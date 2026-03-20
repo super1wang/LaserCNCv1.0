@@ -4,16 +4,27 @@
 #include <QMap>
 #include <Standard_Handle.hxx>
 #include <AIS_Shape.hxx>
+#include <V3d_View.hxx>
+#include <AIS_InteractiveContext.hxx>
+#include <Aspect_NeutralWindow.hxx>
 
 #include "base/lcnc_application.h"
 #include "graphics/graphics_scene.h"
 
+class AIS_ViewCube;
+class AIS_Trihedron;
+class QTimer;
+
 /**
  * @brief GUI-layer wrapper for one open document.
  *
- * Combines a LcncDocument (data) with a GraphicsScene (visual).
- * All shape display operations that need to persist across views
- * are registered here so they can be restored when a view is recreated.
+ * Each GuiDocument owns its own V3d_View (created once on first activation,
+ * reused on subsequent switches).  This follows the Mayo pattern: the widget
+ * provides a shared OS window handle; per-document views are bound to it so
+ * switching documents means simply changing which view is being redrawn.
+ *
+ * Gizmos (ViewCube, RGB Trihedron) are created per-document so they
+ * survive document switches without needing to be re-initialised.
  */
 class GuiDocument : public QObject
 {
@@ -22,32 +33,47 @@ public:
     explicit GuiDocument(DocumentId id, QObject* parent = nullptr);
     ~GuiDocument() override;
 
-    DocumentId       documentId() const { return m_docId; }
-    LcncDocument*    document()   const;
-    GraphicsScene*   scene()      const { return m_scene; }
+    DocumentId     documentId() const { return m_docId; }
+    LcncDocument*  document()   const;
+    GraphicsScene* scene()      const { return m_scene; }
+
+    // ── Per-document View ─────────────────────────────────────────────────────
+    bool hasView() const { return !m_view.IsNull(); }
+    const Handle(V3d_View)&               view()    const { return m_view;    }
+    const Handle(AIS_InteractiveContext)& context() const;
+
+    /// Called by WidgetOccView when this document becomes active.
+    /// Creates the V3d_View the first time; just syncs window size afterwards.
+    void attachView(const Handle(Aspect_NeutralWindow)& win, int w, int h);
+
+    void resizeView(int w, int h);
+    void fitAll();
+
+    // Gizmo accessors used by WidgetOccView for ViewCube click handling
+    const Handle(AIS_ViewCube)& viewCube()  const { return m_viewCube; }
+    QTimer*                     animTimer() const { return m_animTimer; }
 
     // ── Shape registration ────────────────────────────────────────────────────
-    /// Display a shape and register it for this document.
     Handle(AIS_Shape) displayShape(const TopoDS_Shape& shape,
                                    const QString& name,
                                    bool           fitAll = false);
-
-    /// Erase and de-register the AIS_Shape associated with the given label entry.
     void eraseEntity(const QString& labelEntry);
-
-    /// Erase all and re-populate from the document's XDE tree.
     void rebuildDisplay();
-
-    /// Lookup registered AIS shape by label entry.
     Handle(AIS_Shape) aisShape(const QString& labelEntry) const;
 
 signals:
     void displayUpdated();
 
 private:
+    void initGizmos();   ///< Called once inside attachView() after m_view is created
+
     DocumentId     m_docId;
     GraphicsScene* m_scene{nullptr};
-
-    // Maps label entry strings to AIS shapes for managed refresh
     QMap<QString, Handle(AIS_Shape)> m_aisMap;
+
+    // Per-document view state (created once, persistent)
+    Handle(V3d_View)      m_view;
+    Handle(AIS_ViewCube)  m_viewCube;
+    Handle(AIS_Trihedron) m_trihedron;
+    QTimer*               m_animTimer{nullptr};
 };

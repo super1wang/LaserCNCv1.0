@@ -164,7 +164,7 @@ void MainWindow::create3DView()
 {
     m_occView = new WidgetOccView(this);
     m_defaultScene = new GraphicsScene(this);
-    m_occView->attachScene(m_defaultScene);
+    m_occView->attachDefaultScene(m_defaultScene);
 }
 
 void MainWindow::createLeftPanel()
@@ -414,9 +414,8 @@ void MainWindow::onDocumentAdded(DocumentId id)
     LcncDocument* doc = LcncApplication::instance()->documentById(id);
     if (doc) {
         m_sbDocName->setText(doc->name());
-        // Attach new GuiDocument's scene to the viewport
         if (auto* gd = GuiApplication::instance()->guiDocument(id))
-            m_occView->attachScene(gd->scene());
+            m_occView->attachDocument(gd);
     }
     rebuildDocumentTree();
     updateCommandStates();
@@ -424,11 +423,9 @@ void MainWindow::onDocumentAdded(DocumentId id)
 
 void MainWindow::onDocumentClosed(DocumentId /*id*/)
 {
-    if (LcncApplication::instance()->activeDocument() == nullptr) {
-        m_sbDocName->setText(tr("无文档"));
-        m_modelTree->clear();
-        m_occView->attachScene(m_defaultScene);
-    }
+    // The "no active document" detach has already been done in
+    // onActiveDocumentChanged when activeDocumentChanged(kInvalid) fired
+    // (which precedes this signal).  Just refresh the tree and command states.
     rebuildDocumentTree();
     updateCommandStates();
 }
@@ -439,9 +436,16 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
     if (doc) {
         m_sbDocName->setText(doc->name());
         m_modelTree->rebuildForDocument(doc);
-        // Switch scene
         if (auto* gd = GuiApplication::instance()->guiDocument(id))
-            m_occView->attachScene(gd->scene());
+            m_occView->attachDocument(gd);
+    } else {
+        // No active document — detach to default scene NOW, BEFORE the
+        // subsequent documentClosed signal causes GuiApplication to delete
+        // the old GuiDocument.  Without this, m_activeDoc would become a
+        // dangling pointer by the time onDocumentClosed runs.
+        m_sbDocName->setText(tr("无文档"));
+        m_modelTree->clear();
+        m_occView->attachDefaultScene(m_defaultScene);
     }
     rebuildDocumentTree();
     updateCommandStates();
@@ -552,39 +556,14 @@ void MainWindow::updateCommandStates()
 
 void MainWindow::closeEvent(QCloseEvent* e)
 {
-    // Safely cleanup before closing
-    try {
-        // Disconnect all signals to prevent callbacks during shutdown
-        disconnect(this, nullptr, nullptr, nullptr);
-        
-        // Clear document tree to prevent item access
-        if (m_documentTree) {
-            m_documentTree->clear();
-        }
-        
-        // Detach scene to prevent rendering during shutdown
-        if (m_occView) {
-            m_occView->attachScene(nullptr);
-        }
-        
-        // Close all documents
-        LcncApplication* app = LcncApplication::instance();
-        if (app) {
-            QList<LcncDocument*> docs = app->documents();
-            for (LcncDocument* doc : docs) {
-                if (doc) {
-                    app->closeDocument(doc->id());
-                }
-            }
-        }
-        
-        // Accept close event
-        e->accept();
-    } catch (const std::exception& ex) {
-        qWarning() << "Exception during close:" << ex.what();
-        e->accept();
-    } catch (...) {
-        qWarning() << "Unknown exception during close";
-        e->accept();
-    }
+    // Disconnect all signals before shutdown to prevent re-entrant callbacks
+    disconnect(this, nullptr, nullptr, nullptr);
+
+    // Detach rendering: stop the active ViewCube animation and unhook the
+    // OCC view from the widget so no Redraw() fires during Qt teardown.
+    if (m_occView)
+        m_occView->attachDefaultScene(nullptr);
+
+    // Accept; Qt's parent-child destructor chain cleans up all OCC resources.
+    e->accept();
 }

@@ -2,6 +2,7 @@
 
 #include <QAction>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QStyle>
 #include <QApplication>
@@ -53,25 +54,79 @@ void CmdOpenDocument::execute()
 {
     const QString path = QFileDialog::getOpenFileName(
         nullptr, tr("打开文件"), QString(),
-        tr("所有支持格式 (*.stp *.step *.igs *.iges *.brep *.xcaf);;"
+        tr("所有支持格式 (*.stp *.step *.igs *.iges *.stl *.brep);;"
            "STEP (*.stp *.step);;"
            "IGES (*.igs *.iges);;"
-           "BREP (*.brep);;"
-           "XCAF (*.xcaf)"));
+           "STL (*.stl);;"
+           "BREP (*.brep)"));
     if (path.isEmpty()) return;
 
-    QString err;
-    LcncDocument* doc = app()->openDocument(path, &err);
-    if (!doc) {
-        QMessageBox::critical(nullptr, tr("打开失败"), err);
-        return;
-    }
+    QFileInfo fi(path);
+    LcncDocument* doc = app()->newDocument(fi.baseName());
+    doc->setFilePath(path);
+    const QString ext = fi.suffix().toLower();
 
-    // Trigger GUI display rebuild
-    if (GuiDocument* gd = guiApp()->guiDocument(doc->id()))
-        gd->rebuildDisplay();
+    TaskId taskId = taskMgr()->run(tr("打开: %1").arg(fi.fileName()),
+        [path, ext, doc](TaskProgress* prog) {
+            prog->setRange(0, 100);
 
-    context()->updateCommandStates();
+            if (ext == "stp" || ext == "step") {
+                prog->setStepName(QStringLiteral("读取 STEP..."));
+                STEPControl_Reader reader;
+                if (reader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
+                    prog->setValue(50);
+                    prog->setStepName(QStringLiteral("转换形体..."));
+                    reader.TransferRoots();
+                    for (int i = 1; i <= reader.NbShapes(); ++i) {
+                        TopoDS_Shape sh = reader.Shape(i);
+                        if (!sh.IsNull())
+                            doc->addShapeEntity(sh, QStringLiteral("Shape_%1").arg(i));
+                    }
+                }
+            } else if (ext == "igs" || ext == "iges") {
+                prog->setStepName(QStringLiteral("读取 IGES..."));
+                IGESControl_Reader reader;
+                if (reader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
+                    prog->setValue(50);
+                    prog->setStepName(QStringLiteral("转换形体..."));
+                    reader.TransferRoots();
+                    for (int i = 1; i <= reader.NbShapes(); ++i) {
+                        TopoDS_Shape sh = reader.Shape(i);
+                        if (!sh.IsNull())
+                            doc->addShapeEntity(sh, QStringLiteral("Shape_%1").arg(i));
+                    }
+                }
+            } else if (ext == "stl") {
+                prog->setStepName(QStringLiteral("读取 STL..."));
+                BRep_Builder builder;
+                TopoDS_Shape shape;
+                StlAPI_Reader stlReader;
+                stlReader.Read(shape, path.toUtf8().constData());
+                prog->setValue(80);
+                if (!shape.IsNull())
+                    doc->addShapeEntity(shape, QFileInfo(path).baseName());
+            } else if (ext == "brep") {
+                prog->setStepName(QStringLiteral("读取 BREP..."));
+                TopoDS_Shape shape;
+                BRep_Builder builder;
+                BRepTools::Read(shape, path.toUtf8().constData(), builder);
+                if (!shape.IsNull())
+                    doc->addShapeEntity(shape, QFileInfo(path).baseName());
+            }
+
+            prog->setValue(100);
+        });
+
+    connect(TaskManager::instance(), &TaskManager::taskFinished,
+            this, [this, doc, taskId](TaskId id, bool ok) {
+                if (id != taskId) return;
+                if (ok) {
+                    if (auto* gd = guiApp()->guiDocument(doc->id()))
+                        gd->rebuildDisplay();
+                    app()->notifyDocumentModified(doc->id());
+                }
+                context()->updateCommandStates();
+            });
 }
 
 // ── CmdSaveDocument ────────────────────────────────────────────────────────────

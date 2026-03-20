@@ -9,8 +9,7 @@
 #include <TDataStd_Name.hxx>
 #include <TDataStd_Integer.hxx>
 #include <TDF_Tool.hxx>
-#include <TDF_ChildIterator.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
+#include <TDF_LabelSequence.hxx>
 
 // IMPLEMENT_STANDARD_RTTIEXT(LcncDocument, TDocStd_Document)
 
@@ -77,32 +76,40 @@ TDF_Label LcncDocument::addShapeEntity(const TopoDS_Shape& shape,
                                        const QString&      name,
                                        EntityKind          kind)
 {
-    openCommand(QStringLiteral("添加形体: %1").arg(name));
-
+    // Do NOT use OpenCommand/CommitCommand here: undo-tracking file imports
+    // bloats the XCAF transaction stack and can cause crashes during document
+    // destruction.  Undo is reserved for interactive CAD operations only.
+    //
+    // Do NOT call AddComponent(groupLabel, ...) with a raw TDF_Label that is
+    // not a proper XDE shape — that corrupts the XCAF internal tree.
+    // Register each shape as a top-level free shape and tag it with its
+    // EntityKind via TDataStd_Integer so entityLabels() can filter by category.
     Handle(XCAFDoc_ShapeTool) st = shapeTool();
     TDF_Label shapeLabel = st->NewShape();
     st->SetShape(shapeLabel, shape);
     XcafUtils::setName(shapeLabel, name);
-
-    // Reference the shape under the category group
-    TDF_Label groupLabel = entityGroup(kind);
-    TDF_Label ref;
-    st->AddComponent(groupLabel, shapeLabel, TopLoc_Location());
-
-    commitCommand();
+    TDataStd_Integer::Set(shapeLabel, static_cast<Standard_Integer>(kind));
     return shapeLabel;
 }
 
 TDF_LabelSequence LcncDocument::entityLabels(EntityKind kind) const
 {
-    TDF_LabelSequence seq;
-    TDF_Label group = entityGroup(kind);
-    TDF_ChildIterator it(group, false);
-    while (it.More()) {
-        seq.Append(it.Value());
-        it.Next();
+    // Shapes are stored as top-level XDE free shapes tagged with their
+    // EntityKind via a TDataStd_Integer attribute.  Enumerate and filter.
+    Handle(XCAFDoc_ShapeTool) st = shapeTool();
+    TDF_LabelSequence freeShapes;
+    st->GetFreeShapes(freeShapes);
+
+    TDF_LabelSequence result;
+    for (int i = 1; i <= freeShapes.Length(); ++i) {
+        TDF_Label lbl = freeShapes.Value(i);
+        Handle(TDataStd_Integer) attr;
+        if (lbl.FindAttribute(TDataStd_Integer::GetID(), attr) &&
+            static_cast<EntityKind>(attr->Get()) == kind) {
+            result.Append(lbl);
+        }
     }
-    return seq;
+    return result;
 }
 
 // ── Undo/Redo ──────────────────────────────────────────────────────────────────
