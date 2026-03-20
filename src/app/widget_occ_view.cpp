@@ -140,29 +140,43 @@ void WidgetOccView::paintEvent(QPaintEvent*)
 void WidgetOccView::mousePressEvent(QMouseEvent* e)
 {
     if (m_view.IsNull() || m_context.IsNull()) return;
-    m_prevPos = e->pos();
+    m_prevPos  = e->pos();
+    m_pressPos = e->pos();
 
-    if (e->button() == Qt::LeftButton) {
-        m_context->MoveTo(e->pos().x(), e->pos().y(), m_view, false);
-        if (m_context->HasDetected()) {
-            m_rotating = false; // clicked an interactive — don't start orbit
-        } else {
-            m_rotating = true;
-            m_view->StartRotation(e->pos().x(), e->pos().y());
-        }
+    if (e->button() == Qt::RightButton) {
+        // Right button: start view rotation
+        m_rotating = true;
+        m_view->StartRotation(e->pos().x(), e->pos().y());
     } else if (e->button() == Qt::MiddleButton) {
         m_panning = true;
     }
+    // Left button: rubber-band drag / toggle-select are handled in
+    // mouseMoveEvent / mouseReleaseEvent respectively.
 }
 
 void WidgetOccView::mouseReleaseEvent(QMouseEvent* e)
 {
     if (m_view.IsNull()) return;
+
     if (e->button() == Qt::LeftButton) {
+        if (m_rubberBanding) {
+            // Finish rubber-band: hide band, select shapes inside rectangle.
+            m_rubberBanding = false;
+            if (!m_context.IsNull() && !m_rubberBand.IsNull())
+                m_context->Erase(m_rubberBand, false);
+            const QRect selRect = QRect(m_pressPos, e->pos()).normalized();
+            m_context->Select(selRect.left(),  selRect.top(),
+                              selRect.right(), selRect.bottom(),
+                              m_view, Standard_True);
+            emit selectionChanged();
+            m_view->Redraw();
+        } else {
+            // Short click (no drag) → toggle-select under cursor.
+            if ((e->pos() - m_pressPos).manhattanLength() < 4)
+                handleSelection(e->pos());
+        }
+    } else if (e->button() == Qt::RightButton) {
         m_rotating = false;
-        QPoint delta = e->pos() - m_prevPos;
-        if (delta.manhattanLength() < 4)
-            handleSelection(e->pos());
     } else if (e->button() == Qt::MiddleButton) {
         m_panning = false;
     }
@@ -172,18 +186,57 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
 {
     if (m_view.IsNull() || m_context.IsNull()) return;
 
-    int dx = e->pos().x() - m_prevPos.x();
-    int dy = e->pos().y() - m_prevPos.y();
+    if (e->buttons() & Qt::LeftButton) {
+        const QPoint delta = e->pos() - m_pressPos;
 
-    if (m_rotating)
+        if (!m_rubberBanding && delta.manhattanLength() >= 4) {
+            // Threshold exceeded — start rubber-band display.
+            m_rubberBanding = true;
+            if (m_rubberBand.IsNull())
+                m_rubberBand = new AIS_RubberBand(
+                    Quantity_Color(0.25, 0.70, 1.0, Quantity_TOC_RGB),  // border: blue
+                    Aspect_TOL_SOLID,
+                    Quantity_Color(0.25, 0.70, 1.0, Quantity_TOC_RGB),  // fill: same
+                    0.80,  // 80% transparent (20% opaque) fill
+                    1.5);  // border width
+
+            const int h = height();
+            m_rubberBand->SetRectangle(
+                qMin(m_pressPos.x(), e->pos().x()),
+                h - qMax(m_pressPos.y(), e->pos().y()),
+                qMax(m_pressPos.x(), e->pos().x()),
+                h - qMin(m_pressPos.y(), e->pos().y()));
+            m_context->Display(m_rubberBand, 0, -1, false);
+            m_context->Deactivate(m_rubberBand);
+            m_view->Redraw();
+
+        } else if (m_rubberBanding) {
+            // Update rectangle during drag.
+            const int h = height();
+            m_rubberBand->SetRectangle(
+                qMin(m_pressPos.x(), e->pos().x()),
+                h - qMax(m_pressPos.y(), e->pos().y()),
+                qMax(m_pressPos.x(), e->pos().x()),
+                h - qMin(m_pressPos.y(), e->pos().y()));
+            m_context->Redisplay(m_rubberBand, false);
+            m_view->Redraw();
+        }
+
+    } else if (m_rotating) {
         m_view->Rotation(e->pos().x(), e->pos().y());
-    else if (m_panning)
+        m_view->Redraw();
+    } else if (m_panning) {
+        const int dx = e->pos().x() - m_prevPos.x();
+        const int dy = e->pos().y() - m_prevPos.y();
         m_view->Pan(dx, -dy);
-    else
+        m_view->Redraw();
+    } else {
+        // Hover highlight (no button held)
         m_context->MoveTo(e->pos().x(), e->pos().y(), m_view, true);
+        m_view->Redraw();
+    }
 
     m_prevPos = e->pos();
-    m_view->Redraw();
 }
 
 void WidgetOccView::wheelEvent(QWheelEvent* e)
@@ -204,6 +257,13 @@ void WidgetOccView::keyPressEvent(QKeyEvent* e)
     if (m_view.IsNull()) { QWidget::keyPressEvent(e); return; }
 
     switch (e->key()) {
+    case Qt::Key_Escape:
+        if (!m_context.IsNull()) {
+            m_context->ClearSelected(Standard_True);
+            emit selectionChanged();
+            m_view->Redraw();
+        }
+        break;
     case Qt::Key_F: fitAll(); break;
     case Qt::Key_1: setOrientation(V3d_Xpos);          break;
     case Qt::Key_2: setOrientation(V3d_Ypos);          break;
@@ -223,11 +283,10 @@ void WidgetOccView::handleSelection(const QPoint& pos)
 
     Handle(SelectMgr_EntityOwner) owner = m_context->DetectedOwner();
     if (!owner.IsNull()) {
+        // ViewCube click — start orientation animation
         Handle(AIS_ViewCubeOwner) cubeOwner =
             Handle(AIS_ViewCubeOwner)::DownCast(owner);
         if (!cubeOwner.IsNull() && m_activeDoc && !m_activeDoc->viewCube().IsNull()) {
-            // Call StartAnimation() directly — HandleClick() may be guarded by
-            // an internal flag (myToAutoStartAnim) and silently return early.
             m_activeDoc->viewCube()->StartAnimation(cubeOwner);
             if (m_activeDoc->animTimer())
                 m_activeDoc->animTimer()->start();
@@ -235,7 +294,10 @@ void WidgetOccView::handleSelection(const QPoint& pos)
         }
     }
 
-    m_context->Select(true);
+    // ShiftSelect = XOR / toggle: adds to selection if not selected,
+    // removes from selection if already selected.  Nothing changes when
+    // clicking on empty space — use ESC to clear all.
+    m_context->ShiftSelect(Standard_True);
     emit selectionChanged();
     m_view->Redraw();
 }

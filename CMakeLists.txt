@@ -45,6 +45,7 @@ set(SRCS_APP
     src/app/commands_file.cpp
     src/app/commands_edit.cpp
     src/app/commands_display.cpp
+    src/app/commands_cad.cpp
     src/app/widget_occ_view.cpp
     src/app/widget_model_tree.cpp
     src/app/widget_machine_panel.cpp

@@ -6,6 +6,7 @@
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_NeutralWindow.hxx>
 #include <V3d_TypeOfOrientation.hxx>
+#include <AIS_RubberBand.hxx>
 
 class GuiDocument;
 class GraphicsScene;
@@ -20,10 +21,13 @@ class GraphicsScene;
  *    no view teardown/recreation, so camera state is preserved per document.
  *
  * Mouse interaction:
- *  - Left drag   → rotate
- *  - Middle drag → pan
- *  - Wheel       → zoom
- *  - Double-left → fit all
+ *  - Left click      → toggle-select shape (additive; click again to deselect)
+ *  - Left drag       → rubber-band multi-select
+ *  - Right drag      → rotate view
+ *  - Middle drag     → pan
+ *  - Wheel           → zoom
+ *  - Double-left     → fit all
+ *  - ESC             → clear all selections
  */
 class WidgetOccView : public QWidget
 {
@@ -84,7 +88,10 @@ private:
     GraphicsScene* m_defaultScene{nullptr};        ///< fallback scene (no open docs)
     Handle(V3d_View) m_defaultView;                ///< view for the default scene
 
-    QPoint m_prevPos;
+    QPoint m_prevPos;          ///< last cursor position (used for pan delta)
+    QPoint m_pressPos;          ///< where the left button was pressed
     bool   m_rotating{false};
     bool   m_panning{false};
+    bool   m_rubberBanding{false};
+    Handle(AIS_RubberBand) m_rubberBand;  ///< created lazily; displayed only during drag
 };

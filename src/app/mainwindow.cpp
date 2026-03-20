@@ -4,6 +4,7 @@
 #include "app/commands_file.h"
 #include "app/commands_edit.h"
 #include "app/commands_display.h"
+#include "app/commands_cad.h"
 #include "app/widget_occ_view.h"
 #include "app/widget_model_tree.h"
 #include "app/widget_machine_panel.h"
@@ -104,6 +105,27 @@ void MainWindow::createCommands()
     // Edit
     m_cmdContainer->addCommand<CmdUndo>(CmdUndo::Name);
     m_cmdContainer->addCommand<CmdRedo>(CmdRedo::Name);
+
+    // CAD — Primitives
+    m_cmdContainer->addCommand<CmdCreateBox>(CmdCreateBox::Name);
+    m_cmdContainer->addCommand<CmdCreateCylinder>(CmdCreateCylinder::Name);
+    m_cmdContainer->addCommand<CmdCreateSphere>(CmdCreateSphere::Name);
+    m_cmdContainer->addCommand<CmdCreateCone>(CmdCreateCone::Name);
+    m_cmdContainer->addCommand<CmdCreateTorus>(CmdCreateTorus::Name);
+
+    // CAD — Transforms
+    m_cmdContainer->addCommand<CmdMoveShape>(CmdMoveShape::Name);
+    m_cmdContainer->addCommand<CmdRotateShape>(CmdRotateShape::Name);
+
+    // CAD — Boolean
+    m_cmdContainer->addCommand<CmdBoolUnion>(CmdBoolUnion::Name);
+    m_cmdContainer->addCommand<CmdBoolCut>(CmdBoolCut::Name);
+    m_cmdContainer->addCommand<CmdBoolCommon>(CmdBoolCommon::Name);
+
+    // CAD — Measurement
+    m_cmdContainer->addCommand<CmdMeasureDistance>(CmdMeasureDistance::Name);
+    m_cmdContainer->addCommand<CmdMeasureAngle>(CmdMeasureAngle::Name);
+    m_cmdContainer->addCommand<CmdMeasureArea>(CmdMeasureArea::Name);
 
     // Display — view orientation
     auto addOrient = [this](const QString& name,
@@ -282,35 +304,37 @@ void MainWindow::buildFileTab(SARibbonCategory* cat)
 
 void MainWindow::buildCadTab(SARibbonCategory* cat)
 {
-    // ── 基本体 ─────────────────────────────────────────────────────────────
-    SARibbonPanel* panelPrim = cat->addPanel(tr("基本体"));
+    // Helper for unimplemented placeholder actions (sketch etc.)
     auto makeAct = [this](const QString& label, const QString& iconPath) -> QAction* {
         auto* a = new QAction(QIcon(iconPath), label, this);
         a->setStatusTip(tr("创建 ") + label);
         return a;
     };
-    panelPrim->addLargeAction(makeAct(tr("长方体"), ":/icons/box.svg"));
-    panelPrim->addLargeAction(makeAct(tr("圆柱体"), ":/icons/cylinder.svg"));
-    panelPrim->addLargeAction(makeAct(tr("球体"),   ":/icons/sphere.svg"));
-    panelPrim->addSmallAction(makeAct(tr("圆锥体"), ":/icons/cone.svg"));
-    panelPrim->addSmallAction(makeAct(tr("圆环体"), ":/icons/torus.svg"));
+
+    // ── 基本体 ─────────────────────────────────────────────────────────────
+    SARibbonPanel* panelPrim = cat->addPanel(tr("基本体"));
+    panelPrim->addLargeAction(m_cmdContainer->findAction(CmdCreateBox::Name));
+    panelPrim->addLargeAction(m_cmdContainer->findAction(CmdCreateCylinder::Name));
+    panelPrim->addLargeAction(m_cmdContainer->findAction(CmdCreateSphere::Name));
+    panelPrim->addSmallAction(m_cmdContainer->findAction(CmdCreateCone::Name));
+    panelPrim->addSmallAction(m_cmdContainer->findAction(CmdCreateTorus::Name));
 
     // ── 操作 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelOps = cat->addPanel(tr("操作"));
-    panelOps->addLargeAction(makeAct(tr("移动"),   ":/icons/move.svg"));
-    panelOps->addLargeAction(makeAct(tr("旋转"),   ":/icons/rotate.svg"));
+    panelOps->addLargeAction(m_cmdContainer->findAction(CmdMoveShape::Name));
+    panelOps->addLargeAction(m_cmdContainer->findAction(CmdRotateShape::Name));
     panelOps->addSmallAction(makeAct(tr("缩放"),   ":/icons/scale.svg"));
-    panelOps->addSmallAction(makeAct(tr("布尔并"), ":/icons/bool_union.svg"));
-    panelOps->addSmallAction(makeAct(tr("布尔差"), ":/icons/bool_cut.svg"));
-    panelOps->addSmallAction(makeAct(tr("布尔交"), ":/icons/bool_common.svg"));
+    panelOps->addSmallAction(m_cmdContainer->findAction(CmdBoolUnion::Name));
+    panelOps->addSmallAction(m_cmdContainer->findAction(CmdBoolCut::Name));
+    panelOps->addSmallAction(m_cmdContainer->findAction(CmdBoolCommon::Name));
 
     // ── 测量 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelMeas = cat->addPanel(tr("测量"));
-    panelMeas->addLargeAction(makeAct(tr("距离"),   ":/icons/measure_dist.svg"));
-    panelMeas->addSmallAction(makeAct(tr("角度"),   ":/icons/measure_angle.svg"));
-    panelMeas->addSmallAction(makeAct(tr("面积"),   ":/icons/measure_area.svg"));
+    panelMeas->addLargeAction(m_cmdContainer->findAction(CmdMeasureDistance::Name));
+    panelMeas->addSmallAction(m_cmdContainer->findAction(CmdMeasureAngle::Name));
+    panelMeas->addSmallAction(m_cmdContainer->findAction(CmdMeasureArea::Name));
 
-    // ── 草图 ───────────────────────────────────────────────────────────────
+    // ── 草图 (预留) ────────────────────────────────────────────────────────
     SARibbonPanel* panelSketch = cat->addPanel(tr("草图"));
     panelSketch->addLargeAction(makeAct(tr("新建草图"), ":/icons/sketch.svg"));
     panelSketch->addSmallAction(makeAct(tr("直线"),     ":/icons/line.svg"));
