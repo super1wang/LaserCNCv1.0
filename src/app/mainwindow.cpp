@@ -1,0 +1,590 @@
+#include "app/mainwindow.h"
+#include "app/app_context.h"
+#include "app/commands_api.h"
+#include "app/commands_file.h"
+#include "app/commands_edit.h"
+#include "app/commands_display.h"
+#include "app/widget_occ_view.h"
+#include "app/widget_model_tree.h"
+#include "app/widget_machine_panel.h"
+#include "app/widget_laser_control.h"
+#include "app/dialog_task_manager.h"
+#include "base/lcnc_application.h"
+#include "base/lcnc_document.h"
+#include "base/xcaf_utils.h"
+#include "graphics/graphics_scene.h"
+#include "gui/gui_application.h"
+#include "gui/gui_document.h"
+
+#include <SARibbonBar.h>
+#include <SARibbonCategory.h>
+#include <SARibbonPanel.h>
+
+#include <QSplitter>
+#include <QTabWidget>
+#include <QStackedWidget>
+#include <QTreeWidget>
+#include <QHeaderView>
+#include <QStatusBar>
+#include <QLabel>
+#include <QVBoxLayout>
+#include <QCloseEvent>
+#include <QMessageBox>
+#include <QApplication>
+#include <QIcon>
+#include <QStyle>
+#include <QSignalBlocker>
+#include <functional>
+#include <V3d_TypeOfOrientation.hxx>
+#include <TDF_LabelSequence.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+constexpr int kRoleDocId = Qt::UserRole + 1;
+constexpr int kRoleEntry = Qt::UserRole + 2;
+}
+
+MainWindow::MainWindow(QWidget* parent)
+    : SARibbonMainWindow(parent)
+{
+    setWindowTitle(tr("LaserCNC — 五轴激光加工CAM软件"));
+    setWindowIcon(QIcon(":/icons/app_icon.svg"));
+    resize(1440, 900);
+
+    // Initialise in dependency order
+    createContext();        // AppContext (needs singletons)
+    createCentralLayout();  // Central splitter — creates m_occView first
+    createCommands();       // Commands connect to m_occView (must exist)
+    createRibbon();         // Ribbon uses m_cmdContainer (must exist)
+    createStatusBar();
+
+    // Wire document lifecycle signals
+    LcncApplication* lcnc = LcncApplication::instance();
+    connect(lcnc, &LcncApplication::documentAdded,
+            this, &MainWindow::onDocumentAdded);
+    connect(lcnc, &LcncApplication::documentClosed,
+            this, &MainWindow::onDocumentClosed);
+    connect(lcnc, &LcncApplication::activeDocumentChanged,
+            this, &MainWindow::onActiveDocumentChanged);
+        connect(lcnc, &LcncApplication::documentModified,
+            this, &MainWindow::onDocumentModified);
+
+    updateCommandStates();
+}
+
+MainWindow::~MainWindow() = default;
+
+// ── Initialization ─────────────────────────────────────────────────────────────
+void MainWindow::createContext()
+{
+    m_appContext = new AppContext(this, this);
+
+    // Ensure GUI application singleton is alive
+    GuiApplication::instance();
+    // Task manager
+    TaskManager::instance();
+}
+
+void MainWindow::createCommands()
+{
+    m_cmdContainer = new CommandContainer(m_appContext, this);
+
+    // File
+    m_cmdContainer->addCommand<CmdNewDocument>(CmdNewDocument::Name);
+    m_cmdContainer->addCommand<CmdOpenDocument>(CmdOpenDocument::Name);
+    m_cmdContainer->addCommand<CmdSaveDocument>(CmdSaveDocument::Name);
+    m_cmdContainer->addCommand<CmdSaveDocumentAs>(CmdSaveDocumentAs::Name);
+    m_cmdContainer->addCommand<CmdImportStep>(CmdImportStep::Name);
+    m_cmdContainer->addCommand<CmdImportStl>(CmdImportStl::Name);
+    m_cmdContainer->addCommand<CmdExportStep>(CmdExportStep::Name);
+    m_cmdContainer->addCommand<CmdCloseDocument>(CmdCloseDocument::Name);
+
+    // Edit
+    m_cmdContainer->addCommand<CmdUndo>(CmdUndo::Name);
+    m_cmdContainer->addCommand<CmdRedo>(CmdRedo::Name);
+
+    // Display — view orientation
+    auto addOrient = [this](const QString& name,
+                             V3d_TypeOfOrientation o,
+                             const QString& label,
+                             const QIcon& icon) {
+        auto* cmd = new CmdViewOrient(m_appContext, o, label, icon);
+        cmd->setParent(m_cmdContainer);
+        // register by connecting action to fitAll/orient in OccView
+        connect(cmd->action(), &QAction::triggered, m_occView,
+                [this, o]{ m_occView->setOrientation(o); });
+    };
+
+    m_cmdContainer->addCommand<CmdFitAll>(CmdFitAll::Name);
+    // Wire fit-all directly
+    connect(m_cmdContainer->findAction(CmdFitAll::Name), &QAction::triggered,
+            m_occView, &WidgetOccView::fitAll);
+
+    m_cmdContainer->addCommand<CmdToggleShaded>(CmdToggleShaded::Name);
+    m_cmdContainer->addCommand<CmdToggleWireframe>(CmdToggleWireframe::Name);
+    m_cmdContainer->addCommand<CmdToggleShadedWithEdges>(CmdToggleShadedWithEdges::Name);
+
+    // Wire display mode actions to OccView
+    connect(m_cmdContainer->findAction(CmdToggleShaded::Name),
+            &QAction::triggered, m_occView, [this]{ m_occView->setDisplayMode(1); });
+    connect(m_cmdContainer->findAction(CmdToggleWireframe::Name),
+            &QAction::triggered, m_occView, [this]{ m_occView->setDisplayMode(0); });
+}
+
+void MainWindow::createCentralLayout()
+{
+    // ── 3D View ────────────────────────────────────────────────────────────
+    create3DView();
+
+    // ── Left panel ─────────────────────────────────────────────────────────
+    createLeftPanel();
+
+    // ── Right panel ────────────────────────────────────────────────────────
+    createRightPanel();
+
+    // ── Splitter ───────────────────────────────────────────────────────────
+    m_splitter = new QSplitter(Qt::Horizontal, this);
+    m_splitter->addWidget(m_leftTabs);
+    m_splitter->addWidget(m_occView);
+    m_splitter->addWidget(m_rightStack);
+    m_splitter->setStretchFactor(0, 1);
+    m_splitter->setStretchFactor(1, 5);
+    m_splitter->setStretchFactor(2, 2);
+    m_splitter->setSizes({250, 900, 290});
+
+    setCentralWidget(m_splitter);
+
+    // Task dialog (non-modal, floats on top)
+    m_taskDialog = new DialogTaskManager(this);
+}
+
+void MainWindow::create3DView()
+{
+    m_occView = new WidgetOccView(this);
+    m_defaultScene = new GraphicsScene(this);
+    m_occView->attachScene(m_defaultScene);
+}
+
+void MainWindow::createLeftPanel()
+{
+    m_leftTabs = new QTabWidget(this);
+    m_leftTabs->setMinimumWidth(220);
+    m_leftTabs->setMaximumWidth(350);
+
+    // ── 文档 tab (all opened files + assembly tree) ──────────────────────
+    m_documentTree = new QTreeWidget(m_leftTabs);
+    m_documentTree->setHeaderLabel(tr("文档结构"));
+    m_documentTree->setColumnCount(1);
+    m_documentTree->header()->setVisible(false);
+    m_leftTabs->addTab(m_documentTree, tr("文档"));
+
+    // ── 准备 tab ───────────────────────────────────────────────────────────
+    m_modelTree = new WidgetModelTree(m_leftTabs);
+    m_leftTabs->addTab(m_modelTree, tr("准备"));
+
+    // ── 执行 tab ───────────────────────────────────────────────────────────
+    m_processTree = new QTreeWidget(m_leftTabs);
+    m_processTree->setHeaderLabel(tr("加工流程"));
+    m_processTree->setColumnCount(2);
+    m_processTree->setHeaderLabels({tr("步骤"), tr("信息")});
+    m_processTree->header()->setStretchLastSection(true);
+    // Placeholder items
+    auto* startItem = new QTreeWidgetItem(m_processTree);
+    startItem->setText(0, tr("开始"));
+    startItem->setBackground(0, QColor(60, 160, 60));
+    startItem->setForeground(0, Qt::white);
+    auto* stopItem = new QTreeWidgetItem(m_processTree);
+    stopItem->setText(0, tr("结束"));
+    stopItem->setBackground(0, QColor(160, 60, 60));
+    stopItem->setForeground(0, Qt::white);
+
+    m_leftTabs->addTab(m_processTree, tr("执行"));
+
+    connect(m_leftTabs, &QTabWidget::currentChanged,
+            this, &MainWindow::onLeftTabChanged);
+        connect(m_documentTree, &QTreeWidget::itemClicked,
+            this, &MainWindow::onDocumentTreeItemClicked);
+}
+
+void MainWindow::createRightPanel()
+{
+    m_machinePanel  = new WidgetMachinePanel(this);
+    m_laserControl  = new WidgetLaserControl(this);
+
+    m_rightStack = new QStackedWidget(this);
+    m_rightStack->addWidget(m_machinePanel);   // index 0 — shown when "准备"
+    m_rightStack->addWidget(m_laserControl);   // index 1 — shown when "执行"
+    m_rightStack->setMinimumWidth(260);
+    m_rightStack->setMaximumWidth(350);
+    m_rightStack->setCurrentIndex(0);
+
+    // Wire machine panel signals to file commands
+    connect(m_machinePanel, &WidgetMachinePanel::loadMachineRequested, this,
+            []{ CmdImportStl(nullptr); });
+    connect(m_machinePanel, &WidgetMachinePanel::loadWorkpieceRequested, this,
+            []{ CmdImportStep(nullptr); });
+}
+
+// ── Ribbon ─────────────────────────────────────────────────────────────────────
+void MainWindow::createRibbon()
+{
+    SARibbonBar* ribbon = ribbonBar();
+    ribbon->setRibbonStyle(SARibbonBar::RibbonStyleLooseThreeRow);
+
+    buildFileTab(ribbon->addCategoryPage(tr("文件")));
+    buildCadTab(ribbon->addCategoryPage(tr("CAD")));
+    buildCamTab(ribbon->addCategoryPage(tr("CAM")));
+    buildLaserTab(ribbon->addCategoryPage(tr("激光加工")));
+}
+
+void MainWindow::buildFileTab(SARibbonCategory* cat)
+{
+    SARibbonPanel* panelDoc = cat->addPanel(tr("文档"));
+    panelDoc->addLargeAction(m_cmdContainer->findAction(CmdNewDocument::Name));
+    panelDoc->addLargeAction(m_cmdContainer->findAction(CmdOpenDocument::Name));
+    panelDoc->addLargeAction(m_cmdContainer->findAction(CmdSaveDocument::Name));
+
+    SARibbonPanel* panelIO = cat->addPanel(tr("导入/导出"));
+    panelIO->addLargeAction(m_cmdContainer->findAction(CmdImportStep::Name));
+    panelIO->addLargeAction(m_cmdContainer->findAction(CmdImportStl::Name));
+    panelIO->addSmallAction(m_cmdContainer->findAction(CmdExportStep::Name));
+    panelIO->addSmallAction(m_cmdContainer->findAction(CmdCloseDocument::Name));
+
+    SARibbonPanel* panelEdit = cat->addPanel(tr("编辑"));
+    panelEdit->addLargeAction(m_cmdContainer->findAction(CmdUndo::Name));
+    panelEdit->addLargeAction(m_cmdContainer->findAction(CmdRedo::Name));
+
+    SARibbonPanel* panelView = cat->addPanel(tr("视图"));
+    panelView->addLargeAction(m_cmdContainer->findAction(CmdFitAll::Name));
+
+    // View orientation quick actions
+    struct OrientInfo { QString label; QString key; V3d_TypeOfOrientation orient; };
+    const QList<OrientInfo> orients = {
+        { tr("正视"),   "1", V3d_Xpos              },
+        { tr("俯视"),   "2", V3d_Zpos              },
+        { tr("侧视"),   "3", V3d_Ypos              },
+        { tr("等轴测"), "0", V3d_XposYnegZpos      },
+    };
+    for (auto& info : orients) {
+        auto* act = new QAction(info.label + " [" + info.key + "]", this);
+        connect(act, &QAction::triggered, m_occView,
+                [this, o = info.orient]{ m_occView->setOrientation(o); });
+        panelView->addSmallAction(act);
+    }
+
+    SARibbonPanel* panelDisplay = cat->addPanel(tr("显示"));
+    panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleShaded::Name));
+    panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleWireframe::Name));
+    panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name));
+}
+
+void MainWindow::buildCadTab(SARibbonCategory* cat)
+{
+    // ── 基本体 ─────────────────────────────────────────────────────────────
+    SARibbonPanel* panelPrim = cat->addPanel(tr("基本体"));
+    auto makeAct = [this](const QString& label, const QString& iconPath) -> QAction* {
+        auto* a = new QAction(QIcon(iconPath), label, this);
+        a->setStatusTip(tr("创建 ") + label);
+        return a;
+    };
+    panelPrim->addLargeAction(makeAct(tr("长方体"), ":/icons/box.svg"));
+    panelPrim->addLargeAction(makeAct(tr("圆柱体"), ":/icons/cylinder.svg"));
+    panelPrim->addLargeAction(makeAct(tr("球体"),   ":/icons/sphere.svg"));
+    panelPrim->addSmallAction(makeAct(tr("圆锥体"), ":/icons/cone.svg"));
+    panelPrim->addSmallAction(makeAct(tr("圆环体"), ":/icons/torus.svg"));
+
+    // ── 操作 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelOps = cat->addPanel(tr("操作"));
+    panelOps->addLargeAction(makeAct(tr("移动"),   ":/icons/move.svg"));
+    panelOps->addLargeAction(makeAct(tr("旋转"),   ":/icons/rotate.svg"));
+    panelOps->addSmallAction(makeAct(tr("缩放"),   ":/icons/scale.svg"));
+    panelOps->addSmallAction(makeAct(tr("布尔并"), ":/icons/bool_union.svg"));
+    panelOps->addSmallAction(makeAct(tr("布尔差"), ":/icons/bool_cut.svg"));
+    panelOps->addSmallAction(makeAct(tr("布尔交"), ":/icons/bool_common.svg"));
+
+    // ── 测量 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelMeas = cat->addPanel(tr("测量"));
+    panelMeas->addLargeAction(makeAct(tr("距离"),   ":/icons/measure_dist.svg"));
+    panelMeas->addSmallAction(makeAct(tr("角度"),   ":/icons/measure_angle.svg"));
+    panelMeas->addSmallAction(makeAct(tr("面积"),   ":/icons/measure_area.svg"));
+
+    // ── 草图 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelSketch = cat->addPanel(tr("草图"));
+    panelSketch->addLargeAction(makeAct(tr("新建草图"), ":/icons/sketch.svg"));
+    panelSketch->addSmallAction(makeAct(tr("直线"),     ":/icons/line.svg"));
+    panelSketch->addSmallAction(makeAct(tr("圆"),       ":/icons/circle.svg"));
+    panelSketch->addSmallAction(makeAct(tr("圆弧"),     ":/icons/arc.svg"));
+    panelSketch->addSmallAction(makeAct(tr("退出草图"), ":/icons/exit_sketch.svg"));
+}
+
+void MainWindow::buildCamTab(SARibbonCategory* cat)
+{
+    auto makeAct = [this](const QString& label, const QString& icon) -> QAction* {
+        return new QAction(QIcon(icon), label, this);
+    };
+
+    // ── 机台 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelMach = cat->addPanel(tr("机台"));
+    panelMach->addLargeAction(makeAct(tr("加载机台"), ":/icons/machine.svg"));
+    panelMach->addSmallAction(makeAct(tr("机台设置"), ":/icons/settings.svg"));
+    panelMach->addSmallAction(makeAct(tr("坐标系"), ":/icons/coordinate.svg"));
+
+    // ── 刀路 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelPath = cat->addPanel(tr("刀路"));
+    panelPath->addLargeAction(makeAct(tr("生成刀路"), ":/icons/toolpath.svg"));
+    panelPath->addSmallAction(makeAct(tr("3+2 定位"), ":/icons/toolpath_32.svg"));
+    panelPath->addSmallAction(makeAct(tr("5轴联动"),  ":/icons/toolpath_5x.svg"));
+    panelPath->addSmallAction(makeAct(tr("刀路预览"), ":/icons/preview.svg"));
+
+    // ── G代码 ─────────────────────────────────────────────────────────────
+    SARibbonPanel* panelNC = cat->addPanel(tr("G代码"));
+    panelNC->addLargeAction(makeAct(tr("生成G代码"), ":/icons/gcode.svg"));
+    panelNC->addSmallAction(makeAct(tr("导入G代码"), ":/icons/import.svg"));
+    panelNC->addSmallAction(makeAct(tr("导出G代码"), ":/icons/export.svg"));
+    panelNC->addSmallAction(makeAct(tr("代码查看"),  ":/icons/code.svg"));
+}
+
+void MainWindow::buildLaserTab(SARibbonCategory* cat)
+{
+    auto makeAct = [this](const QString& label, const QString& icon) -> QAction* {
+        return new QAction(QIcon(icon), label, this);
+    };
+
+    // ── 连接 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelConn = cat->addPanel(tr("连接"));
+    panelConn->addLargeAction(makeAct(tr("连接控制器"), ":/icons/connect.svg"));
+    panelConn->addLargeAction(makeAct(tr("仿真模式"),   ":/icons/simulate.svg"));
+    panelConn->addSmallAction(makeAct(tr("断开连接"),   ":/icons/disconnect.svg"));
+
+    // ── 流程 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelProc = cat->addPanel(tr("流程"));
+    panelProc->addLargeAction(makeAct(tr("新建流程"), ":/icons/new_process.svg"));
+    panelProc->addLargeAction(makeAct(tr("加载流程"), ":/icons/open_process.svg"));
+    panelProc->addSmallAction(makeAct(tr("保存流程"), ":/icons/save_process.svg"));
+
+    // ── 运行 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelRun = cat->addPanel(tr("运行"));
+    auto* actStart = makeAct(tr("运行"), ":/icons/start.svg");
+    auto* actPause = makeAct(tr("暂停"), ":/icons/pause.svg");
+    auto* actStop  = makeAct(tr("停止"), ":/icons/stop.svg");
+    actStart->setShortcut(QKeySequence(Qt::Key_F5));
+    panelRun->addLargeAction(actStart);
+    panelRun->addSmallAction(actPause);
+    panelRun->addSmallAction(actStop);
+
+    // Wire to laser control widget
+    connect(actStart, &QAction::triggered, m_laserControl, &WidgetLaserControl::startRequested);
+    connect(actPause, &QAction::triggered, m_laserControl, &WidgetLaserControl::pauseRequested);
+    connect(actStop,  &QAction::triggered, m_laserControl, &WidgetLaserControl::stopRequested);
+
+    // ── 参数 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelParam = cat->addPanel(tr("参数"));
+    panelParam->addSmallAction(makeAct(tr("激光参数"), ":/icons/laser_param.svg"));
+    panelParam->addSmallAction(makeAct(tr("运动参数"), ":/icons/motion_param.svg"));
+    panelParam->addSmallAction(makeAct(tr("加工设置"), ":/icons/process_param.svg"));
+}
+
+// ── Status bar ────────────────────────────────────────────────────────────────
+void MainWindow::createStatusBar()
+{
+    m_sbDocName = new QLabel(tr("无文档"), this);
+    m_sbCoords  = new QLabel("X: 0.000  Y: 0.000  Z: 0.000", this);
+    m_sbStatus  = new QLabel(tr("就绪"), this);
+
+    m_sbDocName->setMinimumWidth(200);
+    m_sbCoords->setMinimumWidth(280);
+
+    statusBar()->addWidget(m_sbDocName);
+    statusBar()->addPermanentWidget(m_sbCoords);
+    statusBar()->addPermanentWidget(m_sbStatus);
+}
+
+// ── Slots ──────────────────────────────────────────────────────────────────────
+void MainWindow::onLeftTabChanged(int index)
+{
+    // index 0 = 文档 / 1 = 准备 → show machine panel
+    // index 2 = 执行 → show laser control
+    m_rightStack->setCurrentIndex(index == 2 ? 1 : 0);
+}
+
+void MainWindow::onDocumentAdded(DocumentId id)
+{
+    LcncDocument* doc = LcncApplication::instance()->documentById(id);
+    if (doc) {
+        m_sbDocName->setText(doc->name());
+        // Attach new GuiDocument's scene to the viewport
+        if (auto* gd = GuiApplication::instance()->guiDocument(id))
+            m_occView->attachScene(gd->scene());
+    }
+    rebuildDocumentTree();
+    updateCommandStates();
+}
+
+void MainWindow::onDocumentClosed(DocumentId /*id*/)
+{
+    if (LcncApplication::instance()->activeDocument() == nullptr) {
+        m_sbDocName->setText(tr("无文档"));
+        m_modelTree->clear();
+        m_occView->attachScene(m_defaultScene);
+    }
+    rebuildDocumentTree();
+    updateCommandStates();
+}
+
+void MainWindow::onActiveDocumentChanged(DocumentId id)
+{
+    LcncDocument* doc = LcncApplication::instance()->documentById(id);
+    if (doc) {
+        m_sbDocName->setText(doc->name());
+        m_modelTree->rebuildForDocument(doc);
+        // Switch scene
+        if (auto* gd = GuiApplication::instance()->guiDocument(id))
+            m_occView->attachScene(gd->scene());
+    }
+    rebuildDocumentTree();
+    updateCommandStates();
+}
+
+void MainWindow::onDocumentModified(DocumentId id)
+{
+    if (id == LcncApplication::instance()->activeDocumentId()) {
+        if (LcncDocument* doc = LcncApplication::instance()->documentById(id))
+            m_modelTree->rebuildForDocument(doc);
+    }
+    rebuildDocumentTree();
+}
+
+void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/)
+{
+    if (!item) return;
+
+    // IMPORTANT: Read ALL data from item BEFORE any operation that may
+    // trigger rebuildDocumentTree() and invalidate the item pointer.
+    const DocumentId docId  = item->data(0, kRoleDocId).toInt();
+    const QString    entry  = item->data(0, kRoleEntry).toString();
+
+    if (docId == kInvalidDocumentId) return;
+
+    // Switch document AFTER reading item data.
+    // setActiveDocument emits activeDocumentChanged → onActiveDocumentChanged
+    // → rebuildDocumentTree() → m_documentTree->clear() which deletes 'item'.
+    if (LcncApplication::instance()->activeDocumentId() != docId)
+        LcncApplication::instance()->setActiveDocument(docId);
+
+    if (entry.isEmpty()) return;
+
+    // Safely get GUI document (scene may have been switched above)
+    GuiDocument* gd = GuiApplication::instance()->guiDocument(docId);
+    if (!gd) return;
+
+    // The aisMap stores only root/free shapes; sub-component labels are not
+    // individually tracked, so gracefully skip if not found.
+    Handle(AIS_Shape) ais = gd->aisShape(entry);
+    if (ais.IsNull()) return;
+
+    // Get context and view from the (possibly just-switched) scene.
+    Handle(AIS_InteractiveContext) ctx = m_occView->context();
+    if (ctx.IsNull()) return;
+
+    Handle(V3d_View) view = m_occView->view();
+    if (view.IsNull()) return;
+
+    try {
+        ctx->ClearSelected(false);
+        ctx->SetSelected(ais, true);
+        view->Redraw();
+    } catch (const std::exception& e) {
+        qWarning() << "Exception during selection:" << e.what();
+    }
+}
+
+void MainWindow::rebuildDocumentTree()
+{
+    if (!m_documentTree) return;
+    QSignalBlocker blocker(m_documentTree);
+    m_documentTree->clear();
+
+    const QList<LcncDocument*> docs = LcncApplication::instance()->documents();
+    for (LcncDocument* doc : docs) {
+        if (!doc) continue;
+
+        auto* docItem = new QTreeWidgetItem(m_documentTree);
+        docItem->setText(0, doc->name());
+        docItem->setIcon(0, QIcon(":/icons/new_doc.svg"));
+        docItem->setData(0, kRoleDocId, doc->id());
+        docItem->setData(0, kRoleEntry, QString());
+
+        Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
+        TDF_LabelSequence roots;
+        st->GetFreeShapes(roots);
+
+        std::function<void(QTreeWidgetItem*, const TDF_Label&)> appendNode;
+        appendNode = [&](QTreeWidgetItem* parent, const TDF_Label& lbl) {
+            auto* item = new QTreeWidgetItem(parent);
+            QString text = XcafUtils::name(lbl);
+            const QString entry = XcafUtils::entry(lbl);
+            if (text.isEmpty())
+                text = entry;
+            item->setText(0, text);
+            item->setIcon(0, QIcon(":/icons/shape.svg"));
+            item->setData(0, kRoleDocId, doc->id());
+            item->setData(0, kRoleEntry, entry);
+
+            TDF_LabelSequence comps;
+            st->GetComponents(lbl, comps, false);
+            for (int i = 1; i <= comps.Length(); ++i)
+                appendNode(item, comps.Value(i));
+        };
+
+        for (int i = 1; i <= roots.Length(); ++i)
+            appendNode(docItem, roots.Value(i));
+    }
+
+    m_documentTree->expandToDepth(1);
+}
+
+void MainWindow::updateCommandStates()
+{
+    m_cmdContainer->updateAllStates();
+}
+
+void MainWindow::closeEvent(QCloseEvent* e)
+{
+    // Safely cleanup before closing
+    try {
+        // Disconnect all signals to prevent callbacks during shutdown
+        disconnect(this, nullptr, nullptr, nullptr);
+        
+        // Clear document tree to prevent item access
+        if (m_documentTree) {
+            m_documentTree->clear();
+        }
+        
+        // Detach scene to prevent rendering during shutdown
+        if (m_occView) {
+            m_occView->attachScene(nullptr);
+        }
+        
+        // Close all documents
+        LcncApplication* app = LcncApplication::instance();
+        if (app) {
+            QList<LcncDocument*> docs = app->documents();
+            for (LcncDocument* doc : docs) {
+                if (doc) {
+                    app->closeDocument(doc->id());
+                }
+            }
+        }
+        
+        // Accept close event
+        e->accept();
+    } catch (const std::exception& ex) {
+        qWarning() << "Exception during close:" << ex.what();
+        e->accept();
+    } catch (...) {
+        qWarning() << "Unknown exception during close";
+        e->accept();
+    }
+}
