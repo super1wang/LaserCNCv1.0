@@ -82,9 +82,9 @@
 - 修复节点点击崩溃（在 `setActiveDocument` 之前先读取 item data）
 - 修复 `closeEvent` 同步关闭文档导致的卡死（改为只 detach 视图，由析构链清理资源）
 
-### 进行中阶段
+### 已完成阶段（续）
 
-#### 阶段 2：CAD 功能实装（进行中）
+#### 阶段 2：CAD 功能实装（已完成核心部分，草图延后）
 
 **已完成**
 - [x] 基本体参数化建模（长方体/圆柱体/球体/圆锥体/圆环体）
@@ -93,43 +93,75 @@
   - 自动创建文档（如无活动文档）并添加至工件分类
   - 创建后自动刷新显示并自适应 FitAll
 - [x] 平移操作（CmdMoveShape）
-  - 下拉选择文档中的形体 + XYZ 增量输入
-  - 使用 BRepBuilderAPI_Transform + gp_Trsf::SetTranslation 变换
-  - 原地更新 XCAF 标签中的形体（XCAFDoc_ShapeTool::SetShape）
 - [x] 旋转操作（CmdRotateShape）
-  - 选择形体 + 旋转轴方向向量 + 旋转角度输入
-  - 使用 gp_Ax1 + gp_Trsf::SetRotation 变换
 - [x] 布尔操作（CmdBoolUnion/CmdBoolCut/CmdBoolCommon）
-  - 双下拉选择形体 A 和 B
-  - 使用 BRepAlgoAPI_Fuse/Cut/Common 进行布尔运算
-  - 结果添加为新的工件实体（保留原始形体）
 - [x] 测量工具（距离/角度/面积）
-  - 距离：BRepExtrema_DistShapeShape 计算最小距离，弹窗显示结果（mm）
-  - 角度：获取两形体首面法向量，计算夹角，弹窗显示结果（度）
-  - 面积：BRepGProp::SurfaceProperties 计算总表面积，弹窗显示结果（mm²）
 - [x] 所有 CAD 命令注册到 CommandContainer，Ribbon CAD 标签正确连接
 
-**待完成**
-- [ ] 草图编辑与约束（线/圆/圆弧）— 需要专用草图框架，延至后续迭代
-- [ ] 缩放操作（gp_Trsf::SetScale）— 可快速补充
+**延后至后续迭代**
+- [ ] 草图编辑与约束（线/圆/圆弧）— 需要专用草图框架，计划在阶段 2.5 独立实施
+- [ ] 缩放操作（gp_Trsf::SetScale）
 
-### 未完成阶段
+#### 阶段 3：机台模型与运动学（已完成）
 
-#### 阶段 3：CAM 刀路计算
+**运动学数据模型**（`src/base/machine_kinematics.h/.cpp`）
+- `MachineAxisDef`：轴定义结构体（名称、运动类型 Linear/Rotary、方向向量、行程范围、父轴、当前位置）
+- `MachineKinematics`：运动学数据管理类（QObject），支持：
+  - `loadPreset(configType)`：内置 4 种常见机床构型
+    - `VERTICAL_AC_TABLE`：立式主轴 + AC 双转台
+    - `VERTICAL_BC_TABLE`：立式主轴 + BC 双转台
+    - `AB_HEAD`：龙门 + AB 摆头
+    - `AC_HEAD`：龙门 + AC 摆头
+  - `assignShape/unassignShape`：形体-轴系手动绑定
+  - `mountWorkpiece/unmountWorkpiece`：工件挂载到指定轴
+  - `autoDetect()`：按形体名称关键字（"x_axis"、"x_slide"、"_x"、"x轴" 等）自动分配轴系
+  - `computeShapeTransform(entry)`：按运动学链式积（`T_A × T_B × T_C`）计算机台零件世界变换
+  - `computeWpcTransform(entry)`：计算挂载工件的世界变换（随轴系一起运动）
+  - `setAxisPosition(name, pos)`：设置轴位置并触发 `axisPositionChanged` 信号
 
-- 机床运动学模型（AC/BC/AB 等）
-- 3+2 定位与 5 轴联动刀路
-- 刀路可视化与干涉检查
-- 后处理与 G 代码生成
+**文档集成**（`LcncDocument`）
+- 新增 `machineKinematics()` 惰性初始化方法，返回文档持有的 `MachineKinematics` 实例
 
-#### 阶段 4：激光加工控制
+**3D 变换应用**（`GuiDocument`）
+- 新增 `updateAxisTransforms()`：遍历 AIS 形体映射表，调用 `SetLocalTransformation` + `RecomputePrsOnly` + `Redraw` 实时更新 3D 显示
+
+**命令系统**（`src/app/commands_machine.h/.cpp`）
+- `CmdLoadMachine`（"machine.load"）：选择机床构型 → 选择 STEP/STL/BREP 文件 → 后台导入为 Machine 实体 → 完成后自动运行 `autoDetect()`
+- `CmdMarkAxes`（"machine.mark_axes"）：打开 `DialogMarkAxes` 对话框，允许为每个机台形体手动指定所属轴或"未分配"
+- `CmdMountWorkpiece`（"machine.mount_workpiece"）：选择工件 + 目标轴 → `mountWorkpiece()` → `updateAxisTransforms()`
+
+**轴系标记对话框**（`src/app/dialog_mark_axes.h/.cpp`）
+- 网格布局，每行显示形体名称 + 轴系下拉选择框
+- "自动检测"按钮：调用 `autoDetect()` 并更新 UI
+- Accept 后将用户选择写入 `MachineKinematics`
+
+**准备页模型树**（`WidgetModelTree`）
+- 当机台有轴系分配时，切换到轴系视图：
+  - 每个轴生成加粗子节点（`BASE / X / Y / Z / A / C` 等）
+  - 机台零件按轴分组显示在对应子节点下
+  - 挂载的工件显示为绿色带 ⚙ 前缀，附注轴名
+  - 无分配形体归入"(未分配)"分组
+
+**机台面板**（`WidgetMachinePanel`）
+- 三组 GroupBox：机台配置（当前构型名）/ 轴系位置（每轴 QDoubleSpinBox，实时调轴位置）/ 工件挂载（列出当前挂载关系）
+- 轴位置 SpinBox 联动 `MachineKinematics::setAxisPosition()` + `GuiDocument::updateAxisTransforms()`，3D 视图实时响应
+
+### 进行中阶段
+
+#### 阶段 4：CAM 刀路计算
+
+- [ ] 3+2 定位与 5 轴联动刀路算法
+- [ ] 刀路可视化与干涉检查
+- [ ] 后处理与 G 代码生成
+
+#### 阶段 5：激光加工控制
 
 - ACS 控制器接入
 - 设备连接状态与报警处理
 - 加工流程执行控制（启动/暂停/停止/急停）
 - 运动仿真与实时状态反馈
 
-#### 阶段 5：工程化与质量
+#### 阶段 6：工程化与质量
 
 - 单元测试与集成测试
 - 崩溃保护与日志体系

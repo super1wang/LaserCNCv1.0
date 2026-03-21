@@ -2,16 +2,11 @@
 
 #include <QWidget>
 #include <QTreeWidget>
+#include <QStringList>
 #include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
+#include "base/machine_kinematics.h"
 
-/**
- * @brief Left-panel "准备" tab: displays the document entity tree.
- *
- * Shows two top-level groups — Machine Model and Workpiece Model — driven
- * by the LcncDocument's XDE label tree.  Selecting an item in the tree
- * highlights the corresponding shape in the 3D view.
- */
 class WidgetModelTree : public QWidget
 {
     Q_OBJECT
@@ -23,15 +18,31 @@ public:
 
 signals:
     void entitySelected(const QString& labelEntry);
+    void selectionChanged(const QStringList& entries);
+    /// Emitted after an axis node assignment is removed via context menu.
+    void axisNodeUnassigned();
+
+public slots:
+    void highlightEntries(const QStringList& entries);
 
 private slots:
     void onItemSelectionChanged();
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
+    void onContextMenuRequested(const QPoint& pos);
 
 private:
-    void populateGroup(QTreeWidgetItem* groupItem,
-                       LcncDocument*   doc,
-                       LcncDocument::EntityKind kind);
+    void populateGroup(QTreeWidgetItem*   groupItem,
+                       LcncDocument*      doc,
+                       LcncDocument::EntityKind kind,
+                       MachineKinematics* kin = nullptr);
+    void populateMachineGroup(QTreeWidgetItem*   groupItem,
+                               LcncDocument*      doc,
+                               MachineKinematics* kin);
+    void addTreeNodes(QTreeWidgetItem*                             parent,
+                      const QList<LcncDocument::ShapeTreeNode>&    nodes,
+                      LcncDocument::EntityKind                     kind,
+                      MachineKinematics*                           kin);
 
-    QTreeWidget* m_tree{nullptr};
+    QTreeWidget*  m_tree{nullptr};
+    LcncDocument* m_doc{nullptr};   ///< current document (set in rebuildForDocument)
 };

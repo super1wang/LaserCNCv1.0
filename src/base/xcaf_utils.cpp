@@ -25,8 +25,12 @@ QString XcafUtils::name(const TDF_Label& label)
 {
     Handle(TDataStd_Name) nameAttr;
     if (label.FindAttribute(TDataStd_Name::GetID(), nameAttr)) {
-        TCollection_AsciiString ascii(nameAttr->Get(), '?');
-        return QString::fromLatin1(ascii.ToCString());
+        const TCollection_ExtendedString& ext = nameAttr->Get();
+        std::wstring ws;
+        ws.reserve(static_cast<size_t>(ext.Length()));
+        for (Standard_Integer i = 1; i <= ext.Length(); ++i)
+            ws.push_back(static_cast<wchar_t>(ext.Value(i)));
+        return QString::fromStdWString(ws);
     }
     return QString();
 }

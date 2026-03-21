@@ -2,6 +2,7 @@
 #include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
 #include "base/xcaf_utils.h"
+#include "base/machine_kinematics.h"
 #include "graphics/shape_object_driver.h"
 
 #include <TDF_LabelSequence.hxx>
@@ -216,4 +217,58 @@ void GuiDocument::rebuildDisplay()
 Handle(AIS_Shape) GuiDocument::aisShape(const QString& labelEntry) const
 {
     return m_aisMap.value(labelEntry, Handle(AIS_Shape)());
+}
+
+// ── Axis transform update ──────────────────────────────────────────────────────
+
+QStringList GuiDocument::selectedEntries() const
+{
+    QStringList result;
+    if (!m_scene) return result;
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull()) return result;
+    for (ctx->InitSelected(); ctx->MoreSelected(); ctx->NextSelected()) {
+        // Compare raw pointers — Handle equality compares underlying object addresses
+        const AIS_InteractiveObject* objPtr = ctx->SelectedInteractive().get();
+        for (auto it = m_aisMap.cbegin(); it != m_aisMap.cend(); ++it) {
+            if (it.value().get() == objPtr) {
+                result << it.key();
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+void GuiDocument::updateAxisTransforms()
+{
+    LcncDocument* doc = document();
+    if (!doc) return;
+
+    MachineKinematics* kin = doc->machineKinematics();
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull()) return;
+
+    for (auto it = m_aisMap.constBegin(); it != m_aisMap.constEnd(); ++it) {
+        const QString&         entry = it.key();
+        const Handle(AIS_Shape)& ais = it.value();
+        if (ais.IsNull()) continue;
+
+        gp_Trsf t;
+        const QString machineAxis = kin->axisForShape(entry);
+        const QString wpcAxis     = kin->mountedAxis(entry);
+
+        if (!machineAxis.isEmpty())
+            t = kin->computeShapeTransform(entry);
+        else if (!wpcAxis.isEmpty())
+            t = kin->computeWpcTransform(entry);
+        else
+            continue;  // not assigned — leave transform unchanged
+
+        ais->SetLocalTransformation(t);
+        ctx->RecomputePrsOnly(ais, Standard_False);
+    }
+
+    if (!m_view.IsNull())
+        m_view->Redraw();
 }

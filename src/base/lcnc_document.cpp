@@ -10,6 +10,10 @@
 #include <TDataStd_Integer.hxx>
 #include <TDF_Tool.hxx>
 #include <TDF_LabelSequence.hxx>
+#include <TDF_ChildIterator.hxx>
+#include <TCollection_AsciiString.hxx>
+#include <XCAFDoc_Location.hxx>
+#include <TopLoc_Location.hxx>
 
 // IMPLEMENT_STANDARD_RTTIEXT(LcncDocument, TDocStd_Document)
 
@@ -110,6 +114,139 @@ TDF_LabelSequence LcncDocument::entityLabels(EntityKind kind) const
         }
     }
     return result;
+}
+
+// ── Assembly import ───────────────────────────────────────────────────────────
+
+/// Read TDataStd_Name from a label, preserving Unicode (Chinese, etc.).
+static QString xcafLabelName(const TDF_Label& lbl)
+{
+    Handle(TDataStd_Name) attr;
+    if (lbl.FindAttribute(TDataStd_Name::GetID(), attr)) {
+        const TCollection_ExtendedString& ext = attr->Get();
+        std::wstring ws;
+        ws.reserve(static_cast<size_t>(ext.Length()));
+        for (Standard_Integer i = 1; i <= ext.Length(); ++i)
+            ws.push_back(static_cast<wchar_t>(ext.Value(i)));
+        return QString::fromStdWString(ws);
+    }
+    return QString();
+}
+
+/// Recursively build a ShapeTreeNode from an XCAF design label.
+///
+/// - Leaf labels (no components): shape is registered via addShapeEntity;
+///   node.entry is set to the created XCAF label entry.
+/// - Assembly labels: node.entry is empty (virtual group); children are
+///   populated by recursing into each component with its composed location.
+static LcncDocument::ShapeTreeNode importBuildTreeR(
+    LcncDocument*                    doc,
+    const Handle(XCAFDoc_ShapeTool)& st,
+    const TDF_Label&                 designLbl,
+    const TopLoc_Location&           parentLoc,
+    const QString&                   fallbackName,
+    LcncDocument::EntityKind         kind)
+{
+    LcncDocument::ShapeTreeNode node;
+    node.displayName = xcafLabelName(designLbl);
+    if (node.displayName.isEmpty())
+        node.displayName = fallbackName;
+
+    // Try XDE GetComponents first; if it fails, fall back to scanning child
+    // labels for any reference label (handles STEP files where IsAssembly
+    // may not be set but NAUO component-references still exist as children).
+    TDF_LabelSequence comps;
+    st->GetComponents(designLbl, comps);
+    if (comps.IsEmpty()) {
+        TDF_ChildIterator childIt(designLbl);
+        for (; childIt.More(); childIt.Next()) {
+            TDF_Label child = childIt.Value();
+            if (st->IsReference(child))
+                comps.Append(child);
+        }
+    }
+    if (comps.IsEmpty()) {
+        // ── Leaf: register as entity ──────────────────────────────────────
+        TopoDS_Shape sh = st->GetShape(designLbl);
+        if (sh.IsNull()) return node;
+        TopLoc_Location loc = parentLoc * sh.Location();
+        if (!loc.IsIdentity())
+            sh = sh.Located(loc);
+        TDF_Label lbl = doc->addShapeEntity(sh, node.displayName, kind);
+        node.entry = XcafUtils::entry(lbl);
+        return node;
+    }
+
+    // ── Assembly: recurse into components ─────────────────────────────────
+    for (int i = 1; i <= comps.Length(); ++i) {
+        TDF_Label compRef = comps.Value(i);
+
+        TopLoc_Location compLoc;
+        Handle(XCAFDoc_Location) locAttr;
+        if (compRef.FindAttribute(XCAFDoc_Location::GetID(), locAttr))
+            compLoc = locAttr->Get();
+        const TopLoc_Location childLoc = parentLoc * compLoc;
+
+        // Prefer the component-reference (instance) name, then the design name
+        QString nm = xcafLabelName(compRef);
+        TDF_Label referred;
+        if (!st->GetReferredShape(compRef, referred)) {
+            // No referred design label — import the component shape directly
+            TopoDS_Shape sh = st->GetShape(compRef);
+            if (!sh.IsNull()) {
+                if (!childLoc.IsIdentity())
+                    sh = sh.Located(childLoc * sh.Location());
+                if (nm.isEmpty()) nm = QStringLiteral("Part_%1").arg(i);
+                TDF_Label lbl = doc->addShapeEntity(sh, nm, kind);
+                LcncDocument::ShapeTreeNode leaf;
+                leaf.entry       = XcafUtils::entry(lbl);
+                leaf.displayName = nm;
+                node.children.append(leaf);
+            }
+            continue;
+        }
+        if (nm.isEmpty()) nm = xcafLabelName(referred);
+        if (nm.isEmpty()) nm = QStringLiteral("Part_%1").arg(i);
+
+        LcncDocument::ShapeTreeNode child =
+            importBuildTreeR(doc, st, referred, childLoc, nm, kind);
+        if (!child.displayName.isEmpty() || !child.entry.isEmpty())
+            node.children.append(child);
+    }
+    return node;
+}
+
+void LcncDocument::importFromXcaf(const Handle(TDocStd_Document)& xdeDoc,
+                                   EntityKind kind)
+{
+    Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
+    TDF_LabelSequence freeShapes;
+    st->GetFreeShapes(freeShapes);
+
+    auto& tree = (kind == EntityKind::Machine) ? m_machineTree : m_workpieceTree;
+
+    for (int i = 1; i <= freeShapes.Length(); ++i) {
+        const TDF_Label& root     = freeShapes.Value(i);
+        const QString    rootName = xcafLabelName(root);
+        ShapeTreeNode node =
+            importBuildTreeR(this, st, root, TopLoc_Location(), rootName, kind);
+        if (!node.displayName.isEmpty() || !node.entry.isEmpty())
+            tree.append(node);
+    }
+}
+
+const QList<LcncDocument::ShapeTreeNode>& LcncDocument::entityTree(EntityKind kind) const
+{
+    return (kind == EntityKind::Machine) ? m_machineTree : m_workpieceTree;
+}
+
+// ── Machine kinematics ─────────────────────────────────────────────────────────
+
+MachineKinematics* LcncDocument::machineKinematics()
+{
+    if (!m_kinematics)
+        m_kinematics = new MachineKinematics(nullptr);
+    return m_kinematics;
 }
 
 // ── Undo/Redo ──────────────────────────────────────────────────────────────────

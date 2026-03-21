@@ -16,11 +16,12 @@
 // OCC data exchange
 #include <BRep_Builder.hxx>
 #include <BRepTools.hxx>
-#include <STEPControl_Reader.hxx>
+#include <STEPCAFControl_Reader.hxx>
+#include <IGESCAFControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
-#include <IGESControl_Reader.hxx>
 #include <StlAPI_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <TCollection_ExtendedString.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 
@@ -72,29 +73,29 @@ void CmdOpenDocument::execute()
 
             if (ext == "stp" || ext == "step") {
                 prog->setStepName(QStringLiteral("读取 STEP..."));
-                STEPControl_Reader reader;
-                if (reader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
+                Handle(TDocStd_Document) xdeDoc =
+                    new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+                XCAFDoc_DocumentTool::Set(xdeDoc->Main());
+                STEPCAFControl_Reader cafReader;
+                cafReader.SetNameMode(Standard_True);
+                if (cafReader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
                     prog->setValue(50);
                     prog->setStepName(QStringLiteral("转换形体..."));
-                    reader.TransferRoots();
-                    for (int i = 1; i <= reader.NbShapes(); ++i) {
-                        TopoDS_Shape sh = reader.Shape(i);
-                        if (!sh.IsNull())
-                            doc->addShapeEntity(sh, QStringLiteral("Shape_%1").arg(i));
-                    }
+                    cafReader.Transfer(xdeDoc);
+                    doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
                 }
             } else if (ext == "igs" || ext == "iges") {
                 prog->setStepName(QStringLiteral("读取 IGES..."));
-                IGESControl_Reader reader;
-                if (reader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
+                Handle(TDocStd_Document) xdeDoc =
+                    new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+                XCAFDoc_DocumentTool::Set(xdeDoc->Main());
+                IGESCAFControl_Reader cafReader;
+                cafReader.SetNameMode(Standard_True);
+                if (cafReader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
                     prog->setValue(50);
                     prog->setStepName(QStringLiteral("转换形体..."));
-                    reader.TransferRoots();
-                    for (int i = 1; i <= reader.NbShapes(); ++i) {
-                        TopoDS_Shape sh = reader.Shape(i);
-                        if (!sh.IsNull())
-                            doc->addShapeEntity(sh, QStringLiteral("Shape_%1").arg(i));
-                    }
+                    cafReader.Transfer(xdeDoc);
+                    doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
                 }
             } else if (ext == "stl") {
                 prog->setStepName(QStringLiteral("读取 STL..."));
@@ -211,22 +212,17 @@ void CmdImportStep::execute()
             prog->setStepName(QStringLiteral("读取 STEP..."));
             prog->setRange(0, 100);
 
-            STEPControl_Reader reader;
-            IFSelect_ReturnStatus status =
-                reader.ReadFile(path.toUtf8().constData());
-            if (status != IFSelect_RetDone) return;
+            Handle(TDocStd_Document) xdeDoc =
+                new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+            XCAFDoc_DocumentTool::Set(xdeDoc->Main());
+            STEPCAFControl_Reader cafReader;
+            cafReader.SetNameMode(Standard_True);
+            if (cafReader.ReadFile(path.toUtf8().constData()) != IFSelect_RetDone) return;
 
             prog->setValue(50);
             prog->setStepName(QStringLiteral("转换形体..."));
-            reader.TransferRoots();
-
-            for (int i = 1; i <= reader.NbShapes(); ++i) {
-                TopoDS_Shape sh = reader.Shape(i);
-                if (!sh.IsNull()) {
-                    QString name = QStringLiteral("Shape_%1").arg(i);
-                    doc->addShapeEntity(sh, name, LcncDocument::EntityKind::Workpiece);
-                }
-            }
+            cafReader.Transfer(xdeDoc);
+            doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
             prog->setValue(100);
         });
 

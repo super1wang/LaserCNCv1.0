@@ -59,8 +59,11 @@ public:
                                    bool           fitAll = false);
     void eraseEntity(const QString& labelEntry);
     void rebuildDisplay();
-    Handle(AIS_Shape) aisShape(const QString& labelEntry) const;
-
+    Handle(AIS_Shape) aisShape(const QString& labelEntry) const;    /// Returns label entries of all currently selected AIS shapes.
+    QStringList selectedEntries() const;    // ── Axis transform update ─────────────────────────────────────────────
+    /// Recomputes and applies AIS local transforms for all axis-assigned
+    /// machine shapes and all mounted workpieces at their current positions.
+    void updateAxisTransforms();
 signals:
     void displayUpdated();
 

@@ -27,6 +27,7 @@ set(SRCS_BASE
     src/base/xcaf_utils.cpp
     src/base/task_progress.cpp
     src/base/task_manager.cpp
+    src/base/machine_kinematics.cpp
 )
 
 set(SRCS_GRAPHICS
@@ -46,6 +47,8 @@ set(SRCS_APP
     src/app/commands_edit.cpp
     src/app/commands_display.cpp
     src/app/commands_cad.cpp
+    src/app/commands_machine.cpp
+    src/app/dialog_mark_axes.cpp
     src/app/widget_occ_view.cpp
     src/app/widget_model_tree.cpp
     src/app/widget_machine_panel.cpp

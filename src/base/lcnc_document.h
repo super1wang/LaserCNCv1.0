@@ -3,6 +3,8 @@
 #include <QString>
 #include <QList>
 
+#include "base/machine_kinematics.h"
+
 // OCC
 #include <Standard_Handle.hxx>
 #include <Standard_Type.hxx>
@@ -67,6 +69,29 @@ public:
     void commitCommand();
     void abortCommand();
 
+    // ── Machine kinematics ────────────────────────────────────────────────────
+    /// Returns the per-document kinematics model (created on first call).
+    MachineKinematics* machineKinematics();
+
+    // ── Assembly import ───────────────────────────────────────────────────────
+    /// Import shapes from an XCAF document, expanding the assembly hierarchy.
+    /// Each named product/component is added as a separate entity.
+    void importFromXcaf(const Handle(TDocStd_Document)& xdeDoc, EntityKind kind);
+
+    /// Node in the import-time shape hierarchy (for hierarchical tree display).
+    /// When entry is empty, the node is a virtual assembly/group node with no
+    /// own geometry; its children hold the actual shapes.
+    struct ShapeTreeNode {
+        QString              entry;        ///< label entry, empty = grouping node
+        QString              displayName;
+        QList<ShapeTreeNode> children;
+    };
+
+    /// Returns the import hierarchy tree for the given entity kind.
+    /// Returns an empty list when shapes were created directly (e.g. via CAD
+    /// primitives), in which case \c entityLabels() flat fallback is used.
+    const QList<ShapeTreeNode>& entityTree(EntityKind kind) const;
+
 private:
     friend class LcncApplication;
 
@@ -82,6 +107,11 @@ private:
     TDF_Label m_workpieceGroup;
     TDF_Label m_machineGroup;
     TDF_Label m_auxiliaryGroup;
+
+    MachineKinematics* m_kinematics{nullptr};  ///< owned by this document
+
+    QList<ShapeTreeNode> m_machineTree;    ///< import hierarchy for machine entities
+    QList<ShapeTreeNode> m_workpieceTree;  ///< import hierarchy for workpiece entities
 };
 
 DEFINE_STANDARD_HANDLE(LcncDocument, TDocStd_Document)

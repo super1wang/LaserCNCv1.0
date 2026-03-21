@@ -5,6 +5,7 @@
 #include "app/commands_edit.h"
 #include "app/commands_display.h"
 #include "app/commands_cad.h"
+#include "app/commands_machine.h"
 #include "app/widget_occ_view.h"
 #include "app/widget_model_tree.h"
 #include "app/widget_machine_panel.h"
@@ -12,6 +13,7 @@
 #include "app/dialog_task_manager.h"
 #include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
+#include "base/machine_kinematics.h"
 #include "base/xcaf_utils.h"
 #include "graphics/graphics_scene.h"
 #include "gui/gui_application.h"
@@ -127,6 +129,11 @@ void MainWindow::createCommands()
     m_cmdContainer->addCommand<CmdMeasureAngle>(CmdMeasureAngle::Name);
     m_cmdContainer->addCommand<CmdMeasureArea>(CmdMeasureArea::Name);
 
+    // Machine commands
+    m_cmdContainer->addCommand<CmdLoadMachine>(CmdLoadMachine::Name);
+    m_cmdContainer->addCommand<CmdMarkAxes>(CmdMarkAxes::Name);
+    m_cmdContainer->addCommand<CmdMountWorkpiece>(CmdMountWorkpiece::Name);
+
     // Display — view orientation
     auto addOrient = [this](const QString& name,
                              V3d_TypeOfOrientation o,
@@ -180,6 +187,36 @@ void MainWindow::createCentralLayout()
 
     // Task dialog (non-modal, floats on top)
     m_taskDialog = new DialogTaskManager(this);
+
+    // ── 3D selection → tree highlight + machine panel ─────────────────────
+    connect(m_occView, &WidgetOccView::selectionChanged, this, [this] {
+        DocumentId id = LcncApplication::instance()->activeDocumentId();
+        if (auto* gd = GuiApplication::instance()->guiDocument(id)) {
+            const QStringList entries = gd->selectedEntries();
+            m_modelTree->highlightEntries(entries);
+            m_machinePanel->setSelectedEntries(entries);
+        }
+    });
+
+    // Tree selection → machine panel mark buttons context
+    connect(m_modelTree, &WidgetModelTree::selectionChanged, this,
+            [this](const QStringList& entries) {
+                m_machinePanel->setSelectedEntries(entries);
+            });
+
+    // Axis assignment in panel → notify document modified
+    connect(m_machinePanel, &WidgetMachinePanel::axisAssignmentChanged, this, [this] {
+        DocumentId id = LcncApplication::instance()->activeDocumentId();
+        if (LcncApplication::instance()->documentById(id))
+            LcncApplication::instance()->notifyDocumentModified(id);
+    });
+
+    // Axis node removed via right-click context menu → refresh tree + panel
+    connect(m_modelTree, &WidgetModelTree::axisNodeUnassigned, this, [this] {
+        DocumentId id = LcncApplication::instance()->activeDocumentId();
+        if (LcncApplication::instance()->documentById(id))
+            LcncApplication::instance()->notifyDocumentModified(id);
+    });
 }
 
 void MainWindow::create3DView()
@@ -242,11 +279,24 @@ void MainWindow::createRightPanel()
     m_rightStack->setMaximumWidth(350);
     m_rightStack->setCurrentIndex(0);
 
-    // Wire machine panel signals to file commands
+    // Wire machine panel signals to commands
     connect(m_machinePanel, &WidgetMachinePanel::loadMachineRequested, this,
-            []{ CmdImportStl(nullptr); });
-    connect(m_machinePanel, &WidgetMachinePanel::loadWorkpieceRequested, this,
-            []{ CmdImportStep(nullptr); });
+            [this]{ m_cmdContainer->findCommand(CmdLoadMachine::Name)->execute(); });
+    connect(m_machinePanel, &WidgetMachinePanel::markAxesRequested, this,
+            [this]{ m_cmdContainer->findCommand(CmdMarkAxes::Name)->execute(); });
+    connect(m_machinePanel, &WidgetMachinePanel::mountWorkpieceRequested, this,
+            [this]{ m_cmdContainer->findCommand(CmdMountWorkpiece::Name)->execute(); });
+
+    // Axis position spinbox → kinematics + 3D update
+    connect(m_machinePanel, &WidgetMachinePanel::axisPositionChanged, this,
+            [this](const QString& axisName, double value) {
+                LcncDocument* doc = LcncApplication::instance()->activeDocument();
+                if (!doc) return;
+                doc->machineKinematics()->setAxisPosition(axisName, value);
+                DocumentId id = LcncApplication::instance()->activeDocumentId();
+                if (auto* gd = GuiApplication::instance()->guiDocument(id))
+                    gd->updateAxisTransforms();
+            });
 }
 
 // ── Ribbon ─────────────────────────────────────────────────────────────────────
@@ -351,8 +401,9 @@ void MainWindow::buildCamTab(SARibbonCategory* cat)
 
     // ── 机台 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelMach = cat->addPanel(tr("机台"));
-    panelMach->addLargeAction(makeAct(tr("加载机台"), ":/icons/machine.svg"));
-    panelMach->addSmallAction(makeAct(tr("机台设置"), ":/icons/settings.svg"));
+    panelMach->addLargeAction(m_cmdContainer->findAction(CmdLoadMachine::Name));
+    panelMach->addLargeAction(m_cmdContainer->findAction(CmdMarkAxes::Name));
+    panelMach->addSmallAction(m_cmdContainer->findAction(CmdMountWorkpiece::Name));
     panelMach->addSmallAction(makeAct(tr("坐标系"), ":/icons/coordinate.svg"));
 
     // ── 刀路 ───────────────────────────────────────────────────────────────
@@ -460,6 +511,7 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
     if (doc) {
         m_sbDocName->setText(doc->name());
         m_modelTree->rebuildForDocument(doc);
+        m_machinePanel->setDocument(doc);
         if (auto* gd = GuiApplication::instance()->guiDocument(id))
             m_occView->attachDocument(gd);
     } else {
@@ -469,6 +521,7 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
         // dangling pointer by the time onDocumentClosed runs.
         m_sbDocName->setText(tr("无文档"));
         m_modelTree->clear();
+        m_machinePanel->setDocument(nullptr);
         m_occView->attachDefaultScene(m_defaultScene);
     }
     rebuildDocumentTree();
@@ -478,8 +531,10 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
 void MainWindow::onDocumentModified(DocumentId id)
 {
     if (id == LcncApplication::instance()->activeDocumentId()) {
-        if (LcncDocument* doc = LcncApplication::instance()->documentById(id))
+        if (LcncDocument* doc = LcncApplication::instance()->documentById(id)) {
             m_modelTree->rebuildForDocument(doc);
+            m_machinePanel->setDocument(doc);
+        }
     }
     rebuildDocumentTree();
 }
@@ -544,33 +599,44 @@ void MainWindow::rebuildDocumentTree()
         docItem->setData(0, kRoleDocId, doc->id());
         docItem->setData(0, kRoleEntry, QString());
 
-        Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
-        TDF_LabelSequence roots;
-        st->GetFreeShapes(roots);
+        const auto& workpieceTree = doc->entityTree(LcncDocument::EntityKind::Workpiece);
 
-        std::function<void(QTreeWidgetItem*, const TDF_Label&)> appendNode;
-        appendNode = [&](QTreeWidgetItem* parent, const TDF_Label& lbl) {
-            auto* item = new QTreeWidgetItem(parent);
-            QString text = XcafUtils::name(lbl);
-            const QString entry = XcafUtils::entry(lbl);
-            if (text.isEmpty())
-                text = entry;
-            item->setText(0, text);
-            item->setIcon(0, QIcon(":/icons/shape.svg"));
-            item->setData(0, kRoleDocId, doc->id());
-            item->setData(0, kRoleEntry, entry);
-
-            TDF_LabelSequence comps;
-            st->GetComponents(lbl, comps, false);
-            for (int i = 1; i <= comps.Length(); ++i)
-                appendNode(item, comps.Value(i));
-        };
-
-        for (int i = 1; i <= roots.Length(); ++i)
-            appendNode(docItem, roots.Value(i));
+        if (!workpieceTree.isEmpty()) {
+            // ── Workpiece hierarchy from STEP/IGES import ───────────────
+            std::function<void(QTreeWidgetItem*, const LcncDocument::ShapeTreeNode&)> addNode;
+            addNode = [&](QTreeWidgetItem* parent, const LcncDocument::ShapeTreeNode& node) {
+                auto* item = new QTreeWidgetItem(parent);
+                item->setText(0, node.displayName.isEmpty() ? node.entry : node.displayName);
+                item->setData(0, kRoleDocId, doc->id());
+                item->setData(0, kRoleEntry, node.entry);
+                if (node.entry.isEmpty()) {
+                    item->setIcon(0, QIcon(":/icons/machine.svg"));
+                    item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
+                } else {
+                    item->setIcon(0, QIcon(":/icons/shape.svg"));
+                }
+                for (const auto& child : node.children)
+                    addNode(item, child);
+            };
+            for (const auto& node : workpieceTree) addNode(docItem, node);
+        } else {
+            // ── Fallback: only show Workpiece-tagged free shapes ───────────
+            TDF_LabelSequence wpcLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+            for (int i = 1; i <= wpcLabels.Length(); ++i) {
+                TDF_Label lbl = wpcLabels.Value(i);
+                const QString entry = XcafUtils::entry(lbl);
+                QString text = XcafUtils::name(lbl);
+                if (text.isEmpty()) text = entry;
+                auto* item = new QTreeWidgetItem(docItem);
+                item->setText(0, text);
+                item->setIcon(0, QIcon(":/icons/shape.svg"));
+                item->setData(0, kRoleDocId, doc->id());
+                item->setData(0, kRoleEntry, entry);
+            }
+        }
     }
 
-    m_documentTree->expandToDepth(1);
+    m_documentTree->expandToDepth(2);
 }
 
 void MainWindow::updateCommandStates()
