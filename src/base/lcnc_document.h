@@ -56,6 +56,11 @@ public:
                              const QString&      name,
                              EntityKind          kind = EntityKind::Workpiece);
 
+    /// Remove a shape entity identified by its label entry string.
+    /// Also removes the node from the entity hierarchy tree and cleans up
+    /// any kinematics references.  Safe to call with an unknown entry.
+    void removeShapeEntity(const QString& entry);
+
     /// Enumerate all top-level entities (for tree building)
     TDF_LabelSequence entityLabels(EntityKind kind) const;
 
@@ -112,6 +117,16 @@ private:
 
     QList<ShapeTreeNode> m_machineTree;    ///< import hierarchy for machine entities
     QList<ShapeTreeNode> m_workpieceTree;  ///< import hierarchy for workpiece entities
+
+    /// Tree snapshot saved at the start of each XCAF command, mirroring the
+    /// XCAF undo stack so that the in-memory Qt trees can be restored on
+    /// undo/redo without losing virtual group hierarchy.
+    struct TreeSnapshot {
+        QList<ShapeTreeNode> workpieceTree;
+        QList<ShapeTreeNode> machineTree;
+    };
+    QList<TreeSnapshot> m_treeUndoStack;
+    QList<TreeSnapshot> m_treeRedoStack;
 };
 
 DEFINE_STANDARD_HANDLE(LcncDocument, TDocStd_Document)

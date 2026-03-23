@@ -815,3 +815,109 @@ void CmdMeasureArea::execute()
             msg.trimmed());
     }
 }
+
+// =============================================================================
+// Delete shape command
+// =============================================================================
+
+// ── CmdDeleteShape ─────────────────────────────────────────────────────────────
+CmdDeleteShape::CmdDeleteShape(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/delete.svg"), tr("删除"), this);
+    a->setShortcut(QKeySequence::Delete);
+    a->setStatusTip(tr("删除选中的形体（同步移除三维视图和树节点）"));
+    setAction(a);
+}
+
+bool CmdDeleteShape::isEnabled() const
+{
+    if (LcncDocument* doc = context()->activeDocument()) {
+        Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
+        TDF_LabelSequence fs;
+        st->GetFreeShapes(fs);
+        return fs.Length() > 0;
+    }
+    return false;
+}
+
+void CmdDeleteShape::execute()
+{
+    LcncDocument* doc = context()->activeDocument();
+    if (!doc) return;
+
+    // Collect ALL entities (both Machine and Workpiece kinds)
+    Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
+    TDF_LabelSequence freeShapes;
+    st->GetFreeShapes(freeShapes);
+
+    QList<EntityInfo> all;
+    for (int i = 1; i <= freeShapes.Length(); ++i) {
+        TDF_Label lbl = freeShapes.Value(i);
+        Handle(TDataStd_Integer) kindAttr;
+        if (!lbl.FindAttribute(TDataStd_Integer::GetID(), kindAttr)) continue;
+        EntityInfo info;
+        info.label = lbl;
+        info.name  = XcafUtils::name(lbl);
+        if (info.name.isEmpty()) info.name = XcafUtils::entry(lbl);
+        info.shape = st->GetShape(lbl);
+        all.append(info);
+    }
+
+    if (all.isEmpty()) {
+        QMessageBox::information(nullptr, tr("删除"), tr("文档中没有可删除的形体"));
+        return;
+    }
+
+    // Determine target(s): selected in viewport, or let user pick
+    const auto sel = selectedEntities(context(), all);
+
+    QList<EntityInfo> targets;
+    if (!sel.isEmpty()) {
+        targets = sel;
+    } else {
+        QDialog dlg;
+        dlg.setWindowTitle(tr("删除形体"));
+        auto* form = new QFormLayout;
+        auto* cb   = new QComboBox;
+        for (const auto& e : all) cb->addItem(e.name);
+        form->addRow(tr("形体:"), cb);
+        auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        auto* vl = new QVBoxLayout(&dlg);
+        vl->addLayout(form);
+        vl->addWidget(btns);
+        if (dlg.exec() != QDialog::Accepted) return;
+        targets = { all[cb->currentIndex()] };
+    }
+
+    // Confirm when deleting multiple or a single entity without visual selection
+    if (targets.size() > 1) {
+        const int ret = QMessageBox::question(
+            nullptr, tr("删除"),
+            tr("将删除 %1 个形体，确认继续？").arg(targets.size()),
+            QMessageBox::Yes | QMessageBox::No);
+        if (ret != QMessageBox::Yes) return;
+    }
+
+    GuiDocument* gd = context()->activeGuiDocument();
+    MachineKinematics* kin = doc->machineKinematics();
+
+    // Wrap in an XCAF undo transaction so Ctrl+Z can restore the shapes
+    doc->openCommand(tr("删除形体"));
+    for (const auto& ei : targets) {
+        const QString entry = XcafUtils::entry(ei.label);
+        // Remove from kinematics (axis assignments + workpiece mounts)
+        if (kin) kin->unassignShape(entry);
+        // Remove AIS shape from the 3D view
+        if (gd) gd->eraseEntity(entry);
+        // Remove from XCAF document and entity trees
+        doc->removeShapeEntity(entry);
+    }
+    doc->commitCommand();
+
+    // Rebuild display to sync m_aisMap
+    if (gd) gd->rebuildDisplay();
+    context()->app()->notifyDocumentModified(doc->id());
+    context()->updateCommandStates();
+}

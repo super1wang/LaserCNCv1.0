@@ -44,10 +44,15 @@ void GraphicsScene::init()
 
 void GraphicsScene::setDefaultLighting()
 {
-    m_viewer->SetLightOn();
-    m_viewer->AddLight(new V3d_DirectionalLight(
-        V3d_XposYnegZpos, Quantity_NOC_WHITE, true));
-    m_viewer->AddLight(new V3d_AmbientLight(Quantity_Color(0.3, 0.3, 0.3, Quantity_TOC_RGB)));
+    // Add lights first, then enable them — SetLightOn() only activates
+    // lights already in the viewer's defined-light list.
+    Handle(V3d_DirectionalLight) dirLight = new V3d_DirectionalLight(
+        V3d_XposYnegZpos, Quantity_NOC_WHITE, Standard_True);
+    Handle(V3d_AmbientLight) ambLight = new V3d_AmbientLight(
+        Quantity_Color(0.3, 0.3, 0.3, Quantity_TOC_RGB));
+    m_viewer->AddLight(dirLight);
+    m_viewer->AddLight(ambLight);
+    m_viewer->SetLightOn();  // Enable all defined lights (must call AFTER AddLight)
 }
 
 void GraphicsScene::setGradientBackground(const Quantity_Color& top,

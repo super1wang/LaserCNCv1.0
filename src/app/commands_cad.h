@@ -133,3 +133,16 @@ public:
     void execute() override;
     bool isEnabled() const override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delete entity
+// ─────────────────────────────────────────────────────────────────────────────
+
+class CmdDeleteShape : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "cad.deleteShape";
+    explicit CmdDeleteShape(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};

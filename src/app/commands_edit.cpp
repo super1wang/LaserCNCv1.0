@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QKeySequence>
 
+#include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
 #include "gui/gui_document.h"
 
@@ -28,6 +29,7 @@ void CmdUndo::execute()
         d->undo();
         if (auto* gd = context()->activeGuiDocument())
             gd->rebuildDisplay();
+        context()->app()->notifyDocumentModified(d->id());
         context()->updateCommandStates();
     }
 }
@@ -54,6 +56,7 @@ void CmdRedo::execute()
         d->redo();
         if (auto* gd = context()->activeGuiDocument())
             gd->rebuildDisplay();
+        context()->app()->notifyDocumentModified(d->id());
         context()->updateCommandStates();
     }
 }

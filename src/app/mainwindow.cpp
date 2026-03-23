@@ -27,6 +27,7 @@
 #include <QTabWidget>
 #include <QStackedWidget>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QHeaderView>
 #include <QStatusBar>
 #include <QLabel>
@@ -129,6 +130,9 @@ void MainWindow::createCommands()
     m_cmdContainer->addCommand<CmdMeasureAngle>(CmdMeasureAngle::Name);
     m_cmdContainer->addCommand<CmdMeasureArea>(CmdMeasureArea::Name);
 
+    // CAD — Delete
+    m_cmdContainer->addCommand<CmdDeleteShape>(CmdDeleteShape::Name);
+
     // Machine commands
     m_cmdContainer->addCommand<CmdLoadMachine>(CmdLoadMachine::Name);
     m_cmdContainer->addCommand<CmdMarkAxes>(CmdMarkAxes::Name);
@@ -195,6 +199,21 @@ void MainWindow::createCentralLayout()
             const QStringList entries = gd->selectedEntries();
             m_modelTree->highlightEntries(entries);
             m_machinePanel->setSelectedEntries(entries);
+            // Highlight matching nodes in the 文档 tab tree
+            if (m_documentTree && !entries.isEmpty()) {
+                QSignalBlocker blocker(m_documentTree);
+                m_documentTree->clearSelection();
+                QTreeWidgetItemIterator it(m_documentTree);
+                while (*it) {
+                    const QString e = (*it)->data(0, kRoleEntry).toString();
+                    if (!e.isEmpty() && entries.contains(e)) {
+                        (*it)->setSelected(true);
+                        for (QTreeWidgetItem* p = (*it)->parent(); p; p = p->parent())
+                            p->setExpanded(true);
+                    }
+                    ++it;
+                }
+            }
         }
     });
 
@@ -237,6 +256,7 @@ void MainWindow::createLeftPanel()
     m_documentTree->setHeaderLabel(tr("文档结构"));
     m_documentTree->setColumnCount(1);
     m_documentTree->header()->setVisible(false);
+    m_documentTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_leftTabs->addTab(m_documentTree, tr("文档"));
 
     // ── 准备 tab ───────────────────────────────────────────────────────────
@@ -324,10 +344,6 @@ void MainWindow::buildFileTab(SARibbonCategory* cat)
     panelIO->addSmallAction(m_cmdContainer->findAction(CmdExportStep::Name));
     panelIO->addSmallAction(m_cmdContainer->findAction(CmdCloseDocument::Name));
 
-    SARibbonPanel* panelEdit = cat->addPanel(tr("编辑"));
-    panelEdit->addLargeAction(m_cmdContainer->findAction(CmdUndo::Name));
-    panelEdit->addLargeAction(m_cmdContainer->findAction(CmdRedo::Name));
-
     SARibbonPanel* panelView = cat->addPanel(tr("视图"));
     panelView->addLargeAction(m_cmdContainer->findAction(CmdFitAll::Name));
 
@@ -361,6 +377,11 @@ void MainWindow::buildCadTab(SARibbonCategory* cat)
         return a;
     };
 
+    // ── 历史 ─────────────────────────────────────────────────────────────
+    SARibbonPanel* panelHist = cat->addPanel(tr("历史"));
+    panelHist->addLargeAction(m_cmdContainer->findAction(CmdUndo::Name));
+    panelHist->addLargeAction(m_cmdContainer->findAction(CmdRedo::Name));
+
     // ── 基本体 ─────────────────────────────────────────────────────────────
     SARibbonPanel* panelPrim = cat->addPanel(tr("基本体"));
     panelPrim->addLargeAction(m_cmdContainer->findAction(CmdCreateBox::Name));
@@ -376,8 +397,7 @@ void MainWindow::buildCadTab(SARibbonCategory* cat)
     panelOps->addSmallAction(makeAct(tr("缩放"),   ":/icons/scale.svg"));
     panelOps->addSmallAction(m_cmdContainer->findAction(CmdBoolUnion::Name));
     panelOps->addSmallAction(m_cmdContainer->findAction(CmdBoolCut::Name));
-    panelOps->addSmallAction(m_cmdContainer->findAction(CmdBoolCommon::Name));
-
+    panelOps->addSmallAction(m_cmdContainer->findAction(CmdBoolCommon::Name));    panelOps->addSmallAction(m_cmdContainer->findAction(CmdDeleteShape::Name));
     // ── 测量 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelMeas = cat->addPanel(tr("测量"));
     panelMeas->addLargeAction(m_cmdContainer->findAction(CmdMeasureDistance::Name));
@@ -556,23 +576,52 @@ void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/
     if (LcncApplication::instance()->activeDocumentId() != docId)
         LcncApplication::instance()->setActiveDocument(docId);
 
-    if (entry.isEmpty()) return;
-
     // Safely get GUI document (scene may have been switched above)
     GuiDocument* gd = GuiApplication::instance()->guiDocument(docId);
     if (!gd) return;
 
-    // The aisMap stores only root/free shapes; sub-component labels are not
-    // individually tracked, so gracefully skip if not found.
-    Handle(AIS_Shape) ais = gd->aisShape(entry);
-    if (ais.IsNull()) return;
-
-    // Get context and view from the (possibly just-switched) scene.
     Handle(AIS_InteractiveContext) ctx = m_occView->context();
     if (ctx.IsNull()) return;
 
     Handle(V3d_View) view = m_occView->view();
     if (view.IsNull()) return;
+
+    if (entry.isEmpty()) {
+        // Group node: cascade-select all descendant leaf entries in 3D.
+        // Collect leaf entries by recursively walking the tree item children.
+        std::function<void(QTreeWidgetItem*, QStringList&)> collectLeaves;
+        collectLeaves = [&](QTreeWidgetItem* node, QStringList& out) {
+            for (int i = 0; i < node->childCount(); ++i) {
+                QTreeWidgetItem* ch = node->child(i);
+                const QString e = ch->data(0, kRoleEntry).toString();
+                if (!e.isEmpty())
+                    out << e;
+                else
+                    collectLeaves(ch, out);
+            }
+        };
+        QStringList leaves;
+        collectLeaves(item, leaves);
+        if (leaves.isEmpty()) return;
+        try {
+            ctx->ClearSelected(false);
+            for (const QString& e : leaves) {
+                Handle(AIS_Shape) ais = gd->aisShape(e);
+                if (!ais.IsNull())
+                    ctx->AddOrRemoveSelected(ais, false);
+            }
+            view->Redraw();
+        } catch (const std::exception& ex) {
+            qWarning() << "Exception during group selection:" << ex.what();
+        }
+        return;
+    }
+
+    // Leaf node: select the single shape.
+    // The aisMap stores only root/free shapes; sub-component labels are not
+    // individually tracked, so gracefully skip if not found.
+    Handle(AIS_Shape) ais = gd->aisShape(entry);
+    if (ais.IsNull()) return;
 
     try {
         ctx->ClearSelected(false);
@@ -593,6 +642,14 @@ void MainWindow::rebuildDocumentTree()
     for (LcncDocument* doc : docs) {
         if (!doc) continue;
 
+        // Machine-only documents are managed via the "准备" tab; skip them here.
+        // Empty documents (new, unsaved) are always shown with no children.
+        const bool isMachineOnly =
+            doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() == 0
+            && !doc->entityTree(LcncDocument::EntityKind::Workpiece).isEmpty() == false
+            && doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
+        if (isMachineOnly) continue;
+
         auto* docItem = new QTreeWidgetItem(m_documentTree);
         docItem->setText(0, doc->name());
         docItem->setIcon(0, QIcon(":/icons/new_doc.svg"));
@@ -610,8 +667,8 @@ void MainWindow::rebuildDocumentTree()
                 item->setData(0, kRoleDocId, doc->id());
                 item->setData(0, kRoleEntry, node.entry);
                 if (node.entry.isEmpty()) {
+                    // Virtual assembly/group node: use folder icon, keep selectable
                     item->setIcon(0, QIcon(":/icons/machine.svg"));
-                    item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
                 } else {
                     item->setIcon(0, QIcon(":/icons/shape.svg"));
                 }

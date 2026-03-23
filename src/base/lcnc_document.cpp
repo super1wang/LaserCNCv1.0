@@ -1,6 +1,7 @@
 #include "base/lcnc_document.h"
 #include "base/xcaf_utils.h"
 
+
 // OCC
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -114,6 +115,43 @@ TDF_LabelSequence LcncDocument::entityLabels(EntityKind kind) const
         }
     }
     return result;
+}
+
+void LcncDocument::removeShapeEntity(const QString& entry)
+{
+    Handle(XCAFDoc_ShapeTool) st = shapeTool();
+    TDF_LabelSequence freeShapes;
+    st->GetFreeShapes(freeShapes);
+
+    for (int i = 1; i <= freeShapes.Length(); ++i) {
+        TDF_Label lbl = freeShapes.Value(i);
+        if (XcafUtils::entry(lbl) != entry) continue;
+
+        // Forget all attributes: removes TNaming_NamedShape (so IsShape() returns
+        // false and GetFreeShapes() will no longer return this label), the kind
+        // tag (TDataStd_Integer), name and any colors.
+        lbl.ForgetAllAttributes(Standard_True);
+
+        // Remove from in-memory hierarchy trees so the "准备" tab rebuild is clean.
+        // Empty virtual parent nodes are pruned automatically (request 2).
+        struct TreeHelper {
+            static bool remove(QList<ShapeTreeNode>& nodes, const QString& e) {
+                for (int j = 0; j < nodes.size(); ++j) {
+                    if (nodes[j].entry == e) { nodes.removeAt(j); return true; }
+                    if (remove(nodes[j].children, e)) {
+                        // Prune now-empty virtual group nodes as we unwind
+                        if (nodes[j].entry.isEmpty() && nodes[j].children.isEmpty())
+                            nodes.removeAt(j);
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+        TreeHelper::remove(m_machineTree,   entry);
+        TreeHelper::remove(m_workpieceTree, entry);
+        break;
+    }
 }
 
 // ── Assembly import ───────────────────────────────────────────────────────────
@@ -253,13 +291,55 @@ MachineKinematics* LcncDocument::machineKinematics()
 bool LcncDocument::canUndo() const { return GetAvailableUndos() > 0; }
 bool LcncDocument::canRedo() const { return GetAvailableRedos() > 0; }
 
-void LcncDocument::undo() { if (canUndo()) Undo(); }
-void LcncDocument::redo() { if (canRedo()) Redo(); }
+void LcncDocument::undo()
+{
+    if (canUndo()) {
+        if (!m_treeUndoStack.isEmpty()) {
+            // push current state onto redo stack before overwriting
+            m_treeRedoStack.push_back({m_workpieceTree, m_machineTree});
+            TreeSnapshot snap = m_treeUndoStack.takeLast();
+            m_workpieceTree = snap.workpieceTree;
+            m_machineTree   = snap.machineTree;
+        }
+        Undo();
+    }
+}
+
+void LcncDocument::redo()
+{
+    if (canRedo()) {
+        if (!m_treeRedoStack.isEmpty()) {
+            // push current state onto undo stack before overwriting
+            m_treeUndoStack.push_back({m_workpieceTree, m_machineTree});
+            TreeSnapshot snap = m_treeRedoStack.takeLast();
+            m_workpieceTree = snap.workpieceTree;
+            m_machineTree   = snap.machineTree;
+        }
+        Redo();
+    }
+}
 
 void LcncDocument::openCommand(const QString& /*description*/)
 {
+    // Snapshot the trees BEFORE the command modifies them so that undo can
+    // restore the exact pre-command hierarchy (including virtual group nodes).
+    m_treeUndoStack.push_back({m_workpieceTree, m_machineTree});
+    m_treeRedoStack.clear();
     OpenCommand();
 }
 
 void LcncDocument::commitCommand() { CommitCommand(); }
-void LcncDocument::abortCommand()  { AbortCommand();  }
+void LcncDocument::abortCommand()
+{
+    // Restore the tree to the state it was in before the aborted command.
+    if (!m_treeUndoStack.isEmpty()) {
+        TreeSnapshot snap = m_treeUndoStack.takeLast();
+        m_workpieceTree = snap.workpieceTree;
+        m_machineTree   = snap.machineTree;
+    }
+    AbortCommand();
+}
+
+// syncEntityTreesFromXcaf() removed: tree hierarchy is now maintained via
+// per-command TreeSnapshot stacks (m_treeUndoStack / m_treeRedoStack) pushed
+// inside openCommand() and restored inside undo()/redo().
