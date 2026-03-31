@@ -24,8 +24,7 @@ public:
     // ── GUI document access ───────────────────────────────────────────────────
     GuiDocument*         guiDocument(DocumentId id) const;
     QList<GuiDocument*>  guiDocuments() const;
-    GuiDocument*         activeGuiDocument() const;
-
+    GuiDocument*         activeGuiDocument() const;    GuiDocument*         machineGuiDocument() const;
 signals:
     void guiDocumentAdded(DocumentId id);
     void guiDocumentClosed(DocumentId id);

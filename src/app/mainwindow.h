@@ -63,6 +63,10 @@ private:
     void buildCamTab(class SARibbonCategory* cat);
     void buildLaserTab(class SARibbonCategory* cat);
     void rebuildDocumentTree();
+    /// Route 3D view to the machine workspace document.
+    void showMachineView();
+    /// Route 3D view to the specified workpiece document (defaults to active).
+    void showWorkpieceView(DocumentId id = kInvalidDocumentId);
 
     // ── Slots ─────────────────────────────────────────────────────────────────
     void onLeftTabChanged(int index);

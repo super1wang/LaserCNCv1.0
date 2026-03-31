@@ -63,16 +63,24 @@ void WidgetMachinePanel::buildUi()
     infoRow->addRow(tr("构型:"),  m_lblConfigType);
     cfgLayout->addLayout(infoRow);
 
-    auto* btnLoad = new QPushButton(QIcon(":/icons/machine.svg"),
-                                    tr("加载机台模型..."), this);
-    auto* btnMark = new QPushButton(QIcon(":/icons/coordinate.svg"),
-                                    tr("标记轴系..."), this);
+    auto* btnLoad   = new QPushButton(QIcon(":/icons/machine.svg"),
+                                      tr("加载机台模型..."), this);
+    auto* btnMark   = new QPushButton(QIcon(":/icons/coordinate.svg"),
+                                      tr("标记轴系..."), this);
+    auto* btnUnload = new QPushButton(QIcon(":/icons/machine.svg"),
+                                      tr("卸载机台"), this);
+    auto* btnExport = new QPushButton(QIcon(":/icons/export.svg"),
+                                      tr("导出机台模型..."), this);
     cfgLayout->addWidget(btnLoad);
     cfgLayout->addWidget(btnMark);
+    cfgLayout->addWidget(btnUnload);
+    cfgLayout->addWidget(btnExport);
     mainLayout->addWidget(cfgGroup);
 
-    connect(btnLoad, &QPushButton::clicked, this, &WidgetMachinePanel::loadMachineRequested);
-    connect(btnMark, &QPushButton::clicked, this, &WidgetMachinePanel::markAxesRequested);
+    connect(btnLoad,   &QPushButton::clicked, this, &WidgetMachinePanel::loadMachineRequested);
+    connect(btnMark,   &QPushButton::clicked, this, &WidgetMachinePanel::markAxesRequested);
+    connect(btnUnload, &QPushButton::clicked, this, &WidgetMachinePanel::unloadMachineRequested);
+    connect(btnExport, &QPushButton::clicked, this, &WidgetMachinePanel::exportMachineRequested);
 
     // ── 轴系位置 section ──────────────────────────────────────────────────
     m_axisGroup  = new QGroupBox(tr("轴系位置"), this);

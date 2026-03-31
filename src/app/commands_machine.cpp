@@ -22,13 +22,21 @@
 #include <QComboBox>
 #include <QLabel>
 
+#include <QSet>
+
 #include <STEPCAFControl_Reader.hxx>
+#include <STEPCAFControl_Writer.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepTools.hxx>
 #include <StlAPI_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <TDF_LabelSequence.hxx>
+#include <TDocStd_Document.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
+#include <TDataStd_Name.hxx>
+#include <TopoDS_Compound.hxx>
 
 // ── CmdLoadMachine ─────────────────────────────────────────────────────────────
 
@@ -59,8 +67,8 @@ void CmdLoadMachine::execute()
     vl->addLayout(frm);
     vl->addWidget(btns);
 
-    // Pre-select config from existing kinematics if already loaded
-    if (LcncDocument* existing = context()->activeDocument()) {
+    // Pre-select config from existing machine doc kinematics if already loaded
+    if (LcncDocument* existing = context()->machineDocument()) {
         const QString cur = existing->machineKinematics()->configType();
         for (int i = 0; i < cbConfig->count(); ++i) {
             if (cbConfig->itemData(i).toString() == cur) {
@@ -85,13 +93,22 @@ void CmdLoadMachine::execute()
     QFileInfo fi(path);
     const QString ext = fi.suffix().toLower();
 
-    // ── Step 3: ensure active document ────────────────────────────────────
-    LcncDocument* doc = context()->activeDocument();
-    if (!doc) {
-        doc = app()->newDocument(fi.baseName());
+    // ── Step 3: operate on the unique machine workspace document ─────────
+    LcncDocument* doc = context()->machineDocument();
+    if (!doc) return;
+
+    // Clear any previously loaded machine entities
+    {
+        TDF_LabelSequence existing = doc->entityLabels(LcncDocument::EntityKind::Machine);
+        QStringList entriesToRemove;
+        for (int i = 1; i <= existing.Length(); ++i)
+            entriesToRemove << XcafUtils::entry(existing.Value(i));
+        for (const QString& e : entriesToRemove)
+            doc->removeShapeEntity(e);
     }
 
-    // Initialize kinematics preset
+    // Reset and reconfigure kinematics
+    doc->machineKinematics()->clear();
     doc->machineKinematics()->loadPreset(configType);
 
     // ── Step 4: import in background ──────────────────────────────────────
@@ -170,14 +187,14 @@ CmdMarkAxes::CmdMarkAxes(IAppContext* ctx)
 
 bool CmdMarkAxes::isEnabled() const
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->machineDocument();
     if (!doc) return false;
     return doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
 }
 
 void CmdMarkAxes::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->machineDocument();
     if (!doc) return;
 
     MachineKinematics* kin = doc->machineKinematics();
@@ -206,51 +223,56 @@ CmdMountWorkpiece::CmdMountWorkpiece(IAppContext* ctx)
 
 bool CmdMountWorkpiece::isEnabled() const
 {
-    LcncDocument* doc = context()->activeDocument();
-    if (!doc) return false;
-    return doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0
-        && doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
+    LcncDocument* machDoc = context()->machineDocument();
+    if (!machDoc) return false;
+    if (machDoc->entityLabels(LcncDocument::EntityKind::Machine).Length() == 0)
+        return false;
+    // At least one workpiece document must exist
+    return !app()->workpieceDocuments().isEmpty();
 }
 
 void CmdMountWorkpiece::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
-    if (!doc) return;
+    LcncDocument* machDoc = context()->machineDocument();
+    if (!machDoc) return;
 
-    MachineKinematics* kin = doc->machineKinematics();
+    MachineKinematics* kin = machDoc->machineKinematics();
     if (kin->axes().isEmpty()) {
         QMessageBox::information(nullptr, tr("挂载工件"),
             tr("请先加载机台模型并配置轴系。"));
         return;
     }
 
-    // Build workpiece list
-    TDF_LabelSequence wpcLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
-    if (wpcLabels.Length() == 0) {
-        QMessageBox::information(nullptr, tr("挂载工件"), tr("文档中无工件模型。"));
+    // Gather all open workpiece documents
+    const QList<LcncDocument*> wpcDocs = app()->workpieceDocuments();
+    if (wpcDocs.isEmpty()) {
+        QMessageBox::information(nullptr, tr("挂载工件"),
+            tr("请先打开至少一个工件文档。"));
         return;
     }
 
-    // Build dialog
+    // ── Build dialog ───────────────────────────────────────────────────────
     QDialog dlg;
     dlg.setWindowTitle(tr("工件挂载"));
     auto* frm = new QFormLayout;
 
-    auto* cbWpc  = new QComboBox;
+    auto* cbDoc  = new QComboBox;
     auto* cbAxis = new QComboBox;
 
-    for (int i = 1; i <= wpcLabels.Length(); ++i) {
-        TDF_Label lbl = wpcLabels.Value(i);
-        QString entry = XcafUtils::entry(lbl);
-        QString name  = XcafUtils::name(lbl);
-        const QString mountedOn = kin->mountedAxis(entry);
-        if (mountedOn.isEmpty())
-            cbWpc->addItem(name, entry);
-        else
-            cbWpc->addItem(tr("%1  [→ %2]").arg(name, mountedOn), entry);
+    // Populate document combo — show document name + workpiece entity count
+    for (LcncDocument* d : wpcDocs) {
+        const int wpcCount = d->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
+        if (wpcCount == 0) continue;
+        cbDoc->addItem(tr("%1  (%2 形体)").arg(d->name()).arg(wpcCount), d->id());
+    }
+    if (cbDoc->count() == 0) {
+        QMessageBox::information(nullptr, tr("挂载工件"),
+            tr("打开的文档中没有工件模型。"));
+        return;
     }
 
-    cbAxis->addItem(tr("— 解除挂载 —"), QString());
+    // Populate axis combo
+    cbAxis->addItem(tr("— 解除已有挂载 —"), QString());
     for (const auto& axis : kin->axes()) {
         if (axis.name == "BASE") {
             cbAxis->addItem(tr("BASE（固定基座）"), axis.name);
@@ -261,32 +283,13 @@ void CmdMountWorkpiece::execute()
         }
     }
 
-    // Pre-select based on existing mount for first item
-    const QString firstEntry = cbWpc->itemData(0).toString();
-    const QString curAxis    = kin->mountedAxis(firstEntry);
-    for (int i = 0; i < cbAxis->count(); ++i) {
-        if (cbAxis->itemData(i).toString() == curAxis) {
-            cbAxis->setCurrentIndex(i);
-            break;
-        }
-    }
+    frm->addRow(tr("工件文档:"), cbDoc);
+    frm->addRow(tr("挂载到:"),   cbAxis);
 
-    // Update axis combo when workpiece selection changes
-    connect(cbWpc, QOverload<int>::of(&QComboBox::currentIndexChanged), &dlg,
-            [cbWpc, cbAxis, kin](int) {
-                const QString entry = cbWpc->currentData().toString();
-                const QString cur   = kin->mountedAxis(entry);
-                for (int i = 0; i < cbAxis->count(); ++i) {
-                    if (cbAxis->itemData(i).toString() == cur) {
-                        cbAxis->setCurrentIndex(i);
-                        return;
-                    }
-                }
-                cbAxis->setCurrentIndex(0);  // not mounted
-            });
-
-    frm->addRow(tr("工件:"), cbWpc);
-    frm->addRow(tr("挂载到:"), cbAxis);
+    // Info label showing what will happen
+    auto* lblInfo = new QLabel(tr("将选中文档的所有工件合并为一个整体加载到机台文档"), &dlg);
+    lblInfo->setStyleSheet("color: gray; font-size: 11px;");
+    lblInfo->setWordWrap(true);
 
     auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -294,22 +297,261 @@ void CmdMountWorkpiece::execute()
 
     auto* vl = new QVBoxLayout(&dlg);
     vl->addLayout(frm);
+    vl->addWidget(lblInfo);
     vl->addWidget(btns);
 
     if (dlg.exec() != QDialog::Accepted) return;
 
-    const QString wpcEntry  = cbWpc->currentData().toString();
-    const QString axisName  = cbAxis->currentData().toString();
+    const DocumentId srcDocId = cbDoc->currentData().toInt();
+    const QString    axisName = cbAxis->currentData().toString();
 
-    if (axisName.isEmpty())
-        kin->unmountWorkpiece(wpcEntry);
-    else
-        kin->mountWorkpiece(wpcEntry, axisName);
+    LcncDocument* srcDoc = app()->documentById(srcDocId);
+    if (!srcDoc) return;
 
-    // Apply transform immediately
-    if (auto* gd = guiApp()->guiDocument(doc->id()))
+    // ── Handle "解除已有挂载" — unmount all workpieces ───────────────────
+    if (axisName.isEmpty()) {
+        // Remove all workpiece entities from machine doc
+        TDF_LabelSequence existingWpc = machDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
+        QStringList toRemove;
+        for (int i = 1; i <= existingWpc.Length(); ++i)
+            toRemove << XcafUtils::entry(existingWpc.Value(i));
+        for (const QString& e : toRemove) {
+            kin->unmountWorkpiece(e);
+            machDoc->removeShapeEntity(e);
+        }
+
+        if (auto* gd = guiApp()->guiDocument(machDoc->id()))
+            gd->rebuildDisplay();
+        app()->notifyDocumentModified(machDoc->id());
+        context()->updateCommandStates();
+        return;
+    }
+
+    // ── Merge all workpiece shapes from source doc into one compound ──────
+    TDF_LabelSequence srcLabels = srcDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    Handle(XCAFDoc_ShapeTool) srcSt = srcDoc->shapeTool();
+
+    BRep_Builder bb;
+    TopoDS_Compound compound;
+    bb.MakeCompound(compound);
+    bool hasShape = false;
+
+    for (int i = 1; i <= srcLabels.Length(); ++i) {
+        TopoDS_Shape sh = srcSt->GetShape(srcLabels.Value(i));
+        if (!sh.IsNull()) {
+            bb.Add(compound, sh);
+            hasShape = true;
+        }
+    }
+
+    if (!hasShape) {
+        QMessageBox::information(nullptr, tr("挂载工件"),
+            tr("源文档中无有效工件形体。"));
+        return;
+    }
+
+    // Remove any previously mounted workpiece entities from machine doc first
+    {
+        TDF_LabelSequence existingWpc = machDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
+        QStringList toRemove;
+        for (int i = 1; i <= existingWpc.Length(); ++i)
+            toRemove << XcafUtils::entry(existingWpc.Value(i));
+        for (const QString& e : toRemove) {
+            kin->unmountWorkpiece(e);
+            machDoc->removeShapeEntity(e);
+        }
+    }
+
+    // Add the merged compound to machine doc as a single Workpiece entity
+    const QString wpcName = tr("工件 — %1").arg(srcDoc->name());
+    TDF_Label wpcLabel = machDoc->addShapeEntity(compound, wpcName,
+                                                  LcncDocument::EntityKind::Workpiece);
+    const QString wpcEntry = XcafUtils::entry(wpcLabel);
+
+    // Mount the compound entity to the chosen axis
+    kin->mountWorkpiece(wpcEntry, axisName);
+
+    // Rebuild 3D display and refresh
+    if (auto* gd = guiApp()->guiDocument(machDoc->id())) {
+        gd->rebuildDisplay();
         gd->updateAxisTransforms();
+    }
+
+    app()->notifyDocumentModified(machDoc->id());
+    context()->updateCommandStates();
+}
+
+// ── CmdUnloadMachine ──────────────────────────────────────────────────────────
+
+CmdUnloadMachine::CmdUnloadMachine(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("卸载机台"), this);
+    a->setStatusTip(tr("删除当前机台模型及轴系配置"));
+    setAction(a);
+}
+
+bool CmdUnloadMachine::isEnabled() const
+{
+    LcncDocument* doc = context()->machineDocument();
+    if (!doc) return false;
+    return doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
+}
+
+void CmdUnloadMachine::execute()
+{
+    LcncDocument* doc = context()->machineDocument();
+    if (!doc) return;
+
+    if (QMessageBox::question(nullptr, tr("卸载机台"),
+            tr("确定要卸载当前机台模型吗？此操作将清除所有轴系配置。"),
+            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+        return;
+
+    // Remove all machine entities
+    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    QStringList entries;
+    for (int i = 1; i <= labels.Length(); ++i)
+        entries << XcafUtils::entry(labels.Value(i));
+    for (const QString& e : entries)
+        doc->removeShapeEntity(e);
+
+    // Remove any mounted workpiece entities from the machine doc
+    {
+        TDF_LabelSequence wpcLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+        QStringList wpcEntries;
+        for (int i = 1; i <= wpcLabels.Length(); ++i)
+            wpcEntries << XcafUtils::entry(wpcLabels.Value(i));
+        for (const QString& e : wpcEntries)
+            doc->removeShapeEntity(e);
+    }
+
+    // Reset kinematics
+    doc->machineKinematics()->clear();
+
+    // Rebuild display
+    if (auto* gd = guiApp()->guiDocument(doc->id()))
+        gd->rebuildDisplay();
 
     app()->notifyDocumentModified(doc->id());
     context()->updateCommandStates();
+}
+
+// ── CmdExportMachine ──────────────────────────────────────────────────────────
+
+CmdExportMachine::CmdExportMachine(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/export.svg"), tr("导出机台"), this);
+    a->setStatusTip(tr("导出机台模型为 STEP 文件，轴系按 LCNC_AXIS_* 命名以支持自动识别"));
+    setAction(a);
+}
+
+bool CmdExportMachine::isEnabled() const
+{
+    LcncDocument* doc = context()->machineDocument();
+    if (!doc) return false;
+    return doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
+}
+
+void CmdExportMachine::execute()
+{
+    LcncDocument* machDoc = context()->machineDocument();
+    if (!machDoc) return;
+
+    MachineKinematics* kin = machDoc->machineKinematics();
+
+    const QString path = QFileDialog::getSaveFileName(
+        nullptr, tr("导出机台模型"), QString(),
+        tr("STEP 文件 (*.stp *.step);;所有文件 (*)"));
+    if (path.isEmpty()) return;
+
+    // Build a fresh XDE document with per-axis named compound shapes.
+    // Each compound uses AddShape(..., Standard_False) so it is NOT split
+    // into sub-components — on reimport it appears as a single named entity
+    // and its LCNC_AXIS_<name> label triggers autoDetect() recognition.
+    Handle(TDocStd_Document) xdeExport =
+        new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+    XCAFDoc_DocumentTool::Set(xdeExport->Main());
+    Handle(XCAFDoc_ShapeTool) stExp =
+        XCAFDoc_DocumentTool::ShapeTool(xdeExport->Main());
+    Handle(XCAFDoc_ShapeTool) stMach = machDoc->shapeTool();
+
+    QSet<QString> assignedEntries;
+
+    // One named compound per axis group
+    for (const MachineAxisDef& axis : kin->axes()) {
+        const QStringList entries = kin->shapesForAxis(axis.name);
+        if (entries.isEmpty()) continue;
+
+        BRep_Builder bb;
+        TopoDS_Compound axisCompound;
+        bb.MakeCompound(axisCompound);
+        bool hasShape = false;
+
+        TDF_LabelSequence freeShapes;
+        stMach->GetFreeShapes(freeShapes);
+
+        for (const QString& entry : entries) {
+            assignedEntries.insert(entry);
+            for (int i = 1; i <= freeShapes.Length(); ++i) {
+                if (XcafUtils::entry(freeShapes.Value(i)) == entry) {
+                    TopoDS_Shape sh = stMach->GetShape(freeShapes.Value(i));
+                    if (!sh.IsNull()) {
+                        bb.Add(axisCompound, sh);
+                        hasShape = true;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (!hasShape) continue;
+
+        const QString axisLabel = QStringLiteral("LCNC_AXIS_") + axis.name;
+        TDF_Label lbl = stExp->AddShape(axisCompound, Standard_False);
+        TDataStd_Name::Set(lbl,
+            TCollection_ExtendedString(axisLabel.toStdString().c_str()));
+    }
+
+    // Group unassigned shapes under LCNC_AXIS_UNASSIGNED
+    {
+        TDF_LabelSequence freeShapes;
+        stMach->GetFreeShapes(freeShapes);
+        BRep_Builder bb;
+        TopoDS_Compound unassigned;
+        bb.MakeCompound(unassigned);
+        bool hasUnassigned = false;
+
+        for (int i = 1; i <= freeShapes.Length(); ++i) {
+            const QString entry = XcafUtils::entry(freeShapes.Value(i));
+            if (!assignedEntries.contains(entry)) {
+                TopoDS_Shape sh = stMach->GetShape(freeShapes.Value(i));
+                if (!sh.IsNull()) {
+                    bb.Add(unassigned, sh);
+                    hasUnassigned = true;
+                }
+            }
+        }
+
+        if (hasUnassigned) {
+            TDF_Label lbl = stExp->AddShape(unassigned, Standard_False);
+            TDataStd_Name::Set(lbl, TCollection_ExtendedString("LCNC_AXIS_UNASSIGNED"));
+        }
+    }
+
+    // Write via STEPCAFControl_Writer (preserves XDE shape names in STEP)
+    STEPCAFControl_Writer writer;
+    writer.SetNameMode(Standard_True);
+    if (writer.Transfer(xdeExport) != IFSelect_RetDone) {
+        QMessageBox::critical(nullptr, tr("导出失败"),
+            tr("无法序列化机台模型。"));
+        return;
+    }
+    if (writer.Write(path.toUtf8().constData()) != IFSelect_RetDone)
+        QMessageBox::critical(nullptr, tr("导出失败"),
+            tr("写入文件失败: %1").arg(path));
+    else
+        QMessageBox::information(nullptr, tr("导出成功"),
+            tr("机台模型已导出到:\n%1").arg(path));
 }

@@ -60,3 +60,8 @@ GuiDocument* GuiApplication::activeGuiDocument() const
 {
     return guiDocument(LcncApplication::instance()->activeDocumentId());
 }
+
+GuiDocument* GuiApplication::machineGuiDocument() const
+{
+    return guiDocument(LcncApplication::instance()->machineDocumentId());
+}

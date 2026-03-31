@@ -38,10 +38,11 @@ public:
 };
 
 /**
- * @brief Bind a workpiece to a machine axis so it follows the axis's motion.
+ * @brief Mount a workpiece document onto a machine axis.
  *
- * Shows a small dialog: workpiece combo + axis combo.
- * Requires at least one Machine entity and one Workpiece entity.
+ * Shows a dialog where the user picks a workpiece document (from all open
+ * workpiece docs) and a target axis.  All shapes are merged into one compound,
+ * added to the machine document, and mounted to the chosen axis.
  */
 class CmdMountWorkpiece : public CommandBase
 {
@@ -49,6 +50,40 @@ class CmdMountWorkpiece : public CommandBase
 public:
     explicit CmdMountWorkpiece(IAppContext* ctx);
     static constexpr const char* Name = "machine.mount_workpiece";
+
+    bool isEnabled() const override;
+    void execute()   override;
+};
+
+/**
+ * @brief Remove all machine entities and reset the kinematic configuration.
+ *
+ * Asks for confirmation, then clears the machine workspace document.
+ */
+class CmdUnloadMachine : public CommandBase
+{
+    Q_OBJECT
+public:
+    explicit CmdUnloadMachine(IAppContext* ctx);
+    static constexpr const char* Name = "machine.unload";
+
+    bool isEnabled() const override;
+    void execute()   override;
+};
+
+/**
+ * @brief Export the loaded machine model as a STEP file with LCNC_AXIS_*
+ *        named compounds for each axis group.
+ *
+ * On re-import, CmdLoadMachine's autoDetect() recognises the LCNC_AXIS_
+ * prefix and restores axis assignments automatically.
+ */
+class CmdExportMachine : public CommandBase
+{
+    Q_OBJECT
+public:
+    explicit CmdExportMachine(IAppContext* ctx);
+    static constexpr const char* Name = "machine.export";
 
     bool isEnabled() const override;
     void execute()   override;

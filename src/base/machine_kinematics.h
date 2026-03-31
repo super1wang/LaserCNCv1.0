@@ -45,8 +45,8 @@ public:
     /// @param configType  "VERTICAL_AC_TABLE" | "VERTICAL_BC_TABLE" |
     ///                    "AB_HEAD" | "AC_HEAD"
     void    loadPreset(const QString& configType);
-    QString configType() const { return m_configType; }
-
+    QString configType() const { return m_configType; }    /// Reset all axes, assignments, and mounts.
+    void    clear();
     // ── Axis definitions ──────────────────────────────────────────────────────
     const QList<MachineAxisDef>& axes() const { return m_axes; }
     MachineAxisDef*              findAxis(const QString& name);

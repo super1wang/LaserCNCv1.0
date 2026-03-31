@@ -29,6 +29,17 @@ GuiDocument* AppContext::activeGuiDocument() const
     return GuiApplication::instance()->activeGuiDocument();
 }
 
+LcncDocument* AppContext::machineDocument() const
+{
+    return LcncApplication::instance()->machineDocument();
+}
+
+GuiDocument* AppContext::machineGuiDocument() const
+{
+    DocumentId id = LcncApplication::instance()->machineDocumentId();
+    return GuiApplication::instance()->guiDocument(id);
+}
+
 void AppContext::updateCommandStates()
 {
     // Delegated to MainWindow via its CommandContainer

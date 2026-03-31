@@ -14,8 +14,9 @@
 
 ### 1) base 层（核心数据与任务）
 
-- `LcncApplication`：文档生命周期管理、活动文档切换、信号分发
+- `LcncApplication`：文档生命周期管理、活动文档切换、信号分发；内含**机台工作区**管理（`ensureMachineDocument` / `machineDocumentId` / `isMachineDocument`）
 - `LcncDocument`：基于 XCAF 文档的数据封装，XDE free-shape 存储 + `TDataStd_Integer` 分类标签，支持 Undo/Redo
+- `MachineKinematics`：运动学数据，支持 `clear()` 重置与 `autoDetect()` 识别 `LCNC_AXIS_*` 标准命名
 - `XcafUtils`：XCAF 标签名称、Entry、Shape 获取等工具
 - `TaskManager` / `TaskProgress`：统一异步任务与进度状态管理
 
@@ -31,15 +32,16 @@
 
 ### 4) app 层（命令与界面）
 
-- `MainWindow`：SARibbon 主窗体与三栏布局、信号连接顺序保证关闭文档无悬空指针
+- `MainWindow`：SARibbon 主窗体与三栏布局、信号连接顺序保证关闭文档无悬空指针；**准备标签始终显示机台文档视图**（`showMachineView` / `showWorkpieceView` 路由）
 - `CommandBase` + `CommandContainer`：命令模式封装
 - 文件命令：新建/打开（后台 Task + 进度条）/保存/导入导出（后台 Task + 进度条）
 - 编辑命令：撤销/重做
 - 显示命令：视角、显示模式
+- 机台命令：`CmdLoadMachine`（复用唯一机台文档）/ `CmdMarkAxes` / `CmdMountWorkpiece` / **`CmdUnloadMachine`** / **`CmdExportMachine`**（轴系按 `LCNC_AXIS_*` 命名导出 STEP）
 - 关键控件：
   - `WidgetOccView`：中间 3D 视窗，共享一个 `Aspect_NeutralWindow`，各文档视图复用
-  - `WidgetModelTree`：准备页模型树
-  - `WidgetMachinePanel`：机台管理面板
+  - `WidgetModelTree`：准备页模型树（始终显示机台文档结构）
+  - `WidgetMachinePanel`：机台管理面板（含加载/标记轴系/卸载/导出四个操作按钮）
   - `WidgetLaserControl`：激光控制面板
   - `DialogTaskManager`：任务进度窗口
 
@@ -102,7 +104,15 @@
 - [ ] 草图编辑与约束（线/圆/圆弧）— 需要专用草图框架，计划在阶段 2.5 独立实施
 - [ ] 缩放操作（gp_Trsf::SetScale）
 
-#### 阶段 3：机台模型与运动学（已完成）
+#### 阶段 3：机台独立工作区与运动学（已完成）
+
+**机台工作区架构**（本期新增核心设计）
+- `LcncApplication::ensureMachineDocument()`：软件启动时自动创建**唯一且永久**的机台文档，该文档不受工件文档打开/关闭影响，也不会出现在"文档"标签的树中
+- `LcncApplication::isMachineDocument(id)`：用于在整个系统中区分机台文档与工件文档
+- `LcncApplication::closeDocument(id)`：机台文档被保护，无法通过普通关闭流程删除
+- `IAppContext::machineDocument()` / `machineGuiDocument()`：命令层统一访问机台文档的接口
+- **准备标签视图路由**：`MainWindow::onLeftTabChanged()` 切换到"准备"标签时调用 `showMachineView()`，切换到其他标签时调用 `showWorkpieceView()`，保证视图与标签绑定
+- 左侧模型树与右侧机台面板始终反映机台文档状态，不受工件文档活动状态影响
 
 **运动学数据模型**（`src/base/machine_kinematics.h/.cpp`）
 - `MachineAxisDef`：轴定义结构体（名称、运动类型 Linear/Rotary、方向向量、行程范围、父轴、当前位置）
@@ -112,39 +122,30 @@
     - `VERTICAL_BC_TABLE`：立式主轴 + BC 双转台
     - `AB_HEAD`：龙门 + AB 摆头
     - `AC_HEAD`：龙门 + AC 摆头
-  - `assignShape/unassignShape`：形体-轴系手动绑定
+  - `clear()`：重置所有轴定义、形体分配与工件挂载（本期新增）
+  - `assignAxis/unassignAxis`：形体-轴系手动绑定
   - `mountWorkpiece/unmountWorkpiece`：工件挂载到指定轴
-  - `autoDetect()`：按形体名称关键字（"x_axis"、"x_slide"、"_x"、"x轴" 等）自动分配轴系
-  - `computeShapeTransform(entry)`：按运动学链式积（`T_A × T_B × T_C`）计算机台零件世界变换
-  - `computeWpcTransform(entry)`：计算挂载工件的世界变换（随轴系一起运动）
+  - `autoDetect()`：优先识别 `LCNC_AXIS_<name>` 标准前缀（本期新增），其次按形体名称关键字自动分配轴系
+  - `computeShapeTransform(entry)`：按运动学链式积计算机台零件世界变换
   - `setAxisPosition(name, pos)`：设置轴位置并触发 `axisPositionChanged` 信号
 
-**文档集成**（`LcncDocument`）
-- 新增 `machineKinematics()` 惰性初始化方法，返回文档持有的 `MachineKinematics` 实例
-
-**3D 变换应用**（`GuiDocument`）
-- 新增 `updateAxisTransforms()`：遍历 AIS 形体映射表，调用 `SetLocalTransformation` + `RecomputePrsOnly` + `Redraw` 实时更新 3D 显示
-
 **命令系统**（`src/app/commands_machine.h/.cpp`）
-- `CmdLoadMachine`（"machine.load"）：选择机床构型 → 选择 STEP/STL/BREP 文件 → 后台导入为 Machine 实体 → 完成后自动运行 `autoDetect()`
-- `CmdMarkAxes`（"machine.mark_axes"）：打开 `DialogMarkAxes` 对话框，允许为每个机台形体手动指定所属轴或"未分配"
-- `CmdMountWorkpiece`（"machine.mount_workpiece"）：选择工件 + 目标轴 → `mountWorkpiece()` → `updateAxisTransforms()`
+- `CmdLoadMachine`：选择机床构型 → 选择 STEP/STL/BREP 文件 → 清除旧机台实体 → 后台导入到**唯一机台文档** → 完成后自动运行 `autoDetect()`
+- `CmdMarkAxes`：操作机台文档，打开 `DialogMarkAxes` 手动指定轴系
+- `CmdMountWorkpiece`：操作机台文档的运动学，读取当前活动**工件文档**中的工件实体
+- **`CmdUnloadMachine`**（新增）：确认后清除所有机台实体及轴系配置，重置 3D 显示
+- **`CmdExportMachine`**（新增）：将机台模型导出为 STEP 文件，每个轴系的形体合并成一个整体 Compound，命名为 `LCNC_AXIS_<轴名>`（如 `LCNC_AXIS_X`、`LCNC_AXIS_C`），未分配形体归入 `LCNC_AXIS_UNASSIGNED`；重新导入时 `autoDetect()` 自动识别并恢复轴系
+
+**机台面板**（`WidgetMachinePanel`）
+- 四个操作按钮：加载机台模型 / 标记轴系 / 卸载机台 / 导出机台模型
+- 轴系位置 SpinBox 联动 `MachineKinematics::setAxisPosition()` + `GuiDocument::updateAxisTransforms()`
 
 **轴系标记对话框**（`src/app/dialog_mark_axes.h/.cpp`）
 - 网格布局，每行显示形体名称 + 轴系下拉选择框
 - "自动检测"按钮：调用 `autoDetect()` 并更新 UI
-- Accept 后将用户选择写入 `MachineKinematics`
 
 **准备页模型树**（`WidgetModelTree`）
-- 当机台有轴系分配时，切换到轴系视图：
-  - 每个轴生成加粗子节点（`BASE / X / Y / Z / A / C` 等）
-  - 机台零件按轴分组显示在对应子节点下
-  - 挂载的工件显示为绿色带 ⚙ 前缀，附注轴名
-  - 无分配形体归入"(未分配)"分组
-
-**机台面板**（`WidgetMachinePanel`）
-- 三组 GroupBox：机台配置（当前构型名）/ 轴系位置（每轴 QDoubleSpinBox，实时调轴位置）/ 工件挂载（列出当前挂载关系）
-- 轴位置 SpinBox 联动 `MachineKinematics::setAxisPosition()` + `GuiDocument::updateAxisTransforms()`，3D 视图实时响应
+- 始终显示机台文档结构：轴系视图（每轴加粗节点）、机台零件按轴分组、挂载工件标注
 
 ### 进行中阶段
 

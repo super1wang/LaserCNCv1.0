@@ -40,6 +40,16 @@ public:
     LcncDocument* activeDocument() const;
     void          setActiveDocument(DocumentId id);
 
+    // ── Machine workspace ─────────────────────────────────────────────────────
+    /// Creates the unique machine document on first call.  Must be called after
+    /// GuiApplication has subscribed to documentAdded.
+    LcncDocument*        ensureMachineDocument();
+    DocumentId           machineDocumentId()              const { return m_machineDocId; }
+    LcncDocument*        machineDocument()                const;
+    bool                 isMachineDocument(DocumentId id) const { return id == m_machineDocId; }
+    /// Returns all documents except the machine workspace document.
+    QList<LcncDocument*> workpieceDocuments()             const;
+
 signals:
     void documentAdded(DocumentId id);
     void documentClosed(DocumentId id);
@@ -53,6 +63,7 @@ private:
     static LcncApplication* s_instance;
 
     QList<LcncDocument*> m_documents;
-    DocumentId           m_activeId   = kInvalidDocumentId;
-    int                  m_nextId     = 0;
+    DocumentId           m_activeId     = kInvalidDocumentId;
+    DocumentId           m_machineDocId = kInvalidDocumentId;
+    int                  m_nextId       = 0;
 };

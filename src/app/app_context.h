@@ -24,6 +24,9 @@ public:
     LcncDocument* activeDocument()    const override;
     GuiDocument*  activeGuiDocument() const override;
 
+    LcncDocument* machineDocument()    const override;
+    GuiDocument*  machineGuiDocument() const override;
+
     void updateCommandStates() override;
 
 private:

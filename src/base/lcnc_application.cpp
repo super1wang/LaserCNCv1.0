@@ -158,8 +158,39 @@ bool LcncApplication::saveDocument(DocumentId id, const QString& filePath, QStri
     return ok;
 }
 
+LcncDocument* LcncApplication::ensureMachineDocument()
+{
+    if (m_machineDocId != kInvalidDocumentId)
+        return machineDocument();
+    const int id = m_nextId++;
+    auto* doc = new LcncDocument(id, QStringLiteral("机台工作区"));
+    m_machineDocId = id;
+    m_documents.append(doc);
+    // Emit so GuiApplication creates a GuiDocument for the machine workspace,
+    // but do NOT call setActiveDocument — the machine doc is never "active".
+    emit documentAdded(id);
+    return doc;
+}
+
+LcncDocument* LcncApplication::machineDocument() const
+{
+    return documentById(m_machineDocId);
+}
+
+QList<LcncDocument*> LcncApplication::workpieceDocuments() const
+{
+    QList<LcncDocument*> result;
+    for (LcncDocument* d : m_documents)
+        if (d->id() != m_machineDocId)
+            result.append(d);
+    return result;
+}
+
 void LcncApplication::closeDocument(DocumentId id)
 {
+    // Machine workspace document is permanent for the session lifetime.
+    if (id == m_machineDocId) return;
+
     for (int i = 0; i < m_documents.size(); ++i) {
         if (m_documents[i]->id() == id) {
             LcncDocument* doc = m_documents.takeAt(i);
@@ -210,6 +241,8 @@ LcncDocument* LcncApplication::activeDocument() const
 
 void LcncApplication::setActiveDocument(DocumentId id)
 {
+    // Machine workspace is never the "active" document in the workpiece sense.
+    if (id == m_machineDocId) return;
     if (m_activeId != id) {
         m_activeId = id;
         emit activeDocumentChanged(id);

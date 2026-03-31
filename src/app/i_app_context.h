@@ -25,6 +25,9 @@ public:
     virtual LcncDocument*     activeDocument()     const = 0;
     virtual GuiDocument*      activeGuiDocument()  const = 0;
 
+    virtual LcncDocument*     machineDocument()    const = 0;
+    virtual GuiDocument*      machineGuiDocument() const = 0;
+
     /// Ask the main window to refresh enabled/disabled state of all actions.
     virtual void updateCommandStates() = 0;
 };

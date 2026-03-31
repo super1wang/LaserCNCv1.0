@@ -15,7 +15,15 @@
 MachineKinematics::MachineKinematics(QObject* parent)
     : QObject(parent)
 {}
-
+// ── Clear ──────────────────────────────────────────────────────────────────────────
+void MachineKinematics::clear()
+{
+    m_configType.clear();
+    m_axes.clear();
+    m_shapeToAxis.clear();
+    m_wpcToAxis.clear();
+    emit assignmentsChanged();
+}
 // ── Preset loading ─────────────────────────────────────────────────────────────
 
 void MachineKinematics::loadPreset(const QString& configType)
@@ -256,10 +264,20 @@ void MachineKinematics::autoDetect(const QMap<QString,QString>& entryToName)
         const QString lowerName = it.value().toLower();
         QString matched;
 
-        for (const auto& pair : kw) {
-            if (lowerName.contains(pair.first)) {
-                matched = pair.second;
-                break;
+        // Priority 1: canonical LCNC_AXIS_<name> naming from machine export
+        if (it.value().startsWith(QStringLiteral("LCNC_AXIS_"), Qt::CaseInsensitive)) {
+            const QString axisFromName = it.value().mid(10).toUpper();
+            if (findAxis(axisFromName))
+                matched = axisFromName;
+        }
+
+        // Priority 2: keyword heuristics
+        if (matched.isEmpty()) {
+            for (const auto& pair : kw) {
+                if (lowerName.contains(pair.first)) {
+                    matched = pair.second;
+                    break;
+                }
             }
         }
 

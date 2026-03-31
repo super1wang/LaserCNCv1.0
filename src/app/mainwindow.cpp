@@ -89,6 +89,10 @@ void MainWindow::createContext()
     GuiApplication::instance();
     // Task manager
     TaskManager::instance();
+    // Create the permanent machine workspace document.
+    // Must be called AFTER GuiApplication::instance() so the documentAdded
+    // signal is received and a GuiDocument is created for the machine doc.
+    LcncApplication::instance()->ensureMachineDocument();
 }
 
 void MainWindow::createCommands()
@@ -137,6 +141,8 @@ void MainWindow::createCommands()
     m_cmdContainer->addCommand<CmdLoadMachine>(CmdLoadMachine::Name);
     m_cmdContainer->addCommand<CmdMarkAxes>(CmdMarkAxes::Name);
     m_cmdContainer->addCommand<CmdMountWorkpiece>(CmdMountWorkpiece::Name);
+    m_cmdContainer->addCommand<CmdUnloadMachine>(CmdUnloadMachine::Name);
+    m_cmdContainer->addCommand<CmdExportMachine>(CmdExportMachine::Name);
 
     // Display — view orientation
     auto addOrient = [this](const QString& name,
@@ -194,7 +200,10 @@ void MainWindow::createCentralLayout()
 
     // ── 3D selection → tree highlight + machine panel ─────────────────────
     connect(m_occView, &WidgetOccView::selectionChanged, this, [this] {
-        DocumentId id = LcncApplication::instance()->activeDocumentId();
+        // Use machine doc when on 准备 tab, otherwise use active workpiece doc
+        DocumentId id = (m_leftTabs && m_leftTabs->currentIndex() == 1)
+            ? LcncApplication::instance()->machineDocumentId()
+            : LcncApplication::instance()->activeDocumentId();
         if (auto* gd = GuiApplication::instance()->guiDocument(id)) {
             const QStringList entries = gd->selectedEntries();
             m_modelTree->highlightEntries(entries);
@@ -223,18 +232,18 @@ void MainWindow::createCentralLayout()
                 m_machinePanel->setSelectedEntries(entries);
             });
 
-    // Axis assignment in panel → notify document modified
+    // Axis assignment in panel → notify machine document modified
     connect(m_machinePanel, &WidgetMachinePanel::axisAssignmentChanged, this, [this] {
-        DocumentId id = LcncApplication::instance()->activeDocumentId();
-        if (LcncApplication::instance()->documentById(id))
-            LcncApplication::instance()->notifyDocumentModified(id);
+        DocumentId machId = LcncApplication::instance()->machineDocumentId();
+        if (machId != kInvalidDocumentId)
+            LcncApplication::instance()->notifyDocumentModified(machId);
     });
 
     // Axis node removed via right-click context menu → refresh tree + panel
     connect(m_modelTree, &WidgetModelTree::axisNodeUnassigned, this, [this] {
-        DocumentId id = LcncApplication::instance()->activeDocumentId();
-        if (LcncApplication::instance()->documentById(id))
-            LcncApplication::instance()->notifyDocumentModified(id);
+        DocumentId machId = LcncApplication::instance()->machineDocumentId();
+        if (machId != kInvalidDocumentId)
+            LcncApplication::instance()->notifyDocumentModified(machId);
     });
 }
 
@@ -307,16 +316,22 @@ void MainWindow::createRightPanel()
     connect(m_machinePanel, &WidgetMachinePanel::mountWorkpieceRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdMountWorkpiece::Name)->execute(); });
 
-    // Axis position spinbox → kinematics + 3D update
+    // Axis position spinbox → kinematics + 3D update on machine document
     connect(m_machinePanel, &WidgetMachinePanel::axisPositionChanged, this,
             [this](const QString& axisName, double value) {
-                LcncDocument* doc = LcncApplication::instance()->activeDocument();
+                LcncDocument* doc = LcncApplication::instance()->machineDocument();
                 if (!doc) return;
                 doc->machineKinematics()->setAxisPosition(axisName, value);
-                DocumentId id = LcncApplication::instance()->activeDocumentId();
-                if (auto* gd = GuiApplication::instance()->guiDocument(id))
+                DocumentId machId = LcncApplication::instance()->machineDocumentId();
+                if (auto* gd = GuiApplication::instance()->guiDocument(machId))
                     gd->updateAxisTransforms();
             });
+
+    // New machine panel signals
+    connect(m_machinePanel, &WidgetMachinePanel::unloadMachineRequested, this,
+            [this]{ m_cmdContainer->findCommand(CmdUnloadMachine::Name)->execute(); });
+    connect(m_machinePanel, &WidgetMachinePanel::exportMachineRequested, this,
+            [this]{ m_cmdContainer->findCommand(CmdExportMachine::Name)->execute(); });
 }
 
 // ── Ribbon ─────────────────────────────────────────────────────────────────────
@@ -423,8 +438,8 @@ void MainWindow::buildCamTab(SARibbonCategory* cat)
     SARibbonPanel* panelMach = cat->addPanel(tr("机台"));
     panelMach->addLargeAction(m_cmdContainer->findAction(CmdLoadMachine::Name));
     panelMach->addLargeAction(m_cmdContainer->findAction(CmdMarkAxes::Name));
-    panelMach->addSmallAction(m_cmdContainer->findAction(CmdMountWorkpiece::Name));
-    panelMach->addSmallAction(makeAct(tr("坐标系"), ":/icons/coordinate.svg"));
+    panelMach->addSmallAction(m_cmdContainer->findAction(CmdMountWorkpiece::Name));    panelMach->addSmallAction(m_cmdContainer->findAction(CmdUnloadMachine::Name));
+    panelMach->addSmallAction(m_cmdContainer->findAction(CmdExportMachine::Name));    panelMach->addSmallAction(makeAct(tr("坐标系"), ":/icons/coordinate.svg"));
 
     // ── 刀路 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelPath = cat->addPanel(tr("刀路"));
@@ -499,18 +514,31 @@ void MainWindow::createStatusBar()
 // ── Slots ──────────────────────────────────────────────────────────────────────
 void MainWindow::onLeftTabChanged(int index)
 {
-    // index 0 = 文档 / 1 = 准备 → show machine panel
-    // index 2 = 执行 → show laser control
+    // index 0 = 文档 / 1 = 准备 → show machine panel  /  index 2 = 执行 → laser
     m_rightStack->setCurrentIndex(index == 2 ? 1 : 0);
+    if (index == 1)
+        showMachineView();
+    else
+        showWorkpieceView();
 }
 
 void MainWindow::onDocumentAdded(DocumentId id)
 {
+    // Machine workspace document is managed via showMachineView(); skip normal flow.
+    if (LcncApplication::instance()->isMachineDocument(id)) {
+        if (m_leftTabs && m_leftTabs->currentIndex() == 1)
+            showMachineView();
+        updateCommandStates();
+        return;
+    }
     LcncDocument* doc = LcncApplication::instance()->documentById(id);
     if (doc) {
         m_sbDocName->setText(doc->name());
-        if (auto* gd = GuiApplication::instance()->guiDocument(id))
-            m_occView->attachDocument(gd);
+        // Only switch view if not on 准备 tab (which always shows machine view)
+        if (!m_leftTabs || m_leftTabs->currentIndex() != 1) {
+            if (auto* gd = GuiApplication::instance()->guiDocument(id))
+                m_occView->attachDocument(gd);
+        }
     }
     rebuildDocumentTree();
     updateCommandStates();
@@ -530,19 +558,28 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
     LcncDocument* doc = LcncApplication::instance()->documentById(id);
     if (doc) {
         m_sbDocName->setText(doc->name());
-        m_modelTree->rebuildForDocument(doc);
-        m_machinePanel->setDocument(doc);
-        if (auto* gd = GuiApplication::instance()->guiDocument(id))
-            m_occView->attachDocument(gd);
+        // Only switch view if not on 准备 tab (which always shows machine view)
+        if (!m_leftTabs || m_leftTabs->currentIndex() != 1) {
+            if (auto* gd = GuiApplication::instance()->guiDocument(id))
+                m_occView->attachDocument(gd);
+        }
     } else {
         // No active document — detach to default scene NOW, BEFORE the
         // subsequent documentClosed signal causes GuiApplication to delete
         // the old GuiDocument.  Without this, m_activeDoc would become a
         // dangling pointer by the time onDocumentClosed runs.
         m_sbDocName->setText(tr("无文档"));
+        if (!m_leftTabs || m_leftTabs->currentIndex() != 1)
+            m_occView->attachDefaultScene(m_defaultScene);
+    }
+    // Model tree and machine panel always reflect the machine workspace
+    LcncDocument* machDoc = LcncApplication::instance()->machineDocument();
+    if (machDoc) {
+        m_modelTree->rebuildForDocument(machDoc);
+        m_machinePanel->setDocument(machDoc);
+    } else {
         m_modelTree->clear();
         m_machinePanel->setDocument(nullptr);
-        m_occView->attachDefaultScene(m_defaultScene);
     }
     rebuildDocumentTree();
     updateCommandStates();
@@ -550,11 +587,13 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
 
 void MainWindow::onDocumentModified(DocumentId id)
 {
-    if (id == LcncApplication::instance()->activeDocumentId()) {
-        if (LcncDocument* doc = LcncApplication::instance()->documentById(id)) {
+    // Machine document modification: update model tree and machine panel
+    if (LcncApplication::instance()->isMachineDocument(id)) {
+        if (LcncDocument* doc = LcncApplication::instance()->machineDocument()) {
             m_modelTree->rebuildForDocument(doc);
             m_machinePanel->setDocument(doc);
         }
+        return;
     }
     rebuildDocumentTree();
 }
@@ -642,13 +681,8 @@ void MainWindow::rebuildDocumentTree()
     for (LcncDocument* doc : docs) {
         if (!doc) continue;
 
-        // Machine-only documents are managed via the "准备" tab; skip them here.
-        // Empty documents (new, unsaved) are always shown with no children.
-        const bool isMachineOnly =
-            doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() == 0
-            && !doc->entityTree(LcncDocument::EntityKind::Workpiece).isEmpty() == false
-            && doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
-        if (isMachineOnly) continue;
+        // Machine workspace is managed via the "准备" tab; skip it in the doc tree.
+        if (LcncApplication::instance()->isMachineDocument(doc->id())) continue;
 
         auto* docItem = new QTreeWidgetItem(m_documentTree);
         docItem->setText(0, doc->name());
@@ -694,6 +728,31 @@ void MainWindow::rebuildDocumentTree()
     }
 
     m_documentTree->expandToDepth(2);
+}
+
+// ── View routing helpers ────────────────────────────────────────────────────────────────
+void MainWindow::showMachineView()
+{
+    DocumentId machId = LcncApplication::instance()->machineDocumentId();
+    if (auto* gd = GuiApplication::instance()->guiDocument(machId))
+        m_occView->attachDocument(gd);
+    else
+        m_occView->attachDefaultScene(m_defaultScene);
+
+    if (LcncDocument* machDoc = LcncApplication::instance()->machineDocument()) {
+        m_modelTree->rebuildForDocument(machDoc);
+        m_machinePanel->setDocument(machDoc);
+    }
+}
+
+void MainWindow::showWorkpieceView(DocumentId id)
+{
+    if (id == kInvalidDocumentId)
+        id = LcncApplication::instance()->activeDocumentId();
+    if (auto* gd = GuiApplication::instance()->guiDocument(id))
+        m_occView->attachDocument(gd);
+    else
+        m_occView->attachDefaultScene(m_defaultScene);
 }
 
 void MainWindow::updateCommandStates()
