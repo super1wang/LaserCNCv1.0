@@ -4,6 +4,9 @@
 #include "app/i_app_context.h"
 
 class MainWindow;
+class CadModule;
+class CamModule;
+class ProcessModule;
 
 /**
  * @brief Concrete IAppContext that holds raw pointers to all singletons.
@@ -26,6 +29,12 @@ public:
 
     LcncDocument* machineDocument()    const override;
     GuiDocument*  machineGuiDocument() const override;
+
+    CadModule*     cadModule()     const override;
+    CamModule*     camModule()     const override;
+    ProcessModule* processModule() const override;
+
+    bool isMachineViewActive() const override;
 
     void updateCommandStates() override;
 

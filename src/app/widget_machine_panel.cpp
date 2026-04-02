@@ -71,16 +71,28 @@ void WidgetMachinePanel::buildUi()
                                       tr("卸载机台"), this);
     auto* btnExport = new QPushButton(QIcon(":/icons/export.svg"),
                                       tr("导出机台模型..."), this);
+    auto* btnMove   = new QPushButton(QIcon(":/icons/move.svg"),
+                                      tr("移动部件..."), this);
+    auto* btnRotate = new QPushButton(QIcon(":/icons/rotate.svg"),
+                                      tr("旋转部件..."), this);
+    auto* btnDelete = new QPushButton(QIcon(":/icons/delete.svg"),
+                                      tr("删除部件"), this);
     cfgLayout->addWidget(btnLoad);
     cfgLayout->addWidget(btnMark);
     cfgLayout->addWidget(btnUnload);
     cfgLayout->addWidget(btnExport);
+    cfgLayout->addWidget(btnMove);
+    cfgLayout->addWidget(btnRotate);
+    cfgLayout->addWidget(btnDelete);
     mainLayout->addWidget(cfgGroup);
 
     connect(btnLoad,   &QPushButton::clicked, this, &WidgetMachinePanel::loadMachineRequested);
     connect(btnMark,   &QPushButton::clicked, this, &WidgetMachinePanel::markAxesRequested);
     connect(btnUnload, &QPushButton::clicked, this, &WidgetMachinePanel::unloadMachineRequested);
     connect(btnExport, &QPushButton::clicked, this, &WidgetMachinePanel::exportMachineRequested);
+    connect(btnMove,   &QPushButton::clicked, this, &WidgetMachinePanel::moveMachineShapeRequested);
+    connect(btnRotate, &QPushButton::clicked, this, &WidgetMachinePanel::rotateMachineShapeRequested);
+    connect(btnDelete, &QPushButton::clicked, this, &WidgetMachinePanel::deleteMachineShapeRequested);
 
     // ── 轴系位置 section ──────────────────────────────────────────────────
     m_axisGroup  = new QGroupBox(tr("轴系位置"), this);

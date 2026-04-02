@@ -2,8 +2,10 @@
 #include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
 #include "base/xcaf_utils.h"
+#include "base/machine_kinematics.h"
 #include "gui/gui_application.h"
 #include "gui/gui_document.h"
+#include "modules/cad_module.h"
 
 // OCC — Primitives
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -38,6 +40,7 @@
 // OCC — XCAF
 #include <XCAFDoc_ShapeTool.hxx>
 #include <TDF_LabelSequence.hxx>
+#include <TopoDS_Iterator.hxx>
 
 // OCC — AIS (for viewport selection query)
 #include <AIS_Shape.hxx>
@@ -62,18 +65,44 @@
 
 namespace {
 
+// ── Tab-context helpers ────────────────────────────────────────────────────────
+/// Returns the document matching the current tab context (machine or workpiece).
+LcncDocument* contextualDocument(IAppContext* ctx)
+{
+    if (ctx->isMachineViewActive())
+        return ctx->machineDocument();
+    return ctx->activeDocument();
+}
+
+/// Returns the GUI document matching the current tab context.
+GuiDocument* contextualGuiDocument(IAppContext* ctx)
+{
+    if (ctx->isMachineViewActive())
+        return ctx->machineGuiDocument();
+    return ctx->activeGuiDocument();
+}
+
+/// Returns the entity kind appropriate for the current tab context.
+LcncDocument::EntityKind contextualEntityKind(IAppContext* ctx)
+{
+    return ctx->isMachineViewActive()
+        ? LcncDocument::EntityKind::Machine
+        : LcncDocument::EntityKind::Workpiece;
+}
+
 struct EntityInfo {
     TDF_Label    label;
     QString      name;
     TopoDS_Shape shape;
 };
 
-/// Collect all Workpiece-category entities from a document.
-QList<EntityInfo> collectEntities(LcncDocument* doc)
+/// Collect entities of the given kind from a document.
+QList<EntityInfo> collectEntities(LcncDocument* doc,
+                                   LcncDocument::EntityKind kind = LcncDocument::EntityKind::Workpiece)
 {
     QList<EntityInfo> out;
     if (!doc) return out;
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    TDF_LabelSequence labels = doc->entityLabels(kind);
     Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
     for (int i = 1; i <= labels.Length(); ++i) {
         TDF_Label lbl = labels.Value(i);
@@ -88,37 +117,31 @@ QList<EntityInfo> collectEntities(LcncDocument* doc)
     return out;
 }
 
-/// Check whether the active document has at least minCount workpiece entities.
+/// Check whether the contextual document has at least minCount entities.
 bool hasEntities(IAppContext* ctx, int minCount = 1)
 {
-    LcncDocument* doc = ctx->activeDocument();
+    LcncDocument* doc = contextualDocument(ctx);
     if (!doc) return false;
-    return doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() >= minCount;
+    return doc->entityLabels(contextualEntityKind(ctx)).Length() >= minCount;
 }
 
 /// Create or reuse the active document, add the shape, and refresh the display.
 void commitShape(IAppContext* ctx, const TopoDS_Shape& shape, const QString& name)
 {
-    LcncDocument* doc = ctx->activeDocument();
-    if (!doc)
-        doc = ctx->app()->newDocument(name);
-
-    doc->addShapeEntity(shape, name, LcncDocument::EntityKind::Workpiece);
-
-    if (auto* gd = ctx->guiApp()->guiDocument(doc->id())) {
-        gd->rebuildDisplay();
-        gd->fitAll();
-    }
-    ctx->app()->notifyDocumentModified(doc->id());
+    DocumentId docId = ctx->activeDocumentId();
+    if (docId == kInvalidDocumentId)
+        docId = ctx->cadModule()->newDocument(name);
+    ctx->cadModule()->createShape(docId, shape, name,
+        static_cast<int>(LcncDocument::EntityKind::Workpiece));
     ctx->updateCommandStates();
 }
 
 /// Refresh display after an in-place shape update.
 void refreshDocument(IAppContext* ctx)
 {
-    LcncDocument* doc = ctx->activeDocument();
+    LcncDocument* doc = contextualDocument(ctx);
     if (!doc) return;
-    if (auto* gd = ctx->guiApp()->guiDocument(doc->id())) {
+    if (auto* gd = contextualGuiDocument(ctx)) {
         gd->rebuildDisplay();
         gd->fitAll();
     }
@@ -159,7 +182,7 @@ gp_Vec firstFaceNormal(const TopoDS_Shape& shape)
 /// Return entities from 'all' that are currently selected in the viewport.
 QList<EntityInfo> selectedEntities(IAppContext* ctx, const QList<EntityInfo>& all)
 {
-    GuiDocument* gd = ctx->activeGuiDocument();
+    GuiDocument* gd = contextualGuiDocument(ctx);
     if (!gd) return {};
     const Handle(AIS_InteractiveContext)& aisCtx = gd->context();
     if (aisCtx.IsNull()) return {};
@@ -401,9 +424,9 @@ bool CmdMoveShape::isEnabled() const
 
 void CmdMoveShape::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = contextualDocument(context());
     if (!doc) return;
-    auto entities = collectEntities(doc);
+    auto entities = collectEntities(doc, contextualEntityKind(context()));
     if (entities.isEmpty()) {
         QMessageBox::information(nullptr, tr("移动"), tr("文档中没有工件"));
         return;
@@ -435,9 +458,6 @@ void CmdMoveShape::execute()
 
     if (dlg.exec() != QDialog::Accepted) return;
 
-    gp_Trsf trsf;
-    trsf.SetTranslation(gp_Vec(spX->value(), spY->value(), spZ->value()));
-
     // Resolve target entities from combobox selection.
     QList<EntityInfo> targets;
     if (hasSentinel && cb->currentIndex() == 0) {
@@ -448,12 +468,13 @@ void CmdMoveShape::execute()
             targets = { entities[idx] };
     }
 
-    for (const auto& ei : targets) {
-        BRepBuilderAPI_Transform xform(ei.shape, trsf, Standard_True);
-        if (xform.IsDone())
-            doc->shapeTool()->SetShape(ei.label, xform.Shape());
-    }
-    refreshDocument(context());
+    QList<TDF_Label> labels;
+    for (const auto& ei : targets)
+        labels.append(ei.label);
+
+    context()->cadModule()->moveShapes(doc->id(), labels,
+        gp_Vec(spX->value(), spY->value(), spZ->value()));
+    context()->updateCommandStates();
 }
 
 // ── CmdRotateShape ────────────────────────────────────────────────────────────
@@ -471,9 +492,9 @@ bool CmdRotateShape::isEnabled() const
 
 void CmdRotateShape::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = contextualDocument(context());
     if (!doc) return;
-    auto entities = collectEntities(doc);
+    auto entities = collectEntities(doc, contextualEntityKind(context()));
     if (entities.isEmpty()) {
         QMessageBox::information(nullptr, tr("旋转"), tr("文档中没有工件"));
         return;
@@ -515,8 +536,6 @@ void CmdRotateShape::execute()
     }
 
     gp_Ax1 axis(gp_Pnt(0, 0, 0), gp_Dir(ax, ay, az));
-    gp_Trsf trsf;
-    trsf.SetRotation(axis, spAngle->value() * M_PI / 180.0);
 
     // Resolve target entities.
     QList<EntityInfo> targets;
@@ -528,12 +547,13 @@ void CmdRotateShape::execute()
             targets = { entities[idx] };
     }
 
-    for (const auto& ei : targets) {
-        BRepBuilderAPI_Transform xform(ei.shape, trsf, Standard_True);
-        if (xform.IsDone())
-            doc->shapeTool()->SetShape(ei.label, xform.Shape());
-    }
-    refreshDocument(context());
+    QList<TDF_Label> labels;
+    for (const auto& ei : targets)
+        labels.append(ei.label);
+
+    context()->cadModule()->rotateShapes(doc->id(), labels, axis,
+        spAngle->value());
+    context()->updateCommandStates();
 }
 
 // =============================================================================
@@ -831,7 +851,7 @@ CmdDeleteShape::CmdDeleteShape(IAppContext* ctx) : CommandBase(ctx)
 
 bool CmdDeleteShape::isEnabled() const
 {
-    if (LcncDocument* doc = context()->activeDocument()) {
+    if (LcncDocument* doc = contextualDocument(context())) {
         Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
         TDF_LabelSequence fs;
         st->GetFreeShapes(fs);
@@ -842,7 +862,7 @@ bool CmdDeleteShape::isEnabled() const
 
 void CmdDeleteShape::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = contextualDocument(context());
     if (!doc) return;
 
     // Collect ALL entities (both Machine and Workpiece kinds)
@@ -900,24 +920,144 @@ void CmdDeleteShape::execute()
         if (ret != QMessageBox::Yes) return;
     }
 
-    GuiDocument* gd = context()->activeGuiDocument();
-    MachineKinematics* kin = doc->machineKinematics();
+    QStringList entries;
+    for (const auto& ei : targets)
+        entries.append(XcafUtils::entry(ei.label));
 
-    // Wrap in an XCAF undo transaction so Ctrl+Z can restore the shapes
-    doc->openCommand(tr("删除形体"));
-    for (const auto& ei : targets) {
-        const QString entry = XcafUtils::entry(ei.label);
-        // Remove from kinematics (axis assignments + workpiece mounts)
-        if (kin) kin->unassignShape(entry);
-        // Remove AIS shape from the 3D view
-        if (gd) gd->eraseEntity(entry);
-        // Remove from XCAF document and entity trees
-        doc->removeShapeEntity(entry);
+    context()->cadModule()->deleteShapes(doc->id(), entries);
+    context()->updateCommandStates();
+}
+
+// =============================================================================
+// CmdExplodeShape — decompose selected entity into direct sub-shapes
+// =============================================================================
+
+CmdExplodeShape::CmdExplodeShape(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/explode.svg"), tr("拆解"), this);
+    a->setStatusTip(tr("将选中的复合体拆解为下一层级子形体（一级拆解）"));
+    setAction(a);
+}
+
+bool CmdExplodeShape::isEnabled() const
+{
+    // Enable when either the active doc or machine doc has any entity
+    LcncDocument* activeDoc  = context()->activeDocument();
+    LcncDocument* machineDoc = context()->machineDocument();
+    if (activeDoc  && activeDoc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0)
+        return true;
+    if (machineDoc && machineDoc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0)
+        return true;
+    return false;
+}
+
+void CmdExplodeShape::execute()
+{
+    // ── Find the selected entity; prefer machine doc (primary use case) ──────
+    // We check the machine doc's AIS context first, then the active (workpiece) doc.
+    struct Hit {
+        LcncDocument*             doc   {nullptr};
+        LcncDocument::EntityKind  kind  {LcncDocument::EntityKind::Workpiece};
+        TDF_Label                 label;
+        TopoDS_Shape              shape;
+        QString                   name;
+        QString                   entry;
+    };
+
+    auto tryFind = [&](LcncDocument* doc, LcncDocument::EntityKind kind,
+                       GuiDocument* gd) -> Hit {
+        if (!doc || !gd) return {};
+        const Handle(AIS_InteractiveContext)& aisCtx = gd->context();
+        if (aisCtx.IsNull()) return {};
+        TDF_LabelSequence labels = doc->entityLabels(kind);
+        Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
+        for (int i = 1; i <= labels.Length(); ++i) {
+            TDF_Label lbl = labels.Value(i);
+            QString   ent = XcafUtils::entry(lbl);
+            Handle(AIS_Shape) ais = gd->aisShape(ent);
+            if (!ais.IsNull() && aisCtx->IsSelected(ais)) {
+                Hit h;
+                h.doc   = doc;
+                h.kind  = kind;
+                h.label = lbl;
+                h.shape = st->GetShape(lbl);
+                h.name  = XcafUtils::name(lbl);
+                h.entry = ent;
+                return h;
+            }
+        }
+        return {};
+    };
+
+    // Check machine doc first
+    Hit hit = tryFind(context()->machineDocument(),
+                      LcncDocument::EntityKind::Machine,
+                      context()->machineGuiDocument());
+    // Fallback: active (workpiece) doc
+    if (!hit.doc)
+        hit = tryFind(context()->activeDocument(),
+                      LcncDocument::EntityKind::Workpiece,
+                      context()->activeGuiDocument());
+
+    if (!hit.doc) {
+        // No AIS selection — show picker from active doc
+        LcncDocument* doc = context()->activeDocument();
+        if (!doc) {
+            doc = context()->machineDocument();
+            if (!doc) return;
+        }
+        LcncDocument::EntityKind kind =
+            (doc == context()->machineDocument())
+            ? LcncDocument::EntityKind::Machine
+            : LcncDocument::EntityKind::Workpiece;
+        TDF_LabelSequence labels = doc->entityLabels(kind);
+        if (labels.IsEmpty()) return;
+
+        QDialog dlg;
+        dlg.setWindowTitle(tr("拆解形体"));
+        auto* form = new QFormLayout;
+        auto* cb   = new QComboBox;
+        Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
+        for (int i = 1; i <= labels.Length(); ++i)
+            cb->addItem(XcafUtils::name(labels.Value(i)));
+        form->addRow(tr("选择形体:"), cb);
+        auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        auto* vl = new QVBoxLayout(&dlg);
+        vl->addLayout(form);
+        vl->addWidget(btns);
+        if (dlg.exec() != QDialog::Accepted) return;
+        int idx = cb->currentIndex();
+        hit.doc   = doc;
+        hit.kind  = kind;
+        hit.label = labels.Value(idx + 1);
+        hit.shape = st->GetShape(hit.label);
+        hit.name  = XcafUtils::name(hit.label);
+        hit.entry = XcafUtils::entry(hit.label);
     }
-    doc->commitCommand();
 
-    // Rebuild display to sync m_aisMap
-    if (gd) gd->rebuildDisplay();
-    context()->app()->notifyDocumentModified(doc->id());
+    if (hit.shape.IsNull()) return;
+
+    // ── Count direct sub-shapes via TopoDS_Iterator ────────────────────────
+    int childCount = 0;
+    for (TopoDS_Iterator it(hit.shape); it.More(); it.Next())
+        ++childCount;
+
+    if (childCount == 0) {
+        QMessageBox::information(nullptr, tr("拆解"),
+            tr("所选形体 \"%1\" 无法继续拆解（已是基本形体）。").arg(hit.name));
+        return;
+    }
+
+    // ── Confirm ─────────────────────────────────────────────────────────────
+    if (QMessageBox::question(nullptr, tr("拆解形体"),
+            tr("将 \"%1\" 拆解为 %2 个子形体，原形体将被替换。\n继续？")
+                .arg(hit.name).arg(childCount),
+            QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+        return;
+
+    context()->cadModule()->explodeShape(hit.doc->id(), hit.label,
+        static_cast<int>(hit.kind));
     context()->updateCommandStates();
 }

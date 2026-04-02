@@ -28,6 +28,9 @@ set(SRCS_BASE
     src/base/task_progress.cpp
     src/base/task_manager.cpp
     src/base/machine_kinematics.cpp
+    src/base/laser_toolpath.cpp
+    src/base/face_classifier.cpp
+    src/base/ik_solver.cpp
 )
 
 set(SRCS_GRAPHICS
@@ -40,6 +43,13 @@ set(SRCS_GUI
     src/gui/gui_document.cpp
 )
 
+set(SRCS_MODULES
+    src/modules/shape_service.cpp
+    src/modules/cad_module.cpp
+    src/modules/cam_module.cpp
+    src/modules/process_module.cpp
+)
+
 set(SRCS_APP
     src/app/app_context.cpp
     src/app/commands_api.cpp
@@ -48,10 +58,12 @@ set(SRCS_APP
     src/app/commands_display.cpp
     src/app/commands_cad.cpp
     src/app/commands_machine.cpp
+    src/app/commands_cam.cpp
     src/app/dialog_mark_axes.cpp
     src/app/widget_occ_view.cpp
     src/app/widget_model_tree.cpp
     src/app/widget_machine_panel.cpp
+    src/app/widget_toolpath_panel.cpp
     src/app/widget_laser_control.cpp
     src/app/dialog_task_manager.cpp
     src/app/mainwindow.cpp
@@ -62,6 +74,7 @@ add_executable(LaserCNC WIN32
     ${SRCS_BASE}
     ${SRCS_GRAPHICS}
     ${SRCS_GUI}
+    ${SRCS_MODULES}
     ${SRCS_APP}
     resources/resources.qrc
 )

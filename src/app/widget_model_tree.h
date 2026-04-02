@@ -15,12 +15,15 @@ public:
 
     void rebuildForDocument(LcncDocument* doc);
     void clear();
+    LcncDocument* currentDocument() const { return m_doc; }
 
 signals:
     void entitySelected(const QString& labelEntry);
     void selectionChanged(const QStringList& entries);
     /// Emitted after an axis node assignment is removed via context menu.
     void axisNodeUnassigned();
+    /// Emitted when user toggles a node's checkbox.
+    void visibilityChanged(const QString& entry, bool visible);
 
 public slots:
     void highlightEntries(const QStringList& entries);
@@ -29,6 +32,7 @@ private slots:
     void onItemSelectionChanged();
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
     void onContextMenuRequested(const QPoint& pos);
+    void onItemChanged(QTreeWidgetItem* item, int column);
 
 private:
     void populateGroup(QTreeWidgetItem*   groupItem,
@@ -45,4 +49,5 @@ private:
 
     QTreeWidget*  m_tree{nullptr};
     LcncDocument* m_doc{nullptr};   ///< current document (set in rebuildForDocument)
+    bool          m_blockItemChanged{false};
 };

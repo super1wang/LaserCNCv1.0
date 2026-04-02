@@ -5,6 +5,9 @@
 class GuiApplication;
 class GuiDocument;
 class TaskManager;
+class CadModule;
+class CamModule;
+class ProcessModule;
 
 /**
  * @brief Thin context interface injected into every Command.
@@ -27,6 +30,13 @@ public:
 
     virtual LcncDocument*     machineDocument()    const = 0;
     virtual GuiDocument*      machineGuiDocument() const = 0;
+
+    virtual CadModule*        cadModule()         const = 0;
+    virtual CamModule*        camModule()         const = 0;
+    virtual ProcessModule*    processModule()     const = 0;
+
+    /// Returns true when the 准备 (machine) tab is currently active.
+    virtual bool isMachineViewActive() const = 0;
 
     /// Ask the main window to refresh enabled/disabled state of all actions.
     virtual void updateCommandStates() = 0;

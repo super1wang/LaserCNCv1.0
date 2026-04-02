@@ -83,6 +83,20 @@ public:
     /// Each named product/component is added as a separate entity.
     void importFromXcaf(const Handle(TDocStd_Document)& xdeDoc, EntityKind kind);
 
+    /// Import shapes from an XCAF document WITHOUT deep recursion (flat mode).
+    /// Each direct component of the root assembly becomes one entity,
+    /// preserving its fully-assembled compound shape.  Used for machine loading
+    /// so that named axis-groups arrive as individual shapes without further
+    /// decomposition into bolts / sub-parts.
+    void importFromXcafFlat(const Handle(TDocStd_Document)& xdeDoc, EntityKind kind);
+
+    /// Import shapes from an XCAF document as root nodes only — no decomposition
+    /// at all.  Each free shape in the file is added directly as a single entity,
+    /// regardless of whether it is a simple solid or an assembly compound.
+    /// Use this when the exported file already contains one top-level shape per
+    /// axis group (e.g. files produced by CmdExportMachine).
+    void importFromXcafRoots(const Handle(TDocStd_Document)& xdeDoc, EntityKind kind);
+
     /// Node in the import-time shape hierarchy (for hierarchical tree display).
     /// When entry is empty, the node is a virtual assembly/group node with no
     /// own geometry; its children hold the actual shapes.

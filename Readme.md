@@ -147,13 +147,47 @@
 **准备页模型树**（`WidgetModelTree`）
 - 始终显示机台文档结构：轴系视图（每轴加粗节点）、机台零件按轴分组、挂载工件标注
 
+#### 阶段 4：激光刀路计算（已完成）
+
+**核心数据模型**（`src/base/laser_toolpath.h/.cpp`）
+- `ToolpathPoint`：采样点结构（3D 坐标 `gp_Pnt` + 表面法线 `gp_Dir` + 曲线参数）
+- `LeadInParams`：引刀线参数（长度、法线角度偏移、入口点坐标、入口边索引、有效标志）
+- `LaserContour`：单条轮廓（`TopoDS_Wire` + 离散采样点集 + 引刀参数 + 启用/禁用标志 + 名称）
+- `LaserToolpath`：轮廓集合 + 全局参数（引刀长度、法线角度），支持逐条轮廓访问
+- `LaserToolpathBuilder`（静态工具类）：
+  - `extractContours()`：从工件形体提取所有 Wire 轮廓，无 Wire 时 fallback 遍历单独 Edge
+  - `discretizeContour()`：使用 `BRepAdaptor_Curve` + `GCPnts_UniformDeflection` 沿轮廓边缘均匀采样，每点通过 `ShapeAnalysis_Surface` + `GeomLProp_SLProps` 计算面法线
+  - `computeLeadInEdge()`：在入口点处根据面法线方向 + 角度偏移生成引刀线 `TopoDS_Edge`
+  - `ensureNotFromAbove()`：**核心约束** — 引刀方向与 Z+ 轴夹角小于 15° 时，自动投影到 XY 平面强制水平进入，避免从工件正上方切入
+  - `findSurfaceNormal()`：遍历工件所有 Face，找到最近面并计算法线（考虑面朝向翻转）
+
+**CAM 命令系统**（`src/app/commands_cam.h/.cpp`）
+- `CmdGenerateToolpath`（`cam.generate_toolpath`）：从机台文档中的工件实体提取轮廓 → 离散化 → 存储到 `LaserToolpath` → 以绿色 `AIS_Shape` 覆盖层显示到 3D 视图
+- `CmdSetLeadIn`（`cam.set_leadin`）：激活边缘级选择模式（`AIS_Shape` mode 2 = `TopAbs_EDGE`）→ 用户点击轮廓边缘 → 取最近采样点匹配轮廓 → 设置引刀入口 → 以红色 `AIS_Shape` 显示引刀线 → 恢复默认选择模式
+- `CmdToolpathPreview`（`cam.preview`）：切换所有刀路 AIS 对象的显隐状态（Checkable 按钮）
+- `CmdRecalcToolpath`（`cam.recalc`）：读取当前全局参数（长度、角度）→ 重新离散化 + 重建引刀线 → 刷新 3D 显示
+- 全局 `ToolpathState` 单例管理刀路数据与 AIS 对象生命周期（`contourAis` / `leadInAis` 列表）
+- `CamToolpathAccess` 命名空间提供外部访问接口（`toolpath()` / `hasToolpath()` / `isVisible()`）
+
+**刀路参数面板**（`src/app/widget_toolpath_panel.h/.cpp`）
+- 右侧面板（`QStackedWidget` index 1），包含三个分组：
+  - **参数**：引刀长度 `QDoubleSpinBox`（0.1–100 mm，默认 5.0）+ 法线角度 `QDoubleSpinBox`（-90°~90°，默认 0°）
+  - **操作**：四个按钮 — 生成刀路 / 选择引刀位置 / 重新计算 / 刀路预览（Checkable）
+  - **轮廓列表**：`QListWidget` 带复选框，每条轮廓可单独启用/禁用，Tooltip 显示引刀线设置状态
+- 参数变更自动更新 `LaserToolpath` 全局参数
+- 轮廓勾选状态同步到 `LaserContour.enabled`
+
+**Ribbon 集成**
+- CAM 标签"刀路"面板：4 个 placeholder `makeAct()` 替换为真实命令 action（`CmdGenerateToolpath` / `CmdSetLeadIn` / `CmdRecalcToolpath` / `CmdToolpathPreview`）
+- `createCommands()` 注册 4 个 CAM 命令到 `CommandContainer`
+- 刀路面板信号连接：按钮 → 命令执行，SpinBox → 全局参数更新，轮廓勾选 → 禁用/启用
+
+**3D 可视化**
+- 轮廓线：绿色 `AIS_Shape`（RGB 0.1, 0.8, 0.2）
+- 引刀线：红色 `AIS_Shape`（RGB 0.9, 0.15, 0.15）
+- 所有刀路 AIS 对象在重新生成前自动清除（`eraseAllToolpathAis`），避免残留
+
 ### 进行中阶段
-
-#### 阶段 4：CAM 刀路计算
-
-- [ ] 3+2 定位与 5 轴联动刀路算法
-- [ ] 刀路可视化与干涉检查
-- [ ] 后处理与 G 代码生成
 
 #### 阶段 5：激光加工控制
 
@@ -161,6 +195,12 @@
 - 设备连接状态与报警处理
 - 加工流程执行控制（启动/暂停/停止/急停）
 - 运动仿真与实时状态反馈
+
+#### 阶段 5.5：后处理与 G 代码
+
+- [ ] G 代码生成（后处理器）
+- [ ] G 代码导入/导出
+- [ ] G 代码查看器
 
 #### 阶段 6：工程化与质量
 

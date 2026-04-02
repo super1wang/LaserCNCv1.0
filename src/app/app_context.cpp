@@ -4,6 +4,9 @@
 #include "base/task_manager.h"
 #include "gui/gui_application.h"
 #include "gui/gui_document.h"
+#include "modules/cad_module.h"
+#include "modules/cam_module.h"
+#include "modules/process_module.h"
 
 AppContext::AppContext(MainWindow* mainWindow, QObject* parent)
     : QObject(parent)
@@ -40,9 +43,29 @@ GuiDocument* AppContext::machineGuiDocument() const
     return GuiApplication::instance()->guiDocument(id);
 }
 
+CadModule* AppContext::cadModule() const
+{
+    return CadModule::instance();
+}
+
+CamModule* AppContext::camModule() const
+{
+    return CamModule::instance();
+}
+
+ProcessModule* AppContext::processModule() const
+{
+    return ProcessModule::instance();
+}
+
 void AppContext::updateCommandStates()
 {
     // Delegated to MainWindow via its CommandContainer
     if (m_mainWindow)
         m_mainWindow->updateCommandStates();
+}
+
+bool AppContext::isMachineViewActive() const
+{
+    return m_mainWindow && m_mainWindow->isMachineViewActive();
 }

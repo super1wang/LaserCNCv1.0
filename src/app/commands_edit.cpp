@@ -3,9 +3,8 @@
 #include <QAction>
 #include <QKeySequence>
 
-#include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
-#include "gui/gui_document.h"
+#include "modules/cad_module.h"
 
 // ── CmdUndo ────────────────────────────────────────────────────────────────────
 CmdUndo::CmdUndo(IAppContext* ctx) : CommandBase(ctx)
@@ -18,20 +17,13 @@ CmdUndo::CmdUndo(IAppContext* ctx) : CommandBase(ctx)
 
 bool CmdUndo::isEnabled() const
 {
-    if (LcncDocument* d = context()->activeDocument())
-        return d->canUndo();
-    return false;
+    return context()->cadModule()->canUndo(context()->activeDocumentId());
 }
 
 void CmdUndo::execute()
 {
-    if (LcncDocument* d = context()->activeDocument()) {
-        d->undo();
-        if (auto* gd = context()->activeGuiDocument())
-            gd->rebuildDisplay();
-        context()->app()->notifyDocumentModified(d->id());
-        context()->updateCommandStates();
-    }
+    context()->cadModule()->undo(context()->activeDocumentId());
+    context()->updateCommandStates();
 }
 
 // ── CmdRedo ────────────────────────────────────────────────────────────────────
@@ -45,18 +37,11 @@ CmdRedo::CmdRedo(IAppContext* ctx) : CommandBase(ctx)
 
 bool CmdRedo::isEnabled() const
 {
-    if (LcncDocument* d = context()->activeDocument())
-        return d->canRedo();
-    return false;
+    return context()->cadModule()->canRedo(context()->activeDocumentId());
 }
 
 void CmdRedo::execute()
 {
-    if (LcncDocument* d = context()->activeDocument()) {
-        d->redo();
-        if (auto* gd = context()->activeGuiDocument())
-            gd->rebuildDisplay();
-        context()->app()->notifyDocumentModified(d->id());
-        context()->updateCommandStates();
-    }
+    context()->cadModule()->redo(context()->activeDocumentId());
+    context()->updateCommandStates();
 }

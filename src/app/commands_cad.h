@@ -146,3 +146,24 @@ public:
     void execute() override;
     bool isEnabled() const override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Explode / decompose entity into direct sub-shapes (one level down)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @brief Split the selected compound entity into its direct child sub-shapes.
+ *
+ * Replaces the selected entity with N child shapes extracted via TopoDS_Iterator
+ * (one level of decomposition, no deep recursion). Works on both Machine and
+ * Workpiece entities, making it easy to separate machine axis assemblies for
+ * individual axis calibration.
+ */
+class CmdExplodeShape : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "cad.explode";
+    explicit CmdExplodeShape(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};

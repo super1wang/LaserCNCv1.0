@@ -10,6 +10,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QMessageBox>
+#include <functional>
 
 #include <TDF_LabelSequence.hxx>
 
@@ -35,6 +36,8 @@ WidgetModelTree::WidgetModelTree(QWidget* parent)
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QTreeWidget::customContextMenuRequested,
             this, &WidgetModelTree::onContextMenuRequested);
+    connect(m_tree, &QTreeWidget::itemChanged,
+            this, &WidgetModelTree::onItemChanged);
 }
 
 void WidgetModelTree::clear()
@@ -56,7 +59,8 @@ void WidgetModelTree::rebuildForDocument(LcncDocument* doc)
     machineItem->setText(0, tr("机台模型"));
     machineItem->setIcon(0, QIcon(":/icons/machine.svg"));
     machineItem->setData(0, Qt::UserRole, "group:machine");
-    machineItem->setFlags(machineItem->flags() & ~Qt::ItemIsSelectable);
+    machineItem->setFlags((machineItem->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
+    machineItem->setCheckState(0, Qt::Checked);
 
     if (!doc->entityTree(LcncDocument::EntityKind::Machine).isEmpty())
         populateGroup(machineItem, doc, LcncDocument::EntityKind::Machine, kin);
@@ -69,7 +73,8 @@ void WidgetModelTree::rebuildForDocument(LcncDocument* doc)
         axisItem->setText(0, tr("轴系模型"));
         axisItem->setIcon(0, QIcon(":/icons/coordinate.svg"));
         axisItem->setData(0, Qt::UserRole, "group:axisnodes");
-        axisItem->setFlags(axisItem->flags() & ~Qt::ItemIsSelectable);
+        axisItem->setFlags((axisItem->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
+        axisItem->setCheckState(0, Qt::Checked);
         populateMachineGroup(axisItem, doc, kin);
     }
 
@@ -78,10 +83,17 @@ void WidgetModelTree::rebuildForDocument(LcncDocument* doc)
     workpieceItem->setText(0, tr("工件模型"));
     workpieceItem->setIcon(0, QIcon(":/icons/workpiece.svg"));
     workpieceItem->setData(0, Qt::UserRole, "group:workpiece");
-    workpieceItem->setFlags(workpieceItem->flags() & ~Qt::ItemIsSelectable);
+    workpieceItem->setFlags((workpieceItem->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
+    workpieceItem->setCheckState(0, Qt::Checked);
     populateGroup(workpieceItem, doc, LcncDocument::EntityKind::Workpiece, kin);
 
-    m_tree->expandAll();
+    // Only expand the workpiece group by default; keep machine/axis groups collapsed
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* item = m_tree->topLevelItem(i);
+        const QString data = item->data(0, Qt::UserRole).toString();
+        if (data == "group:workpiece")
+            m_tree->expandItem(item);
+    }
 }
 
 void WidgetModelTree::populateGroup(QTreeWidgetItem*         groupItem,
@@ -112,6 +124,8 @@ void WidgetModelTree::populateGroup(QTreeWidgetItem*         groupItem,
         } else {
             item->setText(0, name);
         }
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, Qt::Checked);
     }
 }
 
@@ -129,7 +143,8 @@ void WidgetModelTree::addTreeNodes(
             item->setText(0, node.displayName);
             item->setIcon(0, QIcon(":/icons/machine.svg"));
             item->setData(0, Qt::UserRole, QStringLiteral("group:asm"));
-            item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
+            item->setFlags((item->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
+            item->setCheckState(0, Qt::Checked);
             if (!node.children.isEmpty())
                 addTreeNodes(item, node.children, kind, kin);
         } else {
@@ -148,6 +163,8 @@ void WidgetModelTree::addTreeNodes(
             } else {
                 item->setText(0, node.displayName);
             }
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(0, Qt::Checked);
         }
     }
 }
@@ -186,7 +203,8 @@ void WidgetModelTree::populateMachineGroup(QTreeWidgetItem*   groupItem,
         axisItem->setText(0, axisText);
         axisItem->setIcon(0, QIcon(":/icons/coordinate.svg"));
         axisItem->setData(0, Qt::UserRole, QStringLiteral("axis:%1").arg(axis.name));
-        axisItem->setFlags(axisItem->flags() & ~Qt::ItemIsSelectable);
+        axisItem->setFlags((axisItem->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
+        axisItem->setCheckState(0, Qt::Checked);
         const QFont boldFont = [&]{ QFont f = axisItem->font(0); f.setBold(true); return f; }();
         axisItem->setFont(0, boldFont);
 
@@ -198,6 +216,8 @@ void WidgetModelTree::populateMachineGroup(QTreeWidgetItem*   groupItem,
             item->setText(0, name);
             item->setIcon(0, QIcon(":/icons/shape.svg"));
             item->setData(0, Qt::UserRole, entry);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(0, Qt::Checked);
             placed.insert(entry);
         }
 
@@ -216,6 +236,8 @@ void WidgetModelTree::populateMachineGroup(QTreeWidgetItem*   groupItem,
             wItem->setIcon(0, QIcon(":/icons/workpiece.svg"));
             wItem->setData(0, Qt::UserRole, wEntry);
             wItem->setForeground(0, QColor(80, 160, 80));
+            wItem->setFlags(wItem->flags() | Qt::ItemIsUserCheckable);
+            wItem->setCheckState(0, Qt::Checked);
         }
     }
 
@@ -229,7 +251,8 @@ void WidgetModelTree::populateMachineGroup(QTreeWidgetItem*   groupItem,
                 unassignedItem = new QTreeWidgetItem(groupItem);
                 unassignedItem->setText(0, tr("（未分配）"));
                 unassignedItem->setData(0, Qt::UserRole, "group:unassigned");
-                unassignedItem->setFlags(unassignedItem->flags() & ~Qt::ItemIsSelectable);
+                unassignedItem->setFlags((unassignedItem->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
+                unassignedItem->setCheckState(0, Qt::Checked);
                 unassignedItem->setForeground(0, QColor(160, 100, 60));
                 hasUnassigned = true;
             }
@@ -237,6 +260,8 @@ void WidgetModelTree::populateMachineGroup(QTreeWidgetItem*   groupItem,
             item->setText(0, it.value());
             item->setIcon(0, QIcon(":/icons/shape.svg"));
             item->setData(0, Qt::UserRole, it.key());
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(0, Qt::Checked);
         }
     }
 }
@@ -333,4 +358,46 @@ void WidgetModelTree::onContextMenuRequested(const QPoint& pos)
             kin->unassignShape(entry);
         emit axisNodeUnassigned();
     }
+}
+
+void WidgetModelTree::onItemChanged(QTreeWidgetItem* item, int /*column*/)
+{
+    if (m_blockItemChanged || !item) return;
+
+    const Qt::CheckState state = item->checkState(0);
+    const QString entry = item->data(0, Qt::UserRole).toString();
+
+    const bool isGroup = entry.isEmpty()
+                      || entry.startsWith("group:")
+                      || entry.startsWith("axis:");
+
+    if (isGroup) {
+        // Cascade check state to all descendants, then emit for each leaf.
+        m_blockItemChanged = true;
+        std::function<void(QTreeWidgetItem*)> cascade = [&](QTreeWidgetItem* node) {
+            for (int i = 0; i < node->childCount(); ++i) {
+                QTreeWidgetItem* child = node->child(i);
+                if (child->flags() & Qt::ItemIsUserCheckable)
+                    child->setCheckState(0, state);
+                cascade(child);
+            }
+        };
+        cascade(item);
+        m_blockItemChanged = false;
+
+        // Emit visibilityChanged for every real leaf
+        std::function<void(QTreeWidgetItem*)> emitLeaves = [&](QTreeWidgetItem* node) {
+            for (int i = 0; i < node->childCount(); ++i) {
+                QTreeWidgetItem* child = node->child(i);
+                const QString e = child->data(0, Qt::UserRole).toString();
+                if (!e.isEmpty() && !e.startsWith("group:") && !e.startsWith("axis:"))
+                    emit visibilityChanged(e, state == Qt::Checked);
+                emitLeaves(child);
+            }
+        };
+        emitLeaves(item);
+        return;
+    }
+
+    emit visibilityChanged(entry, state == Qt::Checked);
 }

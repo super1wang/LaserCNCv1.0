@@ -2,28 +2,9 @@
 
 #include <QAction>
 #include <QFileDialog>
-#include <QFileInfo>
-#include <QMessageBox>
-#include <QStyle>
-#include <QApplication>
 
-#include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
-#include "base/task_manager.h"
-#include "gui/gui_application.h"
-#include "gui/gui_document.h"
-
-// OCC data exchange
-#include <BRep_Builder.hxx>
-#include <BRepTools.hxx>
-#include <STEPCAFControl_Reader.hxx>
-#include <IGESCAFControl_Reader.hxx>
-#include <STEPControl_Writer.hxx>
-#include <StlAPI_Reader.hxx>
-#include <IFSelect_ReturnStatus.hxx>
-#include <TCollection_ExtendedString.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <XCAFDoc_DocumentTool.hxx>
+#include "modules/cad_module.h"
 
 // ── CmdNewDocument ─────────────────────────────────────────────────────────────
 CmdNewDocument::CmdNewDocument(IAppContext* ctx)
@@ -37,7 +18,7 @@ CmdNewDocument::CmdNewDocument(IAppContext* ctx)
 
 void CmdNewDocument::execute()
 {
-    app()->newDocument();
+    context()->cadModule()->newDocument();
     context()->updateCommandStates();
 }
 
@@ -62,72 +43,8 @@ void CmdOpenDocument::execute()
            "BREP (*.brep)"));
     if (path.isEmpty()) return;
 
-    QFileInfo fi(path);
-    LcncDocument* doc = app()->newDocument(fi.baseName());
-    doc->setFilePath(path);
-    const QString ext = fi.suffix().toLower();
-
-    TaskId taskId = taskMgr()->run(tr("打开: %1").arg(fi.fileName()),
-        [path, ext, doc](TaskProgress* prog) {
-            prog->setRange(0, 100);
-
-            if (ext == "stp" || ext == "step") {
-                prog->setStepName(QStringLiteral("读取 STEP..."));
-                Handle(TDocStd_Document) xdeDoc =
-                    new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-                XCAFDoc_DocumentTool::Set(xdeDoc->Main());
-                STEPCAFControl_Reader cafReader;
-                cafReader.SetNameMode(Standard_True);
-                if (cafReader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
-                    prog->setValue(50);
-                    prog->setStepName(QStringLiteral("转换形体..."));
-                    cafReader.Transfer(xdeDoc);
-                    doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
-                }
-            } else if (ext == "igs" || ext == "iges") {
-                prog->setStepName(QStringLiteral("读取 IGES..."));
-                Handle(TDocStd_Document) xdeDoc =
-                    new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-                XCAFDoc_DocumentTool::Set(xdeDoc->Main());
-                IGESCAFControl_Reader cafReader;
-                cafReader.SetNameMode(Standard_True);
-                if (cafReader.ReadFile(path.toUtf8().constData()) == IFSelect_RetDone) {
-                    prog->setValue(50);
-                    prog->setStepName(QStringLiteral("转换形体..."));
-                    cafReader.Transfer(xdeDoc);
-                    doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
-                }
-            } else if (ext == "stl") {
-                prog->setStepName(QStringLiteral("读取 STL..."));
-                BRep_Builder builder;
-                TopoDS_Shape shape;
-                StlAPI_Reader stlReader;
-                stlReader.Read(shape, path.toUtf8().constData());
-                prog->setValue(80);
-                if (!shape.IsNull())
-                    doc->addShapeEntity(shape, QFileInfo(path).baseName());
-            } else if (ext == "brep") {
-                prog->setStepName(QStringLiteral("读取 BREP..."));
-                TopoDS_Shape shape;
-                BRep_Builder builder;
-                BRepTools::Read(shape, path.toUtf8().constData(), builder);
-                if (!shape.IsNull())
-                    doc->addShapeEntity(shape, QFileInfo(path).baseName());
-            }
-
-            prog->setValue(100);
-        });
-
-    connect(TaskManager::instance(), &TaskManager::taskFinished,
-            this, [this, doc, taskId](TaskId id, bool ok) {
-                if (id != taskId) return;
-                if (ok) {
-                    if (auto* gd = guiApp()->guiDocument(doc->id()))
-                        gd->rebuildDisplay();
-                    app()->notifyDocumentModified(doc->id());
-                }
-                context()->updateCommandStates();
-            });
+    context()->cadModule()->openDocument(path);
+    context()->updateCommandStates();
 }
 
 // ── CmdSaveDocument ────────────────────────────────────────────────────────────
@@ -155,9 +72,7 @@ void CmdSaveDocument::execute()
         saveAs.execute();
         return;
     }
-    QString err;
-    if (!app()->saveDocument(doc->id(), doc->filePath(), &err))
-        QMessageBox::critical(nullptr, tr("保存失败"), err);
+    context()->cadModule()->saveDocument(doc->id(), doc->filePath());
 }
 
 // ── CmdSaveDocumentAs ──────────────────────────────────────────────────────────
@@ -182,9 +97,7 @@ void CmdSaveDocumentAs::execute()
         nullptr, tr("另存为"), doc->name(),
         tr("XCAF 二进制 (*.xcaf);;XCAF XML (*.xml)"));
     if (path.isEmpty()) return;
-    QString err;
-    if (!app()->saveDocument(doc->id(), path, &err))
-        QMessageBox::critical(nullptr, tr("保存失败"), err);
+    context()->cadModule()->saveDocument(doc->id(), path);
 }
 
 // ── CmdImportStep ──────────────────────────────────────────────────────────────
@@ -203,38 +116,7 @@ void CmdImportStep::execute()
         tr("STEP 文件 (*.stp *.step)"));
     if (path.isEmpty()) return;
 
-    // Ensure there is an active document
-    LcncDocument* doc = context()->activeDocument();
-    if (!doc) doc = app()->newDocument();
-
-    TaskId taskId = taskMgr()->run(tr("导入 STEP: %1").arg(path),
-        [path, doc](TaskProgress* prog) {
-            prog->setStepName(QStringLiteral("读取 STEP..."));
-            prog->setRange(0, 100);
-
-            Handle(TDocStd_Document) xdeDoc =
-                new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-            XCAFDoc_DocumentTool::Set(xdeDoc->Main());
-            STEPCAFControl_Reader cafReader;
-            cafReader.SetNameMode(Standard_True);
-            if (cafReader.ReadFile(path.toUtf8().constData()) != IFSelect_RetDone) return;
-
-            prog->setValue(50);
-            prog->setStepName(QStringLiteral("转换形体..."));
-            cafReader.Transfer(xdeDoc);
-            doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
-            prog->setValue(100);
-        });
-
-    // Refresh display/tree after import finishes
-    connect(TaskManager::instance(), &TaskManager::taskFinished,
-            this, [this, doc, taskId](TaskId id, bool ok) {
-                if (id != taskId) return;
-                if (ok && guiApp()->guiDocument(doc->id()))
-                    guiApp()->guiDocument(doc->id())->rebuildDisplay();
-                if (ok)
-                    app()->notifyDocumentModified(doc->id());
-            });
+    context()->cadModule()->importStep(path, context()->activeDocumentId());
 }
 
 // ── CmdImportStl ───────────────────────────────────────────────────────────────
@@ -253,35 +135,7 @@ void CmdImportStl::execute()
         tr("STL 文件 (*.stl)"));
     if (path.isEmpty()) return;
 
-    LcncDocument* doc = context()->activeDocument();
-    if (!doc) doc = app()->newDocument();
-
-    TaskId taskId = taskMgr()->run(tr("导入 STL: %1").arg(path),
-        [path, doc](TaskProgress* prog) {
-            prog->setStepName(QStringLiteral("读取 STL..."));
-            prog->setRange(0, 100);
-
-            BRep_Builder builder;
-            TopoDS_Shape shape;
-            StlAPI_Reader reader;
-            reader.Read(shape, path.toUtf8().constData());
-
-            prog->setValue(80);
-            if (!shape.IsNull()) {
-                QString name = QFileInfo(path).baseName();
-                doc->addShapeEntity(shape, name, LcncDocument::EntityKind::Workpiece);
-            }
-            prog->setValue(100);
-        });
-
-    connect(TaskManager::instance(), &TaskManager::taskFinished,
-            this, [this, doc, taskId](TaskId id, bool ok) {
-                if (id != taskId) return;
-                if (ok && guiApp()->guiDocument(doc->id()))
-                    guiApp()->guiDocument(doc->id())->rebuildDisplay();
-                if (ok)
-                    app()->notifyDocumentModified(doc->id());
-            });
+    context()->cadModule()->importStl(path, context()->activeDocumentId());
 }
 
 // ── CmdExportStep ──────────────────────────────────────────────────────────────
@@ -307,24 +161,7 @@ void CmdExportStep::execute()
     LcncDocument* doc = context()->activeDocument();
     if (!doc) return;
 
-    taskMgr()->run(tr("导出 STEP"),
-        [path, doc](TaskProgress* prog) {
-            prog->setStepName(QStringLiteral("写入 STEP..."));
-            prog->setRange(0, 100);
-
-            Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
-            TDF_LabelSequence shapes;
-            st->GetFreeShapes(shapes);
-
-            STEPControl_Writer writer;
-            for (int i = 1; i <= shapes.Length(); ++i) {
-                TopoDS_Shape sh = st->GetShape(shapes.Value(i));
-                if (!sh.IsNull())
-                    writer.Transfer(sh, STEPControl_AsIs);
-            }
-            writer.Write(path.toUtf8().constData());
-            prog->setValue(100);
-        });
+    context()->cadModule()->exportStep(doc->id(), path);
 }
 
 // ── CmdCloseDocument ───────────────────────────────────────────────────────────
@@ -345,6 +182,6 @@ void CmdCloseDocument::execute()
 {
     DocumentId id = context()->activeDocumentId();
     if (id == kInvalidDocumentId) return;
-    app()->closeDocument(id);
+    context()->cadModule()->closeDocument(id);
     context()->updateCommandStates();
 }

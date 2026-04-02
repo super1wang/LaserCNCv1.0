@@ -9,6 +9,7 @@ class WidgetOccView;
 class WidgetModelTree;
 class WidgetMachinePanel;
 class WidgetLaserControl;
+class WidgetToolpathPanel;
 class DialogTaskManager;
 class GraphicsScene;
 class QTabWidget;
@@ -42,6 +43,9 @@ public:
 
     /// Called by AppContext to refresh Ribbon button states.
     void updateCommandStates();
+
+    /// Returns true when the 准备 (machine) tab is currently active.
+    bool isMachineViewActive() const;
 
 protected:
     void closeEvent(QCloseEvent*) override;
@@ -87,11 +91,13 @@ private:
     QStackedWidget*    m_rightStack{nullptr};
     WidgetModelTree*   m_modelTree{nullptr};
     QTreeWidget*       m_documentTree{nullptr};
+    QTreeWidget*       m_contourListWidget{nullptr};  ///< contour list in "刀路" tab (drag-reorder)
     QTreeWidget*       m_processTree{nullptr};
-    WidgetMachinePanel*  m_machinePanel{nullptr};
-    WidgetLaserControl*  m_laserControl{nullptr};
-    DialogTaskManager*   m_taskDialog{nullptr};
-    GraphicsScene*       m_defaultScene{nullptr};
+    WidgetMachinePanel*   m_machinePanel{nullptr};
+    WidgetToolpathPanel*   m_toolpathPanel{nullptr};
+    WidgetLaserControl*    m_laserControl{nullptr};
+    DialogTaskManager*     m_taskDialog{nullptr};
+    GraphicsScene*         m_defaultScene{nullptr};
 
     // Status bar labels
     QLabel* m_sbDocName{nullptr};

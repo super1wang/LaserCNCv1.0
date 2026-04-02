@@ -40,6 +40,9 @@ signals:
     void mountWorkpieceRequested();
     void unloadMachineRequested();
     void exportMachineRequested();
+    void moveMachineShapeRequested();
+    void rotateMachineShapeRequested();
+    void deleteMachineShapeRequested();
     /// Emitted when the user adjusts an axis-position spinbox.
     void axisPositionChanged(const QString& axisName, double valueMmOrDeg);
     /// Emitted after a shape has been (re)assigned to an axis via the mark buttons.

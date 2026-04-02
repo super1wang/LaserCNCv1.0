@@ -7,6 +7,7 @@
 
 #include <TDF_LabelSequence.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <TDataStd_Integer.hxx>
 
 // View and gizmo includes
 #include <AIS_ViewCube.hxx>
@@ -207,6 +208,16 @@ void GuiDocument::rebuildDisplay()
         TopoDS_Shape sh = XcafUtils::shape(lbl);
         if (!sh.IsNull()) {
             Handle(AIS_Shape) ais = m_scene->displayShape(sh);
+            // Use a coarser tessellation for machine entities so that AIS
+            // transform updates during simulation are cheap to re-render.
+            Handle(TDataStd_Integer) kindAttr;
+            if (lbl.FindAttribute(TDataStd_Integer::GetID(), kindAttr) &&
+                kindAttr->Get() == static_cast<int>(LcncDocument::EntityKind::Machine))
+            {
+                ais->SetOwnDeviationCoefficient(0.05);
+                ais->SetOwnDeviationAngle(0.35); // ~20°
+                m_scene->redisplayShape(ais);
+            }
             m_aisMap.insert(XcafUtils::entry(lbl), ais);
         }
     }
