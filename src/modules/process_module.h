@@ -4,6 +4,8 @@
 #include <QMap>
 #include <QString>
 
+class QTimer;
+
 /**
  * @brief Process module singleton — manages execution process, peripherals, and parameters.
  *
@@ -32,6 +34,9 @@ public:
     void setSimulationMode(bool on);
     bool simulationMode() const;
 
+    void jog(const QString& axisName, int direction, int speedLevel);
+    void home();
+
     void start();
     void pause();
     void stop();
@@ -41,14 +46,28 @@ public:
     QMap<QString, double> currentAxisPositions() const;
     void setAxisPosition(const QString& axisName, double value);
 
+    void setFeedOverride(double factor);
+    double feedOverride() const;
+
+    QString statusMessage() const;
+
 signals:
     void connectionChanged(bool connected);
     void simulationModeChanged(bool enabled);
     void stateChanged(State state);
     void axisPositionChanged(const QString& axisName, double value);
+    void feedOverrideChanged(double factor);
+    void statusMessageChanged(const QString& message);
+
+private slots:
+    void onSimulationTick();
 
 private:
     explicit ProcessModule(QObject* parent = nullptr);
+
+    void initializeAxisPositions();
+    void setState(State state, const QString& statusMessage);
+    void setStatusMessage(const QString& message);
 
     static ProcessModule* s_instance;
 
@@ -56,4 +75,8 @@ private:
     bool m_simulationMode{true};
     State m_state{State::Idle};
     QMap<QString, double> m_axisPositions;
+    QTimer* m_simTimer{nullptr};
+    double m_feedOverride{1.0};
+    double m_simPhase{0.0};
+    QString m_statusMessage;
 };

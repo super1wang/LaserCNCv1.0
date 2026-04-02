@@ -36,6 +36,17 @@ class CamModule : public QObject
 {
     Q_OBJECT
 public:
+    struct AxisOption {
+        QString name;
+        QString displayName;
+    };
+
+    struct WorkpieceMountCandidate {
+        DocumentId documentId{kInvalidDocumentId};
+        QString displayName;
+        int workpieceCount{0};
+    };
+
     static CamModule* instance();
 
     // ── Machine Document ─────────────────────────────────────────────────
@@ -57,6 +68,12 @@ public:
 
     /// Auto-detect axis assignments by shape name heuristics.
     void autoDetectAxes();
+    void applyAxisAssignments(const QMap<QString, QString>& entryToAxis);
+    void assignShapesToAxis(const QStringList& entries, const QString& axisName);
+    void unassignShape(const QString& entry);
+    void clearAxisAssignments(const QString& axisName);
+    QList<AxisOption> axisOptions(bool includeDetachOption = false) const;
+    QList<WorkpieceMountCandidate> mountableWorkpieces() const;
 
     // ── Workpiece Mounting ───────────────────────────────────────────────
     /// Mount workpiece from a source document onto a machine axis.
@@ -119,6 +136,12 @@ public:
     // ── Axis Position ────────────────────────────────────────────────────
     void setAxisPosition(const QString& axisName, double value);
 
+    // ── Selection / Visibility ──────────────────────────────────────────
+    void setEntityVisible(const QString& entry, bool visible);
+    void setSelectedEntries(const QStringList& entries);
+    QStringList selectedEntries() const;
+    void syncSelectionFromView();
+
 signals:
     void machineLoaded();
     void machineUnloaded();
@@ -130,6 +153,8 @@ signals:
     void simulationTick(int contourIdx, int pointIdx, int totalPoints);
     void simulationStateChanged(bool playing);
     void simulationFinished();
+    void selectionChanged(const QStringList& entries);
+    void axisAssignmentsChanged();
 
 private slots:
     void onSimTick();
@@ -145,6 +170,7 @@ private:
     /// Display lead-in edges as red AIS shapes.
     void displayLeadIns();
 
+    void refreshMachineTransforms();
     void refreshMachineDisplay();
 
     static CamModule* s_instance;

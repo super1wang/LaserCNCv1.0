@@ -49,7 +49,16 @@ public:
     DocumentId    activeDocumentId() const;
     LcncDocument* activeDocument() const;
     GuiDocument*  activeGuiDocument() const;
+    LcncDocument* documentById(DocumentId id) const;
+    GuiDocument*  guiDocument(DocumentId id) const;
+    QList<LcncDocument*> workpieceDocuments() const;
     void          setActiveDocument(DocumentId id);
+
+    // ── Selection / Visibility ──────────────────────────────────────────
+    void setEntityVisible(DocumentId docId, const QString& entry, bool visible);
+    void setSelectedEntries(DocumentId docId, const QStringList& entries);
+    QStringList selectedEntries(DocumentId docId) const;
+    void syncSelectionFromView(DocumentId docId = kInvalidDocumentId);
 
     // ── Modeling Operations (delegates to ShapeService + refreshes display) ──
     /// Move a shape by translation vector. Returns true on success.
@@ -90,6 +99,8 @@ signals:
     void documentModified(DocumentId id);
     /// Emitted when a module-level operation fails and should be surfaced by the UI.
     void operationFailed(const QString& title, const QString& message);
+    /// Emitted when a workpiece document selection changes via module coordination.
+    void selectionChanged(DocumentId id, const QStringList& entries);
 
 private:
     explicit CadModule(QObject* parent = nullptr);

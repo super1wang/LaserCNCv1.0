@@ -23,6 +23,7 @@ public:
     // ── Called from device layer (Phase 5) ────────────────────────────────────
     void updateAxisPosition(const QString& axis, double pos);
     void updateConnectionStatus(bool connected);
+    void updateSimulationMode(bool enabled);
     void updateSystemStatus(const QString& status);
 
 signals:
@@ -32,18 +33,19 @@ signals:
     void eStopRequested();
     void jogRequested(const QString& axis, int direction, int speedLevel);
     void homeRequested();
-
-private slots:
-    void onSimTick();     ///< Simulates axis readback in Phase 1
+    void feedOverrideChanged(double factor);
 
 private:
     void buildUi();
     void buildAxisGroup();
     void buildJogGroup();
     void buildProcessGroup();
+    void refreshStatusBanner();
 
     QMap<QString, class QLabel*> m_posLabels;    ///< axis → position label
-    class QTimer*  m_simTimer{nullptr};
     class QLabel*  m_statusLabel{nullptr};
-    double         m_simPos[5]{};                ///< simulated positions X Y Z A C
+    bool           m_connected{false};
+    bool           m_simulationMode{true};
+    QString        m_statusText;
+    int            m_jogSpeedLevel{1};
 };

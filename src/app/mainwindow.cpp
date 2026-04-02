@@ -23,6 +23,7 @@
 #include "gui/gui_document.h"
 #include "modules/cad_module.h"
 #include "modules/cam_module.h"
+#include "modules/process_module.h"
 
 #include <SARibbonBar.h>
 #include <SARibbonCategory.h>
@@ -41,6 +42,8 @@
 #include <QComboBox>
 #include <QCloseEvent>
 #include <QMessageBox>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QApplication>
 #include <QIcon>
 #include <QStyle>
@@ -104,6 +107,12 @@ void MainWindow::createContext()
     connect(m_appContext->cadModule(), &CadModule::operationFailed,
             this, [this](const QString& title, const QString& message) {
                 QMessageBox::critical(this, title, message);
+            });
+
+    connect(m_appContext->processModule(), &ProcessModule::statusMessageChanged,
+            this, [this](const QString& status) {
+                if (m_sbStatus)
+                    m_sbStatus->setText(status);
             });
 }
 
@@ -218,67 +227,53 @@ void MainWindow::createCentralLayout()
     // Task dialog (non-modal, floats on top)
     m_taskDialog = new DialogTaskManager(this);
 
-    // ── 3D selection → tree highlight + machine panel ─────────────────────
+    // ── 3D selection → module coordination ────────────────────────────────
     connect(m_occView, &WidgetOccView::selectionChanged, this, [this] {
-        // Use machine doc when on 准备 tab, otherwise use active workpiece doc
-        DocumentId id = (m_leftTabs && m_leftTabs->currentIndex() == 1)
-            ? LcncApplication::instance()->machineDocumentId()
-            : LcncApplication::instance()->activeDocumentId();
-        if (auto* gd = GuiApplication::instance()->guiDocument(id)) {
-            const QStringList entries = gd->selectedEntries();
-            m_modelTree->highlightEntries(entries);
-            m_machinePanel->setSelectedEntries(entries);
-            // Highlight matching nodes in the 文档 tab tree
-            if (m_documentTree && !entries.isEmpty()) {
+        if (isMachineViewActive()) {
+            m_appContext->camModule()->syncSelectionFromView();
+            return;
+        }
+
+        m_appContext->cadModule()->syncSelectionFromView(
+            m_appContext->cadModule()->activeDocumentId());
+    });
+
+    connect(m_appContext->camModule(), &CamModule::selectionChanged, this,
+            [this](const QStringList& entries) {
+                m_modelTree->highlightEntries(entries);
+                m_machinePanel->setSelectedEntries(entries);
+            });
+
+    connect(m_appContext->cadModule(), &CadModule::selectionChanged, this,
+            [this](DocumentId docId, const QStringList& entries) {
+                if (!m_documentTree)
+                    return;
+
                 QSignalBlocker blocker(m_documentTree);
                 m_documentTree->clearSelection();
                 QTreeWidgetItemIterator it(m_documentTree);
                 while (*it) {
-                    const QString e = (*it)->data(0, kRoleEntry).toString();
-                    if (!e.isEmpty() && entries.contains(e)) {
+                    const DocumentId itemDocId = (*it)->data(0, kRoleDocId).toInt();
+                    const QString entry = (*it)->data(0, kRoleEntry).toString();
+                    if (itemDocId == docId && !entry.isEmpty() && entries.contains(entry)) {
                         (*it)->setSelected(true);
                         for (QTreeWidgetItem* p = (*it)->parent(); p; p = p->parent())
                             p->setExpanded(true);
                     }
                     ++it;
                 }
-            }
-        }
-    });
-
-    // Tree selection → machine panel mark buttons context
-    connect(m_modelTree, &WidgetModelTree::selectionChanged, this,
-            [this](const QStringList& entries) {
-                m_machinePanel->setSelectedEntries(entries);
             });
 
-    // Axis assignment in panel → notify machine document modified
-    connect(m_machinePanel, &WidgetMachinePanel::axisAssignmentChanged, this, [this] {
-        DocumentId machId = LcncApplication::instance()->machineDocumentId();
-        if (machId != kInvalidDocumentId)
-            LcncApplication::instance()->notifyDocumentModified(machId);
-    });
+    // Tree selection → module selection and machine panel context
+    connect(m_modelTree, &WidgetModelTree::selectionChanged, this,
+            [this](const QStringList& entries) {
+                m_appContext->camModule()->setSelectedEntries(entries);
+            });
 
-    // Axis node removed via right-click context menu → refresh tree + panel
-    connect(m_modelTree, &WidgetModelTree::axisNodeUnassigned, this, [this] {
-        DocumentId machId = LcncApplication::instance()->machineDocumentId();
-        if (machId != kInvalidDocumentId)
-            LcncApplication::instance()->notifyDocumentModified(machId);
-    });
-
-    // Checkbox visibility toggle → show/hide AIS shape in 3D
+    // Checkbox visibility toggle → CAM module owns machine-side visibility
     connect(m_modelTree, &WidgetModelTree::visibilityChanged, this,
             [this](const QString& entry, bool visible) {
-                DocumentId machId = LcncApplication::instance()->machineDocumentId();
-                if (auto* gd = GuiApplication::instance()->guiDocument(machId)) {
-                    Handle(AIS_Shape) ais = gd->aisShape(entry);
-                    if (!ais.IsNull()) {
-                        if (visible)
-                            gd->scene()->displayObject(ais);
-                        else
-                            gd->scene()->eraseObject(ais);
-                    }
-                }
+                m_appContext->camModule()->setEntityVisible(entry, visible);
             });
 }
 
@@ -357,13 +352,7 @@ void MainWindow::createLeftPanel()
                     const QString    ent = leaf->data(0, kRoleEntry).toString();
                     if (did == kInvalidDocumentId || ent.isEmpty()) return;
                     const bool v = (leaf->checkState(0) == Qt::Checked);
-                    if (auto* gd = GuiApplication::instance()->guiDocument(did)) {
-                        Handle(AIS_Shape) ais = gd->aisShape(ent);
-                        if (!ais.IsNull()) {
-                            if (v) gd->scene()->displayObject(ais);
-                            else   gd->scene()->eraseObject(ais);
-                        }
-                    }
+                    m_appContext->cadModule()->setEntityVisible(did, ent, v);
                 };
 
                 // Group / doc item: cascade then apply to all leaves
@@ -523,6 +512,50 @@ void MainWindow::createRightPanel()
                 int idx = current->data(0, Qt::UserRole).toInt();
                 m_toolpathPanel->showContourCoordinates(idx);
             });
+
+        // ── Process module ↔ execution page ─────────────────────────────────
+        ProcessModule* process = m_appContext->processModule();
+        connect(m_laserControl, &WidgetLaserControl::startRequested,
+            process, &ProcessModule::start);
+        connect(m_laserControl, &WidgetLaserControl::pauseRequested,
+            process, &ProcessModule::pause);
+        connect(m_laserControl, &WidgetLaserControl::stopRequested,
+            process, &ProcessModule::stop);
+        connect(m_laserControl, &WidgetLaserControl::eStopRequested,
+            process, &ProcessModule::emergencyStop);
+        connect(m_laserControl, &WidgetLaserControl::jogRequested, this,
+            [process](const QString& axis, int direction, int speedLevel) {
+            process->jog(axis, direction, speedLevel);
+            });
+        connect(m_laserControl, &WidgetLaserControl::homeRequested,
+            process, &ProcessModule::home);
+        connect(m_laserControl, &WidgetLaserControl::feedOverrideChanged,
+            process, &ProcessModule::setFeedOverride);
+
+        connect(process, &ProcessModule::connectionChanged,
+            m_laserControl, &WidgetLaserControl::updateConnectionStatus);
+        connect(process, &ProcessModule::simulationModeChanged,
+            m_laserControl, &WidgetLaserControl::updateSimulationMode);
+        connect(process, &ProcessModule::statusMessageChanged,
+            m_laserControl, &WidgetLaserControl::updateSystemStatus);
+        connect(process, &ProcessModule::axisPositionChanged, this,
+            [this](const QString& axis, double value) {
+            m_laserControl->updateAxisPosition(axis, value);
+
+            const auto positions = m_appContext->processModule()->currentAxisPositions();
+            m_sbCoords->setText(
+                tr("X: %1  Y: %2  Z: %3")
+                .arg(positions.value(QStringLiteral("X"), 0.0), 0, 'f', 3)
+                .arg(positions.value(QStringLiteral("Y"), 0.0), 0, 'f', 3)
+                .arg(positions.value(QStringLiteral("Z"), 0.0), 0, 'f', 3));
+            });
+
+        m_laserControl->updateConnectionStatus(process->isConnected());
+        m_laserControl->updateSimulationMode(process->simulationMode());
+        m_laserControl->updateSystemStatus(process->statusMessage());
+        const auto axisPositions = process->currentAxisPositions();
+        for (auto it = axisPositions.cbegin(); it != axisPositions.cend(); ++it)
+        m_laserControl->updateAxisPosition(it.key(), it.value());
 }
 
 // ── Ribbon ─────────────────────────────────────────────────────────────────────
@@ -690,9 +723,35 @@ void MainWindow::buildLaserTab(SARibbonCategory* cat)
 
     // ── 连接 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelConn = cat->addPanel(tr("连接"));
-    panelConn->addLargeAction(makeAct(tr("连接控制器"), ":/icons/connect.svg"));
-    panelConn->addLargeAction(makeAct(tr("仿真模式"),   ":/icons/simulate.svg"));
-    panelConn->addSmallAction(makeAct(tr("断开连接"),   ":/icons/disconnect.svg"));
+    QAction* actConnect = makeAct(tr("连接控制器"), ":/icons/connect.svg");
+    QAction* actSimulation = makeAct(tr("仿真模式"), ":/icons/simulate.svg");
+    QAction* actDisconnect = makeAct(tr("断开连接"), ":/icons/disconnect.svg");
+    actSimulation->setCheckable(true);
+    actSimulation->setChecked(m_appContext->processModule()->simulationMode());
+    panelConn->addLargeAction(actConnect);
+    panelConn->addLargeAction(actSimulation);
+    panelConn->addSmallAction(actDisconnect);
+
+    connect(actConnect, &QAction::triggered, this, [this] {
+        bool ok = false;
+        const QString endpoint = QInputDialog::getText(
+            this,
+            tr("连接控制器"),
+            tr("控制器地址:"),
+            QLineEdit::Normal,
+            QStringLiteral("tcp://127.0.0.1:5000"),
+            &ok);
+        if (!ok)
+            return;
+
+        m_appContext->processModule()->connectController(endpoint);
+    });
+    connect(actDisconnect, &QAction::triggered,
+            m_appContext->processModule(), &ProcessModule::disconnectController);
+    connect(actSimulation, &QAction::toggled,
+            m_appContext->processModule(), &ProcessModule::setSimulationMode);
+    connect(m_appContext->processModule(), &ProcessModule::simulationModeChanged,
+            actSimulation, &QAction::setChecked);
 
     // ── 流程 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelProc = cat->addPanel(tr("流程"));
@@ -710,10 +769,12 @@ void MainWindow::buildLaserTab(SARibbonCategory* cat)
     panelRun->addSmallAction(actPause);
     panelRun->addSmallAction(actStop);
 
-    // Wire to laser control widget
-    connect(actStart, &QAction::triggered, m_laserControl, &WidgetLaserControl::startRequested);
-    connect(actPause, &QAction::triggered, m_laserControl, &WidgetLaserControl::pauseRequested);
-    connect(actStop,  &QAction::triggered, m_laserControl, &WidgetLaserControl::stopRequested);
+        connect(actStart, &QAction::triggered,
+            m_appContext->processModule(), &ProcessModule::start);
+        connect(actPause, &QAction::triggered,
+            m_appContext->processModule(), &ProcessModule::pause);
+        connect(actStop,  &QAction::triggered,
+            m_appContext->processModule(), &ProcessModule::stop);
 
     // ── 参数 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelParam = cat->addPanel(tr("参数"));
@@ -727,7 +788,10 @@ void MainWindow::createStatusBar()
 {
     m_sbDocName = new QLabel(tr("无文档"), this);
     m_sbCoords  = new QLabel("X: 0.000  Y: 0.000  Z: 0.000", this);
-    m_sbStatus  = new QLabel(tr("就绪"), this);
+    const QString statusText = m_appContext
+        ? m_appContext->processModule()->statusMessage()
+        : tr("就绪");
+    m_sbStatus  = new QLabel(statusText, this);
 
     m_sbDocName->setMinimumWidth(200);
     m_sbCoords->setMinimumWidth(280);
@@ -765,12 +829,12 @@ void MainWindow::onDocumentAdded(DocumentId id)
         updateCommandStates();
         return;
     }
-    LcncDocument* doc = LcncApplication::instance()->documentById(id);
+    LcncDocument* doc = m_appContext->cadModule()->documentById(id);
     if (doc) {
         m_sbDocName->setText(doc->name());
         // Only switch view if not on 准备 tab (which always shows machine view)
         if (!m_leftTabs || m_leftTabs->currentIndex() != 1) {
-            if (auto* gd = GuiApplication::instance()->guiDocument(id))
+            if (auto* gd = m_appContext->cadModule()->guiDocument(id))
                 m_occView->attachDocument(gd);
         }
     }
@@ -789,12 +853,12 @@ void MainWindow::onDocumentClosed(DocumentId /*id*/)
 
 void MainWindow::onActiveDocumentChanged(DocumentId id)
 {
-    LcncDocument* doc = LcncApplication::instance()->documentById(id);
+    LcncDocument* doc = m_appContext->cadModule()->documentById(id);
     if (doc) {
         m_sbDocName->setText(doc->name());
         // Only switch view if not on 准备 tab (which always shows machine view)
         if (!m_leftTabs || m_leftTabs->currentIndex() != 1) {
-            if (auto* gd = GuiApplication::instance()->guiDocument(id))
+            if (auto* gd = m_appContext->cadModule()->guiDocument(id))
                 m_occView->attachDocument(gd);
         }
     } else {
@@ -840,28 +904,9 @@ void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/
     // trigger rebuildDocumentTree() and invalidate the item pointer.
     const DocumentId docId  = item->data(0, kRoleDocId).toInt();
     const QString    entry  = item->data(0, kRoleEntry).toString();
-
-    if (docId == kInvalidDocumentId) return;
-
-    // Switch document AFTER reading item data.
-    // setActiveDocument emits activeDocumentChanged → onActiveDocumentChanged
-    // → rebuildDocumentTree() → m_documentTree->clear() which deletes 'item'.
-    if (LcncApplication::instance()->activeDocumentId() != docId)
-        LcncApplication::instance()->setActiveDocument(docId);
-
-    // Safely get GUI document (scene may have been switched above)
-    GuiDocument* gd = GuiApplication::instance()->guiDocument(docId);
-    if (!gd) return;
-
-    Handle(AIS_InteractiveContext) ctx = m_occView->context();
-    if (ctx.IsNull()) return;
-
-    Handle(V3d_View) view = m_occView->view();
-    if (view.IsNull()) return;
+    QStringList leaves;
 
     if (entry.isEmpty()) {
-        // Group node: cascade-select all descendant leaf entries in 3D.
-        // Collect leaf entries by recursively walking the tree item children.
         std::function<void(QTreeWidgetItem*, QStringList&)> collectLeaves;
         collectLeaves = [&](QTreeWidgetItem* node, QStringList& out) {
             for (int i = 0; i < node->childCount(); ++i) {
@@ -873,36 +918,24 @@ void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/
                     collectLeaves(ch, out);
             }
         };
-        QStringList leaves;
         collectLeaves(item, leaves);
+    }
+
+    if (docId == kInvalidDocumentId) return;
+
+    // Switch document AFTER reading item data.
+    // setActiveDocument emits activeDocumentChanged → onActiveDocumentChanged
+    // → rebuildDocumentTree() → m_documentTree->clear() which deletes 'item'.
+    if (m_appContext->cadModule()->activeDocumentId() != docId)
+        m_appContext->cadModule()->setActiveDocument(docId);
+
+    if (entry.isEmpty()) {
         if (leaves.isEmpty()) return;
-        try {
-            ctx->ClearSelected(false);
-            for (const QString& e : leaves) {
-                Handle(AIS_Shape) ais = gd->aisShape(e);
-                if (!ais.IsNull())
-                    ctx->AddOrRemoveSelected(ais, false);
-            }
-            view->Redraw();
-        } catch (const std::exception& ex) {
-            qWarning() << "Exception during group selection:" << ex.what();
-        }
+        m_appContext->cadModule()->setSelectedEntries(docId, leaves);
         return;
     }
 
-    // Leaf node: select the single shape.
-    // The aisMap stores only root/free shapes; sub-component labels are not
-    // individually tracked, so gracefully skip if not found.
-    Handle(AIS_Shape) ais = gd->aisShape(entry);
-    if (ais.IsNull()) return;
-
-    try {
-        ctx->ClearSelected(false);
-        ctx->SetSelected(ais, true);
-        view->Redraw();
-    } catch (const std::exception& e) {
-        qWarning() << "Exception during selection:" << e.what();
-    }
+    m_appContext->cadModule()->setSelectedEntries(docId, {entry});
 }
 
 void MainWindow::rebuildDocumentTree()
@@ -911,12 +944,9 @@ void MainWindow::rebuildDocumentTree()
     QSignalBlocker blocker(m_documentTree);
     m_documentTree->clear();
 
-    const QList<LcncDocument*> docs = LcncApplication::instance()->documents();
+    const QList<LcncDocument*> docs = m_appContext->cadModule()->workpieceDocuments();
     for (LcncDocument* doc : docs) {
         if (!doc) continue;
-
-        // Machine workspace is managed via the "准备" tab; skip it in the doc tree.
-        if (LcncApplication::instance()->isMachineDocument(doc->id())) continue;
 
         auto* docItem = new QTreeWidgetItem(m_documentTree);
         docItem->setText(0, doc->name());
@@ -975,13 +1005,12 @@ void MainWindow::rebuildDocumentTree()
 // ── View routing helpers ────────────────────────────────────────────────────────────────
 void MainWindow::showMachineView()
 {
-    DocumentId machId = LcncApplication::instance()->machineDocumentId();
-    if (auto* gd = GuiApplication::instance()->guiDocument(machId))
+    if (auto* gd = m_appContext->camModule()->machineGuiDocument())
         m_occView->attachDocument(gd);
     else
         m_occView->attachDefaultScene(m_defaultScene);
 
-    if (LcncDocument* machDoc = LcncApplication::instance()->machineDocument()) {
+    if (LcncDocument* machDoc = m_appContext->camModule()->machineDocument()) {
         // Only rebuild if document changed to preserve expand/collapse state
         if (m_modelTree->currentDocument() != machDoc)
             m_modelTree->rebuildForDocument(machDoc);
@@ -992,8 +1021,8 @@ void MainWindow::showMachineView()
 void MainWindow::showWorkpieceView(DocumentId id)
 {
     if (id == kInvalidDocumentId)
-        id = LcncApplication::instance()->activeDocumentId();
-    if (auto* gd = GuiApplication::instance()->guiDocument(id))
+        id = m_appContext->cadModule()->activeDocumentId();
+    if (auto* gd = m_appContext->cadModule()->guiDocument(id))
         m_occView->attachDocument(gd);
     else
         m_occView->attachDefaultScene(m_defaultScene);

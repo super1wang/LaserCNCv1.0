@@ -410,9 +410,83 @@ GuiDocument* CadModule::activeGuiDocument() const
     return GuiApplication::instance()->activeGuiDocument();
 }
 
+LcncDocument* CadModule::documentById(DocumentId id) const
+{
+    return LcncApplication::instance()->documentById(id);
+}
+
+GuiDocument* CadModule::guiDocument(DocumentId id) const
+{
+    return GuiApplication::instance()->guiDocument(id);
+}
+
+QList<LcncDocument*> CadModule::workpieceDocuments() const
+{
+    return LcncApplication::instance()->workpieceDocuments();
+}
+
 void CadModule::setActiveDocument(DocumentId id)
 {
     LcncApplication::instance()->setActiveDocument(id);
+}
+
+void CadModule::setEntityVisible(DocumentId docId, const QString& entry, bool visible)
+{
+    if (entry.isEmpty())
+        return;
+
+    if (auto* gd = guiDocument(docId)) {
+        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        if (ais.IsNull())
+            return;
+
+        if (visible)
+            gd->scene()->displayObject(ais);
+        else
+            gd->scene()->eraseObject(ais);
+
+        if (gd->hasView())
+            gd->view()->Redraw();
+    }
+}
+
+void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
+{
+    GuiDocument* gd = guiDocument(docId);
+    if (!gd)
+        return;
+
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull())
+        return;
+
+    ctx->ClearSelected(false);
+    for (const QString& entry : entries) {
+        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        if (!ais.IsNull())
+            ctx->AddOrRemoveSelected(ais, false);
+    }
+
+    if (gd->hasView())
+        gd->view()->Redraw();
+
+    emit selectionChanged(docId, gd->selectedEntries());
+}
+
+QStringList CadModule::selectedEntries(DocumentId docId) const
+{
+    if (auto* gd = guiDocument(docId))
+        return gd->selectedEntries();
+
+    return {};
+}
+
+void CadModule::syncSelectionFromView(DocumentId docId)
+{
+    if (docId == kInvalidDocumentId)
+        docId = activeDocumentId();
+
+    emit selectionChanged(docId, selectedEntries(docId));
 }
 
 // ── Modeling Operations ────────────────────────────────────────────────────────

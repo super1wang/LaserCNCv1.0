@@ -264,6 +264,108 @@ void CamModule::autoDetectAxes()
         entryToName.insert(XcafUtils::entry(lbl), XcafUtils::name(lbl));
     }
     doc->machineKinematics()->autoDetect(entryToName);
+    refreshMachineTransforms();
+    emit axisAssignmentsChanged();
+    LcncApplication::instance()->notifyDocumentModified(machineDocumentId());
+}
+
+void CamModule::applyAxisAssignments(const QMap<QString, QString>& entryToAxis)
+{
+    LcncDocument* doc = machineDocument();
+    if (!doc || entryToAxis.isEmpty())
+        return;
+
+    MachineKinematics* kin = doc->machineKinematics();
+    for (auto it = entryToAxis.cbegin(); it != entryToAxis.cend(); ++it) {
+        if (it.value().isEmpty())
+            kin->unassignShape(it.key());
+        else
+            kin->assignShape(it.key(), it.value());
+    }
+
+    refreshMachineTransforms();
+    emit axisAssignmentsChanged();
+    LcncApplication::instance()->notifyDocumentModified(machineDocumentId());
+}
+
+void CamModule::assignShapesToAxis(const QStringList& entries, const QString& axisName)
+{
+    if (entries.isEmpty() || axisName.isEmpty())
+        return;
+
+    QMap<QString, QString> entryToAxis;
+    for (const QString& entry : entries)
+        entryToAxis.insert(entry, axisName);
+    applyAxisAssignments(entryToAxis);
+}
+
+void CamModule::unassignShape(const QString& entry)
+{
+    if (entry.isEmpty())
+        return;
+
+    QMap<QString, QString> entryToAxis;
+    entryToAxis.insert(entry, QString());
+    applyAxisAssignments(entryToAxis);
+}
+
+void CamModule::clearAxisAssignments(const QString& axisName)
+{
+    MachineKinematics* kin = kinematics();
+    if (!kin || axisName.isEmpty())
+        return;
+
+    QMap<QString, QString> entryToAxis;
+    for (const QString& entry : kin->shapesForAxis(axisName))
+        entryToAxis.insert(entry, QString());
+    applyAxisAssignments(entryToAxis);
+}
+
+QList<CamModule::AxisOption> CamModule::axisOptions(bool includeDetachOption) const
+{
+    QList<AxisOption> result;
+    MachineKinematics* kin = kinematics();
+    if (!kin)
+        return result;
+
+    if (includeDetachOption)
+        result.append({QString(), tr("— 解除已有挂载 —")});
+
+    for (const MachineAxisDef& axis : kin->axes()) {
+        QString displayName;
+        if (axis.name == QStringLiteral("BASE")) {
+            displayName = tr("BASE（固定基座）");
+        } else if (axis.motionType == MachineAxisDef::Rotary) {
+            displayName = tr("%1 轴（旋转）").arg(axis.name);
+        } else {
+            displayName = tr("%1 轴（线性）").arg(axis.name);
+        }
+        result.append({axis.name, displayName});
+    }
+
+    return result;
+}
+
+QList<CamModule::WorkpieceMountCandidate> CamModule::mountableWorkpieces() const
+{
+    QList<WorkpieceMountCandidate> result;
+    const QList<LcncDocument*> docs = LcncApplication::instance()->workpieceDocuments();
+    for (LcncDocument* doc : docs) {
+        if (!doc)
+            continue;
+
+        const int workpieceCount = doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
+        if (workpieceCount <= 0)
+            continue;
+
+        result.append({
+            doc->id(),
+            tr("%1  (%2 形体)").arg(doc->name()).arg(workpieceCount),
+            workpieceCount,
+        });
+    }
+
+    return result;
 }
 
 // ── Workpiece Mounting ────────────────────────────────────────────────────────
@@ -815,12 +917,64 @@ void CamModule::setAxisPosition(const QString& axisName, double value)
 {
     if (auto* kin = kinematics()) {
         kin->setAxisPosition(axisName, value);
-        if (auto* gd = machineGuiDocument()) {
-            gd->updateAxisTransforms();
-            if (gd->hasView())
-                gd->view()->Redraw();
-        }
+        refreshMachineTransforms();
     }
+}
+
+void CamModule::setEntityVisible(const QString& entry, bool visible)
+{
+    if (entry.isEmpty())
+        return;
+
+    if (auto* gd = machineGuiDocument()) {
+        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        if (ais.IsNull())
+            return;
+
+        if (visible)
+            gd->scene()->displayObject(ais);
+        else
+            gd->scene()->eraseObject(ais);
+
+        if (gd->hasView())
+            gd->view()->Redraw();
+    }
+}
+
+void CamModule::setSelectedEntries(const QStringList& entries)
+{
+    GuiDocument* gd = machineGuiDocument();
+    if (!gd)
+        return;
+
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull())
+        return;
+
+    ctx->ClearSelected(false);
+    for (const QString& entry : entries) {
+        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        if (!ais.IsNull())
+            ctx->AddOrRemoveSelected(ais, false);
+    }
+
+    if (gd->hasView())
+        gd->view()->Redraw();
+
+    emit selectionChanged(gd->selectedEntries());
+}
+
+QStringList CamModule::selectedEntries() const
+{
+    if (auto* gd = machineGuiDocument())
+        return gd->selectedEntries();
+
+    return {};
+}
+
+void CamModule::syncSelectionFromView()
+{
+    emit selectionChanged(selectedEntries());
 }
 
 void CamModule::onSimTick()
@@ -859,15 +1013,20 @@ void CamModule::onSimTick()
         if (!mc.r2Name.isEmpty())
             kin->setAxisPosition(mc.r2Name, mc.r2);
 
-        if (auto* gd = machineGuiDocument()) {
-            gd->updateAxisTransforms();
-            if (gd->hasView())
-                gd->view()->Redraw();
-        }
+        refreshMachineTransforms();
     }
 
     emit simulationTick(m_simCurrentContour, m_simCurrentPoint, m_simTotalPoints);
     ++m_simCurrentPoint;
+}
+
+void CamModule::refreshMachineTransforms()
+{
+    if (auto* gd = machineGuiDocument()) {
+        gd->updateAxisTransforms();
+        if (gd->hasView())
+            gd->view()->Redraw();
+    }
 }
 
 void CamModule::refreshMachineDisplay()

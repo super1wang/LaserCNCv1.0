@@ -3,24 +3,18 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
+#include <QButtonGroup>
 #include <QPushButton>
 #include <QLabel>
 #include <QSlider>
 #include <QGridLayout>
-#include <QTimer>
 #include <QFrame>
-#include <cmath>
 
 WidgetLaserControl::WidgetLaserControl(QWidget* parent)
     : QWidget(parent)
 {
     buildUi();
-
-    // ── Simulation timer (Phase 1 placeholder) ────────────────────────────
-    m_simTimer = new QTimer(this);
-    m_simTimer->setInterval(200);       // 200 ms refresh
-    connect(m_simTimer, &QTimer::timeout, this, &WidgetLaserControl::onSimTick);
-    m_simTimer->start();
+    refreshStatusBanner();
 }
 
 void WidgetLaserControl::buildUi()
@@ -36,10 +30,8 @@ void WidgetLaserControl::buildUi()
     mainLayout->addStretch();
 
     // ── Status bar ────────────────────────────────────────────────────────
-    m_statusLabel = new QLabel(tr("仿真模式 — 未连接"), this);
+    m_statusLabel = new QLabel(this);
     m_statusLabel->setAlignment(Qt::AlignCenter);
-    m_statusLabel->setStyleSheet(
-        "background: #333; color: #AAFFAA; padding: 2px 4px; border-radius: 3px;");
     mainLayout->addWidget(m_statusLabel);
 }
 
@@ -81,6 +73,13 @@ void WidgetLaserControl::buildJogGroup()
     btnMed->setCheckable(true);
     btnFast->setCheckable(true);
     btnMed->setChecked(true);
+        auto* speedGroup = new QButtonGroup(this);
+        speedGroup->setExclusive(true);
+        speedGroup->addButton(btnSlow, 0);
+        speedGroup->addButton(btnMed, 1);
+        speedGroup->addButton(btnFast, 2);
+        connect(speedGroup, &QButtonGroup::idClicked,
+            this, [this](int id) { m_jogSpeedLevel = id; });
     for (auto* b : {btnSlow, btnMed, btnFast}) b->setMaximumWidth(40);
     speedRow->addWidget(btnSlow);
     speedRow->addWidget(btnMed);
@@ -101,9 +100,9 @@ void WidgetLaserControl::buildJogGroup()
         btnMinus->setFixedWidth(55);
 
         connect(btnPlus,  &QPushButton::clicked,
-                this, [this, ax]{ emit jogRequested(ax, +1, 1); });
+            this, [this, ax]{ emit jogRequested(ax, +1, m_jogSpeedLevel); });
         connect(btnMinus, &QPushButton::clicked,
-                this, [this, ax]{ emit jogRequested(ax, -1, 1); });
+            this, [this, ax]{ emit jogRequested(ax, -1, m_jogSpeedLevel); });
 
         jogGrid->addWidget(lblAx,    row, 0);
         jogGrid->addWidget(btnPlus,  row, 1);
@@ -154,7 +153,10 @@ void WidgetLaserControl::buildProcessGroup()
     auto* labelPct = new QLabel("100%", this);
     labelPct->setMinimumWidth(35);
     connect(slider, &QSlider::valueChanged, this,
-            [labelPct](int v){ labelPct->setText(QString::number(v) + "%"); });
+            [this, labelPct](int v) {
+            labelPct->setText(QString::number(v) + "%");
+            emit feedOverrideChanged(static_cast<double>(v) / 100.0);
+            });
     feedRow->addWidget(slider);
     feedRow->addWidget(labelPct);
     vlay->addLayout(feedRow);
@@ -176,23 +178,40 @@ void WidgetLaserControl::updateAxisPosition(const QString& axis, double pos)
 
 void WidgetLaserControl::updateConnectionStatus(bool connected)
 {
-    m_statusLabel->setText(connected ? tr("已连接") : tr("仿真模式 — 未连接"));
-    m_statusLabel->setStyleSheet(
-        connected ? "background: #1B5E20; color: #00FF88; padding: 2px 4px; border-radius: 3px;"
-                  : "background: #333; color: #AAFFAA; padding: 2px 4px; border-radius: 3px;");
+    m_connected = connected;
+    refreshStatusBanner();
+}
+
+void WidgetLaserControl::updateSimulationMode(bool enabled)
+{
+    m_simulationMode = enabled;
+    refreshStatusBanner();
 }
 
 void WidgetLaserControl::updateSystemStatus(const QString& status)
 {
-    m_statusLabel->setText(status);
+    m_statusText = status;
+    refreshStatusBanner();
 }
 
-// ── Simulation tick ────────────────────────────────────────────────────────────
-void WidgetLaserControl::onSimTick()
+void WidgetLaserControl::refreshStatusBanner()
 {
-    static double t = 0.0;
-    t += 0.05;
-    const QStringList axes = {"X", "Y", "Z", "A", "C"};
-    for (int i = 0; i < axes.size(); ++i)
-        updateAxisPosition(axes[i], std::sin(t + i) * 10.0);
+    const QString fallback = m_simulationMode
+        ? (m_connected ? tr("仿真模式 — 控制器已连接") : tr("仿真模式 — 未连接"))
+        : (m_connected ? tr("控制器模式 — 已连接") : tr("控制器模式 — 未连接"));
+    const QString text = m_statusText.isEmpty() ? fallback : m_statusText;
+
+    QString style = QStringLiteral("background: #333; color: #AAFFAA; padding: 2px 4px; border-radius: 3px;");
+    if (text.contains(tr("急停"))) {
+        style = QStringLiteral("background: #7F1D1D; color: white; padding: 2px 4px; border-radius: 3px;");
+    } else if (text.contains(tr("错误")) || text.contains(tr("无法"))) {
+        style = QStringLiteral("background: #92400E; color: white; padding: 2px 4px; border-radius: 3px;");
+    } else if (text.contains(tr("暂停"))) {
+        style = QStringLiteral("background: #B45309; color: white; padding: 2px 4px; border-radius: 3px;");
+    } else if (m_connected && !m_simulationMode) {
+        style = QStringLiteral("background: #1B5E20; color: #00FF88; padding: 2px 4px; border-radius: 3px;");
+    }
+
+    m_statusLabel->setText(text);
+    m_statusLabel->setStyleSheet(style);
 }

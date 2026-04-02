@@ -1,4 +1,5 @@
 #include "app/widget_machine_panel.h"
+#include "modules/cam_module.h"
 #include "base/lcnc_document.h"
 #include "base/machine_kinematics.h"
 #include "base/xcaf_utils.h"
@@ -272,10 +273,7 @@ void WidgetMachinePanel::rebuildMarkButtons()
         const QString axisName = axis.name;
         connect(btn, &QPushButton::clicked, this, [this, axisName] {
             if (m_selectedEntries.isEmpty() || !m_doc) return;
-            MachineKinematics* kin = m_doc->machineKinematics();
-            for (const QString& entry : m_selectedEntries)
-                kin->assignShape(entry, axisName);
-            emit axisAssignmentChanged();
+            CamModule::instance()->assignShapesToAxis(m_selectedEntries, axisName);
         });
     }
 }

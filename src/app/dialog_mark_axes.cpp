@@ -1,4 +1,5 @@
 #include "app/dialog_mark_axes.h"
+#include "modules/cam_module.h"
 #include "base/lcnc_document.h"
 #include "base/machine_kinematics.h"
 #include "base/xcaf_utils.h"
@@ -143,13 +144,7 @@ void DialogMarkAxes::populateRows()
 
 void DialogMarkAxes::onAutoDetect()
 {
-    // Build entryToName map for all rows
-    QMap<QString,QString> entryToName;
-    for (const auto& r : m_rows)
-        entryToName.insert(r.entry, r.name);
-
-    // Save current assignment state, run auto-detect, then reflect in combos
-    m_kin->autoDetect(entryToName);
+    CamModule::instance()->autoDetectAxes();
 
     // Update combos
     for (auto& r : m_rows) {
@@ -171,17 +166,19 @@ void DialogMarkAxes::onAutoDetect()
 
 void DialogMarkAxes::accept()
 {
-    // Write all combo selections back to MachineKinematics
+    QMap<QString, QString> entryToAxis;
     const auto& axes = m_kin->axes();
     for (const auto& r : m_rows) {
         const int idx = r.combo->currentIndex();
         if (idx == 0) {
-            m_kin->unassignShape(r.entry);  // "— 未分配 —"
+            entryToAxis.insert(r.entry, QString());
         } else {
             const int axisIdx = idx - 1;
             if (axisIdx >= 0 && axisIdx < axes.size())
-                m_kin->assignShape(r.entry, axes[axisIdx].name);
+                entryToAxis.insert(r.entry, axes[axisIdx].name);
         }
     }
+
+    CamModule::instance()->applyAxisAssignments(entryToAxis);
     QDialog::accept();
 }

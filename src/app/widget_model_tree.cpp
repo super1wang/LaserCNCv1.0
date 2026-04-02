@@ -1,4 +1,5 @@
 #include "app/widget_model_tree.h"
+#include "modules/cam_module.h"
 #include "base/lcnc_document.h"
 #include "base/machine_kinematics.h"
 #include "base/xcaf_utils.h"
@@ -349,14 +350,10 @@ void WidgetModelTree::onContextMenuRequested(const QPoint& pos)
     QAction* chosen = menu.exec(m_tree->viewport()->mapToGlobal(pos));
     if (!chosen) return;
 
-    MachineKinematics* kin = m_doc->machineKinematics();
     if (chosen == actRemove) {
-        kin->unassignShape(shapeEntry);
-        emit axisNodeUnassigned();
+        CamModule::instance()->unassignShape(shapeEntry);
     } else if (chosen == actClear) {
-        for (const QString& entry : kin->shapesForAxis(axisName))
-            kin->unassignShape(entry);
-        emit axisNodeUnassigned();
+        CamModule::instance()->clearAxisAssignments(axisName);
     }
 }
 

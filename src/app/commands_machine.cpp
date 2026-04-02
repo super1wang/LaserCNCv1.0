@@ -127,16 +127,14 @@ void CmdMarkAxes::execute()
     LcncDocument* doc = context()->machineDocument();
     if (!doc) return;
 
-    MachineKinematics* kin = doc->machineKinematics();
-    if (kin->axes().isEmpty()) {
+    if (context()->camModule()->axisOptions().isEmpty()) {
         QMessageBox::information(nullptr, tr("标记轴系"),
             tr("请先通过[加载机台]命令选择机台构型并加载模型。"));
         return;
     }
 
-    DialogMarkAxes dlg(doc, kin, nullptr);
+    DialogMarkAxes dlg(doc, doc->machineKinematics(), nullptr);
     if (dlg.exec() == QDialog::Accepted) {
-        app()->notifyDocumentModified(doc->id());
         context()->updateCommandStates();
     }
 }
@@ -166,16 +164,15 @@ void CmdMountWorkpiece::execute()
     LcncDocument* machDoc = context()->machineDocument();
     if (!machDoc) return;
 
-    MachineKinematics* kin = machDoc->machineKinematics();
-    if (kin->axes().isEmpty()) {
+    const auto axisOptions = context()->camModule()->axisOptions(true);
+    if (axisOptions.size() <= 1) {
         QMessageBox::information(nullptr, tr("挂载工件"),
             tr("请先加载机台模型并配置轴系。"));
         return;
     }
 
-    // Gather all open workpiece documents
-    const QList<LcncDocument*> wpcDocs = app()->workpieceDocuments();
-    if (wpcDocs.isEmpty()) {
+    const auto mountCandidates = context()->camModule()->mountableWorkpieces();
+    if (mountCandidates.isEmpty()) {
         QMessageBox::information(nullptr, tr("挂载工件"),
             tr("请先打开至少一个工件文档。"));
         return;
@@ -189,29 +186,11 @@ void CmdMountWorkpiece::execute()
     auto* cbDoc  = new QComboBox;
     auto* cbAxis = new QComboBox;
 
-    // Populate document combo — show document name + workpiece entity count
-    for (LcncDocument* d : wpcDocs) {
-        const int wpcCount = d->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
-        if (wpcCount == 0) continue;
-        cbDoc->addItem(tr("%1  (%2 形体)").arg(d->name()).arg(wpcCount), d->id());
-    }
-    if (cbDoc->count() == 0) {
-        QMessageBox::information(nullptr, tr("挂载工件"),
-            tr("打开的文档中没有工件模型。"));
-        return;
-    }
+    for (const auto& candidate : mountCandidates)
+        cbDoc->addItem(candidate.displayName, candidate.documentId);
 
-    // Populate axis combo
-    cbAxis->addItem(tr("— 解除已有挂载 —"), QString());
-    for (const auto& axis : kin->axes()) {
-        if (axis.name == "BASE") {
-            cbAxis->addItem(tr("BASE（固定基座）"), axis.name);
-        } else if (axis.motionType == MachineAxisDef::Rotary) {
-            cbAxis->addItem(tr("%1 轴（旋转）").arg(axis.name), axis.name);
-        } else {
-            cbAxis->addItem(tr("%1 轴（线性）").arg(axis.name), axis.name);
-        }
-    }
+    for (const auto& axis : axisOptions)
+        cbAxis->addItem(axis.displayName, axis.name);
 
     frm->addRow(tr("工件文档:"), cbDoc);
     frm->addRow(tr("挂载到:"),   cbAxis);

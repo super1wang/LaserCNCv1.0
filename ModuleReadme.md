@@ -41,7 +41,8 @@
 3、Process 模块
 - 负责加工流程、外设、工艺参数及执行状态管理
 - 负责执行 tab 页
-- 当前先建立统一接口和状态容器，后续逐步接入实际设备与执行流程
+- 当前已开始承接执行页控制语义，包括仿真模式、运行/暂停/停止、急停、点动、回零、进给倍率、轴位置反馈
+- 后续继续接入真实设备与执行流程持久化
 
 4、共享子模块
 - 日志、TaskManager、参数配置、后续设备管理等作为独立共用模块/服务存在
@@ -95,15 +96,19 @@ CAM 中的工件和机台零件同样会用到平移、旋转、删除等常规�
 - 工具路径共享访问 CamToolpathAccess 已切换为从 CamModule 读取状态
 - MainWindow 中机台轴位置和刀路参数/轮廓状态的直接写底层逻辑已开始改为通过 CamModule 路由
 - CadModule 已补上文档级事务封装，避免创建/变换/删除/拆解丢失 Undo 语义
+- MainWindow 中工件页/准备页的显隐与选择写操作已开始改为通过 CadModule / CamModule 路由
+- DialogMarkAxes、准备页快速轴分配、模型树右键解除分配已切换为调用 CamModule，而不再直接改 MachineKinematics
+- WidgetLaserControl 已去掉内部假定时器，执行页开始通过 ProcessModule 统一驱动状态和轴位反馈
+- 激光加工 Ribbon 的连接/仿真/运行控制已开始直连 ProcessModule
 
 3、当前状态
 - 工程已可成功编译
-- 现阶段属于“第一轮模块落地 + 文件/CAD 命令继续内聚 + MainWindow 编排继续收口”
+- 现阶段属于“第一轮模块落地 + 文件/CAD 命令继续内聚 + MainWindow 编排继续收口 + 执行页开始真实接入 ProcessModule”
 
 六、后续继续迁移项
 
 1、继续瘦化 commands_machine / commands_cam，清理 commands_cam 中遗留的旧静态状态代码
-2、将 MainWindow 中剩余的文档树、可见性、选择联动等业务编排进一步迁入 CadModule / CamModule / ProcessModule
-3、补齐 ProcessModule 与执行页、外设控制、工艺参数的真实集成
+2、继续将 MainWindow 中剩余的文档树数据构建、视图切换编排进一步迁入 CadModule / CamModule / ProcessModule
+3、继续补齐 ProcessModule 与真实外设控制、工艺参数、流程持久化的集成
 4、补齐文档页、准备页、执行页的模块内聚管理
 5、按模块继续梳理日志、任务、参数等共用子模块
