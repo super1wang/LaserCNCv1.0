@@ -16,6 +16,7 @@ class QTabWidget;
 class QStackedWidget;
 class QSplitter;
 class QLabel;
+class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -43,6 +44,7 @@ public:
 
     /// Called by AppContext to refresh Ribbon button states.
     void updateCommandStates();
+    WidgetOccView* occView() const { return m_occView; }
 
     /// Returns true when the 准备 (machine) tab is currently active.
     bool isMachineViewActive() const;
@@ -67,6 +69,10 @@ private:
     void buildCamTab(class SARibbonCategory* cat);
     void buildLaserTab(class SARibbonCategory* cat);
     void rebuildDocumentTree();
+    void rebuildContourListWidget();
+    void restorePersistedCamState();
+    void syncMachineWorkspaceUi();
+    void syncMachineWorkspaceUiInternal(bool rebuildTree);
     /// Route 3D view to the machine workspace document.
     void showMachineView();
     /// Route 3D view to the specified workpiece document (defaults to active).
@@ -103,4 +109,6 @@ private:
     QLabel* m_sbDocName{nullptr};
     QLabel* m_sbCoords{nullptr};
     QLabel* m_sbStatus{nullptr};
+    QTimer* m_machineRefreshTimer{nullptr};
+    QString m_pendingCalibrationTarget;
 };

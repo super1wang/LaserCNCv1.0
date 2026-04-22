@@ -30,14 +30,16 @@ public:
     // ── Shape display ─────────────────────────────────────────────────────────
     Handle(AIS_Shape) displayShape(const TopoDS_Shape& shape,
                                    bool fitAll  = false,
-                                   bool selectable = true);
+                                   bool selectable = true,
+                                   bool updateViewer = true);
 
-    void redisplayShape(const Handle(AIS_Shape)& aisShape);
+    void redisplayShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
     void eraseShape(const Handle(AIS_Shape)& aisShape);
     void eraseAll();
 
     void setShapeColor(const Handle(AIS_Shape)& aisShape,
-                       const Quantity_Color&     color);
+                       const Quantity_Color&     color,
+                       bool                      updateViewer = true);
 
     // ── Selection ─────────────────────────────────────────────────────────────
     void clearSelection();

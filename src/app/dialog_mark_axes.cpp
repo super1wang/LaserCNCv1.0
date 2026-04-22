@@ -9,6 +9,7 @@
 #include <QGridLayout>
 #include <QScrollArea>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QLabel>
 #include <QPushButton>
 #include <QDialogButtonBox>
@@ -26,9 +27,10 @@ DialogMarkAxes::DialogMarkAxes(LcncDocument*     doc,
     , m_kin(kin)
 {
     setWindowTitle(tr("标记轴系零部件"));
-    setMinimumSize(480, 460);
+    setMinimumSize(560, 560);
     buildUi();
     populateRows();
+    populateOriginRows();
 }
 
 // ── UI construction ───────────────────────────────────────────────────────────
@@ -72,6 +74,24 @@ void DialogMarkAxes::buildUi()
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     mainLayout->addWidget(scroll, 1);
+
+    auto* originSep = new QFrame(this);
+    originSep->setFrameShape(QFrame::HLine);
+    originSep->setFrameShadow(QFrame::Sunken);
+    mainLayout->addWidget(originSep);
+
+    auto* originLabel = new QLabel(tr("旋转轴轴心（用于仿真时绕真实轴心旋转）"), this);
+    originLabel->setStyleSheet("color: #888; font-size: 11px;");
+    mainLayout->addWidget(originLabel);
+
+    m_originContainer = new QWidget(this);
+    m_originGrid = new QGridLayout(m_originContainer);
+    m_originGrid->setColumnStretch(0, 0);
+    m_originGrid->setColumnStretch(1, 1);
+    m_originGrid->setColumnStretch(2, 1);
+    m_originGrid->setColumnStretch(3, 1);
+    m_originGrid->setSpacing(4);
+    mainLayout->addWidget(m_originContainer);
 
     // ── Bottom button row ─────────────────────────────────────────────────
     auto* autoBtn = new QPushButton(tr("🔍 自动识别"), this);
@@ -140,6 +160,78 @@ void DialogMarkAxes::populateRows()
     }
 }
 
+void DialogMarkAxes::populateOriginRows()
+{
+    m_originEditors.clear();
+
+    while (m_originGrid->count() > 0) {
+        QLayoutItem* item = m_originGrid->takeAt(0);
+        if (!item)
+            continue;
+        delete item->widget();
+        delete item;
+    }
+
+    auto* hdrAxis = new QLabel(tr("轴"), m_originContainer);
+    auto* hdrX = new QLabel(tr("X"), m_originContainer);
+    auto* hdrY = new QLabel(tr("Y"), m_originContainer);
+    auto* hdrZ = new QLabel(tr("Z"), m_originContainer);
+    hdrAxis->setStyleSheet("font-weight: bold;");
+    hdrX->setStyleSheet("font-weight: bold;");
+    hdrY->setStyleSheet("font-weight: bold;");
+    hdrZ->setStyleSheet("font-weight: bold;");
+    m_originGrid->addWidget(hdrAxis, 0, 0);
+    m_originGrid->addWidget(hdrX, 0, 1);
+    m_originGrid->addWidget(hdrY, 0, 2);
+    m_originGrid->addWidget(hdrZ, 0, 3);
+
+    int row = 1;
+    for (const MachineAxisDef& axis : m_kin->axes()) {
+        if (axis.motionType != MachineAxisDef::Rotary)
+            continue;
+
+        auto makeSpin = [this]() {
+            auto* spin = new QDoubleSpinBox(m_originContainer);
+            spin->setRange(-100000.0, 100000.0);
+            spin->setDecimals(3);
+            spin->setSingleStep(1.0);
+            spin->setSuffix(QStringLiteral(" mm"));
+            return spin;
+        };
+
+        auto* nameLabel = new QLabel(axis.name, m_originContainer);
+        auto* xSpin = makeSpin();
+        auto* ySpin = makeSpin();
+        auto* zSpin = makeSpin();
+
+        m_originGrid->addWidget(nameLabel, row, 0);
+        m_originGrid->addWidget(xSpin, row, 1);
+        m_originGrid->addWidget(ySpin, row, 2);
+        m_originGrid->addWidget(zSpin, row, 3);
+
+        m_originEditors.insert(axis.name, {xSpin, ySpin, zSpin});
+        ++row;
+    }
+
+    if (m_originEditors.isEmpty()) {
+        auto* lbl = new QLabel(tr("当前构型没有旋转轴需要配置轴心。"), m_originContainer);
+        lbl->setStyleSheet("color: gray; font-size: 11px;");
+        m_originGrid->addWidget(lbl, 1, 0, 1, 4);
+    }
+
+    refreshOriginEditors();
+}
+
+void DialogMarkAxes::refreshOriginEditors()
+{
+    for (auto it = m_originEditors.begin(); it != m_originEditors.end(); ++it) {
+        const gp_Pnt origin = CamModule::instance()->axisOrigin(it.key());
+        it.value().x->setValue(origin.X());
+        it.value().y->setValue(origin.Y());
+        it.value().z->setValue(origin.Z());
+    }
+}
+
 // ── Auto-detect slot ──────────────────────────────────────────────────────────
 
 void DialogMarkAxes::onAutoDetect()
@@ -160,6 +252,8 @@ void DialogMarkAxes::onAutoDetect()
         }
         r.combo->setCurrentIndex(idx);
     }
+
+    refreshOriginEditors();
 }
 
 // ── Accept ────────────────────────────────────────────────────────────────────
@@ -180,5 +274,12 @@ void DialogMarkAxes::accept()
     }
 
     CamModule::instance()->applyAxisAssignments(entryToAxis);
+    for (auto it = m_originEditors.cbegin(); it != m_originEditors.cend(); ++it) {
+        CamModule::instance()->setAxisOrigin(
+            it.key(),
+            gp_Pnt(it.value().x->value(),
+                   it.value().y->value(),
+                   it.value().z->value()));
+    }
     QDialog::accept();
 }

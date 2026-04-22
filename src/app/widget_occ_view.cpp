@@ -12,8 +12,10 @@
 #include <V3d_View.hxx>
 #include <V3d_Viewer.hxx>
 #include <AIS_InteractiveContext.hxx>
+#include <AIS_Shape.hxx>
 #include <AIS_ViewCube.hxx>
 #include <SelectMgr_EntityOwner.hxx>
+#include <TopAbs_ShapeEnum.hxx>
 
 WidgetOccView::WidgetOccView(QWidget* parent)
     : QWidget(parent)
@@ -41,9 +43,30 @@ void WidgetOccView::ensureOccWindow()
         m_occWindow->Map();
 }
 
+void WidgetOccView::clearRubberBand()
+{
+    m_rubberBanding = false;
+
+    if (!m_context.IsNull() && !m_rubberBand.IsNull())
+        m_context->Erase(m_rubberBand, false);
+
+    m_rubberBand.Nullify();
+}
+
 void WidgetOccView::activateView(const Handle(V3d_View)& view,
                                   const Handle(AIS_InteractiveContext)& ctx)
 {
+    if (m_leadInPickActive) {
+        endLeadInPick();
+        emit leadInPickCanceled();
+    }
+
+    if (m_facePickActive) {
+        endFacePick();
+        emit facePickCanceled();
+    }
+
+    clearRubberBand();
     m_view    = view;
     m_context = ctx;
     if (!m_view.IsNull()) {
@@ -53,7 +76,79 @@ void WidgetOccView::activateView(const Handle(V3d_View)& view,
     }
 }
 
+void WidgetOccView::restoreDefaultSelectionModes()
+{
+    if (m_context.IsNull())
+        return;
+
+    m_context->Deactivate();
+
+    if (m_activeDoc) {
+        m_activeDoc->setEntitySelectionMode(0);
+        if (!m_activeDoc->viewCube().IsNull())
+            m_context->Activate(m_activeDoc->viewCube(), 0, Standard_False);
+    }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
+
+void WidgetOccView::beginLeadInPick()
+{
+    if (m_view.IsNull() || m_context.IsNull())
+        return;
+
+    if (m_facePickActive) {
+        endFacePick();
+        emit facePickCanceled();
+    }
+
+    clearRubberBand();
+    m_rotating = false;
+    m_panning = false;
+    m_leadInPickActive = true;
+    setCursor(Qt::CrossCursor);
+    setFocus(Qt::OtherFocusReason);
+}
+
+void WidgetOccView::endLeadInPick()
+{
+    if (!m_leadInPickActive)
+        return;
+
+    m_leadInPickActive = false;
+    unsetCursor();
+}
+
+void WidgetOccView::beginFacePick()
+{
+    if (m_view.IsNull() || m_context.IsNull() || !m_activeDoc)
+        return;
+
+    clearRubberBand();
+    m_rotating = false;
+    m_panning = false;
+    m_facePickActive = true;
+
+    if (m_leadInPickActive) {
+        endLeadInPick();
+        emit leadInPickCanceled();
+    }
+
+    m_context->Deactivate();
+    m_activeDoc->setEntitySelectionMode(AIS_Shape::SelectionMode(TopAbs_FACE));
+    setCursor(Qt::CrossCursor);
+    setFocus(Qt::OtherFocusReason);
+}
+
+void WidgetOccView::endFacePick()
+{
+    if (!m_facePickActive)
+        return;
+
+    m_facePickActive = false;
+    restoreDefaultSelectionModes();
+    unsetCursor();
+}
 
 void WidgetOccView::attachDocument(GuiDocument* doc)
 {
@@ -80,6 +175,8 @@ void WidgetOccView::attachDefaultScene(GraphicsScene* scene)
     // Stop animation on the outgoing document
     if (m_activeDoc && m_activeDoc->animTimer())
         m_activeDoc->animTimer()->stop();
+
+    clearRubberBand();
 
     m_activeDoc    = nullptr;
     m_defaultScene = scene;
@@ -143,6 +240,21 @@ void WidgetOccView::mousePressEvent(QMouseEvent* e)
     m_prevPos  = e->pos();
     m_pressPos = e->pos();
 
+    if (m_leadInPickActive) {
+        if (e->button() == Qt::LeftButton)
+            clearRubberBand();
+        return;
+    }
+
+    if (m_facePickActive) {
+        if (e->button() == Qt::LeftButton)
+            clearRubberBand();
+        return;
+    }
+
+    if (e->button() == Qt::LeftButton)
+        clearRubberBand();
+
     if (e->button() == Qt::RightButton) {
         // Right button: start view rotation
         m_rotating = true;
@@ -156,15 +268,39 @@ void WidgetOccView::mousePressEvent(QMouseEvent* e)
 
 void WidgetOccView::mouseReleaseEvent(QMouseEvent* e)
 {
-    if (m_view.IsNull()) return;
+    if (m_view.IsNull() || m_context.IsNull()) return;
+
+    if (m_leadInPickActive) {
+        if (e->button() == Qt::RightButton) {
+            emit leadInPickCanceled();
+            return;
+        }
+
+        if (e->button() == Qt::LeftButton
+            && (e->pos() - m_pressPos).manhattanLength() < 4) {
+            emit leadInPickConfirmed(e->pos());
+        }
+        return;
+    }
+
+    if (m_facePickActive) {
+        if (e->button() == Qt::RightButton) {
+            emit facePickCanceled();
+            return;
+        }
+
+        if (e->button() == Qt::LeftButton
+            && (e->pos() - m_pressPos).manhattanLength() < 4) {
+            emit facePickConfirmed(e->pos());
+        }
+        return;
+    }
 
     if (e->button() == Qt::LeftButton) {
         if (m_rubberBanding) {
             // Finish rubber-band: hide band, select shapes inside rectangle.
-            m_rubberBanding = false;
-            if (!m_context.IsNull() && !m_rubberBand.IsNull())
-                m_context->Erase(m_rubberBand, false);
             const QRect selRect = QRect(m_pressPos, e->pos()).normalized();
+            clearRubberBand();
             m_context->Select(selRect.left(),  selRect.top(),
                               selRect.right(), selRect.bottom(),
                               m_view, Standard_True);
@@ -186,19 +322,30 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
 {
     if (m_view.IsNull() || m_context.IsNull()) return;
 
+    if (m_leadInPickActive) {
+        emit leadInPickMoved(e->pos());
+        m_prevPos = e->pos();
+        return;
+    }
+
+    if (m_facePickActive) {
+        emit facePickMoved(e->pos());
+        m_prevPos = e->pos();
+        return;
+    }
+
     if (e->buttons() & Qt::LeftButton) {
         const QPoint delta = e->pos() - m_pressPos;
 
         if (!m_rubberBanding && delta.manhattanLength() >= 4) {
             // Threshold exceeded — start rubber-band display.
             m_rubberBanding = true;
-            if (m_rubberBand.IsNull())
-                m_rubberBand = new AIS_RubberBand(
-                    Quantity_Color(0.25, 0.70, 1.0, Quantity_TOC_RGB),  // border: blue
-                    Aspect_TOL_SOLID,
-                    Quantity_Color(0.25, 0.70, 1.0, Quantity_TOC_RGB),  // fill: same
-                    0.80,  // 80% transparent (20% opaque) fill
-                    1.5);  // border width
+            m_rubberBand = new AIS_RubberBand(
+                Quantity_Color(0.25, 0.70, 1.0, Quantity_TOC_RGB),  // border: blue
+                Aspect_TOL_SOLID,
+                Quantity_Color(0.25, 0.70, 1.0, Quantity_TOC_RGB),  // fill: same
+                0.80,  // 80% transparent (20% opaque) fill
+                1.5);  // border width
 
             const int h = height();
             m_rubberBand->SetRectangle(
@@ -207,11 +354,12 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
                 qMax(m_pressPos.x(), e->pos().x()),
                 h - qMin(m_pressPos.y(), e->pos().y()));
             m_context->Display(m_rubberBand, 0, -1, false);
-            m_context->Deactivate(m_rubberBand);
             m_view->Redraw();
 
         } else if (m_rubberBanding) {
             // Update rectangle during drag.
+            if (m_rubberBand.IsNull())
+                return;
             const int h = height();
             m_rubberBand->SetRectangle(
                 qMin(m_pressPos.x(), e->pos().x()),
@@ -249,12 +397,25 @@ void WidgetOccView::wheelEvent(QWheelEvent* e)
 
 void WidgetOccView::mouseDoubleClickEvent(QMouseEvent* e)
 {
+    if (m_leadInPickActive || m_facePickActive)
+        return;
+
     if (e->button() == Qt::LeftButton) fitAll();
 }
 
 void WidgetOccView::keyPressEvent(QKeyEvent* e)
 {
     if (m_view.IsNull()) { QWidget::keyPressEvent(e); return; }
+
+    if (m_leadInPickActive && e->key() == Qt::Key_Escape) {
+        emit leadInPickCanceled();
+        return;
+    }
+
+    if (m_facePickActive && e->key() == Qt::Key_Escape) {
+        emit facePickCanceled();
+        return;
+    }
 
     switch (e->key()) {
     case Qt::Key_Escape:

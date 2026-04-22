@@ -1,5 +1,6 @@
 #include "app/commands_cam.h"
 #include "app/i_app_context.h"
+#include "app/widget_occ_view.h"
 
 #include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
@@ -16,6 +17,7 @@
 #include <QIcon>
 #include <QMessageBox>
 #include <QTimer>
+#include <QToolTip>
 
 #include <AIS_Shape.hxx>
 #include <AIS_InteractiveContext.hxx>
@@ -55,7 +57,9 @@ bool CmdGenerateToolpath::isEnabled() const
 void CmdGenerateToolpath::execute()
 {
     CamModule* cam = context()->camModule();
-    if (!cam->generateToolpath(cam->smoothAngle(), cam->useFaceClassification())) {
+    if (!cam->generateToolpath(cam->smoothAngle(),
+                               cam->useFaceClassification(),
+                               cam->deflection())) {
         QMessageBox::warning(nullptr, tr("生成刀路"),
             tr("机台文档中未找到工件，或未找到可用的轮廓边缘。"));
     }
@@ -82,83 +86,22 @@ bool CmdSetLeadIn::isEnabled() const
 void CmdSetLeadIn::execute()
 {
     CamModule* cam = context()->camModule();
-    GuiDocument* gd = context()->machineGuiDocument();
-    if (!gd) return;
+    WidgetOccView* occView = context()->occView();
+    if (!occView)
+        return;
 
-    const Handle(AIS_InteractiveContext)& aisCtx = gd->context();
-    if (aisCtx.IsNull()) return;
+    cam->requestMachineView();
 
-    LaserToolpath& toolpath = cam->toolpathRef();
-    const QList<Handle(AIS_Shape)>& contourAis = cam->contourAis();
-
-    // Activate edge-level selection on contour AIS shapes
-    // Mode 2 = TopAbs_EDGE for AIS_Shape
-    for (const auto& ais : contourAis) {
-        if (!ais.IsNull()) {
-            aisCtx->Activate(ais, 2);   // Edge sub-shape selection
-        }
+    if (occView->isLeadInPickActive()) {
+        occView->endLeadInPick();
+        cam->cancelLeadInPreview();
+        return;
     }
 
-    // Show a non-modal message instructing the user to click
-    QMessageBox::information(nullptr, tr("选择引刀位置"),
-        tr("请在3D视图中点击一条轮廓边缘。\n"
-           "点击的位置将作为引刀线的进入点。\n\n"
-           "点击确定后进入选择模式，单击视图中的轮廓边缘完成选择。"));
-
-    // Check if user already has something selected (after the message box)
-    if (aisCtx->NbSelected() == 0) {
-        // The user needs to click — we set up a one-shot connection.
-        // For simplicity, we query current selection after the message box.
-        // In practice the user will click, and we handle it on next call.
-        // Let's check DetectedShape for any recently picked edge.
-    }
-
-    // Process the current selection
-    aisCtx->InitSelected();
-    if (aisCtx->MoreSelected()) {
-        Handle(SelectMgr_EntityOwner) owner = aisCtx->SelectedOwner();
-        Handle(StdSelect_BRepOwner) brepOwner =
-            Handle(StdSelect_BRepOwner)::DownCast(owner);
-
-        if (!brepOwner.IsNull() && brepOwner->HasShape()) {
-            TopoDS_Shape selectedShape = brepOwner->Shape();
-            if (selectedShape.ShapeType() == TopAbs_EDGE) {
-                TopoDS_Edge edge = TopoDS::Edge(selectedShape);
-
-                // Get the clicked 3D point (use parameter midpoint of the edge)
-                BRepAdaptor_Curve curve(edge);
-                double uMid = (curve.FirstParameter() + curve.LastParameter()) / 2.0;
-                gp_Pnt clickPt = curve.Value(uMid);
-
-                // Find which contour contains this edge
-                int bestContour = -1;
-                double bestDist = 1e30;
-
-                for (int ci = 0; ci < toolpath.contourCount(); ++ci) {
-                    const LaserContour& c = toolpath.contour(ci);
-                    for (const auto& tp : c.points) {
-                        double d = clickPt.Distance(tp.position);
-                        if (d < bestDist) {
-                            bestDist = d;
-                            bestContour = ci;
-                        }
-                    }
-                }
-
-                if (bestContour >= 0) {
-                    cam->setLeadInEntry(bestContour, clickPt, uMid);
-                }
-            }
-        }
-    }
-
-    // Deactivate edge selection mode, restore shape-level selection
-    for (const auto& ais : contourAis) {
-        if (!ais.IsNull()) {
-            aisCtx->Deactivate(ais, 2);
-            aisCtx->Activate(ais, 0);  // Restore shape-level
-        }
-    }
+    occView->beginLeadInPick();
+    QToolTip::showText(occView->mapToGlobal(QPoint(24, 24)),
+                       tr("移动鼠标预览引刀线，左键确认，右键或 Esc 取消"),
+                       occView);
 }
 
 // =============================================================================

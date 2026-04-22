@@ -43,6 +43,11 @@ GuiDocument* AppContext::machineGuiDocument() const
     return GuiApplication::instance()->guiDocument(id);
 }
 
+WidgetOccView* AppContext::occView() const
+{
+    return m_mainWindow ? m_mainWindow->occView() : nullptr;
+}
+
 CadModule* AppContext::cadModule() const
 {
     return CadModule::instance();

@@ -8,6 +8,7 @@
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_NeutralWindow.hxx>
 
+#include "base/cam_config.h"
 #include "base/lcnc_application.h"
 #include "graphics/graphics_scene.h"
 
@@ -59,8 +60,12 @@ public:
                                    bool           fitAll = false);
     void eraseEntity(const QString& labelEntry);
     void rebuildDisplay();
+    void setMachineRenderQuality(MachineRenderQuality quality);
+    MachineRenderQuality machineRenderQuality() const { return m_machineRenderQuality; }
+    void applyMachineDisplayStyle();
     Handle(AIS_Shape) aisShape(const QString& labelEntry) const;    /// Returns label entries of all currently selected AIS shapes.
     QStringList selectedEntries() const;    // ── Axis transform update ─────────────────────────────────────────────
+    void setEntitySelectionMode(int selectionMode);
     /// Recomputes and applies AIS local transforms for all axis-assigned
     /// machine shapes and all mounted workpieces at their current positions.
     void updateAxisTransforms();
@@ -73,6 +78,7 @@ private:
     DocumentId     m_docId;
     GraphicsScene* m_scene{nullptr};
     QMap<QString, Handle(AIS_Shape)> m_aisMap;
+    MachineRenderQuality m_machineRenderQuality{MachineRenderQuality::Medium};
 
     // Per-document view state (created once, persistent)
     Handle(V3d_View)      m_view;

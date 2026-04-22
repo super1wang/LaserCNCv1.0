@@ -59,10 +59,12 @@ struct LeadInParams
 struct LaserContour
 {
     TopoDS_Wire                wire;     ///< The original topological wire
+    TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
     LeadInParams               leadIn;   ///< Lead-in parameters for this contour
     bool                       enabled{true};
     QString                    name;
+    QString                    workpieceEntry; ///< Mounted workpiece entry owning this contour
 
     // ── Face-classification metadata (set when using face-based extraction) ──
     int  contourType{3};   ///< FaceGroupKind cast to int (3 = Unknown / legacy)

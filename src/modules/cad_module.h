@@ -31,6 +31,22 @@ class CadModule : public QObject
 {
     Q_OBJECT
 public:
+    struct DocumentTreeNode {
+        QString nodeKey;
+        QString displayName;
+        QString entry;
+        QStringList leafEntries;
+        QList<DocumentTreeNode> children;
+    };
+
+    struct DocumentTreeDocument {
+        DocumentId documentId{kInvalidDocumentId};
+        QString nodeKey;
+        QString displayName;
+        QStringList leafEntries;
+        QList<DocumentTreeNode> children;
+    };
+
     static CadModule* instance();
 
     // ── Document Management (delegates to LcncApplication) ───────────────
@@ -52,10 +68,13 @@ public:
     LcncDocument* documentById(DocumentId id) const;
     GuiDocument*  guiDocument(DocumentId id) const;
     QList<LcncDocument*> workpieceDocuments() const;
+    QList<DocumentTreeDocument> documentTreeDocuments() const;
     void          setActiveDocument(DocumentId id);
+    void          requestWorkpieceView(DocumentId id = kInvalidDocumentId);
 
     // ── Selection / Visibility ──────────────────────────────────────────
     void setEntityVisible(DocumentId docId, const QString& entry, bool visible);
+    void setEntriesVisible(DocumentId docId, const QStringList& entries, bool visible);
     void setSelectedEntries(DocumentId docId, const QStringList& entries);
     QStringList selectedEntries(DocumentId docId) const;
     void syncSelectionFromView(DocumentId docId = kInvalidDocumentId);
@@ -93,8 +112,12 @@ public:
 signals:
     /// Emitted whenever the document list changes (add/remove).
     void documentListChanged();
+    /// Emitted when the workpiece document tree should be rebuilt.
+    void documentTreeChanged();
     /// Emitted when the active document switches.
     void activeDocumentChanged(DocumentId id);
+    /// Emitted when the UI should attach the requested workpiece document view.
+    void workpieceViewRequested(DocumentId id);
     /// Emitted when a document's content is modified.
     void documentModified(DocumentId id);
     /// Emitted when a module-level operation fails and should be surfaced by the UI.

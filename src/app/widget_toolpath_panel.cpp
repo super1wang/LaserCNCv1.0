@@ -7,7 +7,6 @@
 #include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QPushButton>
-#include <QListWidget>
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QLabel>
@@ -49,6 +48,15 @@ void WidgetToolpathPanel::buildUi()
     m_spinNormalAngle->setSingleStep(1.0);
     paramForm->addRow(tr("法线角度:"), m_spinNormalAngle);
 
+    m_spinDeflection = new QDoubleSpinBox(paramGroup);
+    m_spinDeflection->setRange(0.01, 50.0);
+    m_spinDeflection->setValue(0.1);
+    m_spinDeflection->setDecimals(3);
+    m_spinDeflection->setSuffix(tr(" mm"));
+    m_spinDeflection->setSingleStep(0.01);
+    m_spinDeflection->setToolTip(tr("轮廓离散采样间隔，越小越精细但计算越慢"));
+    paramForm->addRow(tr("离散间隔:"), m_spinDeflection);
+
     mainLayout->addWidget(paramGroup);
 
     // ── 面分类 group ───────────────────────────────────────────────────────
@@ -74,6 +82,25 @@ void WidgetToolpathPanel::buildUi()
 
     mainLayout->addWidget(classGroup);
 
+    // ── 法线显示 group ───────────────────────────────────────────────
+    auto* normalGroup = new QGroupBox(tr("法线显示"), this);
+    auto* normalForm  = new QFormLayout(normalGroup);
+
+    m_checkShowNormals = new QCheckBox(tr("显示法线"), normalGroup);
+    m_checkShowNormals->setChecked(false);
+    normalForm->addRow(m_checkShowNormals);
+
+    m_spinNormalStep = new QDoubleSpinBox(normalGroup);
+    m_spinNormalStep->setRange(0.1, 50.0);
+    m_spinNormalStep->setValue(2.0);
+    m_spinNormalStep->setDecimals(2);
+    m_spinNormalStep->setSuffix(tr(" mm"));
+    m_spinNormalStep->setSingleStep(0.5);
+    m_spinNormalStep->setToolTip(tr("法线抽样步长，越小越密集，越大越稀疏"));
+    normalForm->addRow(tr("抽样步长:"), m_spinNormalStep);
+
+    mainLayout->addWidget(normalGroup);
+
     // ── 操作 group ─────────────────────────────────────────────────────────
     auto* opsGroup  = new QGroupBox(tr("操作"), this);
     auto* opsLayout = new QVBoxLayout(opsGroup);
@@ -91,15 +118,6 @@ void WidgetToolpathPanel::buildUi()
     opsLayout->addWidget(m_btnPreview);
 
     mainLayout->addWidget(opsGroup);
-
-    // ── 轮廓列表 group ────────────────────────────────────────────────────
-    auto* contourGroup = new QGroupBox(tr("轮廓列表"), this);
-    auto* contourLayout = new QVBoxLayout(contourGroup);
-
-    m_contourList = new QListWidget(contourGroup);
-    contourLayout->addWidget(m_contourList);
-
-    mainLayout->addWidget(contourGroup);
 
     // ── 坐标表 group ──────────────────────────────────────────────────────
     auto* coordGroup  = new QGroupBox(tr("机床坐标"), this);
@@ -134,6 +152,8 @@ void WidgetToolpathPanel::buildUi()
             this, &WidgetToolpathPanel::leadInLengthChanged);
     connect(m_spinNormalAngle,  QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::normalAngleChanged);
+    connect(m_spinDeflection,   QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &WidgetToolpathPanel::discretizationIntervalChanged);
 
     connect(m_spinSmoothAngle,  QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::smoothAngleChanged);
@@ -143,51 +163,104 @@ void WidgetToolpathPanel::buildUi()
                 int mode = m_comboClassMode->itemData(index).toInt();
                 emit classificationModeChanged(mode);
             });
-
-    connect(m_contourList, &QListWidget::itemChanged, this,
-            [this](QListWidgetItem* item) {
-                int row = m_contourList->row(item);
-                bool checked = (item->checkState() == Qt::Checked);
-                emit contourToggled(row, checked);
-            });
+        connect(m_checkShowNormals, &QCheckBox::toggled,
+            this, &WidgetToolpathPanel::showNormalsToggled);
+        connect(m_spinNormalStep, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &WidgetToolpathPanel::normalSampleStepChanged);
 }
 
 void WidgetToolpathPanel::setToolpath(LaserToolpath* tp)
 {
     m_toolpath = tp;
-    updateContourList();
+    showContourCoordinates(-1);
 
     if (tp) {
-        m_spinLeadInLength->setValue(tp->globalLeadInLength());
-        m_spinNormalAngle->setValue(tp->globalNormalAngle());
+        setLeadInLength(tp->globalLeadInLength());
+        setNormalAngle(tp->globalNormalAngle());
     }
 }
 
-void WidgetToolpathPanel::updateContourList()
+void WidgetToolpathPanel::setLeadInLength(double mm)
 {
-    QSignalBlocker blocker(m_contourList);
-    m_contourList->clear();
+    if (!m_spinLeadInLength)
+        return;
 
-    if (!m_toolpath) return;
+    if (qFuzzyCompare(m_spinLeadInLength->value() + 1.0, mm + 1.0))
+        return;
 
-    for (int i = 0; i < m_toolpath->contourCount(); ++i) {
-        const LaserContour& c = m_toolpath->contour(i);
-        auto* item = new QListWidgetItem(c.name, m_contourList);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(c.enabled ? Qt::Checked : Qt::Unchecked);
+    const QSignalBlocker blocker(m_spinLeadInLength);
+    m_spinLeadInLength->setValue(mm);
+}
 
-        // Show lead-in status in tooltip
-        QString tip;
-        if (!c.sourceInfo.isEmpty())
-            tip += c.sourceInfo + QStringLiteral("\n");
-        if (c.leadIn.valid)
-            tip += tr("引刀线已设置 (长度: %1 mm)").arg(c.leadIn.length);
-        else
-            tip += tr("未设置引刀线");
-        item->setToolTip(tip);
-    }
+void WidgetToolpathPanel::setNormalAngle(double deg)
+{
+    if (!m_spinNormalAngle)
+        return;
 
-    emit contourListUpdated();
+    if (qFuzzyCompare(m_spinNormalAngle->value() + 1.0, deg + 1.0))
+        return;
+
+    const QSignalBlocker blocker(m_spinNormalAngle);
+    m_spinNormalAngle->setValue(deg);
+}
+
+void WidgetToolpathPanel::setDiscretizationInterval(double mm)
+{
+    if (!m_spinDeflection)
+        return;
+
+    if (qFuzzyCompare(m_spinDeflection->value() + 1.0, mm + 1.0))
+        return;
+
+    const QSignalBlocker blocker(m_spinDeflection);
+    m_spinDeflection->setValue(mm);
+}
+
+void WidgetToolpathPanel::setSmoothAngle(double deg)
+{
+    if (!m_spinSmoothAngle)
+        return;
+
+    if (qFuzzyCompare(m_spinSmoothAngle->value() + 1.0, deg + 1.0))
+        return;
+
+    const QSignalBlocker blocker(m_spinSmoothAngle);
+    m_spinSmoothAngle->setValue(deg);
+}
+
+void WidgetToolpathPanel::setUseFaceClassification(bool enabled)
+{
+    if (!m_comboClassMode)
+        return;
+
+    const int desiredMode = enabled ? 1 : 0;
+    const int index = m_comboClassMode->findData(desiredMode);
+    if (index < 0 || m_comboClassMode->currentIndex() == index)
+        return;
+
+    const QSignalBlocker blocker(m_comboClassMode);
+    m_comboClassMode->setCurrentIndex(index);
+}
+
+void WidgetToolpathPanel::setShowNormals(bool on)
+{
+    if (!m_checkShowNormals || m_checkShowNormals->isChecked() == on)
+        return;
+
+    const QSignalBlocker blocker(m_checkShowNormals);
+    m_checkShowNormals->setChecked(on);
+}
+
+void WidgetToolpathPanel::setNormalSampleStep(double mm)
+{
+    if (!m_spinNormalStep)
+        return;
+
+    if (qFuzzyCompare(m_spinNormalStep->value() + 1.0, mm + 1.0))
+        return;
+
+    const QSignalBlocker blocker(m_spinNormalStep);
+    m_spinNormalStep->setValue(mm);
 }
 
 double WidgetToolpathPanel::leadInLength() const
@@ -198,6 +271,11 @@ double WidgetToolpathPanel::leadInLength() const
 double WidgetToolpathPanel::normalAngle() const
 {
     return m_spinNormalAngle ? m_spinNormalAngle->value() : 0.0;
+}
+
+double WidgetToolpathPanel::discretizationInterval() const
+{
+    return m_spinDeflection ? m_spinDeflection->value() : 0.1;
 }
 
 double WidgetToolpathPanel::smoothAngle() const

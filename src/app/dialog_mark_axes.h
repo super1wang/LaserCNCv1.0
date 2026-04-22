@@ -8,6 +8,7 @@
 class LcncDocument;
 class MachineKinematics;
 class QComboBox;
+class QDoubleSpinBox;
 class QGridLayout;
 class QScrollArea;
 
@@ -45,6 +46,8 @@ private slots:
 private:
     void buildUi();
     void populateRows();
+    void populateOriginRows();
+    void refreshOriginEditors();
     void applyAssignments(const QMap<QString,QString>& entry2axis);
 
     LcncDocument*     m_doc;
@@ -59,4 +62,14 @@ private:
     QList<Row>   m_rows;
     QWidget*     m_rowContainer{nullptr};
     QGridLayout* m_grid{nullptr};
+
+    struct OriginEditors {
+        QDoubleSpinBox* x{nullptr};
+        QDoubleSpinBox* y{nullptr};
+        QDoubleSpinBox* z{nullptr};
+    };
+
+    QWidget*     m_originContainer{nullptr};
+    QGridLayout* m_originGrid{nullptr};
+    QMap<QString, OriginEditors> m_originEditors;
 };

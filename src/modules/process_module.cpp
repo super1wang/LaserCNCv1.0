@@ -34,6 +34,52 @@ double jogStepForLevel(int speedLevel)
     }
 }
 
+bool sameAxisDefinitions(const QList<MachineAxisDef>& lhs,
+                         const QList<MachineAxisDef>& rhs)
+{
+    if (lhs.size() != rhs.size())
+        return false;
+
+    for (int i = 0; i < lhs.size(); ++i) {
+        const MachineAxisDef& a = lhs.at(i);
+        const MachineAxisDef& b = rhs.at(i);
+        if (a.name != b.name ||
+            a.motionType != b.motionType ||
+            a.parentAxis != b.parentAxis ||
+            std::abs(a.minVal - b.minVal) > 1e-9 ||
+            std::abs(a.maxVal - b.maxVal) > 1e-9) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+double simulatedAxisValue(const MachineAxisDef& axis,
+                          double phase,
+                          int linearIndex,
+                          int rotaryIndex)
+{
+    const double axisLimit = std::max(std::abs(axis.minVal), std::abs(axis.maxVal));
+
+    if (axis.motionType == MachineAxisDef::Linear) {
+        const double amplitude = axisLimit > 1e-6
+            ? std::clamp(axisLimit * 0.12, 5.0, 60.0)
+            : 20.0;
+        const double freq = 0.55 + 0.18 * linearIndex;
+        const double wave = std::sin(phase * freq + linearIndex * 0.8);
+        if (axis.name == QStringLiteral("Z"))
+            return amplitude + wave * amplitude * 0.7;
+        return wave * amplitude;
+    }
+
+    const double amplitude = axisLimit >= 9000.0
+        ? 90.0
+        : std::max(10.0, axisLimit * 0.35);
+    const double freq = 0.35 + 0.12 * rotaryIndex;
+    return std::sin(phase * freq + rotaryIndex * 0.6) * amplitude;
+}
+
 } // namespace
 
 ProcessModule* ProcessModule::s_instance = nullptr;
@@ -119,6 +165,16 @@ void ProcessModule::setSimulationMode(bool on)
 bool ProcessModule::simulationMode() const
 {
     return m_simulationMode;
+}
+
+void ProcessModule::setAxisDefinitions(const QList<MachineAxisDef>& axes)
+{
+    if (sameAxisDefinitions(m_axisDefinitions, axes))
+        return;
+
+    m_axisDefinitions = axes;
+    m_simPhase = 0.0;
+    initializeAxisPositions();
 }
 
 void ProcessModule::jog(const QString& axisName, int direction, int speedLevel)
@@ -240,25 +296,39 @@ void ProcessModule::onSimulationTick()
 
     m_simPhase += 0.08 * std::max(0.1, m_feedOverride);
 
-    setAxisPosition(QStringLiteral("X"), std::sin(m_simPhase) * 45.0);
-    setAxisPosition(QStringLiteral("Y"), std::cos(m_simPhase * 0.75) * 30.0);
-    setAxisPosition(QStringLiteral("Z"), 15.0 + std::sin(m_simPhase * 0.5) * 12.0);
-    setAxisPosition(QStringLiteral("A"), std::sin(m_simPhase * 0.4) * 35.0);
-    setAxisPosition(QStringLiteral("C"), std::cos(m_simPhase * 0.3) * 80.0);
+    int linearIndex = 0;
+    int rotaryIndex = 0;
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+
+        const double value = simulatedAxisValue(axis, m_simPhase, linearIndex, rotaryIndex);
+        setAxisPosition(axis.name, value);
+
+        if (axis.motionType == MachineAxisDef::Linear)
+            ++linearIndex;
+        else
+            ++rotaryIndex;
+    }
 }
 
 void ProcessModule::initializeAxisPositions()
 {
-    const QList<QString> axisNames = {
-        QStringLiteral("X"),
-        QStringLiteral("Y"),
-        QStringLiteral("Z"),
-        QStringLiteral("A"),
-        QStringLiteral("C"),
-    };
+    if (m_axisDefinitions.isEmpty()) {
+        m_axisPositions.clear();
+        return;
+    }
 
-    for (const QString& axisName : axisNames)
-        setAxisPosition(axisName, 0.0);
+    QMap<QString, double> nextPositions;
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+        nextPositions.insert(axis.name, 0.0);
+    }
+
+    m_axisPositions = nextPositions;
+    for (auto it = m_axisPositions.cbegin(); it != m_axisPositions.cend(); ++it)
+        emit axisPositionChanged(it.key(), it.value());
 }
 
 void ProcessModule::setState(State state, const QString& statusMessage)

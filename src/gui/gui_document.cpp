@@ -21,6 +21,69 @@
 #include <Aspect_TypeOfTriedronPosition.hxx>
 #include <V3d_Viewer.hxx>
 #include <QTimer>
+#include <QSet>
+
+namespace {
+
+Quantity_Color axisDisplayColor(const QString& axisName)
+{
+    if (axisName == QStringLiteral("BASE"))
+        return Quantity_Color(0.62, 0.64, 0.68, Quantity_TOC_RGB);
+    if (axisName == QStringLiteral("X"))
+        return Quantity_Color(0.90, 0.27, 0.18, Quantity_TOC_RGB);
+    if (axisName == QStringLiteral("Y"))
+        return Quantity_Color(0.14, 0.66, 0.28, Quantity_TOC_RGB);
+    if (axisName == QStringLiteral("Z"))
+        return Quantity_Color(0.18, 0.48, 0.94, Quantity_TOC_RGB);
+    if (axisName == QStringLiteral("A"))
+        return Quantity_Color(0.93, 0.60, 0.08, Quantity_TOC_RGB);
+    if (axisName == QStringLiteral("B"))
+        return Quantity_Color(0.10, 0.70, 0.70, Quantity_TOC_RGB);
+    if (axisName == QStringLiteral("C"))
+        return Quantity_Color(0.76, 0.23, 0.79, Quantity_TOC_RGB);
+    return Quantity_Color(0.78, 0.78, 0.80, Quantity_TOC_RGB);
+}
+
+void applyRenderQuality(const Handle(AIS_Shape)& ais,
+                        MachineRenderQuality quality)
+{
+    if (ais.IsNull())
+        return;
+
+    bool drawBoundary = true;
+    double deviationCoefficient = 0.02;
+    double deviationAngle = 0.18;
+    double boundaryWidth = 1.0;
+
+    switch (quality) {
+    case MachineRenderQuality::High:
+        drawBoundary = true;
+        deviationCoefficient = 0.01;
+        deviationAngle = 0.12;
+        boundaryWidth = 1.1;
+        break;
+    case MachineRenderQuality::Medium:
+        drawBoundary = true;
+        deviationCoefficient = 0.05;
+        deviationAngle = 0.35;
+        boundaryWidth = 0.8;
+        break;
+    case MachineRenderQuality::Low:
+        drawBoundary = false;
+        deviationCoefficient = 0.12;
+        deviationAngle = 0.70;
+        boundaryWidth = 0.6;
+        break;
+    }
+
+    ais->SetOwnDeviationCoefficient(deviationCoefficient);
+    ais->SetOwnDeviationAngle(deviationAngle);
+    ais->Attributes()->SetFaceBoundaryDraw(drawBoundary);
+    ais->Attributes()->FaceBoundaryAspect()->SetColor(Quantity_NOC_GRAY40);
+    ais->Attributes()->FaceBoundaryAspect()->SetWidth(boundaryWidth);
+}
+
+} // namespace
 
 GuiDocument::GuiDocument(DocumentId id, QObject* parent)
     : QObject(parent)
@@ -173,8 +236,9 @@ Handle(AIS_Shape) GuiDocument::displayShape(const TopoDS_Shape& shape,
                                              const QString&      name,
                                              bool                fitAll)
 {
-    Handle(AIS_Shape) ais = m_scene->displayShape(shape, fitAll);
+    Handle(AIS_Shape) ais = m_scene->displayShape(shape, fitAll, true, false);
     m_aisMap.insert(name, ais);
+    applyMachineDisplayStyle();
     emit displayUpdated();
     return ais;
 }
@@ -207,27 +271,84 @@ void GuiDocument::rebuildDisplay()
         TDF_Label lbl   = freeShapes.Value(i);
         TopoDS_Shape sh = XcafUtils::shape(lbl);
         if (!sh.IsNull()) {
-            Handle(AIS_Shape) ais = m_scene->displayShape(sh);
-            // Use a coarser tessellation for machine entities so that AIS
-            // transform updates during simulation are cheap to re-render.
-            Handle(TDataStd_Integer) kindAttr;
-            if (lbl.FindAttribute(TDataStd_Integer::GetID(), kindAttr) &&
-                kindAttr->Get() == static_cast<int>(LcncDocument::EntityKind::Machine))
-            {
-                ais->SetOwnDeviationCoefficient(0.05);
-                ais->SetOwnDeviationAngle(0.35); // ~20°
-                m_scene->redisplayShape(ais);
-            }
+            Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
             m_aisMap.insert(XcafUtils::entry(lbl), ais);
         }
     }
 
+    applyMachineDisplayStyle();
+
     emit displayUpdated();
+}
+
+void GuiDocument::setMachineRenderQuality(MachineRenderQuality quality)
+{
+    if (m_machineRenderQuality == quality)
+        return;
+
+    m_machineRenderQuality = quality;
+    applyMachineDisplayStyle();
+    if (!m_view.IsNull())
+        m_view->Redraw();
+}
+
+void GuiDocument::applyMachineDisplayStyle()
+{
+    LcncDocument* doc = document();
+    if (!doc)
+        return;
+
+    MachineKinematics* kin = doc->machineKinematics();
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull())
+        return;
+
+    QSet<QString> machineEntries;
+    const TDF_LabelSequence machineLabels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    for (int i = 1; i <= machineLabels.Length(); ++i)
+        machineEntries.insert(XcafUtils::entry(machineLabels.Value(i)));
+
+    for (auto it = m_aisMap.cbegin(); it != m_aisMap.cend(); ++it) {
+        const QString& entry = it.key();
+        const Handle(AIS_Shape)& ais = it.value();
+        if (ais.IsNull())
+            continue;
+
+        if (machineEntries.contains(entry)) {
+            const QString axisName = kin ? kin->axisForShape(entry) : QString();
+            const Quantity_Color color = axisName.isEmpty()
+                ? Quantity_Color(0.74, 0.74, 0.76, Quantity_TOC_RGB)
+                : axisDisplayColor(axisName);
+            applyRenderQuality(ais, m_machineRenderQuality);
+            ctx->SetDisplayMode(ais, AIS_Shaded, Standard_False);
+            m_scene->setShapeColor(ais, color, false);
+            m_scene->redisplayShape(ais, false);
+            continue;
+        }
+
+        ais->Attributes()->SetFaceBoundaryDraw(true);
+    }
 }
 
 Handle(AIS_Shape) GuiDocument::aisShape(const QString& labelEntry) const
 {
     return m_aisMap.value(labelEntry, Handle(AIS_Shape)());
+}
+
+void GuiDocument::setEntitySelectionMode(int selectionMode)
+{
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull())
+        return;
+
+    for (auto it = m_aisMap.cbegin(); it != m_aisMap.cend(); ++it) {
+        const Handle(AIS_Shape)& ais = it.value();
+        if (ais.IsNull())
+            continue;
+
+        ctx->Deactivate(ais);
+        ctx->Activate(ais, selectionMode, Standard_False);
+    }
 }
 
 // ── Axis transform update ──────────────────────────────────────────────────────
@@ -279,7 +400,4 @@ void GuiDocument::updateAxisTransforms()
         ais->SetLocalTransformation(t);
         ctx->RecomputePrsOnly(ais, Standard_False);
     }
-
-    if (!m_view.IsNull())
-        m_view->Redraw();
 }

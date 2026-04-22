@@ -28,6 +28,73 @@
 
 namespace {
 
+void appendUniqueEntries(QStringList* target, const QStringList& entries)
+{
+    if (!target)
+        return;
+
+    for (const QString& entry : entries) {
+        if (!entry.isEmpty() && !target->contains(entry))
+            target->append(entry);
+    }
+}
+
+CadModule::DocumentTreeNode buildHierarchyNode(const LcncDocument::ShapeTreeNode& sourceNode,
+                                               DocumentId docId,
+                                               const QString& keyPrefix,
+                                               int childIndex)
+{
+    CadModule::DocumentTreeNode targetNode;
+    targetNode.nodeKey = sourceNode.entry.isEmpty()
+        ? QStringLiteral("group:%1/%2").arg(keyPrefix).arg(childIndex)
+        : QStringLiteral("entry:%1:%2").arg(docId).arg(sourceNode.entry);
+    targetNode.entry = sourceNode.entry;
+    targetNode.displayName = sourceNode.displayName.isEmpty()
+        ? sourceNode.entry
+        : sourceNode.displayName;
+
+    if (sourceNode.entry.isEmpty()) {
+        for (int index = 0; index < sourceNode.children.size(); ++index) {
+            const auto& childSourceNode = sourceNode.children.at(index);
+            CadModule::DocumentTreeNode childNode =
+                buildHierarchyNode(childSourceNode, docId, targetNode.nodeKey, index);
+            appendUniqueEntries(&targetNode.leafEntries, childNode.leafEntries);
+            targetNode.children.append(std::move(childNode));
+        }
+    } else {
+        targetNode.leafEntries.append(sourceNode.entry);
+    }
+
+    return targetNode;
+}
+
+QList<CadModule::DocumentTreeNode> buildFallbackNodes(LcncDocument* doc)
+{
+    QList<CadModule::DocumentTreeNode> nodes;
+    if (!doc)
+        return nodes;
+
+    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    nodes.reserve(labels.Length());
+
+    for (int i = 1; i <= labels.Length(); ++i) {
+        const TDF_Label label = labels.Value(i);
+        const QString entry = XcafUtils::entry(label);
+        QString displayName = XcafUtils::name(label);
+        if (displayName.isEmpty())
+            displayName = entry;
+
+        CadModule::DocumentTreeNode node;
+        node.nodeKey = QStringLiteral("entry:%1:%2").arg(doc->id()).arg(entry);
+        node.displayName = displayName;
+        node.entry = entry;
+        node.leafEntries.append(entry);
+        nodes.append(std::move(node));
+    }
+
+    return nodes;
+}
+
 void watchTask(QObject* owner, TaskId taskId, std::function<void(bool)> onFinished)
 {
     auto connection = std::make_shared<QMetaObject::Connection>();
@@ -77,17 +144,23 @@ CadModule::CadModule(QObject* parent)
 {
     LcncApplication* lcnc = LcncApplication::instance();
 
-    connect(lcnc, &LcncApplication::documentAdded, this, [this](DocumentId) {
+    connect(lcnc, &LcncApplication::documentAdded, this, [this, lcnc](DocumentId id) {
         emit documentListChanged();
+        if (!lcnc->isMachineDocument(id))
+            emit documentTreeChanged();
     });
-    connect(lcnc, &LcncApplication::documentClosed, this, [this](DocumentId) {
+    connect(lcnc, &LcncApplication::documentClosed, this, [this, lcnc](DocumentId id) {
         emit documentListChanged();
+        if (!lcnc->isMachineDocument(id))
+            emit documentTreeChanged();
     });
     connect(lcnc, &LcncApplication::activeDocumentChanged, this, [this](DocumentId id) {
         emit activeDocumentChanged(id);
     });
-    connect(lcnc, &LcncApplication::documentModified, this, [this](DocumentId id) {
+    connect(lcnc, &LcncApplication::documentModified, this, [this, lcnc](DocumentId id) {
         emit documentModified(id);
+        if (!lcnc->isMachineDocument(id))
+            emit documentTreeChanged();
     });
 }
 
@@ -425,9 +498,52 @@ QList<LcncDocument*> CadModule::workpieceDocuments() const
     return LcncApplication::instance()->workpieceDocuments();
 }
 
+QList<CadModule::DocumentTreeDocument> CadModule::documentTreeDocuments() const
+{
+    QList<DocumentTreeDocument> documents;
+    const QList<LcncDocument*> docs = workpieceDocuments();
+    documents.reserve(docs.size());
+
+    for (LcncDocument* doc : docs) {
+        if (!doc)
+            continue;
+
+        DocumentTreeDocument documentNode;
+        documentNode.documentId = doc->id();
+        documentNode.nodeKey = QStringLiteral("doc:%1").arg(doc->id());
+        documentNode.displayName = doc->name();
+
+        const auto& hierarchy = doc->entityTree(LcncDocument::EntityKind::Workpiece);
+        if (!hierarchy.isEmpty()) {
+            documentNode.children.reserve(hierarchy.size());
+            for (int index = 0; index < hierarchy.size(); ++index) {
+                DocumentTreeNode childNode =
+                    buildHierarchyNode(hierarchy.at(index), doc->id(), documentNode.nodeKey, index);
+                appendUniqueEntries(&documentNode.leafEntries, childNode.leafEntries);
+                documentNode.children.append(std::move(childNode));
+            }
+        } else {
+            documentNode.children = buildFallbackNodes(doc);
+            for (const auto& childNode : documentNode.children)
+                appendUniqueEntries(&documentNode.leafEntries, childNode.leafEntries);
+        }
+
+        documents.append(std::move(documentNode));
+    }
+
+    return documents;
+}
+
 void CadModule::setActiveDocument(DocumentId id)
 {
     LcncApplication::instance()->setActiveDocument(id);
+}
+
+void CadModule::requestWorkpieceView(DocumentId id)
+{
+    if (id == kInvalidDocumentId)
+        id = activeDocumentId();
+    emit workpieceViewRequested(id);
 }
 
 void CadModule::setEntityVisible(DocumentId docId, const QString& entry, bool visible)
@@ -448,6 +564,12 @@ void CadModule::setEntityVisible(DocumentId docId, const QString& entry, bool vi
         if (gd->hasView())
             gd->view()->Redraw();
     }
+}
+
+void CadModule::setEntriesVisible(DocumentId docId, const QStringList& entries, bool visible)
+{
+    for (const QString& entry : entries)
+        setEntityVisible(docId, entry, visible);
 }
 
 void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)

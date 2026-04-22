@@ -298,12 +298,13 @@ void WidgetModelTree::highlightEntries(const QStringList& entries)
         const QString data = (*it)->data(0, Qt::UserRole).toString();
         if (entries.contains(data)) {
             (*it)->setSelected(true);
-            // Expand ancestors only when NOT inside the "group:machine" top-level
-            // (machine model group stays collapsed unless the user opens it)
+            // Keep both machine-model and axis-node trees collapsed unless the user expands them.
             QTreeWidgetItem* topLevel = *it;
             while (topLevel->parent()) topLevel = topLevel->parent();
-            const bool underMachine = (topLevel->data(0, Qt::UserRole).toString() == "group:machine");
-            if (!underMachine) {
+            const QString topLevelKey = topLevel->data(0, Qt::UserRole).toString();
+            const bool keepCollapsed = topLevelKey == QStringLiteral("group:machine")
+                || topLevelKey == QStringLiteral("group:axisnodes");
+            if (!keepCollapsed) {
                 for (QTreeWidgetItem* p = (*it)->parent(); p; p = p->parent())
                     p->setExpanded(true);
             }

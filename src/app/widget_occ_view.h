@@ -52,11 +52,23 @@ public:
     void fitAll();
     void setOrientation(V3d_TypeOfOrientation orient);
     void setDisplayMode(int mode); ///< AIS_WireFrame = 0, AIS_Shaded = 1
+    void beginLeadInPick();
+    void endLeadInPick();
+    void beginFacePick();
+    void endFacePick();
+    bool isLeadInPickActive() const { return m_leadInPickActive; }
+    bool isFacePickActive() const { return m_facePickActive; }
 
     QPaintEngine* paintEngine() const override { return nullptr; }
 
 signals:
     void selectionChanged();
+    void leadInPickMoved(const QPoint& pos);
+    void leadInPickConfirmed(const QPoint& pos);
+    void leadInPickCanceled();
+    void facePickMoved(const QPoint& pos);
+    void facePickConfirmed(const QPoint& pos);
+    void facePickCanceled();
 
 protected:
     void resizeEvent(QResizeEvent*) override;
@@ -73,9 +85,14 @@ private:
     /// Create m_occWindow the first time (requires valid HWND — call only when shown).
     void ensureOccWindow();
 
+    /// Remove any in-progress rubber-band overlay from the current context.
+    void clearRubberBand();
+
     /// Switch the active view/context pair and trigger a redraw.
     void activateView(const Handle(V3d_View)& view,
                       const Handle(AIS_InteractiveContext)& ctx);
+
+    void restoreDefaultSelectionModes();
 
     void handleSelection(const QPoint& pos);
 
@@ -93,5 +110,7 @@ private:
     bool   m_rotating{false};
     bool   m_panning{false};
     bool   m_rubberBanding{false};
+    bool   m_leadInPickActive{false};
+    bool   m_facePickActive{false};
     Handle(AIS_RubberBand) m_rubberBand;  ///< created lazily; displayed only during drag
 };

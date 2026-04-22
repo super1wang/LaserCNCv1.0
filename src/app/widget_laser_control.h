@@ -1,8 +1,11 @@
 #pragma once
 
 #include <QWidget>
+#include <QList>
 #include <QMap>
 #include <QString>
+
+#include "base/machine_kinematics.h"
 
 /**
  * @brief Right-panel widget shown when the "执行" tab is active.
@@ -21,6 +24,7 @@ public:
     explicit WidgetLaserControl(QWidget* parent = nullptr);
 
     // ── Called from device layer (Phase 5) ────────────────────────────────────
+    void setAxisDefinitions(const QList<MachineAxisDef>& axes);
     void updateAxisPosition(const QString& axis, double pos);
     void updateConnectionStatus(bool connected);
     void updateSimulationMode(bool enabled);
@@ -40,9 +44,14 @@ private:
     void buildAxisGroup();
     void buildJogGroup();
     void buildProcessGroup();
+    void rebuildAxisGroup();
+    void rebuildJogGroup();
     void refreshStatusBanner();
 
+    QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, class QLabel*> m_posLabels;    ///< axis → position label
+    class QGroupBox* m_axisGroup{nullptr};
+    class QGroupBox* m_jogGroup{nullptr};
     class QLabel*  m_statusLabel{nullptr};
     bool           m_connected{false};
     bool           m_simulationMode{true};

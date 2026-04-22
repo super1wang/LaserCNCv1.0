@@ -5,6 +5,7 @@
 #include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
 #include "base/machine_kinematics.h"
+#include "base/machine_model_compressor.h"
 #include "base/xcaf_utils.h"
 #include "base/task_manager.h"
 #include "gui/gui_application.h"
@@ -54,54 +55,37 @@ CmdLoadMachine::CmdLoadMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("加载机台"), this);
-    a->setStatusTip(tr("加载机台三维模型并初始化轴系配置"));
+    a->setStatusTip(tr("加载机台三维模型，保留当前轴系配置"));
     setAction(a);
 }
 
 void CmdLoadMachine::execute()
 {
-    // ── Step 1: pick machine kinematic configuration ───────────────────────
-    QDialog cfgDlg;
-    cfgDlg.setWindowTitle(tr("机台配置"));
-    auto* vl  = new QVBoxLayout(&cfgDlg);
-    auto* frm = new QFormLayout;
-    auto* cbConfig = new QComboBox;
-    cbConfig->addItem(tr("AC 转台（垂直主轴）"), QStringLiteral("VERTICAL_AC_TABLE"));
-    cbConfig->addItem(tr("BC 转台（垂直主轴）"), QStringLiteral("VERTICAL_BC_TABLE"));
-    cbConfig->addItem(tr("AB 摆头"),             QStringLiteral("AB_HEAD"));
-    cbConfig->addItem(tr("AC 摆头"),             QStringLiteral("AC_HEAD"));
-    frm->addRow(tr("机台构型:"), cbConfig);
-    auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(btns, &QDialogButtonBox::accepted, &cfgDlg, &QDialog::accept);
-    connect(btns, &QDialogButtonBox::rejected, &cfgDlg, &QDialog::reject);
-    vl->addLayout(frm);
-    vl->addWidget(btns);
-
-    // Pre-select config from existing machine doc kinematics if already loaded
-    if (LcncDocument* existing = context()->machineDocument()) {
-        const QString cur = existing->machineKinematics()->configType();
-        for (int i = 0; i < cbConfig->count(); ++i) {
-            if (cbConfig->itemData(i).toString() == cur) {
-                cbConfig->setCurrentIndex(i);
-                break;
-            }
-        }
+    LcncDocument* doc = context()->machineDocument();
+    if (!doc || doc->machineKinematics()->axes().isEmpty()) {
+        QMessageBox::information(nullptr, tr("加载机台"),
+            tr("请先在准备页的轴系配置页面中选择机台构型并完成轴系配置。"));
+        return;
     }
 
-    if (cfgDlg.exec() != QDialog::Accepted) return;
-    const QString configType = cbConfig->currentData().toString();
+    const QString configuredPath = context()->camModule()->machineModelPath();
+    QString pathToLoad;
+    if (!configuredPath.isEmpty() && QFileInfo::exists(configuredPath)) {
+        pathToLoad = configuredPath;
+    } else {
+        pathToLoad = QFileDialog::getOpenFileName(
+            nullptr, tr("选择机台模型文件"), configuredPath,
+            tr("三维模型文件 (*.stp *.step *.stl *.brep);;"
+               "STEP (*.stp *.step);;"
+               "STL (*.stl);;"
+               "BREP (*.brep)"));
+        if (pathToLoad.isEmpty())
+            return;
 
-    // ── Step 2: pick model file ────────────────────────────────────────────
-    const QString path = QFileDialog::getOpenFileName(
-        nullptr, tr("选择机台模型文件"), QString(),
-        tr("三维模型文件 (*.stp *.step *.stl *.brep);;"
-           "STEP (*.stp *.step);;"
-           "STL (*.stl);;"
-           "BREP (*.brep)"));
-    if (path.isEmpty()) return;
+        context()->camModule()->setMachineModelPath(pathToLoad);
+    }
 
-    QFileInfo fi(path);
-    context()->camModule()->loadMachine(path, configType);
+    context()->camModule()->loadMachine(pathToLoad);
     context()->updateCommandStates();
 }
 
@@ -129,7 +113,7 @@ void CmdMarkAxes::execute()
 
     if (context()->camModule()->axisOptions().isEmpty()) {
         QMessageBox::information(nullptr, tr("标记轴系"),
-            tr("请先通过[加载机台]命令选择机台构型并加载模型。"));
+            tr("请先在准备页的轴系配置页面中配置机台构型，并加载机台模型。"));
         return;
     }
 
@@ -221,13 +205,82 @@ void CmdMountWorkpiece::execute()
     context()->updateCommandStates();
 }
 
+// ── CmdCompressMachine ───────────────────────────────────────────────────────
+
+CmdCompressMachine::CmdCompressMachine(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("压缩机台"), this);
+    a->setStatusTip(tr("按轴系对机台模型执行独立压缩，并在压缩前选择算法策略"));
+    setAction(a);
+}
+
+bool CmdCompressMachine::isEnabled() const
+{
+    LcncDocument* doc = context()->machineDocument();
+    if (!doc)
+        return false;
+    return doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
+}
+
+void CmdCompressMachine::execute()
+{
+    LcncDocument* doc = context()->machineDocument();
+    if (!doc)
+        return;
+
+    if (context()->camModule()->axisOptions().isEmpty()) {
+        QMessageBox::information(nullptr, tr("压缩机台"),
+            tr("请先在准备页配置机台构型。"));
+        return;
+    }
+
+    QDialog dlg;
+    dlg.setWindowTitle(tr("压缩机台"));
+    auto* layout = new QVBoxLayout(&dlg);
+    auto* form = new QFormLayout;
+    auto* combo = new QComboBox(&dlg);
+    combo->addItem(tr("实体填充并集（最快，适合先验证外形）"),
+                   static_cast<int>(CamModule::MachineCompressionStrategy::FilledSolid));
+    combo->addItem(tr("外壳抽取（去内部结构，保留外壳）"),
+                   static_cast<int>(CamModule::MachineCompressionStrategy::ExteriorShell));
+    combo->addItem(tr("缝合壳体（布尔失败时更稳，结果可能更松散）"),
+                   static_cast<int>(CamModule::MachineCompressionStrategy::SewingShell));
+    combo->addItem(tr("平衡外观代理（保留大件外形，小件盒化）"),
+                   static_cast<int>(CamModule::MachineCompressionStrategy::BoundingBoxProxy));
+    form->addRow(tr("压缩策略:"), combo);
+    layout->addLayout(form);
+
+    auto* info = new QLabel(
+          tr("如果想在体积和外观之间折中，优先试‘平衡外观代理’。\n"
+              "它会保留大件外形，把螺钉、附件和碎细节盒化。\n"
+              "前面三种策略仍然保留较多解析几何，通常不会显著缩小 STEP 文件。\n"
+              "注：网格三角化不是 STEP 的 B-Rep 简化，本次不作为压缩选项。"),
+        &dlg);
+    info->setWordWrap(true);
+    info->setStyleSheet("color: #888; font-size: 11px;");
+    layout->addWidget(info);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    const CamModule::MachineCompressionStrategy strategy =
+        static_cast<CamModule::MachineCompressionStrategy>(combo->currentData().toInt());
+    context()->camModule()->compressMachineModel(strategy);
+}
+
 // ── CmdUnloadMachine ──────────────────────────────────────────────────────────
 
 CmdUnloadMachine::CmdUnloadMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("卸载机台"), this);
-    a->setStatusTip(tr("删除当前机台模型及轴系配置"));
+    a->setStatusTip(tr("删除当前机台模型和挂载工件，保留当前轴系配置"));
     setAction(a);
 }
 
@@ -241,7 +294,7 @@ bool CmdUnloadMachine::isEnabled() const
 void CmdUnloadMachine::execute()
 {
     if (QMessageBox::question(nullptr, tr("卸载机台"),
-            tr("确定要卸载当前机台模型吗？此操作将清除所有轴系配置。"),
+            tr("确定要卸载当前机台模型吗？此操作会删除机台几何和挂载工件，但会保留当前轴系配置。"),
             QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
         return;
     context()->camModule()->unloadMachine();

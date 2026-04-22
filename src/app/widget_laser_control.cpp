@@ -9,6 +9,27 @@
 #include <QSlider>
 #include <QGridLayout>
 #include <QFrame>
+#include <QLayoutItem>
+
+namespace {
+
+void clearLayout(QLayout* layout)
+{
+    if (!layout)
+        return;
+
+    while (QLayoutItem* item = layout->takeAt(0)) {
+        if (QLayout* childLayout = item->layout())
+            clearLayout(childLayout);
+
+        if (QWidget* widget = item->widget())
+            delete widget;
+
+        delete item;
+    }
+}
+
+} // namespace
 
 WidgetLaserControl::WidgetLaserControl(QWidget* parent)
     : QWidget(parent)
@@ -37,87 +58,16 @@ void WidgetLaserControl::buildUi()
 
 void WidgetLaserControl::buildAxisGroup()
 {
-    auto* group  = new QGroupBox(tr("轴位置"), this);
-    auto* grid   = new QGridLayout(group);
-    const QStringList axes = {"X", "Y", "Z", "A", "C"};
-    int row = 0;
-    for (const QString& ax : axes) {
-        auto* lbl  = new QLabel(ax + ":", this);
-        auto* val  = new QLabel("  0.000", this);
-        val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        val->setMinimumWidth(70);
-        val->setStyleSheet("font-family: Consolas, monospace; color: #00FF88;");
-        auto* unit = new QLabel("mm", this);
-        grid->addWidget(lbl,  row, 0);
-        grid->addWidget(val,  row, 1);
-        grid->addWidget(unit, row, 2);
-        m_posLabels[ax] = val;
-        ++row;
-    }
-
-    this->layout()->addWidget(group);
+    m_axisGroup = new QGroupBox(tr("轴位置"), this);
+    this->layout()->addWidget(m_axisGroup);
+    rebuildAxisGroup();
 }
 
 void WidgetLaserControl::buildJogGroup()
 {
-    auto* group  = new QGroupBox(tr("手动点动"), this);
-    auto* vlay   = new QVBoxLayout(group);
-
-    // Speed selector
-    auto* speedRow = new QHBoxLayout();
-    speedRow->addWidget(new QLabel(tr("速度:"), this));
-    auto* btnSlow = new QPushButton(tr("慢"), this);
-    auto* btnMed  = new QPushButton(tr("中"), this);
-    auto* btnFast = new QPushButton(tr("快"), this);
-    btnSlow->setCheckable(true);
-    btnMed->setCheckable(true);
-    btnFast->setCheckable(true);
-    btnMed->setChecked(true);
-        auto* speedGroup = new QButtonGroup(this);
-        speedGroup->setExclusive(true);
-        speedGroup->addButton(btnSlow, 0);
-        speedGroup->addButton(btnMed, 1);
-        speedGroup->addButton(btnFast, 2);
-        connect(speedGroup, &QButtonGroup::idClicked,
-            this, [this](int id) { m_jogSpeedLevel = id; });
-    for (auto* b : {btnSlow, btnMed, btnFast}) b->setMaximumWidth(40);
-    speedRow->addWidget(btnSlow);
-    speedRow->addWidget(btnMed);
-    speedRow->addWidget(btnFast);
-    speedRow->addStretch();
-    vlay->addLayout(speedRow);
-
-    // Jog buttons for each axis
-    auto* jogGrid = new QGridLayout();
-    const QStringList axes = {"X", "Y", "Z", "A", "C"};
-    int row = 0;
-    for (const QString& ax : axes) {
-        auto* lblAx = new QLabel(ax, this);
-        lblAx->setAlignment(Qt::AlignCenter);
-        auto* btnPlus  = new QPushButton("▲ +", this);
-        auto* btnMinus = new QPushButton("▼ -", this);
-        btnPlus->setFixedWidth(55);
-        btnMinus->setFixedWidth(55);
-
-        connect(btnPlus,  &QPushButton::clicked,
-            this, [this, ax]{ emit jogRequested(ax, +1, m_jogSpeedLevel); });
-        connect(btnMinus, &QPushButton::clicked,
-            this, [this, ax]{ emit jogRequested(ax, -1, m_jogSpeedLevel); });
-
-        jogGrid->addWidget(lblAx,    row, 0);
-        jogGrid->addWidget(btnPlus,  row, 1);
-        jogGrid->addWidget(btnMinus, row, 2);
-        ++row;
-    }
-    vlay->addLayout(jogGrid);
-
-    // Home button
-    auto* btnHome = new QPushButton(tr("归零 (Home)"), this);
-    btnHome->setIcon(QIcon(":/icons/home.svg"));
-    connect(btnHome, &QPushButton::clicked, this, &WidgetLaserControl::homeRequested);
-    vlay->addWidget(btnHome);
-
-    this->layout()->addWidget(group);
+    m_jogGroup = new QGroupBox(tr("手动点动"), this);
+    this->layout()->addWidget(m_jogGroup);
+    rebuildJogGroup();
 }
 
 void WidgetLaserControl::buildProcessGroup()
@@ -167,6 +117,125 @@ void WidgetLaserControl::buildProcessGroup()
     connect(btnEStop, &QPushButton::clicked, this, &WidgetLaserControl::eStopRequested);
 
     this->layout()->addWidget(group);
+}
+
+void WidgetLaserControl::setAxisDefinitions(const QList<MachineAxisDef>& axes)
+{
+    m_axisDefinitions = axes;
+    rebuildAxisGroup();
+    rebuildJogGroup();
+}
+
+void WidgetLaserControl::rebuildAxisGroup()
+{
+    if (!m_axisGroup)
+        return;
+
+    clearLayout(m_axisGroup->layout());
+    delete m_axisGroup->layout();
+
+    m_posLabels.clear();
+
+    auto* grid = new QGridLayout(m_axisGroup);
+    int row = 0;
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+
+        auto* lbl  = new QLabel(axis.name + ":", m_axisGroup);
+        auto* val  = new QLabel("  0.000", m_axisGroup);
+        val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        val->setMinimumWidth(70);
+        val->setStyleSheet("font-family: Consolas, monospace; color: #00FF88;");
+        auto* unit = new QLabel(axis.motionType == MachineAxisDef::Linear ? "mm" : "°", m_axisGroup);
+        grid->addWidget(lbl,  row, 0);
+        grid->addWidget(val,  row, 1);
+        grid->addWidget(unit, row, 2);
+        m_posLabels[axis.name] = val;
+        ++row;
+    }
+
+    if (row == 0) {
+        auto* placeholder = new QLabel(tr("加载机台并配置轴系后显示"), m_axisGroup);
+        placeholder->setStyleSheet("color: gray; font-size: 11px;");
+        grid->addWidget(placeholder, 0, 0, 1, 3);
+    }
+}
+
+void WidgetLaserControl::rebuildJogGroup()
+{
+    if (!m_jogGroup)
+        return;
+
+    clearLayout(m_jogGroup->layout());
+    delete m_jogGroup->layout();
+
+    auto* vlay = new QVBoxLayout(m_jogGroup);
+
+    auto* speedRow = new QHBoxLayout();
+    speedRow->addWidget(new QLabel(tr("速度:"), m_jogGroup));
+    auto* btnSlow = new QPushButton(tr("慢"), m_jogGroup);
+    auto* btnMed  = new QPushButton(tr("中"), m_jogGroup);
+    auto* btnFast = new QPushButton(tr("快"), m_jogGroup);
+    btnSlow->setCheckable(true);
+    btnMed->setCheckable(true);
+    btnFast->setCheckable(true);
+    btnMed->setChecked(m_jogSpeedLevel == 1);
+    btnSlow->setChecked(m_jogSpeedLevel == 0);
+    btnFast->setChecked(m_jogSpeedLevel == 2);
+
+    auto* speedGroup = new QButtonGroup(m_jogGroup);
+    speedGroup->setExclusive(true);
+    speedGroup->addButton(btnSlow, 0);
+    speedGroup->addButton(btnMed, 1);
+    speedGroup->addButton(btnFast, 2);
+    connect(speedGroup, &QButtonGroup::idClicked,
+            this, [this](int id) { m_jogSpeedLevel = id; });
+    for (auto* b : {btnSlow, btnMed, btnFast})
+        b->setMaximumWidth(40);
+    speedRow->addWidget(btnSlow);
+    speedRow->addWidget(btnMed);
+    speedRow->addWidget(btnFast);
+    speedRow->addStretch();
+    vlay->addLayout(speedRow);
+
+    auto* jogGrid = new QGridLayout();
+    int row = 0;
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+
+        auto* lblAx = new QLabel(axis.name, m_jogGroup);
+        lblAx->setAlignment(Qt::AlignCenter);
+        auto* btnPlus  = new QPushButton("▲ +", m_jogGroup);
+        auto* btnMinus = new QPushButton("▼ -", m_jogGroup);
+        btnPlus->setFixedWidth(55);
+        btnMinus->setFixedWidth(55);
+
+        const QString axisName = axis.name;
+        connect(btnPlus,  &QPushButton::clicked,
+                this, [this, axisName]{ emit jogRequested(axisName, +1, m_jogSpeedLevel); });
+        connect(btnMinus, &QPushButton::clicked,
+                this, [this, axisName]{ emit jogRequested(axisName, -1, m_jogSpeedLevel); });
+
+        jogGrid->addWidget(lblAx,    row, 0);
+        jogGrid->addWidget(btnPlus,  row, 1);
+        jogGrid->addWidget(btnMinus, row, 2);
+        ++row;
+    }
+
+    if (row == 0) {
+        auto* placeholder = new QLabel(tr("加载机台并配置轴系后显示"), m_jogGroup);
+        placeholder->setStyleSheet("color: gray; font-size: 11px;");
+        vlay->addWidget(placeholder);
+    } else {
+        vlay->addLayout(jogGrid);
+
+        auto* btnHome = new QPushButton(tr("归零 (Home)"), m_jogGroup);
+        btnHome->setIcon(QIcon(":/icons/home.svg"));
+        connect(btnHome, &QPushButton::clicked, this, &WidgetLaserControl::homeRequested);
+        vlay->addWidget(btnHome);
+    }
 }
 
 // ── Public update methods ──────────────────────────────────────────────────────

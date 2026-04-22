@@ -1,8 +1,11 @@
 #pragma once
 
 #include <QObject>
+#include <QList>
 #include <QMap>
 #include <QString>
+
+#include "base/machine_kinematics.h"
 
 class QTimer;
 
@@ -33,6 +36,8 @@ public:
 
     void setSimulationMode(bool on);
     bool simulationMode() const;
+
+    void setAxisDefinitions(const QList<MachineAxisDef>& axes);
 
     void jog(const QString& axisName, int direction, int speedLevel);
     void home();
@@ -74,6 +79,7 @@ private:
     bool m_connected{false};
     bool m_simulationMode{true};
     State m_state{State::Idle};
+    QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, double> m_axisPositions;
     QTimer* m_simTimer{nullptr};
     double m_feedOverride{1.0};

@@ -13,6 +13,7 @@
 #include "app/widget_toolpath_panel.h"
 #include "app/widget_laser_control.h"
 #include "app/dialog_task_manager.h"
+#include "base/cam_config.h"
 #include "base/laser_toolpath.h"
 #include "base/lcnc_application.h"
 #include "base/lcnc_document.h"
@@ -45,7 +46,9 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QApplication>
+#include <QFileInfo>
 #include <QIcon>
+#include <QTimer>
 #include <QStyle>
 #include <QSignalBlocker>
 #include <functional>
@@ -58,6 +61,13 @@
 namespace {
 constexpr int kRoleDocId = Qt::UserRole + 1;
 constexpr int kRoleEntry = Qt::UserRole + 2;
+constexpr int kRoleNodeKey = Qt::UserRole + 3;
+constexpr int kRoleLeafEntries = Qt::UserRole + 4;
+
+bool usesMachineWorkspace(int tabIndex)
+{
+    return tabIndex >= 1;
+}
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -85,6 +95,8 @@ MainWindow::MainWindow(QWidget* parent)
         connect(lcnc, &LcncApplication::documentModified,
             this, &MainWindow::onDocumentModified);
 
+    restorePersistedCamState();
+
     updateCommandStates();
 }
 
@@ -105,6 +117,11 @@ void MainWindow::createContext()
     LcncApplication::instance()->ensureMachineDocument();
 
     connect(m_appContext->cadModule(), &CadModule::operationFailed,
+            this, [this](const QString& title, const QString& message) {
+                QMessageBox::critical(this, title, message);
+            });
+
+    connect(m_appContext->camModule(), &CamModule::operationFailed,
             this, [this](const QString& title, const QString& message) {
                 QMessageBox::critical(this, title, message);
             });
@@ -161,7 +178,7 @@ void MainWindow::createCommands()
 
     // Machine commands
     m_cmdContainer->addCommand<CmdLoadMachine>(CmdLoadMachine::Name);
-    m_cmdContainer->addCommand<CmdMarkAxes>(CmdMarkAxes::Name);
+    m_cmdContainer->addCommand<CmdCompressMachine>(CmdCompressMachine::Name);
     m_cmdContainer->addCommand<CmdMountWorkpiece>(CmdMountWorkpiece::Name);
     m_cmdContainer->addCommand<CmdUnloadMachine>(CmdUnloadMachine::Name);
     m_cmdContainer->addCommand<CmdExportMachine>(CmdExportMachine::Name);
@@ -227,6 +244,15 @@ void MainWindow::createCentralLayout()
     // Task dialog (non-modal, floats on top)
     m_taskDialog = new DialogTaskManager(this);
 
+        connect(m_appContext->cadModule(), &CadModule::documentTreeChanged,
+            this, &MainWindow::rebuildDocumentTree);
+        connect(m_appContext->cadModule(), &CadModule::workpieceViewRequested,
+            this, &MainWindow::showWorkpieceView);
+        connect(m_appContext->camModule(), &CamModule::machineViewRequested,
+            this, &MainWindow::showMachineView);
+            connect(m_appContext->camModule(), &CamModule::machineWorkspaceChanged,
+                this, &MainWindow::syncMachineWorkspaceUi);
+
     // ── 3D selection → module coordination ────────────────────────────────
     connect(m_occView, &WidgetOccView::selectionChanged, this, [this] {
         if (isMachineViewActive()) {
@@ -237,6 +263,50 @@ void MainWindow::createCentralLayout()
         m_appContext->cadModule()->syncSelectionFromView(
             m_appContext->cadModule()->activeDocumentId());
     });
+
+    connect(m_occView, &WidgetOccView::leadInPickMoved, this,
+            [this](const QPoint& pos) {
+                m_appContext->camModule()->updateLeadInPreview(m_occView, pos);
+            });
+    connect(m_occView, &WidgetOccView::leadInPickConfirmed, this,
+            [this](const QPoint& pos) {
+                if (m_appContext->camModule()->commitLeadInPreview(m_occView, pos))
+                    m_occView->endLeadInPick();
+            });
+    connect(m_occView, &WidgetOccView::leadInPickCanceled, this,
+            [this]() {
+                m_occView->endLeadInPick();
+                m_appContext->camModule()->cancelLeadInPreview();
+            });
+
+    connect(m_occView, &WidgetOccView::facePickConfirmed, this,
+            [this](const QPoint& pos) {
+                if (m_pendingCalibrationTarget.isEmpty())
+                    return;
+
+                bool handled = false;
+                if (m_pendingCalibrationTarget == QStringLiteral("A")
+                    || m_pendingCalibrationTarget == QStringLiteral("C")) {
+                    handled = m_appContext->camModule()->fillAxisOriginFromReferenceFace(
+                        m_occView, pos, m_pendingCalibrationTarget);
+                } else if (m_pendingCalibrationTarget == QStringLiteral("CUTTER_HEAD")) {
+                    handled = m_appContext->camModule()->setCutterHeadModelPositionFromReferenceFace(
+                        m_occView, pos);
+                }
+
+                if (!handled)
+                    return;
+
+                m_occView->endFacePick();
+                m_pendingCalibrationTarget.clear();
+                m_machinePanel->setCalibrationPickAxis(QString());
+            });
+    connect(m_occView, &WidgetOccView::facePickCanceled, this,
+            [this]() {
+                m_occView->endFacePick();
+                m_pendingCalibrationTarget.clear();
+                m_machinePanel->setCalibrationPickAxis(QString());
+            });
 
     connect(m_appContext->camModule(), &CamModule::selectionChanged, this,
             [this](const QStringList& entries) {
@@ -275,6 +345,9 @@ void MainWindow::createCentralLayout()
             [this](const QString& entry, bool visible) {
                 m_appContext->camModule()->setEntityVisible(entry, visible);
             });
+
+    rebuildDocumentTree();
+    syncMachineWorkspaceUiInternal(true);
 }
 
 void MainWindow::create3DView()
@@ -313,6 +386,9 @@ void MainWindow::createLeftPanel()
     m_contourListWidget->setDefaultDropAction(Qt::MoveAction);
     m_contourListWidget->setSelectionMode(QAbstractItemView::SingleSelection);
     m_contourListWidget->setRootIsDecorated(false);
+    m_contourListWidget->setItemsExpandable(false);
+    m_contourListWidget->setExpandsOnDoubleClick(false);
+    m_contourListWidget->setDropIndicatorShown(true);
     m_leftTabs->addTab(m_contourListWidget, tr("刀路"));
 
     // ── 执行 tab ───────────────────────────────────────────────────────────
@@ -344,16 +420,9 @@ void MainWindow::createLeftPanel()
                 if (!item) return;
                 const DocumentId docId = item->data(0, kRoleDocId).toInt();
                 const QString entry = item->data(0, kRoleEntry).toString();
+                const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
                 if (docId == kInvalidDocumentId) return;
                 const bool visible = (item->checkState(0) == Qt::Checked);
-
-                auto applyVisibility = [this](QTreeWidgetItem* leaf) {
-                    const DocumentId did = leaf->data(0, kRoleDocId).toInt();
-                    const QString    ent = leaf->data(0, kRoleEntry).toString();
-                    if (did == kInvalidDocumentId || ent.isEmpty()) return;
-                    const bool v = (leaf->checkState(0) == Qt::Checked);
-                    m_appContext->cadModule()->setEntityVisible(did, ent, v);
-                };
 
                 // Group / doc item: cascade then apply to all leaves
                 if (entry.isEmpty()) {
@@ -367,20 +436,14 @@ void MainWindow::createLeftPanel()
                         }
                     };
                     cascade(item);
-                    std::function<void(QTreeWidgetItem*)> applyLeaves = [&](QTreeWidgetItem* node) {
-                        for (int i = 0; i < node->childCount(); ++i) {
-                            QTreeWidgetItem* child = node->child(i);
-                            applyVisibility(child);
-                            applyLeaves(child);
-                        }
-                    };
-                    applyLeaves(item);
+                    m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
                     return;
                 }
 
                 // Leaf item
-                applyVisibility(item);
+                m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
             });
+
 }
 
 void MainWindow::createRightPanel()
@@ -389,26 +452,94 @@ void MainWindow::createRightPanel()
     m_toolpathPanel  = new WidgetToolpathPanel(this);
     m_laserControl   = new WidgetLaserControl(this);
 
+    CamModule* cam = m_appContext->camModule();
+    m_machinePanel->setMachineModelPath(cam->machineModelPath());
+    m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
+    m_toolpathPanel->setLeadInLength(cam->leadInLength());
+    m_toolpathPanel->setNormalAngle(cam->normalAngle());
+    m_toolpathPanel->setDiscretizationInterval(cam->deflection());
+    m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
+    m_toolpathPanel->setUseFaceClassification(cam->useFaceClassification());
+    m_toolpathPanel->setShowNormals(cam->showNormals());
+    m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
+
+    m_machineRefreshTimer = new QTimer(this);
+    m_machineRefreshTimer->setSingleShot(true);
+    m_machineRefreshTimer->setInterval(0);
+    connect(m_machineRefreshTimer, &QTimer::timeout, this, [this] {
+        m_appContext->camModule()->refreshMachineTransforms();
+    });
+
     m_rightStack = new QStackedWidget(this);
     m_rightStack->addWidget(m_machinePanel);   // index 0 — shown when "准备"
     m_rightStack->addWidget(m_toolpathPanel);  // index 1 — shown when CAM tab
     m_rightStack->addWidget(m_laserControl);   // index 2 — shown when "执行"
-    m_rightStack->setMinimumWidth(260);
-    m_rightStack->setMaximumWidth(350);
+    m_rightStack->setMinimumWidth(320);
+    m_rightStack->setMaximumWidth(420);
     m_rightStack->setCurrentIndex(0);
 
     // Wire machine panel signals to commands
+        connect(m_machinePanel, &WidgetMachinePanel::machinePresetChanged, this,
+            [this](const QString& presetName) {
+            m_appContext->camModule()->configureMachine(presetName);
+            });
+    connect(m_machinePanel, &WidgetMachinePanel::machineModelPathChanged, this,
+            [this](const QString& path) {
+                m_appContext->camModule()->setMachineModelPath(path);
+            });
+    connect(m_machinePanel, &WidgetMachinePanel::machineRenderQualityChanged, this,
+            [this](MachineRenderQuality quality) {
+                m_appContext->camModule()->setMachineRenderQuality(quality);
+            });
     connect(m_machinePanel, &WidgetMachinePanel::loadMachineRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdLoadMachine::Name)->execute(); });
-    connect(m_machinePanel, &WidgetMachinePanel::markAxesRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdMarkAxes::Name)->execute(); });
+        connect(m_machinePanel, &WidgetMachinePanel::compressMachineRequested, this,
+            [this]{ m_cmdContainer->findCommand(CmdCompressMachine::Name)->execute(); });
     connect(m_machinePanel, &WidgetMachinePanel::mountWorkpieceRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdMountWorkpiece::Name)->execute(); });
+        connect(m_machinePanel, &WidgetMachinePanel::axisOriginChanged, this,
+            [this](const QString& axisName, double x, double y, double z) {
+            m_appContext->camModule()->setAxisOrigin(axisName, gp_Pnt(x, y, z));
+            });
+        connect(m_machinePanel, &WidgetMachinePanel::calibrationFacePickRequested, this,
+            [this](const QString& targetName) {
+                m_appContext->camModule()->requestMachineView();
+            m_pendingCalibrationTarget = targetName;
+            m_machinePanel->setCalibrationPickAxis(targetName);
+                if (!m_occView->isFacePickActive())
+                    m_occView->beginFacePick();
+            });
+    connect(m_machinePanel, &WidgetMachinePanel::alignToPhysicalCenterRequested, this,
+            [this](double x, double y, double z) {
+                if (m_occView->isFacePickActive()) {
+                    m_occView->endFacePick();
+                    m_pendingCalibrationTarget.clear();
+                    m_machinePanel->setCalibrationPickAxis(QString());
+                }
 
-    // Axis position spinbox → kinematics + 3D update on machine document
-    connect(m_machinePanel, &WidgetMachinePanel::axisPositionChanged, this,
-            [this](const QString& axisName, double value) {
-                m_appContext->camModule()->setAxisPosition(axisName, value);
+                m_appContext->camModule()->requestMachineView();
+                m_appContext->camModule()->alignMachineToPhysicalCenter(gp_Pnt(x, y, z));
+            });
+    connect(m_machinePanel, &WidgetMachinePanel::cutterHeadModelPositionChanged, this,
+            [this](double x, double y, double z) {
+                m_appContext->camModule()->setCutterHeadModelPosition(gp_Pnt(x, y, z));
+            });
+    connect(m_machinePanel, &WidgetMachinePanel::cutterHeadPhysicalPositionChanged, this,
+            [this](double x, double y, double z) {
+                m_appContext->camModule()->setCutterHeadPhysicalPosition(gp_Pnt(x, y, z));
+            });
+    connect(m_machinePanel, &WidgetMachinePanel::alignToPhysicalCutterHeadRequested, this,
+            [this]() {
+                m_appContext->camModule()->requestMachineView();
+                m_appContext->camModule()->alignMachineToPhysicalCutterHead();
+            });
+        connect(m_machinePanel, &WidgetMachinePanel::workpieceInstallPositionChanged, this,
+            [this](double x, double y, double z) {
+            m_appContext->camModule()->setWorkpieceInstallPosition(gp_Pnt(x, y, z));
+            });
+        connect(m_machinePanel, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested, this,
+            [this]() {
+            m_appContext->camModule()->alignWorkpieceInstallPositionToRotationCenter();
             });
 
     // New machine panel signals
@@ -416,20 +547,20 @@ void MainWindow::createRightPanel()
             [this]{ m_cmdContainer->findCommand(CmdUnloadMachine::Name)->execute(); });
     connect(m_machinePanel, &WidgetMachinePanel::exportMachineRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdExportMachine::Name)->execute(); });
-    connect(m_machinePanel, &WidgetMachinePanel::moveMachineShapeRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdMoveShape::Name)->execute(); });
-    connect(m_machinePanel, &WidgetMachinePanel::rotateMachineShapeRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdRotateShape::Name)->execute(); });
-    connect(m_machinePanel, &WidgetMachinePanel::deleteMachineShapeRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdDeleteShape::Name)->execute(); });
 
         connect(m_appContext->camModule(), &CamModule::toolpathGenerated, this,
             [this]() {
+            m_occView->endLeadInPick();
+            m_appContext->camModule()->cancelLeadInPreview();
             m_toolpathPanel->setToolpath(&m_appContext->camModule()->toolpathRef());
+            rebuildContourListWidget();
             });
         connect(m_appContext->camModule(), &CamModule::toolpathCleared, this,
             [this]() {
+            m_occView->endLeadInPick();
+            m_appContext->camModule()->cancelLeadInPreview();
             m_toolpathPanel->setToolpath(nullptr);
+            rebuildContourListWidget();
             });
 
     // ── Toolpath panel signals ──────────────────────────────────────────
@@ -449,60 +580,98 @@ void MainWindow::createRightPanel()
             [this](double v) {
             m_appContext->camModule()->setNormalAngle(v);
             });
-    connect(m_toolpathPanel, &WidgetToolpathPanel::contourToggled, this,
-            [this](int idx, bool enabled) {
-            m_appContext->camModule()->setContourEnabled(idx, enabled);
-            if (idx >= 0 && idx < m_contourListWidget->topLevelItemCount()) {
-                QSignalBlocker blocker(m_contourListWidget);
-                m_contourListWidget->topLevelItem(idx)->setCheckState(
-                0, enabled ? Qt::Checked : Qt::Unchecked);
-            }
-            });
+        connect(m_toolpathPanel, &WidgetToolpathPanel::discretizationIntervalChanged, this,
+            [this](double v) { m_appContext->camModule()->setDeflection(v); });
     connect(m_toolpathPanel, &WidgetToolpathPanel::smoothAngleChanged, this,
             [this](double v) { m_appContext->camModule()->setSmoothAngle(v); });
-    connect(m_toolpathPanel, &WidgetToolpathPanel::classificationModeChanged, this,
+
+        connect(m_toolpathPanel, &WidgetToolpathPanel::classificationModeChanged, this,
             [this](int mode) { m_appContext->camModule()->setUseFaceClassification(mode == 1); });
+
+        // 法线显示参数信号
+        connect(m_toolpathPanel, &WidgetToolpathPanel::showNormalsToggled, this,
+            [this](bool on) { m_appContext->camModule()->setShowNormals(on); });
+        connect(m_toolpathPanel, &WidgetToolpathPanel::normalSampleStepChanged, this,
+            [this](double step) { m_appContext->camModule()->setNormalSampleStep(step); });
 
     // ── Left contour list (刀路 tab) ────────────────────────────────────
     connect(m_contourListWidget, &QTreeWidget::itemChanged, this,
             [this](QTreeWidgetItem* item, int /*column*/) {
+                if (!item) return;
                 int row = m_contourListWidget->indexOfTopLevelItem(item);
+                if (row < 0) return;
                 bool checked = (item->checkState(0) == Qt::Checked);
                 m_appContext->camModule()->setContourEnabled(row, checked);
-                m_toolpathPanel->updateContourList();
             });
 
     // Reorder contours when drag-drop finishes
     connect(m_contourListWidget->model(), &QAbstractItemModel::rowsMoved, this,
             [this]() {
-                int count = m_contourListWidget->topLevelItemCount();
-                QList<int> order;
-                order.reserve(count);
-                for (int i = 0; i < count; ++i) {
-                    auto* item = m_contourListWidget->topLevelItem(i);
-                    order.append(item->data(0, Qt::UserRole).toInt());
-                }
-                m_appContext->camModule()->reorderContours(order);
-                m_toolpathPanel->updateContourList();
-            });
+                struct ContourRowState {
+                    QString name;
+                    QString pointCount;
+                    Qt::CheckState checkState{Qt::Unchecked};
+                    int originalIndex{-1};
+                    QString toolTip;
+                };
 
-    // Sync left contour list when toolpath panel updates its list
-    connect(m_toolpathPanel, &WidgetToolpathPanel::contourListUpdated, this,
-            [this]() {
-                QSignalBlocker blocker(m_contourListWidget);
-                m_contourListWidget->clear();
-                const auto& tp = m_appContext->camModule()->toolpath();
-                for (int i = 0; i < tp.contourCount(); ++i) {
-                    const LaserContour& c = tp.contour(i);
-                    auto* item = new QTreeWidgetItem(m_contourListWidget);
-                    item->setText(0, c.name);
-                    item->setText(1, QString::number(c.points.size()));
-                    item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled);
-                    item->setCheckState(0, c.enabled ? Qt::Checked : Qt::Unchecked);
-                    item->setData(0, Qt::UserRole, i);  // store original index
-                    if (!c.sourceInfo.isEmpty())
-                        item->setToolTip(0, c.sourceInfo);
+                QList<ContourRowState> rows;
+                rows.reserve(m_appContext->camModule()->toolpath().contourCount());
+
+                const QTreeWidgetItem* currentItem = m_contourListWidget->currentItem();
+                int currentRow = -1;
+                QTreeWidgetItemIterator it(m_contourListWidget);
+                while (*it) {
+                    QTreeWidgetItem* item = *it;
+                    ContourRowState row;
+                    row.name = item->text(0);
+                    row.pointCount = item->text(1);
+                    row.checkState = item->checkState(0);
+                    row.originalIndex = item->data(0, Qt::UserRole).toInt();
+                    row.toolTip = item->toolTip(0);
+                    if (item == currentItem)
+                        currentRow = rows.size();
+                    rows.append(row);
+                    ++it;
                 }
+
+                if (rows.isEmpty())
+                    return;
+
+                {
+                    QSignalBlocker blocker(m_contourListWidget);
+                    m_contourListWidget->clear();
+                    for (int i = 0; i < rows.size(); ++i) {
+                        const auto& row = rows.at(i);
+                        auto* item = new QTreeWidgetItem(m_contourListWidget);
+                        item->setText(0, row.name);
+                        item->setText(1, row.pointCount);
+                        item->setFlags((item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled)
+                                       & ~Qt::ItemIsDropEnabled);
+                        item->setCheckState(0, row.checkState);
+                        item->setData(0, Qt::UserRole, row.originalIndex);
+                        if (!row.toolTip.isEmpty())
+                            item->setToolTip(0, row.toolTip);
+                    }
+                    if (currentRow >= 0 && currentRow < m_contourListWidget->topLevelItemCount())
+                        m_contourListWidget->setCurrentItem(m_contourListWidget->topLevelItem(currentRow));
+                }
+
+                QList<int> order;
+                order.reserve(rows.size());
+                for (const auto& row : rows)
+                    order.append(row.originalIndex);
+
+                m_appContext->camModule()->reorderContours(order);
+
+                QSignalBlocker blocker(m_contourListWidget);
+                for (int i = 0; i < m_contourListWidget->topLevelItemCount(); ++i) {
+                    auto* item = m_contourListWidget->topLevelItem(i);
+                    if (item)
+                        item->setData(0, Qt::UserRole, i);
+                }
+
+                m_toolpathPanel->showContourCoordinates(currentRow);
             });
 
     // When user clicks a contour in the left list, show its coordinates in the right panel
@@ -541,6 +710,10 @@ void MainWindow::createRightPanel()
         connect(process, &ProcessModule::axisPositionChanged, this,
             [this](const QString& axis, double value) {
             m_laserControl->updateAxisPosition(axis, value);
+            m_appContext->camModule()->setAxisPosition(axis, value, false);
+
+            if (m_machineRefreshTimer && !m_machineRefreshTimer->isActive())
+                m_machineRefreshTimer->start();
 
             const auto positions = m_appContext->processModule()->currentAxisPositions();
             m_sbCoords->setText(
@@ -662,9 +835,10 @@ void MainWindow::buildCamTab(SARibbonCategory* cat)
     // ── 机台 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelMach = cat->addPanel(tr("机台"));
     panelMach->addLargeAction(m_cmdContainer->findAction(CmdLoadMachine::Name));
-    panelMach->addLargeAction(m_cmdContainer->findAction(CmdMarkAxes::Name));
-    panelMach->addSmallAction(m_cmdContainer->findAction(CmdMountWorkpiece::Name));    panelMach->addSmallAction(m_cmdContainer->findAction(CmdUnloadMachine::Name));
-    panelMach->addSmallAction(m_cmdContainer->findAction(CmdExportMachine::Name));    panelMach->addSmallAction(makeAct(tr("坐标系"), ":/icons/coordinate.svg"));
+    panelMach->addSmallAction(m_cmdContainer->findAction(CmdCompressMachine::Name));
+    panelMach->addSmallAction(m_cmdContainer->findAction(CmdMountWorkpiece::Name));
+    panelMach->addSmallAction(m_cmdContainer->findAction(CmdUnloadMachine::Name));
+    panelMach->addSmallAction(m_cmdContainer->findAction(CmdExportMachine::Name));
 
     // ── 刀路 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelPath = cat->addPanel(tr("刀路"));
@@ -814,40 +988,37 @@ void MainWindow::onLeftTabChanged(int index)
         m_rightStack->setCurrentIndex(0);   // 准备 → machine panel
     else
         m_rightStack->setCurrentIndex(1);   // 文档 → toolpath panel
-    if (index == 1)
-        showMachineView();
+
+    if (usesMachineWorkspace(index))
+        m_appContext->camModule()->requestMachineView();
     else
-        showWorkpieceView();
+        m_appContext->cadModule()->requestWorkpieceView();
+
+    updateCommandStates();
 }
 
 void MainWindow::onDocumentAdded(DocumentId id)
 {
     // Machine workspace document is managed via showMachineView(); skip normal flow.
     if (LcncApplication::instance()->isMachineDocument(id)) {
-        if (m_leftTabs && m_leftTabs->currentIndex() == 1)
-            showMachineView();
+        if (isMachineViewActive())
+            m_appContext->camModule()->requestMachineView();
         updateCommandStates();
         return;
     }
+
     LcncDocument* doc = m_appContext->cadModule()->documentById(id);
-    if (doc) {
+    if (doc)
         m_sbDocName->setText(doc->name());
-        // Only switch view if not on 准备 tab (which always shows machine view)
-        if (!m_leftTabs || m_leftTabs->currentIndex() != 1) {
-            if (auto* gd = m_appContext->cadModule()->guiDocument(id))
-                m_occView->attachDocument(gd);
-        }
-    }
-    rebuildDocumentTree();
+
+    if (!isMachineViewActive())
+        m_appContext->cadModule()->requestWorkpieceView(id);
+
     updateCommandStates();
 }
 
 void MainWindow::onDocumentClosed(DocumentId /*id*/)
 {
-    // The "no active document" detach has already been done in
-    // onActiveDocumentChanged when activeDocumentChanged(kInvalid) fired
-    // (which precedes this signal).  Just refresh the tree and command states.
-    rebuildDocumentTree();
     updateCommandStates();
 }
 
@@ -856,44 +1027,21 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
     LcncDocument* doc = m_appContext->cadModule()->documentById(id);
     if (doc) {
         m_sbDocName->setText(doc->name());
-        // Only switch view if not on 准备 tab (which always shows machine view)
-        if (!m_leftTabs || m_leftTabs->currentIndex() != 1) {
-            if (auto* gd = m_appContext->cadModule()->guiDocument(id))
-                m_occView->attachDocument(gd);
-        }
+        if (!isMachineViewActive())
+            m_appContext->cadModule()->requestWorkpieceView(id);
     } else {
-        // No active document — detach to default scene NOW, BEFORE the
-        // subsequent documentClosed signal causes GuiApplication to delete
-        // the old GuiDocument.  Without this, m_activeDoc would become a
-        // dangling pointer by the time onDocumentClosed runs.
         m_sbDocName->setText(tr("无文档"));
-        if (!m_leftTabs || m_leftTabs->currentIndex() != 1)
+        if (!isMachineViewActive())
             m_occView->attachDefaultScene(m_defaultScene);
     }
-    // Model tree and machine panel always reflect the machine workspace
-    LcncDocument* machDoc = LcncApplication::instance()->machineDocument();
-    if (machDoc) {
-        m_modelTree->rebuildForDocument(machDoc);
-        m_machinePanel->setDocument(machDoc);
-    } else {
-        m_modelTree->clear();
-        m_machinePanel->setDocument(nullptr);
-    }
-    rebuildDocumentTree();
+
     updateCommandStates();
 }
 
 void MainWindow::onDocumentModified(DocumentId id)
 {
-    // Machine document modification: update model tree and machine panel
-    if (LcncApplication::instance()->isMachineDocument(id)) {
-        if (LcncDocument* doc = LcncApplication::instance()->machineDocument()) {
-            m_modelTree->rebuildForDocument(doc);
-            m_machinePanel->setDocument(doc);
-        }
-        return;
-    }
-    rebuildDocumentTree();
+    Q_UNUSED(id);
+    updateCommandStates();
 }
 
 void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/)
@@ -903,23 +1051,7 @@ void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/
     // IMPORTANT: Read ALL data from item BEFORE any operation that may
     // trigger rebuildDocumentTree() and invalidate the item pointer.
     const DocumentId docId  = item->data(0, kRoleDocId).toInt();
-    const QString    entry  = item->data(0, kRoleEntry).toString();
-    QStringList leaves;
-
-    if (entry.isEmpty()) {
-        std::function<void(QTreeWidgetItem*, QStringList&)> collectLeaves;
-        collectLeaves = [&](QTreeWidgetItem* node, QStringList& out) {
-            for (int i = 0; i < node->childCount(); ++i) {
-                QTreeWidgetItem* ch = node->child(i);
-                const QString e = ch->data(0, kRoleEntry).toString();
-                if (!e.isEmpty())
-                    out << e;
-                else
-                    collectLeaves(ch, out);
-            }
-        };
-        collectLeaves(item, leaves);
-    }
+    const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
 
     if (docId == kInvalidDocumentId) return;
 
@@ -929,13 +1061,8 @@ void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/
     if (m_appContext->cadModule()->activeDocumentId() != docId)
         m_appContext->cadModule()->setActiveDocument(docId);
 
-    if (entry.isEmpty()) {
-        if (leaves.isEmpty()) return;
-        m_appContext->cadModule()->setSelectedEntries(docId, leaves);
-        return;
-    }
-
-    m_appContext->cadModule()->setSelectedEntries(docId, {entry});
+    if (leafEntries.isEmpty()) return;
+    m_appContext->cadModule()->setSelectedEntries(docId, leafEntries);
 }
 
 void MainWindow::rebuildDocumentTree()
@@ -944,62 +1071,153 @@ void MainWindow::rebuildDocumentTree()
     QSignalBlocker blocker(m_documentTree);
     m_documentTree->clear();
 
-    const QList<LcncDocument*> docs = m_appContext->cadModule()->workpieceDocuments();
-    for (LcncDocument* doc : docs) {
-        if (!doc) continue;
+    const auto docs = m_appContext->cadModule()->documentTreeDocuments();
+    std::function<void(QTreeWidgetItem*, DocumentId, const CadModule::DocumentTreeNode&)> addNode;
+    addNode = [this, &addNode](QTreeWidgetItem* parent,
+                               DocumentId docId,
+                               const CadModule::DocumentTreeNode& node) {
+        auto* item = new QTreeWidgetItem(parent);
+        item->setText(0, node.displayName);
+        item->setData(0, kRoleDocId, docId);
+        item->setData(0, kRoleNodeKey, node.nodeKey);
+        item->setData(0, kRoleEntry, node.entry);
+        item->setData(0, kRoleLeafEntries, node.leafEntries);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(0, Qt::Checked);
 
+        if (node.entry.isEmpty())
+            item->setIcon(0, QIcon(":/icons/machine.svg"));
+        else
+            item->setIcon(0, QIcon(":/icons/shape.svg"));
+
+        for (const auto& childNode : node.children)
+            addNode(item, docId, childNode);
+    };
+
+    for (const auto& doc : docs) {
         auto* docItem = new QTreeWidgetItem(m_documentTree);
-        docItem->setText(0, doc->name());
+        docItem->setText(0, doc.displayName);
         docItem->setIcon(0, QIcon(":/icons/new_doc.svg"));
-        docItem->setData(0, kRoleDocId, doc->id());
+        docItem->setData(0, kRoleDocId, doc.documentId);
+        docItem->setData(0, kRoleNodeKey, doc.nodeKey);
         docItem->setData(0, kRoleEntry, QString());
+        docItem->setData(0, kRoleLeafEntries, doc.leafEntries);
         docItem->setFlags(docItem->flags() | Qt::ItemIsUserCheckable);
         docItem->setCheckState(0, Qt::Checked);
 
-        const auto& workpieceTree = doc->entityTree(LcncDocument::EntityKind::Workpiece);
-
-        if (!workpieceTree.isEmpty()) {
-            // ── Workpiece hierarchy from STEP/IGES import ───────────────
-            std::function<void(QTreeWidgetItem*, const LcncDocument::ShapeTreeNode&)> addNode;
-            addNode = [&](QTreeWidgetItem* parent, const LcncDocument::ShapeTreeNode& node) {
-                auto* item = new QTreeWidgetItem(parent);
-                item->setText(0, node.displayName.isEmpty() ? node.entry : node.displayName);
-                item->setData(0, kRoleDocId, doc->id());
-                item->setData(0, kRoleEntry, node.entry);
-                if (node.entry.isEmpty()) {
-                    // Virtual assembly/group node: use folder icon, keep selectable
-                    item->setIcon(0, QIcon(":/icons/machine.svg"));
-                    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-                    item->setCheckState(0, Qt::Checked);
-                } else {
-                    item->setIcon(0, QIcon(":/icons/shape.svg"));
-                    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-                    item->setCheckState(0, Qt::Checked);
-                }
-                for (const auto& child : node.children)
-                    addNode(item, child);
-            };
-            for (const auto& node : workpieceTree) addNode(docItem, node);
-        } else {
-            // ── Fallback: only show Workpiece-tagged free shapes ───────────
-            TDF_LabelSequence wpcLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
-            for (int i = 1; i <= wpcLabels.Length(); ++i) {
-                TDF_Label lbl = wpcLabels.Value(i);
-                const QString entry = XcafUtils::entry(lbl);
-                QString text = XcafUtils::name(lbl);
-                if (text.isEmpty()) text = entry;
-                auto* item = new QTreeWidgetItem(docItem);
-                item->setText(0, text);
-                item->setIcon(0, QIcon(":/icons/shape.svg"));
-                item->setData(0, kRoleDocId, doc->id());
-                item->setData(0, kRoleEntry, entry);
-                item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-                item->setCheckState(0, Qt::Checked);
-            }
-        }
+        for (const auto& node : doc.children)
+            addNode(docItem, doc.documentId, node);
     }
 
     m_documentTree->expandToDepth(2);
+
+    if (!isMachineViewActive())
+        m_appContext->cadModule()->syncSelectionFromView();
+}
+
+void MainWindow::rebuildContourListWidget()
+{
+    if (!m_contourListWidget) return;
+
+    const int previousIndex = m_contourListWidget->currentItem()
+        ? m_contourListWidget->currentItem()->data(0, Qt::UserRole).toInt()
+        : -1;
+
+    QSignalBlocker blocker(m_contourListWidget);
+    m_contourListWidget->clear();
+
+    const auto& tp = m_appContext->camModule()->toolpath();
+    int selectedRow = -1;
+    for (int i = 0; i < tp.contourCount(); ++i) {
+        const LaserContour& c = tp.contour(i);
+        auto* item = new QTreeWidgetItem(m_contourListWidget);
+        item->setText(0, c.name);
+        item->setText(1, QString::number(c.points.size()));
+        item->setFlags((item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled)
+                       & ~Qt::ItemIsDropEnabled);
+        item->setCheckState(0, c.enabled ? Qt::Checked : Qt::Unchecked);
+        item->setData(0, Qt::UserRole, i);
+        if (!c.sourceInfo.isEmpty())
+            item->setToolTip(0, c.sourceInfo);
+        if (i == previousIndex)
+            selectedRow = i;
+    }
+
+    if (selectedRow < 0 && m_contourListWidget->topLevelItemCount() > 0)
+        selectedRow = 0;
+
+    if (selectedRow >= 0)
+        m_contourListWidget->setCurrentItem(m_contourListWidget->topLevelItem(selectedRow));
+
+    m_toolpathPanel->showContourCoordinates(selectedRow);
+}
+
+void MainWindow::restorePersistedCamState()
+{
+    CamModule* cam = m_appContext->camModule();
+    if (!cam)
+        return;
+
+    const CamConfig& config = CamConfig::instance();
+    const QString presetName = config.machinePreset();
+    if (!presetName.isEmpty())
+        cam->configureMachine(presetName);
+
+    m_machinePanel->setMachineModelPath(cam->machineModelPath());
+    m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
+    m_toolpathPanel->setLeadInLength(cam->leadInLength());
+    m_toolpathPanel->setNormalAngle(cam->normalAngle());
+    m_toolpathPanel->setDiscretizationInterval(cam->deflection());
+    m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
+    m_toolpathPanel->setUseFaceClassification(cam->useFaceClassification());
+    m_toolpathPanel->setShowNormals(cam->showNormals());
+    m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
+
+    const QString machinePath = cam->machineModelPath();
+    if (!machinePath.isEmpty() && QFileInfo::exists(machinePath))
+        cam->loadMachine(machinePath);
+}
+
+void MainWindow::syncMachineWorkspaceUi()
+{
+    syncMachineWorkspaceUiInternal(true);
+}
+
+void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
+{
+    ProcessModule* process = m_appContext->processModule();
+    CamModule* cam = m_appContext->camModule();
+    LcncDocument* machineDoc = m_appContext->camModule()->machineDocument();
+    if (!machineDoc) {
+        m_modelTree->clear();
+        m_machinePanel->setDocument(nullptr);
+        m_machinePanel->setMachineModelPath(cam->machineModelPath());
+        m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
+        if (process)
+            process->setAxisDefinitions({});
+        if (m_laserControl)
+            m_laserControl->setAxisDefinitions({});
+        return;
+    }
+
+    if (rebuildTree || m_modelTree->currentDocument() != machineDoc)
+        m_modelTree->rebuildForDocument(machineDoc);
+
+    m_machinePanel->setDocument(machineDoc);
+    m_machinePanel->setMachineModelPath(cam->machineModelPath());
+    m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
+
+    const QList<MachineAxisDef> axes = machineDoc->machineKinematics()->axes();
+    if (process)
+        process->setAxisDefinitions(axes);
+    if (m_laserControl)
+        m_laserControl->setAxisDefinitions(axes);
+
+    if (process && m_laserControl) {
+        const auto axisPositions = process->currentAxisPositions();
+        for (auto it = axisPositions.cbegin(); it != axisPositions.cend(); ++it)
+            m_laserControl->updateAxisPosition(it.key(), it.value());
+    }
 }
 
 // ── View routing helpers ────────────────────────────────────────────────────────────────
@@ -1010,12 +1228,7 @@ void MainWindow::showMachineView()
     else
         m_occView->attachDefaultScene(m_defaultScene);
 
-    if (LcncDocument* machDoc = m_appContext->camModule()->machineDocument()) {
-        // Only rebuild if document changed to preserve expand/collapse state
-        if (m_modelTree->currentDocument() != machDoc)
-            m_modelTree->rebuildForDocument(machDoc);
-        m_machinePanel->setDocument(machDoc);
-    }
+    syncMachineWorkspaceUiInternal(false);
 }
 
 void MainWindow::showWorkpieceView(DocumentId id)
@@ -1035,7 +1248,7 @@ void MainWindow::updateCommandStates()
 
 bool MainWindow::isMachineViewActive() const
 {
-    return m_leftTabs && m_leftTabs->currentIndex() == 1;
+    return m_leftTabs && usesMachineWorkspace(m_leftTabs->currentIndex());
 }
 
 void MainWindow::closeEvent(QCloseEvent* e)

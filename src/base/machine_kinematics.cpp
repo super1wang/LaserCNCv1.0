@@ -5,6 +5,7 @@
 #include <gp_Pnt.hxx>
 
 #include <cmath>
+#include <utility>
 
 #ifndef M_PI
 #  define M_PI 3.14159265358979323846
@@ -52,12 +53,23 @@ void MachineKinematics::loadPreset(const QString& configType)
     // BASE is always the world-fixed machine bed
     add("BASE", MachineAxisDef::Linear, gp_Dir(0, 0, 1), 0.0, 0.0, QString());
 
-    if (configType == "VERTICAL_AC_TABLE") {
-        // Spindle chain: BASE → X → Y → Z (carries laser head)
+    if (configType == "XYZ") {
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE");
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y");
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X");
+
+    } else if (configType == "XYZA") {
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE");
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y");
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X");
+        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0), -9999.0, 9999.0, "BASE");
+
+    } else if (configType == "VERTICAL_AC_TABLE") {
+        // Spindle chain: BASE → Y → X → Z (carries laser head)
         // Table  chain: BASE → A → C (carries workpiece)
-        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "BASE");
-        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "X");
-        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "Y");
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE");
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y");
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X");
         add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0), -120.0,  120.0, "BASE");
         add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -9999.0, 9999.0, "A");
 
@@ -83,6 +95,8 @@ void MachineKinematics::loadPreset(const QString& configType)
         add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0),  -90.0,  90.0, "Z");
         add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -360.0, 360.0, "A");
     }
+
+    removeInvalidAssignments();
 }
 
 // ── Axis lookup ────────────────────────────────────────────────────────────────
@@ -99,6 +113,38 @@ const MachineAxisDef* MachineKinematics::findAxis(const QString& name) const
     for (const auto& a : m_axes)
         if (a.name == name) return &a;
     return nullptr;
+}
+
+gp_Pnt MachineKinematics::axisOrigin(const QString& axisName) const
+{
+    if (const MachineAxisDef* axis = findAxis(axisName))
+        return axis->origin;
+    return gp_Pnt(0, 0, 0);
+}
+
+bool MachineKinematics::setAxisOrigin(const QString& axisName, const gp_Pnt& origin)
+{
+    MachineAxisDef* axis = findAxis(axisName);
+    if (!axis)
+        return false;
+
+    axis->origin = origin;
+    return true;
+}
+
+bool MachineKinematics::setAxisLimits(const QString& axisName, double minVal, double maxVal)
+{
+    MachineAxisDef* axis = findAxis(axisName);
+    if (!axis)
+        return false;
+
+    if (minVal > maxVal)
+        std::swap(minVal, maxVal);
+
+    axis->minVal = minVal;
+    axis->maxVal = maxVal;
+    axis->currentPos = qBound(axis->minVal, axis->currentPos, axis->maxVal);
+    return true;
 }
 
 // ── Shape assignments ──────────────────────────────────────────────────────────
@@ -171,7 +217,7 @@ gp_Trsf MachineKinematics::axisLocalTrsf(const MachineAxisDef& axis) const
     if (axis.motionType == MachineAxisDef::Linear) {
         t.SetTranslation(gp_Vec(axis.direction) * axis.currentPos);
     } else {
-        t.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis.direction),
+        t.SetRotation(gp_Ax1(axis.origin, axis.direction),
                       axis.currentPos * M_PI / 180.0);
     }
     return t;
@@ -210,6 +256,11 @@ gp_Trsf MachineKinematics::computeShapeTransform(const QString& entry) const
 gp_Trsf MachineKinematics::computeWpcTransform(const QString& entry) const
 {
     const QString axisName = m_wpcToAxis.value(entry);
+    return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName);
+}
+
+gp_Trsf MachineKinematics::computeAxisTransform(const QString& axisName) const
+{
     return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName);
 }
 
@@ -297,4 +348,25 @@ void MachineKinematics::autoDetect(const QMap<QString,QString>& entryToName)
     }
 
     emit assignmentsChanged();
+}
+
+void MachineKinematics::removeInvalidAssignments()
+{
+    auto isValidAxis = [this](const QString& axisName) {
+        return axisName.isEmpty() || findAxis(axisName) != nullptr;
+    };
+
+    for (auto it = m_shapeToAxis.begin(); it != m_shapeToAxis.end(); ) {
+        if (!isValidAxis(it.value()))
+            it = m_shapeToAxis.erase(it);
+        else
+            ++it;
+    }
+
+    for (auto it = m_wpcToAxis.begin(); it != m_wpcToAxis.end(); ) {
+        if (!isValidAxis(it.value()))
+            it = m_wpcToAxis.erase(it);
+        else
+            ++it;
+    }
 }

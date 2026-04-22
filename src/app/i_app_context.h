@@ -8,6 +8,7 @@ class TaskManager;
 class CadModule;
 class CamModule;
 class ProcessModule;
+class WidgetOccView;
 
 /**
  * @brief Thin context interface injected into every Command.
@@ -30,6 +31,7 @@ public:
 
     virtual LcncDocument*     machineDocument()    const = 0;
     virtual GuiDocument*      machineGuiDocument() const = 0;
+    virtual WidgetOccView*    occView()            const = 0;
 
     virtual CadModule*        cadModule()         const = 0;
     virtual CamModule*        camModule()         const = 0;

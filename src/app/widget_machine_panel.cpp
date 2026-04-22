@@ -1,20 +1,94 @@
 #include "app/widget_machine_panel.h"
+
 #include "modules/cam_module.h"
 #include "base/lcnc_document.h"
 #include "base/machine_kinematics.h"
 #include "base/xcaf_utils.h"
 
-#include <QVBoxLayout>
+#include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
-#include <QPushButton>
+#include <QHBoxLayout>
 #include <QLabel>
-#include <QDoubleSpinBox>
+#include <QLayoutItem>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QSignalBlocker>
+#include <QTabWidget>
+#include <QVBoxLayout>
+
+#include <QSet>
 
 #include <TDF_LabelSequence.hxx>
 
-// ── Constructor ───────────────────────────────────────────────────────────────
+namespace {
+
+void clearLayout(QLayout* layout)
+{
+    if (!layout)
+        return;
+
+    while (QLayoutItem* item = layout->takeAt(0)) {
+        if (QLayout* childLayout = item->layout())
+            clearLayout(childLayout);
+
+        if (QWidget* widget = item->widget())
+            delete widget;
+
+        delete item;
+    }
+}
+
+void clearFormLayout(QFormLayout* formLayout)
+{
+    if (!formLayout)
+        return;
+
+    while (formLayout->rowCount() > 0)
+        formLayout->removeRow(0);
+}
+
+bool supportsAcCalibration(const MachineKinematics* kin)
+{
+    return kin
+        && kin->configType() == QStringLiteral("VERTICAL_AC_TABLE")
+        && kin->findAxis(QStringLiteral("A"))
+        && kin->findAxis(QStringLiteral("C"));
+}
+
+QString formatPointText(const gp_Pnt& point)
+{
+    return QObject::tr("X=%1  Y=%2  Z=%3")
+        .arg(point.X(), 0, 'f', 3)
+        .arg(point.Y(), 0, 'f', 3)
+        .arg(point.Z(), 0, 'f', 3);
+}
+
+void addPresetOption(QComboBox* comboBox,
+                     const QString& displayName,
+                     const QString& presetName)
+{
+    if (!comboBox)
+        return;
+    comboBox->addItem(displayName, presetName);
+}
+
+QDoubleSpinBox* createMillimeterSpin(QWidget* parent,
+                                     double minValue = -99999.0,
+                                     double maxValue = 99999.0)
+{
+    auto* spin = new QDoubleSpinBox(parent);
+    spin->setRange(minValue, maxValue);
+    spin->setDecimals(3);
+    spin->setSingleStep(1.0);
+    spin->setSuffix(QStringLiteral(" mm"));
+    spin->setMinimumWidth(120);
+    return spin;
+}
+
+} // namespace
 
 WidgetMachinePanel::WidgetMachinePanel(QWidget* parent)
     : QWidget(parent)
@@ -22,27 +96,31 @@ WidgetMachinePanel::WidgetMachinePanel(QWidget* parent)
     buildUi();
 }
 
-// ── setDocument ───────────────────────────────────────────────────────────────
-
 void WidgetMachinePanel::setDocument(LcncDocument* doc)
 {
     m_doc = doc;
-    rebuildAxisRows();
+
+    const MachineKinematics* kin = doc ? doc->machineKinematics() : nullptr;
+    const QString configType = kin ? kin->configType() : QString();
+
+    if (m_comboPreset) {
+        const QSignalBlocker blocker(m_comboPreset);
+        const int index = m_comboPreset->findData(configType);
+        m_comboPreset->setCurrentIndex(index >= 0 ? index : 0);
+    }
+
+    refreshCalibrationSection();
+    if (!doc)
+        m_selectedEntries.clear();
+    rebuildAssignmentSection();
     rebuildWpcSection();
-    rebuildMarkButtons();
 
     if (doc) {
-        MachineKinematics* kin = doc->machineKinematics();
-        const QString cfg = kin->configType();
-        m_lblConfigType->setText(cfg.isEmpty() ? tr("（未配置）") : cfg);
         m_lblMachineName->setText(doc->name());
     } else {
-        m_lblConfigType->setText(tr("（无文档）"));
         m_lblMachineName->setText(tr("—"));
     }
 }
-
-// ── UI construction ───────────────────────────────────────────────────────────
 
 void WidgetMachinePanel::buildUi()
 {
@@ -50,237 +128,679 @@ void WidgetMachinePanel::buildUi()
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(6);
 
-    // ── 机台配置 section ──────────────────────────────────────────────────
-    auto* cfgGroup = new QGroupBox(tr("机台配置"), this);
+    m_pages = new QTabWidget(this);
+    m_pages->setDocumentMode(true);
+    buildModelPage();
+    buildConfigPage();
+    buildWorkpiecePage();
+    mainLayout->addWidget(m_pages);
+}
+
+void WidgetMachinePanel::buildConfigPage()
+{
+    m_configPage = new QWidget(m_pages);
+    auto* mainLayout = new QVBoxLayout(m_configPage);
+    mainLayout->setContentsMargins(4, 4, 4, 4);
+    mainLayout->setSpacing(8);
+
+    auto* infoLabel = new QLabel(
+        tr("在此配置轴心、坐标转换与切割头位置。机台构型选择和零部件归轴入口已移动到“机台模型”页。"),
+        m_configPage);
+    infoLabel->setWordWrap(true);
+    infoLabel->setStyleSheet("color: #888; font-size: 11px;");
+    mainLayout->addWidget(infoLabel);
+
+    auto* calibrationGroup = new QGroupBox(tr("坐标系转换"), m_configPage);
+    auto* calibrationLayout = new QVBoxLayout(calibrationGroup);
+    calibrationLayout->setContentsMargins(6, 6, 6, 6);
+    calibrationLayout->setSpacing(8);
+
+    m_lblCalibrationHint = new QLabel(
+        tr("适用于 AC 转台：A 轴参考面写入 Y/Z，C 轴参考面写入 X。整机对齐只做平移。切割头模型点与物理点可独立录入和对齐。"),
+        calibrationGroup);
+    m_lblCalibrationHint->setWordWrap(true);
+    m_lblCalibrationHint->setStyleSheet("color: #888; font-size: 11px;");
+    calibrationLayout->addWidget(m_lblCalibrationHint);
+
+    auto createSpinField = [](QWidget* parent,
+                              const QString& labelText,
+                              QDoubleSpinBox* spinBox) {
+        auto* container = new QWidget(parent);
+        auto* layout = new QHBoxLayout(container);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(4);
+        auto* label = new QLabel(labelText, container);
+        label->setMinimumWidth(48);
+        layout->addWidget(label);
+        layout->addWidget(spinBox, 1);
+        return container;
+    };
+
+    m_groupAcAxes = new QGroupBox(tr("AC 轴心"), calibrationGroup);
+    auto* acLayout = new QGridLayout(m_groupAcAxes);
+    acLayout->setContentsMargins(6, 6, 6, 6);
+    acLayout->setHorizontalSpacing(8);
+    acLayout->setVerticalSpacing(6);
+    acLayout->setColumnStretch(0, 1);
+    acLayout->setColumnStretch(1, 1);
+    m_axisAySpin = createMillimeterSpin(calibrationGroup);
+    m_axisAzSpin = createMillimeterSpin(calibrationGroup);
+    m_axisCxSpin = createMillimeterSpin(calibrationGroup);
+    m_btnPickAxisA = new QPushButton(tr("A 轴参考面..."), m_groupAcAxes);
+    m_btnPickAxisC = new QPushButton(tr("C 轴参考面..."), m_groupAcAxes);
+    acLayout->addWidget(createSpinField(m_groupAcAxes, tr("A 轴 Y:"), m_axisAySpin), 0, 0);
+    acLayout->addWidget(createSpinField(m_groupAcAxes, tr("A 轴 Z:"), m_axisAzSpin), 0, 1);
+    acLayout->addWidget(m_btnPickAxisA, 1, 0);
+    acLayout->addWidget(createSpinField(m_groupAcAxes, tr("C 轴 X:"), m_axisCxSpin), 1, 1);
+    acLayout->addWidget(m_btnPickAxisC, 2, 0);
+    calibrationLayout->addWidget(m_groupAcAxes);
+
+    m_groupAcCenter = new QGroupBox(tr("AC 中心对齐"), calibrationGroup);
+    auto* acCenterLayout = new QFormLayout(m_groupAcCenter);
+    m_lblCurrentAcCenter = new QLabel(tr("当前构型暂不支持 AC 中心对齐。"), m_groupAcCenter);
+    m_lblCurrentAcCenter->setWordWrap(true);
+    m_targetCenterX = createMillimeterSpin(calibrationGroup);
+    m_targetCenterY = createMillimeterSpin(calibrationGroup);
+    m_targetCenterZ = createMillimeterSpin(calibrationGroup);
+    acCenterLayout->addRow(tr("当前模型 AC 中心:"), m_lblCurrentAcCenter);
+    acCenterLayout->addRow(tr("物理目标 X:"), m_targetCenterX);
+    acCenterLayout->addRow(tr("物理目标 Y:"), m_targetCenterY);
+    acCenterLayout->addRow(tr("物理目标 Z:"), m_targetCenterZ);
+    m_btnAlignToPhysical = new QPushButton(tr("对齐到物理 AC 中心"), m_groupAcCenter);
+    acCenterLayout->addRow(m_btnAlignToPhysical);
+    calibrationLayout->addWidget(m_groupAcCenter);
+
+    m_groupHeadAlignment = new QGroupBox(tr("切割头位置"), calibrationGroup);
+    auto* headLayout = new QGridLayout(m_groupHeadAlignment);
+    headLayout->setContentsMargins(6, 6, 6, 6);
+    headLayout->setHorizontalSpacing(8);
+    headLayout->setVerticalSpacing(6);
+    headLayout->setColumnStretch(0, 1);
+    headLayout->setColumnStretch(1, 1);
+    m_headModelX = createMillimeterSpin(calibrationGroup);
+    m_headModelY = createMillimeterSpin(calibrationGroup);
+    m_headModelZ = createMillimeterSpin(calibrationGroup);
+    m_headPhysicalX = createMillimeterSpin(calibrationGroup);
+    m_headPhysicalY = createMillimeterSpin(calibrationGroup);
+    m_headPhysicalZ = createMillimeterSpin(calibrationGroup);
+    m_btnPickHead = new QPushButton(tr("切割头对齐..."), m_groupHeadAlignment);
+    m_btnAlignHeadToPhysical = new QPushButton(tr("对齐到物理切割头"), m_groupHeadAlignment);
+    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("模型 X:"), m_headModelX), 0, 0);
+    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("模型 Y:"), m_headModelY), 0, 1);
+    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("模型 Z:"), m_headModelZ), 1, 0);
+    headLayout->addWidget(m_btnPickHead, 1, 1);
+    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("物理 X:"), m_headPhysicalX), 2, 0);
+    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("物理 Y:"), m_headPhysicalY), 2, 1);
+    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("物理 Z:"), m_headPhysicalZ), 3, 0);
+    headLayout->addWidget(m_btnAlignHeadToPhysical, 3, 1);
+    calibrationLayout->addWidget(m_groupHeadAlignment);
+
+    m_lblHeadModelPoint = new QLabel(tr("机台视图会按模型切割头点绘制 Z 轴线与向下圆锥示意。"), calibrationGroup);
+    m_lblHeadModelPoint->setWordWrap(true);
+    m_lblHeadModelPoint->setStyleSheet("color: #888; font-size: 11px;");
+    calibrationLayout->addWidget(m_lblHeadModelPoint);
+
+    m_lblPickStatus = new QLabel(tr("左键选择参考平面，右键或 ESC 取消。"), calibrationGroup);
+    m_lblPickStatus->setWordWrap(true);
+    m_lblPickStatus->setStyleSheet("color: #888; font-size: 11px;");
+    calibrationLayout->addWidget(m_lblPickStatus);
+
+    connect(m_btnPickAxisA, &QPushButton::clicked, this,
+        [this] { emit calibrationFacePickRequested(QStringLiteral("A")); });
+    connect(m_btnPickAxisC, &QPushButton::clicked, this,
+        [this] { emit calibrationFacePickRequested(QStringLiteral("C")); });
+    connect(m_btnPickHead, &QPushButton::clicked, this,
+        [this] { emit calibrationFacePickRequested(QStringLiteral("CUTTER_HEAD")); });
+    connect(m_btnAlignToPhysical, &QPushButton::clicked, this,
+        [this] {
+        emit alignToPhysicalCenterRequested(
+            m_targetCenterX ? m_targetCenterX->value() : 0.0,
+            m_targetCenterY ? m_targetCenterY->value() : 0.0,
+            m_targetCenterZ ? m_targetCenterZ->value() : 0.0);
+        });
+    connect(m_btnAlignHeadToPhysical, &QPushButton::clicked, this,
+        &WidgetMachinePanel::alignToPhysicalCutterHeadRequested);
+    connect(m_axisAySpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onAxisOriginEditorChanged);
+    connect(m_axisAzSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onAxisOriginEditorChanged);
+    connect(m_axisCxSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onAxisOriginEditorChanged);
+    connect(m_headModelX, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onCutterHeadModelEditorChanged);
+    connect(m_headModelY, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onCutterHeadModelEditorChanged);
+    connect(m_headModelZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onCutterHeadModelEditorChanged);
+    connect(m_headPhysicalX, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onCutterHeadPhysicalEditorChanged);
+    connect(m_headPhysicalY, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onCutterHeadPhysicalEditorChanged);
+    connect(m_headPhysicalZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
+        &WidgetMachinePanel::onCutterHeadPhysicalEditorChanged);
+    mainLayout->addWidget(calibrationGroup, 1);
+
+    mainLayout->addStretch();
+    m_pages->addTab(m_configPage, tr("轴系配置"));
+}
+
+void WidgetMachinePanel::buildModelPage()
+{
+    m_modelPage = new QWidget(m_pages);
+    auto* mainLayout = new QVBoxLayout(m_modelPage);
+    mainLayout->setContentsMargins(4, 4, 4, 4);
+    mainLayout->setSpacing(6);
+
+    auto* cfgGroup = new QGroupBox(tr("机台模型"), m_modelPage);
     auto* cfgLayout = new QVBoxLayout(cfgGroup);
     cfgLayout->setSpacing(4);
 
     auto* infoRow = new QFormLayout;
-    m_lblMachineName = new QLabel(tr("—"), this);
-    m_lblConfigType  = new QLabel(tr("（未配置）"), this);
+    m_lblMachineName = new QLabel(tr("—"), cfgGroup);
     m_lblMachineName->setStyleSheet("color: #aaa;");
-    m_lblConfigType->setStyleSheet("color: #aaa; font-size: 11px;");
-    infoRow->addRow(tr("文档:"),  m_lblMachineName);
-    infoRow->addRow(tr("构型:"),  m_lblConfigType);
+    m_comboPreset = new QComboBox(cfgGroup);
+    addPresetOption(m_comboPreset, tr("— 请选择构型 —"), QString());
+    addPresetOption(m_comboPreset, tr("XYZ 三轴（平面 / 圆管）"), QStringLiteral("XYZ"));
+    addPresetOption(m_comboPreset, tr("XYZA 四轴（工件转台）"), QStringLiteral("XYZA"));
+    addPresetOption(m_comboPreset, tr("AC 转台（垂直主轴）"), QStringLiteral("VERTICAL_AC_TABLE"));
+    addPresetOption(m_comboPreset, tr("BC 转台（垂直主轴）"), QStringLiteral("VERTICAL_BC_TABLE"));
+    addPresetOption(m_comboPreset, tr("AB 摆头"), QStringLiteral("AB_HEAD"));
+    addPresetOption(m_comboPreset, tr("AC 摆头"), QStringLiteral("AC_HEAD"));
+    m_editMachinePath = new QLineEdit(cfgGroup);
+    m_editMachinePath->setClearButtonEnabled(true);
+    m_editMachinePath->setPlaceholderText(tr("输入或粘贴机台模型路径"));
+    m_comboRenderQuality = new QComboBox(cfgGroup);
+    m_comboRenderQuality->addItem(tr("高"), static_cast<int>(MachineRenderQuality::High));
+    m_comboRenderQuality->addItem(tr("中"), static_cast<int>(MachineRenderQuality::Medium));
+    m_comboRenderQuality->addItem(tr("低"), static_cast<int>(MachineRenderQuality::Low));
+    infoRow->addRow(tr("文档:"), m_lblMachineName);
+    infoRow->addRow(tr("构型:"), m_comboPreset);
+    infoRow->addRow(tr("路径:"), m_editMachinePath);
+    infoRow->addRow(tr("渲染:"), m_comboRenderQuality);
     cfgLayout->addLayout(infoRow);
 
-    auto* btnLoad   = new QPushButton(QIcon(":/icons/machine.svg"),
-                                      tr("加载机台模型..."), this);
-    auto* btnMark   = new QPushButton(QIcon(":/icons/coordinate.svg"),
-                                      tr("标记轴系..."), this);
-    auto* btnUnload = new QPushButton(QIcon(":/icons/machine.svg"),
-                                      tr("卸载机台"), this);
-    auto* btnExport = new QPushButton(QIcon(":/icons/export.svg"),
-                                      tr("导出机台模型..."), this);
-    auto* btnMove   = new QPushButton(QIcon(":/icons/move.svg"),
-                                      tr("移动部件..."), this);
-    auto* btnRotate = new QPushButton(QIcon(":/icons/rotate.svg"),
-                                      tr("旋转部件..."), this);
-    auto* btnDelete = new QPushButton(QIcon(":/icons/delete.svg"),
-                                      tr("删除部件"), this);
+    auto* calibrationHint = new QLabel(
+        tr("“加载机台模型...”会优先读取上方路径；未填写有效路径时，会回退到文件选择对话框。\n在机台视图或模型树中选中机台部件后，可直接点击下方按钮完成归轴。"),
+        cfgGroup);
+    calibrationHint->setWordWrap(true);
+    calibrationHint->setStyleSheet("color: #888; font-size: 11px;");
+    cfgLayout->addWidget(calibrationHint);
+
+    auto* btnLoad = new QPushButton(QIcon(":/icons/machine.svg"), tr("加载机台模型..."), cfgGroup);
+    auto* btnCompress = new QPushButton(QIcon(":/icons/machine.svg"), tr("压缩机台模型"), cfgGroup);
+    auto* btnUnload = new QPushButton(QIcon(":/icons/machine.svg"), tr("卸载机台"), cfgGroup);
+    auto* btnExport = new QPushButton(QIcon(":/icons/export.svg"), tr("导出机台模型..."), cfgGroup);
+
     cfgLayout->addWidget(btnLoad);
-    cfgLayout->addWidget(btnMark);
+    cfgLayout->addWidget(btnCompress);
     cfgLayout->addWidget(btnUnload);
     cfgLayout->addWidget(btnExport);
-    cfgLayout->addWidget(btnMove);
-    cfgLayout->addWidget(btnRotate);
-    cfgLayout->addWidget(btnDelete);
     mainLayout->addWidget(cfgGroup);
 
-    connect(btnLoad,   &QPushButton::clicked, this, &WidgetMachinePanel::loadMachineRequested);
-    connect(btnMark,   &QPushButton::clicked, this, &WidgetMachinePanel::markAxesRequested);
+    connect(m_comboPreset, &QComboBox::currentIndexChanged, this,
+            [this](int index) {
+                if (!m_comboPreset)
+                    return;
+
+                const QString presetName = m_comboPreset->itemData(index).toString();
+                emit machinePresetChanged(presetName);
+            });
+    connect(btnLoad, &QPushButton::clicked, this, &WidgetMachinePanel::loadMachineRequested);
+    connect(btnCompress, &QPushButton::clicked, this, &WidgetMachinePanel::compressMachineRequested);
     connect(btnUnload, &QPushButton::clicked, this, &WidgetMachinePanel::unloadMachineRequested);
     connect(btnExport, &QPushButton::clicked, this, &WidgetMachinePanel::exportMachineRequested);
-    connect(btnMove,   &QPushButton::clicked, this, &WidgetMachinePanel::moveMachineShapeRequested);
-    connect(btnRotate, &QPushButton::clicked, this, &WidgetMachinePanel::rotateMachineShapeRequested);
-    connect(btnDelete, &QPushButton::clicked, this, &WidgetMachinePanel::deleteMachineShapeRequested);
+    connect(m_editMachinePath, &QLineEdit::editingFinished, this, [this] {
+        emit machineModelPathChanged(m_editMachinePath ? m_editMachinePath->text().trimmed() : QString());
+    });
+    connect(m_editMachinePath, &QLineEdit::returnPressed, this, [this] {
+        emit machineModelPathChanged(m_editMachinePath ? m_editMachinePath->text().trimmed() : QString());
+    });
+    connect(m_comboRenderQuality, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int index) {
+                if (!m_comboRenderQuality)
+                    return;
 
-    // ── 轴系位置 section ──────────────────────────────────────────────────
-    m_axisGroup  = new QGroupBox(tr("轴系位置"), this);
-    m_axisLayout = new QFormLayout(m_axisGroup);
-    m_axisLayout->setSpacing(4);
-    auto* axisPlaceholder = new QLabel(tr("加载机台后显示"), m_axisGroup);
-    axisPlaceholder->setStyleSheet("color: gray; font-size: 11px;");
-    m_axisLayout->addRow(axisPlaceholder);
-    mainLayout->addWidget(m_axisGroup);
+                emit machineRenderQualityChanged(
+                    static_cast<MachineRenderQuality>(m_comboRenderQuality->itemData(index).toInt()));
+            });
 
-    // ── 工件挂载 section ──────────────────────────────────────────────────
-    m_wpcGroup  = new QGroupBox(tr("工件挂载"), this);
-    m_wpcLayout = new QFormLayout(m_wpcGroup);
-    m_wpcLayout->setSpacing(4);
-    auto* btnMount = new QPushButton(QIcon(":/icons/workpiece.svg"),
-                                      tr("挂载工件..."), this);
-    m_wpcLayout->addRow(btnMount);
-    mainLayout->addWidget(m_wpcGroup);
-
-    connect(btnMount, &QPushButton::clicked, this, &WidgetMachinePanel::mountWorkpieceRequested);
-
-    // ── 标记所选形体 section ───────────────────────────────────────────────
-    m_markGroup = new QGroupBox(tr("标记所选形体"), this);
-    auto* markOuterLayout = new QVBoxLayout(m_markGroup);
-    markOuterLayout->setContentsMargins(4, 2, 4, 2);
-    markOuterLayout->setSpacing(2);
-    m_markWidget = new QWidget(m_markGroup);
-    markOuterLayout->addWidget(m_markWidget);
-    {
-        auto* l = new QVBoxLayout(m_markWidget);
-        l->setContentsMargins(0, 0, 0, 0);
-        auto* lbl = new QLabel(tr("加载机台后显示"), m_markWidget);
-        lbl->setStyleSheet("color: gray; font-size: 11px;");
-        l->addWidget(lbl);
-    }
-    mainLayout->addWidget(m_markGroup);
+    m_assignGroup = new QGroupBox(tr("标记所选部件"), m_modelPage);
+    auto* assignLayout = new QVBoxLayout(m_assignGroup);
+    assignLayout->setContentsMargins(6, 6, 6, 6);
+    assignLayout->setSpacing(6);
+    m_lblAssignSelection = new QLabel(tr("请在机台视图或模型树中选择机台部件。"), m_assignGroup);
+    m_lblAssignSelection->setWordWrap(true);
+    m_lblAssignSelection->setStyleSheet("color: #888; font-size: 11px;");
+    assignLayout->addWidget(m_lblAssignSelection);
+    m_assignGrid = new QGridLayout;
+    m_assignGrid->setHorizontalSpacing(8);
+    m_assignGrid->setVerticalSpacing(6);
+    m_assignGrid->setColumnStretch(0, 1);
+    m_assignGrid->setColumnStretch(1, 1);
+    assignLayout->addLayout(m_assignGrid);
+    mainLayout->addWidget(m_assignGroup);
 
     mainLayout->addStretch();
+    m_pages->addTab(m_modelPage, tr("机台模型"));
 }
 
-// ── Axis spinbox rebuild ──────────────────────────────────────────────────────
+    void WidgetMachinePanel::buildWorkpiecePage()
+    {
+        m_workpiecePage = new QWidget(m_pages);
+        auto* mainLayout = new QVBoxLayout(m_workpiecePage);
+        mainLayout->setContentsMargins(4, 4, 4, 4);
+        mainLayout->setSpacing(8);
 
-static void clearFormLayout(QFormLayout* fl)
+        auto* infoLabel = new QLabel(
+        tr("挂载后的工件会按工件包围盒中心对齐到安装位置坐标。存在转台构型时，可直接把安装位置 X/Y 对齐到旋转中心。"),
+        m_workpiecePage);
+        infoLabel->setWordWrap(true);
+        infoLabel->setStyleSheet("color: #888; font-size: 11px;");
+        mainLayout->addWidget(infoLabel);
+
+        m_wpcGroup = new QGroupBox(tr("工件挂载"), m_workpiecePage);
+        auto* mountLayout = new QVBoxLayout(m_wpcGroup);
+        mountLayout->setContentsMargins(6, 6, 6, 6);
+        mountLayout->setSpacing(6);
+        m_lblWorkpieceStatus = new QLabel(tr("暂无工件挂载"), m_wpcGroup);
+        m_lblWorkpieceStatus->setWordWrap(true);
+        m_lblWorkpieceStatus->setStyleSheet("color: gray; font-size: 11px;");
+        m_btnMountWorkpiece = new QPushButton(QIcon(":/icons/workpiece.svg"), tr("挂载工件..."), m_wpcGroup);
+        mountLayout->addWidget(m_lblWorkpieceStatus);
+        mountLayout->addWidget(m_btnMountWorkpiece);
+        mainLayout->addWidget(m_wpcGroup);
+
+        m_installGroup = new QGroupBox(tr("工件安装位置"), m_workpiecePage);
+        auto* installLayout = new QFormLayout(m_installGroup);
+        installLayout->setContentsMargins(6, 6, 6, 6);
+        installLayout->setSpacing(6);
+        m_wpcInstallX = createMillimeterSpin(m_installGroup);
+        m_wpcInstallY = createMillimeterSpin(m_installGroup);
+        m_wpcInstallZ = createMillimeterSpin(m_installGroup);
+        m_btnAlignRotationCenter = new QPushButton(tr("对齐旋转中心"), m_installGroup);
+        installLayout->addRow(tr("安装 X:"), m_wpcInstallX);
+        installLayout->addRow(tr("安装 Y:"), m_wpcInstallY);
+        installLayout->addRow(tr("安装 Z:"), m_wpcInstallZ);
+        installLayout->addRow(m_btnAlignRotationCenter);
+        mainLayout->addWidget(m_installGroup);
+
+        connect(m_btnMountWorkpiece, &QPushButton::clicked,
+            this, &WidgetMachinePanel::mountWorkpieceRequested);
+        connect(m_btnAlignRotationCenter, &QPushButton::clicked,
+            this, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested);
+        connect(m_wpcInstallX, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
+        connect(m_wpcInstallY, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
+        connect(m_wpcInstallZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
+
+        mainLayout->addStretch();
+        m_pages->addTab(m_workpiecePage, tr("工件配置"));
+    }
+
+void WidgetMachinePanel::refreshCalibrationSection()
 {
-    while (fl->rowCount() > 0)
-        fl->removeRow(0);
-}
+    const MachineKinematics* kin = m_doc ? m_doc->machineKinematics() : nullptr;
+    const bool supported = supportsAcCalibration(kin);
+    const bool hasPreset = kin && !kin->configType().isEmpty();
 
-void WidgetMachinePanel::rebuildAxisRows()
-{
-    m_axisSpin.clear();
-    clearFormLayout(m_axisLayout);
+    if (m_groupAcAxes)
+        m_groupAcAxes->setVisible(supported);
+    if (m_groupAcCenter)
+        m_groupAcCenter->setVisible(supported);
+    if (m_groupHeadAlignment)
+        m_groupHeadAlignment->setVisible(hasPreset);
+    if (m_lblCalibrationHint) {
+        m_lblCalibrationHint->setText(
+            supported
+                ? tr("适用于 AC 转台：A 轴参考面写入 Y/Z，C 轴参考面写入 X。整机对齐只做平移。切割头模型点与物理点可独立录入和对齐。")
+                : tr("当前页用于轴心与切割头位置配置。AC 轴心快填和 AC 中心对齐仅在 AC 转台构型下显示。"));
+    }
 
-    if (!m_doc) {
-        auto* lbl = new QLabel(tr("加载机台后显示"), m_axisGroup);
-        lbl->setStyleSheet("color: gray; font-size: 11px;");
-        m_axisLayout->addRow(lbl);
+    if (m_axisAySpin && kin && kin->findAxis(QStringLiteral("A"))) {
+        const gp_Pnt origin = kin->axisOrigin(QStringLiteral("A"));
+        const QSignalBlocker blockY(m_axisAySpin);
+        const QSignalBlocker blockZ(m_axisAzSpin);
+        m_axisAySpin->setValue(origin.Y());
+        m_axisAzSpin->setValue(origin.Z());
+    }
+
+    if (m_axisCxSpin && kin && kin->findAxis(QStringLiteral("C"))) {
+        const gp_Pnt origin = kin->axisOrigin(QStringLiteral("C"));
+        const QSignalBlocker blockX(m_axisCxSpin);
+        m_axisCxSpin->setValue(origin.X());
+    }
+
+    gp_Pnt center;
+    const bool hasCenter = supported && CamModule::instance()->currentAcRotationCenter(center);
+    if (m_lblCurrentAcCenter) {
+        if (hasCenter) {
+            m_lblCurrentAcCenter->setText(formatPointText(center));
+            m_lblCurrentAcCenter->setStyleSheet(QString());
+        } else {
+            m_lblCurrentAcCenter->setText(tr("当前构型暂不支持 AC 中心对齐。"));
+            m_lblCurrentAcCenter->setStyleSheet("color: gray; font-size: 11px;");
+        }
+    }
+
+    for (QDoubleSpinBox* spin : {m_targetCenterX, m_targetCenterY, m_targetCenterZ}) {
+        if (spin)
+            spin->setEnabled(supported);
+    }
+
+    if (m_btnPickAxisA)
+        m_btnPickAxisA->setEnabled(supported);
+    if (m_btnPickAxisC)
+        m_btnPickAxisC->setEnabled(supported);
+    if (m_axisAySpin)
+        m_axisAySpin->setEnabled(supported);
+    if (m_axisAzSpin)
+        m_axisAzSpin->setEnabled(supported);
+    if (m_axisCxSpin)
+        m_axisCxSpin->setEnabled(supported);
+    if (m_btnAlignToPhysical)
+        m_btnAlignToPhysical->setEnabled(supported);
+
+    const gp_Pnt cutterHeadModel = CamModule::instance()->cutterHeadModelPosition();
+    const gp_Pnt cutterHeadPhysical = CamModule::instance()->cutterHeadPhysicalPosition();
+    for (const auto pair : {
+             std::pair<QDoubleSpinBox*, double>(m_headModelX, cutterHeadModel.X()),
+             std::pair<QDoubleSpinBox*, double>(m_headModelY, cutterHeadModel.Y()),
+             std::pair<QDoubleSpinBox*, double>(m_headModelZ, cutterHeadModel.Z()),
+             std::pair<QDoubleSpinBox*, double>(m_headPhysicalX, cutterHeadPhysical.X()),
+             std::pair<QDoubleSpinBox*, double>(m_headPhysicalY, cutterHeadPhysical.Y()),
+             std::pair<QDoubleSpinBox*, double>(m_headPhysicalZ, cutterHeadPhysical.Z()) }) {
+        if (!pair.first)
+            continue;
+        const QSignalBlocker blocker(pair.first);
+        pair.first->setValue(pair.second);
+    }
+
+    if (m_lblHeadModelPoint)
+        m_lblHeadModelPoint->setText(tr("当前切割头模型点: %1")
+                                         .arg(formatPointText(cutterHeadModel)));
+
+    if (!m_lblPickStatus)
+        return;
+
+    if (!m_pendingCalibrationAxis.isEmpty()) {
+        const QString targetText = (m_pendingCalibrationAxis == QStringLiteral("CUTTER_HEAD"))
+            ? tr("切割头对齐")
+            : tr("%1 轴参考平面").arg(m_pendingCalibrationAxis);
+        m_lblPickStatus->setText(
+            tr("正在拾取 %1：左键确认，右键或 ESC 取消。")
+                .arg(targetText));
+        m_lblPickStatus->setStyleSheet("color: #c98512; font-size: 11px; font-weight: bold;");
         return;
     }
 
-    MachineKinematics* kin = m_doc->machineKinematics();
-    if (kin->axes().isEmpty()) {
-        auto* lbl = new QLabel(tr("未配置轴系"), m_axisGroup);
-        lbl->setStyleSheet("color: gray; font-size: 11px;");
-        m_axisLayout->addRow(lbl);
+    if (!supported) {
+        m_lblPickStatus->setText(tr("左键选择参考平面，右键或 ESC 取消。切割头拾取始终可用，AC 轴心快填仅在 AC 转台构型下显示。"));
+        m_lblPickStatus->setStyleSheet("color: #888; font-size: 11px;");
         return;
     }
 
-    for (const auto& axis : kin->axes()) {
-        if (axis.name == "BASE") continue;  // fixed base — no user control
+    m_lblPickStatus->setText(tr("左键选择参考平面，右键或 ESC 取消。"));
+    m_lblPickStatus->setStyleSheet("color: #888; font-size: 11px;");
+}
 
-        auto* sb = new QDoubleSpinBox(m_axisGroup);
-        sb->setDecimals(axis.motionType == MachineAxisDef::Linear ? 3 : 2);
-        sb->setSuffix(axis.motionType == MachineAxisDef::Linear
-                      ? QStringLiteral(" mm") : QStringLiteral(" °"));
-        const double viewMin = qMax(axis.minVal, -9999.0);
-        const double viewMax = qMin(axis.maxVal,  9999.0);
-        sb->setRange(viewMin, viewMax);
-        sb->setValue(axis.currentPos);
-        sb->setSingleStep(axis.motionType == MachineAxisDef::Linear ? 1.0 : 0.5);
+void WidgetMachinePanel::rebuildAssignmentSection()
+{
+    if (!m_assignGroup || !m_lblAssignSelection || !m_assignGrid)
+        return;
 
-        m_axisLayout->addRow(tr("%1 轴:").arg(axis.name), sb);
-        m_axisSpin.insert(axis.name, sb);
+    clearLayout(m_assignGrid);
 
+    const MachineKinematics* kin = m_doc ? m_doc->machineKinematics() : nullptr;
+    const bool hasMachineEntities = m_doc
+        && m_doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
+    if (!m_doc || !kin || !hasMachineEntities) {
+        m_lblAssignSelection->setText(tr("加载机台模型后，可为选中机台部件直接标记所属轴系。"));
+        m_lblAssignSelection->setStyleSheet("color: #888; font-size: 11px;");
+        return;
+    }
+
+    if (m_selectedEntries.isEmpty()) {
+        m_lblAssignSelection->setText(tr("请在机台视图或模型树中选择机台部件。"));
+        m_lblAssignSelection->setStyleSheet("color: #888; font-size: 11px;");
+        return;
+    }
+
+    TDF_LabelSequence labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
+    QMap<QString, QString> entryNames;
+    for (int i = 1; i <= labels.Length(); ++i) {
+        const TDF_Label label = labels.Value(i);
+        entryNames.insert(XcafUtils::entry(label), XcafUtils::name(label));
+    }
+
+    QStringList selectedNames;
+    for (const QString& entry : m_selectedEntries)
+        selectedNames << entryNames.value(entry, entry);
+
+    QString summaryText;
+    if (selectedNames.size() == 1) {
+        summaryText = tr("当前选中: %1").arg(selectedNames.first());
+    } else if (selectedNames.size() <= 3) {
+        summaryText = tr("当前选中 %1 个部件: %2")
+            .arg(selectedNames.size())
+            .arg(selectedNames.join(tr("、")));
+    } else {
+        summaryText = tr("当前选中 %1 个机台部件，可直接点击下方按钮归轴。")
+            .arg(selectedNames.size());
+    }
+    m_lblAssignSelection->setText(summaryText);
+    m_lblAssignSelection->setStyleSheet("color: #2f5f9f; font-size: 11px;");
+
+    int index = 0;
+    for (const MachineAxisDef& axis : kin->axes()) {
         const QString axisName = axis.name;
-        connect(sb, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-                this, [this, axisName](double v) {
-                    onAxisSpinChanged(axisName, v);
-                });
-    }
-}
+        QString buttonText;
+        if (axisName == QStringLiteral("BASE"))
+            buttonText = tr("标记为 BASE");
+        else
+            buttonText = tr("标记为 %1").arg(axisName);
 
-// ── Workpiece mount section rebuild ──────────────────────────────────────────
+        auto* button = new QPushButton(buttonText, m_assignGroup);
+        button->setToolTip(tr("将当前选中的机台部件归到 %1 轴").arg(axisName));
+        connect(button, &QPushButton::clicked, this, [this, axisName] {
+            if (m_selectedEntries.isEmpty())
+                return;
+            CamModule::instance()->assignShapesToAxis(m_selectedEntries, axisName);
+        });
+
+        const int row = index / 2;
+        const int column = index % 2;
+        m_assignGrid->addWidget(button, row, column);
+        ++index;
+    }
+
+    auto* clearButton = new QPushButton(tr("解除所选归轴"), m_assignGroup);
+    clearButton->setToolTip(tr("清除当前选中机台部件已有的轴系归属"));
+    connect(clearButton, &QPushButton::clicked, this, [this] {
+        for (const QString& entry : m_selectedEntries)
+            CamModule::instance()->unassignShape(entry);
+    });
+    m_assignGrid->addWidget(clearButton, index / 2, index % 2);
+}
 
 void WidgetMachinePanel::rebuildWpcSection()
 {
-    clearFormLayout(m_wpcLayout);
+    const MachineKinematics* kin = m_doc ? m_doc->machineKinematics() : nullptr;
+    const bool hasMachineEntities = m_doc
+        && m_doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
+    const bool hasPreset = kin && !kin->configType().isEmpty();
+    const QString configType = kin ? kin->configType() : QString();
+    const bool showRotationButton = configType == QStringLiteral("VERTICAL_AC_TABLE")
+        || configType == QStringLiteral("VERTICAL_BC_TABLE")
+        || configType == QStringLiteral("XYZA");
 
-    auto* btnMount = new QPushButton(QIcon(":/icons/workpiece.svg"),
-                                      tr("挂载工件..."), m_wpcGroup);
-    connect(btnMount, &QPushButton::clicked, this, &WidgetMachinePanel::mountWorkpieceRequested);
+    if (m_btnMountWorkpiece)
+        m_btnMountWorkpiece->setEnabled(hasMachineEntities && hasPreset);
 
-    if (m_doc) {
-        MachineKinematics* kin = m_doc->machineKinematics();
-        const auto& mounts = kin->wpcMounts();
+    if (m_lblWorkpieceStatus && kin && !kin->wpcMounts().isEmpty()) {
+        TDF_LabelSequence wpcLabels = m_doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+        QMap<QString, QString> workpieceNames;
+        for (int i = 1; i <= wpcLabels.Length(); ++i) {
+            const TDF_Label label = wpcLabels.Value(i);
+            workpieceNames.insert(XcafUtils::entry(label), XcafUtils::name(label));
+        }
 
-        if (!mounts.isEmpty()) {
-            TDF_LabelSequence wpcLabels = m_doc->entityLabels(LcncDocument::EntityKind::Workpiece);
-            QMap<QString,QString> wpcNames;
-            for (int i = 1; i <= wpcLabels.Length(); ++i) {
-                TDF_Label lbl = wpcLabels.Value(i);
-                wpcNames.insert(XcafUtils::entry(lbl), XcafUtils::name(lbl));
-            }
-            for (auto it = mounts.cbegin(); it != mounts.cend(); ++it) {
-                const QString wName = wpcNames.value(it.key(), it.key());
-                auto* row = new QLabel(
-                    tr("<b>%1</b>  →  %2 轴").arg(wName, it.value()),
-                    m_wpcGroup);
-                row->setStyleSheet("color: #3a8; font-size: 11px;");
-                m_wpcLayout->addRow(row);
-            }
+        QStringList mountLines;
+        for (auto it = kin->wpcMounts().cbegin(); it != kin->wpcMounts().cend(); ++it) {
+            mountLines << tr("<b>%1</b> → %2 轴")
+                              .arg(workpieceNames.value(it.key(), it.key()), it.value());
+        }
+
+        m_lblWorkpieceStatus->setText(mountLines.join(QStringLiteral("<br/>")));
+        m_lblWorkpieceStatus->setStyleSheet("color: #3a8; font-size: 11px;");
+    } else if (m_lblWorkpieceStatus) {
+        if (!hasMachineEntities) {
+            m_lblWorkpieceStatus->setText(tr("请先加载机台模型，再从这里挂载工件。"));
+        } else if (!hasPreset) {
+            m_lblWorkpieceStatus->setText(tr("请先在“机台模型”页选择机台构型。"));
         } else {
-            auto* lbl = new QLabel(tr("暂无工件挂载"), m_wpcGroup);
-            lbl->setStyleSheet("color: gray; font-size: 11px;");
-            m_wpcLayout->addRow(lbl);
+            m_lblWorkpieceStatus->setText(tr("暂无工件挂载"));
+        }
+        m_lblWorkpieceStatus->setStyleSheet("color: gray; font-size: 11px;");
+    }
+
+    if (m_wpcInstallX && m_wpcInstallY && m_wpcInstallZ) {
+        const gp_Pnt installPosition = CamModule::instance()->workpieceInstallPosition();
+        {
+            const QSignalBlocker blockerX(m_wpcInstallX);
+            m_wpcInstallX->setValue(installPosition.X());
+        }
+        {
+            const QSignalBlocker blockerY(m_wpcInstallY);
+            m_wpcInstallY->setValue(installPosition.Y());
+        }
+        {
+            const QSignalBlocker blockerZ(m_wpcInstallZ);
+            m_wpcInstallZ->setValue(installPosition.Z());
+        }
+
+        const bool enabled = hasPreset;
+        m_wpcInstallX->setEnabled(enabled);
+        m_wpcInstallY->setEnabled(enabled);
+        m_wpcInstallZ->setEnabled(enabled);
+    }
+
+    if (m_installGroup)
+        m_installGroup->setEnabled(hasPreset);
+
+    if (m_btnAlignRotationCenter) {
+        m_btnAlignRotationCenter->setVisible(showRotationButton);
+        m_btnAlignRotationCenter->setEnabled(showRotationButton && hasPreset);
+        if (configType == QStringLiteral("VERTICAL_AC_TABLE")) {
+            m_btnAlignRotationCenter->setToolTip(tr("将安装位置 X/Y 回填为 AC 旋转中心。"));
+        } else if (configType == QStringLiteral("VERTICAL_BC_TABLE")) {
+            m_btnAlignRotationCenter->setToolTip(tr("将安装位置 X/Y 回填为 BC 旋转中心。"));
+        } else if (configType == QStringLiteral("XYZA")) {
+            m_btnAlignRotationCenter->setToolTip(tr("将安装位置 X/Y 回填为 A 转台中心。"));
+        } else {
+            m_btnAlignRotationCenter->setToolTip(QString());
         }
     }
-    m_wpcLayout->addRow(btnMount);
 }
-
-// ── setSelectedEntries / rebuildMarkButtons ─────────────────────────────────────
 
 void WidgetMachinePanel::setSelectedEntries(const QStringList& entries)
 {
-    m_selectedEntries = entries;
-}
-
-void WidgetMachinePanel::rebuildMarkButtons()
-{
-    if (m_markWidget) {
-        delete m_markWidget;
-        m_markWidget = nullptr;
-    }
-    m_markWidget = new QWidget(m_markGroup);
-    m_markGroup->layout()->addWidget(m_markWidget);
+    m_selectedEntries.clear();
 
     if (!m_doc) {
-        auto* l = new QVBoxLayout(m_markWidget);
-        l->setContentsMargins(0, 0, 0, 0);
-        auto* lbl = new QLabel(tr("加载机台后显示"), m_markWidget);
-        lbl->setStyleSheet("color: gray; font-size: 11px;");
-        l->addWidget(lbl);
+        rebuildAssignmentSection();
         return;
     }
 
-    MachineKinematics* kin = m_doc->machineKinematics();
-    if (kin->axes().isEmpty()) {
-        auto* l = new QVBoxLayout(m_markWidget);
-        l->setContentsMargins(0, 0, 0, 0);
-        auto* lbl = new QLabel(tr("未配置轴系"), m_markWidget);
-        lbl->setStyleSheet("color: gray; font-size: 11px;");
-        l->addWidget(lbl);
-        return;
+    TDF_LabelSequence labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
+    QSet<QString> machineEntries;
+    for (int i = 1; i <= labels.Length(); ++i)
+        machineEntries.insert(XcafUtils::entry(labels.Value(i)));
+
+    for (const QString& entry : entries) {
+        if (machineEntries.contains(entry) && !m_selectedEntries.contains(entry))
+            m_selectedEntries.append(entry);
     }
 
-    auto* grid = new QGridLayout(m_markWidget);
-    grid->setSpacing(3);
-    grid->setContentsMargins(0, 0, 0, 0);
-
-    int idx = 0;
-    for (const auto& axis : kin->axes()) {
-        auto* btn = new QPushButton(tr("→%1").arg(axis.name), m_markWidget);
-        btn->setToolTip(tr("将所选形体标记为 %1 轴").arg(axis.name));
-        btn->setStyleSheet("font-size: 11px; padding: 2px;");
-        grid->addWidget(btn, idx / 3, idx % 3);
-        ++idx;
-        const QString axisName = axis.name;
-        connect(btn, &QPushButton::clicked, this, [this, axisName] {
-            if (m_selectedEntries.isEmpty() || !m_doc) return;
-            CamModule::instance()->assignShapesToAxis(m_selectedEntries, axisName);
-        });
-    }
+    rebuildAssignmentSection();
 }
 
-// ── Axis spinbox changed ──────────────────────────────────────────────────────
-
-void WidgetMachinePanel::onAxisSpinChanged(const QString& axisName, double value)
+void WidgetMachinePanel::setCalibrationPickAxis(const QString& axisName)
 {
-    emit axisPositionChanged(axisName, value);
+    if (m_pendingCalibrationAxis == axisName)
+        return;
+
+    m_pendingCalibrationAxis = axisName;
+    refreshCalibrationSection();
+}
+
+void WidgetMachinePanel::setMachineModelPath(const QString& path)
+{
+    if (!m_editMachinePath)
+        return;
+
+    const QString normalized = path.trimmed();
+    if (m_editMachinePath->text() == normalized)
+        return;
+
+    const QSignalBlocker blocker(m_editMachinePath);
+    m_editMachinePath->setText(normalized);
+}
+
+void WidgetMachinePanel::setMachineRenderQuality(MachineRenderQuality quality)
+{
+    if (!m_comboRenderQuality)
+        return;
+
+    const int index = m_comboRenderQuality->findData(static_cast<int>(quality));
+    if (index < 0 || m_comboRenderQuality->currentIndex() == index)
+        return;
+
+    const QSignalBlocker blocker(m_comboRenderQuality);
+    m_comboRenderQuality->setCurrentIndex(index);
+}
+
+void WidgetMachinePanel::onAxisOriginEditorChanged()
+{
+    if (!m_doc)
+        return;
+
+    const MachineKinematics* kin = m_doc->machineKinematics();
+    if (!kin)
+        return;
+
+    const gp_Pnt aOrigin = kin->axisOrigin(QStringLiteral("A"));
+    emit axisOriginChanged(QStringLiteral("A"), aOrigin.X(),
+                           m_axisAySpin ? m_axisAySpin->value() : aOrigin.Y(),
+                           m_axisAzSpin ? m_axisAzSpin->value() : aOrigin.Z());
+
+    const gp_Pnt cOrigin = kin->axisOrigin(QStringLiteral("C"));
+    emit axisOriginChanged(QStringLiteral("C"),
+                           m_axisCxSpin ? m_axisCxSpin->value() : cOrigin.X(),
+                           cOrigin.Y(), cOrigin.Z());
+}
+
+void WidgetMachinePanel::onCutterHeadModelEditorChanged()
+{
+    emit cutterHeadModelPositionChanged(
+        m_headModelX ? m_headModelX->value() : 0.0,
+        m_headModelY ? m_headModelY->value() : 0.0,
+        m_headModelZ ? m_headModelZ->value() : 0.0);
+}
+
+void WidgetMachinePanel::onCutterHeadPhysicalEditorChanged()
+{
+    emit cutterHeadPhysicalPositionChanged(
+        m_headPhysicalX ? m_headPhysicalX->value() : 0.0,
+        m_headPhysicalY ? m_headPhysicalY->value() : 0.0,
+        m_headPhysicalZ ? m_headPhysicalZ->value() : 0.0);
+}
+
+void WidgetMachinePanel::onWorkpieceInstallPositionChanged()
+{
+    emit workpieceInstallPositionChanged(
+        m_wpcInstallX ? m_wpcInstallX->value() : 0.0,
+        m_wpcInstallY ? m_wpcInstallY->value() : 0.0,
+        m_wpcInstallZ ? m_wpcInstallZ->value() : 0.0);
 }

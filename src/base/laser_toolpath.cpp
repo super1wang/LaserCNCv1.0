@@ -18,12 +18,14 @@
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRep_Builder.hxx>
+#include <BRepBndLib.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <ShapeAnalysis_Surface.hxx>
 #include <Geom_Surface.hxx>
 #include <GeomLProp_SLProps.hxx>
+#include <Bnd_Box.hxx>
 
 #include <gp_Vec.hxx>
 #include <gp_Ax1.hxx>
@@ -46,6 +48,126 @@ void LaserToolpath::clear()
     m_globalLeadInLength = 5.0;
     m_globalNormalAngle  = 0.0;
 }
+
+namespace {
+
+gp_Pnt bboxCenter(const Bnd_Box& box)
+{
+    if (box.IsVoid())
+        return gp_Pnt(0, 0, 0);
+
+    Standard_Real xmin = 0.0;
+    Standard_Real ymin = 0.0;
+    Standard_Real zmin = 0.0;
+    Standard_Real xmax = 0.0;
+    Standard_Real ymax = 0.0;
+    Standard_Real zmax = 0.0;
+    box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    return gp_Pnt(0.5 * (xmin + xmax),
+                  0.5 * (ymin + ymax),
+                  0.5 * (zmin + zmax));
+}
+
+gp_Pnt shapeCenter(const TopoDS_Shape& shape)
+{
+    if (shape.IsNull())
+        return gp_Pnt(0, 0, 0);
+
+    Bnd_Box box;
+    BRepBndLib::Add(shape, box);
+    return bboxCenter(box);
+}
+
+gp_Pnt faceGroupCenter(const std::vector<TopoDS_Face>& faces)
+{
+    Bnd_Box box;
+    for (const auto& face : faces)
+        BRepBndLib::Add(face, box);
+    return bboxCenter(box);
+}
+
+gp_Dir enforceOutwardDirection(const gp_Pnt& point,
+                               const gp_Dir& candidate,
+                               const gp_Pnt& center)
+{
+    gp_Vec outward(center, point);
+    if (outward.Magnitude() <= 1e-9)
+        return candidate;
+
+    gp_Dir result = candidate;
+    if (gp_Vec(result).Dot(outward) < 0.0)
+        result.Reverse();
+    return result;
+}
+
+bool findClosestFaceNormal(const gp_Pnt& pt,
+                           const std::vector<TopoDS_Face>& faces,
+                           gp_Dir& normal,
+                           double& bestDistance)
+{
+    bool found = false;
+    bestDistance = std::numeric_limits<double>::max();
+
+    for (const auto& face : faces) {
+        Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+        if (surf.IsNull())
+            continue;
+
+        ShapeAnalysis_Surface sas(surf);
+        const gp_Pnt2d uv = sas.ValueOfUV(pt, 1.0);
+
+        gp_Pnt surfPt;
+        surf->D0(uv.X(), uv.Y(), surfPt);
+        const double dist = pt.Distance(surfPt);
+        if (dist >= bestDistance)
+            continue;
+
+        GeomLProp_SLProps props(surf, uv.X(), uv.Y(), 1, 0.01);
+        if (!props.IsNormalDefined())
+            continue;
+
+        normal = props.Normal();
+        if (face.Orientation() == TopAbs_REVERSED)
+            normal.Reverse();
+        bestDistance = dist;
+        found = true;
+    }
+
+    return found;
+}
+
+gp_Dir avoidCrossSectionDirection(const gp_Pnt& point,
+                                  const gp_Dir& candidate,
+                                  const gp_Pnt& center,
+                                  const std::vector<TopoDS_Face>& crossFaces)
+{
+    gp_Dir result = enforceOutwardDirection(point, candidate, center);
+    if (crossFaces.empty())
+        return result;
+
+    gp_Dir crossNormal;
+    double bestCrossDistance = 0.0;
+    if (!findClosestFaceNormal(point, crossFaces, crossNormal, bestCrossDistance))
+        return result;
+
+    const double alignment = std::abs(gp_Vec(result).Dot(gp_Vec(crossNormal)));
+    if (alignment <= 0.85)
+        return result;
+
+    gp_Vec outward(center, point);
+    if (outward.Magnitude() <= 1e-9)
+        return result;
+
+    gp_Vec projected = outward - gp_Vec(crossNormal) * outward.Dot(gp_Vec(crossNormal));
+    if (projected.Magnitude() > 1e-9)
+        result = gp_Dir(projected);
+    else
+        result = gp_Dir(outward);
+
+    return enforceOutwardDirection(point, result, center);
+}
+
+} // namespace
 
 // =============================================================================
 // LaserToolpathBuilder — contour extraction
@@ -230,6 +352,8 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
     if (contour.wire.IsNull())
         return;
 
+    const gp_Pnt workpieceCenter = shapeCenter(workpiece);
+
     for (TopExp_Explorer exp(contour.wire, TopAbs_EDGE); exp.More(); exp.Next()) {
         const TopoDS_Edge& edge = TopoDS::Edge(exp.Current());
         if (BRep_Tool::Degenerated(edge))
@@ -247,7 +371,10 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             tp.position = sampler.Value(i);
 
             // Compute surface normal at this point
-            tp.normal = findSurfaceNormal(workpiece, tp.position);
+            tp.normal = enforceOutwardDirection(
+                tp.position,
+                findSurfaceNormal(workpiece, tp.position),
+                workpieceCenter);
 
             contour.points.push_back(tp);
         }
@@ -268,6 +395,8 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
     if (contour.wire.IsNull())
         return;
 
+    const gp_Pnt outerCenter = faceGroupCenter(outerFaces);
+
     for (TopExp_Explorer exp(contour.wire, TopAbs_EDGE); exp.More(); exp.Next()) {
         const TopoDS_Edge& edge = TopoDS::Edge(exp.Current());
         if (BRep_Tool::Degenerated(edge))
@@ -285,7 +414,11 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             tp.position = sampler.Value(i);
 
             // Compute machining normal using face classification
-            tp.normal = findMachiningNormal(tp.position, outerFaces, crossFaces);
+            tp.normal = avoidCrossSectionDirection(
+                tp.position,
+                findMachiningNormal(tp.position, outerFaces, crossFaces),
+                outerCenter,
+                crossFaces);
 
             // Compute tangent along the curve
             gp_Pnt pDummy;
@@ -342,57 +475,6 @@ gp_Dir LaserToolpathBuilder::findMachiningNormal(
 
     if (!foundOuter)
         return defaultNormal;
-
-    // ── If no cross-section faces, return outer normal directly ──────────
-    if (crossFaces.empty())
-        return outerNormal;
-
-    // ── Find the closest cross-section face and its normal ───────────────
-    gp_Dir crossNormal = defaultNormal;
-    double bestCrossDist = std::numeric_limits<double>::max();
-    bool   foundCross = false;
-
-    for (const auto& face : crossFaces) {
-        Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
-        if (surf.IsNull()) continue;
-
-        ShapeAnalysis_Surface sas(surf);
-        gp_Pnt2d uv = sas.ValueOfUV(pt, 1.0);
-
-        gp_Pnt surfPt;
-        surf->D0(uv.X(), uv.Y(), surfPt);
-        double dist = pt.Distance(surfPt);
-
-        if (dist < bestCrossDist) {
-            bestCrossDist = dist;
-            GeomLProp_SLProps props(surf, uv.X(), uv.Y(), 1, 0.01);
-            if (props.IsNormalDefined()) {
-                crossNormal = props.Normal();
-                if (face.Orientation() == TopAbs_REVERSED)
-                    crossNormal.Reverse();
-                foundCross = true;
-            }
-        }
-    }
-
-    // ── Consistency check: outer normal should be consistent with ────────
-    // the cross-section plane direction. The machining direction (outer
-    // normal) should lie roughly within the cross-section plane, meaning
-    // `outerNormal · crossNormal` should be close to zero for ideal
-    // cross-sections perpendicular to the outer surface. If the dot
-    // product is negative (pointing inward), we flip the outer normal.
-    if (foundCross) {
-        gp_Vec outerVec(outerNormal);
-        gp_Vec crossVec(crossNormal);
-        double dot = outerVec.Dot(crossVec);
-
-        // If the outer normal has a significant component opposite to the
-        // cross-section normal, flip it so the laser approaches from the
-        // correct side.
-        if (dot < -0.1) {
-            outerNormal.Reverse();
-        }
-    }
 
     return outerNormal;
 }

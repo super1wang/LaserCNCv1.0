@@ -6,6 +6,7 @@
 #include <QString>
 
 #include <gp_Dir.hxx>
+#include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
 /**
@@ -18,6 +19,7 @@ struct MachineAxisDef
     QString    name;                 ///< "BASE", "X", "Y", "Z", "A", "B", "C"
     MotionType motionType{Linear};
     gp_Dir     direction;            ///< translation direction (Linear) or rotation axis (Rotary)
+    gp_Pnt     origin{0.0, 0.0, 0.0};///< pivot/origin point in machine coordinates
     double     minVal{-999.0};       ///< travel limit (mm or °)
     double     maxVal{ 999.0};
     QString    parentAxis;           ///< kinematic parent; empty = world
@@ -51,6 +53,9 @@ public:
     const QList<MachineAxisDef>& axes() const { return m_axes; }
     MachineAxisDef*              findAxis(const QString& name);
     const MachineAxisDef*        findAxis(const QString& name) const;
+    gp_Pnt                       axisOrigin(const QString& axisName) const;
+    bool                         setAxisOrigin(const QString& axisName, const gp_Pnt& origin);
+    bool                         setAxisLimits(const QString& axisName, double minVal, double maxVal);
 
     // ── Shape–axis assignments (machine body parts) ───────────────────────────
     void     assignShape(const QString& labelEntry, const QString& axisName);
@@ -71,6 +76,8 @@ public:
     gp_Trsf computeShapeTransform(const QString& labelEntry) const;
     /// World transform for a mounted workpiece at current axis positions.
     gp_Trsf computeWpcTransform(const QString& wpcEntry)     const;
+    /// World transform for an axis node at current axis positions.
+    gp_Trsf computeAxisTransform(const QString& axisName) const;
 
     // ── Axis position control ─────────────────────────────────────────────────
     /// Clamp to [minVal, maxVal] and emit axisPositionChanged.
@@ -89,6 +96,7 @@ signals:
 private:
     gp_Trsf axisLocalTrsf(const MachineAxisDef& axis) const;
     gp_Trsf chainTrsf     (const QString& axisName)   const;
+    void    removeInvalidAssignments();
 
     QString               m_configType;
     QList<MachineAxisDef> m_axes;
