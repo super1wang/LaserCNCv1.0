@@ -1,0 +1,446 @@
+#include "modules/cam/services/cam_config.h"
+
+#include "core/logging/logger.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+
+namespace {
+
+constexpr double kEps    = 1e-9;
+constexpr double kEps2   = 1e-12;
+
+bool nearlyEqual(double a, double b)        { return qAbs(a - b) <= kEps; }
+bool samePoint(const gp_Pnt& a, const gp_Pnt& b) { return a.SquareDistance(b) <= kEps2; }
+
+QString renderQualityToString(MachineRenderQuality q)
+{
+    switch (q) {
+    case MachineRenderQuality::High:   return QStringLiteral("high");
+    case MachineRenderQuality::Medium: return QStringLiteral("medium");
+    case MachineRenderQuality::Low:    return QStringLiteral("low");
+    }
+    return QStringLiteral("medium");
+}
+
+MachineRenderQuality renderQualityFromString(const QString& v)
+{
+    const QString s = v.trimmed().toLower();
+    if (s == QStringLiteral("high")) return MachineRenderQuality::High;
+    if (s == QStringLiteral("low"))  return MachineRenderQuality::Low;
+    return MachineRenderQuality::Medium;
+}
+
+// ── TOML <-> gp_Pnt ─────────────────────────────────────────────────────────
+toml::value pointToToml(const gp_Pnt& p)
+{
+    toml::array a;
+    a.emplace_back(p.X());
+    a.emplace_back(p.Y());
+    a.emplace_back(p.Z());
+    return toml::value(a);
+}
+
+bool pointFromToml(const toml::value& v, gp_Pnt* out)
+{
+    if (!out || !v.is_array()) return false;
+    const auto& a = v.as_array();
+    if (a.size() != 3) return false;
+    auto coord = [](const toml::value& x) -> double {
+        if (x.is_floating()) return x.as_floating();
+        if (x.is_integer())  return static_cast<double>(x.as_integer());
+        return 0.0;
+    };
+    *out = gp_Pnt(coord(a[0]), coord(a[1]), coord(a[2]));
+    return true;
+}
+
+// ── JSON helpers (legacy migration only) ────────────────────────────────────
+bool pointFromJson(const QJsonValue& v, gp_Pnt* out)
+{
+    if (!out || !v.isArray()) return false;
+    const auto a = v.toArray();
+    if (a.size() != 3) return false;
+    *out = gp_Pnt(a.at(0).toDouble(), a.at(1).toDouble(), a.at(2).toDouble());
+    return true;
+}
+
+} // namespace
+
+// ── Path helpers ────────────────────────────────────────────────────────────
+QString CamConfig::configDirectoryPath()
+{
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath(QStringLiteral("config"));
+}
+
+QString CamConfig::tomlFilePath()
+{
+    return QDir(configDirectoryPath()).filePath(QStringLiteral("cam.toml"));
+}
+
+QString CamConfig::legacyJsonPath()
+{
+    return QDir(configDirectoryPath()).filePath(QStringLiteral("CamConfig.json"));
+}
+
+QString CamConfig::machineKey(const QString& machinePath)
+{
+    if (machinePath.isEmpty()) return QString();
+    return QFileInfo(machinePath).absoluteFilePath().replace('\\', '/').toLower();
+}
+
+// ── Load / Save ─────────────────────────────────────────────────────────────
+bool CamConfig::loadDefault()
+{
+    LCNC_DEBUG(lcnc::LogCode::SettingsLoaded, "CamConfig::loadDefault begin");
+
+    const QString tomlPath   = tomlFilePath();
+    const QString legacyPath = legacyJsonPath();
+
+    const bool tomlExists   = QFileInfo::exists(tomlPath);
+    const bool legacyExists = QFileInfo::exists(legacyPath);
+
+    if (!tomlExists && legacyExists) {
+        // 自动迁移：解析 JSON → 写入 TOML → 备份原 JSON。
+        if (importLegacyJson(legacyPath)) {
+            const bool wrote = save(tomlPath);
+            if (wrote) {
+                const QString bak = legacyPath + QStringLiteral(".bak");
+                QFile::remove(bak);
+                if (QFile::rename(legacyPath, bak)) {
+                    LCNC_INFO(lcnc::LogCode::SettingsLoaded,
+                              "CamConfig: migrated legacy JSON '{}' -> TOML '{}'",
+                              legacyPath.toStdString(), tomlPath.toStdString());
+                } else {
+                    LCNC_WARN(lcnc::LogCode::SettingsSaveFailed,
+                              "CamConfig: migrated to TOML but could not rename legacy JSON to '{}'",
+                              bak.toStdString());
+                }
+                return true;
+            }
+            LCNC_ERR(lcnc::LogCode::SettingsSaveFailed,
+                     "CamConfig: legacy JSON parsed but TOML write failed");
+            return false;
+        }
+        LCNC_WARN(lcnc::LogCode::SettingsParseFailed,
+                  "CamConfig: legacy JSON exists but failed to parse, ignoring");
+    }
+
+    return load(tomlPath);
+}
+
+bool CamConfig::saveDefault() const
+{
+    return save(tomlFilePath());
+}
+
+bool CamConfig::importLegacyJson(const QString& jsonPath)
+{
+    QFile file(jsonPath);
+    if (!file.open(QIODevice::ReadOnly)) return false;
+
+    const auto doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject()) return false;
+
+    const auto root = doc.object();
+    m_machineModelPath     = root.value(QStringLiteral("machineModelPath")).toString();
+    m_machinePreset        = root.value(QStringLiteral("machinePreset")).toString();
+    m_machineRenderQuality = renderQualityFromString(
+        root.value(QStringLiteral("machineRenderQuality")).toString());
+
+    const auto tp = root.value(QStringLiteral("toolpath")).toObject();
+    m_leadInLength          = tp.value(QStringLiteral("leadInLength")).toDouble(m_leadInLength);
+    m_normalAngle           = tp.value(QStringLiteral("normalAngle")).toDouble(m_normalAngle);
+    m_deflection            = tp.value(QStringLiteral("deflection")).toDouble(m_deflection);
+    m_smoothAngle           = tp.value(QStringLiteral("smoothAngle")).toDouble(m_smoothAngle);
+    m_useFaceClassification = tp.value(QStringLiteral("useFaceClassification")).toBool(m_useFaceClassification);
+    m_showNormals           = tp.value(QStringLiteral("showNormals")).toBool(m_showNormals);
+    m_normalSampleStep      = tp.value(QStringLiteral("normalSampleStep")).toDouble(m_normalSampleStep);
+
+    const auto profiles = root.value(QStringLiteral("machineProfiles")).toObject();
+    for (auto it = profiles.begin(); it != profiles.end(); ++it) {
+        if (!it.value().isObject()) continue;
+        MachineProfile profile;
+        const auto po = it.value().toObject();
+
+        const auto axisOrigins = po.value(QStringLiteral("axisOrigins")).toObject();
+        for (auto axIt = axisOrigins.begin(); axIt != axisOrigins.end(); ++axIt) {
+            gp_Pnt origin;
+            if (pointFromJson(axIt.value(), &origin))
+                profile.axisOrigins.insert(axIt.key(), origin);
+        }
+
+        gp_Pnt p;
+        if (pointFromJson(po.value(QStringLiteral("cutterHeadModelPosition")), &p))    { profile.hasCutterHeadModel       = true; profile.cutterHeadModelPosition       = p; }
+        if (pointFromJson(po.value(QStringLiteral("cutterHeadPhysicalPosition")), &p)) { profile.hasCutterHeadPhysical    = true; profile.cutterHeadPhysicalPosition    = p; }
+        if (pointFromJson(po.value(QStringLiteral("workpieceInstallPosition")), &p))   { profile.hasWorkpieceInstallPosition = true; profile.workpieceInstallPosition   = p; }
+
+        m_machineProfiles.insert(it.key(), profile);
+    }
+    return true;
+}
+
+// ── TOML serialization ──────────────────────────────────────────────────────
+void CamConfig::readFrom(const toml::value& root)
+{
+    using namespace lcnc::toml_io;
+
+    m_machineModelPath     = get_qstring(root, "machineModelPath",     QString());
+    m_machinePreset        = get_qstring(root, "machinePreset",        QString());
+    m_machineRenderQuality = renderQualityFromString(
+        get_qstring(root, "machineRenderQuality", QStringLiteral("medium")));
+
+    if (root.contains("toolpath") && root.at("toolpath").is_table()) {
+        const auto& tp = root.at("toolpath");
+        m_leadInLength          = get_double(tp, "leadInLength",          m_leadInLength);
+        m_normalAngle           = get_double(tp, "normalAngle",           m_normalAngle);
+        m_deflection            = get_double(tp, "deflection",            m_deflection);
+        m_smoothAngle           = get_double(tp, "smoothAngle",           m_smoothAngle);
+        m_useFaceClassification = get_bool  (tp, "useFaceClassification", m_useFaceClassification);
+        m_showNormals           = get_bool  (tp, "showNormals",           m_showNormals);
+        m_normalSampleStep      = get_double(tp, "normalSampleStep",      m_normalSampleStep);
+    }
+
+    m_machineProfiles.clear();
+    if (root.contains("machineProfile") && root.at("machineProfile").is_array()) {
+        for (const auto& mp : root.at("machineProfile").as_array()) {
+            if (!mp.is_table()) continue;
+            const QString path = get_qstring(mp, "path", QString());
+            if (path.isEmpty()) continue;
+
+            MachineProfile profile;
+            gp_Pnt p;
+            if (mp.contains("cutterHeadModelPosition")    && pointFromToml(mp.at("cutterHeadModelPosition"),    &p)) { profile.hasCutterHeadModel       = true; profile.cutterHeadModelPosition       = p; }
+            if (mp.contains("cutterHeadPhysicalPosition") && pointFromToml(mp.at("cutterHeadPhysicalPosition"), &p)) { profile.hasCutterHeadPhysical    = true; profile.cutterHeadPhysicalPosition    = p; }
+            if (mp.contains("workpieceInstallPosition")   && pointFromToml(mp.at("workpieceInstallPosition"),   &p)) { profile.hasWorkpieceInstallPosition = true; profile.workpieceInstallPosition   = p; }
+
+            if (mp.contains("axisOrigins") && mp.at("axisOrigins").is_array()) {
+                for (const auto& ao : mp.at("axisOrigins").as_array()) {
+                    if (!ao.is_table()) continue;
+                    const QString name = get_qstring(ao, "name", QString());
+                    gp_Pnt origin;
+                    if (!name.isEmpty() && ao.contains("origin") && pointFromToml(ao.at("origin"), &origin))
+                        profile.axisOrigins.insert(name, origin);
+                }
+            }
+            m_machineProfiles.insert(path, profile);
+        }
+    }
+}
+
+void CamConfig::writeTo(toml::value& root) const
+{
+    using namespace lcnc::toml_io;
+
+    root["machineModelPath"]     = qs(m_machineModelPath);
+    root["machinePreset"]        = qs(m_machinePreset);
+    root["machineRenderQuality"] = qs(renderQualityToString(m_machineRenderQuality));
+
+    toml::value tp(toml::table{});
+    tp["leadInLength"]          = m_leadInLength;
+    tp["normalAngle"]           = m_normalAngle;
+    tp["deflection"]            = m_deflection;
+    tp["smoothAngle"]           = m_smoothAngle;
+    tp["useFaceClassification"] = m_useFaceClassification;
+    tp["showNormals"]           = m_showNormals;
+    tp["normalSampleStep"]      = m_normalSampleStep;
+    root["toolpath"] = tp;
+
+    toml::array profiles;
+    for (auto it = m_machineProfiles.cbegin(); it != m_machineProfiles.cend(); ++it) {
+        toml::value mp(toml::table{});
+        mp["path"] = qs(it.key());
+        if (it.value().hasCutterHeadModel)       mp["cutterHeadModelPosition"]    = pointToToml(it.value().cutterHeadModelPosition);
+        if (it.value().hasCutterHeadPhysical)    mp["cutterHeadPhysicalPosition"] = pointToToml(it.value().cutterHeadPhysicalPosition);
+        if (it.value().hasWorkpieceInstallPosition) mp["workpieceInstallPosition"] = pointToToml(it.value().workpieceInstallPosition);
+
+        toml::array axes;
+        for (auto ax = it.value().axisOrigins.cbegin(); ax != it.value().axisOrigins.cend(); ++ax) {
+            toml::value entry(toml::table{});
+            entry["name"]   = qs(ax.key());
+            entry["origin"] = pointToToml(ax.value());
+            axes.emplace_back(entry);
+        }
+        if (!axes.empty()) mp["axisOrigins"] = axes;
+        profiles.emplace_back(mp);
+    }
+    if (!profiles.empty()) root["machineProfile"] = profiles;
+}
+
+// ── Setters with auto-save ──────────────────────────────────────────────────
+void CamConfig::setMachineModelPath(const QString& path)
+{
+    const QString normalized = path.trimmed().isEmpty()
+        ? QString()
+        : QFileInfo(path).absoluteFilePath();
+    if (m_machineModelPath == normalized) return;
+    m_machineModelPath = normalized;
+    saveDefault();
+}
+
+void CamConfig::setMachinePreset(const QString& preset)
+{
+    if (m_machinePreset == preset) return;
+    m_machinePreset = preset;
+    saveDefault();
+}
+
+void CamConfig::setMachineRenderQuality(MachineRenderQuality quality)
+{
+    if (m_machineRenderQuality == quality) return;
+    m_machineRenderQuality = quality;
+    saveDefault();
+}
+
+void CamConfig::setLeadInLength(double mm)
+{
+    if (nearlyEqual(m_leadInLength, mm)) return;
+    m_leadInLength = mm;
+    saveDefault();
+}
+
+void CamConfig::setNormalAngle(double deg)
+{
+    if (nearlyEqual(m_normalAngle, deg)) return;
+    m_normalAngle = deg;
+    saveDefault();
+}
+
+void CamConfig::setDeflection(double mm)
+{
+    if (nearlyEqual(m_deflection, mm)) return;
+    m_deflection = mm;
+    saveDefault();
+}
+
+void CamConfig::setSmoothAngle(double deg)
+{
+    if (nearlyEqual(m_smoothAngle, deg)) return;
+    m_smoothAngle = deg;
+    saveDefault();
+}
+
+void CamConfig::setUseFaceClassification(bool enabled)
+{
+    if (m_useFaceClassification == enabled) return;
+    m_useFaceClassification = enabled;
+    saveDefault();
+}
+
+void CamConfig::setShowNormals(bool enabled)
+{
+    if (m_showNormals == enabled) return;
+    m_showNormals = enabled;
+    saveDefault();
+}
+
+void CamConfig::setNormalSampleStep(double mm)
+{
+    if (nearlyEqual(m_normalSampleStep, mm)) return;
+    m_normalSampleStep = mm;
+    saveDefault();
+}
+
+// ── Profile lookup ──────────────────────────────────────────────────────────
+CamConfig::MachineProfile* CamConfig::mutableProfileForMachine(const QString& machinePath)
+{
+    return &m_machineProfiles[machineKey(machinePath)];
+}
+
+const CamConfig::MachineProfile* CamConfig::profileForMachine(const QString& machinePath) const
+{
+    const QString key = machineKey(machinePath);
+    const auto it = m_machineProfiles.constFind(key);
+    if (it == m_machineProfiles.cend()) return nullptr;
+    return &it.value();
+}
+
+bool CamConfig::axisOriginForMachine(const QString& machinePath,
+                                     const QString& axisName,
+                                     gp_Pnt* outOrigin) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    if (!profile || !outOrigin) return false;
+    const auto it = profile->axisOrigins.constFind(axisName);
+    if (it == profile->axisOrigins.cend()) return false;
+    *outOrigin = it.value();
+    return true;
+}
+
+void CamConfig::setAxisOriginForMachine(const QString& machinePath,
+                                        const QString& axisName,
+                                        const gp_Pnt& origin)
+{
+    if (machinePath.isEmpty() || axisName.isEmpty()) return;
+    auto* profile = mutableProfileForMachine(machinePath);
+    const auto it = profile->axisOrigins.constFind(axisName);
+    if (it != profile->axisOrigins.cend() && samePoint(it.value(), origin)) return;
+    profile->axisOrigins.insert(axisName, origin);
+    saveDefault();
+}
+
+bool CamConfig::cutterHeadModelPositionForMachine(const QString& machinePath,
+                                                  gp_Pnt* outPosition) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    if (!profile || !profile->hasCutterHeadModel || !outPosition) return false;
+    *outPosition = profile->cutterHeadModelPosition;
+    return true;
+}
+
+void CamConfig::setCutterHeadModelPositionForMachine(const QString& machinePath,
+                                                     const gp_Pnt& position)
+{
+    if (machinePath.isEmpty()) return;
+    auto* profile = mutableProfileForMachine(machinePath);
+    if (profile->hasCutterHeadModel && samePoint(profile->cutterHeadModelPosition, position)) return;
+    profile->hasCutterHeadModel       = true;
+    profile->cutterHeadModelPosition  = position;
+    saveDefault();
+}
+
+bool CamConfig::cutterHeadPhysicalPositionForMachine(const QString& machinePath,
+                                                     gp_Pnt* outPosition) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    if (!profile || !profile->hasCutterHeadPhysical || !outPosition) return false;
+    *outPosition = profile->cutterHeadPhysicalPosition;
+    return true;
+}
+
+void CamConfig::setCutterHeadPhysicalPositionForMachine(const QString& machinePath,
+                                                        const gp_Pnt& position)
+{
+    if (machinePath.isEmpty()) return;
+    auto* profile = mutableProfileForMachine(machinePath);
+    if (profile->hasCutterHeadPhysical && samePoint(profile->cutterHeadPhysicalPosition, position)) return;
+    profile->hasCutterHeadPhysical       = true;
+    profile->cutterHeadPhysicalPosition  = position;
+    saveDefault();
+}
+
+bool CamConfig::workpieceInstallPositionForMachine(const QString& machinePath,
+                                                   gp_Pnt* outPosition) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    if (!profile || !profile->hasWorkpieceInstallPosition || !outPosition) return false;
+    *outPosition = profile->workpieceInstallPosition;
+    return true;
+}
+
+void CamConfig::setWorkpieceInstallPositionForMachine(const QString& machinePath,
+                                                      const gp_Pnt& position)
+{
+    if (machinePath.isEmpty()) return;
+    auto* profile = mutableProfileForMachine(machinePath);
+    if (profile->hasWorkpieceInstallPosition && samePoint(profile->workpieceInstallPosition, position)) return;
+    profile->hasWorkpieceInstallPosition = true;
+    profile->workpieceInstallPosition    = position;
+    saveDefault();
+}

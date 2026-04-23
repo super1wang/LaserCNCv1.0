@@ -1,4 +1,4 @@
-#include "app/mainwindow.h"
+#include "app/main_window.h"
 #include "core/kernel/kernel.h"
 #include "app/app_context.h"
 #include "app/command_registry.h"

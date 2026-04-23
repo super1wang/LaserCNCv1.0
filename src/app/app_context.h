@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QObject>
-#include "app/i_app_context.h"
+#include "core/command/command_context.h"
 
 class MainWindow;
 class CadModule;

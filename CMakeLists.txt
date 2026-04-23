@@ -21,59 +21,69 @@ set(SARibbonBar_DIR "F:/wangchao/SARibbon/bin_qt6.9.1_MSVC_x64/lib/cmake/SARibbo
 find_package(SARibbonBar REQUIRED)
 
 # ─── Sources ──────────────────────────────────────────────────────────────────
-set(SRCS_BASE
-    src/base/lcnc_application.cpp
-    src/base/lcnc_document.cpp
-    src/base/xcaf_utils.cpp
-    src/base/task_progress.cpp
-    src/base/task_manager.cpp
-    src/base/machine_kinematics.cpp
-    src/base/laser_toolpath.cpp
-    src/base/face_classifier.cpp
-    src/base/ik_solver.cpp
+set(SRCS_CORE
+    src/core/logging/logger.cpp
+    src/core/settings/toml_config.cpp
+    src/core/settings/app_settings.cpp
+    src/core/document/lcnc_application.cpp
+    src/core/document/lcnc_document.cpp
+    src/core/document/xcaf_utils.cpp
+    src/core/kinematics/machine_kinematics.cpp
+    src/core/task/task_progress.cpp
+    src/core/task/task_manager.cpp
+    src/core/command/commands_api.cpp
+    src/core/kernel/service_registry.cpp
+    src/core/kernel/event_bus.cpp
+    src/core/kernel/module_registry.cpp
+    src/core/kernel/kernel.cpp
 )
 
-set(SRCS_GRAPHICS
-    src/graphics/graphics_scene.cpp
-    src/graphics/shape_object_driver.cpp
-)
-
-set(SRCS_GUI
-    src/gui/gui_application.cpp
-    src/gui/gui_document.cpp
+set(SRCS_VIEW
+    src/view/graphics_scene.cpp
+    src/view/shape_object_driver.cpp
+    src/view/gui_application.cpp
+    src/view/gui_document.cpp
+    src/view/widget_occ_view.cpp
 )
 
 set(SRCS_MODULES
-    src/modules/shape_service.cpp
-    src/modules/cad_module.cpp
-    src/modules/cam_module.cpp
-    src/modules/process_module.cpp
+    src/modules/cad/cad_module.cpp
+    src/modules/cad/services/shape_service.cpp
+    src/modules/cad/commands/commands_file.cpp
+    src/modules/cad/commands/commands_edit.cpp
+    src/modules/cad/commands/commands_cad.cpp
+    src/modules/cad/ui/widget_model_tree.cpp
+    src/modules/cad/ui/ribbon_cad_tab.cpp
+    src/modules/cam/cam_module.cpp
+    src/modules/cam/services/cam_config.cpp
+    src/modules/cam/services/machine_model_compressor.cpp
+    src/modules/cam/services/laser_toolpath.cpp
+    src/modules/cam/services/face_classifier.cpp
+    src/modules/cam/services/ik_solver.cpp
+    src/modules/cam/commands/commands_machine.cpp
+    src/modules/cam/commands/commands_cam.cpp
+    src/modules/cam/ui/widget_machine_panel.cpp
+    src/modules/cam/ui/widget_toolpath_panel.cpp
+    src/modules/cam/ui/dialog_mark_axes.cpp
+    src/modules/cam/ui/ribbon_cam_tab.cpp
+    src/modules/process/process_module.cpp
+    src/modules/process/settings/process_settings.cpp
+    src/modules/process/ui/widget_laser_control.cpp
+    src/modules/process/ui/ribbon_process_tab.cpp
 )
 
 set(SRCS_APP
     src/app/app_context.cpp
-    src/app/commands_api.cpp
-    src/app/commands_file.cpp
-    src/app/commands_edit.cpp
-    src/app/commands_display.cpp
-    src/app/commands_cad.cpp
-    src/app/commands_machine.cpp
-    src/app/commands_cam.cpp
-    src/app/dialog_mark_axes.cpp
-    src/app/widget_occ_view.cpp
-    src/app/widget_model_tree.cpp
-    src/app/widget_machine_panel.cpp
-    src/app/widget_toolpath_panel.cpp
-    src/app/widget_laser_control.cpp
-    src/app/dialog_task_manager.cpp
-    src/app/mainwindow.cpp
+    src/app/command_registry.cpp
+    src/app/commands/commands_display.cpp
+    src/app/dialog/dialog_task_manager.cpp
+    src/app/main_window.cpp
 )
 
 add_executable(LaserCNC WIN32
     src/main.cpp
-    ${SRCS_BASE}
-    ${SRCS_GRAPHICS}
-    ${SRCS_GUI}
+    ${SRCS_CORE}
+    ${SRCS_VIEW}
     ${SRCS_MODULES}
     ${SRCS_APP}
     resources/resources.qrc
@@ -81,6 +91,8 @@ add_executable(LaserCNC WIN32
 
 target_include_directories(LaserCNC PRIVATE
     src
+    3rd
+    3rd/toml11
     ${OpenCASCADE_INCLUDE_DIR}
 )
 

@@ -1,46 +1,47 @@
 #include "app/app_context.h"
-#include "app/mainwindow.h"
-#include "base/lcnc_application.h"
-#include "base/task_manager.h"
-#include "gui/gui_application.h"
-#include "gui/gui_document.h"
-#include "modules/cad_module.h"
-#include "modules/cam_module.h"
-#include "modules/process_module.h"
+#include "core/kernel/kernel.h"
+#include "app/main_window.h"
+#include "core/document/lcnc_application.h"
+#include "core/task/task_manager.h"
+#include "view/gui_application.h"
+#include "view/gui_document.h"
+#include "modules/cad/cad_module.h"
+#include "modules/cam/cam_module.h"
+#include "modules/process/process_module.h"
 
 AppContext::AppContext(MainWindow* mainWindow, QObject* parent)
     : QObject(parent)
     , m_mainWindow(mainWindow)
 {}
 
-LcncApplication* AppContext::app()    const { return LcncApplication::instance(); }
-GuiApplication*  AppContext::guiApp() const { return GuiApplication::instance();  }
-TaskManager*     AppContext::taskMgr()const { return TaskManager::instance();      }
+LcncApplication* AppContext::app()    const { return lcnc::Kernel::current().app(); }
+GuiApplication*  AppContext::guiApp() const { return lcnc::Kernel::current().guiApp();  }
+TaskManager*     AppContext::taskMgr()const { return lcnc::Kernel::current().taskManager();      }
 
 DocumentId AppContext::activeDocumentId() const
 {
-    return LcncApplication::instance()->activeDocumentId();
+    return lcnc::Kernel::current().app()->activeDocumentId();
 }
 
 LcncDocument* AppContext::activeDocument() const
 {
-    return LcncApplication::instance()->activeDocument();
+    return lcnc::Kernel::current().app()->activeDocument();
 }
 
 GuiDocument* AppContext::activeGuiDocument() const
 {
-    return GuiApplication::instance()->activeGuiDocument();
+    return lcnc::Kernel::current().guiApp()->activeGuiDocument();
 }
 
 LcncDocument* AppContext::machineDocument() const
 {
-    return LcncApplication::instance()->machineDocument();
+    return lcnc::Kernel::current().app()->machineDocument();
 }
 
 GuiDocument* AppContext::machineGuiDocument() const
 {
-    DocumentId id = LcncApplication::instance()->machineDocumentId();
-    return GuiApplication::instance()->guiDocument(id);
+    DocumentId id = lcnc::Kernel::current().app()->machineDocumentId();
+    return lcnc::Kernel::current().guiApp()->guiDocument(id);
 }
 
 WidgetOccView* AppContext::occView() const
@@ -50,17 +51,17 @@ WidgetOccView* AppContext::occView() const
 
 CadModule* AppContext::cadModule() const
 {
-    return CadModule::instance();
+    return lcnc::Kernel::current().service<CadModule>();
 }
 
 CamModule* AppContext::camModule() const
 {
-    return CamModule::instance();
+    return lcnc::Kernel::current().service<CamModule>();
 }
 
 ProcessModule* AppContext::processModule() const
 {
-    return ProcessModule::instance();
+    return lcnc::Kernel::current().service<ProcessModule>();
 }
 
 void AppContext::updateCommandStates()
