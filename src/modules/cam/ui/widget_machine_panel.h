@@ -5,8 +5,6 @@
 #include <QMap>
 #include <QStringList>
 
-#include "modules/cam/services/cam_config.h"
-
 class LcncDocument;
 class MachineKinematics;
 class QLabel;
@@ -14,6 +12,7 @@ class QComboBox;
 class QFormLayout;
 class QGroupBox;
 class QDoubleSpinBox;
+class QEvent;
 class QGridLayout;
 class QLineEdit;
 class QPushButton;
@@ -23,15 +22,17 @@ class QTabWidget;
  * @brief Right-panel widget shown when the "准备" tab is active.
  *
  * Sections:
- *  1. 机台模型页 — preset, model loading and machine-part assignment.
- *  2. 轴系配置页 — axis calibration, origins and cutter-head alignment.
- *  3. 工件配置页 — mounting, install position and rotary-center alignment.
+ *  1. 机台模型页 — preset, model loading, machine-part assignment and calibration.
+ *  2. 工件配置页 — mounting, install position and rotary-center alignment.
  */
 class WidgetMachinePanel : public QWidget
 {
     Q_OBJECT
 public:
     explicit WidgetMachinePanel(QWidget* parent = nullptr);
+
+    /// 拦截 spin 控件滚轮，避免滚动页面时误改参数。
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
     /// Called whenever the active document changes.  Rebuilds axis spinboxes
     /// and workpiece mount combo to reflect the current document's state.
@@ -41,12 +42,10 @@ public:
     void setSelectedEntries(const QStringList& entries);
     void setCalibrationPickAxis(const QString& axisName);
     void setMachineModelPath(const QString& path);
-    void setMachineRenderQuality(MachineRenderQuality quality);
 
 signals:
     void machinePresetChanged(const QString& presetName);
     void machineModelPathChanged(const QString& path);
-    void machineRenderQualityChanged(MachineRenderQuality quality);
     void loadMachineRequested();
     void compressMachineRequested();
     void mountWorkpieceRequested();
@@ -58,6 +57,7 @@ signals:
     void cutterHeadModelPositionChanged(double x, double y, double z);
     void cutterHeadPhysicalPositionChanged(double x, double y, double z);
     void alignToPhysicalCutterHeadRequested();
+    void axisCalibrationWizardRequested();
     void workpieceInstallPositionChanged(double x, double y, double z);
     void alignWorkpieceRotationCenterRequested();
 
@@ -69,7 +69,6 @@ private slots:
 
 private:
     void buildUi();
-    void buildModelPage();
     void buildConfigPage();
     void buildWorkpiecePage();
     void refreshCalibrationSection();
@@ -79,7 +78,6 @@ private:
     LcncDocument* m_doc{nullptr};
 
     QTabWidget* m_pages{nullptr};
-    QWidget*    m_modelPage{nullptr};
     QWidget*    m_configPage{nullptr};
     QWidget*    m_workpiecePage{nullptr};
 
@@ -109,10 +107,10 @@ private:
     QPushButton* m_btnPickHead{nullptr};
     QPushButton* m_btnAlignToPhysical{nullptr};
     QPushButton* m_btnAlignHeadToPhysical{nullptr};
+    QPushButton* m_btnOpenCalibrationWizard{nullptr};
 
     QLabel*    m_lblMachineName{nullptr};
     QLineEdit* m_editMachinePath{nullptr};
-    QComboBox* m_comboRenderQuality{nullptr};
     QGroupBox* m_assignGroup{nullptr};
     QLabel*    m_lblAssignSelection{nullptr};
     QGridLayout* m_assignGrid{nullptr};

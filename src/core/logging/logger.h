@@ -3,6 +3,7 @@
 #include <QString>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "core/logging/log_codes.h"
 
@@ -41,6 +42,21 @@ public:
     /// QString → std::string helper (UTF-8, used by macros).
     static std::string toUtf8(const QString& s) { return s.toStdString(); }
 
+    template <typename... Args>
+    static void log(spdlog::level::level_enum level,
+                    LogCode code,
+                    spdlog::format_string_t<Args...> fmt,
+                    Args&&... args)
+    {
+        auto logger = get();
+        if (logger && logger->should_log(level)) {
+            logger->log(level,
+                        "[{:04d}] {}",
+                        static_cast<int>(code),
+                        spdlog::fmt_lib::format(fmt, std::forward<Args>(args)...));
+        }
+    }
+
 private:
     Logger() = default;
 };
@@ -54,10 +70,7 @@ private:
 
 #define LCNC_LOG(level, code, ...) \
     do { \
-        auto _lg = ::lcnc::Logger::get(); \
-        if (_lg && _lg->should_log(level)) { \
-            _lg->log(level, "[{:04d}] " __VA_ARGS__, static_cast<int>(code)); \
-        } \
+        ::lcnc::Logger::log(level, code, __VA_ARGS__); \
     } while (0)
 
 #define LCNC_TRACE(code, ...) LCNC_LOG(spdlog::level::trace,    code, __VA_ARGS__)

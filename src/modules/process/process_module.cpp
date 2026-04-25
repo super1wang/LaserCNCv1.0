@@ -2,7 +2,9 @@
 
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/service_registry.h"
+#include "core/kinematics/i_motion_controller.h"
 #include "core/logging/logger.h"
+#include "modules/process/controllers/simulation_motion_controller.h"
 
 #include <QList>
 #include <QTimer>
@@ -110,6 +112,15 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_simulationMode = m_settings.simulationMode();
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 
+    // 注册仿真运动控制器作为 IMotionController 服务（默认为活动控制器）。
+    m_simController = std::make_unique<lcnc::process::SimulationMotionController>(this);
+    m_simController->start();
+    auto motionSvc = std::shared_ptr<lcnc::IMotionController>(
+        m_simController.get(), [](lcnc::IMotionController*) {});
+    kernel.services().registerService<lcnc::IMotionController>(motionSvc);
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "ProcessModule: SimulationMotionController registered as IMotionController");
+
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "ProcessModule init done");
     return true;
@@ -125,6 +136,9 @@ void ProcessModule::stop()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::stop begin");
     if (!m_initialized) return;
+    if (m_simController) {
+        m_simController->stop();
+    }
     m_initialized = false;
     LCNC_INFO(lcnc::LogCode::Generic, "ProcessModule stop done");
 }
@@ -282,6 +296,13 @@ void ProcessModule::emergencyStop()
 {
     m_simTimer->stop();
     setState(State::EmergencyStop, tr("急停已触发"));
+}
+
+void ProcessModule::resetEmergencyStop()
+{
+    if (m_state != State::EmergencyStop)
+        return;
+    setState(State::Idle, defaultStatusText(m_simulationMode, m_connected));
 }
 
 ProcessModule::State ProcessModule::state() const

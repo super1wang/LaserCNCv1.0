@@ -8,6 +8,7 @@
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
 #include "core/settings/app_settings.h"
+#include "view/gui_application.h"
 #include "modules/cad/cad_module.h"
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
@@ -54,6 +55,12 @@ int main(int argc, char* argv[])
     kernel.registerCoreServices();
     kernel.appSettings()->loadDefault();   // mainwindow.toml
 
+    // GuiApplication 不在 core/Kernel 内创建（避免 core 反向依赖 view），
+    // 改在此处由 main 拥有并注入 Kernel。须在模块 init 之前完成，
+    // 因为 CAM 在 init() 里会访问 guiApp() 创建机台 GUI 文档。
+    auto guiAppOwner = std::make_unique<GuiApplication>();
+    kernel.setGuiApp(guiAppOwner.get());
+
     auto* settings = kernel.appSettings();
     auto tryAdd = [&](const QString& id,
                       const QStringList& deps,
@@ -96,6 +103,10 @@ int main(int argc, char* argv[])
     // 注意：Kernel 在 MainWindow 之后销毁，但模块在销毁前先 stop。
     kernel.appSettings()->saveDefault();
     kernel.shutdown();
+
+    // 作用域销毁顺序：mainWin → guiAppOwner → kernel（声明顺序的反序），
+    // 满足 "UI → GuiApplication → LcncApplication/TaskManager" 的依赖
+    // 反向释放，无需在此处手动 reset。
 
     LCNC_INFO(lcnc::LogCode::Generic, "Shutdown rc={}", rc);
     lcnc::Logger::shutdown();

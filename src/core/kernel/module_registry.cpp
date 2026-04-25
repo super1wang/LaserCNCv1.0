@@ -139,7 +139,18 @@ bool ModuleRegistry::startAll(IKernel& kernel)
             // 反向 stop 已 init 的模块（虽然只 init 没 start，但允许子类
             // 在 stop 中清理 init 阶段的资源）
             for (auto it = initialized.rbegin(); it != initialized.rend(); ++it) {
-                try { (*it)->stop(); } catch (...) {}
+                const auto rid = (*it)->info().id;
+                try {
+                    (*it)->stop();
+                } catch (const std::exception& e) {
+                    LCNC_ERR(LogCode::InternalUnexpectedState,
+                             "Rollback: module '{}' stop threw: {}",
+                             rid.toStdString(), e.what());
+                } catch (...) {
+                    LCNC_ERR(LogCode::InternalUnexpectedState,
+                             "Rollback: module '{}' stop threw unknown exception",
+                             rid.toStdString());
+                }
             }
             return false;
         }

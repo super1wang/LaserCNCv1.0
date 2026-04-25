@@ -18,7 +18,9 @@
 #include <BRepTools.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <IGESCAFControl_Reader.hxx>
+#include <IGESControl_Reader.hxx>
 #include <STEPCAFControl_Reader.hxx>
+#include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
 #include <StlAPI_Reader.hxx>
 #include <TCollection_ExtendedString.hxx>
@@ -97,6 +99,129 @@ QList<CadModule::DocumentTreeNode> buildFallbackNodes(LcncDocument* doc)
     }
 
     return nodes;
+}
+
+int entityCount(LcncDocument* doc, LcncDocument::EntityKind kind)
+{
+    return doc ? doc->entityLabels(kind).Length() : 0;
+}
+
+bool importStepAsSingleShape(const QString& filePath,
+                             LcncDocument* doc,
+                             LcncDocument::EntityKind kind,
+                             const QString& displayName,
+                             QString* error)
+{
+    STEPControl_Reader reader;
+    if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (error)
+            *error = QObject::tr("无法读取 STEP 文件: %1").arg(filePath);
+        return false;
+    }
+
+    const Standard_Integer transferred = reader.TransferRoots();
+    TopoDS_Shape shape = reader.OneShape();
+    if (transferred <= 0 || shape.IsNull()) {
+        if (error)
+            *error = QObject::tr("STEP 文件未解析出可显示形体: %1").arg(filePath);
+        return false;
+    }
+
+    doc->addShapeEntity(shape, displayName, kind);
+    LCNC_WARN(lcnc::LogCode::Generic,
+              "STEP XCAF import produced no entities; used single-shape fallback path={} transferred={}",
+              filePath.toStdString(), transferred);
+    return true;
+}
+
+bool importIgesAsSingleShape(const QString& filePath,
+                             LcncDocument* doc,
+                             LcncDocument::EntityKind kind,
+                             const QString& displayName,
+                             QString* error)
+{
+    IGESControl_Reader reader;
+    if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (error)
+            *error = QObject::tr("无法读取 IGES 文件: %1").arg(filePath);
+        return false;
+    }
+
+    const Standard_Integer transferred = reader.TransferRoots();
+    TopoDS_Shape shape = reader.OneShape();
+    if (transferred <= 0 || shape.IsNull()) {
+        if (error)
+            *error = QObject::tr("IGES 文件未解析出可显示形体: %1").arg(filePath);
+        return false;
+    }
+
+    doc->addShapeEntity(shape, displayName, kind);
+    LCNC_WARN(lcnc::LogCode::Generic,
+              "IGES XCAF import produced no entities; used single-shape fallback path={} transferred={}",
+              filePath.toStdString(), transferred);
+    return true;
+}
+
+bool importStepWithFallback(const QString& filePath,
+                            LcncDocument* doc,
+                            LcncDocument::EntityKind kind,
+                            const QString& displayName,
+                            QString* error)
+{
+    const int beforeCount = entityCount(doc, kind);
+    Handle(TDocStd_Document) xdeDoc =
+        new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+    XCAFDoc_DocumentTool::Set(xdeDoc->Main());
+    STEPCAFControl_Reader reader;
+    reader.SetNameMode(Standard_True);
+    if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (error)
+            *error = QObject::tr("无法读取 STEP 文件: %1").arg(filePath);
+        return false;
+    }
+
+    const Standard_Boolean transferOk = reader.Transfer(xdeDoc);
+    doc->importFromXcaf(xdeDoc, kind);
+    const int importedCount = entityCount(doc, kind) - beforeCount;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "STEP XCAF transfer path={} ok={} imported={}",
+               filePath.toStdString(), static_cast<bool>(transferOk), importedCount);
+
+    if (importedCount > 0)
+        return true;
+
+    return importStepAsSingleShape(filePath, doc, kind, displayName, error);
+}
+
+bool importIgesWithFallback(const QString& filePath,
+                            LcncDocument* doc,
+                            LcncDocument::EntityKind kind,
+                            const QString& displayName,
+                            QString* error)
+{
+    const int beforeCount = entityCount(doc, kind);
+    Handle(TDocStd_Document) xdeDoc =
+        new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+    XCAFDoc_DocumentTool::Set(xdeDoc->Main());
+    IGESCAFControl_Reader reader;
+    reader.SetNameMode(Standard_True);
+    if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (error)
+            *error = QObject::tr("无法读取 IGES 文件: %1").arg(filePath);
+        return false;
+    }
+
+    const Standard_Boolean transferOk = reader.Transfer(xdeDoc);
+    doc->importFromXcaf(xdeDoc, kind);
+    const int importedCount = entityCount(doc, kind) - beforeCount;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "IGES XCAF transfer path={} ok={} imported={}",
+               filePath.toStdString(), static_cast<bool>(transferOk), importedCount);
+
+    if (importedCount > 0)
+        return true;
+
+    return importIgesAsSingleShape(filePath, doc, kind, displayName, error);
 }
 
 void watchTask(QObject* owner, TaskId taskId, std::function<void(bool)> onFinished)
@@ -213,8 +338,15 @@ DocumentId CadModule::newDocument(const QString& name)
 
 DocumentId CadModule::openDocument(const QString& filePath)
 {
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::openDocument begin path={}",
+               filePath.toStdString());
+
     QFileInfo fileInfo(filePath);
     if (filePath.isEmpty() || !fileInfo.exists()) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::openDocument missing file path={}",
+                  filePath.toStdString());
         emit operationFailed(tr("打开失败"), tr("文件不存在: %1").arg(filePath));
         return kInvalidDocumentId;
     }
@@ -223,6 +355,9 @@ DocumentId CadModule::openDocument(const QString& filePath)
     if (ext != "stp" && ext != "step" &&
         ext != "igs" && ext != "iges" &&
         ext != "stl" && ext != "brep") {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::openDocument unsupported suffix path={} suffix={}",
+                  filePath.toStdString(), fileInfo.suffix().toStdString());
         emit operationFailed(tr("打开失败"), tr("暂不支持的文件格式: %1").arg(fileInfo.suffix()));
         return kInvalidDocumentId;
     }
@@ -230,50 +365,51 @@ DocumentId CadModule::openDocument(const QString& filePath)
     const DocumentId docId = newDocument(fileInfo.baseName());
     LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
     if (!doc) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::openDocument failed to create document path={}",
+                  filePath.toStdString());
         emit operationFailed(tr("打开失败"), tr("无法创建目标文档"));
         return kInvalidDocumentId;
     }
 
     doc->setFilePath(filePath);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::openDocument created docId={} ext={} path={}",
+               docId, ext.toStdString(), filePath.toStdString());
 
     auto error = std::make_shared<QString>();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
         tr("打开: %1").arg(fileInfo.fileName()),
         [filePath, ext, doc, error](TaskProgress* prog) {
+            LCNC_DEBUG(lcnc::LogCode::Generic,
+                       "CadModule::openDocument worker begin docId={} ext={} path={}",
+                       doc ? doc->id() : kInvalidDocumentId,
+                       ext.toStdString(),
+                       filePath.toStdString());
             prog->setRange(0, 100);
 
             if (ext == "stp" || ext == "step") {
                 prog->setStepName(QStringLiteral("读取 STEP..."));
-                Handle(TDocStd_Document) xdeDoc =
-                    new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-                XCAFDoc_DocumentTool::Set(xdeDoc->Main());
-                STEPCAFControl_Reader reader;
-                reader.SetNameMode(Standard_True);
-                if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
-                    *error = QObject::tr("无法读取 STEP 文件: %1").arg(filePath);
+                prog->setValue(50);
+                prog->setStepName(QStringLiteral("转换形体..."));
+                if (!importStepWithFallback(filePath,
+                                            doc,
+                                            LcncDocument::EntityKind::Workpiece,
+                                            QFileInfo(filePath).baseName(),
+                                            error.get())) {
                     throw std::runtime_error("step open failed");
                 }
-
-                prog->setValue(50);
-                prog->setStepName(QStringLiteral("转换形体..."));
-                reader.Transfer(xdeDoc);
-                doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
             } else if (ext == "igs" || ext == "iges") {
                 prog->setStepName(QStringLiteral("读取 IGES..."));
-                Handle(TDocStd_Document) xdeDoc =
-                    new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-                XCAFDoc_DocumentTool::Set(xdeDoc->Main());
-                IGESCAFControl_Reader reader;
-                reader.SetNameMode(Standard_True);
-                if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
-                    *error = QObject::tr("无法读取 IGES 文件: %1").arg(filePath);
-                    throw std::runtime_error("iges open failed");
-                }
-
                 prog->setValue(50);
                 prog->setStepName(QStringLiteral("转换形体..."));
-                reader.Transfer(xdeDoc);
-                doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
+                if (!importIgesWithFallback(filePath,
+                                            doc,
+                                            LcncDocument::EntityKind::Workpiece,
+                                            QFileInfo(filePath).baseName(),
+                                            error.get())) {
+                    throw std::runtime_error("iges open failed");
+                }
             } else if (ext == "stl") {
                 prog->setStepName(QStringLiteral("读取 STL..."));
                 TopoDS_Shape shape;
@@ -301,10 +437,21 @@ DocumentId CadModule::openDocument(const QString& filePath)
                                     LcncDocument::EntityKind::Workpiece);
             }
 
+            LCNC_DEBUG(lcnc::LogCode::Generic,
+                       "CadModule::openDocument worker done docId={} workpieceCount={}",
+                       doc ? doc->id() : kInvalidDocumentId,
+                       entityCount(doc, LcncDocument::EntityKind::Workpiece));
             prog->setValue(100);
         });
 
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::openDocument task scheduled docId={} taskId={}",
+               docId, taskId);
+
     watchTask(this, taskId, [this, docId, error](bool success) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "CadModule::openDocument task done docId={} success={}",
+                   docId, success);
         if (!success) {
             closeDocument(docId);
             emit operationFailed(tr("打开失败"),
@@ -341,20 +488,15 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
             prog->setRange(0, 100);
             prog->setStepName(QStringLiteral("读取 STEP..."));
 
-            Handle(TDocStd_Document) xdeDoc =
-                new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-            XCAFDoc_DocumentTool::Set(xdeDoc->Main());
-            STEPCAFControl_Reader reader;
-            reader.SetNameMode(Standard_True);
-            if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
-                *error = QObject::tr("无法读取 STEP 文件: %1").arg(filePath);
-                throw std::runtime_error("step import failed");
-            }
-
             prog->setValue(50);
             prog->setStepName(QStringLiteral("转换形体..."));
-            reader.Transfer(xdeDoc);
-            doc->importFromXcaf(xdeDoc, LcncDocument::EntityKind::Workpiece);
+            if (!importStepWithFallback(filePath,
+                                        doc,
+                                        LcncDocument::EntityKind::Workpiece,
+                                        QFileInfo(filePath).baseName(),
+                                        error.get())) {
+                throw std::runtime_error("step import failed");
+            }
             prog->setValue(100);
         });
 
@@ -803,7 +945,11 @@ void CadModule::redo(DocumentId docId)
 
 void CadModule::refreshDisplay(DocumentId docId)
 {
-    if (auto* gd = lcnc::Kernel::current().guiApp()->guiDocument(docId)) {
+    auto* gd = lcnc::Kernel::current().guiApp()->guiDocument(docId);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::refreshDisplay docId={} gd={}",
+               docId, static_cast<void*>(gd));
+    if (gd) {
         gd->rebuildDisplay();
         gd->fitAll();
     }

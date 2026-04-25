@@ -4,8 +4,8 @@
 
 #include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
-#include "modules/cam/services/laser_toolpath.h"
-#include "modules/cam/services/face_classifier.h"
+#include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/face_classifier.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
 #include "view/gui_application.h"

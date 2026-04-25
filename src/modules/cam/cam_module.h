@@ -4,12 +4,16 @@
 #include <QObject>
 #include <QList>
 #include <QMap>
+#include <QSet>
+#include <QString>
 
-#include "modules/cam/services/cam_config.h"
+#include <memory>
+
+#include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
 #include "core/document/lcnc_application.h"
-#include "modules/cam/services/laser_toolpath.h"
-#include "modules/cam/services/machine_model_compressor.h"
+#include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 
@@ -21,11 +25,21 @@ class GuiDocument;
 class MachineKinematics;
 class GraphicsScene;
 class QTimer;
+namespace lcnc { class MachinePose; }
 class QPoint;
 class WidgetOccView;
 class gp_Vec;
 class gp_Ax1;
 class gp_Pnt;
+
+namespace lcnc::view {
+class ToolpathRenderer;
+class MachineGuideRenderer;
+} // namespace lcnc::view
+
+namespace lcnc::cam {
+class ToolpathSimulator;
+} // namespace lcnc::cam
 
 /**
  * @brief CAM module singleton — manages machine, toolpath, and simulation.
@@ -50,6 +64,8 @@ class CamModule : public QObject, public lcnc::IModule, public lcnc::ICamFacade
 public:
     /// 公开构造：由 Kernel 拥有。
     explicit CamModule(QObject* parent = nullptr);
+    /// 显式析构（用于 unique_ptr<前置声明类型>）。
+    ~CamModule() override;
     enum class MachineCompressionStrategy {
         FilledSolid,
         ExteriorShell,
@@ -66,6 +82,23 @@ public:
         DocumentId documentId{kInvalidDocumentId};
         QString displayName;
         int workpieceCount{0};
+    };
+
+    /**
+     * @brief 三段式机台坐标系标定输入。
+     *
+     * 由 @ref DialogAxisCalibrationWizard 在用户依次拾取 A 轴参考面、
+     * C 轴参考面、切割头下端面并填入物理 AC 中心坐标后整合而成。
+     * 仅在 VERTICAL_AC_TABLE 构型下有效。
+     */
+    struct AxisCalibrationInputs {
+        gp_Pnt aFaceCenter{0.0, 0.0, 0.0};       ///< A 轴参考面中心（模型坐标）
+        gp_Pnt cFaceCenter{0.0, 0.0, 0.0};       ///< C 轴参考面中心（模型坐标）
+        gp_Pnt cutterHeadFaceCenter{0.0, 0.0, 0.0}; ///< 切割头下端面中心（模型坐标）
+        gp_Pnt physicalAcCenter{0.0, 0.0, 0.0};  ///< 物理机台 AC 中心目标坐标
+        bool   hasPhysicalCenter{true};          ///< 是否需要执行整机平移对齐
+        double physicalAAngle{0.0};              ///< 标定位对应的物理 A 角度（度）
+        double physicalCAngle{0.0};              ///< 标定位对应的物理 C 角度（度）
     };
 
 
@@ -128,13 +161,41 @@ public:
                                          const QString& axisName);
     bool setCutterHeadModelPositionFromReferenceFace(WidgetOccView* occView,
                                                      const QPoint& screenPos);
+    /// 拾取一个平面参考面，返回其几何中心（已叠加 LocalTransformation）。
+    /// 仅做查询、不修改任何模块状态，供标定向导使用。
+    bool pickReferenceFaceCenter(WidgetOccView* occView,
+                                 const QPoint& screenPos,
+                                 gp_Pnt& center,
+                                 QString* errorMessage = nullptr) const;
     bool alignMachineToPhysicalCenter(const gp_Pnt& physicalCenter);
     bool alignMachineToPhysicalCutterHead();
+    /// 三段式标定：一次性写入 A/C 轴心、切割头模型点，并按物理 AC 中心整体平移。
+    /// C 轴原点会强制投影到 A 轴线上以保证父子轴几何一致。
+    bool applyAxisCalibration(const AxisCalibrationInputs& inputs, QString* errorMessage = nullptr);
+    /// 进入"机台标定位"：写入轴心与切割头模型点，并把 A=0/C=0、X/Y 调整为
+    /// 让切割头世界 XY 与 AC 中心 XY 对齐。不做整机平移、不持久化、不导出。
+    /// 仅用于向导显示标定姿态下的当前 AC 中心 / 切割嘴位置。
+    bool enterStandardCalibrationPose(const AxisCalibrationInputs& inputs,
+                                      QString* errorMessage = nullptr);
+    /// 切割头当前世界坐标（受当前 X/Y/Z 轴位置影响）。
+    gp_Pnt cutterHeadWorldPosition() const;
+    /// 当前生效的标定 AC 角度偏移（度）；未标定时返回 false。
+    bool acAngleOffset(double& outA, double& outC) const;
+    /// 当前机台已记录的物理 AC 中心 XYZ（mm）；未标定时返回 false。
+    bool physicalAcCenter(gp_Pnt& outCenter) const;
+    /// 当前机台是否已经完成至少一次三段式标定（cam.toml 里有完整记录）。
+    /// 用于向导启动时回填 + 状态指示。
+    bool isMachineCalibrated() const;
     /// Start machine compression asynchronously; returns false if startup validation fails.
     bool compressMachineModel(MachineCompressionStrategy strategy = MachineCompressionStrategy::FilledSolid);
     QList<WorkpieceMountCandidate> mountableWorkpieces() const;
     gp_Pnt workpieceInstallPosition() const;
+    /// 重量级路径：完整重设安装位置，翻译底层 TopoDS 并重建机台 view（适用于「对齐」之类一次性操作）。
     void setWorkpieceInstallPosition(const gp_Pnt& position);
+    /// 轻量级路径：仅对已展示的工件 AIS 调 SetLocation，不修改几何；适用于 spinbox
+    /// 频繁拖动，以避免整个机台 view 被重建。后续打开重量路径（如 mount/setWorkpieceInstallPosition）
+    /// 会重新 bake 位置并复位 AIS Location。
+    void updateWorkpieceInstallLocation(const gp_Pnt& position);
     bool supportsWorkpieceRotationAlignment() const;
     bool alignWorkpieceInstallPositionToRotationCenter();
 
@@ -209,6 +270,13 @@ public:
     void setAxisPosition(const QString& axisName, double value, bool refreshNow = true);
     void refreshMachineTransforms();
 
+    /// 仅刷新指定 dirty 轴对应的几何变换链（局部刷新，避免整体重绘）。
+    /// dirty 为空等价于 @ref refreshMachineTransforms 全量刷新。
+    void refreshMachineTransforms(const QStringList& dirtyAxes);
+
+    /// 取共享的 MachinePose 指针（CAM 持有所有权；UI/控制器只读/写值）。
+    lcnc::MachinePose* machinePose() const;
+
     // ── Selection / Visibility ──────────────────────────────────────────
     void setEntityVisible(const QString& entry, bool visible);
     void setSelectedEntries(const QStringList& entries);
@@ -232,9 +300,6 @@ signals:
     void selectionChanged(const QStringList& entries);
     void axisAssignmentsChanged();
 
-private slots:
-    void onSimTick();
-
 private:
     struct WorkpieceShapeSource {
         QString workpieceEntry;
@@ -246,12 +311,7 @@ private:
     TopoDS_Shape collectWorkpieceShape() const;
     QList<WorkpieceShapeSource> collectWorkpieceShapes() const;
 
-    /// Display contour wires as green AIS shapes.
-    void displayContours();
-    /// Display lead-in edges as red AIS shapes.
-    void displayLeadIns();
-    /// Display sampled normal vectors as overlay lines.
-    void displayNormals();
+    /// Refresh axis guide AIS via MachineGuideRenderer.
     void displayAxisGuides();
     void eraseAxisGuideDisplay();
     void updateAxisGuideTransforms();
@@ -279,26 +339,28 @@ private:
 
     CamConfig         m_config;
 
-    // ── Toolpath state (migrated from anonymous namespace in commands_cam.cpp) ──
+    // ── Renderers (v2.2: AIS state moved to view/ layer) ──────────────
+    std::unique_ptr<lcnc::view::ToolpathRenderer>      m_toolpathRenderer;
+    std::unique_ptr<lcnc::view::MachineGuideRenderer>  m_guideRenderer;
+
+    // ── Toolpath data (renderer owns AIS) ─────────────────────────────
     LaserToolpath               m_toolpath;
-    QList<Handle(AIS_Shape)>    m_contourAis;
-    QList<Handle(AIS_Shape)>    m_leadInAis;
-    QList<Handle(AIS_Shape)>    m_normalAis;
-    QMap<QString, Handle(AIS_Shape)> m_axisGuideAis;
-    bool                        m_toolpathVisible{true};
     TopoDS_Shape                m_workpieceShape;
     QString                     m_machineModelPath;
     MachineRenderQuality        m_machineRenderQuality{MachineRenderQuality::Medium};
     gp_Pnt                      m_cutterHeadModelPosition{0.0, 0.0, 0.0};
     gp_Pnt                      m_cutterHeadPhysicalPosition{0.0, 0.0, 0.0};
     gp_Pnt                      m_workpieceInstallPosition{0.0, 0.0, 0.0};
+    /// 上一次"已 bake 进 TopoDS"的安装位置；用于轻量 SetLocation 时计算 delta。
+    gp_Pnt                      m_workpieceInstallPositionBaked{0.0, 0.0, 0.0};
+    bool                        m_hasAcAngleOffset{false};
+    double                      m_acAngleOffsetA{0.0};
+    double                      m_acAngleOffsetC{0.0};
+    bool                        m_hasPhysicalAcCenter{false};
+    gp_Pnt                      m_physicalAcCenter{0.0, 0.0, 0.0};
     double                      m_smoothAngle{5.0};
     bool                        m_useFaceClassification{true};
     double                      m_deflection{0.1};
-
-    // ── Normal overlay parameters ─────────────────────────────────────
-    bool   m_showNormals{false};
-    double m_normalSampleStep{2.0};
 
     // ── Lead-in picking preview ────────────────────────────────────────
     int    m_previewLeadInContour{-1};
@@ -306,13 +368,17 @@ private:
     double m_previewLeadInParam{0.0};
     bool   m_previewLeadInValid{false};
 
-    // ── Simulation state ────────────────────────────────────────────────
-    QTimer* m_simTimer{nullptr};
-    int     m_simCurrentContour{0};
-    int     m_simCurrentPoint{0};
-    int     m_simTotalPoints{0};
-    double  m_simSpeed{1.0};
-    bool    m_simPlaying{false};
-    bool    m_simPaused{false};
+    // ── Simulation (delegates to ToolpathSimulator) ────────────────────
+    std::unique_ptr<lcnc::cam::ToolpathSimulator> m_simulator;
+
+    // ── Pose state + 局部刷新 coalescer ─────────────────────────────────
+    /// 当前姿态显式状态对象；CAM 持有，跨模块共享读/写。
+    std::unique_ptr<lcnc::MachinePose> m_pose;
+    /// 16ms 单次定时器：合并连续 poseChanged，60Hz 上限。
+    QTimer* m_refreshCoalescer{nullptr};
+    /// 待刷新的轴名集合（dirty 集合）；空集合表示需要做整体刷新。
+    QSet<QString> m_pendingDirtyAxes;
+    /// pose→cam 自更新过程中的 reentry 防护。
+    bool m_inPoseSelfUpdate{false};
     bool    m_machineCompressionRunning{false};
 };

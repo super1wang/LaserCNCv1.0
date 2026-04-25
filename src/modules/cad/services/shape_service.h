@@ -20,9 +20,6 @@ bool moveShape(LcncDocument* doc, const TDF_Label& label, const gp_Vec& translat
 bool rotateShape(LcncDocument* doc, const TDF_Label& label,
                  const gp_Ax1& axis, double angleDeg);
 
-/// Scale a shape entity uniformly. Returns true on success.
-bool scaleShape(LcncDocument* doc, const TDF_Label& label, double factor);
-
 /// Delete a shape entity from the XCAF document and clean up kinematics references.
 /// Does NOT erase the AIS object — caller must handle display removal.
 void deleteShape(LcncDocument* doc, const QString& entry);

@@ -8,13 +8,17 @@
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_NeutralWindow.hxx>
 
-#include "modules/cam/services/cam_config.h"
+#include "view/render_quality.h"
 #include "core/document/lcnc_application.h"
 #include "view/graphics_scene.h"
 
 class AIS_ViewCube;
 class AIS_Trihedron;
 class QTimer;
+
+namespace lcnc::view {
+class RenderingManager;
+}
 
 /**
  * @brief GUI-layer wrapper for one open document.
@@ -37,6 +41,8 @@ public:
     DocumentId     documentId() const { return m_docId; }
     LcncDocument*  document()   const;
     GraphicsScene* scene()      const { return m_scene; }
+    /// Returns the per-document rendering parameter manager.
+    lcnc::view::RenderingManager* renderingManager() const { return m_renderingManager; }
 
     // ── Per-document View ─────────────────────────────────────────────────────
     bool hasView() const { return !m_view.IsNull(); }
@@ -77,6 +83,7 @@ private:
 
     DocumentId     m_docId;
     GraphicsScene* m_scene{nullptr};
+    lcnc::view::RenderingManager* m_renderingManager{nullptr};
     QMap<QString, Handle(AIS_Shape)> m_aisMap;
     MachineRenderQuality m_machineRenderQuality{MachineRenderQuality::Medium};
 

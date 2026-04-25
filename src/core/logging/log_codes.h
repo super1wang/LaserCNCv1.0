@@ -48,6 +48,10 @@ enum class LogCode : int {
     ControllerJogFailed      = 5002,
     ControllerEmergencyStop  = 5003,
 
+    // ── 6xxx Task scheduler ────────────────────────────────────────────
+    TaskUnhandled            = 6001,
+    TaskAborted              = 6002,
+
     // ── 9xxx Internal / unexpected ─────────────────────────────────────
     InternalUnexpectedState  = 9001,
     InternalAssertion        = 9002,

@@ -3,9 +3,13 @@
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "core/logging/logger.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
 #include "modules/cad/cad_module.h"
+#include "core/algorithms/cad/primitives.h"
+#include "core/algorithms/cad/boolean_ops.h"
+#include "core/algorithms/cad/measure.h"
 
 // OCC — Primitives
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -117,12 +121,41 @@ QList<EntityInfo> collectEntities(LcncDocument* doc,
     return out;
 }
 
+/// Collect entities relevant to the current tab context.
+/// 在机台 view 中同时返回机台与工件（带 "[机台]" / "[工件]" 名称前缀以便区分），
+/// 在工件 view 中只返回工件。命令的目标列表来源应优先使用本函数。
+QList<EntityInfo> collectContextualEntities(IAppContext* ctx)
+{
+    LcncDocument* doc = contextualDocument(ctx);
+    if (!doc) return {};
+    if (!ctx->isMachineViewActive())
+        return collectEntities(doc, LcncDocument::EntityKind::Workpiece);
+
+    QList<EntityInfo> machine = collectEntities(doc, LcncDocument::EntityKind::Machine);
+    QList<EntityInfo> workpiece = collectEntities(doc, LcncDocument::EntityKind::Workpiece);
+    for (auto& e : machine)
+        e.name = QObject::tr("[机台] %1").arg(e.name);
+    for (auto& e : workpiece)
+        e.name = QObject::tr("[工件] %1").arg(e.name);
+    QList<EntityInfo> all;
+    all.reserve(workpiece.size() + machine.size());
+    // 工件优先，因为在机台 view 中"调整加工位置"是主要用途
+    all.append(workpiece);
+    all.append(machine);
+    return all;
+}
+
 /// Check whether the contextual document has at least minCount entities.
 bool hasEntities(IAppContext* ctx, int minCount = 1)
 {
     LcncDocument* doc = contextualDocument(ctx);
     if (!doc) return false;
-    return doc->entityLabels(contextualEntityKind(ctx)).Length() >= minCount;
+    if (ctx->isMachineViewActive()) {
+        const int total = doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length()
+                        + doc->entityLabels(LcncDocument::EntityKind::Machine).Length();
+        return total >= minCount;
+    }
+    return doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() >= minCount;
 }
 
 /// Create or reuse the active document, add the shape, and refresh the display.
@@ -261,8 +294,10 @@ void CmdCreateBox::execute()
 
     if (dlg.exec() != QDialog::Accepted) return;
 
-    BRepPrimAPI_MakeBox mk(spX->value(), spY->value(), spZ->value());
-    commitShape(context(), mk.Shape(), tr("长方体"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::makeBox(spX->value(), spY->value(), spZ->value(), &err);
+    if (s.IsNull()) { QMessageBox::warning(nullptr, tr("长方体"), err); return; }
+    commitShape(context(), s, tr("长方体"));
 }
 
 // ── CmdCreateCylinder ─────────────────────────────────────────────────────────
@@ -292,8 +327,10 @@ void CmdCreateCylinder::execute()
 
     if (dlg.exec() != QDialog::Accepted) return;
 
-    BRepPrimAPI_MakeCylinder mk(spR->value(), spH->value());
-    commitShape(context(), mk.Shape(), tr("圆柱体"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::makeCylinder(spR->value(), spH->value(), &err);
+    if (s.IsNull()) { QMessageBox::warning(nullptr, tr("圆柱体"), err); return; }
+    commitShape(context(), s, tr("圆柱体"));
 }
 
 // ── CmdCreateSphere ───────────────────────────────────────────────────────────
@@ -321,8 +358,10 @@ void CmdCreateSphere::execute()
 
     if (dlg.exec() != QDialog::Accepted) return;
 
-    BRepPrimAPI_MakeSphere mk(spR->value());
-    commitShape(context(), mk.Shape(), tr("球体"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::makeSphere(spR->value(), &err);
+    if (s.IsNull()) { QMessageBox::warning(nullptr, tr("球体"), err); return; }
+    commitShape(context(), s, tr("球体"));
 }
 
 // ── CmdCreateCone ─────────────────────────────────────────────────────────────
@@ -359,13 +398,10 @@ void CmdCreateCone::execute()
     if (dlg.exec() != QDialog::Accepted) return;
 
     const double r1 = spR1->value(), r2 = spR2->value(), h = spH->value();
-    if (r1 <= 0.0 && r2 <= 0.0) {
-        QMessageBox::warning(nullptr, tr("圆锥体"), tr("R1 和 R2 不能同时为零"));
-        return;
-    }
-
-    BRepPrimAPI_MakeCone mk(r1, r2, h);
-    commitShape(context(), mk.Shape(), tr("圆锥体"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::makeCone(r1, r2, h, &err);
+    if (s.IsNull()) { QMessageBox::warning(nullptr, tr("圆锥体"), err); return; }
+    commitShape(context(), s, tr("圆锥体"));
 }
 
 // ── CmdCreateTorus ────────────────────────────────────────────────────────────
@@ -396,13 +432,10 @@ void CmdCreateTorus::execute()
     if (dlg.exec() != QDialog::Accepted) return;
 
     const double r1 = spR1->value(), r2 = spR2->value();
-    if (r1 <= r2) {
-        QMessageBox::warning(nullptr, tr("圆环体"), tr("主半径 R1 必须大于管半径 R2"));
-        return;
-    }
-
-    BRepPrimAPI_MakeTorus mk(r1, r2);
-    commitShape(context(), mk.Shape(), tr("圆环体"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::makeTorus(r1, r2, &err);
+    if (s.IsNull()) { QMessageBox::warning(nullptr, tr("圆环体"), err); return; }
+    commitShape(context(), s, tr("圆环体"));
 }
 
 // =============================================================================
@@ -426,9 +459,12 @@ void CmdMoveShape::execute()
 {
     LcncDocument* doc = contextualDocument(context());
     if (!doc) return;
-    auto entities = collectEntities(doc, contextualEntityKind(context()));
+    auto entities = collectContextualEntities(context());
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CmdMoveShape::execute entities={} machineView={}",
+               entities.size(), context()->isMachineViewActive());
     if (entities.isEmpty()) {
-        QMessageBox::information(nullptr, tr("移动"), tr("文档中没有工件"));
+        QMessageBox::information(nullptr, tr("移动"), tr("当前视图无可移动的形体"));
         return;
     }
 
@@ -494,9 +530,12 @@ void CmdRotateShape::execute()
 {
     LcncDocument* doc = contextualDocument(context());
     if (!doc) return;
-    auto entities = collectEntities(doc, contextualEntityKind(context()));
+    auto entities = collectContextualEntities(context());
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CmdRotateShape::execute entities={} machineView={}",
+               entities.size(), context()->isMachineViewActive());
     if (entities.isEmpty()) {
-        QMessageBox::information(nullptr, tr("旋转"), tr("文档中没有工件"));
+        QMessageBox::information(nullptr, tr("旋转"), tr("当前视图无可旋转的形体"));
         return;
     }
 
@@ -637,12 +676,10 @@ void CmdBoolUnion::execute()
     int idxA = 0, idxB = 1;
     if (!pickTwoEntities(tr("布尔并"), entities, idxA, idxB, sel)) return;
 
-    BRepAlgoAPI_Fuse op(entities[idxA].shape, entities[idxB].shape);
-    if (!op.IsDone()) {
-        QMessageBox::critical(nullptr, tr("布尔并"), tr("布尔并运算失败"));
-        return;
-    }
-    commitShape(context(), op.Shape(), tr("布尔并结果"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::fuseShapes(entities[idxA].shape, entities[idxB].shape, &err);
+    if (s.IsNull()) { QMessageBox::critical(nullptr, tr("布尔并"), err); return; }
+    commitShape(context(), s, tr("布尔并结果"));
 }
 
 // ── CmdBoolCut ────────────────────────────────────────────────────────────────
@@ -664,12 +701,10 @@ void CmdBoolCut::execute()
     int idxA = 0, idxB = 1;
     if (!pickTwoEntities(tr("布尔差 (A − B)"), entities, idxA, idxB, sel)) return;
 
-    BRepAlgoAPI_Cut op(entities[idxA].shape, entities[idxB].shape);
-    if (!op.IsDone()) {
-        QMessageBox::critical(nullptr, tr("布尔差"), tr("布尔差运算失败"));
-        return;
-    }
-    commitShape(context(), op.Shape(), tr("布尔差结果"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::cutShapes(entities[idxA].shape, entities[idxB].shape, &err);
+    if (s.IsNull()) { QMessageBox::critical(nullptr, tr("布尔差"), err); return; }
+    commitShape(context(), s, tr("布尔差结果"));
 }
 
 // ── CmdBoolCommon ─────────────────────────────────────────────────────────────
@@ -691,12 +726,10 @@ void CmdBoolCommon::execute()
     int idxA = 0, idxB = 1;
     if (!pickTwoEntities(tr("布尔交 (A ∩ B)"), entities, idxA, idxB, sel)) return;
 
-    BRepAlgoAPI_Common op(entities[idxA].shape, entities[idxB].shape);
-    if (!op.IsDone()) {
-        QMessageBox::critical(nullptr, tr("布尔交"), tr("布尔交运算失败，可能形体不相交"));
-        return;
-    }
-    commitShape(context(), op.Shape(), tr("布尔交结果"));
+    QString err;
+    TopoDS_Shape s = lcnc::cad_algo::commonShapes(entities[idxA].shape, entities[idxB].shape, &err);
+    if (s.IsNull()) { QMessageBox::critical(nullptr, tr("布尔交"), err); return; }
+    commitShape(context(), s, tr("布尔交结果"));
 }
 
 // =============================================================================
@@ -722,9 +755,8 @@ void CmdMeasureDistance::execute()
     int idxA = 0, idxB = 1;
     if (!pickTwoEntities(tr("距离测量"), entities, idxA, idxB, sel)) return;
 
-    BRepExtrema_DistShapeShape dss(entities[idxA].shape, entities[idxB].shape);
-    dss.Perform();
-    if (!dss.IsDone()) {
+    const double d = lcnc::cad_algo::minDistance(entities[idxA].shape, entities[idxB].shape);
+    if (d < 0.0) {
         QMessageBox::critical(nullptr, tr("距离测量"), tr("距离计算失败"));
         return;
     }
@@ -732,7 +764,7 @@ void CmdMeasureDistance::execute()
         tr("形体 \"%1\" 与 \"%2\" 之间的最小距离:\n\n%3 mm")
             .arg(entities[idxA].name)
             .arg(entities[idxB].name)
-            .arg(dss.Value(), 0, 'f', 4));
+            .arg(d, 0, 'f', 4));
 }
 
 // ── CmdMeasureAngle ───────────────────────────────────────────────────────────
@@ -754,16 +786,13 @@ void CmdMeasureAngle::execute()
     int idxA = 0, idxB = 1;
     if (!pickTwoEntities(tr("角度测量"), entities, idxA, idxB, sel)) return;
 
-    gp_Vec nA = firstFaceNormal(entities[idxA].shape);
-    gp_Vec nB = firstFaceNormal(entities[idxB].shape);
-    const double lenA = nA.Magnitude(), lenB = nB.Magnitude();
-    if (lenA < 1e-9 || lenB < 1e-9) {
+    const gp_Vec nA = lcnc::cad_algo::firstFaceNormal(entities[idxA].shape);
+    const gp_Vec nB = lcnc::cad_algo::firstFaceNormal(entities[idxB].shape);
+    const double angleDeg = lcnc::cad_algo::angleBetween(nA, nB);
+    if (angleDeg < 0.0) {
         QMessageBox::warning(nullptr, tr("角度测量"), tr("无法获取面法向量"));
         return;
     }
-    double cosA = nA.Dot(nB) / (lenA * lenB);
-    cosA = std::max(-1.0, std::min(1.0, cosA));
-    const double angleDeg = std::acos(cosA) * 180.0 / M_PI;
 
     QMessageBox::information(nullptr, tr("角度测量"),
         tr("形体 \"%1\" 与 \"%2\" 首面法向夹角:\n\n%3°")

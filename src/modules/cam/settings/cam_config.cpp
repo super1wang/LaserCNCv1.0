@@ -1,4 +1,4 @@
-#include "modules/cam/services/cam_config.h"
+#include "modules/cam/settings/cam_config.h"
 
 #include "core/logging/logger.h"
 
@@ -220,6 +220,19 @@ void CamConfig::readFrom(const toml::value& root)
             if (mp.contains("cutterHeadPhysicalPosition") && pointFromToml(mp.at("cutterHeadPhysicalPosition"), &p)) { profile.hasCutterHeadPhysical    = true; profile.cutterHeadPhysicalPosition    = p; }
             if (mp.contains("workpieceInstallPosition")   && pointFromToml(mp.at("workpieceInstallPosition"),   &p)) { profile.hasWorkpieceInstallPosition = true; profile.workpieceInstallPosition   = p; }
 
+            if (mp.contains("acAngleOffsetA") && mp.at("acAngleOffsetA").is_floating()) {
+                profile.hasAcAngleOffset = true;
+                profile.acAngleOffsetA   = mp.at("acAngleOffsetA").as_floating();
+            }
+            if (mp.contains("acAngleOffsetC") && mp.at("acAngleOffsetC").is_floating()) {
+                profile.hasAcAngleOffset = true;
+                profile.acAngleOffsetC   = mp.at("acAngleOffsetC").as_floating();
+            }
+            if (mp.contains("physicalAcCenter") && pointFromToml(mp.at("physicalAcCenter"), &p)) {
+                profile.hasPhysicalAcCenter = true;
+                profile.physicalAcCenter    = p;
+            }
+
             if (mp.contains("axisOrigins") && mp.at("axisOrigins").is_array()) {
                 for (const auto& ao : mp.at("axisOrigins").as_array()) {
                     if (!ao.is_table()) continue;
@@ -259,6 +272,13 @@ void CamConfig::writeTo(toml::value& root) const
         if (it.value().hasCutterHeadModel)       mp["cutterHeadModelPosition"]    = pointToToml(it.value().cutterHeadModelPosition);
         if (it.value().hasCutterHeadPhysical)    mp["cutterHeadPhysicalPosition"] = pointToToml(it.value().cutterHeadPhysicalPosition);
         if (it.value().hasWorkpieceInstallPosition) mp["workpieceInstallPosition"] = pointToToml(it.value().workpieceInstallPosition);
+        if (it.value().hasAcAngleOffset) {
+            mp["acAngleOffsetA"] = it.value().acAngleOffsetA;
+            mp["acAngleOffsetC"] = it.value().acAngleOffsetC;
+        }
+        if (it.value().hasPhysicalAcCenter) {
+            mp["physicalAcCenter"] = pointToToml(it.value().physicalAcCenter);
+        }
 
         toml::array axes;
         for (auto ax = it.value().axisOrigins.cbegin(); ax != it.value().axisOrigins.cend(); ++ax) {
@@ -442,5 +462,53 @@ void CamConfig::setWorkpieceInstallPositionForMachine(const QString& machinePath
     if (profile->hasWorkpieceInstallPosition && samePoint(profile->workpieceInstallPosition, position)) return;
     profile->hasWorkpieceInstallPosition = true;
     profile->workpieceInstallPosition    = position;
+    saveDefault();
+}
+
+bool CamConfig::acAngleOffsetForMachine(const QString& machinePath,
+                                        double* outA,
+                                        double* outC) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    if (!profile || !profile->hasAcAngleOffset) return false;
+    if (outA) *outA = profile->acAngleOffsetA;
+    if (outC) *outC = profile->acAngleOffsetC;
+    return true;
+}
+
+void CamConfig::setAcAngleOffsetForMachine(const QString& machinePath,
+                                           double aAngle,
+                                           double cAngle)
+{
+    if (machinePath.isEmpty()) return;
+    auto* profile = mutableProfileForMachine(machinePath);
+    if (profile->hasAcAngleOffset
+        && nearlyEqual(profile->acAngleOffsetA, aAngle)
+        && nearlyEqual(profile->acAngleOffsetC, cAngle))
+        return;
+    profile->hasAcAngleOffset = true;
+    profile->acAngleOffsetA   = aAngle;
+    profile->acAngleOffsetC   = cAngle;
+    saveDefault();
+}
+
+bool CamConfig::physicalAcCenterForMachine(const QString& machinePath,
+                                           gp_Pnt* outCenter) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    if (!profile || !profile->hasPhysicalAcCenter) return false;
+    if (outCenter) *outCenter = profile->physicalAcCenter;
+    return true;
+}
+
+void CamConfig::setPhysicalAcCenterForMachine(const QString& machinePath,
+                                              const gp_Pnt& center)
+{
+    if (machinePath.isEmpty()) return;
+    auto* profile = mutableProfileForMachine(machinePath);
+    if (profile->hasPhysicalAcCenter && samePoint(profile->physicalAcCenter, center))
+        return;
+    profile->hasPhysicalAcCenter = true;
+    profile->physicalAcCenter    = center;
     saveDefault();
 }

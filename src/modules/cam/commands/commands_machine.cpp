@@ -5,7 +5,7 @@
 #include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/kinematics/machine_kinematics.h"
-#include "modules/cam/services/machine_model_compressor.h"
+#include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/document/xcaf_utils.h"
 #include "core/task/task_manager.h"
 #include "view/gui_application.h"

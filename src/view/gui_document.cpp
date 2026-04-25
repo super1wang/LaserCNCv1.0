@@ -1,9 +1,12 @@
 #include "view/gui_document.h"
 #include "core/kernel/kernel.h"
+#include "core/logging/logger.h"
+#include "core/settings/app_settings.h"
 #include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "view/rendering_manager.h"
 #include "view/shape_object_driver.h"
 
 #include <TDF_LabelSequence.hxx>
@@ -90,7 +93,17 @@ GuiDocument::GuiDocument(DocumentId id, QObject* parent)
     : QObject(parent)
     , m_docId(id)
     , m_scene(new GraphicsScene(this))
-{}
+    , m_renderingManager(new lcnc::view::RenderingManager(this, this))
+{
+    const bool isMachine = id == lcnc::Kernel::current().app()->machineDocumentId();
+    m_renderingManager->setMachineView(isMachine);
+    if (auto* settings = lcnc::Kernel::current().appSettings()) {
+        m_renderingManager->configure(
+            isMachine ? settings->camViewRendering : settings->cadViewRendering,
+            settings->colors);
+        m_renderingManager->applyNow(lcnc::view::RenderDirtyFlag::All);
+    }
+}
 
 GuiDocument::~GuiDocument() = default;
 
@@ -120,15 +133,23 @@ void GuiDocument::attachView(const Handle(Aspect_NeutralWindow)& win, int w, int
     if (!win->IsMapped())
         win->Map();
 
-    m_view->SetBgGradientColors(
-        Quantity_Color(0.30, 0.35, 0.42, Quantity_TOC_RGB),
-        Quantity_Color(0.12, 0.15, 0.20, Quantity_TOC_RGB),
-        Aspect_GFM_VER, false);
-
     m_view->MustBeResized();
-    m_view->ZFitAll();
+
+    // 必须先把 RenderingManager 当前运行时显示模式（context 默认 + 已 Display 的形体
+    // 模式 + face boundary）应用到上下文，再触发首次 Redraw 让 OCC 计算所有形体的
+    // 表示。否则 FitAll 在表示尚未生成时会拿不到包围盒，导致首次 attach 时模型不可见。
+    if (m_renderingManager)
+        m_renderingManager->applyNow(lcnc::view::RenderDirtyFlag::All);
     initGizmos();
     m_view->Redraw();
+
+    if (!m_aisMap.isEmpty()) {
+        m_view->FitAll(0.01, false);
+        m_view->ZFitAll();
+        m_view->Redraw();
+    } else {
+        m_view->ZFitAll();
+    }
 
     // Animation timer for ViewCube rotation (owned by this QObject)
     m_animTimer = new QTimer(this);
@@ -157,6 +178,9 @@ void GuiDocument::resizeView(int w, int h)
 void GuiDocument::fitAll()
 {
     if (m_view.IsNull()) return;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "GuiDocument::fitAll doc={} count={}",
+               m_docId, m_aisMap.size());
     m_view->FitAll(0.01, true);
     m_view->ZFitAll();
     m_view->Redraw();
@@ -240,6 +264,19 @@ Handle(AIS_Shape) GuiDocument::displayShape(const TopoDS_Shape& shape,
     Handle(AIS_Shape) ais = m_scene->displayShape(shape, fitAll, true, false);
     m_aisMap.insert(name, ais);
     applyMachineDisplayStyle();
+    if (m_renderingManager)
+        m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
+                                                  m_renderingManager->runtimeFaceBoundary());
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "GuiDocument::displayShape doc={} name={} fit={} count={}",
+               m_docId, name.toStdString(), fitAll, m_aisMap.size());
+    if (!m_view.IsNull()) {
+        if (fitAll) {
+            m_view->FitAll(0.01, false);
+            m_view->ZFitAll();
+        }
+        m_view->Redraw();
+    }
     emit displayUpdated();
     return ais;
 }
@@ -256,7 +293,11 @@ void GuiDocument::eraseEntity(const QString& labelEntry)
 void GuiDocument::rebuildDisplay()
 {
     LcncDocument* doc = document();
-    if (!doc) return;
+    if (!doc) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "GuiDocument::rebuildDisplay doc={} no LcncDocument", m_docId);
+        return;
+    }
 
     // Erase only tracked shapes — do NOT call eraseAll() which would also
     // erase the overlay gizmos (ViewCube / Trihedron) stored in the same context.
@@ -278,6 +319,19 @@ void GuiDocument::rebuildDisplay()
     }
 
     applyMachineDisplayStyle();
+    if (m_renderingManager)
+        m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
+                                                  m_renderingManager->runtimeFaceBoundary());
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "GuiDocument::rebuildDisplay doc={} count={}",
+               m_docId, m_aisMap.size());
+
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (!ctx.IsNull())
+        ctx->UpdateCurrentViewer();
+    if (!m_view.IsNull()) {
+        m_view->Redraw();
+    }
 
     emit displayUpdated();
 }
@@ -288,46 +342,34 @@ void GuiDocument::setMachineRenderQuality(MachineRenderQuality quality)
         return;
 
     m_machineRenderQuality = quality;
+    if (m_renderingManager) {
+        lcnc::RenderProfileSettings profile = m_renderingManager->profile();
+        switch (quality) {
+        case MachineRenderQuality::High:
+            profile.qualityPreset = lcnc::RenderQualityPreset::High;
+            break;
+        case MachineRenderQuality::Low:
+            profile.qualityPreset = lcnc::RenderQualityPreset::Low;
+            break;
+        case MachineRenderQuality::Medium:
+            profile.qualityPreset = lcnc::RenderQualityPreset::Medium;
+            break;
+        }
+        m_renderingManager->configure(profile, m_renderingManager->colors());
+        m_renderingManager->requestApply(
+            lcnc::view::RenderDirtyFlags(lcnc::view::RenderDirtyFlag::Profile) |
+            lcnc::view::RenderDirtyFlag::Colors);
+        return;
+    }
+
     applyMachineDisplayStyle();
-    if (!m_view.IsNull())
-        m_view->Redraw();
 }
 
 void GuiDocument::applyMachineDisplayStyle()
 {
-    LcncDocument* doc = document();
-    if (!doc)
+    if (m_renderingManager) {
+        m_renderingManager->applyDocumentStyles(m_aisMap);
         return;
-
-    MachineKinematics* kin = doc->machineKinematics();
-    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
-    if (ctx.IsNull())
-        return;
-
-    QSet<QString> machineEntries;
-    const TDF_LabelSequence machineLabels = doc->entityLabels(LcncDocument::EntityKind::Machine);
-    for (int i = 1; i <= machineLabels.Length(); ++i)
-        machineEntries.insert(XcafUtils::entry(machineLabels.Value(i)));
-
-    for (auto it = m_aisMap.cbegin(); it != m_aisMap.cend(); ++it) {
-        const QString& entry = it.key();
-        const Handle(AIS_Shape)& ais = it.value();
-        if (ais.IsNull())
-            continue;
-
-        if (machineEntries.contains(entry)) {
-            const QString axisName = kin ? kin->axisForShape(entry) : QString();
-            const Quantity_Color color = axisName.isEmpty()
-                ? Quantity_Color(0.74, 0.74, 0.76, Quantity_TOC_RGB)
-                : axisDisplayColor(axisName);
-            applyRenderQuality(ais, m_machineRenderQuality);
-            ctx->SetDisplayMode(ais, AIS_Shaded, Standard_False);
-            m_scene->setShapeColor(ais, color, false);
-            m_scene->redisplayShape(ais, false);
-            continue;
-        }
-
-        ais->Attributes()->SetFaceBoundaryDraw(true);
     }
 }
 

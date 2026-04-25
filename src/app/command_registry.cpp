@@ -9,6 +9,7 @@
 #include "view/widget_occ_view.h"
 
 #include <QAction>
+#include <QActionGroup>
 
 namespace lcnc::app {
 
@@ -17,22 +18,35 @@ namespace {
 /// 注册"显示"分组命令并把 QAction triggered 连接到 OccView。
 void registerDisplayCommands(CommandContainer* container, WidgetOccView* occView)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState,
+    LCNC_DEBUG(lcnc::LogCode::Generic,
                "lcnc::app::registerDisplayCommands begin");
 
     container->addCommand<CmdFitAll>(CmdFitAll::Name);
     container->addCommand<CmdToggleShaded>(CmdToggleShaded::Name);
     container->addCommand<CmdToggleWireframe>(CmdToggleWireframe::Name);
     container->addCommand<CmdToggleShadedWithEdges>(CmdToggleShadedWithEdges::Name);
+    container->addCommand<CmdToggleWorldAxes>(CmdToggleWorldAxes::Name);
+    container->addCommand<CmdShowOptions>(CmdShowOptions::Name);
 
     QObject::connect(container->findAction(CmdFitAll::Name),
                      &QAction::triggered, occView, &WidgetOccView::fitAll);
-    QObject::connect(container->findAction(CmdToggleShaded::Name),
-                     &QAction::triggered, occView, [occView] { occView->setDisplayMode(1); });
-    QObject::connect(container->findAction(CmdToggleWireframe::Name),
-                     &QAction::triggered, occView, [occView] { occView->setDisplayMode(0); });
 
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState,
+    // 三个显示模式互斥：用 QActionGroup 自动维持 checked 状态唯一。
+    QAction* aWire   = container->findAction(CmdToggleWireframe::Name);
+    QAction* aShade  = container->findAction(CmdToggleShaded::Name);
+    QAction* aEdges  = container->findAction(CmdToggleShadedWithEdges::Name);
+    if (aWire && aShade && aEdges) {
+        auto* group = new QActionGroup(occView);
+        group->setExclusive(true);
+        group->addAction(aWire);
+        group->addAction(aShade);
+        group->addAction(aEdges);
+        // 默认“着色”：与 RenderingManager 启动时应用的 StartupDisplayMode::Shaded（mode=1，
+        // FaceBoundaryDraw=false）保持一致；ribbon 高亮项必须反映视图实际生效的显示模式。
+        aShade->setChecked(true);
+    }
+
+    LCNC_DEBUG(lcnc::LogCode::Generic,
                "lcnc::app::registerDisplayCommands end");
 }
 
@@ -43,7 +57,7 @@ void registerAllCommands(CommandContainer* container,
                          WidgetOccView* occView,
                          QObject* /*parent*/)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState,
+    LCNC_DEBUG(lcnc::LogCode::Generic,
                "lcnc::app::registerAllCommands begin");
 
     if (!container || !occView) {
@@ -57,7 +71,7 @@ void registerAllCommands(CommandContainer* container,
     lcnc::process::registerCommands(container);
     registerDisplayCommands(container, occView);
 
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState,
+    LCNC_DEBUG(lcnc::LogCode::Generic,
                "lcnc::app::registerAllCommands end");
 }
 

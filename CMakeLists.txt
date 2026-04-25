@@ -29,6 +29,14 @@ set(SRCS_CORE
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_kinematics.cpp
+    src/core/kinematics/machine_pose.cpp
+    src/core/kinematics/ik_solver.cpp
+    src/core/algorithms/cad/primitives.cpp
+    src/core/algorithms/cad/boolean_ops.cpp
+    src/core/algorithms/cad/measure.cpp
+    src/core/algorithms/cam/face_classifier.cpp
+    src/core/algorithms/cam/laser_toolpath.cpp
+    src/core/algorithms/cam/machine_model_compressor.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp
     src/core/command/commands_api.cpp
@@ -40,10 +48,14 @@ set(SRCS_CORE
 
 set(SRCS_VIEW
     src/view/graphics_scene.cpp
+    src/view/rendering_manager.cpp
     src/view/shape_object_driver.cpp
     src/view/gui_application.cpp
     src/view/gui_document.cpp
     src/view/widget_occ_view.cpp
+    src/view/toolpath_renderer.cpp
+    src/view/machine_guide_renderer.cpp
+    src/view/world_axes_renderer.cpp
 )
 
 set(SRCS_MODULES
@@ -55,19 +67,22 @@ set(SRCS_MODULES
     src/modules/cad/ui/widget_model_tree.cpp
     src/modules/cad/ui/ribbon_cad_tab.cpp
     src/modules/cam/cam_module.cpp
-    src/modules/cam/services/cam_config.cpp
-    src/modules/cam/services/machine_model_compressor.cpp
-    src/modules/cam/services/laser_toolpath.cpp
-    src/modules/cam/services/face_classifier.cpp
-    src/modules/cam/services/ik_solver.cpp
+    src/modules/cam/settings/cam_config.cpp
+    src/modules/cam/services/toolpath_simulator.cpp
+    src/modules/cam/services/machine_axis_detector.cpp
+    src/modules/cam/services/machine_io.cpp
+    src/modules/cam/services/reference_pick.cpp
     src/modules/cam/commands/commands_machine.cpp
     src/modules/cam/commands/commands_cam.cpp
     src/modules/cam/ui/widget_machine_panel.cpp
     src/modules/cam/ui/widget_toolpath_panel.cpp
     src/modules/cam/ui/dialog_mark_axes.cpp
+    src/modules/cam/ui/dialog_axis_calibration_wizard.cpp
     src/modules/cam/ui/ribbon_cam_tab.cpp
     src/modules/process/process_module.cpp
+    src/modules/process/controllers/simulation_motion_controller.cpp
     src/modules/process/settings/process_settings.cpp
+    src/modules/process/commands/commands_process.cpp
     src/modules/process/ui/widget_laser_control.cpp
     src/modules/process/ui/ribbon_process_tab.cpp
 )
@@ -76,6 +91,7 @@ set(SRCS_APP
     src/app/app_context.cpp
     src/app/command_registry.cpp
     src/app/commands/commands_display.cpp
+    src/app/dialog/dialog_options.cpp
     src/app/dialog/dialog_task_manager.cpp
     src/app/main_window.cpp
 )

@@ -5,6 +5,8 @@
 #include <V3d_DirectionalLight.hxx>
 #include <V3d_AmbientLight.hxx>
 #include <Prs3d_LineAspect.hxx>
+#include <Prs3d_ShadingAspect.hxx>
+#include <Prs3d_Drawer.hxx>
 #include <Graphic3d_AspectFillArea3d.hxx>
 
 GraphicsScene::GraphicsScene(QObject* parent)
@@ -40,6 +42,35 @@ void GraphicsScene::init()
     m_context->DefaultDrawer()->SetFaceBoundaryDraw(true);
     m_context->DefaultDrawer()->FaceBoundaryAspect()
         ->SetColor(Quantity_NOC_GRAY40);
+
+    // 选中高亮：红色（线框模式 → 红色线框；着色模式 → 红色填充 + 红色边线）。
+    // SetDisplayMode(-1) 表示沿用对象当前 displayMode，避免选中时被强制切换。
+    {
+        const Quantity_Color hlColor(Quantity_NOC_RED);
+        Handle(Prs3d_Drawer) selStyle =
+            m_context->HighlightStyle(Prs3d_TypeOfHighlight_Selected);
+        if (!selStyle.IsNull()) {
+            selStyle->SetColor(hlColor);
+            selStyle->SetDisplayMode(-1);
+            selStyle->SetLineAspect(
+                new Prs3d_LineAspect(hlColor, Aspect_TOL_SOLID, 2.0));
+            // 红色 ShadingAspect → 着色模式下选中物呈红色填充。
+            Handle(Prs3d_ShadingAspect) shading = new Prs3d_ShadingAspect();
+            shading->SetColor(hlColor);
+            selStyle->SetShadingAspect(shading);
+            // 红色边线 → 着色带边模式下高亮一致。
+            selStyle->SetFaceBoundaryDraw(true);
+            selStyle->SetFaceBoundaryAspect(
+                new Prs3d_LineAspect(hlColor, Aspect_TOL_SOLID, 2.0));
+        }
+        // Hover 高亮保持区分：橙色，避免与选中色混淆。
+        Handle(Prs3d_Drawer) dynStyle =
+            m_context->HighlightStyle(Prs3d_TypeOfHighlight_Dynamic);
+        if (!dynStyle.IsNull()) {
+            dynStyle->SetColor(Quantity_NOC_ORANGE);
+            dynStyle->SetDisplayMode(-1);
+        }
+    }
 }
 
 void GraphicsScene::setDefaultLighting()
@@ -70,8 +101,9 @@ Handle(AIS_Shape) GraphicsScene::displayShape(const TopoDS_Shape& shape,
                                               bool updateViewer)
 {
     Handle(AIS_Shape) aisShape = new AIS_Shape(shape);
-    m_context->Display(aisShape, AIS_Shaded, 0, false);
-    m_context->SetDisplayMode(aisShape, AIS_Shaded, false);
+    // 使用 context 当前默认 displayMode 显示对象，避免强制 AIS_Shaded 覆盖
+    // 用户在"线框/着色/带边着色"中选择的全局模式。新对象以 -1（context 默认）显示。
+    m_context->Display(aisShape, -1, 0, false);
     (void)fitAll; // FitAll is handled per-view in WidgetOccView
     if (updateViewer)
         m_context->UpdateCurrentViewer();

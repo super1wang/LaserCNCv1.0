@@ -11,6 +11,7 @@ class WidgetMachinePanel;
 class WidgetLaserControl;
 class WidgetToolpathPanel;
 class DialogTaskManager;
+namespace lcnc::cam::ui { class DialogAxisCalibrationWizard; }
 class GraphicsScene;
 class QTabWidget;
 class QStackedWidget;
@@ -111,4 +112,5 @@ private:
     QLabel* m_sbStatus{nullptr};
     QTimer* m_machineRefreshTimer{nullptr};
     QString m_pendingCalibrationTarget;
+    lcnc::cam::ui::DialogAxisCalibrationWizard* m_axisCalibWizard{nullptr};
 };

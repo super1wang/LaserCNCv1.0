@@ -1,6 +1,6 @@
-#include "modules/cam/services/laser_toolpath.h"
-#include "modules/cam/services/face_classifier.h"
-#include "modules/cam/services/ik_solver.h"
+#include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/face_classifier.h"
+#include "core/kinematics/ik_solver.h"
 
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>

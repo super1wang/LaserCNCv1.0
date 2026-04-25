@@ -81,7 +81,11 @@ void Logger::init(const QString& logDir)
 
     auto lg = std::make_shared<spdlog::logger>(kLoggerName, sinks.begin(), sinks.end());
     lg->set_level(spdlog::level::debug);
+#ifdef _DEBUG
+    lg->flush_on(spdlog::level::debug);
+#else
     lg->flush_on(spdlog::level::warn);
+#endif
     lg->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%t] [%^%l%$] %v");
 
     slot = lg;

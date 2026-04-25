@@ -20,6 +20,10 @@ public:
 signals:
     void entitySelected(const QString& labelEntry);
     void selectionChanged(const QStringList& entries);
+    /// User asked to unassign a single shape entry from any axis (CamModule listens).
+    void axisShapeUnassignRequested(const QString& shapeEntry);
+    /// User asked to clear all shape assignments for an axis name.
+    void axisAssignmentsClearRequested(const QString& axisName);
     /// Emitted after an axis node assignment is removed via context menu.
     void axisNodeUnassigned();
     /// Emitted when user toggles a node's checkbox.

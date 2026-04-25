@@ -1,15 +1,22 @@
 
 #include "modules/cam/cam_module.h"
+#include "view/toolpath_renderer.h"
+#include "view/machine_guide_renderer.h"
+#include "modules/cam/services/toolpath_simulator.h"
+#include "modules/cam/services/machine_axis_detector.h"
+#include "modules/cam/services/machine_io.h"
+#include "modules/cam/services/reference_pick.h"
 #include "core/kernel/kernel.h"
 #include "modules/cad/services/shape_service.h"
 
-#include "modules/cam/services/cam_config.h"
-#include "modules/cam/services/face_classifier.h"
+#include "modules/cam/settings/cam_config.h"
+#include "core/algorithms/cam/face_classifier.h"
 #include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
-#include "modules/cam/services/laser_toolpath.h"
+#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kinematics/machine_kinematics.h"
-#include "modules/cam/services/machine_model_compressor.h"
+#include "core/kinematics/machine_pose.h"
+#include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/service_registry.h"
 #include "core/logging/logger.h"
@@ -36,18 +43,11 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <TopLoc_Location.hxx>
+#include <gp_Trsf.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
-#include <BRepTools.hxx>
-#include <STEPCAFControl_Reader.hxx>
-#include <STEPCAFControl_Writer.hxx>
-#include <StlAPI_Reader.hxx>
-#include <IFSelect_ReturnStatus.hxx>
-#include <TCollection_ExtendedString.hxx>
-#include <TDocStd_Document.hxx>
 #include <TDF_LabelSequence.hxx>
-#include <TDataStd_Name.hxx>
-#include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
@@ -177,6 +177,9 @@ gp_Pnt shapeCenter(const TopoDS_Shape& shape)
 
 } // namespace
 
+// Out-of-line dtor for unique_ptr<前置声明类型>。
+CamModule::~CamModule() = default;
+
 // ── IModule ───────────────────────────────────────────────────────────────────────
 lcnc::ModuleInfo CamModule::info() const
 {
@@ -195,6 +198,11 @@ bool CamModule::init(lcnc::IKernel& kernel)
     kernel.services().registerService<CamModule>(svc);
     auto facade = std::shared_ptr<lcnc::ICamFacade>(svc, static_cast<lcnc::ICamFacade*>(this));
     kernel.services().registerService<lcnc::ICamFacade>(facade);
+    if (m_pose) {
+        // 把 MachinePose 也作为共享 IService 暴露，跨模块（process/UI）可读写姿态。
+        auto poseSvc = std::shared_ptr<lcnc::MachinePose>(m_pose.get(), [](lcnc::MachinePose*) {});
+        kernel.services().registerService<lcnc::MachinePose>(poseSvc);
+    }
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "CamModule init done");
     return true;
@@ -216,6 +224,8 @@ void CamModule::stop()
 
 CamModule::CamModule(QObject* parent)
     : QObject(parent)
+    , m_toolpathRenderer(std::make_unique<lcnc::view::ToolpathRenderer>())
+    , m_guideRenderer(std::make_unique<lcnc::view::MachineGuideRenderer>())
 {
     // 加载持久化配置（首次启动会自动迁移旧版 CamConfig.json -> cam.toml）。
     m_config.loadDefault();
@@ -230,18 +240,53 @@ CamModule::CamModule(QObject* parent)
     m_deflection = config.deflection();
     m_smoothAngle = config.smoothAngle();
     m_useFaceClassification = config.useFaceClassification();
-    m_showNormals = config.showNormals();
-    m_normalSampleStep = config.normalSampleStep();
+    m_toolpathRenderer->setShowNormals(config.showNormals());
+    m_toolpathRenderer->setNormalSampleStep(config.normalSampleStep());
 
-    m_simTimer = new QTimer(this);
-    m_simTimer->setInterval(50);
-    connect(m_simTimer, &QTimer::timeout, this, &CamModule::onSimTick);
+    m_simulator = std::make_unique<lcnc::cam::ToolpathSimulator>(this);
+    m_simulator->setToolpath(&m_toolpath);
+    m_simulator->setApplyAxisFn([this](const QString& axis, double value, bool refreshNow) {
+        setAxisPosition(axis, value, refreshNow);
+    });
+    m_simulator->setRefreshFn([this]() { refreshMachineTransforms(); });
+    connect(m_simulator.get(), &lcnc::cam::ToolpathSimulator::simulationTick,
+            this, &CamModule::simulationTick);
+    connect(m_simulator.get(), &lcnc::cam::ToolpathSimulator::simulationStateChanged,
+            this, &CamModule::simulationStateChanged);
+    connect(m_simulator.get(), &lcnc::cam::ToolpathSimulator::simulationFinished,
+            this, &CamModule::simulationFinished);
 
     connect(lcnc::Kernel::current().app(), &LcncApplication::documentModified,
             this, [this](DocumentId id) {
-                if (id == machineDocumentId())
+                if (id == machineDocumentId()) {
+                    // 机台文档变更（构型切换/重新装载）后同步 pose 的轴集合
+                    if (m_pose && m_pose->kinematics() != kinematics())
+                        m_pose->setKinematics(kinematics());
                     emit machineWorkspaceChanged();
+                }
             });
+
+    // 姿态状态对象 + 16ms 单次定时合并器（dirty-axis 局部刷新）。
+    m_pose = std::make_unique<lcnc::MachinePose>(this);
+    m_refreshCoalescer = new QTimer(this);
+    m_refreshCoalescer->setSingleShot(true);
+    m_refreshCoalescer->setInterval(16); // ≈ 60Hz 上限
+    connect(m_refreshCoalescer, &QTimer::timeout, this, [this]() {
+        QStringList dirty(m_pendingDirtyAxes.cbegin(), m_pendingDirtyAxes.cend());
+        m_pendingDirtyAxes.clear();
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "CamModule coalescer flush n={}", dirty.size());
+        refreshMachineTransforms(dirty);
+    });
+    connect(m_pose.get(), &lcnc::MachinePose::poseChanged, this,
+            [this](const QStringList& dirtyAxes) {
+        if (m_inPoseSelfUpdate)
+            return; // 由 setAxisPosition 触发的自更新已自行处理刷新
+        for (const QString& a : dirtyAxes)
+            m_pendingDirtyAxes.insert(a);
+        if (!m_refreshCoalescer->isActive())
+            m_refreshCoalescer->start();
+    });
 }
 
 // ── Machine Document ──────────────────────────────────────────────────────────
@@ -302,9 +347,6 @@ void CamModule::setMachineRenderQuality(MachineRenderQuality quality)
 
     m_machineRenderQuality = quality;
     m_config.setMachineRenderQuality(quality);
-
-    if (auto* gd = machineGuiDocument())
-        gd->setMachineRenderQuality(quality);
 }
 
 // ── Machine Management ────────────────────────────────────────────────────────
@@ -346,7 +388,6 @@ void CamModule::loadMachine(const QString& filePath)
         return;
 
     const QString normalizedPath = fi.absoluteFilePath();
-    const QString ext = fi.suffix().toLower();
 
     // Clear previous machine entities
     {
@@ -362,41 +403,8 @@ void CamModule::loadMachine(const QString& filePath)
     unmountAllWorkpieces();
 
     TaskId taskId = lcnc::Kernel::current().taskManager()->run(tr("加载机台: %1").arg(fi.fileName()),
-        [filePath, ext, doc](TaskProgress* prog) {
-            prog->setRange(0, 100);
-
-            if (ext == "stp" || ext == "step") {
-                prog->setStepName(QStringLiteral("读取 STEP..."));
-                Handle(TDocStd_Document) xdeDoc =
-                    new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-                XCAFDoc_DocumentTool::Set(xdeDoc->Main());
-                STEPCAFControl_Reader cafReader;
-                cafReader.SetNameMode(Standard_True);
-                if (cafReader.ReadFile(filePath.toUtf8().constData()) == IFSelect_RetDone) {
-                    prog->setValue(50);
-                    prog->setStepName(QStringLiteral("转换形体..."));
-                    cafReader.Transfer(xdeDoc);
-                    prog->setValue(80);
-                    doc->importFromXcafRoots(xdeDoc, LcncDocument::EntityKind::Machine);
-                }
-            } else if (ext == "stl") {
-                prog->setStepName(QStringLiteral("读取 STL..."));
-                TopoDS_Shape shape;
-                StlAPI_Reader stlReader;
-                stlReader.Read(shape, filePath.toUtf8().constData());
-                prog->setValue(80);
-                if (!shape.IsNull())
-                    doc->addShapeEntity(shape, QFileInfo(filePath).baseName(), LcncDocument::EntityKind::Machine);
-            } else if (ext == "brep") {
-                prog->setStepName(QStringLiteral("读取 BREP..."));
-                TopoDS_Shape shape;
-                BRep_Builder builder;
-                BRepTools::Read(shape, filePath.toUtf8().constData(), builder);
-                if (!shape.IsNull())
-                    doc->addShapeEntity(shape, QFileInfo(filePath).baseName(), LcncDocument::EntityKind::Machine);
-            }
-
-            prog->setValue(100);
+        [filePath, doc](TaskProgress* prog) {
+            lcnc::cam::machine_io::loadMachineFromFile(doc, filePath, prog);
         });
 
     watchTask(this, taskId, [this, normalizedPath](bool ok) {
@@ -436,81 +444,10 @@ void CamModule::unloadMachine()
 void CamModule::exportMachine(const QString& filePath)
 {
     LcncDocument* machDoc = machineDocument();
-    if (!machDoc || filePath.isEmpty()) return;
+    if (!machDoc || filePath.isEmpty())
+        return;
 
-    MachineKinematics* kin = machDoc->machineKinematics();
-
-    Handle(TDocStd_Document) xdeExport =
-        new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
-    XCAFDoc_DocumentTool::Set(xdeExport->Main());
-    Handle(XCAFDoc_ShapeTool) stExp = XCAFDoc_DocumentTool::ShapeTool(xdeExport->Main());
-    Handle(XCAFDoc_ShapeTool) stMach = machDoc->shapeTool();
-
-    QSet<QString> assignedEntries;
-
-    for (const MachineAxisDef& axis : kin->axes()) {
-        const QStringList entries = kin->shapesForAxis(axis.name);
-        if (entries.isEmpty()) continue;
-
-        BRep_Builder bb;
-        TopoDS_Compound axisCompound;
-        bb.MakeCompound(axisCompound);
-        bool hasShape = false;
-
-        TDF_LabelSequence freeShapes;
-        stMach->GetFreeShapes(freeShapes);
-
-        for (const QString& entry : entries) {
-            assignedEntries.insert(entry);
-            for (int i = 1; i <= freeShapes.Length(); ++i) {
-                if (XcafUtils::entry(freeShapes.Value(i)) == entry) {
-                    TopoDS_Shape sh = stMach->GetShape(freeShapes.Value(i));
-                    if (!sh.IsNull()) {
-                        bb.Add(axisCompound, sh);
-                        hasShape = true;
-                    }
-                    break;
-                }
-            }
-        }
-
-        if (!hasShape) continue;
-
-        const QString axisLabel = QStringLiteral("LCNC_AXIS_") + axis.name;
-        TDF_Label lbl = stExp->AddShape(axisCompound, Standard_False);
-        TDataStd_Name::Set(lbl, TCollection_ExtendedString(axisLabel.toStdString().c_str()));
-    }
-
-    // Unassigned group
-    {
-        TDF_LabelSequence freeShapes;
-        stMach->GetFreeShapes(freeShapes);
-        BRep_Builder bb;
-        TopoDS_Compound unassigned;
-        bb.MakeCompound(unassigned);
-        bool hasUnassigned = false;
-
-        for (int i = 1; i <= freeShapes.Length(); ++i) {
-            const QString entry = XcafUtils::entry(freeShapes.Value(i));
-            if (!assignedEntries.contains(entry)) {
-                TopoDS_Shape sh = stMach->GetShape(freeShapes.Value(i));
-                if (!sh.IsNull()) {
-                    bb.Add(unassigned, sh);
-                    hasUnassigned = true;
-                }
-            }
-        }
-
-        if (hasUnassigned) {
-            TDF_Label lbl = stExp->AddShape(unassigned, Standard_False);
-            TDataStd_Name::Set(lbl, TCollection_ExtendedString("LCNC_AXIS_UNASSIGNED"));
-        }
-    }
-
-    STEPCAFControl_Writer writer;
-    writer.SetNameMode(Standard_True);
-    if (writer.Transfer(xdeExport) != IFSelect_RetDone) return;
-    writer.Write(filePath.toUtf8().constData());
+    lcnc::cam::machine_io::exportMachineToFile(machDoc, machDoc->machineKinematics(), filePath);
 }
 
 void CamModule::autoDetectAxes()
@@ -518,13 +455,7 @@ void CamModule::autoDetectAxes()
     LcncDocument* doc = machineDocument();
     if (!doc) return;
 
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
-    QMap<QString, QString> entryToName;
-    for (int i = 1; i <= labels.Length(); ++i) {
-        TDF_Label lbl = labels.Value(i);
-        entryToName.insert(XcafUtils::entry(lbl), XcafUtils::name(lbl));
-    }
-    doc->machineKinematics()->autoDetect(entryToName);
+    lcnc::cam::machine_axis_detector::autoDetectAxisNames(doc, doc->machineKinematics());
     autoDetectAxisOrigins();
     applyStoredMachineProfile(m_machineModelPath);
     if (auto* gd = machineGuiDocument())
@@ -804,6 +735,226 @@ bool CamModule::setCutterHeadModelPositionFromReferenceFace(WidgetOccView* occVi
     }
 
     setCutterHeadModelPosition(faceCenter);
+    return true;
+}
+
+bool CamModule::pickReferenceFaceCenter(WidgetOccView* occView,
+                                        const QPoint& screenPos,
+                                        gp_Pnt& center,
+                                        QString* errorMessage) const
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CamModule::pickReferenceFaceCenter begin");
+    const bool ok = resolveReferencePlaneCenter(occView, screenPos, center, errorMessage);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CamModule::pickReferenceFaceCenter end ok={}", ok);
+    return ok;
+}
+
+bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs,
+                                             QString* errorMessage)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CamModule::enterStandardCalibrationPose begin");
+
+    auto fail = [&](const QString& msg) {
+        if (errorMessage)
+            *errorMessage = msg;
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "CamModule::enterStandardCalibrationPose failed: {}",
+                 msg.toStdString());
+        emit operationFailed(tr("机台标定位"), msg);
+        return false;
+    };
+
+    QString reason;
+    if (!ensureAcCenterCalibrationAvailable(&reason))
+        return fail(reason);
+
+    MachineKinematics* kin = kinematics();
+    if (!kin)
+        return fail(tr("找不到机台轴系配置。"));
+
+    try {
+        // 1) A 轴原点：保留当前 X，Y/Z 取 A 参考面中心
+        const gp_Pnt currentA = kin->axisOrigin(QStringLiteral("A"));
+        const gp_Pnt newA(currentA.X(),
+                          inputs.aFaceCenter.Y(),
+                          inputs.aFaceCenter.Z());
+        // 2) C 轴原点：X 取 C 参考面中心，Y/Z 投影到 A 轴线
+        const gp_Pnt newC(inputs.cFaceCenter.X(),
+                          newA.Y(),
+                          newA.Z());
+
+        if (!kin->setAxisOrigin(QStringLiteral("A"), newA))
+            return fail(tr("写入 A 轴原点失败。"));
+        if (!kin->setAxisOrigin(QStringLiteral("C"), newC))
+            return fail(tr("写入 C 轴原点失败。"));
+
+        // 3) 切割头模型点（BASE 局部坐标），直接采用拾取面中心
+        m_cutterHeadModelPosition = inputs.cutterHeadFaceCenter;
+
+        // 4) 进入"机台标定位"：A=0, C=0；XY 调整为切割头世界 XY 与 AC 中心 XY 对齐
+        kin->setAxisPosition(QStringLiteral("A"), 0.0);
+        kin->setAxisPosition(QStringLiteral("C"), 0.0);
+        const gp_Pnt acCenter(newC.X(), newA.Y(), newA.Z());
+        if (kin->findAxis(QStringLiteral("X")))
+            kin->setAxisPosition(QStringLiteral("X"),
+                                 acCenter.X() - m_cutterHeadModelPosition.X());
+        if (kin->findAxis(QStringLiteral("Y")))
+            kin->setAxisPosition(QStringLiteral("Y"),
+                                 acCenter.Y() - m_cutterHeadModelPosition.Y());
+
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "Standard pose entered: A.origin=({:.3f},{:.3f},{:.3f}) "
+                  "C.origin=({:.3f},{:.3f},{:.3f}) head.model=({:.3f},{:.3f},{:.3f})",
+                  newA.X(), newA.Y(), newA.Z(),
+                  newC.X(), newC.Y(), newC.Z(),
+                  m_cutterHeadModelPosition.X(),
+                  m_cutterHeadModelPosition.Y(),
+                  m_cutterHeadModelPosition.Z());
+    } catch (const Standard_Failure& f) {
+        return fail(tr("OCC 异常：%1").arg(QString::fromUtf8(f.GetMessageString())));
+    } catch (const std::exception& e) {
+        return fail(tr("异常：%1").arg(QString::fromUtf8(e.what())));
+    } catch (...) {
+        return fail(tr("发生未知异常。"));
+    }
+
+    displayAxisGuides();
+    refreshMachineTransforms();
+    return true;
+}
+
+gp_Pnt CamModule::cutterHeadWorldPosition() const
+{
+    const MachineKinematics* kin = kinematics();
+    if (!kin)
+        return m_cutterHeadModelPosition;
+    // 切割头几何挂在 Z 轴链下（BASE→Y→X→Z），由该链变换 m_cutterHeadModelPosition。
+    gp_Pnt pos = m_cutterHeadModelPosition;
+    pos.Transform(kin->computeAxisTransform(QStringLiteral("Z")));
+    return pos;
+}
+
+bool CamModule::acAngleOffset(double& outA, double& outC) const
+{
+    if (!m_hasAcAngleOffset)
+        return false;
+    outA = m_acAngleOffsetA;
+    outC = m_acAngleOffsetC;
+    return true;
+}
+
+bool CamModule::physicalAcCenter(gp_Pnt& outCenter) const
+{
+    if (!m_hasPhysicalAcCenter)
+        return false;
+    outCenter = m_physicalAcCenter;
+    return true;
+}
+
+bool CamModule::isMachineCalibrated() const
+{
+    // 标定完整的判据：已记录物理中心 + AC 角度映射 + 切割头模型点。
+    // 三者通常由 applyAxisCalibration 一次性写入。
+    return m_hasPhysicalAcCenter && m_hasAcAngleOffset;
+}
+
+bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
+                                     QString* errorMessage)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CamModule::applyAxisCalibration begin");
+
+    auto fail = [&](const QString& msg) {
+        if (errorMessage)
+            *errorMessage = msg;
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "CamModule::applyAxisCalibration failed: {}",
+                 msg.toStdString());
+        emit operationFailed(tr("机台坐标系标定"), msg);
+        return false;
+    };
+
+    // ── 1) 进入标定位（写入轴心、切割头模型点、A=C=0、XY 对齐） ────────
+    QString reason;
+    if (!enterStandardCalibrationPose(inputs, &reason))
+        return fail(reason);
+
+    try {
+        // ── 2) 持久化轴心与切割头模型点 ────────────────────────────────
+        if (!m_machineModelPath.isEmpty()) {
+            MachineKinematics* kin = kinematics();
+            if (kin) {
+                m_config.setAxisOriginForMachine(m_machineModelPath, QStringLiteral("A"),
+                                                  kin->axisOrigin(QStringLiteral("A")));
+                m_config.setAxisOriginForMachine(m_machineModelPath, QStringLiteral("C"),
+                                                  kin->axisOrigin(QStringLiteral("C")));
+            }
+            m_config.setCutterHeadModelPositionForMachine(m_machineModelPath,
+                                                          m_cutterHeadModelPosition);
+        }
+
+        // ── 3) 整机平移：将当前模型 AC 中心搬到物理 AC 中心 ───────────
+        if (inputs.hasPhysicalCenter) {
+            gp_Pnt currentCenter;
+            if (!currentAcRotationCenter(currentCenter))
+                return fail(tr("无法计算当前模型 AC 中心。"));
+
+            const gp_Vec translation(currentCenter, inputs.physicalAcCenter);
+            if (translation.SquareMagnitude() >= 1e-12) {
+                if (!translateMachineWorkspace(translation, tr("机台坐标系标定")))
+                    return false; // translateMachineWorkspace 已发 operationFailed
+            }
+        }
+
+        // ── 4) 持久化 AC 角度偏移（标定位 → 物理角度的映射） ─────────
+        m_hasAcAngleOffset = true;
+        m_acAngleOffsetA   = inputs.physicalAAngle;
+        m_acAngleOffsetC   = inputs.physicalCAngle;
+        // 物理 AC 中心 XYZ：作为标定记录持久化，向导回显时回填。
+        if (inputs.hasPhysicalCenter) {
+            m_hasPhysicalAcCenter = true;
+            m_physicalAcCenter    = inputs.physicalAcCenter;
+        }
+        if (!m_machineModelPath.isEmpty()) {
+            m_config.setAcAngleOffsetForMachine(m_machineModelPath,
+                                                inputs.physicalAAngle,
+                                                inputs.physicalCAngle);
+            if (inputs.hasPhysicalCenter) {
+                m_config.setPhysicalAcCenterForMachine(m_machineModelPath,
+                                                       inputs.physicalAcCenter);
+            }
+        }
+
+        // ── 5) 自动 STEP 回写：标定后的姿态作为下次启动的初始模型 ─────
+        if (!m_machineModelPath.isEmpty()) {
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "Saving calibrated machine model back to: {}",
+                      m_machineModelPath.toStdString());
+            LcncDocument* doc = machineDocument();
+            if (doc && !lcnc::cam::machine_io::exportMachineToFile(
+                            doc, doc->machineKinematics(), m_machineModelPath)) {
+                LCNC_WARN(lcnc::LogCode::Generic,
+                          "Auto-save of machine model failed: {}",
+                          m_machineModelPath.toStdString());
+                // 仅警告，不中断标定流程
+            }
+        }
+    } catch (const Standard_Failure& f) {
+        return fail(tr("OCC 异常：%1").arg(QString::fromUtf8(f.GetMessageString())));
+    } catch (const std::exception& e) {
+        return fail(tr("异常：%1").arg(QString::fromUtf8(e.what())));
+    } catch (...) {
+        return fail(tr("发生未知异常。"));
+    }
+
+    displayAxisGuides();
+    refreshMachineDisplay();
+    if (hasToolpath())
+        recalcToolpath();
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "CamModule::applyAxisCalibration done (origins/head/center/angles applied, model saved)");
+    emit machineWorkspaceChanged();
     return true;
 }
 
@@ -1138,6 +1289,7 @@ void CamModule::setWorkpieceInstallPosition(const gp_Pnt& position)
     }
 
     m_workpieceInstallPosition = position;
+    m_workpieceInstallPositionBaked = position;
     if (!m_machineModelPath.isEmpty()) {
         m_config.setWorkpieceInstallPositionForMachine(
             m_machineModelPath,
@@ -1145,6 +1297,19 @@ void CamModule::setWorkpieceInstallPosition(const gp_Pnt& position)
     }
 
     if (movedWorkpieces) {
+        // 上面 moveShape 已将底层几何迁动。联动复位任何轻量路径赋予的 AIS Location。
+        if (auto* gd = machineGuiDocument()) {
+            const TopLoc_Location identityLoc;
+            const auto& ctx = gd->scene()->context();
+            const TDF_LabelSequence wpcLabels =
+                doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+            for (int i = 1; i <= wpcLabels.Length(); ++i) {
+                const QString entry = XcafUtils::entry(wpcLabels.Value(i));
+                Handle(AIS_Shape) ais = gd->aisShape(entry);
+                if (!ais.IsNull() && !ctx.IsNull())
+                    ctx->SetLocation(ais, identityLoc);
+            }
+        }
         refreshMachineDisplay();
         if (hasToolpath() || m_previewLeadInValid)
             refreshToolpathDisplay();
@@ -1152,6 +1317,46 @@ void CamModule::setWorkpieceInstallPosition(const gp_Pnt& position)
     }
 
     emit machineWorkspaceChanged();
+}
+
+void CamModule::updateWorkpieceInstallLocation(const gp_Pnt& position)
+{
+    if (m_workpieceInstallPosition.SquareDistance(position) < 1e-12)
+        return;
+
+    m_workpieceInstallPosition = position;
+    if (!m_machineModelPath.isEmpty()) {
+        m_config.setWorkpieceInstallPositionForMachine(
+            m_machineModelPath, m_workpieceInstallPosition);
+    }
+
+    auto* gd = machineGuiDocument();
+    LcncDocument* doc = machineDocument();
+    if (!gd || !doc)
+        return;
+
+    // 计算 baked → 当前 的平移增量，对所有已展示的工件 AIS 调 SetLocation。
+    const gp_Vec delta(m_workpieceInstallPositionBaked, m_workpieceInstallPosition);
+    gp_Trsf trsf;
+    trsf.SetTranslation(delta);
+    const TopLoc_Location loc(trsf);
+    const auto& ctx = gd->scene()->context();
+    if (ctx.IsNull())
+        return;
+
+    const TDF_LabelSequence wpcLabels =
+        doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    int updated = 0;
+    for (int i = 1; i <= wpcLabels.Length(); ++i) {
+        const QString entry = XcafUtils::entry(wpcLabels.Value(i));
+        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        if (ais.IsNull())
+            continue;
+        ctx->SetLocation(ais, loc);
+        ++updated;
+    }
+    if (updated > 0)
+        ctx->UpdateCurrentViewer();
 }
 
 bool CamModule::supportsWorkpieceRotationAlignment() const
@@ -1177,52 +1382,7 @@ bool CamModule::alignWorkpieceInstallPositionToRotationCenter()
 
 void CamModule::autoDetectAxisOrigins()
 {
-    LcncDocument* doc = machineDocument();
-    MachineKinematics* kin = kinematics();
-    if (!doc || !kin)
-        return;
-
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
-    QMap<QString, TDF_Label> labelByEntry;
-    for (int i = 1; i <= labels.Length(); ++i) {
-        const TDF_Label lbl = labels.Value(i);
-        labelByEntry.insert(XcafUtils::entry(lbl), lbl);
-    }
-
-    for (const MachineAxisDef& axis : kin->axes()) {
-        if (axis.name == QStringLiteral("BASE") || axis.motionType != MachineAxisDef::Rotary)
-            continue;
-
-        Bnd_Box bbox;
-        bool hasShape = false;
-        for (const QString& entry : kin->shapesForAxis(axis.name)) {
-            const auto it = labelByEntry.constFind(entry);
-            if (it == labelByEntry.cend())
-                continue;
-
-            const TopoDS_Shape shape = XcafUtils::shape(it.value());
-            if (shape.IsNull())
-                continue;
-
-            BRepBndLib::Add(shape, bbox);
-            hasShape = true;
-        }
-
-        if (!hasShape || bbox.IsVoid())
-            continue;
-
-        Standard_Real xmin = 0.0;
-        Standard_Real ymin = 0.0;
-        Standard_Real zmin = 0.0;
-        Standard_Real xmax = 0.0;
-        Standard_Real ymax = 0.0;
-        Standard_Real zmax = 0.0;
-        bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-        kin->setAxisOrigin(axis.name,
-                           gp_Pnt(0.5 * (xmin + xmax),
-                                  0.5 * (ymin + ymax),
-                                  0.5 * (zmin + zmax)));
-    }
+    lcnc::cam::machine_axis_detector::autoDetectAxisOrigins(machineDocument(), kinematics());
 }
 
 void CamModule::applyStoredMachineProfile(const QString& machinePath)
@@ -1231,24 +1391,43 @@ void CamModule::applyStoredMachineProfile(const QString& machinePath)
     if (!kin || machinePath.isEmpty())
         return;
 
-    CamConfig& config = m_config;
-    for (const MachineAxisDef& axis : kin->axes()) {
-        gp_Pnt storedOrigin;
-        if (config.axisOriginForMachine(machinePath, axis.name, &storedOrigin))
-            kin->setAxisOrigin(axis.name, storedOrigin);
-    }
-
     m_workpieceInstallPosition = defaultWorkpieceInstallPosition();
 
-    gp_Pnt storedPosition;
-    if (config.cutterHeadModelPositionForMachine(machinePath, &storedPosition))
-        m_cutterHeadModelPosition = storedPosition;
+    const auto profile = lcnc::cam::machine_axis_detector::applyStoredMachineProfile(
+        kin, m_config, machinePath);
 
-    if (config.cutterHeadPhysicalPositionForMachine(machinePath, &storedPosition))
-        m_cutterHeadPhysicalPosition = storedPosition;
+    if (profile.hasCutterHeadModel)
+        m_cutterHeadModelPosition = profile.cutterHeadModelPosition;
+    if (profile.hasCutterHeadPhysical)
+        m_cutterHeadPhysicalPosition = profile.cutterHeadPhysicalPosition;
+    if (profile.hasWorkpieceInstall)
+        m_workpieceInstallPosition = profile.workpieceInstallPosition;
 
-    if (config.workpieceInstallPositionForMachine(machinePath, &storedPosition))
-        m_workpieceInstallPosition = storedPosition;
+    double aOff = 0.0;
+    double cOff = 0.0;
+    if (m_config.acAngleOffsetForMachine(machinePath, &aOff, &cOff)) {
+        m_hasAcAngleOffset = true;
+        m_acAngleOffsetA   = aOff;
+        m_acAngleOffsetC   = cOff;
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "Loaded AC angle offset for machine: A={:.3f}° C={:.3f}°", aOff, cOff);
+    } else {
+        m_hasAcAngleOffset = false;
+        m_acAngleOffsetA = 0.0;
+        m_acAngleOffsetC = 0.0;
+    }
+
+    gp_Pnt physCenter;
+    if (m_config.physicalAcCenterForMachine(machinePath, &physCenter)) {
+        m_hasPhysicalAcCenter = true;
+        m_physicalAcCenter    = physCenter;
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "Loaded physical AC center for machine: ({:.3f},{:.3f},{:.3f})",
+                  physCenter.X(), physCenter.Y(), physCenter.Z());
+    } else {
+        m_hasPhysicalAcCenter = false;
+        m_physicalAcCenter    = gp_Pnt(0.0, 0.0, 0.0);
+    }
 }
 
 gp_Pnt CamModule::defaultWorkpieceInstallPosition() const
@@ -1319,8 +1498,18 @@ void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName)
     const QString wpcEntry = XcafUtils::entry(wpcLabel);
     kin->mountWorkpiece(wpcEntry, axisName);
 
-    if (auto* gd = machineGuiDocument())
+    if (auto* gd = machineGuiDocument()) {
         gd->displayShape(mountShape, wpcEntry);
+        // 显式激活工件 AIS 的整体选择模式（TopAbs_SHAPE），避免在机台 view 中无法被鼠标拾取。
+        if (Handle(AIS_Shape) ais = gd->aisShape(wpcEntry); !ais.IsNull()) {
+            const auto& ctx = gd->scene()->context();
+            if (!ctx.IsNull())
+                ctx->Activate(ais, 0, Standard_False);
+        }
+    }
+
+    // 标记当前 baked 安装位置 = 已写入 TopoDS 的位置；后续轻量更新基于此 delta。
+    m_workpieceInstallPositionBaked = m_workpieceInstallPosition;
 
     refreshMachineTransforms();
     lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
@@ -1534,7 +1723,7 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
         return false;
 
     m_toolpath.contours() = std::move(allContours);
-    m_toolpathVisible = true;
+    m_toolpathRenderer->setVisible(machineGuiDocument(), true);
 
     refreshToolpathDisplay();
     emit toolpathGenerated();
@@ -1557,46 +1746,7 @@ bool CamModule::resolveReferencePlaneCenter(WidgetOccView* occView,
                                             gp_Pnt& center,
                                             QString* errorMessage) const
 {
-    if (!occView || occView->view().IsNull() || occView->context().IsNull()) {
-        if (errorMessage)
-            *errorMessage = tr("当前没有可用的机台视图用于参考面拾取。");
-        return false;
-    }
-
-    const Handle(AIS_InteractiveContext)& context = occView->context();
-    context->MoveTo(screenPos.x(), screenPos.y(), occView->view(), Standard_False);
-
-    const Handle(SelectMgr_EntityOwner) owner = context->DetectedOwner();
-    Handle(StdSelect_BRepOwner) brepOwner = Handle(StdSelect_BRepOwner)::DownCast(owner);
-    if (brepOwner.IsNull() || !brepOwner->HasShape()) {
-        if (errorMessage)
-            *errorMessage = tr("请将光标放在机台模型或挂载工件的平面上。\n当前未检测到可用参考面。");
-        return false;
-    }
-
-    const TopoDS_Shape pickedShape = brepOwner->Shape();
-    if (pickedShape.IsNull() || pickedShape.ShapeType() != TopAbs_FACE) {
-        if (errorMessage)
-            *errorMessage = tr("当前拾取的不是平面面片，请重新选择参考平面。");
-        return false;
-    }
-
-    const TopoDS_Face face = TopoDS::Face(pickedShape);
-    const BRepAdaptor_Surface surface(face);
-    if (surface.GetType() != GeomAbs_Plane) {
-        if (errorMessage)
-            *errorMessage = tr("当前拾取的面不是平面，请选择平面参考面。");
-        return false;
-    }
-
-    GProp_GProps props;
-    BRepGProp::SurfaceProperties(face, props);
-    center = props.CentreOfMass();
-
-    if (owner->HasSelectable() && !owner->Selectable().IsNull())
-        center.Transform(owner->Selectable()->LocalTransformation());
-
-    return true;
+    return lcnc::cam::reference_pick::resolveReferencePlaneCenter(occView, screenPos, center, errorMessage);
 }
 
 bool CamModule::ensureAcCenterCalibrationAvailable(QString* errorMessage) const
@@ -1692,7 +1842,7 @@ void CamModule::setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double 
 void CamModule::setLeadInLength(double mm)
 {
     m_toolpath.setGlobalLeadInLength(mm);
-    if (m_toolpathVisible)
+    if (m_toolpathRenderer->isVisible())
         refreshToolpathDisplay();
 }
 
@@ -1704,7 +1854,7 @@ double CamModule::leadInLength() const
 void CamModule::setNormalAngle(double deg)
 {
     m_toolpath.setGlobalNormalAngle(deg);
-    if (m_toolpathVisible)
+    if (m_toolpathRenderer->isVisible())
         refreshToolpathDisplay();
 }
 
@@ -1728,33 +1878,31 @@ double CamModule::deflection() const
 
 bool CamModule::showNormals() const
 {
-    return m_showNormals;
+    return m_toolpathRenderer->showNormals();
 }
 
 void CamModule::setShowNormals(bool on)
 {
-    if (m_showNormals == on)
+    if (m_toolpathRenderer->showNormals() == on)
         return;
-
-    m_showNormals = on;
+    m_toolpathRenderer->setShowNormals(on);
     refreshToolpathDisplay();
 }
 
 double CamModule::normalSampleStep() const
 {
-    return m_normalSampleStep;
+    return m_toolpathRenderer->normalSampleStep();
 }
 
 void CamModule::setNormalSampleStep(double mm)
 {
+    const double current = m_toolpathRenderer->normalSampleStep();
     if (mm <= 0.0)
         return;
-
-    if (qFuzzyCompare(m_normalSampleStep + 1.0, mm + 1.0))
+    if (qFuzzyCompare(current + 1.0, mm + 1.0))
         return;
-
-    m_normalSampleStep = mm;
-    if (m_showNormals)
+    m_toolpathRenderer->setNormalSampleStep(mm);
+    if (m_toolpathRenderer->showNormals())
         refreshToolpathDisplay();
 }
 
@@ -1764,46 +1912,8 @@ bool CamModule::resolveLeadInHit(WidgetOccView* occView,
                                  gp_Pnt& entryPoint,
                                  double& entryParam) const
 {
-    if (!occView || occView->view().IsNull())
-        return false;
-
-    const Handle(V3d_View)& view = occView->view();
-    constexpr double kMaxScreenDistanceSq = 24.0 * 24.0;
-    double bestDistanceSq = kMaxScreenDistanceSq;
-    int bestContour = -1;
-    int bestPoint = -1;
-
-    for (int contourIndex = 0; contourIndex < m_toolpath.contourCount(); ++contourIndex) {
-        const LaserContour& contour = m_toolpath.contour(contourIndex);
-        if (!contour.enabled)
-            continue;
-
-        for (int pointIndex = 0; pointIndex < static_cast<int>(contour.points.size()); ++pointIndex) {
-            const ToolpathPoint& point = contour.points[pointIndex];
-            Standard_Integer px = 0;
-            Standard_Integer py = 0;
-            view->Convert(point.position.X(), point.position.Y(), point.position.Z(), px, py);
-
-            const double dx = static_cast<double>(px - screenPos.x());
-            const double dy = static_cast<double>(py - screenPos.y());
-            const double distanceSq = dx * dx + dy * dy;
-            if (distanceSq > bestDistanceSq)
-                continue;
-
-            bestDistanceSq = distanceSq;
-            bestContour = contourIndex;
-            bestPoint = pointIndex;
-        }
-    }
-
-    if (bestContour < 0 || bestPoint < 0)
-        return false;
-
-    const ToolpathPoint& hitPoint = m_toolpath.contour(bestContour).points[bestPoint];
-    contourIdx = bestContour;
-    entryPoint = hitPoint.position;
-    entryParam = hitPoint.param;
-    return true;
+    return lcnc::cam::reference_pick::resolveLeadInHit(occView, screenPos, m_toolpath,
+                                                       contourIdx, entryPoint, entryParam);
 }
 
 bool CamModule::updateLeadInPreview(WidgetOccView* occView, const QPoint& screenPos)
@@ -1874,7 +1984,7 @@ void CamModule::setContourEnabled(int contourIdx, bool enabled)
         return;
 
     contour.enabled = enabled;
-    if (m_toolpathVisible)
+    if (m_toolpathRenderer->isVisible())
         refreshToolpathDisplay();
 }
 
@@ -1949,37 +2059,14 @@ void CamModule::recalcToolpath()
 
 void CamModule::setToolpathVisible(bool visible)
 {
-    if (m_toolpathVisible == visible) return;
-    m_toolpathVisible = visible;
-
-    GuiDocument* gd = machineGuiDocument();
-    if (!gd) return;
-    const Handle(AIS_InteractiveContext)& aisCtx = gd->context();
-    if (aisCtx.IsNull()) return;
-
-    auto toggleList = [&](QList<Handle(AIS_Shape)>& list) {
-        for (auto& ais : list) {
-            if (ais.IsNull()) continue;
-            if (m_toolpathVisible)
-                aisCtx->Display(ais, Standard_False);
-            else
-                aisCtx->Erase(ais, Standard_False);
-        }
-    };
-
-    toggleList(m_contourAis);
-    toggleList(m_leadInAis);
-    toggleList(m_normalAis);
-
-    if (gd->hasView())
-        gd->view()->Redraw();
-
+    if (m_toolpathRenderer->isVisible() == visible) return;
+    m_toolpathRenderer->setVisible(machineGuiDocument(), visible);
     emit toolpathVisibilityChanged(visible);
 }
 
 bool CamModule::isToolpathVisible() const
 {
-    return m_toolpathVisible;
+    return m_toolpathRenderer->isVisible();
 }
 
 double CamModule::smoothAngle() const
@@ -2002,368 +2089,77 @@ void CamModule::setUseFaceClassification(bool on)
     m_useFaceClassification = on;
 }
 
-void CamModule::displayContours()
-{
-    GuiDocument* gd = machineGuiDocument();
-    if (!gd) return;
-    GraphicsScene* scene = gd->scene();
-    const Handle(AIS_InteractiveContext)& context = gd->context();
-    const Quantity_Color green(0.1, 0.8, 0.2, Quantity_TOC_RGB);
-
-    for (int i = 0; i < m_toolpath.contourCount(); ++i) {
-        const LaserContour& c = m_toolpath.contour(i);
-        if (!c.enabled || c.wire.IsNull()) continue;
-
-        Handle(AIS_Shape) ais = scene->displayShape(c.wire, false, true);
-        scene->setShapeColor(ais, green);
-        if (!context.IsNull())
-            context->Deactivate(ais);
-        m_contourAis.append(ais);
-    }
-}
-
-void CamModule::displayLeadIns()
-{
-    GuiDocument* gd = machineGuiDocument();
-    if (!gd) return;
-    GraphicsScene* scene = gd->scene();
-    const Handle(AIS_InteractiveContext)& context = gd->context();
-    const Quantity_Color red(0.9, 0.15, 0.15, Quantity_TOC_RGB);
-    const Quantity_Color yellow(0.95, 0.8, 0.1, Quantity_TOC_RGB);
-
-    const double length = m_toolpath.globalLeadInLength();
-    const double angle = m_toolpath.globalNormalAngle();
-
-    for (int i = 0; i < m_toolpath.contourCount(); ++i) {
-        const LaserContour& c = m_toolpath.contour(i);
-        if (!c.enabled || !c.leadIn.valid) continue;
-
-        TopoDS_Edge leadEdge = LaserToolpathBuilder::computeLeadInEdge(c, length, angle);
-        if (leadEdge.IsNull()) continue;
-
-        Handle(AIS_Shape) ais = scene->displayShape(leadEdge, false, false);
-        scene->setShapeColor(ais, red);
-        ais->SetWidth(2.0);
-        if (!context.IsNull())
-            context->Deactivate(ais);
-        m_leadInAis.append(ais);
-    }
-
-    if (m_previewLeadInValid
-        && m_previewLeadInContour >= 0
-        && m_previewLeadInContour < m_toolpath.contourCount()) {
-        const LaserContour& sourceContour = m_toolpath.contour(m_previewLeadInContour);
-        if (sourceContour.enabled) {
-            LaserContour previewContour = sourceContour;
-            previewContour.leadIn.entryPoint = m_previewLeadInPoint;
-            previewContour.leadIn.entryParam = m_previewLeadInParam;
-            previewContour.leadIn.valid = true;
-
-            TopoDS_Edge previewEdge =
-                LaserToolpathBuilder::computeLeadInEdge(previewContour, length, angle);
-            if (!previewEdge.IsNull()) {
-                Handle(AIS_Shape) ais = scene->displayShape(previewEdge, false, false);
-                scene->setShapeColor(ais, yellow);
-                ais->SetWidth(2.5);
-                if (!context.IsNull())
-                    context->Deactivate(ais);
-                m_leadInAis.append(ais);
-            }
-        }
-    }
-}
-
-void CamModule::displayNormals()
-{
-    if (!m_showNormals)
-        return;
-
-    GuiDocument* gd = machineGuiDocument();
-    if (!gd)
-        return;
-
-    GraphicsScene* scene = gd->scene();
-    const Handle(AIS_InteractiveContext)& context = gd->context();
-    const Quantity_Color amber(0.95, 0.55, 0.10, Quantity_TOC_RGB);
-    constexpr double kNormalLength = 5.0;
-
-    for (int contourIndex = 0; contourIndex < m_toolpath.contourCount(); ++contourIndex) {
-        const LaserContour& contour = m_toolpath.contour(contourIndex);
-        if (!contour.enabled || contour.points.empty())
-            continue;
-
-        BRep_Builder builder;
-        TopoDS_Compound compound;
-        builder.MakeCompound(compound);
-        bool hasSegments = false;
-        double accumulatedDistance = 0.0;
-        gp_Pnt previousPoint;
-        bool hasPreviousPoint = false;
-
-        for (const ToolpathPoint& point : contour.points) {
-            if (hasPreviousPoint)
-                accumulatedDistance += previousPoint.Distance(point.position);
-
-            const bool shouldEmit = !hasPreviousPoint || accumulatedDistance >= m_normalSampleStep;
-            if (shouldEmit) {
-                const gp_Pnt endPoint(
-                    point.position.X() + point.normal.X() * kNormalLength,
-                    point.position.Y() + point.normal.Y() * kNormalLength,
-                    point.position.Z() + point.normal.Z() * kNormalLength);
-                BRepBuilderAPI_MakeEdge edgeMaker(point.position, endPoint);
-                if (edgeMaker.IsDone()) {
-                    builder.Add(compound, edgeMaker.Edge());
-                    hasSegments = true;
-                }
-                accumulatedDistance = 0.0;
-            }
-
-            previousPoint = point.position;
-            hasPreviousPoint = true;
-        }
-
-        if (!hasSegments)
-            continue;
-
-        Handle(AIS_Shape) ais = scene->displayShape(compound, false, false);
-        scene->setShapeColor(ais, amber);
-        ais->SetWidth(1.5);
-        if (!context.IsNull())
-            context->Deactivate(ais);
-        m_normalAis.append(ais);
-    }
-}
-
 void CamModule::eraseAxisGuideDisplay()
 {
-    GuiDocument* gd = machineGuiDocument();
-    if (!gd)
-        return;
-
-    GraphicsScene* scene = gd->scene();
-    if (!scene)
-        return;
-
-    for (auto& ais : m_axisGuideAis) {
-        if (!ais.IsNull())
-            scene->eraseObject(ais, false);
-    }
-    m_axisGuideAis.clear();
+    m_guideRenderer->erase(machineGuiDocument());
 }
 
 void CamModule::displayAxisGuides()
 {
-    eraseAxisGuideDisplay();
-
-    GuiDocument* gd = machineGuiDocument();
-    MachineKinematics* kin = kinematics();
-    if (!gd || !kin)
-        return;
-
-    GraphicsScene* scene = gd->scene();
-    const Handle(AIS_InteractiveContext)& context = gd->context();
-    if (!scene || context.IsNull())
-        return;
-
-    auto axisColor = [](const QString& axisName) {
-        if (axisName == QStringLiteral("A"))
-            return Quantity_Color(0.95, 0.55, 0.10, Quantity_TOC_RGB);
-        if (axisName == QStringLiteral("C"))
-            return Quantity_Color(0.90, 0.20, 0.90, Quantity_TOC_RGB);
-        return Quantity_Color(0.20, 0.45, 0.95, Quantity_TOC_RGB);
-    };
-
-    const QStringList visibleAxes = {QStringLiteral("A"), QStringLiteral("C")};
-    for (const QString& axisName : visibleAxes) {
-        const MachineAxisDef* axisDef = kin->findAxis(axisName);
-        if (!axisDef)
-            continue;
-
-        const gp_Vec axisVector(axisDef->direction);
-        constexpr double kRotaryGuideHalfLength = 50.0;
-        const gp_Pnt p0 = axisDef->origin.Translated(axisVector * -kRotaryGuideHalfLength);
-        const gp_Pnt p1 = axisDef->origin.Translated(axisVector * kRotaryGuideHalfLength);
-
-        BRepBuilderAPI_MakeEdge edgeMaker(p0, p1);
-        if (!edgeMaker.IsDone())
-            continue;
-
-        Handle(AIS_Shape) ais = scene->displayShape(edgeMaker.Edge(), false, false, false);
-        scene->setShapeColor(ais, axisColor(axisName), false);
-        ais->SetWidth(3.0);
-        context->Deactivate(ais);
-        m_axisGuideAis.insert(QStringLiteral("axis:%1").arg(axisName), ais);
-    }
-
-    constexpr double kHeadGuideLength = 80.0;
-    constexpr double kHeadConeHeight = 18.0;
-    constexpr double kHeadConeRadius = 5.0;
-    const gp_Pnt headTip = m_cutterHeadModelPosition;
-    const gp_Pnt headTop = headTip.Translated(gp_Vec(0.0, 0.0, kHeadGuideLength));
-
-    BRepBuilderAPI_MakeEdge headAxisMaker(headTop, headTip);
-    if (headAxisMaker.IsDone()) {
-        Handle(AIS_Shape) axisAis = scene->displayShape(headAxisMaker.Edge(), false, false, false);
-        scene->setShapeColor(axisAis, axisColor(QString()), false);
-        axisAis->SetWidth(2.5);
-        context->Deactivate(axisAis);
-        m_axisGuideAis.insert(QStringLiteral("head:axis"), axisAis);
-    }
-
-    gp_Ax2 coneAxis(headTip.Translated(gp_Vec(0.0, 0.0, kHeadConeHeight)), gp_Dir(0.0, 0.0, -1.0));
-    BRepPrimAPI_MakeCone coneMaker(coneAxis, kHeadConeRadius, 0.0, kHeadConeHeight);
-    if (coneMaker.IsDone()) {
-        Handle(AIS_Shape) coneAis = scene->displayShape(coneMaker.Shape(), false, false, false);
-        scene->setShapeColor(coneAis, Quantity_Color(0.15, 0.55, 0.95, Quantity_TOC_RGB), false);
-        context->Deactivate(coneAis);
-        m_axisGuideAis.insert(QStringLiteral("head:cone"), coneAis);
-    }
-
-    updateAxisGuideTransforms();
+    m_guideRenderer->refresh(machineGuiDocument(), kinematics(), m_cutterHeadModelPosition);
 }
 
 void CamModule::updateAxisGuideTransforms()
 {
-    GuiDocument* gd = machineGuiDocument();
-    MachineKinematics* kin = kinematics();
-    if (!gd || !kin)
-        return;
-
-    const Handle(AIS_InteractiveContext)& context = gd->context();
-    if (context.IsNull())
-        return;
-
-    auto applyTransform = [&](const QString& key, const gp_Trsf& trsf) {
-        const auto it = m_axisGuideAis.constFind(key);
-        if (it == m_axisGuideAis.cend() || it.value().IsNull())
-            return;
-
-        it.value()->SetLocalTransformation(trsf);
-        context->RecomputePrsOnly(it.value(), Standard_False);
-    };
-
-    applyTransform(QStringLiteral("axis:A"), kin->computeAxisTransform(QStringLiteral("A")));
-    applyTransform(QStringLiteral("axis:C"), kin->computeAxisTransform(QStringLiteral("C")));
-
-    const gp_Trsf headTransform = kin->computeAxisTransform(QStringLiteral("Z"));
-    applyTransform(QStringLiteral("head:axis"), headTransform);
-    applyTransform(QStringLiteral("head:cone"), headTransform);
+    m_guideRenderer->updateTransforms(machineGuiDocument(), kinematics());
 }
 
 void CamModule::refreshToolpathDisplay()
 {
-    eraseToolpathDisplay();
-    if (m_toolpathVisible) {
-        displayContours();
-        displayLeadIns();
-        displayNormals();
-    }
-
-    if (auto* gd = machineGuiDocument()) {
-        if (gd->hasView())
-            gd->view()->Redraw();
-    }
+    lcnc::view::ToolpathRenderer::LeadInPreview preview{
+        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+    };
+    m_toolpathRenderer->refresh(machineGuiDocument(), m_toolpath, preview);
 }
 
 void CamModule::eraseToolpathDisplay()
 {
-    GuiDocument* gd = machineGuiDocument();
-    if (!gd) return;
-    GraphicsScene* scene = gd->scene();
-
-    for (auto& ais : m_contourAis)
-        if (!ais.IsNull()) scene->eraseShape(ais);
-    for (auto& ais : m_leadInAis)
-        if (!ais.IsNull()) scene->eraseShape(ais);
-    for (auto& ais : m_normalAis)
-        if (!ais.IsNull()) scene->eraseShape(ais);
-
-    m_contourAis.clear();
-    m_leadInAis.clear();
-    m_normalAis.clear();
+    m_toolpathRenderer->erase(machineGuiDocument());
 }
 
 const QList<Handle(AIS_Shape)>& CamModule::contourAis() const
 {
-    return m_contourAis;
+    return m_toolpathRenderer->contourAis();
 }
 
-// ── Simulation ────────────────────────────────────────────────────────────────
+// ── Simulation (delegated to ToolpathSimulator) ──────────────────────────────
 
-void CamModule::simulatePlay()
-{
-    if (m_simPaused) {
-        m_simPaused = false;
-        m_simPlaying = true;
-        m_simTimer->start();
-        emit simulationStateChanged(true);
-        return;
-    }
-
-    m_simCurrentContour = 0;
-    m_simCurrentPoint = 0;
-    m_simTotalPoints = 0;
-    for (int i = 0; i < m_toolpath.contourCount(); ++i) {
-        const auto& c = m_toolpath.contour(i);
-        if (c.enabled)
-            m_simTotalPoints += static_cast<int>(c.points.size());
-    }
-    if (m_simTotalPoints == 0) return;
-
-    while (m_simCurrentContour < m_toolpath.contourCount()
-           && !m_toolpath.contour(m_simCurrentContour).enabled)
-        ++m_simCurrentContour;
-
-    m_simPlaying = true;
-    m_simPaused = false;
-    m_simTimer->setInterval(std::max(10, static_cast<int>(50.0 / m_simSpeed)));
-    m_simTimer->start();
-    emit simulationStateChanged(true);
-}
-
-void CamModule::simulatePause()
-{
-    m_simTimer->stop();
-    m_simPaused = true;
-    m_simPlaying = false;
-    emit simulationStateChanged(false);
-}
-
-void CamModule::simulateStop()
-{
-    m_simTimer->stop();
-    m_simPlaying = false;
-    m_simPaused = false;
-    m_simCurrentContour = 0;
-    m_simCurrentPoint = 0;
-    emit simulationStateChanged(false);
-    emit simulationFinished();
-}
-
-void CamModule::setSimulationSpeed(double factor)
-{
-    m_simSpeed = (factor > 0.1) ? factor : 0.1;
-    if (m_simTimer->isActive())
-        m_simTimer->setInterval(std::max(10, static_cast<int>(50.0 / m_simSpeed)));
-}
-
-bool CamModule::isSimulating() const
-{
-    return m_simPlaying;
-}
-
-bool CamModule::isSimPaused() const
-{
-    return m_simPaused;
-}
+void CamModule::simulatePlay()           { m_simulator->play(); }
+void CamModule::simulatePause()          { m_simulator->pause(); }
+void CamModule::simulateStop()           { m_simulator->stop(); }
+void CamModule::setSimulationSpeed(double f) { m_simulator->setSpeed(f); }
+bool CamModule::isSimulating() const     { return m_simulator->isPlaying(); }
+bool CamModule::isSimPaused() const      { return m_simulator->isPaused(); }
 
 void CamModule::setAxisPosition(const QString& axisName, double value, bool refreshNow)
 {
-    if (auto* kin = kinematics()) {
-        kin->setAxisPosition(axisName, value);
-        if (refreshNow)
-            refreshMachineTransforms();
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CamModule::setAxisPosition {}={} refreshNow={}",
+               axisName.toStdString(), value, refreshNow);
+    if (!m_pose || !kinematics()) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "CamModule::setAxisPosition: no pose/kinematics, skip");
+        return;
     }
+    // 由 pose 统一写值；写入会同步回 kinematics 并 emit poseChanged。
+    // 通过 m_inPoseSelfUpdate 抑制 coalescer，让本调用同步刷新（保留旧语义）。
+    m_inPoseSelfUpdate = true;
+    const bool changed = m_pose->setAxisValue(axisName, value, /*emitChanged*/ false);
+    m_inPoseSelfUpdate = false;
+    if (!changed)
+        return;
+    if (refreshNow) {
+        refreshMachineTransforms(QStringList{axisName});
+    } else {
+        m_pendingDirtyAxes.insert(axisName);
+        if (m_refreshCoalescer && !m_refreshCoalescer->isActive())
+            m_refreshCoalescer->start();
+    }
+}
+
+lcnc::MachinePose* CamModule::machinePose() const
+{
+    return m_pose.get();
 }
 
 void CamModule::setEntityVisible(const QString& entry, bool visible)
@@ -2422,51 +2218,29 @@ void CamModule::syncSelectionFromView()
     emit selectionChanged(selectedEntries());
 }
 
-void CamModule::onSimTick()
-{
-    if (m_simCurrentContour >= m_toolpath.contourCount()) {
-        simulateStop();
-        return;
-    }
-
-    const LaserContour& c = m_toolpath.contour(m_simCurrentContour);
-    if (m_simCurrentPoint >= static_cast<int>(c.points.size())) {
-        ++m_simCurrentContour;
-        m_simCurrentPoint = 0;
-        while (m_simCurrentContour < m_toolpath.contourCount()
-               && !m_toolpath.contour(m_simCurrentContour).enabled)
-            ++m_simCurrentContour;
-        if (m_simCurrentContour >= m_toolpath.contourCount()) {
-            simulateStop();
-            return;
-        }
-        return;
-    }
-
-    const MachineCoord& mc = c.points[m_simCurrentPoint].machineCoord;
-    if (!mc.valid) {
-        ++m_simCurrentPoint;
-        return;
-    }
-
-    if (kinematics()) {
-        setAxisPosition("X", mc.x, false);
-        setAxisPosition("Y", mc.y, false);
-        setAxisPosition("Z", mc.z, false);
-        if (!mc.r1Name.isEmpty())
-            setAxisPosition(mc.r1Name, mc.r1, false);
-        if (!mc.r2Name.isEmpty())
-            setAxisPosition(mc.r2Name, mc.r2, false);
-
-        refreshMachineTransforms();
-    }
-
-    emit simulationTick(m_simCurrentContour, m_simCurrentPoint, m_simTotalPoints);
-    ++m_simCurrentPoint;
-}
-
 void CamModule::refreshMachineTransforms()
 {
+    if (auto* gd = machineGuiDocument()) {
+        gd->updateAxisTransforms();
+        updateAxisGuideTransforms();
+        if (gd->hasView())
+            gd->view()->Redraw();
+    }
+}
+
+void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CamModule::refreshMachineTransforms(dirty) n={}", dirtyAxes.size());
+    // 现阶段 GuiDocument::updateAxisTransforms 与 MachineGuideRenderer::updateTransforms
+    // 内部已是就地 SetLocalTransformation，dirty 集合主要用于：
+    //   1) 跳过 m_pose 与几何已一致的"无变化"刷新（上层早 return）；
+    //   2) 为后续按子轴粒度的精细化刷新预留接入点。
+    // dirty 为空时退化为全量。
+    if (dirtyAxes.isEmpty()) {
+        refreshMachineTransforms();
+        return;
+    }
     if (auto* gd = machineGuiDocument()) {
         gd->updateAxisTransforms();
         updateAxisGuideTransforms();
@@ -2478,8 +2252,6 @@ void CamModule::refreshMachineTransforms()
 void CamModule::refreshMachineDisplay()
 {
     if (auto* gd = machineGuiDocument()) {
-        if (gd->machineRenderQuality() != m_machineRenderQuality)
-            gd->setMachineRenderQuality(m_machineRenderQuality);
         gd->rebuildDisplay();
         gd->updateAxisTransforms();
         displayAxisGuides();

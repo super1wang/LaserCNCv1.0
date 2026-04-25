@@ -1,14 +1,22 @@
 #include "app/commands/commands_display.h"
+#include "app/dialog/dialog_options.h"
 
 #include <QAction>
+#include <QActionGroup>
 
 #include "view/widget_occ_view.h"
 #include "view/gui_document.h"
 #include "view/gui_application.h"
 #include "view/graphics_scene.h"
+#include "view/rendering_manager.h"
+#include "view/world_axes_renderer.h"
+#include "core/logging/logger.h"
+#include "core/kernel/kernel.h"
 
 #include <AIS_InteractiveContext.hxx>
 #include <V3d_View.hxx>
+
+#include <memory>
 
 // ── Helper: get the active view (safe) ────────────────────────────────────────
 static Handle(V3d_View) activeView(IAppContext* ctx)
@@ -58,6 +66,29 @@ void CmdViewOrient::execute()
     // Handled by WidgetOccView.
 }
 
+// ── Helper: apply a given displayMode to current view only ───────────────────
+static void applyDisplayModeToCurrentView(IAppContext* ctx, int displayMode, bool faceBoundary)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "applyDisplayModeToCurrentView mode={} edges={}",
+               displayMode, faceBoundary);
+    if (!ctx) {
+        LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
+                  "applyDisplayModeToCurrentView: context null");
+        return;
+    }
+
+    GuiDocument* gd = ctx->isMachineViewActive()
+        ? ctx->machineGuiDocument()
+        : ctx->activeGuiDocument();
+    if (!gd || !gd->renderingManager()) {
+        LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
+                  "applyDisplayModeToCurrentView: no active GuiDocument");
+        return;
+    }
+    gd->renderingManager()->setRuntimeDisplayMode(displayMode, faceBoundary);
+}
+
 // ── CmdToggleWireframe ────────────────────────────────────────────────────────
 CmdToggleWireframe::CmdToggleWireframe(IAppContext* ctx) : CommandBase(ctx)
 {
@@ -68,10 +99,8 @@ CmdToggleWireframe::CmdToggleWireframe(IAppContext* ctx) : CommandBase(ctx)
 
 void CmdToggleWireframe::execute()
 {
-    if (auto* gd = context()->activeGuiDocument()) {
-        auto ctx = gd->scene()->context();
-        ctx->SetDisplayMode(AIS_WireFrame, true);
-    }
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdToggleWireframe::execute");
+    applyDisplayModeToCurrentView(context(), AIS_WireFrame, false);
 }
 
 // ── CmdToggleShaded ───────────────────────────────────────────────────────────
@@ -85,10 +114,8 @@ CmdToggleShaded::CmdToggleShaded(IAppContext* ctx) : CommandBase(ctx)
 
 void CmdToggleShaded::execute()
 {
-    if (auto* gd = context()->activeGuiDocument()) {
-        auto ctx = gd->scene()->context();
-        ctx->SetDisplayMode(AIS_Shaded, true);
-    }
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdToggleShaded::execute");
+    applyDisplayModeToCurrentView(context(), AIS_Shaded, false);
 }
 
 // ── CmdToggleShadedWithEdges ──────────────────────────────────────────────────
@@ -102,9 +129,62 @@ CmdToggleShadedWithEdges::CmdToggleShadedWithEdges(IAppContext* ctx)
 
 void CmdToggleShadedWithEdges::execute()
 {
-    if (auto* gd = context()->activeGuiDocument()) {
-        auto& occCtx = gd->scene()->context();
-        occCtx->SetDisplayMode(AIS_Shaded, true);
-        occCtx->DefaultDrawer()->SetFaceBoundaryDraw(true);
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdToggleShadedWithEdges::execute");
+    applyDisplayModeToCurrentView(context(), AIS_Shaded, true);
+}
+
+// ── CmdToggleWorldAxes ────────────────────────────────────────────────────────
+
+CmdToggleWorldAxes::CmdToggleWorldAxes(IAppContext* ctx) : CommandBase(ctx)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdToggleWorldAxes ctor");
+    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("坐标系"), this);
+    a->setCheckable(true);
+    a->setChecked(false);
+    a->setStatusTip(tr("以世界 0 点为中心绘制持久 XYZ 坐标轴；同时显示在机台与所有工件视图。"));
+    setAction(a);
+}
+
+void CmdToggleWorldAxes::execute()
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdToggleWorldAxes::execute begin");
+    auto& renderer = lcnc::view::WorldAxesRenderer::instance();
+    auto* guiApp = lcnc::Kernel::current().guiApp();
+    if (!guiApp) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CmdToggleWorldAxes: GuiApplication unavailable");
+        if (action())
+            action()->setChecked(false);
+        return;
     }
+    // 把当前所有 GuiDocument 与机台 GuiDocument 的 scene 全部 attach 到渲染器，
+    // 这样切换全局可见性时所有视图同步显示/隐藏。
+    for (auto* gd : guiApp->guiDocuments()) {
+        if (gd && gd->scene())
+            renderer.attach(gd->scene());
+    }
+    if (auto* mgd = guiApp->machineGuiDocument(); mgd && mgd->scene())
+        renderer.attach(mgd->scene());
+
+    const bool wantVisible = action() && action()->isChecked();
+    renderer.setGloballyVisible(wantVisible);
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "World axes toggled: visible={}", wantVisible);
+}
+
+// ── CmdShowOptions ────────────────────────────────────────────────────────────
+CmdShowOptions::CmdShowOptions(IAppContext* ctx) : CommandBase(ctx)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdShowOptions ctor");
+    auto* a = new QAction(QIcon(":/icons/options.svg"), tr("应用程序选项"), this);
+    a->setStatusTip(tr("打开应用程序选项对话框（图形渲染 / 选择高亮 / 应用程序）"));
+    setAction(a);
+}
+
+void CmdShowOptions::execute()
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdShowOptions::execute begin");
+    lcnc::DialogOptions dlg(nullptr);
+    dlg.exec();
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdShowOptions::execute end");
 }

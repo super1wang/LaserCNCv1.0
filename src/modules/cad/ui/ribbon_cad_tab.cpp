@@ -15,7 +15,7 @@ namespace lcnc::cad {
 
 void registerCommands(CommandContainer* container)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cad::registerCommands begin");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::registerCommands begin");
 
     // File
     container->addCommand<CmdNewDocument>(CmdNewDocument::Name);
@@ -56,14 +56,14 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdDeleteShape>(CmdDeleteShape::Name);
     container->addCommand<CmdExplodeShape>(CmdExplodeShape::Name);
 
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cad::registerCommands end");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::registerCommands end");
 }
 
 void buildRibbonTab(SARibbonCategory* cat,
                     CommandContainer* container,
                     QObject* parent)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cad::buildRibbonTab begin");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::buildRibbonTab begin");
 
     auto makeAct = [parent](const QString& label, const QString& iconPath) -> QAction* {
         auto* a = new QAction(QIcon(iconPath), label, parent);
@@ -109,7 +109,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelSketch->addSmallAction(makeAct(QObject::tr("圆弧"),     QStringLiteral(":/icons/arc.svg")));
     panelSketch->addSmallAction(makeAct(QObject::tr("退出草图"), QStringLiteral(":/icons/exit_sketch.svg")));
 
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cad::buildRibbonTab end");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::buildRibbonTab end");
 }
 
 } // namespace lcnc::cad

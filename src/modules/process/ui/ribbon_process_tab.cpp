@@ -1,41 +1,42 @@
 #include "modules/process/ui/ribbon_process_tab.h"
 
 #include "core/command/commands_api.h"
-#include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
-#include "modules/process/process_module.h"
+#include "modules/process/commands/commands_process.h"
 
 #include <SARibbonCategory.h>
 #include <SARibbonPanel.h>
 #include <QAction>
 #include <QIcon>
-#include <QInputDialog>
 #include <QKeySequence>
-#include <QLineEdit>
 #include <QWidget>
 
 namespace lcnc::process {
 
-void registerCommands(CommandContainer* /*container*/)
+void registerCommands(CommandContainer* container)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState,
-               "lcnc::process::registerCommands begin (currently no-op)");
-    // Process 模块暂无独立命令对象。
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::process::registerCommands end");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::registerCommands begin");
+
+    container->addCommand<CmdConnectController>(CmdConnectController::Name);
+    container->addCommand<CmdDisconnectController>(CmdDisconnectController::Name);
+    container->addCommand<CmdToggleSimulationMode>(CmdToggleSimulationMode::Name);
+
+    container->addCommand<CmdRunStart>(CmdRunStart::Name);
+    container->addCommand<CmdRunPause>(CmdRunPause::Name);
+    container->addCommand<CmdRunStop>(CmdRunStop::Name);
+
+    container->addCommand<CmdHome>(CmdHome::Name);
+    container->addCommand<CmdEmergencyStop>(CmdEmergencyStop::Name);
+    container->addCommand<CmdResetEmergencyStop>(CmdResetEmergencyStop::Name);
+
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::registerCommands end");
 }
 
 void buildRibbonTab(SARibbonCategory* cat,
-                    CommandContainer* /*container*/,
+                    CommandContainer* container,
                     QObject* parent)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::process::buildRibbonTab begin");
-
-    auto* parentWidget = qobject_cast<QWidget*>(parent);
-    auto* processModule = lcnc::Kernel::current().service<ProcessModule>();
-    if (!processModule) {
-        LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
-                  "Process module unavailable while building ribbon");
-    }
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab begin");
 
     auto makeAct = [parent](const QString& label, const QString& iconPath) -> QAction* {
         return new QAction(QIcon(iconPath), label, parent);
@@ -43,38 +44,9 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     // ── 连接 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelConn = cat->addPanel(QObject::tr("连接"));
-    QAction* actConnect    = makeAct(QObject::tr("连接控制器"), QStringLiteral(":/icons/connect.svg"));
-    QAction* actSimulation = makeAct(QObject::tr("仿真模式"),   QStringLiteral(":/icons/simulate.svg"));
-    QAction* actDisconnect = makeAct(QObject::tr("断开连接"),   QStringLiteral(":/icons/disconnect.svg"));
-    actSimulation->setCheckable(true);
-    if (processModule)
-        actSimulation->setChecked(processModule->simulationMode());
-    panelConn->addLargeAction(actConnect);
-    panelConn->addLargeAction(actSimulation);
-    panelConn->addSmallAction(actDisconnect);
-
-    QObject::connect(actConnect, &QAction::triggered, parent, [parentWidget] {
-        bool ok = false;
-        const QString endpoint = QInputDialog::getText(
-            parentWidget,
-            QObject::tr("连接控制器"),
-            QObject::tr("控制器地址:"),
-            QLineEdit::Normal,
-            QStringLiteral("tcp://127.0.0.1:5000"),
-            &ok);
-        if (!ok)
-            return;
-        if (auto* pm = lcnc::Kernel::current().service<ProcessModule>())
-            pm->connectController(endpoint);
-    });
-    if (processModule) {
-        QObject::connect(actDisconnect, &QAction::triggered,
-                         processModule, &ProcessModule::disconnectController);
-        QObject::connect(actSimulation, &QAction::toggled,
-                         processModule, &ProcessModule::setSimulationMode);
-        QObject::connect(processModule, &ProcessModule::simulationModeChanged,
-                         actSimulation, &QAction::setChecked);
-    }
+    panelConn->addLargeAction(container->findAction(CmdConnectController::Name));
+    panelConn->addLargeAction(container->findAction(CmdToggleSimulationMode::Name));
+    panelConn->addSmallAction(container->findAction(CmdDisconnectController::Name));
 
     // ── 流程（占位） ───────────────────────────────────────────────────────
     SARibbonPanel* panelProc = cat->addPanel(QObject::tr("流程"));
@@ -84,19 +56,15 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     // ── 运行 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelRun = cat->addPanel(QObject::tr("运行"));
-    auto* actStart = makeAct(QObject::tr("运行"), QStringLiteral(":/icons/start.svg"));
-    auto* actPause = makeAct(QObject::tr("暂停"), QStringLiteral(":/icons/pause.svg"));
-    auto* actStop  = makeAct(QObject::tr("停止"), QStringLiteral(":/icons/stop.svg"));
-    actStart->setShortcut(QKeySequence(Qt::Key_F5));
-    panelRun->addLargeAction(actStart);
-    panelRun->addSmallAction(actPause);
-    panelRun->addSmallAction(actStop);
+    panelRun->addLargeAction(container->findAction(CmdRunStart::Name));
+    panelRun->addSmallAction(container->findAction(CmdRunPause::Name));
+    panelRun->addSmallAction(container->findAction(CmdRunStop::Name));
 
-    if (processModule) {
-        QObject::connect(actStart, &QAction::triggered, processModule, &ProcessModule::runStart);
-        QObject::connect(actPause, &QAction::triggered, processModule, &ProcessModule::runPause);
-        QObject::connect(actStop,  &QAction::triggered, processModule, &ProcessModule::runStop);
-    }
+    // ── 安全 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelSafe = cat->addPanel(QObject::tr("安全"));
+    panelSafe->addLargeAction(container->findAction(CmdEmergencyStop::Name));
+    panelSafe->addSmallAction(container->findAction(CmdResetEmergencyStop::Name));
+    panelSafe->addSmallAction(container->findAction(CmdHome::Name));
 
     // ── 参数（占位） ───────────────────────────────────────────────────────
     SARibbonPanel* panelParam = cat->addPanel(QObject::tr("参数"));
@@ -104,7 +72,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelParam->addSmallAction(makeAct(QObject::tr("运动参数"), QStringLiteral(":/icons/motion_param.svg")));
     panelParam->addSmallAction(makeAct(QObject::tr("加工设置"), QStringLiteral(":/icons/process_param.svg")));
 
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::process::buildRibbonTab end");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab end");
 }
 
 } // namespace lcnc::process

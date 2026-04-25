@@ -16,7 +16,7 @@ namespace lcnc::cam {
 
 void registerCommands(CommandContainer* container)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cam::registerCommands begin");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::registerCommands begin");
 
     // Machine
     container->addCommand<CmdLoadMachine>(CmdLoadMachine::Name);
@@ -32,14 +32,14 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdRecalcToolpath>(CmdRecalcToolpath::Name);
     container->addCommand<CmdSimulate>(CmdSimulate::Name);
 
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cam::registerCommands end");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::registerCommands end");
 }
 
 void buildRibbonTab(SARibbonCategory* cat,
                     CommandContainer* container,
                     QObject* parent)
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cam::buildRibbonTab begin");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::buildRibbonTab begin");
 
     auto makeAct = [parent](const QString& label, const QString& iconPath) -> QAction* {
         return new QAction(QIcon(iconPath), label, parent);
@@ -102,7 +102,7 @@ void buildRibbonTab(SARibbonCategory* cat,
                      });
     panelSim->addSmallWidget(speedCombo);
 
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "lcnc::cam::buildRibbonTab end");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::buildRibbonTab end");
 }
 
 } // namespace lcnc::cam

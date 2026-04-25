@@ -1,4 +1,4 @@
-#include "modules/cam/services/machine_model_compressor.h"
+#include "core/algorithms/cam/machine_model_compressor.h"
 
 #include "core/task/task_progress.h"
 

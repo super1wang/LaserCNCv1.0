@@ -53,23 +53,6 @@ bool rotateShape(LcncDocument* doc, const TDF_Label& label,
     return true;
 }
 
-bool scaleShape(LcncDocument* doc, const TDF_Label& label, double factor)
-{
-    if (!doc || label.IsNull() || factor <= 0.0) return false;
-
-    Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
-    TopoDS_Shape shape = st->GetShape(label);
-    if (shape.IsNull()) return false;
-
-    gp_Trsf trsf;
-    trsf.SetScaleFactor(factor);
-    BRepBuilderAPI_Transform xform(shape, trsf, Standard_True);
-    if (!xform.IsDone()) return false;
-
-    st->SetShape(label, xform.Shape());
-    return true;
-}
-
 void deleteShape(LcncDocument* doc, const QString& entry)
 {
     if (!doc || entry.isEmpty()) return;

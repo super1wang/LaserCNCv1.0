@@ -1,6 +1,6 @@
 #pragma once
 
-#include "modules/cam/services/laser_toolpath.h"
+#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kinematics/machine_kinematics.h"
 
 #include <gp_Dir.hxx>

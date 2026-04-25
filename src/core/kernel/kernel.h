@@ -46,31 +46,30 @@ public:
     // ── IKernel ─────────────────────────────────────────────────────────
     ServiceRegistry&    services() override   { return m_services; }
     EventBus&           events() override     { return m_events; }
-    ILoggerService&     logger() override;
-    ISettingsService&   settings() override;
-    ITaskRunner&        tasks() override;
-    IDocumentRegistry&  documents() override;
-    ICommandBus&        commands() override;
+
 
     // ── 启动 / 关闭 ─────────────────────────────────────────────────────
 
     /**
-     * @brief 注册全部核心服务（创建并持有 Logger/AppSettings/TaskManager/
-     *        LcncApplication/GuiApplication 这些核心对象的实例，包装为
-     *        IService 接口暴露）。
+     * @brief 注册全部核心服务：创建并持有 AppSettings/LcncApplication/
+     *        TaskManager 这些核心对象的实例（GuiApplication 由 main 负责创建
+     *        并以 @ref setGuiApp 注入）。
      *
      * 必须在 @ref bootstrap 之前调用。
      */
     void registerCoreServices();
 
     /**
-     * @brief 把命令注册器实例提交给 Kernel；后续模块通过 commands()
-     *        访问同一容器。
+     * @brief 把命令注册器实例提交给 Kernel；后续模块通过
+     *        @ref commandContainer() 访问同一容器。
      *
      * `CommandContainer` 由 MainWindow 构造（它需要 ICommandContext*），
-     * 构造完成后调用此函数把容器交给 Kernel 的 ICommandBus 适配器。
+     * 构造完成后调用此函数把容器交给 Kernel。传入 nullptr 可解除绑定。
      */
-    void setCommandContainer(class CommandContainer* container);
+    void setCommandContainer(class CommandContainer* container) { m_cmdContainer = container; }
+
+    /// 返回当前绑定的 @c CommandContainer 裸指针（未绑定时为 nullptr）。
+    class CommandContainer* commandContainer() const { return m_cmdContainer; }
 
     /**
      * @brief 加入一个业务模块（顺序无关，依赖由 @c ModuleInfo 声明）。
@@ -91,8 +90,14 @@ public:
 
     /// 返回 Kernel 持有的应用文档管理器（在 registerCoreServices 后非空）。
     LcncApplication* app() const     { return m_app.get(); }
-    /// 返回 Kernel 持有的图形/视图管理器（在 registerCoreServices 后非空）。
-    GuiApplication*  guiApp() const  { return m_guiApp.get(); }
+    /// 返回由 main() 创建并交付 Kernel 的图形/视图管理器。
+    /// 所有权不在 Kernel（避免 core 反向 include view），在
+    /// @ref setGuiApp 调用后非空。
+    GuiApplication*  guiApp() const  { return m_guiApp; }
+    /// 设置外部拥有的 GuiApplication 裸指针；生命周期须不短于
+    /// Kernel 本身（推荐在 @c registerCoreServices 后、任何模块 init 前
+    /// 调用）。传入 nullptr 可解除绑定。
+    void             setGuiApp(GuiApplication* g) { m_guiApp = g; }
     /// 返回 Kernel 持有的任务管理器（在 registerCoreServices 后非空）。
     TaskManager*     taskManager() const { return m_taskMgr.get(); }
     /// 返回 Kernel 持有的应用设置（在 registerCoreServices 后非空）。
@@ -130,17 +135,12 @@ private:
 
     // 由 Kernel 直接拥有所有权（取代原来的 self-managing singleton）。
     std::unique_ptr<::LcncApplication> m_app;
-    std::unique_ptr<::GuiApplication>  m_guiApp;
     std::unique_ptr<::TaskManager>     m_taskMgr;
     std::unique_ptr<AppSettings>       m_appSettings;
-
-    // 缓存：核心服务接口指针，避免每次 services().getService 的查表开销。
-    // 实际 shared_ptr 由 ServiceRegistry 持有。
-    ILoggerService*    m_loggerSvc{nullptr};
-    ISettingsService*  m_settingsSvc{nullptr};
-    ITaskRunner*       m_tasksSvc{nullptr};
-    IDocumentRegistry* m_docsSvc{nullptr};
-    ICommandBus*       m_cmdsSvc{nullptr};
+    // GuiApplication 仅裸指针；所有权在 main()，避免 core 依赖 view。
+    ::GuiApplication*                  m_guiApp{nullptr};
+    // CommandContainer 仅裸指针；所有权在 MainWindow。
+    class CommandContainer*            m_cmdContainer{nullptr};
 };
 
 } // namespace lcnc

@@ -4,6 +4,7 @@
 #include <QList>
 #include <QMap>
 #include <QString>
+#include <memory>
 
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kernel/i_module.h"
@@ -12,6 +13,8 @@
 #include "modules/process/settings/process_settings.h"
 
 class QTimer;
+
+namespace lcnc::process { class SimulationMotionController; }
 
 /**
  * @brief Process module singleton — manages execution process, peripherals, and parameters.
@@ -68,6 +71,9 @@ public:
     /// 停止当前运行（不释放资源）。
     void runStop() override;
     void emergencyStop();
+    /// 复位急停 —— 仅当当前状态为 EmergencyStop 时把状态切回 Idle 并刷新
+    /// 状态栏；不重连控制器、不重置轴位置。
+    void resetEmergencyStop();
 
     State state() const;
     QMap<QString, double> currentAxisPositions() const;
@@ -107,4 +113,5 @@ private:
     double m_simPhase{0.0};
     QString m_statusMessage;
     lcnc::ProcessSettings m_settings;
+    std::unique_ptr<lcnc::process::SimulationMotionController> m_simController;
 };

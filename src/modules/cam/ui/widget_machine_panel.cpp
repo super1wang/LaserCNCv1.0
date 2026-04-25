@@ -8,6 +8,7 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -19,6 +20,7 @@
 #include <QSignalBlocker>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QAbstractSpinBox>
 
 #include <QSet>
 
@@ -86,6 +88,7 @@ QDoubleSpinBox* createMillimeterSpin(QWidget* parent,
     spin->setSingleStep(1.0);
     spin->setSuffix(QStringLiteral(" mm"));
     spin->setMinimumWidth(120);
+    spin->setFocusPolicy(Qt::StrongFocus);
     return spin;
 }
 
@@ -95,6 +98,16 @@ WidgetMachinePanel::WidgetMachinePanel(QWidget* parent)
     : QWidget(parent)
 {
     buildUi();
+}
+
+bool WidgetMachinePanel::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event && event->type() == QEvent::Wheel
+        && qobject_cast<QAbstractSpinBox*>(watched)) {
+        event->ignore();
+        return true;
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void WidgetMachinePanel::setDocument(LcncDocument* doc)
@@ -131,9 +144,13 @@ void WidgetMachinePanel::buildUi()
 
     m_pages = new QTabWidget(this);
     m_pages->setDocumentMode(true);
-    buildModelPage();
     buildConfigPage();
     buildWorkpiecePage();
+    const auto spins = findChildren<QAbstractSpinBox*>();
+    for (QAbstractSpinBox* spin : spins) {
+        spin->setFocusPolicy(Qt::StrongFocus);
+        spin->installEventFilter(this);
+    }
     mainLayout->addWidget(m_pages);
 }
 
@@ -144,155 +161,7 @@ void WidgetMachinePanel::buildConfigPage()
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(8);
 
-    auto* infoLabel = new QLabel(
-        tr("在此配置轴心、坐标转换与切割头位置。机台构型选择和零部件归轴入口已移动到“机台模型”页。"),
-        m_configPage);
-    infoLabel->setWordWrap(true);
-    infoLabel->setStyleSheet("color: #888; font-size: 11px;");
-    mainLayout->addWidget(infoLabel);
-
-    auto* calibrationGroup = new QGroupBox(tr("坐标系转换"), m_configPage);
-    auto* calibrationLayout = new QVBoxLayout(calibrationGroup);
-    calibrationLayout->setContentsMargins(6, 6, 6, 6);
-    calibrationLayout->setSpacing(8);
-
-    m_lblCalibrationHint = new QLabel(
-        tr("适用于 AC 转台：A 轴参考面写入 Y/Z，C 轴参考面写入 X。整机对齐只做平移。切割头模型点与物理点可独立录入和对齐。"),
-        calibrationGroup);
-    m_lblCalibrationHint->setWordWrap(true);
-    m_lblCalibrationHint->setStyleSheet("color: #888; font-size: 11px;");
-    calibrationLayout->addWidget(m_lblCalibrationHint);
-
-    auto createSpinField = [](QWidget* parent,
-                              const QString& labelText,
-                              QDoubleSpinBox* spinBox) {
-        auto* container = new QWidget(parent);
-        auto* layout = new QHBoxLayout(container);
-        layout->setContentsMargins(0, 0, 0, 0);
-        layout->setSpacing(4);
-        auto* label = new QLabel(labelText, container);
-        label->setMinimumWidth(48);
-        layout->addWidget(label);
-        layout->addWidget(spinBox, 1);
-        return container;
-    };
-
-    m_groupAcAxes = new QGroupBox(tr("AC 轴心"), calibrationGroup);
-    auto* acLayout = new QGridLayout(m_groupAcAxes);
-    acLayout->setContentsMargins(6, 6, 6, 6);
-    acLayout->setHorizontalSpacing(8);
-    acLayout->setVerticalSpacing(6);
-    acLayout->setColumnStretch(0, 1);
-    acLayout->setColumnStretch(1, 1);
-    m_axisAySpin = createMillimeterSpin(calibrationGroup);
-    m_axisAzSpin = createMillimeterSpin(calibrationGroup);
-    m_axisCxSpin = createMillimeterSpin(calibrationGroup);
-    m_btnPickAxisA = new QPushButton(tr("A 轴参考面..."), m_groupAcAxes);
-    m_btnPickAxisC = new QPushButton(tr("C 轴参考面..."), m_groupAcAxes);
-    acLayout->addWidget(createSpinField(m_groupAcAxes, tr("A 轴 Y:"), m_axisAySpin), 0, 0);
-    acLayout->addWidget(createSpinField(m_groupAcAxes, tr("A 轴 Z:"), m_axisAzSpin), 0, 1);
-    acLayout->addWidget(m_btnPickAxisA, 1, 0);
-    acLayout->addWidget(createSpinField(m_groupAcAxes, tr("C 轴 X:"), m_axisCxSpin), 1, 1);
-    acLayout->addWidget(m_btnPickAxisC, 2, 0);
-    calibrationLayout->addWidget(m_groupAcAxes);
-
-    m_groupAcCenter = new QGroupBox(tr("AC 中心对齐"), calibrationGroup);
-    auto* acCenterLayout = new QFormLayout(m_groupAcCenter);
-    m_lblCurrentAcCenter = new QLabel(tr("当前构型暂不支持 AC 中心对齐。"), m_groupAcCenter);
-    m_lblCurrentAcCenter->setWordWrap(true);
-    m_targetCenterX = createMillimeterSpin(calibrationGroup);
-    m_targetCenterY = createMillimeterSpin(calibrationGroup);
-    m_targetCenterZ = createMillimeterSpin(calibrationGroup);
-    acCenterLayout->addRow(tr("当前模型 AC 中心:"), m_lblCurrentAcCenter);
-    acCenterLayout->addRow(tr("物理目标 X:"), m_targetCenterX);
-    acCenterLayout->addRow(tr("物理目标 Y:"), m_targetCenterY);
-    acCenterLayout->addRow(tr("物理目标 Z:"), m_targetCenterZ);
-    m_btnAlignToPhysical = new QPushButton(tr("对齐到物理 AC 中心"), m_groupAcCenter);
-    acCenterLayout->addRow(m_btnAlignToPhysical);
-    calibrationLayout->addWidget(m_groupAcCenter);
-
-    m_groupHeadAlignment = new QGroupBox(tr("切割头位置"), calibrationGroup);
-    auto* headLayout = new QGridLayout(m_groupHeadAlignment);
-    headLayout->setContentsMargins(6, 6, 6, 6);
-    headLayout->setHorizontalSpacing(8);
-    headLayout->setVerticalSpacing(6);
-    headLayout->setColumnStretch(0, 1);
-    headLayout->setColumnStretch(1, 1);
-    m_headModelX = createMillimeterSpin(calibrationGroup);
-    m_headModelY = createMillimeterSpin(calibrationGroup);
-    m_headModelZ = createMillimeterSpin(calibrationGroup);
-    m_headPhysicalX = createMillimeterSpin(calibrationGroup);
-    m_headPhysicalY = createMillimeterSpin(calibrationGroup);
-    m_headPhysicalZ = createMillimeterSpin(calibrationGroup);
-    m_btnPickHead = new QPushButton(tr("切割头对齐..."), m_groupHeadAlignment);
-    m_btnAlignHeadToPhysical = new QPushButton(tr("对齐到物理切割头"), m_groupHeadAlignment);
-    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("模型 X:"), m_headModelX), 0, 0);
-    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("模型 Y:"), m_headModelY), 0, 1);
-    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("模型 Z:"), m_headModelZ), 1, 0);
-    headLayout->addWidget(m_btnPickHead, 1, 1);
-    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("物理 X:"), m_headPhysicalX), 2, 0);
-    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("物理 Y:"), m_headPhysicalY), 2, 1);
-    headLayout->addWidget(createSpinField(m_groupHeadAlignment, tr("物理 Z:"), m_headPhysicalZ), 3, 0);
-    headLayout->addWidget(m_btnAlignHeadToPhysical, 3, 1);
-    calibrationLayout->addWidget(m_groupHeadAlignment);
-
-    m_lblHeadModelPoint = new QLabel(tr("机台视图会按模型切割头点绘制 Z 轴线与向下圆锥示意。"), calibrationGroup);
-    m_lblHeadModelPoint->setWordWrap(true);
-    m_lblHeadModelPoint->setStyleSheet("color: #888; font-size: 11px;");
-    calibrationLayout->addWidget(m_lblHeadModelPoint);
-
-    m_lblPickStatus = new QLabel(tr("左键选择参考平面，右键或 ESC 取消。"), calibrationGroup);
-    m_lblPickStatus->setWordWrap(true);
-    m_lblPickStatus->setStyleSheet("color: #888; font-size: 11px;");
-    calibrationLayout->addWidget(m_lblPickStatus);
-
-    connect(m_btnPickAxisA, &QPushButton::clicked, this,
-        [this] { emit calibrationFacePickRequested(QStringLiteral("A")); });
-    connect(m_btnPickAxisC, &QPushButton::clicked, this,
-        [this] { emit calibrationFacePickRequested(QStringLiteral("C")); });
-    connect(m_btnPickHead, &QPushButton::clicked, this,
-        [this] { emit calibrationFacePickRequested(QStringLiteral("CUTTER_HEAD")); });
-    connect(m_btnAlignToPhysical, &QPushButton::clicked, this,
-        [this] {
-        emit alignToPhysicalCenterRequested(
-            m_targetCenterX ? m_targetCenterX->value() : 0.0,
-            m_targetCenterY ? m_targetCenterY->value() : 0.0,
-            m_targetCenterZ ? m_targetCenterZ->value() : 0.0);
-        });
-    connect(m_btnAlignHeadToPhysical, &QPushButton::clicked, this,
-        &WidgetMachinePanel::alignToPhysicalCutterHeadRequested);
-    connect(m_axisAySpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onAxisOriginEditorChanged);
-    connect(m_axisAzSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onAxisOriginEditorChanged);
-    connect(m_axisCxSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onAxisOriginEditorChanged);
-    connect(m_headModelX, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onCutterHeadModelEditorChanged);
-    connect(m_headModelY, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onCutterHeadModelEditorChanged);
-    connect(m_headModelZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onCutterHeadModelEditorChanged);
-    connect(m_headPhysicalX, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onCutterHeadPhysicalEditorChanged);
-    connect(m_headPhysicalY, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onCutterHeadPhysicalEditorChanged);
-    connect(m_headPhysicalZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this,
-        &WidgetMachinePanel::onCutterHeadPhysicalEditorChanged);
-    mainLayout->addWidget(calibrationGroup, 1);
-
-    mainLayout->addStretch();
-    m_pages->addTab(m_configPage, tr("轴系配置"));
-}
-
-void WidgetMachinePanel::buildModelPage()
-{
-    m_modelPage = new QWidget(m_pages);
-    auto* mainLayout = new QVBoxLayout(m_modelPage);
-    mainLayout->setContentsMargins(4, 4, 4, 4);
-    mainLayout->setSpacing(6);
-
-    auto* cfgGroup = new QGroupBox(tr("机台模型"), m_modelPage);
+    auto* cfgGroup = new QGroupBox(tr("机台模型"), m_configPage);
     auto* cfgLayout = new QVBoxLayout(cfgGroup);
     cfgLayout->setSpacing(4);
 
@@ -310,22 +179,10 @@ void WidgetMachinePanel::buildModelPage()
     m_editMachinePath = new QLineEdit(cfgGroup);
     m_editMachinePath->setClearButtonEnabled(true);
     m_editMachinePath->setPlaceholderText(tr("输入或粘贴机台模型路径"));
-    m_comboRenderQuality = new QComboBox(cfgGroup);
-    m_comboRenderQuality->addItem(tr("高"), static_cast<int>(MachineRenderQuality::High));
-    m_comboRenderQuality->addItem(tr("中"), static_cast<int>(MachineRenderQuality::Medium));
-    m_comboRenderQuality->addItem(tr("低"), static_cast<int>(MachineRenderQuality::Low));
     infoRow->addRow(tr("文档:"), m_lblMachineName);
     infoRow->addRow(tr("构型:"), m_comboPreset);
     infoRow->addRow(tr("路径:"), m_editMachinePath);
-    infoRow->addRow(tr("渲染:"), m_comboRenderQuality);
     cfgLayout->addLayout(infoRow);
-
-    auto* calibrationHint = new QLabel(
-        tr("“加载机台模型...”会优先读取上方路径；未填写有效路径时，会回退到文件选择对话框。\n在机台视图或模型树中选中机台部件后，可直接点击下方按钮完成归轴。"),
-        cfgGroup);
-    calibrationHint->setWordWrap(true);
-    calibrationHint->setStyleSheet("color: #888; font-size: 11px;");
-    cfgLayout->addWidget(calibrationHint);
 
     auto* btnLoad = new QPushButton(QIcon(":/icons/machine.svg"), tr("加载机台模型..."), cfgGroup);
     auto* btnCompress = new QPushButton(QIcon(":/icons/machine.svg"), tr("压缩机台模型"), cfgGroup);
@@ -356,16 +213,8 @@ void WidgetMachinePanel::buildModelPage()
     connect(m_editMachinePath, &QLineEdit::returnPressed, this, [this] {
         emit machineModelPathChanged(m_editMachinePath ? m_editMachinePath->text().trimmed() : QString());
     });
-    connect(m_comboRenderQuality, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            [this](int index) {
-                if (!m_comboRenderQuality)
-                    return;
 
-                emit machineRenderQualityChanged(
-                    static_cast<MachineRenderQuality>(m_comboRenderQuality->itemData(index).toInt()));
-            });
-
-    m_assignGroup = new QGroupBox(tr("标记所选部件"), m_modelPage);
+    m_assignGroup = new QGroupBox(tr("标记所选部件"), m_configPage);
     auto* assignLayout = new QVBoxLayout(m_assignGroup);
     assignLayout->setContentsMargins(6, 6, 6, 6);
     assignLayout->setSpacing(6);
@@ -381,64 +230,81 @@ void WidgetMachinePanel::buildModelPage()
     assignLayout->addLayout(m_assignGrid);
     mainLayout->addWidget(m_assignGroup);
 
+    auto* calibrationGroup = new QGroupBox(tr("坐标系转换"), m_configPage);
+    auto* calibrationLayout = new QVBoxLayout(calibrationGroup);
+    calibrationLayout->setContentsMargins(6, 6, 6, 6);
+    calibrationLayout->setSpacing(8);
+
+    // 唯一入口：打开三段式标定向导（需求 3：移除旧的轴心/AC 中心/切割头独立控件）
+    m_btnOpenCalibrationWizard = new QPushButton(
+        tr("打开标定向导..."), calibrationGroup);
+    m_btnOpenCalibrationWizard->setToolTip(
+        tr("依次拾取 A 轴、C 轴参考面与切割头下端面，填入物理 AC 中心与 A/C 角度，"
+           "一次性完成机台坐标系标定，并自动持久化到 cam.toml 与机台 STEP。"));
+    calibrationLayout->addWidget(m_btnOpenCalibrationWizard);
+    connect(m_btnOpenCalibrationWizard, &QPushButton::clicked,
+            this, &WidgetMachinePanel::axisCalibrationWizardRequested);
+
+    mainLayout->addWidget(calibrationGroup, 1);
+
     mainLayout->addStretch();
-    m_pages->addTab(m_modelPage, tr("机台模型"));
+    m_pages->addTab(m_configPage, tr("机台模型"));
 }
 
-    void WidgetMachinePanel::buildWorkpiecePage()
-    {
-        m_workpiecePage = new QWidget(m_pages);
-        auto* mainLayout = new QVBoxLayout(m_workpiecePage);
-        mainLayout->setContentsMargins(4, 4, 4, 4);
-        mainLayout->setSpacing(8);
+void WidgetMachinePanel::buildWorkpiecePage()
+{
+    m_workpiecePage = new QWidget(m_pages);
+    auto* mainLayout = new QVBoxLayout(m_workpiecePage);
+    mainLayout->setContentsMargins(4, 4, 4, 4);
+    mainLayout->setSpacing(8);
 
-        auto* infoLabel = new QLabel(
+    auto* infoLabel = new QLabel(
         tr("挂载后的工件会按工件包围盒中心对齐到安装位置坐标。存在转台构型时，可直接把安装位置 X/Y 对齐到旋转中心。"),
         m_workpiecePage);
-        infoLabel->setWordWrap(true);
-        infoLabel->setStyleSheet("color: #888; font-size: 11px;");
-        mainLayout->addWidget(infoLabel);
+    infoLabel->setWordWrap(true);
+    infoLabel->setStyleSheet("color: #888; font-size: 11px;");
+    mainLayout->addWidget(infoLabel);
 
-        m_wpcGroup = new QGroupBox(tr("工件挂载"), m_workpiecePage);
-        auto* mountLayout = new QVBoxLayout(m_wpcGroup);
-        mountLayout->setContentsMargins(6, 6, 6, 6);
-        mountLayout->setSpacing(6);
-        m_lblWorkpieceStatus = new QLabel(tr("暂无工件挂载"), m_wpcGroup);
-        m_lblWorkpieceStatus->setWordWrap(true);
-        m_lblWorkpieceStatus->setStyleSheet("color: gray; font-size: 11px;");
-        m_btnMountWorkpiece = new QPushButton(QIcon(":/icons/workpiece.svg"), tr("挂载工件..."), m_wpcGroup);
-        mountLayout->addWidget(m_lblWorkpieceStatus);
-        mountLayout->addWidget(m_btnMountWorkpiece);
-        mainLayout->addWidget(m_wpcGroup);
+    m_wpcGroup = new QGroupBox(tr("工件挂载"), m_workpiecePage);
+    auto* mountLayout = new QVBoxLayout(m_wpcGroup);
+    mountLayout->setContentsMargins(6, 6, 6, 6);
+    mountLayout->setSpacing(6);
+    m_lblWorkpieceStatus = new QLabel(tr("暂无工件挂载"), m_wpcGroup);
+    m_lblWorkpieceStatus->setWordWrap(true);
+    m_lblWorkpieceStatus->setStyleSheet("color: gray; font-size: 11px;");
+    m_btnMountWorkpiece = new QPushButton(QIcon(":/icons/workpiece.svg"), tr("挂载工件..."), m_wpcGroup);
+    mountLayout->addWidget(m_lblWorkpieceStatus);
+    mountLayout->addWidget(m_btnMountWorkpiece);
+    mainLayout->addWidget(m_wpcGroup);
 
-        m_installGroup = new QGroupBox(tr("工件安装位置"), m_workpiecePage);
-        auto* installLayout = new QFormLayout(m_installGroup);
-        installLayout->setContentsMargins(6, 6, 6, 6);
-        installLayout->setSpacing(6);
-        m_wpcInstallX = createMillimeterSpin(m_installGroup);
-        m_wpcInstallY = createMillimeterSpin(m_installGroup);
-        m_wpcInstallZ = createMillimeterSpin(m_installGroup);
-        m_btnAlignRotationCenter = new QPushButton(tr("对齐旋转中心"), m_installGroup);
-        installLayout->addRow(tr("安装 X:"), m_wpcInstallX);
-        installLayout->addRow(tr("安装 Y:"), m_wpcInstallY);
-        installLayout->addRow(tr("安装 Z:"), m_wpcInstallZ);
-        installLayout->addRow(m_btnAlignRotationCenter);
-        mainLayout->addWidget(m_installGroup);
+    m_installGroup = new QGroupBox(tr("工件安装位置"), m_workpiecePage);
+    auto* installLayout = new QFormLayout(m_installGroup);
+    installLayout->setContentsMargins(6, 6, 6, 6);
+    installLayout->setSpacing(6);
+    m_wpcInstallX = createMillimeterSpin(m_installGroup);
+    m_wpcInstallY = createMillimeterSpin(m_installGroup);
+    m_wpcInstallZ = createMillimeterSpin(m_installGroup);
+    m_btnAlignRotationCenter = new QPushButton(tr("对齐旋转中心"), m_installGroup);
+    installLayout->addRow(tr("安装 X:"), m_wpcInstallX);
+    installLayout->addRow(tr("安装 Y:"), m_wpcInstallY);
+    installLayout->addRow(tr("安装 Z:"), m_wpcInstallZ);
+    installLayout->addRow(m_btnAlignRotationCenter);
+    mainLayout->addWidget(m_installGroup);
 
-        connect(m_btnMountWorkpiece, &QPushButton::clicked,
-            this, &WidgetMachinePanel::mountWorkpieceRequested);
-        connect(m_btnAlignRotationCenter, &QPushButton::clicked,
-            this, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested);
-        connect(m_wpcInstallX, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
-        connect(m_wpcInstallY, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
-        connect(m_wpcInstallZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
+    connect(m_btnMountWorkpiece, &QPushButton::clicked,
+        this, &WidgetMachinePanel::mountWorkpieceRequested);
+    connect(m_btnAlignRotationCenter, &QPushButton::clicked,
+        this, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested);
+    connect(m_wpcInstallX, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
+    connect(m_wpcInstallY, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
+    connect(m_wpcInstallZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
 
-        mainLayout->addStretch();
-        m_pages->addTab(m_workpiecePage, tr("工件配置"));
-    }
+    mainLayout->addStretch();
+    m_pages->addTab(m_workpiecePage, tr("工件配置"));
+}
 
 void WidgetMachinePanel::refreshCalibrationSection()
 {
@@ -502,6 +368,8 @@ void WidgetMachinePanel::refreshCalibrationSection()
         m_axisCxSpin->setEnabled(supported);
     if (m_btnAlignToPhysical)
         m_btnAlignToPhysical->setEnabled(supported);
+    if (m_btnOpenCalibrationWizard)
+        m_btnOpenCalibrationWizard->setEnabled(supported);
 
     const gp_Pnt cutterHeadModel = lcnc::Kernel::current().service<CamModule>()->cutterHeadModelPosition();
     const gp_Pnt cutterHeadPhysical = lcnc::Kernel::current().service<CamModule>()->cutterHeadPhysicalPosition();
@@ -747,19 +615,6 @@ void WidgetMachinePanel::setMachineModelPath(const QString& path)
 
     const QSignalBlocker blocker(m_editMachinePath);
     m_editMachinePath->setText(normalized);
-}
-
-void WidgetMachinePanel::setMachineRenderQuality(MachineRenderQuality quality)
-{
-    if (!m_comboRenderQuality)
-        return;
-
-    const int index = m_comboRenderQuality->findData(static_cast<int>(quality));
-    if (index < 0 || m_comboRenderQuality->currentIndex() == index)
-        return;
-
-    const QSignalBlocker blocker(m_comboRenderQuality);
-    m_comboRenderQuality->setCurrentIndex(index);
 }
 
 void WidgetMachinePanel::onAxisOriginEditorChanged()

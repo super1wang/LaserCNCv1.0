@@ -49,3 +49,31 @@ public:
     explicit CmdToggleShadedWithEdges(IAppContext* ctx);
     void execute() override;
 };
+
+/**
+ * @brief 切换"物理坐标系世界轴"显示。
+ *
+ * 当前激活 GuiDocument 的场景上挂载/卸载 lcnc::view::WorldAxesRenderer。
+ * 该 QAction 是 checkable，由 ribbon"文件→显示→坐标系"调用。
+ */
+class CmdToggleWorldAxes : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "view.worldAxes";
+    explicit CmdToggleWorldAxes(IAppContext* ctx);
+    void execute() override;
+};
+
+/**
+ * @brief 打开应用程序选项对话框（图形渲染 / 选择高亮 / 应用程序）。
+ *
+ * 由 ribbon"文件→应用→选项"按钮触发；对话框 Apply/OK 时
+ * 即时把设置应用到所有 GuiDocument 与 AppSettings。
+ */
+class CmdShowOptions : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "app.options";
+    explicit CmdShowOptions(IAppContext* ctx);
+    void execute() override;
+};

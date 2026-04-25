@@ -1,4 +1,4 @@
-#include "modules/cam/services/face_classifier.h"
+#include "core/algorithms/cam/face_classifier.h"
 
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>

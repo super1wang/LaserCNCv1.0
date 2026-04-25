@@ -4,6 +4,7 @@
 #include <QFileDialog>
 
 #include "core/document/lcnc_document.h"
+#include "core/logging/logger.h"
 #include "modules/cad/cad_module.h"
 
 // ── CmdNewDocument ─────────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ CmdOpenDocument::CmdOpenDocument(IAppContext* ctx)
 
 void CmdOpenDocument::execute()
 {
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CmdOpenDocument::execute begin");
     const QString path = QFileDialog::getOpenFileName(
         nullptr, tr("打开文件"), QString(),
         tr("所有支持格式 (*.stp *.step *.igs *.iges *.stl *.brep);;"
@@ -41,9 +43,20 @@ void CmdOpenDocument::execute()
            "IGES (*.igs *.iges);;"
            "STL (*.stl);;"
            "BREP (*.brep)"));
-    if (path.isEmpty()) return;
+    if (path.isEmpty()) {
+        LCNC_DEBUG(lcnc::LogCode::Generic, "CmdOpenDocument::execute cancelled");
+        return;
+    }
 
-    context()->cadModule()->openDocument(path);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CmdOpenDocument::execute selected path={}",
+               path.toStdString());
+    const DocumentId docId = context()->cadModule()->openDocument(path);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CmdOpenDocument::execute openDocument returned docId={}",
+               docId);
+    if (docId != kInvalidDocumentId)
+        context()->cadModule()->requestWorkpieceView(docId);
     context()->updateCommandStates();
 }
 

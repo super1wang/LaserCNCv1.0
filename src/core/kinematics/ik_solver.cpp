@@ -1,4 +1,4 @@
-#include "modules/cam/services/ik_solver.h"
+#include "core/kinematics/ik_solver.h"
 
 #include <gp_Vec.hxx>
 #include <gp_Ax1.hxx>

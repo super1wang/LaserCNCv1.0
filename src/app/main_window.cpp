@@ -17,10 +17,11 @@
 #include "modules/cad/ui/widget_model_tree.h"
 #include "modules/cam/ui/widget_machine_panel.h"
 #include "modules/cam/ui/widget_toolpath_panel.h"
+#include "modules/cam/ui/dialog_axis_calibration_wizard.h"
 #include "modules/process/ui/widget_laser_control.h"
 #include "app/dialog/dialog_task_manager.h"
-#include "modules/cam/services/cam_config.h"
-#include "modules/cam/services/laser_toolpath.h"
+#include "modules/cam/settings/cam_config.h"
+#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/kinematics/machine_kinematics.h"
@@ -28,6 +29,7 @@
 #include "view/graphics_scene.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
+#include "view/world_axes_renderer.h"
 #include "modules/cad/cad_module.h"
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
@@ -101,6 +103,37 @@ MainWindow::MainWindow(QWidget* parent)
         connect(lcnc, &LcncApplication::documentModified,
             this, &MainWindow::onDocumentModified);
 
+    // 世界坐标系渲染器：新建/关闭文档时自动 attach/detach 到该文档场景，
+    // 全局可见性由 ribbon 上的 CmdToggleWorldAxes 控制。
+    if (auto* guiApp = lcnc::Kernel::current().guiApp()) {
+        connect(guiApp, &GuiApplication::guiDocumentAdded, this,
+                [guiApp](DocumentId id) {
+            auto* gd = guiApp->guiDocument(id);
+            if (!gd || !gd->scene()) {
+                LCNC_WARN(lcnc::LogCode::Generic,
+                          "WorldAxes auto-attach: missing scene for doc {}",
+                          static_cast<int>(id));
+                return;
+            }
+            LCNC_DEBUG(lcnc::LogCode::Generic,
+                       "WorldAxes auto-attach for new doc {}",
+                       static_cast<int>(id));
+            lcnc::view::WorldAxesRenderer::instance().attach(gd->scene());
+        });
+        connect(guiApp, &GuiApplication::guiDocumentClosed, this,
+                [guiApp](DocumentId id) {
+            auto* gd = guiApp->guiDocument(id);
+            if (gd && gd->scene())
+                lcnc::view::WorldAxesRenderer::instance().detach(gd->scene());
+        });
+        // 启动时机台 GuiDocument 通常已经存在，直接 attach。
+        if (auto* mgd = guiApp->machineGuiDocument(); mgd && mgd->scene()) {
+            LCNC_DEBUG(lcnc::LogCode::Generic,
+                       "WorldAxes auto-attach for machine doc");
+            lcnc::view::WorldAxesRenderer::instance().attach(mgd->scene());
+        }
+    }
+
     restorePersistedCamState();
 
     updateCommandStates();
@@ -141,10 +174,10 @@ void MainWindow::createContext()
 
 void MainWindow::createCommands()
 {
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "MainWindow::createCommands begin");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "MainWindow::createCommands begin");
     m_cmdContainer = new CommandContainer(m_appContext, this);
     lcnc::app::registerAllCommands(m_cmdContainer, m_appContext, m_occView, this);
-    LCNC_DEBUG(lcnc::LogCode::InternalUnexpectedState, "MainWindow::createCommands end");
+    LCNC_DEBUG(lcnc::LogCode::Generic, "MainWindow::createCommands end");
 }
 
 void MainWindow::createCentralLayout()
@@ -214,13 +247,29 @@ void MainWindow::createCentralLayout()
                     return;
 
                 bool handled = false;
-                if (m_pendingCalibrationTarget == QStringLiteral("A")
-                    || m_pendingCalibrationTarget == QStringLiteral("C")) {
-                    handled = m_appContext->camModule()->fillAxisOriginFromReferenceFace(
-                        m_occView, pos, m_pendingCalibrationTarget);
-                } else if (m_pendingCalibrationTarget == QStringLiteral("CUTTER_HEAD")) {
-                    handled = m_appContext->camModule()->setCutterHeadModelPositionFromReferenceFace(
-                        m_occView, pos);
+                // 标定向导是唯一的拾取入口；旧的 A/C/CUTTER_HEAD 直传分支已移除。
+                if (m_pendingCalibrationTarget.startsWith(QStringLiteral("WIZARD_"))
+                    && m_axisCalibWizard) {
+                    using lcnc::cam::ui::DialogAxisCalibrationWizard;
+                    gp_Pnt center;
+                    QString errMsg;
+                    if (m_appContext->camModule()->pickReferenceFaceCenter(
+                            m_occView, pos, center, &errMsg)) {
+                        DialogAxisCalibrationWizard::Stage stage = DialogAxisCalibrationWizard::Stage::AAxis;
+                        if (m_pendingCalibrationTarget == QStringLiteral("WIZARD_C"))
+                            stage = DialogAxisCalibrationWizard::Stage::CAxis;
+                        else if (m_pendingCalibrationTarget == QStringLiteral("WIZARD_HEAD"))
+                            stage = DialogAxisCalibrationWizard::Stage::CutterHead;
+                        m_axisCalibWizard->applyPickResult(stage, center);
+                        m_axisCalibWizard->raise();
+                        m_axisCalibWizard->activateWindow();
+                        handled = true;
+                    } else {
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "Wizard face pick failed: {}", errMsg.toStdString());
+                        // 拾取失败时保持拾取模式，便于用户重试
+                        return;
+                    }
                 }
 
                 if (!handled)
@@ -233,6 +282,12 @@ void MainWindow::createCentralLayout()
     connect(m_occView, &WidgetOccView::facePickCanceled, this,
             [this]() {
                 m_occView->endFacePick();
+                if (m_pendingCalibrationTarget.startsWith(QStringLiteral("WIZARD_"))
+                    && m_axisCalibWizard) {
+                    m_axisCalibWizard->cancelPickInProgress();
+                    m_axisCalibWizard->raise();
+                    m_axisCalibWizard->activateWindow();
+                }
                 m_pendingCalibrationTarget.clear();
                 m_machinePanel->setCalibrationPickAxis(QString());
             });
@@ -275,6 +330,16 @@ void MainWindow::createCentralLayout()
                 m_appContext->camModule()->setEntityVisible(entry, visible);
             });
 
+    // Context menu → CAM module owns axis assignment storage
+    connect(m_modelTree, &WidgetModelTree::axisShapeUnassignRequested, this,
+            [this](const QString& shapeEntry) {
+                m_appContext->camModule()->unassignShape(shapeEntry);
+            });
+    connect(m_modelTree, &WidgetModelTree::axisAssignmentsClearRequested, this,
+            [this](const QString& axisName) {
+                m_appContext->camModule()->clearAxisAssignments(axisName);
+            });
+
     rebuildDocumentTree();
     syncMachineWorkspaceUiInternal(true);
 }
@@ -298,6 +363,10 @@ void MainWindow::createLeftPanel()
     m_documentTree->setColumnCount(1);
     m_documentTree->header()->setVisible(false);
     m_documentTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    // 选中节点蓝底白字，与左侧"准备"模型树保持一致
+    m_documentTree->setStyleSheet(
+        "QTreeWidget::item:selected { background-color: #2A6FDB; color: white; }"
+        "QTreeWidget::item:selected:!active { background-color: #2A6FDB; color: white; }");
     m_leftTabs->addTab(m_documentTree, tr("文档"));
 
     // ── 准备 tab ───────────────────────────────────────────────────────────
@@ -383,7 +452,6 @@ void MainWindow::createRightPanel()
 
     CamModule* cam = m_appContext->camModule();
     m_machinePanel->setMachineModelPath(cam->machineModelPath());
-    m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setNormalAngle(cam->normalAngle());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
@@ -416,55 +484,57 @@ void MainWindow::createRightPanel()
             [this](const QString& path) {
                 m_appContext->camModule()->setMachineModelPath(path);
             });
-    connect(m_machinePanel, &WidgetMachinePanel::machineRenderQualityChanged, this,
-            [this](MachineRenderQuality quality) {
-                m_appContext->camModule()->setMachineRenderQuality(quality);
-            });
     connect(m_machinePanel, &WidgetMachinePanel::loadMachineRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdLoadMachine::Name)->execute(); });
         connect(m_machinePanel, &WidgetMachinePanel::compressMachineRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdCompressMachine::Name)->execute(); });
     connect(m_machinePanel, &WidgetMachinePanel::mountWorkpieceRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdMountWorkpiece::Name)->execute(); });
-        connect(m_machinePanel, &WidgetMachinePanel::axisOriginChanged, this,
-            [this](const QString& axisName, double x, double y, double z) {
-            m_appContext->camModule()->setAxisOrigin(axisName, gp_Pnt(x, y, z));
-            });
-        connect(m_machinePanel, &WidgetMachinePanel::calibrationFacePickRequested, this,
-            [this](const QString& targetName) {
-                m_appContext->camModule()->requestMachineView();
-            m_pendingCalibrationTarget = targetName;
-            m_machinePanel->setCalibrationPickAxis(targetName);
-                if (!m_occView->isFacePickActive())
-                    m_occView->beginFacePick();
-            });
-    connect(m_machinePanel, &WidgetMachinePanel::alignToPhysicalCenterRequested, this,
-            [this](double x, double y, double z) {
-                if (m_occView->isFacePickActive()) {
-                    m_occView->endFacePick();
-                    m_pendingCalibrationTarget.clear();
-                    m_machinePanel->setCalibrationPickAxis(QString());
-                }
-
-                m_appContext->camModule()->requestMachineView();
-                m_appContext->camModule()->alignMachineToPhysicalCenter(gp_Pnt(x, y, z));
-            });
-    connect(m_machinePanel, &WidgetMachinePanel::cutterHeadModelPositionChanged, this,
-            [this](double x, double y, double z) {
-                m_appContext->camModule()->setCutterHeadModelPosition(gp_Pnt(x, y, z));
-            });
-    connect(m_machinePanel, &WidgetMachinePanel::cutterHeadPhysicalPositionChanged, this,
-            [this](double x, double y, double z) {
-                m_appContext->camModule()->setCutterHeadPhysicalPosition(gp_Pnt(x, y, z));
-            });
-    connect(m_machinePanel, &WidgetMachinePanel::alignToPhysicalCutterHeadRequested, this,
+    // 注：旧的"轴原点 / AC 中心 / 切割头"独立设置 UI 已被移除（向导唯一入口），
+    // 这里也相应移除了对应的信号-槽接线。仅保留向导入口。
+    connect(m_machinePanel, &WidgetMachinePanel::axisCalibrationWizardRequested, this,
             [this]() {
+                using lcnc::cam::ui::DialogAxisCalibrationWizard;
                 m_appContext->camModule()->requestMachineView();
-                m_appContext->camModule()->alignMachineToPhysicalCutterHead();
+                if (!m_axisCalibWizard) {
+                    m_axisCalibWizard = new DialogAxisCalibrationWizard(
+                        m_appContext->camModule(), this);
+                    connect(m_axisCalibWizard, &DialogAxisCalibrationWizard::pickRequested,
+                            this, [this](DialogAxisCalibrationWizard::Stage stage) {
+                                if (m_occView->isFacePickActive()) {
+                                    m_occView->endFacePick();
+                                }
+                                switch (stage) {
+                                case DialogAxisCalibrationWizard::Stage::AAxis:
+                                    m_pendingCalibrationTarget = QStringLiteral("WIZARD_A");
+                                    break;
+                                case DialogAxisCalibrationWizard::Stage::CAxis:
+                                    m_pendingCalibrationTarget = QStringLiteral("WIZARD_C");
+                                    break;
+                                case DialogAxisCalibrationWizard::Stage::CutterHead:
+                                    m_pendingCalibrationTarget = QStringLiteral("WIZARD_HEAD");
+                                    break;
+                                }
+                                m_appContext->camModule()->requestMachineView();
+                                m_occView->beginFacePick();
+                            });
+                    // 关闭/接受时清理待拾取状态
+                    connect(m_axisCalibWizard, &QDialog::finished, this, [this](int) {
+                        if (m_pendingCalibrationTarget.startsWith(QStringLiteral("WIZARD_"))) {
+                            if (m_occView->isFacePickActive())
+                                m_occView->endFacePick();
+                            m_pendingCalibrationTarget.clear();
+                        }
+                    });
+                }
+                m_axisCalibWizard->show();
+                m_axisCalibWizard->raise();
+                m_axisCalibWizard->activateWindow();
             });
         connect(m_machinePanel, &WidgetMachinePanel::workpieceInstallPositionChanged, this,
             [this](double x, double y, double z) {
-            m_appContext->camModule()->setWorkpieceInstallPosition(gp_Pnt(x, y, z));
+            // spinbox 频繁回调走轻量路径：仅 SetLocation，不重建机台 view。
+            m_appContext->camModule()->updateWorkpieceInstallLocation(gp_Pnt(x, y, z));
             });
         connect(m_machinePanel, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested, this,
             [this]() {
@@ -707,6 +777,11 @@ void MainWindow::buildFileTab(SARibbonCategory* cat)
     panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleShaded::Name));
     panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleWireframe::Name));
     panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name));
+    panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleWorldAxes::Name));
+
+    // ── 应用 — 选项按钮 ─────────────────────────────────────────────────
+    SARibbonPanel* panelApp = cat->addPanel(tr("应用"));
+    panelApp->addLargeAction(m_cmdContainer->findAction(CmdShowOptions::Name));
 }
 
 void MainWindow::buildCadTab(SARibbonCategory* cat)
@@ -930,7 +1005,6 @@ void MainWindow::restorePersistedCamState()
         cam->configureMachine(presetName);
 
     m_machinePanel->setMachineModelPath(cam->machineModelPath());
-    m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setNormalAngle(cam->normalAngle());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
@@ -958,7 +1032,6 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         m_modelTree->clear();
         m_machinePanel->setDocument(nullptr);
         m_machinePanel->setMachineModelPath(cam->machineModelPath());
-        m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
         if (process)
             process->setAxisDefinitions({});
         if (m_laserControl)
@@ -971,7 +1044,6 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
 
     m_machinePanel->setDocument(machineDoc);
     m_machinePanel->setMachineModelPath(cam->machineModelPath());
-    m_machinePanel->setMachineRenderQuality(cam->machineRenderQuality());
 
     const QList<MachineAxisDef> axes = machineDoc->machineKinematics()->axes();
     if (process)
@@ -989,6 +1061,7 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
 // ── View routing helpers ────────────────────────────────────────────────────────────────
 void MainWindow::showMachineView()
 {
+    LCNC_DEBUG(lcnc::LogCode::Generic, "MainWindow::showMachineView");
     if (auto* gd = m_appContext->camModule()->machineGuiDocument())
         m_occView->attachDocument(gd);
     else
@@ -1001,6 +1074,14 @@ void MainWindow::showWorkpieceView(DocumentId id)
 {
     if (id == kInvalidDocumentId)
         id = m_appContext->cadModule()->activeDocumentId();
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "MainWindow::showWorkpieceView docId={}", id);
+
+    if (m_leftTabs && m_leftTabs->currentIndex() != 0) {
+        QSignalBlocker blocker(m_leftTabs);
+        m_leftTabs->setCurrentIndex(0);
+    }
+
     if (auto* gd = m_appContext->cadModule()->guiDocument(id))
         m_occView->attachDocument(gd);
     else

@@ -1,5 +1,6 @@
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
+#include "core/logging/logger.h"
 
 
 // OCC
@@ -261,6 +262,10 @@ void LcncDocument::importFromXcaf(const Handle(TDocStd_Document)& xdeDoc,
     Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
     TDF_LabelSequence freeShapes;
     st->GetFreeShapes(freeShapes);
+
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "LcncDocument::importFromXcaf kind={} freeShapes={}",
+               static_cast<int>(kind), freeShapes.Length());
 
     auto& tree = (kind == EntityKind::Machine) ? m_machineTree : m_workpieceTree;
 

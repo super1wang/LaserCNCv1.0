@@ -1,6 +1,7 @@
 #include "view/widget_occ_view.h"
 #include "view/gui_document.h"
 #include "view/graphics_scene.h"
+#include "core/logging/logger.h"
 
 #include <QResizeEvent>
 #include <QMouseEvent>
@@ -69,6 +70,11 @@ void WidgetOccView::activateView(const Handle(V3d_View)& view,
     clearRubberBand();
     m_view    = view;
     m_context = ctx;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "WidgetOccView::activateView activeDoc={} viewNull={} ctxNull={}",
+               m_activeDoc ? m_activeDoc->documentId() : kInvalidDocumentId,
+               m_view.IsNull(),
+               m_context.IsNull());
     if (!m_view.IsNull()) {
         m_occWindow->SetSize(width(), height());
         m_view->MustBeResized();
@@ -153,6 +159,9 @@ void WidgetOccView::endFacePick()
 void WidgetOccView::attachDocument(GuiDocument* doc)
 {
     if (!doc) return;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "WidgetOccView::attachDocument docId={} visible={} alreadyActive={}",
+               doc->documentId(), isVisible(), doc == m_activeDoc && !m_view.IsNull());
     // Already showing this exact document and view?  Nothing to do.
     if (doc == m_activeDoc && !m_view.IsNull()) return;
 
@@ -468,6 +477,9 @@ void WidgetOccView::handleSelection(const QPoint& pos)
 void WidgetOccView::fitAll()
 {
     if (m_view.IsNull()) return;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "WidgetOccView::fitAll activeDoc={}",
+               m_activeDoc ? m_activeDoc->documentId() : kInvalidDocumentId);
     m_view->FitAll(0.01, true);
     m_view->ZFitAll();
     m_view->Redraw();

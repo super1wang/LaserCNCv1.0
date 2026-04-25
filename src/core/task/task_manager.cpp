@@ -3,6 +3,8 @@
 #include <QFuture>
 #include <QtConcurrent/QtConcurrent>
 
+#include "core/logging/logger.h"
+
 // ── Singleton accessor ────────────────────────────────────────────────────────
 //   Lifecycle owned by lcnc::Kernel.
 //   Use lcnc::Kernel::current().taskManager() to access this object.
@@ -53,12 +55,20 @@ TaskId TaskManager::run(const QString& label, TaskJob job)
 
     // Launch async
     emit taskStarted(id, label);
-    QFuture<void> future = QtConcurrent::run([job, prog, entity]() {
+    QFuture<void> future = QtConcurrent::run([job, prog, entity, label]() {
         try {
             job(prog);
             entity->success = true;
+        } catch (const std::exception& e) {
+            entity->success = false;
+            LCNC_ERR(lcnc::LogCode::TaskUnhandled,
+                     "TaskManager: task '{}' threw std::exception: {}",
+                     label.toStdString(), e.what());
         } catch (...) {
             entity->success = false;
+            LCNC_ERR(lcnc::LogCode::TaskUnhandled,
+                     "TaskManager: task '{}' threw unknown exception",
+                     label.toStdString());
         }
     });
     entity->watcher->setFuture(future);

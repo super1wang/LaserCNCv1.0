@@ -1,6 +1,4 @@
 #include "modules/cad/ui/widget_model_tree.h"
-#include "core/kernel/kernel.h"
-#include "modules/cam/cam_module.h"
 #include "core/document/lcnc_document.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
@@ -28,6 +26,10 @@ WidgetModelTree::WidgetModelTree(QWidget* parent)
     m_tree->setAnimated(true);
     m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_tree->header()->setVisible(false);
+    // 选中节点高亮：蓝底白字（仅作用于本树，避免污染全局 QSS）。
+    m_tree->setStyleSheet(QStringLiteral(
+        "QTreeWidget::item:selected { background-color: #2A6FDB; color: white; }"
+        "QTreeWidget::item:selected:!active { background-color: #2A6FDB; color: white; }"));
 
     layout->addWidget(m_tree);
 
@@ -56,24 +58,11 @@ void WidgetModelTree::rebuildForDocument(LcncDocument* doc)
 
     MachineKinematics* kin = doc->machineKinematics();
 
-    // ── 机台模型 group ─── assembly hierarchy (from STEP/IGES import) ────
-    auto* machineItem = new QTreeWidgetItem(m_tree);
-    machineItem->setText(0, tr("机台模型"));
-    machineItem->setIcon(0, QIcon(":/icons/machine.svg"));
-    machineItem->setData(0, Qt::UserRole, "group:machine");
-    machineItem->setFlags((machineItem->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
-    machineItem->setCheckState(0, Qt::Checked);
-
-    if (!doc->entityTree(LcncDocument::EntityKind::Machine).isEmpty())
-        populateGroup(machineItem, doc, LcncDocument::EntityKind::Machine, kin);
-    else
-        populateGroup(machineItem, doc, LcncDocument::EntityKind::Machine);
-
-    // ── 轴系模型 group ─── axis-grouped view (always shown when axes exist) ─
+    // ── 机台模型 group ─── axis-grouped view (always shown when axes exist) ─
     if (!kin->axes().isEmpty()) {
         auto* axisItem = new QTreeWidgetItem(m_tree);
-        axisItem->setText(0, tr("轴系模型"));
-        axisItem->setIcon(0, QIcon(":/icons/coordinate.svg"));
+        axisItem->setText(0, tr("机台模型"));
+        axisItem->setIcon(0, QIcon(":/icons/machine.svg"));
         axisItem->setData(0, Qt::UserRole, "group:axisnodes");
         axisItem->setFlags((axisItem->flags() & ~Qt::ItemIsSelectable) | Qt::ItemIsUserCheckable);
         axisItem->setCheckState(0, Qt::Checked);
@@ -353,9 +342,9 @@ void WidgetModelTree::onContextMenuRequested(const QPoint& pos)
     if (!chosen) return;
 
     if (chosen == actRemove) {
-        lcnc::Kernel::current().service<CamModule>()->unassignShape(shapeEntry);
+        emit axisShapeUnassignRequested(shapeEntry);
     } else if (chosen == actClear) {
-        lcnc::Kernel::current().service<CamModule>()->clearAxisAssignments(axisName);
+        emit axisAssignmentsClearRequested(axisName);
     }
 }
 
@@ -371,11 +360,28 @@ void WidgetModelTree::onItemChanged(QTreeWidgetItem* item, int /*column*/)
                       || entry.startsWith("axis:");
 
     if (isGroup) {
+        // 收集当前文档所有工件 entry，cascade 时跳过它们 —— 隐藏机台不应连带隐藏工件。
+        QSet<QString> workpieceEntries;
+        if (m_doc) {
+            const TDF_LabelSequence wpcLabels =
+                m_doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+            for (int i = 1; i <= wpcLabels.Length(); ++i)
+                workpieceEntries.insert(XcafUtils::entry(wpcLabels.Value(i)));
+        }
+        const bool skipWorkpieces = entry == QStringLiteral("group:machine")
+                                 || entry == QStringLiteral("group:axisnodes")
+                                 || entry.startsWith("axis:");
+
         // Cascade check state to all descendants, then emit for each leaf.
         m_blockItemChanged = true;
         std::function<void(QTreeWidgetItem*)> cascade = [&](QTreeWidgetItem* node) {
             for (int i = 0; i < node->childCount(); ++i) {
                 QTreeWidgetItem* child = node->child(i);
+                const QString e = child->data(0, Qt::UserRole).toString();
+                if (skipWorkpieces && workpieceEntries.contains(e)) {
+                    cascade(child);
+                    continue;
+                }
                 if (child->flags() & Qt::ItemIsUserCheckable)
                     child->setCheckState(0, state);
                 cascade(child);
@@ -384,11 +390,15 @@ void WidgetModelTree::onItemChanged(QTreeWidgetItem* item, int /*column*/)
         cascade(item);
         m_blockItemChanged = false;
 
-        // Emit visibilityChanged for every real leaf
+        // Emit visibilityChanged for every real leaf (skip workpieces when隐藏机台分组).
         std::function<void(QTreeWidgetItem*)> emitLeaves = [&](QTreeWidgetItem* node) {
             for (int i = 0; i < node->childCount(); ++i) {
                 QTreeWidgetItem* child = node->child(i);
                 const QString e = child->data(0, Qt::UserRole).toString();
+                if (skipWorkpieces && workpieceEntries.contains(e)) {
+                    emitLeaves(child);
+                    continue;
+                }
                 if (!e.isEmpty() && !e.startsWith("group:") && !e.startsWith("axis:"))
                     emit visibilityChanged(e, state == Qt::Checked);
                 emitLeaves(child);
