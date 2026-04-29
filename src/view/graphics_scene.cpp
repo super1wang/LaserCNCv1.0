@@ -1,6 +1,9 @@
 #include "view/graphics_scene.h"
 
+#include "core/logging/logger.h"
+
 #include <OpenGl_GraphicDriver.hxx>
+#include <OpenGl_Context.hxx>
 #include <Aspect_DisplayConnection.hxx>
 #include <V3d_DirectionalLight.hxx>
 #include <V3d_AmbientLight.hxx>
@@ -8,6 +11,40 @@
 #include <Prs3d_ShadingAspect.hxx>
 #include <Prs3d_Drawer.hxx>
 #include <Graphic3d_AspectFillArea3d.hxx>
+
+namespace {
+
+void configureOpenGlDriver(const Handle(OpenGl_GraphicDriver)& driver)
+{
+    if (driver.IsNull())
+        return;
+
+    OpenGl_Caps& options = driver->ChangeOptions();
+    options.buffersNoSwap = false;
+    options.contextDebug = false;
+    options.contextSyncDebug = false;
+    options.contextNoAccel = false;
+    options.contextNoExtensions = false;
+    options.contextCompatible = false;
+    options.ffpEnable = false;
+    options.vboDisable = false;
+    options.keepArrayData = false;
+    options.swapInterval = 1;
+
+    driver->EnableVBO(Standard_True);
+    driver->SetVerticalSync(true);
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "OCC OpenGL driver configured: vboDisabled={} coreCompatible={} ffp={} noAccel={} noExtensions={} vsync={}",
+              static_cast<bool>(options.vboDisable),
+              static_cast<bool>(options.contextCompatible),
+              static_cast<bool>(options.ffpEnable),
+              static_cast<bool>(options.contextNoAccel),
+              static_cast<bool>(options.contextNoExtensions),
+              driver->IsVerticalSync());
+}
+
+} // namespace
 
 GraphicsScene::GraphicsScene(QObject* parent)
     : QObject(parent)
@@ -22,8 +59,7 @@ void GraphicsScene::init()
     // Create OpenGL graphics driver
     Handle(Aspect_DisplayConnection) displayConn = new Aspect_DisplayConnection();
     Handle(OpenGl_GraphicDriver) driver = new OpenGl_GraphicDriver(displayConn, false);
-    driver->ChangeOptions().buffersNoSwap     = false;
-    driver->ChangeOptions().contextDebug      = false;
+    configureOpenGlDriver(driver);
 
     // Create viewer
     m_viewer = new V3d_Viewer(driver);
@@ -92,6 +128,49 @@ void GraphicsScene::setGradientBackground(const Quantity_Color& top,
     // Background is applied per-view in WidgetOccView::initOccView()
     // V3d_Viewer no longer supports SetGradientBackground in OCCT 7.7+
     (void)top; (void)bottom;
+}
+
+void GraphicsScene::logOpenGlContextState(const char* owner) const
+{
+    static bool s_loggedValidContext = false;
+    if (s_loggedValidContext || m_viewer.IsNull())
+        return;
+
+    const Handle(OpenGl_GraphicDriver) driver =
+        Handle(OpenGl_GraphicDriver)::DownCast(m_viewer->Driver());
+    if (driver.IsNull()) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "OCC OpenGL diagnostics skipped: viewer driver is not OpenGl_GraphicDriver");
+        return;
+    }
+
+    const Handle(OpenGl_Context)& glContext = driver->GetSharedContext(false);
+    if (glContext.IsNull() || !glContext->IsValid()) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "OCC OpenGL context not initialized yet for {}",
+                   owner ? owner : "unknown");
+        return;
+    }
+
+    const OpenGl_Caps& options = driver->Options();
+    const bool vboSupported = glContext->core15fwd != nullptr;
+    const bool vboEnabled = glContext->ToUseVbo();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "OCC OpenGL context ready [{}]: version={}.{} vendor='{}' coreProfile={} vboSupported={} vboDisabled={} vboEnabled={} maxMsaaSamples={}",
+              owner ? owner : "unknown",
+              glContext->VersionMajor(),
+              glContext->VersionMinor(),
+              glContext->Vendor().ToCString(),
+              glContext->core11ffp == nullptr,
+              vboSupported,
+              static_cast<bool>(options.vboDisable),
+              vboEnabled,
+              glContext->MaxMsaaSamples());
+    if (!vboEnabled) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "OCC VBO is not active; rendering may fall back to client arrays");
+    }
+    s_loggedValidContext = true;
 }
 
 // ── Shape display ──────────────────────────────────────────────────────────────

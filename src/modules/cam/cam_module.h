@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "modules/cam/contracts/cam_data_contracts.h"
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
 #include "core/document/lcnc_application.h"
@@ -294,6 +295,7 @@ signals:
     void toolpathGenerated();
     void toolpathCleared();
     void toolpathVisibilityChanged(bool visible);
+    void toolpathContourSelected(int contourIndex);
     void simulationTick(int contourIdx, int pointIdx, int totalPoints);
     void simulationStateChanged(bool playing);
     void simulationFinished();

@@ -142,6 +142,7 @@ void GuiDocument::attachView(const Handle(Aspect_NeutralWindow)& win, int w, int
         m_renderingManager->applyNow(lcnc::view::RenderDirtyFlag::All);
     initGizmos();
     m_view->Redraw();
+    m_scene->logOpenGlContextState("document");
 
     if (!m_aisMap.isEmpty()) {
         m_view->FitAll(0.01, false);

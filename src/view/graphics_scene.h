@@ -52,6 +52,7 @@ public:
     void setDefaultLighting();
     void setGradientBackground(const Quantity_Color& top,
                                const Quantity_Color& bottom);
+    void logOpenGlContextState(const char* owner) const;
 
 signals:
     void selectionChanged();

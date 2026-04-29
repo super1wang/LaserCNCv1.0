@@ -11,6 +11,7 @@
 #include "modules/cam/commands/commands_cam.h"
 #include "app/commands/commands_display.h"
 #include "modules/cad/ui/ribbon_cad_tab.h"
+#include "modules/cad/ui/widget_cad_task_panel.h"
 #include "modules/cam/ui/ribbon_cam_tab.h"
 #include "modules/process/ui/ribbon_process_tab.h"
 #include "view/widget_occ_view.h"
@@ -29,8 +30,11 @@
 #include "view/graphics_scene.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
+#include "view/sketch_overlay_renderer.h"
 #include "view/world_axes_renderer.h"
 #include "modules/cad/cad_module.h"
+#include "modules/cad/selection/cad_selection_resolver.h"
+#include "modules/cad/ui/cad_model_tree_adapter.h"
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
 
@@ -59,9 +63,11 @@
 #include <QTimer>
 #include <QStyle>
 #include <QSignalBlocker>
+#include <QVariantMap>
 #include <functional>
 #include <V3d_TypeOfOrientation.hxx>
 #include <TDF_LabelSequence.hxx>
+#include <TopoDS_Shape.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +81,88 @@ constexpr int kRoleLeafEntries = Qt::UserRole + 4;
 bool usesMachineWorkspace(int tabIndex)
 {
     return tabIndex >= 1;
+}
+
+QString primitiveToolId(int primitiveIndex)
+{
+    switch (primitiveIndex) {
+    case 1: return QStringLiteral("cad.primitive.cylinder");
+    case 2: return QStringLiteral("cad.primitive.sphere");
+    case 3: return QStringLiteral("cad.primitive.cone");
+    case 4: return QStringLiteral("cad.primitive.torus");
+    default: return QStringLiteral("cad.primitive.box");
+    }
+}
+
+QString featureToolId(int featureIndex)
+{
+    switch (featureIndex) {
+    case 1: return QStringLiteral("cad.feature.revolve");
+    case 2: return QStringLiteral("cad.feature.sweep");
+    default: return QStringLiteral("cad.feature.extrude");
+    }
+}
+
+QVariantMap primitiveParams(double sizeX, double sizeY, double sizeZ, double radius1, double radius2)
+{
+    QVariantMap params;
+    params.insert(QStringLiteral("sizeX"), sizeX);
+    params.insert(QStringLiteral("sizeY"), sizeY);
+    params.insert(QStringLiteral("sizeZ"), sizeZ);
+    params.insert(QStringLiteral("radius1"), radius1);
+    params.insert(QStringLiteral("radius2"), radius2);
+    return params;
+}
+
+QVariantMap featureParams(double length, double angleDeg)
+{
+    QVariantMap params;
+    params.insert(QStringLiteral("length"), length);
+    params.insert(QStringLiteral("angle"), angleDeg);
+    return params;
+}
+
+CadModule::TransformParameters transformParams(double translateX,
+                                               double translateY,
+                                               double translateZ,
+                                               double rotateX,
+                                               double rotateY,
+                                               double rotateZ,
+                                               int referenceMode)
+{
+    CadModule::TransformParameters params;
+    params.translateX = translateX;
+    params.translateY = translateY;
+    params.translateZ = translateZ;
+    params.rotateX = rotateX;
+    params.rotateY = rotateY;
+    params.rotateZ = rotateZ;
+    params.referenceMode = referenceMode;
+    return params;
+}
+
+bool isActiveSketchOverlayKey(const QString& key)
+{
+    return key.startsWith(QStringLiteral("__sketch_active_element_"))
+        || key.startsWith(QStringLiteral("__sketch_active_handle_"));
+}
+
+QIcon iconForCadNode(lcnc::cad::ui::CadTreeNodeKind kind)
+{
+    using lcnc::cad::ui::CadTreeNodeKind;
+    switch (kind) {
+    case CadTreeNodeKind::Document:
+        return QIcon(":/icons/new_doc.svg");
+    case CadTreeNodeKind::Sketch:
+    case CadTreeNodeKind::TemporarySketch:
+        return QIcon(":/icons/sketch.svg");
+    case CadTreeNodeKind::Shape:
+    case CadTreeNodeKind::SketchElement:
+        return QIcon(":/icons/shape.svg");
+    case CadTreeNodeKind::Group:
+    default:
+        return QIcon(":/icons/machine.svg");
+    }
 }
 }
 
@@ -226,6 +314,19 @@ void MainWindow::createCentralLayout()
             m_appContext->cadModule()->activeDocumentId());
     });
 
+            connect(m_occView, &WidgetOccView::sketchOverlayPicked,
+                this, &MainWindow::handleCadSketchOverlayPicked);
+            connect(m_occView, &WidgetOccView::sketchOverlayDragMoved,
+                this, &MainWindow::handleCadSketchOverlayDrag);
+            connect(m_occView, &WidgetOccView::sketchOverlayDragCanceled,
+                this, &MainWindow::handleCadSketchOverlayDrag);
+            connect(m_occView, &WidgetOccView::transformGizmoDragMoved,
+                this, [this](int operation, int axis, double delta) {
+                    if (!m_cadTaskPanel || !m_cadTaskPanel->isTransformPageActive())
+                        return;
+                    m_cadTaskPanel->addTransformDragDelta(operation, axis, delta);
+                });
+
     connect(m_occView, &WidgetOccView::leadInPickMoved, this,
             [this](const QPoint& pos) {
                 m_appContext->camModule()->updateLeadInPreview(m_occView, pos);
@@ -297,6 +398,27 @@ void MainWindow::createCentralLayout()
                 m_modelTree->highlightEntries(entries);
                 m_machinePanel->setSelectedEntries(entries);
             });
+    connect(m_appContext->camModule(), &CamModule::toolpathContourSelected, this,
+            [this](int contourIndex) {
+                if (!m_contourListWidget
+                    || contourIndex < 0
+                    || contourIndex >= m_contourListWidget->topLevelItemCount()) {
+                    return;
+                }
+
+                QTreeWidgetItem* item = m_contourListWidget->topLevelItem(contourIndex);
+                if (!item)
+                    return;
+
+                {
+                    QSignalBlocker blocker(m_contourListWidget);
+                    m_contourListWidget->clearSelection();
+                    m_contourListWidget->setCurrentItem(item);
+                    item->setSelected(true);
+                }
+                m_contourListWidget->scrollToItem(item);
+                m_toolpathPanel->showContourCoordinates(contourIndex);
+            });
 
     connect(m_appContext->cadModule(), &CadModule::selectionChanged, this,
             [this](DocumentId docId, const QStringList& entries) {
@@ -316,6 +438,7 @@ void MainWindow::createCentralLayout()
                     }
                     ++it;
                 }
+                updateCommandStates();
             });
 
     // Tree selection → module selection and machine panel context
@@ -418,9 +541,16 @@ void MainWindow::createLeftPanel()
                 if (!item) return;
                 const DocumentId docId = item->data(0, kRoleDocId).toInt();
                 const QString entry = item->data(0, kRoleEntry).toString();
+                const QString nodeKey = item->data(0, kRoleNodeKey).toString();
                 const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
                 if (docId == kInvalidDocumentId) return;
                 const bool visible = (item->checkState(0) == Qt::Checked);
+
+                if (lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(nodeKey)) {
+                    const int sketchId = lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(nodeKey);
+                    m_appContext->cadModule()->setSketchVisible(docId, sketchId, visible);
+                    return;
+                }
 
                 // Group / doc item: cascade then apply to all leaves
                 if (entry.isEmpty()) {
@@ -447,10 +577,12 @@ void MainWindow::createLeftPanel()
 void MainWindow::createRightPanel()
 {
     m_machinePanel   = new WidgetMachinePanel(this);
+    m_cadTaskPanel   = new lcnc::cad::ui::WidgetCadTaskPanel(this);
     m_toolpathPanel  = new WidgetToolpathPanel(this);
     m_laserControl   = new WidgetLaserControl(this);
 
     CamModule* cam = m_appContext->camModule();
+    CadModule* cad = m_appContext->cadModule();
     m_machinePanel->setMachineModelPath(cam->machineModelPath());
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setNormalAngle(cam->normalAngle());
@@ -471,9 +603,236 @@ void MainWindow::createRightPanel()
     m_rightStack->addWidget(m_machinePanel);   // index 0 — shown when "准备"
     m_rightStack->addWidget(m_toolpathPanel);  // index 1 — shown when CAM tab
     m_rightStack->addWidget(m_laserControl);   // index 2 — shown when "执行"
+    m_rightStack->addWidget(m_cadTaskPanel);    // index 3 — shown when "文档"
     m_rightStack->setMinimumWidth(320);
     m_rightStack->setMaximumWidth(420);
-    m_rightStack->setCurrentIndex(0);
+    m_rightStack->setCurrentIndex(3);
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::commandRequested,
+            this, [this](const QString& commandId) {
+        if (m_occView) {
+            m_occView->clearCadPreview();
+            m_occView->clearTransformGizmo();
+        }
+        if (auto* command = m_cmdContainer->findCommand(commandId)) {
+            if (command->isEnabled())
+                command->execute();
+        } else {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "CAD TaskPanel requested unknown command: {}",
+                      commandId.toStdString());
+        }
+        updateCommandStates();
+        });
+
+    connect(cad, &CadModule::primitiveToolRequested,
+            this, [this](int primitiveIndex) {
+        showWorkpieceView();
+        m_occView->clearTransformGizmo();
+        m_cadTaskPanel->showPrimitivePage(primitiveIndex);
+        updateCadPrimitivePreview();
+        updateCommandStates();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchCreateRequested,
+            this, [this](int planeIndex) {
+        if (m_appContext->cadModule()->beginSketch(planeIndex)) {
+            // 自动切换到所选工作平面，便于直接绘制。
+            if (m_occView) {
+                switch (planeIndex) {
+                case 1: m_occView->setOrientation(V3d_Xpos); break;  // YZ
+                case 2: m_occView->setOrientation(V3d_Ypos); break;  // ZX
+                case 0:
+                default: m_occView->setOrientation(V3d_Zpos); break; // XY
+                }
+            }
+            updateCommandStates();
+        }
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchExitRequested,
+            this, [this]() {
+        if (m_appContext->cadModule()->finishSketch()) {
+            m_occView->clearCadPreview();
+            m_cadTaskPanel->showHomePage();
+            updateCommandStates();
+        }
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchCanceled,
+            this, [this]() {
+        m_appContext->cadModule()->cancelModelingOperation();
+        m_occView->clearCadPreview();
+        updateCommandStates();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchToolChanged,
+            this, [this](int toolKind) {
+        m_appContext->cadModule()->setSketchTool(toolKind);
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchElementAddRequested,
+            this, [this](int toolKind, QVector<double> params) {
+        QString errMsg;
+        if (m_appContext->cadModule()->addSketchElement(toolKind, params, &errMsg) < 0) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "MainWindow: addSketchElement failed: {}", errMsg.toStdString());
+        }
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchElementRemoveRequested,
+            this, [this](int elementId) {
+        m_appContext->cadModule()->removeSketchElement(elementId);
+        });
+
+    connect(cad, &CadModule::sketchToolChanged,
+            this, [this](int toolKind) {
+        if (m_cadTaskPanel)
+            m_cadTaskPanel->setActiveSketchTool(toolKind);
+        });
+
+    connect(cad, &CadModule::sketchElementsChanged,
+            this, [this]() {
+        refreshSketchElementsView();
+        rebuildDocumentTree();
+        updateCadSketchOverlay();
+        updateCadTaskPanelState();
+        });
+
+    connect(cad, &CadModule::finishedSketchesChanged,
+            this, [this](DocumentId) {
+        refreshFinishedSketchesView();
+        rebuildDocumentTree();
+        updateCadSketchOverlay();
+        updateCadTaskPanelState();
+        });
+
+    connect(cad, &CadModule::sketchSelectionChanged,
+            this, [this](int) {
+        refreshFinishedSketchesView();
+        updateCadSketchOverlay();
+        updateCadTaskPanelState();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchSelectionChanged,
+            this, [this](int sketchId) {
+        m_appContext->cadModule()->setSelectedSketchId(sketchId);
+        });
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchDeleteRequested,
+            this, [this](int sketchId) {
+        m_appContext->cadModule()->deleteSketch(kInvalidDocumentId, sketchId);
+        });
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchVisibilityToggled,
+            this, [this](int sketchId, bool visible) {
+        m_appContext->cadModule()->setSketchVisible(kInvalidDocumentId, sketchId, visible);
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::primitiveParametersChanged,
+            this, [this](int, double, double, double, double, double) {
+        if (m_cadTaskPanel->isPrimitivePageActive())
+            updateCadPrimitivePreview();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::featureParametersChanged,
+            this, [this](int, double, double) {
+        if (m_cadTaskPanel->isFeaturePageActive())
+            updateCadFeaturePreview();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::transformParametersChanged,
+            this, [this](double, double, double, double, double, double, int) {
+        if (m_cadTaskPanel->isTransformPageActive())
+            updateCadTransformPreview();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::previewToggled,
+            this, [this](bool enabled) {
+        if (enabled && m_cadTaskPanel->isPrimitivePageActive())
+            updateCadPrimitivePreview();
+        else if (enabled && m_cadTaskPanel->isFeaturePageActive())
+            updateCadFeaturePreview();
+        else if (enabled && m_cadTaskPanel->isTransformPageActive())
+            updateCadTransformPreview();
+        else
+            m_occView->clearCadPreview();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::primitiveApplyRequested,
+            this, [this](int primitiveIndex,
+                         double sizeX,
+                         double sizeY,
+                         double sizeZ,
+                         double radius1,
+                         double radius2) {
+        QString errMsg;
+        if (m_appContext->cadModule()->executeTool(
+            primitiveToolId(primitiveIndex),
+            primitiveParams(sizeX, sizeY, sizeZ, radius1, radius2),
+            &errMsg)) {
+            m_occView->clearCadPreview();
+            m_cadTaskPanel->showHomePage();
+            updateCommandStates();
+        }
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::primitiveCanceled,
+            this, [this]() {
+        m_occView->clearCadPreview();
+        updateCommandStates();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::featureApplyRequested,
+            this, [this](int featureIndex, double length, double angleDeg) {
+        QString errMsg;
+        if (m_appContext->cadModule()->executeTool(
+            featureToolId(featureIndex), featureParams(length, angleDeg), &errMsg)) {
+            m_occView->clearCadPreview();
+            m_cadTaskPanel->showHomePage();
+            updateCommandStates();
+        }
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::featureCanceled,
+            this, [this]() {
+        m_occView->clearCadPreview();
+        updateCommandStates();
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::transformApplyRequested,
+            this, [this](double translateX,
+                         double translateY,
+                         double translateZ,
+                         double rotateX,
+                         double rotateY,
+                         double rotateZ,
+                         int referenceMode) {
+        QString errMsg;
+        if (m_appContext->cadModule()->applyTransform(
+                transformParams(translateX, translateY, translateZ,
+                                rotateX, rotateY, rotateZ, referenceMode),
+                &errMsg)) {
+            m_occView->clearCadPreview();
+            m_occView->clearTransformGizmo();
+            {
+                QSignalBlocker blocker(m_cadTaskPanel);
+                m_cadTaskPanel->showHomePage();
+            }
+            updateCommandStates();
+        } else if (!errMsg.isEmpty()) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "MainWindow: applyTransform failed: {}",
+                      errMsg.toStdString());
+        }
+        });
+
+    connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::transformCanceled,
+            this, [this]() {
+        m_occView->clearCadPreview();
+        m_occView->clearTransformGizmo();
+        updateCommandStates();
+        });
+
+    updateCadTaskPanelState();
 
     // Wire machine panel signals to commands
         connect(m_machinePanel, &WidgetMachinePanel::machinePresetChanged, this,
@@ -549,6 +908,8 @@ void MainWindow::createRightPanel()
 
         connect(m_appContext->camModule(), &CamModule::toolpathGenerated, this,
             [this]() {
+            if (m_leftTabs && m_leftTabs->currentIndex() != 2)
+                m_leftTabs->setCurrentIndex(2);
             m_occView->endLeadInPick();
             m_appContext->camModule()->cancelLeadInPreview();
             m_toolpathPanel->setToolpath(&m_appContext->camModule()->toolpathRef());
@@ -601,6 +962,8 @@ void MainWindow::createRightPanel()
                 if (row < 0) return;
                 bool checked = (item->checkState(0) == Qt::Checked);
                 m_appContext->camModule()->setContourEnabled(row, checked);
+                if (item == m_contourListWidget->currentItem())
+                    highlightContourInView(row);
             });
 
     // Reorder contours when drag-drop finishes
@@ -671,6 +1034,7 @@ void MainWindow::createRightPanel()
                 }
 
                 m_toolpathPanel->showContourCoordinates(currentRow);
+                highlightContourInView(currentRow);
             });
 
     // When user clicks a contour in the left list, show its coordinates in the right panel
@@ -679,6 +1043,7 @@ void MainWindow::createRightPanel()
                 if (!current) return;
                 int idx = current->data(0, Qt::UserRole).toInt();
                 m_toolpathPanel->showContourCoordinates(idx);
+                highlightContourInView(idx);
             });
 
         // ── Process module ↔ execution page ─────────────────────────────────
@@ -728,6 +1093,214 @@ void MainWindow::createRightPanel()
         const auto axisPositions = process->currentAxisPositions();
         for (auto it = axisPositions.cbegin(); it != axisPositions.cend(); ++it)
         m_laserControl->updateAxisPosition(it.key(), it.value());
+}
+
+void MainWindow::updateCadPrimitivePreview()
+{
+    if (!m_cadTaskPanel || !m_occView || !m_cadTaskPanel->isPrimitivePageActive()
+        || !m_cadTaskPanel->isPreviewEnabled())
+        return;
+
+    const int primitiveIndex = m_cadTaskPanel->primitiveIndex();
+    const QVariantMap params = primitiveParams(m_cadTaskPanel->primitiveSizeX(),
+                                              m_cadTaskPanel->primitiveSizeY(),
+                                              m_cadTaskPanel->primitiveSizeZ(),
+                                              m_cadTaskPanel->primitiveRadius1(),
+                                              m_cadTaskPanel->primitiveRadius2());
+
+    TopoDS_Shape previewShape;
+    QString errMsg;
+        if (!m_appContext->cadModule()->previewTool(
+            primitiveToolId(primitiveIndex), params, &previewShape, &errMsg)) {
+        m_occView->clearCadPreview();
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "MainWindow::updateCadPrimitivePreview skipped: {}",
+                   errMsg.toStdString());
+        return;
+    }
+
+    m_occView->setCadPreviewShape(previewShape);
+}
+
+void MainWindow::updateCadFeaturePreview()
+{
+    if (!m_cadTaskPanel || !m_occView || !m_cadTaskPanel->isFeaturePageActive()
+        || !m_cadTaskPanel->isPreviewEnabled())
+        return;
+
+    TopoDS_Shape previewShape;
+    QString errMsg;
+        const int featureIndex = m_cadTaskPanel->featureIndex();
+        if (!m_appContext->cadModule()->previewTool(
+            featureToolId(featureIndex),
+            featureParams(m_cadTaskPanel->featureLength(), m_cadTaskPanel->featureAngle()),
+            &previewShape,
+            &errMsg)) {
+        m_occView->clearCadPreview();
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "MainWindow::updateCadFeaturePreview skipped: {}",
+                   errMsg.toStdString());
+        return;
+    }
+
+    m_occView->setCadPreviewShape(previewShape);
+}
+
+void MainWindow::updateCadTransformPreview()
+{
+    if (!m_cadTaskPanel || !m_occView || !m_cadTaskPanel->isTransformPageActive())
+        return;
+
+    const CadModule::TransformParameters params = transformParams(
+        m_cadTaskPanel->transformTranslateX(),
+        m_cadTaskPanel->transformTranslateY(),
+        m_cadTaskPanel->transformTranslateZ(),
+        m_cadTaskPanel->transformRotateX(),
+        m_cadTaskPanel->transformRotateY(),
+        m_cadTaskPanel->transformRotateZ(),
+        m_cadTaskPanel->transformReferenceMode());
+
+    TopoDS_Shape previewShape;
+    QString errMsg;
+    double refX = 0.0;
+    double refY = 0.0;
+    double refZ = 0.0;
+    if (!m_appContext->cadModule()->buildTransformPreview(
+            params, &previewShape, &refX, &refY, &refZ, &errMsg)) {
+        m_occView->clearCadPreview();
+        m_occView->clearTransformGizmo();
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "MainWindow::updateCadTransformPreview skipped: {}",
+                   errMsg.toStdString());
+        return;
+    }
+
+    m_occView->setTransformGizmo(refX, refY, refZ);
+    if (m_cadTaskPanel->isPreviewEnabled())
+        m_occView->setCadPreviewShape(previewShape);
+    else
+        m_occView->clearCadPreview();
+}
+
+void MainWindow::updateCadTaskPanelState()
+{
+    if (!m_cadTaskPanel || !m_appContext || !m_appContext->cadModule())
+        return;
+
+    CadModule* cad = m_appContext->cadModule();
+    const DocumentId docId = cad->activeDocumentId();
+    m_cadTaskPanel->setSelectionContext(cad->selectionContext(docId));
+    if (m_cadTaskPanel->isTransformPageActive())
+        updateCadTransformPreview();
+}
+
+void MainWindow::refreshSketchElementsView()
+{
+    if (!m_cadTaskPanel || !m_appContext || !m_appContext->cadModule())
+        return;
+    CadModule* cad = m_appContext->cadModule();
+    QVector<lcnc::cad::ui::WidgetCadTaskPanel::SketchElementEntry> entries;
+    if (cad->isSketchEditing()) {
+        for (const auto& snap : cad->sketchElementSnapshots()) {
+            lcnc::cad::ui::WidgetCadTaskPanel::SketchElementEntry entry;
+            entry.id = snap.id;
+            entry.kind = snap.kind;
+            entry.label = snap.label;
+            entries.append(entry);
+        }
+    }
+    m_cadTaskPanel->setSketchElements(entries);
+    m_cadTaskPanel->setActiveSketchTool(cad->sketchTool());
+}
+
+void MainWindow::refreshFinishedSketchesView()
+{
+    if (!m_cadTaskPanel || !m_appContext || !m_appContext->cadModule())
+        return;
+    CadModule* cad = m_appContext->cadModule();
+    QVector<lcnc::cad::ui::WidgetCadTaskPanel::FinishedSketchEntry> entries;
+    for (const auto& snap : cad->finishedSketchSnapshots()) {
+        lcnc::cad::ui::WidgetCadTaskPanel::FinishedSketchEntry entry;
+        entry.sketchId = snap.sketchId;
+        entry.label = snap.name;
+        entry.visible = snap.visible;
+        entry.usedByFeature = snap.usedByFeature;
+        entries.append(entry);
+    }
+    m_cadTaskPanel->setFinishedSketches(entries, cad->selectedSketchId());
+}
+
+void MainWindow::updateCadSketchOverlay()
+{
+    if (!m_occView || !m_appContext || !m_appContext->cadModule())
+        return;
+
+    if (isMachineViewActive()) {
+        m_occView->clearSketchOverlay();
+        return;
+    }
+
+    CadModule* cad = m_appContext->cadModule();
+    QVector<lcnc::view::SketchOverlayItem> items;
+    for (const auto& snap : cad->sketchOverlaySnapshots()) {
+        lcnc::view::SketchOverlayItem item;
+        item.key = snap.key;
+        item.kind = snap.kind;
+        item.plane = snap.plane;
+        item.params = snap.params;
+        item.visible = snap.visible;
+        item.draggable = snap.draggable;
+        if (snap.selected)
+            item.color = QColor(255, 196, 40);
+        else if (snap.activeSession)
+            item.color = QColor(60, 220, 255);
+        else if (snap.usedByFeature)
+            item.color = QColor(120, 135, 145);
+        else
+            item.color = QColor(85, 210, 150);
+        items.append(std::move(item));
+    }
+    m_occView->setSketchOverlayItems(items);
+}
+
+void MainWindow::handleCadSketchOverlayPicked(const QString& key)
+{
+    if (key.isEmpty() || isMachineViewActive() || !m_appContext || !m_appContext->cadModule())
+        return;
+
+    CadModule* cad = m_appContext->cadModule();
+    auto context = lcnc::cad::selection::CadSelectionResolver::fromOverlayKey(
+        cad->activeDocumentId(), key, true, cad->isSketchEditing());
+    cad->setSelectionContext(context);
+    updateCadSketchOverlay();
+    updateCadTaskPanelState();
+}
+
+void MainWindow::handleCadSketchOverlayDrag(const QString& key, double deltaX, double deltaY)
+{
+    if (!isActiveSketchOverlayKey(key)
+        || isMachineViewActive()
+        || !m_appContext
+        || !m_appContext->cadModule()) {
+        return;
+    }
+
+    const auto context = lcnc::cad::selection::CadSelectionResolver::fromOverlayKey(
+        m_appContext->cadModule()->activeDocumentId(), key, true, true);
+    if (context.items.isEmpty())
+        return;
+
+    QString errMsg;
+    const auto item = context.items.first();
+    const bool ok = item.sketchHandleIndex >= 0
+        ? m_appContext->cadModule()->moveSketchElementHandle(
+              item.sketchElementId, item.sketchHandleIndex, deltaX, deltaY, &errMsg)
+        : m_appContext->cadModule()->moveSketchElement(item.sketchElementId, deltaX, deltaY, &errMsg);
+    if (!ok) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "MainWindow: moveSketchElement failed: {}",
+                  errMsg.toStdString());
+    }
 }
 
 // ── Ribbon ─────────────────────────────────────────────────────────────────────
@@ -820,7 +1393,7 @@ void MainWindow::createStatusBar()
 void MainWindow::onLeftTabChanged(int index)
 {
     // index 0 = 文档 / 1 = 准备 / 2 = 刀路 / 3 = 执行
-    // Right stack: 0=machine, 1=toolpath, 2=laser
+    // Right stack: 0=machine, 1=toolpath, 2=laser, 3=cad task
     if (index == 3)
         m_rightStack->setCurrentIndex(2);   // 执行 → laser control
     else if (index == 2)
@@ -828,7 +1401,7 @@ void MainWindow::onLeftTabChanged(int index)
     else if (index == 1)
         m_rightStack->setCurrentIndex(0);   // 准备 → machine panel
     else
-        m_rightStack->setCurrentIndex(1);   // 文档 → toolpath panel
+        m_rightStack->setCurrentIndex(3);   // 文档 → CAD task panel
 
     if (usesMachineWorkspace(index))
         m_appContext->camModule()->requestMachineView();
@@ -877,12 +1450,14 @@ void MainWindow::onActiveDocumentChanged(DocumentId id)
     }
 
     updateCommandStates();
+    updateCadSketchOverlay();
 }
 
 void MainWindow::onDocumentModified(DocumentId id)
 {
     Q_UNUSED(id);
     updateCommandStates();
+    updateCadSketchOverlay();
 }
 
 void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/)
@@ -892,6 +1467,8 @@ void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/
     // IMPORTANT: Read ALL data from item BEFORE any operation that may
     // trigger rebuildDocumentTree() and invalidate the item pointer.
     const DocumentId docId  = item->data(0, kRoleDocId).toInt();
+    const QString entry = item->data(0, kRoleEntry).toString();
+    const QString nodeKey = item->data(0, kRoleNodeKey).toString();
     const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
 
     if (docId == kInvalidDocumentId) return;
@@ -902,8 +1479,16 @@ void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/
     if (m_appContext->cadModule()->activeDocumentId() != docId)
         m_appContext->cadModule()->setActiveDocument(docId);
 
-    if (leafEntries.isEmpty()) return;
-    m_appContext->cadModule()->setSelectedEntries(docId, leafEntries);
+    auto context = lcnc::cad::selection::CadSelectionResolver::fromDocumentTreeNode(
+        docId,
+        nodeKey,
+        entry,
+        leafEntries,
+        true,
+        m_appContext->cadModule()->isSketchEditing());
+    m_appContext->cadModule()->setSelectionContext(context);
+    updateCadSketchOverlay();
+    updateCadTaskPanelState();
 }
 
 void MainWindow::rebuildDocumentTree()
@@ -912,33 +1497,40 @@ void MainWindow::rebuildDocumentTree()
     QSignalBlocker blocker(m_documentTree);
     m_documentTree->clear();
 
-    const auto docs = m_appContext->cadModule()->documentTreeDocuments();
-    std::function<void(QTreeWidgetItem*, DocumentId, const CadModule::DocumentTreeNode&)> addNode;
+    const auto docs = lcnc::cad::ui::CadModelTreeAdapter::build(m_appContext->cadModule());
+    std::function<void(QTreeWidgetItem*, const lcnc::cad::ui::CadTreeNode&)> addNode;
     addNode = [this, &addNode](QTreeWidgetItem* parent,
-                               DocumentId docId,
-                               const CadModule::DocumentTreeNode& node) {
+                               const lcnc::cad::ui::CadTreeNode& node) {
         auto* item = new QTreeWidgetItem(parent);
         item->setText(0, node.displayName);
-        item->setData(0, kRoleDocId, docId);
+        item->setIcon(0, iconForCadNode(node.kind));
+        item->setData(0, kRoleDocId, node.documentId);
         item->setData(0, kRoleNodeKey, node.nodeKey);
         item->setData(0, kRoleEntry, node.entry);
         item->setData(0, kRoleLeafEntries, node.leafEntries);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(0, Qt::Checked);
-
-        if (node.entry.isEmpty())
-            item->setIcon(0, QIcon(":/icons/machine.svg"));
-        else
-            item->setIcon(0, QIcon(":/icons/shape.svg"));
+        Qt::ItemFlags flags = item->flags();
+        flags = node.checkable ? (flags | Qt::ItemIsUserCheckable)
+                               : (flags & ~Qt::ItemIsUserCheckable);
+        flags = node.selectable ? (flags | Qt::ItemIsSelectable)
+                                : (flags & ~Qt::ItemIsSelectable);
+        item->setFlags(flags);
+        if (node.checkable)
+            item->setCheckState(0, node.checked ? Qt::Checked : Qt::Unchecked);
+        if (node.muted)
+            item->setForeground(0, Qt::gray);
 
         for (const auto& childNode : node.children)
-            addNode(item, docId, childNode);
+            addNode(item, childNode);
+        if (node.kind == lcnc::cad::ui::CadTreeNodeKind::TemporarySketch
+            || node.kind == lcnc::cad::ui::CadTreeNodeKind::Sketch) {
+            item->setExpanded(true);
+        }
     };
 
     for (const auto& doc : docs) {
         auto* docItem = new QTreeWidgetItem(m_documentTree);
         docItem->setText(0, doc.displayName);
-        docItem->setIcon(0, QIcon(":/icons/new_doc.svg"));
+        docItem->setIcon(0, iconForCadNode(doc.kind));
         docItem->setData(0, kRoleDocId, doc.documentId);
         docItem->setData(0, kRoleNodeKey, doc.nodeKey);
         docItem->setData(0, kRoleEntry, QString());
@@ -947,7 +1539,7 @@ void MainWindow::rebuildDocumentTree()
         docItem->setCheckState(0, Qt::Checked);
 
         for (const auto& node : doc.children)
-            addNode(docItem, doc.documentId, node);
+            addNode(docItem, node);
     }
 
     m_documentTree->expandToDepth(2);
@@ -991,6 +1583,28 @@ void MainWindow::rebuildContourListWidget()
         m_contourListWidget->setCurrentItem(m_contourListWidget->topLevelItem(selectedRow));
 
     m_toolpathPanel->showContourCoordinates(selectedRow);
+    highlightContourInView(selectedRow);
+}
+
+void MainWindow::highlightContourInView(int contourIndex)
+{
+    CamModule* cam = m_appContext ? m_appContext->camModule() : nullptr;
+    GuiDocument* gd = cam ? cam->machineGuiDocument() : nullptr;
+    if (!gd || gd->context().IsNull())
+        return;
+
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    ctx->ClearSelected(Standard_False);
+
+    const QList<Handle(AIS_Shape)>& contourAis = cam->contourAis();
+    if (contourIndex >= 0
+        && contourIndex < contourAis.size()
+        && !contourAis.at(contourIndex).IsNull()) {
+        ctx->AddOrRemoveSelected(contourAis.at(contourIndex), Standard_False);
+    }
+
+    if (gd->hasView())
+        gd->view()->Redraw();
 }
 
 void MainWindow::restorePersistedCamState()
@@ -1066,6 +1680,7 @@ void MainWindow::showMachineView()
         m_occView->attachDocument(gd);
     else
         m_occView->attachDefaultScene(m_defaultScene);
+    m_occView->clearSketchOverlay();
 
     syncMachineWorkspaceUiInternal(false);
 }
@@ -1081,16 +1696,21 @@ void MainWindow::showWorkpieceView(DocumentId id)
         QSignalBlocker blocker(m_leftTabs);
         m_leftTabs->setCurrentIndex(0);
     }
+    if (m_rightStack)
+        m_rightStack->setCurrentIndex(3);
 
     if (auto* gd = m_appContext->cadModule()->guiDocument(id))
         m_occView->attachDocument(gd);
     else
         m_occView->attachDefaultScene(m_defaultScene);
+    updateCadSketchOverlay();
 }
 
 void MainWindow::updateCommandStates()
 {
-    m_cmdContainer->updateAllStates();
+    if (m_cmdContainer)
+        m_cmdContainer->updateAllStates();
+    updateCadTaskPanelState();
 }
 
 bool MainWindow::isMachineViewActive() const

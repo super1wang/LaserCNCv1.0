@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QList>
+#include <AIS_InteractiveObject.hxx>
 #include <AIS_Shape.hxx>
 #include <gp_Pnt.hxx>
 
 class GuiDocument;
 class LaserToolpath;
+class MachineKinematics;
 
 namespace lcnc::view {
 
@@ -34,7 +36,31 @@ public:
     /// 擦除并按当前 visible/normal 标志重绘所有刀路 AIS。
     void refresh(GuiDocument* gd,
                  const LaserToolpath& toolpath,
+                 MachineKinematics* kin,
                  const LeadInPreview& preview = {});
+
+    /// 只刷新引入线和引入线预览，不重建轮廓 AIS。
+    void refreshLeadIns(GuiDocument* gd,
+                        const LaserToolpath& toolpath,
+                        MachineKinematics* kin,
+                        const LeadInPreview& preview = {});
+
+    /// 只刷新法线 AIS，不重建轮廓或引入线。
+    void refreshNormals(GuiDocument* gd,
+                        const LaserToolpath& toolpath,
+                        MachineKinematics* kin);
+
+    /// 只刷新单条轮廓对应的轮廓 / 引入线 / 法线 AIS。
+    void refreshContour(GuiDocument* gd,
+                        const LaserToolpath& toolpath,
+                        MachineKinematics* kin,
+                        int contourIndex,
+                        const LeadInPreview& preview = {});
+
+    /// Apply the current mounted-workpiece transform to all cached contour AIS.
+    void updateTransforms(GuiDocument* gd,
+                          const LaserToolpath& toolpath,
+                          MachineKinematics* kin);
 
     /// 仅擦除 AIS（不修改可见性标志）。
     void erase(GuiDocument* gd);
@@ -52,15 +78,31 @@ public:
     double normalSampleStep() const { return m_normalSampleStep; }
 
     const QList<Handle(AIS_Shape)>& contourAis() const { return m_contourAis; }
+    int contourIndexForAis(const Handle(AIS_InteractiveObject)& object) const;
+    int selectedContourIndex(GuiDocument* gd) const;
 
 private:
-    void displayContours(GuiDocument* gd, const LaserToolpath& tp);
-    void displayLeadIns(GuiDocument* gd, const LaserToolpath& tp, const LeadInPreview& preview);
-    void displayNormals(GuiDocument* gd, const LaserToolpath& tp);
+    struct ContourAisBundle {
+        Handle(AIS_Shape) contour;
+        Handle(AIS_Shape) leadIn;
+        Handle(AIS_Shape) normal;
+    };
 
+    void ensureBundleCount(GuiDocument* gd, int count);
+    void clearAis(GuiDocument* gd, bool updateView);
+    void eraseAis(GuiDocument* gd, Handle(AIS_Shape)& ais);
+    void eraseBundle(GuiDocument* gd, ContourAisBundle& bundle);
+    void rebuildContourAis(GuiDocument* gd, const LaserToolpath& tp, int contourIndex);
+    void rebuildLeadInAis(GuiDocument* gd, const LaserToolpath& tp, int contourIndex);
+    void rebuildNormalAis(GuiDocument* gd, const LaserToolpath& tp, int contourIndex);
+    void rebuildPreviewAis(GuiDocument* gd, const LaserToolpath& tp, const LeadInPreview& preview);
+    void rebuildContourMirror();
+    void redraw(GuiDocument* gd);
+
+    QList<ContourAisBundle> m_bundles;
     QList<Handle(AIS_Shape)> m_contourAis;
-    QList<Handle(AIS_Shape)> m_leadInAis;
-    QList<Handle(AIS_Shape)> m_normalAis;
+    Handle(AIS_Shape) m_previewLeadInAis;
+    int m_previewContourIndex{-1};
     bool   m_visible{true};
     bool   m_showNormals{false};
     double m_normalSampleStep{2.0};

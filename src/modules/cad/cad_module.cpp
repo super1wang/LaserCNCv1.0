@@ -1,7 +1,14 @@
 #include "modules/cad/cad_module.h"
 #include "core/kernel/kernel.h"
+#include "modules/cad/document/cad_document_registry.h"
+#include "modules/cad/selection/cad_selection_resolver.h"
+#include "modules/cad/services/cad_modeling_session.h"
 #include "modules/cad/services/shape_service.h"
+#include "modules/cad/task/cad_command_dispatcher.h"
+#include "modules/cad/task/cad_command_request.h"
 
+#include "core/algorithms/cad/primitives.h"
+#include "core/algorithms/cad/transform_ops.h"
 #include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/kernel/i_kernel.h"
@@ -15,7 +22,9 @@
 #include <QFileInfo>
 
 #include <BRep_Builder.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepTools.hxx>
+#include <Bnd_Box.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IGESControl_Reader.hxx>
@@ -26,6 +35,7 @@
 #include <TCollection_ExtendedString.hxx>
 #include <TDocStd_Document.hxx>
 #include <TDF_LabelSequence.hxx>
+#include <TopoDS_Compound.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
@@ -33,6 +43,117 @@
 #include <stdexcept>
 
 namespace {
+
+QString activeSketchElementKey(int elementId)
+{
+    return QStringLiteral("__sketch_active_element_%1__").arg(elementId);
+}
+
+QString activeSketchHandleKey(int elementId, int handleIndex)
+{
+    return QStringLiteral("__sketch_active_handle_%1_%2__").arg(elementId).arg(handleIndex);
+}
+
+QString finishedSketchElementKey(int sketchId, int elementId)
+{
+    return QStringLiteral("__sketch_finished_element_%1_%2__").arg(sketchId).arg(elementId);
+}
+
+bool selectionContainsSketchElement(
+    const lcnc::cad::selection::CadSelectionContext& context,
+    int sketchId,
+    int elementId)
+{
+    for (const auto& item : context.items) {
+        if (item.domain != lcnc::cad::selection::CadSelectionDomain::SketchElement)
+            continue;
+        if (item.sketchElementId != elementId)
+            continue;
+        if (item.sketchId == sketchId || (sketchId == 0 && item.sketchId == 0))
+            return true;
+    }
+    return false;
+}
+
+bool selectionContainsSketch(const lcnc::cad::selection::CadSelectionContext& context,
+                             int sketchId)
+{
+    if (context.selectedSketchId == sketchId && context.hasSelectedSketch)
+        return true;
+    for (const auto& item : context.items) {
+        if (item.domain == lcnc::cad::selection::CadSelectionDomain::Sketch
+            && item.sketchId == sketchId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+struct SketchHandlePoint {
+    int handleIndex{0};
+    QVector<double> params;
+};
+
+QList<SketchHandlePoint> sketchHandlePoints(const lcnc::cad::SketchElement& element)
+{
+    QList<SketchHandlePoint> handles;
+    const QVector<double>& params = element.params;
+    auto appendHandle = [&handles](int handleIndex, double x, double y) {
+        SketchHandlePoint handle;
+        handle.handleIndex = handleIndex;
+        handle.params = {x, y};
+        handles.append(std::move(handle));
+    };
+
+    switch (element.kind) {
+    case lcnc::cad::SketchToolKind::Point:
+        if (params.size() >= 2)
+            appendHandle(0, params[0], params[1]);
+        break;
+    case lcnc::cad::SketchToolKind::Line:
+        if (params.size() >= 4) {
+            appendHandle(0, params[0], params[1]);
+            appendHandle(1, params[2], params[3]);
+        }
+        break;
+    case lcnc::cad::SketchToolKind::Arc:
+        if (params.size() >= 6) {
+            appendHandle(0, params[0], params[1]);
+            appendHandle(1, params[2], params[3]);
+            appendHandle(2, params[4], params[5]);
+        }
+        break;
+    case lcnc::cad::SketchToolKind::Circle:
+        if (params.size() >= 3) {
+            appendHandle(0, params[0], params[1]);
+            appendHandle(1, params[0] + params[2], params[1]);
+        }
+        break;
+    case lcnc::cad::SketchToolKind::Rectangle:
+        if (params.size() >= 4) {
+            const double centerX = params[0];
+            const double centerY = params[1];
+            const double halfWidth = params[2] * 0.5;
+            const double halfHeight = params[3] * 0.5;
+            appendHandle(0, centerX, centerY);
+            appendHandle(1, centerX + halfWidth, centerY + halfHeight);
+            appendHandle(2, centerX - halfWidth, centerY + halfHeight);
+            appendHandle(3, centerX - halfWidth, centerY - halfHeight);
+            appendHandle(4, centerX + halfWidth, centerY - halfHeight);
+        }
+        break;
+    case lcnc::cad::SketchToolKind::Polygon:
+        if (params.size() >= 3) {
+            appendHandle(0, params[0], params[1]);
+            appendHandle(1, params[0] + params[2], params[1]);
+        }
+        break;
+    case lcnc::cad::SketchToolKind::None:
+    default:
+        break;
+    }
+    return handles;
+}
 
 void appendUniqueEntries(QStringList* target, const QStringList& entries)
 {
@@ -104,6 +225,116 @@ QList<CadModule::DocumentTreeNode> buildFallbackNodes(LcncDocument* doc)
 int entityCount(LcncDocument* doc, LcncDocument::EntityKind kind)
 {
     return doc ? doc->entityLabels(kind).Length() : 0;
+}
+
+QString primitiveName(int primitiveIndex)
+{
+    switch (primitiveIndex) {
+    case 1:
+        return QObject::tr("圆柱体");
+    case 2:
+        return QObject::tr("球体");
+    case 3:
+        return QObject::tr("圆锥体");
+    case 4:
+        return QObject::tr("圆环体");
+    default:
+        return QObject::tr("长方体");
+    }
+}
+
+TopoDS_Shape buildPrimitiveShape(int primitiveIndex,
+                                 const CadModule::PrimitiveParameters& params,
+                                 QString* errMsg)
+{
+    switch (primitiveIndex) {
+    case 1:
+        return lcnc::cad_algo::makeCylinder(params.radius1, params.sizeZ, errMsg);
+    case 2:
+        return lcnc::cad_algo::makeSphere(params.radius1, errMsg);
+    case 3:
+        return lcnc::cad_algo::makeCone(params.radius1, params.radius2, params.sizeZ, errMsg);
+    case 4:
+        return lcnc::cad_algo::makeTorus(params.radius1, params.radius2, errMsg);
+    default:
+        return lcnc::cad_algo::makeBox(params.sizeX, params.sizeY, params.sizeZ, errMsg);
+    }
+}
+
+TDF_Label labelByEntry(LcncDocument* doc, const QString& entry)
+{
+    if (!doc || entry.isEmpty())
+        return {};
+
+    TDF_LabelSequence freeShapes;
+    doc->shapeTool()->GetFreeShapes(freeShapes);
+    for (int index = 1; index <= freeShapes.Length(); ++index) {
+        const TDF_Label label = freeShapes.Value(index);
+        if (XcafUtils::entry(label) == entry)
+            return label;
+    }
+    return {};
+}
+
+QList<TDF_Label> selectedShapeLabels(LcncDocument* doc, const QStringList& entries)
+{
+    QList<TDF_Label> labels;
+    for (const QString& entry : entries) {
+        const TDF_Label label = labelByEntry(doc, entry);
+        if (!label.IsNull())
+            labels.append(label);
+    }
+    return labels;
+}
+
+bool modelCenterForLabels(LcncDocument* doc,
+                          const QList<TDF_Label>& labels,
+                          gp_Pnt* outCenter,
+                          QString* errMsg)
+{
+    if (!doc || labels.isEmpty() || !outCenter) {
+        if (errMsg)
+            *errMsg = QObject::tr("请先选择要变换的形体");
+        return false;
+    }
+
+    Bnd_Box box;
+    const Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
+    for (const TDF_Label& label : labels) {
+        const TopoDS_Shape shape = shapeTool->GetShape(label);
+        if (!shape.IsNull())
+            BRepBndLib::Add(shape, box);
+    }
+    if (box.IsVoid()) {
+        if (errMsg)
+            *errMsg = QObject::tr("无法计算选中形体中心");
+        return false;
+    }
+
+    Standard_Real xMin = 0.0;
+    Standard_Real yMin = 0.0;
+    Standard_Real zMin = 0.0;
+    Standard_Real xMax = 0.0;
+    Standard_Real yMax = 0.0;
+    Standard_Real zMax = 0.0;
+    box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+    *outCenter = gp_Pnt((xMin + xMax) * 0.5,
+                        (yMin + yMax) * 0.5,
+                        (zMin + zMax) * 0.5);
+    return true;
+}
+
+lcnc::cad_algo::TransformParams toAlgorithmTransform(
+    const CadModule::TransformParameters& params,
+    const gp_Pnt& referencePoint)
+{
+    lcnc::cad_algo::TransformParams algoParams;
+    algoParams.translation = gp_Vec(params.translateX, params.translateY, params.translateZ);
+    algoParams.referencePoint = referencePoint;
+    algoParams.rotateXDeg = params.rotateX;
+    algoParams.rotateYDeg = params.rotateY;
+    algoParams.rotateZDeg = params.rotateZ;
+    return algoParams;
 }
 
 bool importStepAsSingleShape(const QString& filePath,
@@ -305,15 +536,27 @@ void CadModule::stop()
 
 CadModule::CadModule(QObject* parent)
     : QObject(parent)
+    , m_modelingSession(std::make_unique<lcnc::cad::CadModelingSession>())
+    , m_documentRegistry(std::make_unique<lcnc::cad::CadDocumentRegistry>())
+    , m_commandDispatcher(std::make_unique<lcnc::cad::task::CadCommandDispatcher>(this))
 {
+    m_commandDispatcher->registerDefaultTools();
     LcncApplication* lcnc = lcnc::Kernel::current().app();
 
     connect(lcnc, &LcncApplication::documentAdded, this, [this, lcnc](DocumentId id) {
         emit documentListChanged();
-        if (!lcnc->isMachineDocument(id))
+        if (!lcnc->isMachineDocument(id)) {
+            m_documentRegistry->ensure(id);
             emit documentTreeChanged();
+        }
     });
     connect(lcnc, &LcncApplication::documentClosed, this, [this, lcnc](DocumentId id) {
+        m_documentRegistry->erase(id);
+        if (m_selectedSketchDocId == id) {
+            m_selectedSketchDocId = kInvalidDocumentId;
+            m_selectedSketchId = 0;
+            emit sketchSelectionChanged(0);
+        }
         emit documentListChanged();
         if (!lcnc->isMachineDocument(id))
             emit documentTreeChanged();
@@ -773,7 +1016,13 @@ void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
     if (gd->hasView())
         gd->view()->Redraw();
 
-    emit selectionChanged(docId, gd->selectedEntries());
+    const QStringList selected = gd->selectedEntries();
+    if (auto* state = m_documentRegistry->ensure(docId)) {
+        state->selectionContext() = lcnc::cad::selection::CadSelectionResolver::fromShapeEntries(
+            docId, selected, true, isSketchEditing(), hasSelectedSketch(), m_selectedSketchId);
+    }
+
+    emit selectionChanged(docId, selected);
 }
 
 QStringList CadModule::selectedEntries(DocumentId docId) const
@@ -789,7 +1038,97 @@ void CadModule::syncSelectionFromView(DocumentId docId)
     if (docId == kInvalidDocumentId)
         docId = activeDocumentId();
 
-    emit selectionChanged(docId, selectedEntries(docId));
+    const QStringList entries = selectedEntries(docId);
+    if (auto* state = m_documentRegistry->ensure(docId)) {
+        state->selectionContext() = lcnc::cad::selection::CadSelectionResolver::fromShapeEntries(
+            docId, entries, docId != kInvalidDocumentId, isSketchEditing(), hasSelectedSketch(), m_selectedSketchId);
+    }
+    emit selectionChanged(docId, entries);
+}
+
+lcnc::cad::selection::CadSelectionContext CadModule::selectionContext(DocumentId docId) const
+{
+    if (docId == kInvalidDocumentId)
+        docId = activeDocumentId();
+
+    lcnc::cad::selection::CadSelectionContext context;
+    if (const auto* state = m_documentRegistry->get(docId))
+        context = state->selectionContext();
+    context.docId = docId;
+    context.hasDocument = docId != kInvalidDocumentId && documentById(docId);
+    context.sketchEditing = isSketchEditing();
+    context.selectedSketchId = m_selectedSketchId;
+    context.hasSelectedSketch = hasSelectedSketch();
+
+    const QStringList entries = selectedEntries(docId);
+    if (!entries.isEmpty()) {
+        context = lcnc::cad::selection::CadSelectionResolver::fromShapeEntries(
+            docId, entries, context.hasDocument, context.sketchEditing,
+            context.hasSelectedSketch, context.selectedSketchId);
+    } else {
+        context.selectedShapeCount = 0;
+        bool hasNonShapeSelection = false;
+        for (const auto& item : context.items) {
+            if (item.domain != lcnc::cad::selection::CadSelectionDomain::DocumentShape
+                && item.domain != lcnc::cad::selection::CadSelectionDomain::None) {
+                hasNonShapeSelection = true;
+                break;
+            }
+        }
+        if (!context.hasSelectedSketch && !hasNonShapeSelection)
+            context.items.clear();
+    }
+    return context;
+}
+
+void CadModule::setSelectionContext(const lcnc::cad::selection::CadSelectionContext& context)
+{
+    if (context.docId == kInvalidDocumentId)
+        return;
+
+    if (auto* state = m_documentRegistry->ensure(context.docId))
+        state->selectionContext() = context;
+
+    if (context.hasSelectedSketch && context.selectedSketchId > 0) {
+        if (m_selectedSketchDocId != context.docId || m_selectedSketchId != context.selectedSketchId) {
+            m_selectedSketchDocId = context.docId;
+            m_selectedSketchId = context.selectedSketchId;
+            emit sketchSelectionChanged(m_selectedSketchId);
+        }
+        if (auto* gd = guiDocument(context.docId)) {
+            const Handle(AIS_InteractiveContext)& ctx = gd->context();
+            if (!ctx.IsNull())
+                ctx->ClearSelected(false);
+            if (gd->hasView())
+                gd->view()->Redraw();
+        }
+        emit selectionChanged(context.docId, {});
+        return;
+    }
+
+    if (m_selectedSketchId > 0) {
+        m_selectedSketchId = 0;
+        m_selectedSketchDocId = kInvalidDocumentId;
+        emit sketchSelectionChanged(0);
+    }
+
+    QStringList entries;
+    for (const auto& item : context.items) {
+        if (item.domain == lcnc::cad::selection::CadSelectionDomain::DocumentShape && !item.entry.isEmpty())
+            entries.append(item.entry);
+    }
+    if (entries.isEmpty()) {
+        if (auto* gd = guiDocument(context.docId)) {
+            const Handle(AIS_InteractiveContext)& ctx = gd->context();
+            if (!ctx.IsNull())
+                ctx->ClearSelected(false);
+            if (gd->hasView())
+                gd->view()->Redraw();
+        }
+        emit selectionChanged(context.docId, {});
+        return;
+    }
+    setSelectedEntries(context.docId, entries);
 }
 
 // ── Modeling Operations ────────────────────────────────────────────────────────
@@ -909,6 +1248,732 @@ TDF_Label CadModule::createShape(DocumentId docId, const TopoDS_Shape& shape,
     doc->commitCommand();
     refreshDisplay(docId);
     return label;
+}
+
+void CadModule::requestPrimitiveTool(int primitiveIndex)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::requestPrimitiveTool primitive={}", primitiveIndex);
+    emit primitiveToolRequested(primitiveIndex);
+}
+
+bool CadModule::buildPrimitivePreview(int primitiveIndex,
+                                      const PrimitiveParameters& params,
+                                      TopoDS_Shape* outShape,
+                                      QString* errMsg)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::buildPrimitivePreview begin primitive={}", primitiveIndex);
+    if (outShape)
+        outShape->Nullify();
+
+    QString buildError;
+    const TopoDS_Shape shape = buildPrimitiveShape(primitiveIndex, params, &buildError);
+    if (shape.IsNull()) {
+        if (errMsg)
+            *errMsg = buildError;
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "CadModule::buildPrimitivePreview end success=false reason={}",
+                   buildError.toStdString());
+        return false;
+    }
+
+    if (outShape)
+        *outShape = shape;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::buildPrimitivePreview end success=true");
+    return true;
+}
+
+bool CadModule::createPrimitive(int primitiveIndex, const PrimitiveParameters& params)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::createPrimitive begin primitive={}", primitiveIndex);
+
+    QString buildError;
+    const TopoDS_Shape shape = buildPrimitiveShape(primitiveIndex, params, &buildError);
+    if (shape.IsNull()) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::createPrimitive build failed: {}",
+                  buildError.toStdString());
+        emit operationFailed(tr("创建基础体失败"), buildError);
+        return false;
+    }
+
+    DocumentId docId = activeDocumentId();
+    if (docId == kInvalidDocumentId)
+        docId = newDocument(primitiveName(primitiveIndex));
+    if (docId == kInvalidDocumentId || !documentById(docId)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::createPrimitive failed to prepare document");
+        emit operationFailed(tr("创建基础体失败"), tr("无法创建或激活目标文档"));
+        return false;
+    }
+
+    const TDF_Label label = createShape(
+        docId,
+        shape,
+        primitiveName(primitiveIndex),
+        static_cast<int>(LcncDocument::EntityKind::Workpiece));
+    if (label.IsNull()) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::createPrimitive createShape failed docId={}", docId);
+        emit operationFailed(tr("创建基础体失败"), tr("无法写入目标文档"));
+        return false;
+    }
+
+    setActiveDocument(docId);
+    requestWorkpieceView(docId);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::createPrimitive end success=true docId={}", docId);
+    return true;
+}
+
+bool CadModule::previewTool(const QString& toolId,
+                            const QVariantMap& params,
+                            TopoDS_Shape* outShape,
+                            QString* errMsg)
+{
+    if (!m_commandDispatcher) {
+        if (errMsg)
+            *errMsg = tr("CAD 工具调度器未初始化");
+        return false;
+    }
+
+    lcnc::cad::task::CadCommandRequest request;
+    request.selection = selectionContext();
+    request.params = params;
+    request.preview = true;
+    return m_commandDispatcher->preview(toolId, request, outShape, errMsg);
+}
+
+bool CadModule::executeTool(const QString& toolId,
+                            const QVariantMap& params,
+                            QString* errMsg)
+{
+    if (!m_commandDispatcher) {
+        if (errMsg)
+            *errMsg = tr("CAD 工具调度器未初始化");
+        return false;
+    }
+
+    lcnc::cad::task::CadCommandRequest request;
+    request.selection = selectionContext();
+    request.params = params;
+    request.preview = false;
+    const bool ok = m_commandDispatcher->execute(toolId, request, errMsg);
+    if (!ok && errMsg && !errMsg->isEmpty())
+        emit operationFailed(tr("CAD 工具失败"), *errMsg);
+    return ok;
+}
+
+bool CadModule::buildTransformPreview(const TransformParameters& params,
+                                      TopoDS_Shape* outShape,
+                                      double* refX,
+                                      double* refY,
+                                      double* refZ,
+                                      QString* errMsg) const
+{
+    if (outShape)
+        outShape->Nullify();
+
+    const DocumentId docId = activeDocumentId();
+    LcncDocument* doc = documentById(docId);
+    if (!doc) {
+        if (errMsg)
+            *errMsg = tr("请先打开或创建工件文档");
+        return false;
+    }
+
+    const QStringList entries = selectedEntries(docId);
+    const QList<TDF_Label> labels = selectedShapeLabels(doc, entries);
+    if (labels.isEmpty()) {
+        if (errMsg)
+            *errMsg = tr("请先选择要变换的形体");
+        return false;
+    }
+
+    gp_Pnt referencePoint(0.0, 0.0, 0.0);
+    if (params.referenceMode == 0
+        && !modelCenterForLabels(doc, labels, &referencePoint, errMsg)) {
+        return false;
+    }
+    if (refX)
+        *refX = referencePoint.X();
+    if (refY)
+        *refY = referencePoint.Y();
+    if (refZ)
+        *refZ = referencePoint.Z();
+
+    TopoDS_Compound compound;
+    BRep_Builder builder;
+    builder.MakeCompound(compound);
+    const Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
+    const auto algoParams = toAlgorithmTransform(params, referencePoint);
+    for (const TDF_Label& label : labels) {
+        const TopoDS_Shape shape = shapeTool->GetShape(label);
+        if (shape.IsNull())
+            continue;
+
+        QString transformError;
+        const TopoDS_Shape transformed = lcnc::cad_algo::transformShape(shape, algoParams, &transformError);
+        if (transformed.IsNull()) {
+            if (errMsg)
+                *errMsg = transformError;
+            return false;
+        }
+        builder.Add(compound, transformed);
+    }
+
+    if (compound.IsNull()) {
+        if (errMsg)
+            *errMsg = tr("变换预览为空");
+        return false;
+    }
+    if (outShape)
+        *outShape = compound;
+    return true;
+}
+
+bool CadModule::applyTransform(const TransformParameters& params, QString* errMsg)
+{
+    auto fail = [this, errMsg](const QString& message) {
+        if (errMsg)
+            *errMsg = message;
+        emit operationFailed(tr("CAD 变换失败"), message);
+        return false;
+    };
+
+    const DocumentId docId = activeDocumentId();
+    LcncDocument* doc = documentById(docId);
+    if (!doc)
+        return fail(tr("请先打开或创建工件文档"));
+
+    const QStringList entries = selectedEntries(docId);
+    const QList<TDF_Label> labels = selectedShapeLabels(doc, entries);
+    if (labels.isEmpty())
+        return fail(tr("请先选择要变换的形体"));
+
+    gp_Pnt referencePoint(0.0, 0.0, 0.0);
+    if (params.referenceMode == 0
+        && !modelCenterForLabels(doc, labels, &referencePoint, errMsg)) {
+        return fail(errMsg ? *errMsg : tr("无法计算选中形体中心"));
+    }
+
+    const auto algoParams = toAlgorithmTransform(params, referencePoint);
+    const Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
+    doc->openCommand(tr("变换形体"));
+    for (const TDF_Label& label : labels) {
+        const TopoDS_Shape shape = shapeTool->GetShape(label);
+        QString transformError;
+        const TopoDS_Shape transformed = lcnc::cad_algo::transformShape(shape, algoParams, &transformError);
+        if (transformed.IsNull()) {
+            doc->abortCommand();
+            return fail(transformError);
+        }
+        shapeTool->SetShape(label, transformed);
+    }
+    doc->commitCommand();
+    refreshDisplay(docId);
+    return true;
+}
+
+bool CadModule::beginSketch(int planeIndex)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::beginSketch begin planeIndex={}", planeIndex);
+    if (!m_modelingSession) {
+        LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                 "CadModule::beginSketch missing modeling session");
+        emit operationFailed(tr("新建草图失败"), tr("CAD 建模会话未初始化"));
+        return false;
+    }
+
+    DocumentId docId = activeDocumentId();
+    if (docId == kInvalidDocumentId)
+        docId = newDocument(tr("草图建模"));
+    if (docId == kInvalidDocumentId || !documentById(docId)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::beginSketch failed to prepare document");
+        emit operationFailed(tr("新建草图失败"), tr("无法创建或激活目标文档"));
+        return false;
+    }
+
+    setActiveDocument(docId);
+    auto planeKind = lcnc::cad::SketchPlaneKind::XY;
+    switch (planeIndex) {
+    case 1:
+        planeKind = lcnc::cad::SketchPlaneKind::YZ;
+        break;
+    case 2:
+        planeKind = lcnc::cad::SketchPlaneKind::ZX;
+        break;
+    default:
+        break;
+    }
+
+    m_modelingSession->beginSketch(planeKind);
+    requestWorkpieceView(docId);
+    emit sketchToolChanged(static_cast<int>(lcnc::cad::SketchToolKind::None));
+    emit sketchElementsChanged();
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::beginSketch end success=true docId={}", docId);
+    return true;
+}
+
+bool CadModule::finishSketch()
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CadModule::finishSketch begin");
+    if (!m_modelingSession) {
+        LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                 "CadModule::finishSketch missing modeling session");
+        emit operationFailed(tr("完成草图失败"), tr("CAD 建模会话未初始化"));
+        return false;
+    }
+
+    QString errMsg;
+    if (!m_modelingSession->finishSketch(&errMsg)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::finishSketch failed: {}",
+                  errMsg.toStdString());
+        emit operationFailed(tr("完成草图失败"), errMsg);
+        return false;
+    }
+
+    DocumentId docId = activeDocumentId();
+    if (docId == kInvalidDocumentId || lcnc::Kernel::current().app()->isMachineDocument(docId)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::finishSketch no workpiece document active");
+        emit operationFailed(tr("完成草图失败"), tr("请在工件文档上完成草图"));
+        return false;
+    }
+
+    auto* state = m_documentRegistry->ensure(docId);
+    auto* manager = state ? &state->sketchManager() : nullptr;
+    if (!manager) {
+        emit operationFailed(tr("完成草图失败"), tr("无法获取草图管理器"));
+        return false;
+    }
+
+    // 拉取 finished session 状态入管理器，随后重置 session 供下一个草图使用。
+    const auto& elements = m_modelingSession->sketchElements();
+    const lcnc::cad::SketchPlaneKind sessionPlane = m_modelingSession->finishedPlane();
+    const TopoDS_Face profileFace = m_modelingSession->finishedProfileFace();
+    const int sketchId = manager->addSketch(
+        sessionPlane,
+        std::vector<lcnc::cad::SketchElement>(elements.begin(), elements.end()),
+        profileFace);
+    m_modelingSession->clear();
+    m_selectedSketchDocId = docId;
+    m_selectedSketchId = sketchId;
+    if (state) {
+        state->presentationState().selectedSketchId = sketchId;
+        state->selectionContext() = lcnc::cad::selection::CadSelectionResolver::fromDocumentTreeNode(
+            docId,
+            QStringLiteral("__sketch_finished_%1__").arg(sketchId),
+            QString(),
+            {});
+    }
+    emit sketchToolChanged(static_cast<int>(lcnc::cad::SketchToolKind::None));
+    emit sketchElementsChanged();
+    emit finishedSketchesChanged(docId);
+    emit sketchSelectionChanged(sketchId);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::finishSketch end success=true sketchId={}", sketchId);
+    return true;
+}
+
+bool CadModule::applyFeature(int featureIndex, double length, double angleDeg)
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::applyFeature begin feature={} length={} angle={} sketchId={}",
+               featureIndex, length, angleDeg, m_selectedSketchId);
+
+    DocumentId docId = m_selectedSketchDocId;
+    if (docId == kInvalidDocumentId)
+        docId = activeDocumentId();
+    auto* manager = m_documentRegistry->sketchManager(docId);
+    if (!manager || m_selectedSketchId <= 0) {
+        emit operationFailed(tr("应用特征失败"), tr("请先完成并选择一个草图"));
+        return false;
+    }
+    auto* record = manager->sketch(m_selectedSketchId);
+    if (!record || record->profileFace.IsNull()) {
+        emit operationFailed(tr("应用特征失败"), tr("选中草图不包含可用轮廓"));
+        return false;
+    }
+
+    auto featureKind = lcnc::cad::FeatureKind::Extrude;
+    switch (featureIndex) {
+    case 1:
+        featureKind = lcnc::cad::FeatureKind::Revolve;
+        break;
+    case 2:
+        featureKind = lcnc::cad::FeatureKind::Sweep;
+        break;
+    default:
+        break;
+    }
+
+    QString featureErr;
+    const TopoDS_Shape featureShape = lcnc::cad::CadModelingSession::buildFeatureFromRecord(
+        record->plane, record->profileFace, featureKind, length, angleDeg, &featureErr);
+    if (featureShape.IsNull()) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "CadModule::applyFeature build failed: {}",
+                  featureErr.toStdString());
+        emit operationFailed(tr("应用特征失败"), featureErr);
+        return false;
+    }
+
+    if (!documentById(docId)) {
+        emit operationFailed(tr("应用特征失败"), tr("目标文档不存在"));
+        return false;
+    }
+
+    const TDF_Label label = createShape(
+        docId,
+        featureShape,
+        m_modelingSession->defaultFeatureName(featureKind),
+        static_cast<int>(LcncDocument::EntityKind::Workpiece));
+    if (label.IsNull()) {
+        emit operationFailed(tr("应用特征失败"), tr("无法写入目标文档"));
+        return false;
+    }
+
+    setActiveDocument(docId);
+    requestWorkpieceView(docId);
+    manager->markSketchUsedByFeature(m_selectedSketchId, XcafUtils::entry(label));
+    emit finishedSketchesChanged(docId);
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "CadModule::applyFeature end success=true docId={}", docId);
+    return true;
+}
+
+bool CadModule::buildFeaturePreview(int featureIndex,
+                                    double length,
+                                    double angleDeg,
+                                    TopoDS_Shape* outShape,
+                                    QString* errMsg)
+{
+    if (outShape)
+        outShape->Nullify();
+
+    DocumentId docId = m_selectedSketchDocId;
+    auto* manager = m_documentRegistry->sketchManager(docId);
+    if (!manager || m_selectedSketchId <= 0) {
+        if (errMsg)
+            *errMsg = tr("请先选择一个草图");
+        return false;
+    }
+    auto* record = manager->sketch(m_selectedSketchId);
+    if (!record || record->profileFace.IsNull()) {
+        if (errMsg)
+            *errMsg = tr("选中草图不包含可用轮廓");
+        return false;
+    }
+
+    auto featureKind = lcnc::cad::FeatureKind::Extrude;
+    switch (featureIndex) {
+    case 1: featureKind = lcnc::cad::FeatureKind::Revolve; break;
+    case 2: featureKind = lcnc::cad::FeatureKind::Sweep; break;
+    default: break;
+    }
+    QString featureErr;
+    const TopoDS_Shape previewShape = lcnc::cad::CadModelingSession::buildFeatureFromRecord(
+        record->plane, record->profileFace, featureKind, length, angleDeg, &featureErr);
+    if (previewShape.IsNull()) {
+        if (errMsg)
+            *errMsg = featureErr;
+        return false;
+    }
+    if (outShape)
+        *outShape = previewShape;
+    return true;
+}
+
+void CadModule::cancelModelingOperation()
+{
+    LCNC_DEBUG(lcnc::LogCode::Generic, "CadModule::cancelModelingOperation");
+    if (m_modelingSession) {
+        const bool wasEditing = m_modelingSession->isSketchEditing();
+        m_modelingSession->clear();
+        if (wasEditing) {
+            emit sketchToolChanged(static_cast<int>(lcnc::cad::SketchToolKind::None));
+            emit sketchElementsChanged();
+        }
+    }
+}
+
+bool CadModule::isSketchEditing() const
+{
+    return m_modelingSession && m_modelingSession->isSketchEditing();
+}
+
+bool CadModule::hasSelectedSketch() const
+{
+    if (m_selectedSketchId <= 0)
+        return false;
+    auto* manager = m_documentRegistry->sketchManager(m_selectedSketchDocId);
+    if (!manager)
+        return false;
+    auto* record = manager->sketch(m_selectedSketchId);
+    return record && !record->profileFace.IsNull();
+}
+
+int CadModule::selectedSketchId() const
+{
+    return m_selectedSketchId;
+}
+
+void CadModule::setSelectedSketchId(int sketchId)
+{
+    if (m_selectedSketchId == sketchId)
+        return;
+    m_selectedSketchId = sketchId;
+    if (sketchId > 0)
+        m_selectedSketchDocId = activeDocumentId();
+    else
+        m_selectedSketchDocId = kInvalidDocumentId;
+    if (auto* state = m_documentRegistry->ensure(m_selectedSketchDocId)) {
+        state->presentationState().selectedSketchId = sketchId;
+        state->selectionContext() = sketchId > 0
+            ? lcnc::cad::selection::CadSelectionResolver::fromDocumentTreeNode(
+                  m_selectedSketchDocId,
+                  QStringLiteral("__sketch_finished_%1__").arg(sketchId),
+                  QString(),
+                  {})
+            : lcnc::cad::selection::CadSelectionContext{};
+    }
+    emit sketchSelectionChanged(sketchId);
+}
+
+QList<CadModule::FinishedSketchSnapshot>
+CadModule::finishedSketchSnapshots(DocumentId docId) const
+{
+    QList<FinishedSketchSnapshot> snaps;
+    if (docId == kInvalidDocumentId)
+        docId = activeDocumentId();
+    auto* manager = m_documentRegistry->sketchManager(docId);
+    if (!manager)
+        return snaps;
+    for (const auto& record : manager->sketches()) {
+        FinishedSketchSnapshot snap;
+        snap.sketchId = record.id;
+        snap.name = record.name;
+        snap.visible = record.visible;
+        snap.usedByFeature = record.usage == lcnc::cad::SketchUsageState::UsedByFeature;
+        for (const auto& element : record.elements) {
+            SketchElementSnapshot e;
+            e.id = element.id;
+            e.kind = static_cast<int>(element.kind);
+            e.label = element.label;
+            snap.elements.append(e);
+        }
+        snaps.append(snap);
+    }
+    return snaps;
+}
+
+bool CadModule::setSketchVisible(DocumentId docId, int sketchId, bool visible)
+{
+    if (docId == kInvalidDocumentId)
+        docId = activeDocumentId();
+    auto* manager = m_documentRegistry->sketchManager(docId);
+    if (!manager)
+        return false;
+    if (!manager->setSketchVisible(sketchId, visible))
+        return false;
+    emit finishedSketchesChanged(docId);
+    return true;
+}
+
+bool CadModule::deleteSketch(DocumentId docId, int sketchId)
+{
+    if (docId == kInvalidDocumentId)
+        docId = activeDocumentId();
+    auto* manager = m_documentRegistry->sketchManager(docId);
+    if (!manager)
+        return false;
+    if (!manager->removeSketch(sketchId))
+        return false;
+    if (m_selectedSketchId == sketchId) {
+        m_selectedSketchId = 0;
+        emit sketchSelectionChanged(0);
+    }
+    emit finishedSketchesChanged(docId);
+    return true;
+}
+
+void CadModule::setSketchTool(int toolKind)
+{
+    if (!m_modelingSession)
+        return;
+    if (!m_modelingSession->isSketchEditing()) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "CadModule::setSketchTool ignored: sketch not editing");
+        return;
+    }
+    const auto kind = static_cast<lcnc::cad::SketchToolKind>(toolKind);
+    if (m_modelingSession->sketchTool() == kind)
+        return;
+    m_modelingSession->setSketchTool(kind);
+    emit sketchToolChanged(toolKind);
+}
+
+int CadModule::sketchTool() const
+{
+    if (!m_modelingSession)
+        return static_cast<int>(lcnc::cad::SketchToolKind::None);
+    return static_cast<int>(m_modelingSession->sketchTool());
+}
+
+int CadModule::addSketchElement(int toolKind, const QVector<double>& params, QString* errMsg)
+{
+    if (!m_modelingSession) {
+        if (errMsg)
+            *errMsg = tr("CAD 建模会话未初始化");
+        return -1;
+    }
+    QString sessionError;
+    const int id = m_modelingSession->addSketchElement(
+        static_cast<lcnc::cad::SketchToolKind>(toolKind), params, &sessionError);
+    if (id < 0) {
+        if (errMsg)
+            *errMsg = sessionError;
+        return -1;
+    }
+    emit sketchElementsChanged();
+    return id;
+}
+
+bool CadModule::removeSketchElement(int elementId)
+{
+    if (!m_modelingSession)
+        return false;
+    if (!m_modelingSession->removeSketchElement(elementId))
+        return false;
+    emit sketchElementsChanged();
+    return true;
+}
+
+bool CadModule::moveSketchElement(int elementId, double deltaX, double deltaY, QString* errMsg)
+{
+    if (!m_modelingSession) {
+        if (errMsg)
+            *errMsg = tr("CAD 建模会话未初始化");
+        return false;
+    }
+    QString sessionError;
+    if (!m_modelingSession->moveSketchElement(elementId, deltaX, deltaY, &sessionError)) {
+        if (errMsg)
+            *errMsg = sessionError;
+        return false;
+    }
+    emit sketchElementsChanged();
+    return true;
+}
+
+bool CadModule::moveSketchElementHandle(int elementId,
+                                        int handleIndex,
+                                        double deltaX,
+                                        double deltaY,
+                                        QString* errMsg)
+{
+    if (!m_modelingSession) {
+        if (errMsg)
+            *errMsg = tr("CAD 建模会话未初始化");
+        return false;
+    }
+    QString sessionError;
+    if (!m_modelingSession->moveSketchElementHandle(
+            elementId, handleIndex, deltaX, deltaY, &sessionError)) {
+        if (errMsg)
+            *errMsg = sessionError;
+        return false;
+    }
+    emit sketchElementsChanged();
+    return true;
+}
+
+QList<CadModule::SketchElementSnapshot> CadModule::sketchElementSnapshots() const
+{
+    QList<SketchElementSnapshot> snapshots;
+    if (!m_modelingSession)
+        return snapshots;
+    for (const auto& element : m_modelingSession->sketchElements()) {
+        SketchElementSnapshot snap;
+        snap.id = element.id;
+        snap.kind = static_cast<int>(element.kind);
+        snap.label = element.label;
+        snapshots.append(snap);
+    }
+    return snapshots;
+}
+
+QList<CadModule::SketchOverlaySnapshot> CadModule::sketchOverlaySnapshots(DocumentId docId) const
+{
+    QList<SketchOverlaySnapshot> snapshots;
+    if (docId == kInvalidDocumentId)
+        docId = activeDocumentId();
+    if (docId == kInvalidDocumentId)
+        return snapshots;
+
+    const auto context = selectionContext(docId);
+
+    if (m_modelingSession && m_modelingSession->isSketchEditing() && docId == activeDocumentId()) {
+        const int plane = static_cast<int>(m_modelingSession->finishedPlane());
+        for (const auto& element : m_modelingSession->sketchElements()) {
+            SketchOverlaySnapshot snap;
+            snap.key = activeSketchElementKey(element.id);
+            snap.elementId = element.id;
+            snap.kind = static_cast<int>(element.kind);
+            snap.plane = plane;
+            snap.params = element.params;
+            snap.visible = true;
+            snap.selected = selectionContainsSketchElement(context, 0, element.id);
+            snap.activeSession = true;
+            snap.draggable = true;
+            snapshots.append(std::move(snap));
+
+            for (const auto& handle : sketchHandlePoints(element)) {
+                SketchOverlaySnapshot handleSnap;
+                handleSnap.key = activeSketchHandleKey(element.id, handle.handleIndex);
+                handleSnap.elementId = element.id;
+                handleSnap.kind = static_cast<int>(lcnc::cad::SketchToolKind::Point);
+                handleSnap.plane = plane;
+                handleSnap.params = handle.params;
+                handleSnap.visible = true;
+                handleSnap.selected = snap.selected;
+                handleSnap.activeSession = true;
+                handleSnap.draggable = true;
+                snapshots.append(std::move(handleSnap));
+            }
+        }
+    }
+
+    auto* manager = m_documentRegistry->sketchManager(docId);
+    if (!manager)
+        return snapshots;
+
+    for (const auto& record : manager->sketches()) {
+        const bool sketchSelected = selectionContainsSketch(context, record.id);
+        for (const auto& element : record.elements) {
+            SketchOverlaySnapshot snap;
+            snap.key = finishedSketchElementKey(record.id, element.id);
+            snap.sketchId = record.id;
+            snap.elementId = element.id;
+            snap.kind = static_cast<int>(element.kind);
+            snap.plane = static_cast<int>(record.plane);
+            snap.params = element.params;
+            snap.visible = record.visible;
+            snap.selected = sketchSelected || selectionContainsSketchElement(context, record.id, element.id);
+            snap.activeSession = false;
+            snap.usedByFeature = record.usage == lcnc::cad::SketchUsageState::UsedByFeature;
+            snapshots.append(std::move(snap));
+        }
+    }
+    return snapshots;
 }
 
 // ── Undo / Redo ────────────────────────────────────────────────────────────────

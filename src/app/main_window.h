@@ -11,6 +11,7 @@ class WidgetMachinePanel;
 class WidgetLaserControl;
 class WidgetToolpathPanel;
 class DialogTaskManager;
+namespace lcnc::cad::ui { class WidgetCadTaskPanel; }
 namespace lcnc::cam::ui { class DialogAxisCalibrationWizard; }
 class GraphicsScene;
 class QTabWidget;
@@ -74,6 +75,26 @@ private:
     void restorePersistedCamState();
     void syncMachineWorkspaceUi();
     void syncMachineWorkspaceUiInternal(bool rebuildTree);
+    /// Regenerate the transient CAD primitive preview from the right task panel.
+    void updateCadPrimitivePreview();
+    /// Regenerate the transient CAD feature preview from the right task panel.
+    void updateCadFeaturePreview();
+    /// Regenerate the transient CAD transform preview and transform gizmo.
+    void updateCadTransformPreview();
+    /// Refresh CAD TaskPanel command availability from active document context.
+    void updateCadTaskPanelState();
+    /// Sync the TaskPanel sketch element list from the CAD module session state.
+    void refreshSketchElementsView();
+    /// Sync the TaskPanel home-page finished sketches list.
+    void refreshFinishedSketchesView();
+    /// Sync CAD sketch overlays from module snapshots to the OCC view.
+    void updateCadSketchOverlay();
+    /// Highlight the contour AIS corresponding to the selected toolpath node.
+    void highlightContourInView(int contourIndex);
+    /// Select a CAD sketch overlay item emitted by the OCC view.
+    void handleCadSketchOverlayPicked(const QString& key);
+    /// Move an active sketch overlay item by a local sketch-plane delta.
+    void handleCadSketchOverlayDrag(const QString& key, double deltaX, double deltaY);
     /// Route 3D view to the machine workspace document.
     void showMachineView();
     /// Route 3D view to the specified workpiece document (defaults to active).
@@ -101,6 +122,7 @@ private:
     QTreeWidget*       m_contourListWidget{nullptr};  ///< contour list in "刀路" tab (drag-reorder)
     QTreeWidget*       m_processTree{nullptr};
     WidgetMachinePanel*   m_machinePanel{nullptr};
+    lcnc::cad::ui::WidgetCadTaskPanel* m_cadTaskPanel{nullptr};
     WidgetToolpathPanel*   m_toolpathPanel{nullptr};
     WidgetLaserControl*    m_laserControl{nullptr};
     DialogTaskManager*     m_taskDialog{nullptr};

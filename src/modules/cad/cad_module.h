@@ -3,6 +3,9 @@
 #include <QObject>
 #include <QList>
 #include <QStringList>
+#include <QVector>
+#include <QVariantMap>
+#include <memory>
 #include <TDF_Label.hxx>
 #include <TopoDS_Shape.hxx>
 
@@ -11,12 +14,15 @@
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "modules/cad/i_cad_facade.h"
+#include "modules/cad/selection/cad_selection.h"
 
 class GuiDocument;
 class GuiApplication;
 class TaskManager;
 class gp_Vec;
 class gp_Ax1;
+namespace lcnc::cad { class CadDocumentRegistry; class CadModelingSession; class SketchManager; }
+namespace lcnc::cad::task { class CadCommandDispatcher; }
 
 /**
  * @brief CAD module singleton — manages documents, file I/O, and modeling operations.
@@ -57,6 +63,74 @@ public:
         QString displayName;
         QStringList leafEntries;
         QList<DocumentTreeNode> children;
+    };
+
+    /**
+     * @brief Parameter bundle for TaskPanel primitive creation.
+     *
+     * Mapping by primitive index:
+     *  - box: sizeX, sizeY, sizeZ
+     *  - cylinder: radius1, sizeZ
+     *  - sphere: radius1
+     *  - cone: radius1, radius2, sizeZ
+     *  - torus: radius1, radius2
+     */
+    struct PrimitiveParameters {
+        double sizeX{100.0};
+        double sizeY{100.0};
+        double sizeZ{50.0};
+        double radius1{50.0};
+        double radius2{15.0};
+    };
+
+    /**
+     * @brief Parameter bundle for interactive transform preview and apply.
+     */
+    struct TransformParameters {
+        double translateX{0.0};
+        double translateY{0.0};
+        double translateZ{0.0};
+        double rotateX{0.0};
+        double rotateY{0.0};
+        double rotateZ{0.0};
+        int referenceMode{0}; ///< 0=model center, 1=world origin.
+    };
+
+    /**
+     * @brief Lightweight snapshot of a sketch element for tree/list rendering.
+     */
+    struct SketchElementSnapshot {
+        int id{0};
+        int kind{0};
+        QString label;
+    };
+
+    /**
+     * @brief Lightweight snapshot of a finished sketch record.
+     */
+    struct FinishedSketchSnapshot {
+        int sketchId{0};
+        QString name;
+        bool visible{true};
+        bool usedByFeature{false};
+        QList<SketchElementSnapshot> elements;
+    };
+
+    /**
+     * @brief View-neutral sketch overlay snapshot used by MainWindow to feed the view renderer.
+     */
+    struct SketchOverlaySnapshot {
+        QString key;
+        int sketchId{0};
+        int elementId{0};
+        int kind{0};
+        int plane{0};
+        QVector<double> params;
+        bool visible{true};
+        bool selected{false};
+        bool activeSession{false};
+        bool usedByFeature{false};
+        bool draggable{false};
     };
 
     // ── IModule ───────────────────────────────────────────────────
@@ -101,6 +175,9 @@ public:
     void setSelectedEntries(DocumentId docId, const QStringList& entries);
     QStringList selectedEntries(DocumentId docId) const;
     void syncSelectionFromView(DocumentId docId = kInvalidDocumentId);
+    lcnc::cad::selection::CadSelectionContext selectionContext(
+        DocumentId docId = kInvalidDocumentId) const;
+    void setSelectionContext(const lcnc::cad::selection::CadSelectionContext& context);
 
     // ── Modeling Operations (delegates to ShapeService + refreshes display) ──
     /// Move a shape by translation vector. Returns true on success.
@@ -126,6 +203,86 @@ public:
                           const QString& name,
                           int entityKind = static_cast<int>(LcncDocument::EntityKind::Workpiece));
 
+    /// Request the UI to enter a primitive creation tool from Ribbon or Task home.
+    void requestPrimitiveTool(int primitiveIndex);
+    /// Build a transient primitive preview shape without modifying any document.
+    bool buildPrimitivePreview(int primitiveIndex,
+                               const PrimitiveParameters& params,
+                               TopoDS_Shape* outShape,
+                               QString* errMsg = nullptr);
+    /// Create a primitive and commit it to the active or newly created document.
+    bool createPrimitive(int primitiveIndex, const PrimitiveParameters& params);
+    /// Build a preview through the CAD tool dispatcher.
+    bool previewTool(const QString& toolId,
+                     const QVariantMap& params,
+                     TopoDS_Shape* outShape,
+                     QString* errMsg = nullptr);
+    /// Execute a parameterized CAD tool through the dispatcher.
+    bool executeTool(const QString& toolId,
+                     const QVariantMap& params,
+                     QString* errMsg = nullptr);
+    /// Build a transient transform preview for the selected shapes.
+    bool buildTransformPreview(const TransformParameters& params,
+                               TopoDS_Shape* outShape,
+                               double* refX = nullptr,
+                               double* refY = nullptr,
+                               double* refZ = nullptr,
+                               QString* errMsg = nullptr) const;
+    /// Apply an interactive transform to the selected shapes.
+    bool applyTransform(const TransformParameters& params,
+                        QString* errMsg = nullptr);
+
+    // ── Sketch + Feature Modeling ───────────────────────────────────────
+    /// Start a lightweight sketch session on the requested plane index.
+    bool beginSketch(int planeIndex);
+    /// Finish the active sketch and push it as a SketchRecord into the manager.
+    bool finishSketch();
+    /// Apply a feature to the currently selected finished sketch and commit it.
+    bool applyFeature(int featureIndex, double length, double angleDeg);
+    /// Build a transient feature preview shape without modifying any document.
+    bool buildFeaturePreview(int featureIndex,
+                             double length,
+                             double angleDeg,
+                             TopoDS_Shape* outShape,
+                             QString* errMsg = nullptr);
+    /// Clear the current transient modeling operation without document mutation.
+    void cancelModelingOperation();
+    /// Returns true while the module has an editable sketch session.
+    bool isSketchEditing() const;
+    /// Returns true when a finished sketch is currently selected and ready for features.
+    bool hasSelectedSketch() const;
+    /// Currently selected finished sketch id (0 if none).
+    int selectedSketchId() const;
+    /// Select a finished sketch by id (0 to clear). Emits sketchSelectionChanged.
+    void setSelectedSketchId(int sketchId);
+    /// Snapshot of finished sketches for the active document.
+    QList<FinishedSketchSnapshot> finishedSketchSnapshots(DocumentId docId = kInvalidDocumentId) const;
+    /// Set visibility flag of a finished sketch (manager-side bookkeeping; view layer pending).
+    bool setSketchVisible(DocumentId docId, int sketchId, bool visible);
+    /// Delete a finished sketch by id.
+    bool deleteSketch(DocumentId docId, int sketchId);
+
+    /// Set the currently active sketch tool (Ribbon command or TaskPanel palette).
+    void setSketchTool(int toolKind);
+    /// Read the currently active sketch tool kind.
+    int sketchTool() const;
+    /// Append a new sketch element to the active session. Returns the assigned id or -1.
+    int addSketchElement(int toolKind, const QVector<double>& params, QString* errMsg = nullptr);
+    /// Remove a previously added sketch element by id.
+    bool removeSketchElement(int elementId);
+    /// Move a sketch element in the active sketch session.
+    bool moveSketchElement(int elementId, double deltaX, double deltaY, QString* errMsg = nullptr);
+    /// Move a specific sketch element handle in the active sketch session.
+    bool moveSketchElementHandle(int elementId,
+                                 int handleIndex,
+                                 double deltaX,
+                                 double deltaY,
+                                 QString* errMsg = nullptr);
+    /// Snapshot of current sketch elements for tree/list rendering.
+    QList<SketchElementSnapshot> sketchElementSnapshots() const;
+    /// Snapshot of sketch elements for view-layer overlay rendering.
+    QList<SketchOverlaySnapshot> sketchOverlaySnapshots(DocumentId docId = kInvalidDocumentId) const;
+
     // ── Undo / Redo ─────────────────────────────────────────────────────
     bool canUndo(DocumentId docId) const;
     bool canRedo(DocumentId docId) const;
@@ -147,10 +304,25 @@ signals:
     void operationFailed(const QString& title, const QString& message);
     /// Emitted when a workpiece document selection changes via module coordination.
     void selectionChanged(DocumentId id, const QStringList& entries);
+    /// Emitted when a command requests activation of a primitive TaskPanel tool.
+    void primitiveToolRequested(int primitiveIndex);
+    /// Emitted when the active sketch tool kind changes.
+    void sketchToolChanged(int toolKind);
+    /// Emitted when the sketch element list changes (add/remove/clear).
+    void sketchElementsChanged();
+    /// Emitted when finished sketch records change for a document.
+    void finishedSketchesChanged(DocumentId docId);
+    /// Emitted when the selected finished sketch changes.
+    void sketchSelectionChanged(int sketchId);
 
 private:
     void refreshDisplay(DocumentId docId);
 
     /// 标记 init() 是否已成功执行（避免重复注册）。
     bool m_initialized{false};
+    int m_selectedSketchId{0};
+    DocumentId m_selectedSketchDocId{kInvalidDocumentId};
+    std::unique_ptr<lcnc::cad::CadModelingSession> m_modelingSession;
+    std::unique_ptr<lcnc::cad::CadDocumentRegistry> m_documentRegistry;
+    std::unique_ptr<lcnc::cad::task::CadCommandDispatcher> m_commandDispatcher;
 };

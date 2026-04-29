@@ -13,20 +13,32 @@
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
 
+namespace {
+
+QSurfaceFormat makeOccSurfaceFormat()
+{
+    QSurfaceFormat format;
+    format.setRenderableType(QSurfaceFormat::OpenGL);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setVersion(3, 3);
+    format.setDepthBufferSize(24);
+    format.setStencilBufferSize(8);
+    format.setSamples(4);
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    format.setSwapInterval(1);
+    return format;
+}
+
+} // namespace
+
 int main(int argc, char* argv[])
 {
     // High DPI / fractional scaling support
     QApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 
-    // OpenGL surface format for OCC
-    QSurfaceFormat fmt;
-    fmt.setDepthBufferSize(24);
-    fmt.setStencilBufferSize(8);
-    fmt.setSamples(4);
-    fmt.setVersion(4, 5);
-    fmt.setProfile(QSurfaceFormat::CoreProfile);
-    QSurfaceFormat::setDefaultFormat(fmt);
+    // Qt/OpenGL defaults must be fixed before QApplication creates any native window.
+    QSurfaceFormat::setDefaultFormat(makeOccSurfaceFormat());
 
     QApplication app(argc, argv);
     app.setApplicationName("LaserCNC");
@@ -42,6 +54,17 @@ int main(int argc, char* argv[])
               "{} {} starting up",
               app.applicationName().toStdString(),
               app.applicationVersion().toStdString());
+
+    const QSurfaceFormat glFormat = QSurfaceFormat::defaultFormat();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "Qt OpenGL default format: version={}.{} profile={} samples={} depth={} stencil={} swapInterval={}",
+              glFormat.majorVersion(),
+              glFormat.minorVersion(),
+              static_cast<int>(glFormat.profile()),
+              glFormat.samples(),
+              glFormat.depthBufferSize(),
+              glFormat.stencilBufferSize(),
+              glFormat.swapInterval());
 
     // ── Kernel：注册核心服务 + 加载业务模块 ────────────────────────────
     //    Kernel 直接持有 LcncApplication / GuiApplication / TaskManager /

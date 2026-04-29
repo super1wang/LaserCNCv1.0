@@ -1,10 +1,11 @@
 #include "view/toolpath_renderer.h"
 
 #include "view/gui_document.h"
-#include "view/graphics_scene.h"
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/kinematics/machine_kinematics.h"
 
 #include <AIS_InteractiveContext.hxx>
+#include <AIS_InteractiveObject.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <Quantity_Color.hxx>
@@ -13,6 +14,24 @@
 #include <V3d_View.hxx>
 
 namespace lcnc::view {
+
+namespace {
+
+constexpr double kNormalLength = 5.0;
+
+void applyLocalTransform(const Handle(AIS_InteractiveContext)& ctx,
+                         const Handle(AIS_Shape)& ais,
+                         const gp_Trsf& transform)
+{
+    if (ais.IsNull())
+        return;
+
+    ais->SetLocalTransformation(transform);
+    if (!ctx.IsNull())
+        ctx->RecomputePrsOnly(ais, Standard_False);
+}
+
+} // namespace
 
 ToolpathRenderer::ToolpathRenderer() = default;
 ToolpathRenderer::~ToolpathRenderer() = default;
@@ -27,44 +46,170 @@ bool ToolpathRenderer::setNormalSampleStep(double mm)
 
 void ToolpathRenderer::refresh(GuiDocument* gd,
                                const LaserToolpath& toolpath,
+                               MachineKinematics* kin,
                                const LeadInPreview& preview)
 {
-    erase(gd);
+    clearAis(gd, false);
     if (!gd) return;
+
+    ensureBundleCount(gd, toolpath.contourCount());
     if (m_visible) {
-        displayContours(gd, toolpath);
-        displayLeadIns(gd, toolpath, preview);
-        if (m_showNormals)
-            displayNormals(gd, toolpath);
+        for (int i = 0; i < toolpath.contourCount(); ++i)
+            rebuildContourAis(gd, toolpath, i);
+        for (int i = 0; i < toolpath.contourCount(); ++i)
+            rebuildLeadInAis(gd, toolpath, i);
+        if (m_showNormals) {
+            for (int i = 0; i < toolpath.contourCount(); ++i)
+                rebuildNormalAis(gd, toolpath, i);
+        }
+        rebuildPreviewAis(gd, toolpath, preview);
     }
-    if (gd->hasView())
-        gd->view()->Redraw();
+    updateTransforms(gd, toolpath, kin);
+    rebuildContourMirror();
+    redraw(gd);
+}
+
+void ToolpathRenderer::refreshLeadIns(GuiDocument* gd,
+                                      const LaserToolpath& toolpath,
+                                      MachineKinematics* kin,
+                                      const LeadInPreview& preview)
+{
+    if (!gd) return;
+    ensureBundleCount(gd, toolpath.contourCount());
+    for (ContourAisBundle& bundle : m_bundles)
+        eraseAis(gd, bundle.leadIn);
+    eraseAis(gd, m_previewLeadInAis);
+    m_previewContourIndex = -1;
+
+    if (m_visible) {
+        for (int i = 0; i < toolpath.contourCount(); ++i)
+            rebuildLeadInAis(gd, toolpath, i);
+        rebuildPreviewAis(gd, toolpath, preview);
+    }
+    updateTransforms(gd, toolpath, kin);
+    redraw(gd);
+}
+
+void ToolpathRenderer::refreshNormals(GuiDocument* gd,
+                                      const LaserToolpath& toolpath,
+                                      MachineKinematics* kin)
+{
+    if (!gd) return;
+    ensureBundleCount(gd, toolpath.contourCount());
+    for (ContourAisBundle& bundle : m_bundles)
+        eraseAis(gd, bundle.normal);
+
+    if (m_visible && m_showNormals) {
+        for (int i = 0; i < toolpath.contourCount(); ++i)
+            rebuildNormalAis(gd, toolpath, i);
+    }
+    updateTransforms(gd, toolpath, kin);
+    redraw(gd);
+}
+
+void ToolpathRenderer::refreshContour(GuiDocument* gd,
+                                      const LaserToolpath& toolpath,
+                                      MachineKinematics* kin,
+                                      int contourIndex,
+                                      const LeadInPreview& preview)
+{
+    if (!gd || contourIndex < 0 || contourIndex >= toolpath.contourCount())
+        return;
+
+    ensureBundleCount(gd, toolpath.contourCount());
+    ContourAisBundle& bundle = m_bundles[contourIndex];
+    eraseBundle(gd, bundle);
+
+    if (m_visible) {
+        rebuildContourAis(gd, toolpath, contourIndex);
+        rebuildLeadInAis(gd, toolpath, contourIndex);
+        if (m_showNormals)
+            rebuildNormalAis(gd, toolpath, contourIndex);
+    }
+
+    if (preview.valid && preview.contourIndex == contourIndex) {
+        eraseAis(gd, m_previewLeadInAis);
+        m_previewContourIndex = -1;
+        if (m_visible)
+            rebuildPreviewAis(gd, toolpath, preview);
+    }
+
+    updateTransforms(gd, toolpath, kin);
+    rebuildContourMirror();
+    redraw(gd);
+}
+
+void ToolpathRenderer::updateTransforms(GuiDocument* gd,
+                                        const LaserToolpath& toolpath,
+                                        MachineKinematics* kin)
+{
+    if (!gd)
+        return;
+
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull())
+        return;
+
+    const int count = qMin(m_bundles.size(), toolpath.contourCount());
+    for (int i = 0; i < count; ++i) {
+        gp_Trsf transform;
+        const LaserContour& contour = toolpath.contour(i);
+        if (kin && !contour.workpieceEntry.isEmpty())
+            transform = kin->computeWpcTransform(contour.workpieceEntry);
+
+        ContourAisBundle& bundle = m_bundles[i];
+        applyLocalTransform(ctx, bundle.contour, transform);
+        applyLocalTransform(ctx, bundle.leadIn, transform);
+        applyLocalTransform(ctx, bundle.normal, transform);
+    }
+
+    if (!m_previewLeadInAis.IsNull()
+        && m_previewContourIndex >= 0
+        && m_previewContourIndex < toolpath.contourCount()) {
+        gp_Trsf transform;
+        const LaserContour& contour = toolpath.contour(m_previewContourIndex);
+        if (kin && !contour.workpieceEntry.isEmpty())
+            transform = kin->computeWpcTransform(contour.workpieceEntry);
+        applyLocalTransform(ctx, m_previewLeadInAis, transform);
+    }
+}
+
+int ToolpathRenderer::contourIndexForAis(const Handle(AIS_InteractiveObject)& object) const
+{
+    if (object.IsNull())
+        return -1;
+
+    const AIS_InteractiveObject* objectPtr = object.get();
+    for (int i = 0; i < m_bundles.size(); ++i) {
+        if (m_bundles.at(i).contour.get() == objectPtr)
+            return i;
+    }
+
+    return -1;
+}
+
+int ToolpathRenderer::selectedContourIndex(GuiDocument* gd) const
+{
+    if (!gd)
+        return -1;
+
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull())
+        return -1;
+
+    int selectedIndex = -1;
+    for (ctx->InitSelected(); ctx->MoreSelected(); ctx->NextSelected()) {
+        const int index = contourIndexForAis(ctx->SelectedInteractive());
+        if (index >= 0)
+            selectedIndex = index;
+    }
+
+    return selectedIndex;
 }
 
 void ToolpathRenderer::erase(GuiDocument* gd)
 {
-    if (!gd) {
-        m_contourAis.clear();
-        m_leadInAis.clear();
-        m_normalAis.clear();
-        return;
-    }
-    GraphicsScene* scene = gd->scene();
-    if (!scene) {
-        m_contourAis.clear();
-        m_leadInAis.clear();
-        m_normalAis.clear();
-        return;
-    }
-    for (auto& ais : m_contourAis)
-        if (!ais.IsNull()) scene->eraseShape(ais);
-    for (auto& ais : m_leadInAis)
-        if (!ais.IsNull()) scene->eraseShape(ais);
-    for (auto& ais : m_normalAis)
-        if (!ais.IsNull()) scene->eraseShape(ais);
-    m_contourAis.clear();
-    m_leadInAis.clear();
-    m_normalAis.clear();
+    clearAis(gd, true);
 }
 
 void ToolpathRenderer::setVisible(GuiDocument* gd, bool visible)
@@ -75,131 +220,233 @@ void ToolpathRenderer::setVisible(GuiDocument* gd, bool visible)
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
     if (ctx.IsNull()) return;
 
-    auto toggle = [&](QList<Handle(AIS_Shape)>& list) {
-        for (auto& ais : list) {
-            if (ais.IsNull()) continue;
-            if (visible)
-                ctx->Display(ais, Standard_False);
-            else
-                ctx->Erase(ais, Standard_False);
-        }
+    auto toggle = [&](const Handle(AIS_Shape)& ais) {
+        if (ais.IsNull()) return;
+        if (visible)
+            ctx->Display(ais, Standard_False);
+        else
+            ctx->Erase(ais, Standard_False);
     };
-    toggle(m_contourAis);
-    toggle(m_leadInAis);
-    toggle(m_normalAis);
-    if (gd->hasView())
-        gd->view()->Redraw();
+
+    for (const ContourAisBundle& bundle : m_bundles) {
+        toggle(bundle.contour);
+        toggle(bundle.leadIn);
+        toggle(bundle.normal);
+    }
+    toggle(m_previewLeadInAis);
+    redraw(gd);
 }
 
-void ToolpathRenderer::displayContours(GuiDocument* gd, const LaserToolpath& tp)
+void ToolpathRenderer::ensureBundleCount(GuiDocument* gd, int count)
 {
-    GraphicsScene* scene = gd->scene();
-    if (!scene) return;
+    while (m_bundles.size() > count) {
+        ContourAisBundle bundle = m_bundles.takeLast();
+        eraseBundle(gd, bundle);
+    }
+    while (m_bundles.size() < count)
+        m_bundles.append(ContourAisBundle{});
+    rebuildContourMirror();
+}
+
+void ToolpathRenderer::clearAis(GuiDocument* gd, bool updateView)
+{
+    for (ContourAisBundle& bundle : m_bundles)
+        eraseBundle(gd, bundle);
+    eraseAis(gd, m_previewLeadInAis);
+    m_previewContourIndex = -1;
+    m_bundles.clear();
+    m_contourAis.clear();
+    if (updateView)
+        redraw(gd);
+}
+
+void ToolpathRenderer::eraseAis(GuiDocument* gd, Handle(AIS_Shape)& ais)
+{
+    if (ais.IsNull())
+        return;
+
+    if (gd) {
+        const Handle(AIS_InteractiveContext)& ctx = gd->context();
+        if (!ctx.IsNull())
+            ctx->Erase(ais, Standard_False);
+    }
+    ais.Nullify();
+}
+
+void ToolpathRenderer::eraseBundle(GuiDocument* gd, ContourAisBundle& bundle)
+{
+    eraseAis(gd, bundle.contour);
+    eraseAis(gd, bundle.leadIn);
+    eraseAis(gd, bundle.normal);
+}
+
+void ToolpathRenderer::rebuildContourAis(GuiDocument* gd,
+                                         const LaserToolpath& tp,
+                                         int contourIndex)
+{
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull()) return;
+    if (contourIndex < 0 || contourIndex >= tp.contourCount()) return;
+    if (contourIndex >= m_bundles.size()) return;
+
+    ContourAisBundle& bundle = m_bundles[contourIndex];
+    eraseAis(gd, bundle.contour);
+
+    const LaserContour& contour = tp.contour(contourIndex);
+    if (!contour.enabled || contour.wire.IsNull())
+        return;
+
     const Quantity_Color green(0.1, 0.8, 0.2, Quantity_TOC_RGB);
-
-    for (int i = 0; i < tp.contourCount(); ++i) {
-        const LaserContour& c = tp.contour(i);
-        if (!c.enabled || c.wire.IsNull()) continue;
-        Handle(AIS_Shape) ais = scene->displayShape(c.wire, false, true);
-        scene->setShapeColor(ais, green);
-        if (!ctx.IsNull()) ctx->Deactivate(ais);
-        m_contourAis.append(ais);
-    }
+    Handle(AIS_Shape) ais = new AIS_Shape(contour.wire);
+    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
+    ctx->SetColor(ais, green, Standard_False);
+    ctx->SetWidth(ais, 3.0, Standard_False);
+    ctx->Activate(ais, 0, Standard_False);
+    bundle.contour = ais;
 }
 
-void ToolpathRenderer::displayLeadIns(GuiDocument* gd,
-                                     const LaserToolpath& tp,
-                                     const LeadInPreview& preview)
+void ToolpathRenderer::rebuildLeadInAis(GuiDocument* gd,
+                                        const LaserToolpath& tp,
+                                        int contourIndex)
 {
-    GraphicsScene* scene = gd->scene();
-    if (!scene) return;
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull()) return;
+    if (contourIndex < 0 || contourIndex >= tp.contourCount()) return;
+    if (contourIndex >= m_bundles.size()) return;
+
+    ContourAisBundle& bundle = m_bundles[contourIndex];
+    eraseAis(gd, bundle.leadIn);
+
+    const LaserContour& contour = tp.contour(contourIndex);
+    if (!contour.enabled || !contour.leadIn.valid)
+        return;
+
+    TopoDS_Edge leadEdge = LaserToolpathBuilder::computeLeadInEdge(
+        contour, tp.globalLeadInLength(), tp.globalNormalAngle());
+    if (leadEdge.IsNull())
+        return;
+
     const Quantity_Color red(0.9, 0.15, 0.15, Quantity_TOC_RGB);
-    const Quantity_Color yellow(0.95, 0.8, 0.1, Quantity_TOC_RGB);
-
-    const double length = tp.globalLeadInLength();
-    const double angle  = tp.globalNormalAngle();
-
-    for (int i = 0; i < tp.contourCount(); ++i) {
-        const LaserContour& c = tp.contour(i);
-        if (!c.enabled || !c.leadIn.valid) continue;
-        TopoDS_Edge leadEdge = LaserToolpathBuilder::computeLeadInEdge(c, length, angle);
-        if (leadEdge.IsNull()) continue;
-        Handle(AIS_Shape) ais = scene->displayShape(leadEdge, false, false);
-        scene->setShapeColor(ais, red);
-        ais->SetWidth(2.0);
-        if (!ctx.IsNull()) ctx->Deactivate(ais);
-        m_leadInAis.append(ais);
-    }
-
-    if (preview.valid
-        && preview.contourIndex >= 0
-        && preview.contourIndex < tp.contourCount()) {
-        const LaserContour& source = tp.contour(preview.contourIndex);
-        if (source.enabled) {
-            LaserContour previewContour = source;
-            previewContour.leadIn.entryPoint = preview.entryPoint;
-            previewContour.leadIn.entryParam = preview.entryParam;
-            previewContour.leadIn.valid = true;
-            TopoDS_Edge previewEdge =
-                LaserToolpathBuilder::computeLeadInEdge(previewContour, length, angle);
-            if (!previewEdge.IsNull()) {
-                Handle(AIS_Shape) ais = scene->displayShape(previewEdge, false, false);
-                scene->setShapeColor(ais, yellow);
-                ais->SetWidth(2.5);
-                if (!ctx.IsNull()) ctx->Deactivate(ais);
-                m_leadInAis.append(ais);
-            }
-        }
-    }
+    Handle(AIS_Shape) ais = new AIS_Shape(leadEdge);
+    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
+    ctx->SetColor(ais, red, Standard_False);
+    ctx->SetWidth(ais, 2.0, Standard_False);
+    ctx->Deactivate(ais);
+    bundle.leadIn = ais;
 }
 
-void ToolpathRenderer::displayNormals(GuiDocument* gd, const LaserToolpath& tp)
+void ToolpathRenderer::rebuildNormalAis(GuiDocument* gd,
+                                        const LaserToolpath& tp,
+                                        int contourIndex)
 {
-    GraphicsScene* scene = gd->scene();
-    if (!scene) return;
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
-    const Quantity_Color amber(0.95, 0.55, 0.10, Quantity_TOC_RGB);
-    constexpr double kNormalLength = 5.0;
+    if (ctx.IsNull()) return;
+    if (contourIndex < 0 || contourIndex >= tp.contourCount()) return;
+    if (contourIndex >= m_bundles.size()) return;
 
-    for (int i = 0; i < tp.contourCount(); ++i) {
-        const LaserContour& contour = tp.contour(i);
-        if (!contour.enabled || contour.points.empty()) continue;
+    ContourAisBundle& bundle = m_bundles[contourIndex];
+    eraseAis(gd, bundle.normal);
 
-        BRep_Builder builder;
-        TopoDS_Compound compound;
-        builder.MakeCompound(compound);
-        bool hasSegments = false;
-        double accum = 0.0;
-        gp_Pnt prev;
-        bool hasPrev = false;
+    const LaserContour& contour = tp.contour(contourIndex);
+    if (!contour.enabled || contour.points.empty())
+        return;
 
-        for (const ToolpathPoint& point : contour.points) {
-            if (hasPrev) accum += prev.Distance(point.position);
-            const bool emitNow = !hasPrev || accum >= m_normalSampleStep;
-            if (emitNow) {
-                const gp_Pnt endPt(
-                    point.position.X() + point.normal.X() * kNormalLength,
-                    point.position.Y() + point.normal.Y() * kNormalLength,
-                    point.position.Z() + point.normal.Z() * kNormalLength);
-                BRepBuilderAPI_MakeEdge edgeMaker(point.position, endPt);
-                if (edgeMaker.IsDone()) {
-                    builder.Add(compound, edgeMaker.Edge());
-                    hasSegments = true;
-                }
-                accum = 0.0;
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    bool hasSegments = false;
+    double accum = 0.0;
+    gp_Pnt prev;
+    bool hasPrev = false;
+
+    for (const ToolpathPoint& point : contour.points) {
+        if (hasPrev) accum += prev.Distance(point.position);
+        const bool emitNow = !hasPrev || accum >= m_normalSampleStep;
+        if (emitNow) {
+            const gp_Pnt endPt(
+                point.position.X() + point.normal.X() * kNormalLength,
+                point.position.Y() + point.normal.Y() * kNormalLength,
+                point.position.Z() + point.normal.Z() * kNormalLength);
+            BRepBuilderAPI_MakeEdge edgeMaker(point.position, endPt);
+            if (edgeMaker.IsDone()) {
+                builder.Add(compound, edgeMaker.Edge());
+                hasSegments = true;
             }
-            prev = point.position;
-            hasPrev = true;
+            accum = 0.0;
         }
-        if (!hasSegments) continue;
-        Handle(AIS_Shape) ais = scene->displayShape(compound, false, false);
-        scene->setShapeColor(ais, amber);
-        ais->SetWidth(1.5);
-        if (!ctx.IsNull()) ctx->Deactivate(ais);
-        m_normalAis.append(ais);
+        prev = point.position;
+        hasPrev = true;
     }
+    if (!hasSegments)
+        return;
+
+    const Quantity_Color amber(0.95, 0.55, 0.10, Quantity_TOC_RGB);
+    Handle(AIS_Shape) ais = new AIS_Shape(compound);
+    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
+    ctx->SetColor(ais, amber, Standard_False);
+    ctx->SetWidth(ais, 1.8, Standard_False);
+    ctx->Deactivate(ais);
+    bundle.normal = ais;
+}
+
+void ToolpathRenderer::rebuildPreviewAis(GuiDocument* gd,
+                                         const LaserToolpath& tp,
+                                         const LeadInPreview& preview)
+{
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull()) return;
+    eraseAis(gd, m_previewLeadInAis);
+    m_previewContourIndex = -1;
+
+    if (!preview.valid
+        || preview.contourIndex < 0
+        || preview.contourIndex >= tp.contourCount()) {
+        return;
+    }
+
+    const LaserContour& source = tp.contour(preview.contourIndex);
+    if (!source.enabled)
+        return;
+
+    LaserContour previewContour = source;
+    previewContour.leadIn.entryPoint = preview.entryPoint;
+    previewContour.leadIn.entryParam = preview.entryParam;
+    previewContour.leadIn.valid = true;
+    TopoDS_Edge previewEdge = LaserToolpathBuilder::computeLeadInEdge(
+        previewContour, tp.globalLeadInLength(), tp.globalNormalAngle());
+    if (previewEdge.IsNull())
+        return;
+
+    const Quantity_Color yellow(0.95, 0.8, 0.1, Quantity_TOC_RGB);
+    Handle(AIS_Shape) ais = new AIS_Shape(previewEdge);
+    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
+    ctx->SetColor(ais, yellow, Standard_False);
+    ctx->SetWidth(ais, 2.5, Standard_False);
+    ctx->Deactivate(ais);
+    m_previewLeadInAis = ais;
+    m_previewContourIndex = preview.contourIndex;
+}
+
+void ToolpathRenderer::rebuildContourMirror()
+{
+    m_contourAis.clear();
+    m_contourAis.reserve(m_bundles.size());
+    for (const ContourAisBundle& bundle : m_bundles)
+        m_contourAis.append(bundle.contour);
+}
+
+void ToolpathRenderer::redraw(GuiDocument* gd)
+{
+    if (!gd)
+        return;
+    if (gd->hasView()) {
+        gd->view()->Redraw();
+        return;
+    }
+
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (!ctx.IsNull())
+        ctx->UpdateCurrentViewer();
 }
 
 } // namespace lcnc::view

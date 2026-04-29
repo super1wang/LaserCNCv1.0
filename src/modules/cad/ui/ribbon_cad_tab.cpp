@@ -9,9 +9,31 @@
 #include <SARibbonCategory.h>
 #include <SARibbonPanel.h>
 #include <QAction>
+#include <QActionGroup>
 #include <QIcon>
+#include <QMenu>
+
+#include <initializer_list>
 
 namespace lcnc::cad {
+
+namespace {
+
+QMenu* makeCommandMenu(SARibbonCategory* parent,
+                       const QString& title,
+                       const QIcon& icon,
+                       std::initializer_list<QAction*> actions)
+{
+    auto* menu = new QMenu(title, parent);
+    menu->setIcon(icon);
+    for (QAction* action : actions) {
+        if (action)
+            menu->addAction(action);
+    }
+    return menu;
+}
+
+} // namespace
 
 void registerCommands(CommandContainer* container)
 {
@@ -30,6 +52,25 @@ void registerCommands(CommandContainer* container)
     // Edit
     container->addCommand<CmdUndo>(CmdUndo::Name);
     container->addCommand<CmdRedo>(CmdRedo::Name);
+
+    // CAD — Sketch
+    container->addCommand<CmdNewSketch>(CmdNewSketch::Name);
+    container->addCommand<CmdFinishSketch>(CmdFinishSketch::Name);
+    container->addCommand<CmdCancelSketch>(CmdCancelSketch::Name);
+    container->addCommand<CmdSketchPoint>(CmdSketchPoint::Name);
+    container->addCommand<CmdSketchLine>(CmdSketchLine::Name);
+    container->addCommand<CmdSketchArc>(CmdSketchArc::Name);
+    container->addCommand<CmdSketchCircleTool>(CmdSketchCircleTool::Name);
+    container->addCommand<CmdSketchRectangleTool>(CmdSketchRectangleTool::Name);
+    container->addCommand<CmdSketchPolygon>(CmdSketchPolygon::Name);
+
+    // CAD — View modeling aids
+    container->addCommand<CmdToggleCadGrid>(CmdToggleCadGrid::Name);
+    container->addCommand<CmdToggleGridSnap>(CmdToggleGridSnap::Name);
+    container->addCommand<CmdSnapNone>(CmdSnapNone::Name);
+    container->addCommand<CmdSnapVertex>(CmdSnapVertex::Name);
+    container->addCommand<CmdSnapEdge>(CmdSnapEdge::Name);
+    container->addCommand<CmdSnapFace>(CmdSnapFace::Name);
 
     // CAD — Primitives
     container->addCommand<CmdCreateBox>(CmdCreateBox::Name);
@@ -65,49 +106,106 @@ void buildRibbonTab(SARibbonCategory* cat,
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::buildRibbonTab begin");
 
-    auto makeAct = [parent](const QString& label, const QString& iconPath) -> QAction* {
-        auto* a = new QAction(QIcon(iconPath), label, parent);
-        a->setStatusTip(QObject::tr("创建 ") + label);
-        return a;
-    };
+    // ── 建模 ─────────────────────────────────────────────────────────────
+    SARibbonPanel* panelModel = cat->addPanel(QObject::tr("建模"));
+    auto* menuPrimitive = makeCommandMenu(
+        cat,
+        QObject::tr("基本体"),
+        QIcon(":/icons/box.svg"),
+        {container->findAction(CmdCreateBox::Name),
+         container->findAction(CmdCreateCylinder::Name),
+         container->findAction(CmdCreateSphere::Name),
+         container->findAction(CmdCreateCone::Name),
+         container->findAction(CmdCreateTorus::Name)});
+    panelModel->addLargeMenu(menuPrimitive);
 
-    // ── 历史 ─────────────────────────────────────────────────────────────
-    SARibbonPanel* panelHist = cat->addPanel(QObject::tr("历史"));
-    panelHist->addLargeAction(container->findAction(CmdUndo::Name));
-    panelHist->addLargeAction(container->findAction(CmdRedo::Name));
-
-    // ── 基本体 ─────────────────────────────────────────────────────────────
-    SARibbonPanel* panelPrim = cat->addPanel(QObject::tr("基本体"));
-    panelPrim->addLargeAction(container->findAction(CmdCreateBox::Name));
-    panelPrim->addLargeAction(container->findAction(CmdCreateCylinder::Name));
-    panelPrim->addLargeAction(container->findAction(CmdCreateSphere::Name));
-    panelPrim->addSmallAction(container->findAction(CmdCreateCone::Name));
-    panelPrim->addSmallAction(container->findAction(CmdCreateTorus::Name));
+    auto* menuSketch = makeCommandMenu(
+        cat,
+        QObject::tr("草图"),
+        QIcon(":/icons/sketch.svg"),
+        {container->findAction(CmdNewSketch::Name),
+         container->findAction(CmdFinishSketch::Name),
+         container->findAction(CmdCancelSketch::Name)});
+    menuSketch->addSeparator();
+    if (auto* a = container->findAction(CmdSketchPoint::Name)) menuSketch->addAction(a);
+    if (auto* a = container->findAction(CmdSketchLine::Name)) menuSketch->addAction(a);
+    if (auto* a = container->findAction(CmdSketchArc::Name)) menuSketch->addAction(a);
+    if (auto* a = container->findAction(CmdSketchCircleTool::Name)) menuSketch->addAction(a);
+    if (auto* a = container->findAction(CmdSketchRectangleTool::Name)) menuSketch->addAction(a);
+    if (auto* a = container->findAction(CmdSketchPolygon::Name)) menuSketch->addAction(a);
+    panelModel->addLargeMenu(menuSketch);
 
     // ── 操作 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelOps = cat->addPanel(QObject::tr("操作"));
-    panelOps->addLargeAction(container->findAction(CmdMoveShape::Name));
-    panelOps->addLargeAction(container->findAction(CmdRotateShape::Name));
-    panelOps->addSmallAction(makeAct(QObject::tr("缩放"), QStringLiteral(":/icons/scale.svg")));
-    panelOps->addSmallAction(container->findAction(CmdBoolUnion::Name));
-    panelOps->addSmallAction(container->findAction(CmdBoolCut::Name));
-    panelOps->addSmallAction(container->findAction(CmdBoolCommon::Name));
-    panelOps->addSmallAction(container->findAction(CmdDeleteShape::Name));
-    panelOps->addSmallAction(container->findAction(CmdExplodeShape::Name));
+    auto* menuHistory = makeCommandMenu(
+        cat,
+        QObject::tr("历史"),
+        QIcon(":/icons/undo.svg"),
+        {container->findAction(CmdUndo::Name),
+         container->findAction(CmdRedo::Name)});
+    panelOps->addLargeMenu(menuHistory);
+
+    auto* menuTransform = makeCommandMenu(
+        cat,
+        QObject::tr("变换"),
+        QIcon(":/icons/move.svg"),
+        {container->findAction(CmdMoveShape::Name),
+         container->findAction(CmdRotateShape::Name)});
+    panelOps->addLargeMenu(menuTransform);
+
+    auto* menuBoolean = makeCommandMenu(
+        cat,
+        QObject::tr("布尔"),
+        QIcon(":/icons/bool_union.svg"),
+        {container->findAction(CmdBoolUnion::Name),
+         container->findAction(CmdBoolCut::Name),
+         container->findAction(CmdBoolCommon::Name)});
+    panelOps->addLargeMenu(menuBoolean);
+
+    auto* menuEdit = makeCommandMenu(
+        cat,
+        QObject::tr("编辑"),
+        QIcon(":/icons/close.svg"),
+        {container->findAction(CmdDeleteShape::Name),
+         container->findAction(CmdExplodeShape::Name)});
+    panelOps->addLargeMenu(menuEdit);
 
     // ── 测量 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelMeas = cat->addPanel(QObject::tr("测量"));
-    panelMeas->addLargeAction(container->findAction(CmdMeasureDistance::Name));
-    panelMeas->addSmallAction(container->findAction(CmdMeasureAngle::Name));
-    panelMeas->addSmallAction(container->findAction(CmdMeasureArea::Name));
+    auto* menuMeasure = makeCommandMenu(
+        cat,
+        QObject::tr("测量"),
+        QIcon(":/icons/measure_dist.svg"),
+        {container->findAction(CmdMeasureDistance::Name),
+         container->findAction(CmdMeasureAngle::Name),
+         container->findAction(CmdMeasureArea::Name)});
+    panelMeas->addLargeMenu(menuMeasure);
 
-    // ── 草图 (预留) ────────────────────────────────────────────────────────
-    SARibbonPanel* panelSketch = cat->addPanel(QObject::tr("草图"));
-    panelSketch->addLargeAction(makeAct(QObject::tr("新建草图"), QStringLiteral(":/icons/sketch.svg")));
-    panelSketch->addSmallAction(makeAct(QObject::tr("直线"),     QStringLiteral(":/icons/line.svg")));
-    panelSketch->addSmallAction(makeAct(QObject::tr("圆"),       QStringLiteral(":/icons/circle.svg")));
-    panelSketch->addSmallAction(makeAct(QObject::tr("圆弧"),     QStringLiteral(":/icons/arc.svg")));
-    panelSketch->addSmallAction(makeAct(QObject::tr("退出草图"), QStringLiteral(":/icons/exit_sketch.svg")));
+    // ── 辅助 ───────────────────────────────────────────────────────────────
+    SARibbonPanel* panelAssist = cat->addPanel(QObject::tr("辅助"));
+    auto* menuGrid = makeCommandMenu(
+        cat,
+        QObject::tr("网格"),
+        QIcon(":/icons/coordinate.svg"),
+        {container->findAction(CmdToggleCadGrid::Name),
+         container->findAction(CmdToggleGridSnap::Name)});
+    panelAssist->addLargeMenu(menuGrid);
+
+    auto* snapGroup = new QActionGroup(parent);
+    snapGroup->setExclusive(true);
+    snapGroup->addAction(container->findAction(CmdSnapNone::Name));
+    snapGroup->addAction(container->findAction(CmdSnapVertex::Name));
+    snapGroup->addAction(container->findAction(CmdSnapEdge::Name));
+    snapGroup->addAction(container->findAction(CmdSnapFace::Name));
+    auto* menuSnap = makeCommandMenu(
+        cat,
+        QObject::tr("抓取"),
+        QIcon(":/icons/shape.svg"),
+        {container->findAction(CmdSnapNone::Name),
+         container->findAction(CmdSnapVertex::Name),
+         container->findAction(CmdSnapEdge::Name),
+         container->findAction(CmdSnapFace::Name)});
+    panelAssist->addLargeMenu(menuSnap);
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::buildRibbonTab end");
 }

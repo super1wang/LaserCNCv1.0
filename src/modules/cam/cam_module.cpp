@@ -1836,14 +1836,19 @@ void CamModule::setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double 
     c.leadIn.entryParam = entryParam;
     c.leadIn.valid = true;
 
-    refreshToolpathDisplay();
+    lcnc::view::ToolpathRenderer::LeadInPreview preview{
+        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+    };
+    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 void CamModule::setLeadInLength(double mm)
 {
     m_toolpath.setGlobalLeadInLength(mm);
-    if (m_toolpathRenderer->isVisible())
-        refreshToolpathDisplay();
+    lcnc::view::ToolpathRenderer::LeadInPreview preview{
+        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+    };
+    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 double CamModule::leadInLength() const
@@ -1854,8 +1859,10 @@ double CamModule::leadInLength() const
 void CamModule::setNormalAngle(double deg)
 {
     m_toolpath.setGlobalNormalAngle(deg);
-    if (m_toolpathRenderer->isVisible())
-        refreshToolpathDisplay();
+    lcnc::view::ToolpathRenderer::LeadInPreview preview{
+        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+    };
+    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 double CamModule::normalAngle() const
@@ -1886,7 +1893,7 @@ void CamModule::setShowNormals(bool on)
     if (m_toolpathRenderer->showNormals() == on)
         return;
     m_toolpathRenderer->setShowNormals(on);
-    refreshToolpathDisplay();
+    m_toolpathRenderer->refreshNormals(machineGuiDocument(), m_toolpath, kinematics());
 }
 
 double CamModule::normalSampleStep() const
@@ -1903,7 +1910,7 @@ void CamModule::setNormalSampleStep(double mm)
         return;
     m_toolpathRenderer->setNormalSampleStep(mm);
     if (m_toolpathRenderer->showNormals())
-        refreshToolpathDisplay();
+        m_toolpathRenderer->refreshNormals(machineGuiDocument(), m_toolpath, kinematics());
 }
 
 bool CamModule::resolveLeadInHit(WidgetOccView* occView,
@@ -1939,7 +1946,10 @@ bool CamModule::updateLeadInPreview(WidgetOccView* occView, const QPoint& screen
     m_previewLeadInPoint = entryPoint;
     m_previewLeadInParam = entryParam;
     m_previewLeadInValid = true;
-    refreshToolpathDisplay();
+    lcnc::view::ToolpathRenderer::LeadInPreview preview{
+        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+    };
+    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
     return true;
 }
 
@@ -1959,7 +1969,7 @@ bool CamModule::commitLeadInPreview(WidgetOccView* occView, const QPoint& screen
     m_previewLeadInContour = -1;
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
-    refreshToolpathDisplay();
+    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics());
     return true;
 }
 
@@ -1971,7 +1981,7 @@ void CamModule::cancelLeadInPreview()
     m_previewLeadInContour = -1;
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
-    refreshToolpathDisplay();
+    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics());
 }
 
 void CamModule::setContourEnabled(int contourIdx, bool enabled)
@@ -1984,8 +1994,10 @@ void CamModule::setContourEnabled(int contourIdx, bool enabled)
         return;
 
     contour.enabled = enabled;
-    if (m_toolpathRenderer->isVisible())
-        refreshToolpathDisplay();
+    lcnc::view::ToolpathRenderer::LeadInPreview preview{
+        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+    };
+    m_toolpathRenderer->refreshContour(machineGuiDocument(), m_toolpath, kinematics(), contourIdx, preview);
 }
 
 void CamModule::reorderContours(const QList<int>& order)
@@ -2009,6 +2021,8 @@ void CamModule::reorderContours(const QList<int>& order)
     }
 
     m_toolpath.contours() = std::move(reordered);
+    if (m_toolpathRenderer->isVisible())
+        refreshToolpathDisplay();
 }
 
 void CamModule::recalcToolpath()
@@ -2061,6 +2075,8 @@ void CamModule::setToolpathVisible(bool visible)
 {
     if (m_toolpathRenderer->isVisible() == visible) return;
     m_toolpathRenderer->setVisible(machineGuiDocument(), visible);
+    if (visible)
+        refreshToolpathDisplay();
     emit toolpathVisibilityChanged(visible);
 }
 
@@ -2109,7 +2125,7 @@ void CamModule::refreshToolpathDisplay()
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
-    m_toolpathRenderer->refresh(machineGuiDocument(), m_toolpath, preview);
+    m_toolpathRenderer->refresh(machineGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 void CamModule::eraseToolpathDisplay()
@@ -2215,13 +2231,19 @@ QStringList CamModule::selectedEntries() const
 
 void CamModule::syncSelectionFromView()
 {
-    emit selectionChanged(selectedEntries());
+    GuiDocument* gd = machineGuiDocument();
+    emit selectionChanged(gd ? gd->selectedEntries() : QStringList{});
+
+    const int contourIndex = m_toolpathRenderer->selectedContourIndex(gd);
+    if (contourIndex >= 0)
+        emit toolpathContourSelected(contourIndex);
 }
 
 void CamModule::refreshMachineTransforms()
 {
     if (auto* gd = machineGuiDocument()) {
         gd->updateAxisTransforms();
+        m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
         updateAxisGuideTransforms();
         if (gd->hasView())
             gd->view()->Redraw();
@@ -2243,6 +2265,7 @@ void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
     }
     if (auto* gd = machineGuiDocument()) {
         gd->updateAxisTransforms();
+        m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
         updateAxisGuideTransforms();
         if (gd->hasView())
             gd->view()->Redraw();

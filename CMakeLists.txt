@@ -34,6 +34,10 @@ set(SRCS_CORE
     src/core/algorithms/cad/primitives.cpp
     src/core/algorithms/cad/boolean_ops.cpp
     src/core/algorithms/cad/measure.cpp
+    src/core/algorithms/cad/sketch.cpp
+    src/core/algorithms/cad/sketch_constraints.cpp
+    src/core/algorithms/cad/features.cpp
+    src/core/algorithms/cad/transform_ops.cpp
     src/core/algorithms/cam/face_classifier.cpp
     src/core/algorithms/cam/laser_toolpath.cpp
     src/core/algorithms/cam/machine_model_compressor.cpp
@@ -56,14 +60,35 @@ set(SRCS_VIEW
     src/view/toolpath_renderer.cpp
     src/view/machine_guide_renderer.cpp
     src/view/world_axes_renderer.cpp
+    src/view/sketch_overlay_renderer.cpp
+    src/view/transform_gizmo_renderer.cpp
 )
 
 set(SRCS_MODULES
     src/modules/cad/cad_module.cpp
+    src/modules/cad/document/cad_document_state.cpp
+    src/modules/cad/document/cad_document_registry.cpp
+    src/modules/cad/services/cad_modeling_session.cpp
+    src/modules/cad/services/sketch_manager.cpp
     src/modules/cad/services/shape_service.cpp
+    src/modules/cad/selection/cad_selection_resolver.cpp
+    src/modules/cad/sketch/sketch_serializer.cpp
+    src/modules/cad/task/cad_command_dispatcher.cpp
+    src/modules/cad/task/cad_tool_registry.cpp
+    src/modules/cad/task/cad_tool_filter.cpp
     src/modules/cad/commands/commands_file.cpp
     src/modules/cad/commands/commands_edit.cpp
+    src/modules/cad/commands/command_helpers.cpp
     src/modules/cad/commands/commands_cad.cpp
+    src/modules/cad/commands/commands_cad_sketch.cpp
+    src/modules/cad/commands/commands_cad_view.cpp
+    src/modules/cad/commands/commands_cad_primitives.cpp
+    src/modules/cad/commands/commands_cad_transform.cpp
+    src/modules/cad/commands/commands_cad_boolean.cpp
+    src/modules/cad/commands/commands_cad_measure.cpp
+    src/modules/cad/commands/commands_cad_delete.cpp
+    src/modules/cad/ui/widget_cad_task_panel.cpp
+    src/modules/cad/ui/cad_model_tree_adapter.cpp
     src/modules/cad/ui/widget_model_tree.cpp
     src/modules/cad/ui/ribbon_cad_tab.cpp
     src/modules/cam/cam_module.cpp
@@ -119,7 +144,7 @@ set(OCC_LIBS
     # Modeling Data
     TKG2d TKG3d TKGeomBase TKBRep
     # Modeling Algorithms
-    TKGeomAlgo TKTopAlgo TKPrim TKBO TKShHealing TKBool TKHLR TKMesh
+    TKGeomAlgo TKTopAlgo TKPrim TKBO TKShHealing TKBool TKOffset TKHLR TKMesh
     # Visualization
     TKService TKV3d TKOpenGl TKMeshVS
     # Application Framework (XDE/XCAF)
