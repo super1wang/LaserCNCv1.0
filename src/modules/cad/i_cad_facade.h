@@ -29,11 +29,11 @@ public:
     /// 用于让调用方挂接信号槽（CadModule 是 QObject）。
     virtual QObject* asQObject() = 0;
 
-    /// 切换 3D 视图至工件文档。@p id 缺省时使用当前活动文档。
+    /// 切换 3D 视图至工件工作区。@p id 缺省时使用当前项目文档。
     virtual void requestWorkpieceView(DocumentId id = kInvalidDocumentId) = 0;
 
-    /// 当前活动工件文档 ID（无活动时返回 @c kInvalidDocumentId）。
-    virtual DocumentId activeDocumentId() const = 0;
+    /// 当前项目的工件文档 ID（无项目时返回 @c kInvalidDocumentId）。
+    virtual DocumentId workpieceDocumentId() const = 0;
 };
 
 } // namespace lcnc

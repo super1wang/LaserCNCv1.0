@@ -15,7 +15,7 @@ enum class SketchUsageState {
     UsedByFeature = 1 ///< Already consumed by an applied feature; auto-hidden.
 };
 
-/// One persisted sketch attached to a workpiece document.
+/// One persisted sketch attached to the project Workpiece section.
 struct SketchRecord {
     int id{0};                           ///< Manager-assigned positive id.
     QString name;                        ///< Display name (\"草图 N\").

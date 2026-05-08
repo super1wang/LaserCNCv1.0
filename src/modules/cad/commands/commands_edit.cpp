@@ -1,5 +1,7 @@
 #include "modules/cad/commands/commands_edit.h"
 
+#include "app/app_command_context.h"
+
 #include <QAction>
 #include <QKeySequence>
 
@@ -17,12 +19,12 @@ CmdUndo::CmdUndo(IAppContext* ctx) : CommandBase(ctx)
 
 bool CmdUndo::isEnabled() const
 {
-    return context()->cadModule()->canUndo(context()->activeDocumentId());
+    return context()->cadModule()->canUndo(context()->workpieceDocumentId());
 }
 
 void CmdUndo::execute()
 {
-    context()->cadModule()->undo(context()->activeDocumentId());
+    context()->cadModule()->undo(context()->workpieceDocumentId());
     context()->updateCommandStates();
 }
 
@@ -37,11 +39,11 @@ CmdRedo::CmdRedo(IAppContext* ctx) : CommandBase(ctx)
 
 bool CmdRedo::isEnabled() const
 {
-    return context()->cadModule()->canRedo(context()->activeDocumentId());
+    return context()->cadModule()->canRedo(context()->workpieceDocumentId());
 }
 
 void CmdRedo::execute()
 {
-    context()->cadModule()->redo(context()->activeDocumentId());
+    context()->cadModule()->redo(context()->workpieceDocumentId());
     context()->updateCommandStates();
 }

@@ -38,11 +38,11 @@ public:
 };
 
 /**
- * @brief Mount a workpiece document onto a machine axis.
+ * @brief Mount the current project workpiece onto a machine axis.
  *
- * Shows a dialog where the user picks a workpiece document (from all open
- * workpiece docs) and a target axis.  All shapes are merged into one compound,
- * added to the machine document, and mounted to the chosen axis.
+ * Shows a dialog where the user confirms the current workpiece and target axis.
+ * Existing Workpiece labels remain in the project document; the command only
+ * writes axis mount relations and moves geometry to the configured install point.
  */
 class CmdMountWorkpiece : public CommandBase
 {

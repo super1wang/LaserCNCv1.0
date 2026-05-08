@@ -1,5 +1,7 @@
 #include "modules/cad/commands/commands_file.h"
 
+#include "app/app_command_context.h"
+
 #include <QAction>
 #include <QFileDialog>
 
@@ -29,7 +31,7 @@ CmdOpenDocument::CmdOpenDocument(IAppContext* ctx)
 {
     auto* a = new QAction(QIcon(":/icons/open.svg"), tr("打开"), this);
     a->setShortcut(QKeySequence::Open);
-    a->setStatusTip(tr("打开 XCAF / STEP / IGES 文件"));
+    a->setStatusTip(tr("打开 LaserCNC 项目或工件模型"));
     setAction(a);
 }
 
@@ -38,7 +40,8 @@ void CmdOpenDocument::execute()
     LCNC_DEBUG(lcnc::LogCode::Generic, "CmdOpenDocument::execute begin");
     const QString path = QFileDialog::getOpenFileName(
         nullptr, tr("打开文件"), QString(),
-        tr("所有支持格式 (*.stp *.step *.igs *.iges *.stl *.brep);;"
+          tr("所有支持格式 (*.lcnc project.toml *.stp *.step *.igs *.iges *.stl *.brep);;"
+              "LaserCNC 项目 (*.lcnc project.toml);;"
            "STEP (*.stp *.step);;"
            "IGES (*.igs *.iges);;"
            "STL (*.stl);;"
@@ -66,18 +69,18 @@ CmdSaveDocument::CmdSaveDocument(IAppContext* ctx)
 {
     auto* a = new QAction(QIcon(":/icons/save.svg"), tr("保存"), this);
     a->setShortcut(QKeySequence::Save);
-    a->setStatusTip(tr("保存当前文档"));
+    a->setStatusTip(tr("保存当前项目"));
     setAction(a);
 }
 
 bool CmdSaveDocument::isEnabled() const
 {
-    return context()->activeDocument() != nullptr;
+    return context()->workpieceDocument() != nullptr;
 }
 
 void CmdSaveDocument::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc) return;
     if (doc->filePath().isEmpty()) {
         // Delegate to Save As
@@ -99,16 +102,16 @@ CmdSaveDocumentAs::CmdSaveDocumentAs(IAppContext* ctx)
 
 bool CmdSaveDocumentAs::isEnabled() const
 {
-    return context()->activeDocument() != nullptr;
+    return context()->workpieceDocument() != nullptr;
 }
 
 void CmdSaveDocumentAs::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc) return;
     const QString path = QFileDialog::getSaveFileName(
         nullptr, tr("另存为"), doc->name(),
-        tr("XCAF 二进制 (*.xcaf);;XCAF XML (*.xml)"));
+        tr("LaserCNC 项目 (*.lcnc);;STEP (*.stp *.step)"));
     if (path.isEmpty()) return;
     context()->cadModule()->saveDocument(doc->id(), path);
 }
@@ -129,7 +132,7 @@ void CmdImportStep::execute()
         tr("STEP 文件 (*.stp *.step)"));
     if (path.isEmpty()) return;
 
-    context()->cadModule()->importStep(path, context()->activeDocumentId());
+    context()->cadModule()->importStep(path, context()->workpieceDocumentId());
 }
 
 // ── CmdImportStl ───────────────────────────────────────────────────────────────
@@ -148,7 +151,7 @@ void CmdImportStl::execute()
         tr("STL 文件 (*.stl)"));
     if (path.isEmpty()) return;
 
-    context()->cadModule()->importStl(path, context()->activeDocumentId());
+    context()->cadModule()->importStl(path, context()->workpieceDocumentId());
 }
 
 // ── CmdExportStep ──────────────────────────────────────────────────────────────
@@ -161,7 +164,7 @@ CmdExportStep::CmdExportStep(IAppContext* ctx)
 
 bool CmdExportStep::isEnabled() const
 {
-    return context()->activeDocument() != nullptr;
+    return context()->workpieceDocument() != nullptr;
 }
 
 void CmdExportStep::execute()
@@ -171,7 +174,7 @@ void CmdExportStep::execute()
         tr("STEP 文件 (*.stp *.step)"));
     if (path.isEmpty()) return;
 
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc) return;
 
     context()->cadModule()->exportStep(doc->id(), path);
@@ -188,12 +191,12 @@ CmdCloseDocument::CmdCloseDocument(IAppContext* ctx)
 
 bool CmdCloseDocument::isEnabled() const
 {
-    return context()->activeDocument() != nullptr;
+    return context()->workpieceDocument() != nullptr;
 }
 
 void CmdCloseDocument::execute()
 {
-    DocumentId id = context()->activeDocumentId();
+    DocumentId id = context()->workpieceDocumentId();
     if (id == kInvalidDocumentId) return;
     context()->cadModule()->closeDocument(id);
     context()->updateCommandStates();

@@ -1,12 +1,12 @@
 #pragma once
 
 #include <SARibbonMainWindow.h>
-#include "core/document/lcnc_application.h"
+#include "core/project/project_types.h"
+#include "app/project_explorer_model.h"
 
 class AppContext;
 class CommandContainer;
 class WidgetOccView;
-class WidgetModelTree;
 class WidgetMachinePanel;
 class WidgetLaserControl;
 class WidgetToolpathPanel;
@@ -14,13 +14,14 @@ class DialogTaskManager;
 namespace lcnc::cad::ui { class WidgetCadTaskPanel; }
 namespace lcnc::cam::ui { class DialogAxisCalibrationWizard; }
 class GraphicsScene;
-class QTabWidget;
 class QStackedWidget;
 class QSplitter;
 class QLabel;
 class QTimer;
+class QTabWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QWidget;
 
 /**
  * @brief The application's main window.
@@ -70,8 +71,8 @@ private:
     void buildCadTab(class SARibbonCategory* cat);
     void buildCamTab(class SARibbonCategory* cat);
     void buildLaserTab(class SARibbonCategory* cat);
-    void rebuildDocumentTree();
-    void rebuildContourListWidget();
+    void rebuildProjectExplorer();
+    void handleProjectExplorerRowsMoved();
     void restorePersistedCamState();
     void syncMachineWorkspaceUi();
     void syncMachineWorkspaceUiInternal(bool rebuildTree);
@@ -95,18 +96,21 @@ private:
     void handleCadSketchOverlayPicked(const QString& key);
     /// Move an active sketch overlay item by a local sketch-plane delta.
     void handleCadSketchOverlayDrag(const QString& key, double deltaX, double deltaY);
-    /// Route 3D view to the machine workspace document.
+    /// Route 3D view to the machine workspace.
     void showMachineView();
-    /// Route 3D view to the specified workpiece document (defaults to active).
+    /// Route CAD context through the unified machine 3D view (defaults to active workpiece).
     void showWorkpieceView(DocumentId id = kInvalidDocumentId);
 
     // ── Slots ─────────────────────────────────────────────────────────────────
-    void onLeftTabChanged(int index);
-    void onDocumentAdded(DocumentId id);
-    void onDocumentClosed(DocumentId id);
-    void onActiveDocumentChanged(DocumentId id);
-    void onDocumentModified(DocumentId id);
-    void onDocumentTreeItemClicked(QTreeWidgetItem* item, int column);
+    void onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);
+    void onProjectExplorerItemChanged(QTreeWidgetItem* item, int column);
+    void onProjectExplorerContextMenuRequested(const QPoint& pos);
+    void onProjectReset();
+    void onProjectDomainChanged(lcnc::ProjectDomain domain);
+    void selectProjectExplorerContour(int contourIndex);
+    void selectProjectExplorerContourById(lcnc::cam::ContourId contourId, int fallbackIndex = -1);
+    void selectProjectExplorerContours(const QList<int>& contourIndexes);
+    void selectProjectExplorerEntries(DocumentId docId, const QStringList& entries, bool cadOnly);
 
     // ── Members ───────────────────────────────────────────────────────────────
     AppContext*        m_appContext{nullptr};
@@ -115,12 +119,10 @@ private:
     // Widgets
     QSplitter*         m_splitter{nullptr};
     QTabWidget*        m_leftTabs{nullptr};
+    QTreeWidget*       m_projectExplorerTree{nullptr};
+    QWidget*           m_processLeftPanel{nullptr};
     WidgetOccView*     m_occView{nullptr};
     QStackedWidget*    m_rightStack{nullptr};
-    WidgetModelTree*   m_modelTree{nullptr};
-    QTreeWidget*       m_documentTree{nullptr};
-    QTreeWidget*       m_contourListWidget{nullptr};  ///< contour list in "刀路" tab (drag-reorder)
-    QTreeWidget*       m_processTree{nullptr};
     WidgetMachinePanel*   m_machinePanel{nullptr};
     lcnc::cad::ui::WidgetCadTaskPanel* m_cadTaskPanel{nullptr};
     WidgetToolpathPanel*   m_toolpathPanel{nullptr};
@@ -135,4 +137,7 @@ private:
     QTimer* m_machineRefreshTimer{nullptr};
     QString m_pendingCalibrationTarget;
     lcnc::cam::ui::DialogAxisCalibrationWizard* m_axisCalibWizard{nullptr};
+    lcnc::app::ProjectExplorerSnapshot m_projectExplorerSnapshot;
+    bool m_machineWorkspaceActive{false};
+    bool m_blockProjectExplorerSignals{false};
 };

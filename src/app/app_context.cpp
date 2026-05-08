@@ -1,7 +1,7 @@
 #include "app/app_context.h"
 #include "core/kernel/kernel.h"
 #include "app/main_window.h"
-#include "core/document/lcnc_application.h"
+#include "core/project/lcnc_project_manager.h"
 #include "core/task/task_manager.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
@@ -14,34 +14,47 @@ AppContext::AppContext(MainWindow* mainWindow, QObject* parent)
     , m_mainWindow(mainWindow)
 {}
 
-LcncApplication* AppContext::app()    const { return lcnc::Kernel::current().app(); }
+lcnc::LcncProjectManager* AppContext::projectManager() const { return lcnc::Kernel::current().projectManager(); }
 GuiApplication*  AppContext::guiApp() const { return lcnc::Kernel::current().guiApp();  }
 TaskManager*     AppContext::taskMgr()const { return lcnc::Kernel::current().taskManager();      }
 
-DocumentId AppContext::activeDocumentId() const
+GuiDocument* AppContext::workspaceGuiDocument() const
 {
-    return lcnc::Kernel::current().app()->activeDocumentId();
+    return lcnc::Kernel::current().guiApp()->workspaceGuiDocument();
 }
 
-LcncDocument* AppContext::activeDocument() const
+DocumentId AppContext::workpieceDocumentId() const
 {
-    return lcnc::Kernel::current().app()->activeDocument();
+    return projectManager()->workpieceDocumentId();
 }
 
-GuiDocument* AppContext::activeGuiDocument() const
+DocumentId AppContext::machineDocumentId() const
 {
-    return lcnc::Kernel::current().guiApp()->activeGuiDocument();
+    return projectManager()->machineDocumentId();
+}
+
+DocumentId AppContext::camDocumentId() const
+{
+    return projectManager()->camDocumentId();
+}
+
+LcncDocument* AppContext::workpieceDocument() const
+{
+    return projectManager()->workpieceDocument();
 }
 
 LcncDocument* AppContext::machineDocument() const
 {
-    return lcnc::Kernel::current().app()->machineDocument();
+    if (CamModule* cam = camModule())
+        return cam->machineDocument();
+    return projectManager()->machineDocument();
 }
 
-GuiDocument* AppContext::machineGuiDocument() const
+LcncDocument* AppContext::camDocument() const
 {
-    DocumentId id = lcnc::Kernel::current().app()->machineDocumentId();
-    return lcnc::Kernel::current().guiApp()->guiDocument(id);
+    if (CamModule* cam = camModule())
+        return cam->camDocument();
+    return projectManager()->camDocument();
 }
 
 WidgetOccView* AppContext::occView() const

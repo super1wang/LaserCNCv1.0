@@ -1,7 +1,7 @@
 #pragma once
 
+#include "core/settings/app_settings.h"
 #include "core/settings/toml_config.h"
-#include "view/render_quality.h"
 
 #include <QMap>
 #include <QString>
@@ -12,7 +12,7 @@
  * @brief CAM 模块持久化配置（cam.toml）。
  *
  * 字段：
- *   - 全局：machineModelPath / machinePreset / machineRenderQuality
+ *   - 全局：machineModelPath / machinePreset / machineRenderQualityPreset
  *   - [toolpath]：leadInLength / normalAngle / deflection / smoothAngle /
  *     useFaceClassification / showNormals / normalSampleStep
  *   - machineProfile（按机台 absolute 路径分组，array of tables）：
@@ -43,8 +43,11 @@ public:
     QString machinePreset() const { return m_machinePreset; }
     void setMachinePreset(const QString& preset);
 
-    MachineRenderQuality machineRenderQuality() const { return m_machineRenderQuality; }
-    void setMachineRenderQuality(MachineRenderQuality quality);
+    lcnc::RenderQualityPreset machineRenderQualityPreset() const { return m_machineRenderQualityPreset; }
+    void setMachineRenderQualityPreset(lcnc::RenderQualityPreset quality);
+
+    bool autoInstallWorkpiece() const { return m_autoInstallWorkpiece; }
+    void setAutoInstallWorkpiece(bool enabled);
 
     double leadInLength() const { return m_leadInLength; }
     void setLeadInLength(double mm);
@@ -139,7 +142,8 @@ private:
 
     QString m_machineModelPath;
     QString m_machinePreset;
-    MachineRenderQuality m_machineRenderQuality{MachineRenderQuality::Medium};
+    lcnc::RenderQualityPreset m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
+    bool m_autoInstallWorkpiece{true};
     double m_leadInLength{5.0};
     double m_normalAngle{0.0};
     double m_deflection{0.1};

@@ -23,7 +23,7 @@ public:
     /// 用于让调用方挂接 CamModule 的 Qt 信号。
     virtual QObject* asQObject() = 0;
 
-    /// 切换 3D 视图至机台文档（载入并定位）。
+    /// 切换 3D 视图至机台工作区（载入并定位）。
     virtual void requestMachineView() = 0;
 
     /// 模块持有的持久化配置（cam.toml）。

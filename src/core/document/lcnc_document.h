@@ -16,12 +16,14 @@
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 
+namespace lcnc { class LcncProjectManager; }
+
 /**
- * @brief Extends TDocStd_Document with LaserCNC-specific metadata.
+ * @brief OCC/XCAF-backed entity storage used by LaserCNC data domains.
  *
- * Holds the XCAF data tree, undo/redo state, and entity categorisation
- * (Workpiece, Machine, Auxiliary). All CAD data is stored via the
- * XCAFDoc_ShapeTool / ColorTool layers as TDF_Label entries.
+ * Holds the XCAF data tree, undo/redo state, and document-local entity tags.
+ * Project-level identity and domain ownership live in LcncProjectSession /
+ * LcncProjectManager instead of this storage container.
  */
 class LcncDocument : public TDocStd_Document
 {
@@ -31,7 +33,8 @@ public:
     enum class EntityKind : int {
         Workpiece  = 0,
         Machine    = 1,
-        Auxiliary  = 2
+        Auxiliary  = 2,
+        Cam        = 3
     };
 
     // ── Identity ─────────────────────────────────────────────────────────────
@@ -47,10 +50,13 @@ public:
     Handle(XCAFDoc_ShapeTool) shapeTool() const;
     Handle(XCAFDoc_ColorTool) colorTool() const;
 
-    // ── Entity management ────────────────────────────────────────────────────
-    /// @return group root label for the given category
-    TDF_Label entityGroup(EntityKind kind) const;
+    /// Remove all entities of one category from the project document.
+    void clearEntityKind(EntityKind kind);
 
+    /// Reset all project geometry, in-memory trees, and kinematic bindings.
+    void clearProjectData();
+
+    // ── Entity management ────────────────────────────────────────────────────
     /// Create a new named shape entity under the given category
     TDF_Label addShapeEntity(const TopoDS_Shape& shape,
                              const QString&      name,
@@ -112,7 +118,7 @@ public:
     const QList<ShapeTreeNode>& entityTree(EntityKind kind) const;
 
 private:
-    friend class LcncApplication;
+    friend class lcnc::LcncProjectManager;
 
     LcncDocument(int id, const QString& name);
 
@@ -123,14 +129,18 @@ private:
     QString m_filePath;
 
     // Category group labels (top-level organising nodes)
+    TDF_Label m_projectGroup;
     TDF_Label m_workpieceGroup;
     TDF_Label m_machineGroup;
+    TDF_Label m_camGroup;
+    TDF_Label m_processGroup;
     TDF_Label m_auxiliaryGroup;
 
     MachineKinematics* m_kinematics{nullptr};  ///< owned by this document
 
     QList<ShapeTreeNode> m_machineTree;    ///< import hierarchy for machine entities
     QList<ShapeTreeNode> m_workpieceTree;  ///< import hierarchy for workpiece entities
+    QList<ShapeTreeNode> m_camTree;        ///< sparse CAM OCC geometry, e.g. contours
 
     /// Tree snapshot saved at the start of each XCAF command, mirroring the
     /// XCAF undo stack so that the in-memory Qt trees can be restored on
@@ -138,6 +148,7 @@ private:
     struct TreeSnapshot {
         QList<ShapeTreeNode> workpieceTree;
         QList<ShapeTreeNode> machineTree;
+        QList<ShapeTreeNode> camTree;
     };
     QList<TreeSnapshot> m_treeUndoStack;
     QList<TreeSnapshot> m_treeRedoStack;

@@ -2,6 +2,7 @@
 #include "modules/cam/cam_module.h"
 #include "view/toolpath_renderer.h"
 #include "view/machine_guide_renderer.h"
+#include "modules/cam/services/cam_data_manager.h"
 #include "modules/cam/services/toolpath_simulator.h"
 #include "modules/cam/services/machine_axis_detector.h"
 #include "modules/cam/services/machine_io.h"
@@ -11,7 +12,6 @@
 
 #include "modules/cam/settings/cam_config.h"
 #include "core/algorithms/cam/face_classifier.h"
-#include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kinematics/machine_kinematics.h"
@@ -20,6 +20,7 @@
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/service_registry.h"
 #include "core/logging/logger.h"
+#include "core/project/lcnc_project_manager.h"
 #include "core/task/task_manager.h"
 #include "core/document/xcaf_utils.h"
 #include "view/gui_application.h"
@@ -31,7 +32,6 @@
 #include <QPoint>
 #include <QSignalBlocker>
 #include <QTimer>
-#include <QSet>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -226,15 +226,18 @@ CamModule::CamModule(QObject* parent)
     : QObject(parent)
     , m_toolpathRenderer(std::make_unique<lcnc::view::ToolpathRenderer>())
     , m_guideRenderer(std::make_unique<lcnc::view::MachineGuideRenderer>())
+    , m_camData(std::make_unique<lcnc::cam::CamDataManager>())
+    , m_toolpath(m_camData->toolpath())
 {
     // 加载持久化配置（首次启动会自动迁移旧版 CamConfig.json -> cam.toml）。
     m_config.loadDefault();
 
-    lcnc::Kernel::current().app()->ensureMachineDocument();
+    auto* project = lcnc::Kernel::current().projectManager();
+    project->ensureProject();
 
     CamConfig& config = m_config;
     m_machineModelPath = config.machineModelPath();
-    m_machineRenderQuality = config.machineRenderQuality();
+    m_machineRenderQualityPreset = config.machineRenderQualityPreset();
     m_toolpath.setGlobalLeadInLength(config.leadInLength());
     m_toolpath.setGlobalNormalAngle(config.normalAngle());
     m_deflection = config.deflection();
@@ -256,10 +259,10 @@ CamModule::CamModule(QObject* parent)
     connect(m_simulator.get(), &lcnc::cam::ToolpathSimulator::simulationFinished,
             this, &CamModule::simulationFinished);
 
-    connect(lcnc::Kernel::current().app(), &LcncApplication::documentModified,
-            this, [this](DocumentId id) {
-                if (id == machineDocumentId()) {
-                    // 机台文档变更（构型切换/重新装载）后同步 pose 的轴集合
+    connect(project, &lcnc::LcncProjectManager::domainDataChanged,
+            this, [this](lcnc::ProjectDomain domain) {
+                if (domain == lcnc::ProjectDomain::Machine) {
+                    // 项目工作区变更（构型切换/重新装载）后同步 pose 的轴集合
                     if (m_pose && m_pose->kinematics() != kinematics())
                         m_pose->setKinematics(kinematics());
                     emit machineWorkspaceChanged();
@@ -289,21 +292,31 @@ CamModule::CamModule(QObject* parent)
     });
 }
 
-// ── Machine Document ──────────────────────────────────────────────────────────
+// ── Domain documents ──────────────────────────────────────────────────────────
 
 LcncDocument* CamModule::machineDocument() const
 {
-    return lcnc::Kernel::current().app()->machineDocument();
-}
-
-GuiDocument* CamModule::machineGuiDocument() const
-{
-    return lcnc::Kernel::current().guiApp()->machineGuiDocument();
+    return lcnc::Kernel::current().projectManager()->machineDocument();
 }
 
 DocumentId CamModule::machineDocumentId() const
 {
-    return lcnc::Kernel::current().app()->machineDocumentId();
+    return lcnc::Kernel::current().projectManager()->machineDocumentId();
+}
+
+LcncDocument* CamModule::camDocument() const
+{
+    return lcnc::Kernel::current().projectManager()->camDocument();
+}
+
+DocumentId CamModule::camDocumentId() const
+{
+    return lcnc::Kernel::current().projectManager()->camDocumentId();
+}
+
+GuiDocument* CamModule::workspaceGuiDocument() const
+{
+    return lcnc::Kernel::current().guiApp()->workspaceGuiDocument();
 }
 
 MachineKinematics* CamModule::kinematics() const
@@ -335,18 +348,18 @@ void CamModule::setMachineModelPath(const QString& filePath)
     m_config.setMachineModelPath(m_machineModelPath);
 }
 
-MachineRenderQuality CamModule::machineRenderQuality() const
+lcnc::RenderQualityPreset CamModule::machineRenderQualityPreset() const
 {
-    return m_machineRenderQuality;
+    return m_machineRenderQualityPreset;
 }
 
-void CamModule::setMachineRenderQuality(MachineRenderQuality quality)
+void CamModule::setMachineRenderQualityPreset(lcnc::RenderQualityPreset quality)
 {
-    if (m_machineRenderQuality == quality)
+    if (m_machineRenderQualityPreset == quality)
         return;
 
-    m_machineRenderQuality = quality;
-    m_config.setMachineRenderQuality(quality);
+    m_machineRenderQualityPreset = quality;
+    m_config.setMachineRenderQualityPreset(quality);
 }
 
 // ── Machine Management ────────────────────────────────────────────────────────
@@ -372,10 +385,12 @@ void CamModule::configureMachine(const QString& presetName)
     if (!sameConfig)
         clearToolpath();
 
+    autoInstallCurrentWorkpieceInternal(m_config.autoInstallWorkpiece());
+
     displayAxisGuides();
     refreshMachineTransforms();
     emit axisAssignmentsChanged();
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
 }
 
 void CamModule::loadMachine(const QString& filePath)
@@ -415,7 +430,9 @@ void CamModule::loadMachine(const QString& filePath)
         m_config.setMachineModelPath(m_machineModelPath);
         autoDetectAxes();
         applyStoredMachineProfile(m_machineModelPath);
-        refreshMachineDisplay();
+        const bool installed = autoInstallCurrentWorkpieceInternal(m_config.autoInstallWorkpiece());
+        if (!installed)
+            refreshMachineDisplay();
         emit machineLoaded();
     });
 }
@@ -458,11 +475,11 @@ void CamModule::autoDetectAxes()
     lcnc::cam::machine_axis_detector::autoDetectAxisNames(doc, doc->machineKinematics());
     autoDetectAxisOrigins();
     applyStoredMachineProfile(m_machineModelPath);
-    if (auto* gd = machineGuiDocument())
+    if (auto* gd = workspaceGuiDocument())
         gd->applyMachineDisplayStyle();
     refreshMachineTransforms();
     emit axisAssignmentsChanged();
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
 }
 
 void CamModule::applyAxisAssignments(const QMap<QString, QString>& entryToAxis)
@@ -479,11 +496,11 @@ void CamModule::applyAxisAssignments(const QMap<QString, QString>& entryToAxis)
             kin->assignShape(it.key(), it.value());
     }
 
-    if (auto* gd = machineGuiDocument())
+    if (auto* gd = workspaceGuiDocument())
         gd->applyMachineDisplayStyle();
     refreshMachineTransforms();
     emit axisAssignmentsChanged();
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
 }
 
 void CamModule::assignShapesToAxis(const QStringList& entries, const QString& axisName)
@@ -544,6 +561,32 @@ QList<CamModule::AxisOption> CamModule::axisOptions(bool includeDetachOption) co
     return result;
 }
 
+QString CamModule::defaultWorkpieceMountAxis() const
+{
+    const MachineKinematics* kin = kinematics();
+    if (!kin || kin->axes().isEmpty())
+        return QString();
+
+    const auto hasAxis = [kin](const QString& axisName) {
+        return kin->findAxis(axisName) != nullptr;
+    };
+
+    const QString configType = kin->configType();
+    if (configType == QStringLiteral("VERTICAL_AC_TABLE")
+        || configType == QStringLiteral("VERTICAL_BC_TABLE")) {
+        if (hasAxis(QStringLiteral("C")))
+            return QStringLiteral("C");
+    } else if (configType == QStringLiteral("XYZA")) {
+        if (hasAxis(QStringLiteral("A")))
+            return QStringLiteral("A");
+    }
+
+    if (hasAxis(QStringLiteral("BASE")))
+        return QStringLiteral("BASE");
+
+    return kin->axes().isEmpty() ? QString() : kin->axes().first().name;
+}
+
 gp_Pnt CamModule::axisOrigin(const QString& axisName) const
 {
     if (MachineKinematics* kin = kinematics())
@@ -569,7 +612,7 @@ void CamModule::setAxisOrigin(const QString& axisName, const gp_Pnt& origin)
 
     displayAxisGuides();
     refreshMachineTransforms();
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
 }
 
 bool CamModule::setAxisLimits(const QString& axisName, double minVal, double maxVal)
@@ -583,7 +626,7 @@ bool CamModule::setAxisLimits(const QString& axisName, double minVal, double max
 
     displayAxisGuides();
     refreshMachineTransforms();
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
     return true;
 }
 
@@ -660,7 +703,7 @@ void CamModule::setCutterHeadModelPosition(const gp_Pnt& position)
             m_cutterHeadModelPosition);
     }
     displayAxisGuides();
-    if (auto* gd = machineGuiDocument()) {
+    if (auto* gd = workspaceGuiDocument()) {
         if (gd->hasView())
             gd->view()->Redraw();
     }
@@ -996,7 +1039,7 @@ bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QStri
     LcncDocument* doc = machineDocument();
     MachineKinematics* kin = kinematics();
     if (!doc || !kin) {
-        emit operationFailed(operationTitle, tr("找不到机台文档或轴系配置。"));
+        emit operationFailed(operationTitle, tr("找不到项目文档或轴系配置。"));
         return false;
     }
 
@@ -1069,7 +1112,7 @@ bool CamModule::compressMachineModel(MachineCompressionStrategy strategy)
     LcncDocument* doc = machineDocument();
     MachineKinematics* kin = kinematics();
     if (!doc || !kin) {
-        emit operationFailed(tr("压缩机台"), tr("找不到机台文档或轴系配置。"));
+        emit operationFailed(tr("压缩机台"), tr("找不到项目文档或轴系配置。"));
         return false;
     }
 
@@ -1180,7 +1223,7 @@ bool CamModule::compressMachineModel(MachineCompressionStrategy strategy)
         }
 
         if (!doc || !kin) {
-            emit operationFailed(tr("压缩机台"), tr("压缩完成后找不到机台文档，结果未写回。"));
+            emit operationFailed(tr("压缩机台"), tr("压缩完成后找不到项目文档，结果未写回。"));
             return;
         }
 
@@ -1225,21 +1268,18 @@ bool CamModule::compressMachineModel(MachineCompressionStrategy strategy)
 QList<CamModule::WorkpieceMountCandidate> CamModule::mountableWorkpieces() const
 {
     QList<WorkpieceMountCandidate> result;
-    const QList<LcncDocument*> docs = lcnc::Kernel::current().app()->workpieceDocuments();
-    for (LcncDocument* doc : docs) {
-        if (!doc)
-            continue;
+    LcncDocument* doc = lcnc::Kernel::current().projectManager()->workpieceDocument();
+    if (!doc)
+        return result;
 
-        const int workpieceCount = doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
-        if (workpieceCount <= 0)
-            continue;
+    const int workpieceCount = doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
+    if (workpieceCount <= 0)
+        return result;
 
-        result.append({
-            doc->id(),
-            tr("%1  (%2 形体)").arg(doc->name()).arg(workpieceCount),
-            workpieceCount,
-        });
-    }
+    const QString stateName = lcnc::Kernel::current().projectManager()->session().workpiece().displayName.trimmed();
+    const QString displayName = stateName.isEmpty() ? tr("当前工件") : stateName;
+
+    result.append({doc->id(), tr("%1  (%2 形体)").arg(displayName).arg(workpieceCount), workpieceCount});
 
     return result;
 }
@@ -1247,6 +1287,68 @@ QList<CamModule::WorkpieceMountCandidate> CamModule::mountableWorkpieces() const
 gp_Pnt CamModule::workpieceInstallPosition() const
 {
     return m_workpieceInstallPosition;
+}
+
+bool CamModule::autoInstallWorkpiece() const
+{
+    return m_config.autoInstallWorkpiece();
+}
+
+void CamModule::setAutoInstallWorkpiece(bool enabled)
+{
+    m_config.setAutoInstallWorkpiece(enabled);
+    autoInstallCurrentWorkpieceInternal(enabled);
+    emit machineWorkspaceChanged();
+}
+
+bool CamModule::autoInstallCurrentWorkpiece()
+{
+    return autoInstallCurrentWorkpieceInternal(m_config.autoInstallWorkpiece());
+}
+
+QStringList CamModule::mountedWorkpieceEntriesForSourceEntries(const QStringList& sourceEntries) const
+{
+    QStringList result;
+    const auto appendMappedEntry = [&result](const QString& entry) {
+        if (!entry.isEmpty() && !result.contains(entry))
+            result.append(entry);
+    };
+
+    if (sourceEntries.isEmpty()) {
+        for (auto it = m_mountedWorkpieceEntryBySourceEntry.cbegin();
+             it != m_mountedWorkpieceEntryBySourceEntry.cend(); ++it) {
+            appendMappedEntry(it.value());
+        }
+        return result;
+    }
+
+    for (const QString& sourceEntry : sourceEntries)
+        appendMappedEntry(m_mountedWorkpieceEntryBySourceEntry.value(sourceEntry));
+    return result;
+}
+
+QStringList CamModule::sourceWorkpieceEntriesForMountedEntries(const QStringList& mountedEntries) const
+{
+    QStringList result;
+    for (const QString& mountedEntry : mountedEntries) {
+        for (auto it = m_mountedWorkpieceEntryBySourceEntry.cbegin();
+             it != m_mountedWorkpieceEntryBySourceEntry.cend(); ++it) {
+            if (it.value() == mountedEntry && !result.contains(it.key()))
+                result.append(it.key());
+        }
+    }
+    return result;
+}
+
+void CamModule::setMountedWorkpieceEntriesVisible(const QStringList& sourceEntries, bool visible)
+{
+    for (const QString& mountedEntry : mountedWorkpieceEntriesForSourceEntries(sourceEntries))
+        setEntityVisible(mountedEntry, visible);
+}
+
+void CamModule::setSelectedMountedWorkpieceEntries(const QStringList& sourceEntries)
+{
+    setSelectedEntries(mountedWorkpieceEntriesForSourceEntries(sourceEntries));
 }
 
 void CamModule::setWorkpieceInstallPosition(const gp_Pnt& position)
@@ -1298,14 +1400,14 @@ void CamModule::setWorkpieceInstallPosition(const gp_Pnt& position)
 
     if (movedWorkpieces) {
         // 上面 moveShape 已将底层几何迁动。联动复位任何轻量路径赋予的 AIS Location。
-        if (auto* gd = machineGuiDocument()) {
+        if (auto* gd = workspaceGuiDocument()) {
             const TopLoc_Location identityLoc;
             const auto& ctx = gd->scene()->context();
             const TDF_LabelSequence wpcLabels =
                 doc->entityLabels(LcncDocument::EntityKind::Workpiece);
             for (int i = 1; i <= wpcLabels.Length(); ++i) {
                 const QString entry = XcafUtils::entry(wpcLabels.Value(i));
-                Handle(AIS_Shape) ais = gd->aisShape(entry);
+                Handle(AIS_Shape) ais = gd->aisShape(doc->id(), entry);
                 if (!ais.IsNull() && !ctx.IsNull())
                     ctx->SetLocation(ais, identityLoc);
             }
@@ -1330,7 +1432,7 @@ void CamModule::updateWorkpieceInstallLocation(const gp_Pnt& position)
             m_machineModelPath, m_workpieceInstallPosition);
     }
 
-    auto* gd = machineGuiDocument();
+    auto* gd = workspaceGuiDocument();
     LcncDocument* doc = machineDocument();
     if (!gd || !doc)
         return;
@@ -1349,7 +1451,7 @@ void CamModule::updateWorkpieceInstallLocation(const gp_Pnt& position)
     int updated = 0;
     for (int i = 1; i <= wpcLabels.Length(); ++i) {
         const QString entry = XcafUtils::entry(wpcLabels.Value(i));
-        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        Handle(AIS_Shape) ais = gd->aisShape(doc->id(), entry);
         if (ais.IsNull())
             continue;
         ctx->SetLocation(ais, loc);
@@ -1441,13 +1543,15 @@ gp_Pnt CamModule::defaultWorkpieceInstallPosition() const
 
 // ── Workpiece Mounting ────────────────────────────────────────────────────────
 
-void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName)
+void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName, bool alignToInstallPosition)
 {
-    LcncDocument* machDoc = machineDocument();
-    LcncDocument* srcDoc = lcnc::Kernel::current().app()->documentById(sourceDocId);
-    if (!machDoc || !srcDoc) return;
+    LcncDocument* doc = machineDocument();
+    auto* project = lcnc::Kernel::current().projectManager();
+    LcncDocument* srcDoc = project->domainDocumentById(sourceDocId);
+    if (!doc || !srcDoc || !project->isDomainDocument(sourceDocId, lcnc::ProjectDomain::Workpiece))
+        return;
 
-    MachineKinematics* kin = machDoc->machineKinematics();
+    MachineKinematics* kin = doc->machineKinematics();
     if (kin->axes().isEmpty()) return;
 
     if (axisName.isEmpty()) {
@@ -1455,15 +1559,20 @@ void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName)
         return;
     }
 
-    TDF_LabelSequence srcLabels = srcDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
-    Handle(XCAFDoc_ShapeTool) srcSt = srcDoc->shapeTool();
+    if (!kin->findAxis(axisName))
+        return;
+
+    TDF_LabelSequence sourceLabels = srcDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    if (sourceLabels.Length() == 0)
+        return;
 
     BRep_Builder bb;
     TopoDS_Compound compound;
     bb.MakeCompound(compound);
     bool hasShape = false;
-    for (int i = 1; i <= srcLabels.Length(); ++i) {
-        TopoDS_Shape sh = srcSt->GetShape(srcLabels.Value(i));
+    Handle(XCAFDoc_ShapeTool) sourceShapeTool = srcDoc->shapeTool();
+    for (int i = 1; i <= sourceLabels.Length(); ++i) {
+        TopoDS_Shape sh = sourceShapeTool->GetShape(sourceLabels.Value(i));
         if (!sh.IsNull()) {
             bb.Add(compound, sh);
             hasShape = true;
@@ -1471,75 +1580,124 @@ void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName)
     }
     if (!hasShape) return;
 
-    const QStringList existingWorkpieces = entityEntries(machDoc, LcncDocument::EntityKind::Workpiece);
-    if (auto* gd = machineGuiDocument()) {
-        for (const QString& entry : existingWorkpieces)
-            gd->eraseEntity(entry);
-    }
-    for (const QString& entry : existingWorkpieces)
-        ShapeService::deleteShape(machDoc, entry);
+    const gp_Pnt currentCenter = shapeCenter(compound);
+    const gp_Pnt targetPosition = alignToInstallPosition ? m_workpieceInstallPosition : currentCenter;
+    const gp_Vec placement(currentCenter, targetPosition);
 
     clearToolpath();
+    clearMountedWorkpieceDisplay(false);
 
-    TopoDS_Shape mountShape = compound;
-    const gp_Pnt currentCenter = shapeCenter(compound);
-    const gp_Vec placement(currentCenter, m_workpieceInstallPosition);
-    if (placement.SquareMagnitude() > 1e-12) {
-        gp_Trsf trsf;
-        trsf.SetTranslation(placement);
-        BRepBuilderAPI_Transform xform(compound, trsf, Standard_True);
-        if (xform.IsDone())
-            mountShape = xform.Shape();
+    QString firstMountedEntry;
+    for (int i = 1; i <= sourceLabels.Length(); ++i) {
+        const TDF_Label sourceLabel = sourceLabels.Value(i);
+        const TopoDS_Shape sourceShape = sourceShapeTool->GetShape(sourceLabel);
+        if (sourceShape.IsNull())
+            continue;
+
+        const TopoDS_Shape mountedShape = translatedShapeCopy(sourceShape, placement);
+        const QString sourceName = XcafUtils::name(sourceLabel).isEmpty()
+            ? tr("工件_%1").arg(i)
+            : XcafUtils::name(sourceLabel);
+        const TDF_Label mountedLabel = doc->addShapeEntity(mountedShape,
+                                                           sourceName,
+                                                           LcncDocument::EntityKind::Workpiece);
+        const QString entry = XcafUtils::entry(mountedLabel);
+        const QString sourceEntry = XcafUtils::entry(sourceLabel);
+        if (!sourceEntry.isEmpty() && !entry.isEmpty())
+            m_mountedWorkpieceEntryBySourceEntry.insert(sourceEntry, entry);
+        kin->mountWorkpiece(entry, axisName);
+        if (firstMountedEntry.isEmpty())
+            firstMountedEntry = entry;
     }
 
-    const QString wpcName = tr("工件 — %1").arg(srcDoc->name());
-    TDF_Label wpcLabel = machDoc->addShapeEntity(mountShape, wpcName,
-                                                 LcncDocument::EntityKind::Workpiece);
-    const QString wpcEntry = XcafUtils::entry(wpcLabel);
-    kin->mountWorkpiece(wpcEntry, axisName);
+    if (firstMountedEntry.isEmpty())
+        return;
 
-    if (auto* gd = machineGuiDocument()) {
-        gd->displayShape(mountShape, wpcEntry);
-        // 显式激活工件 AIS 的整体选择模式（TopAbs_SHAPE），避免在机台 view 中无法被鼠标拾取。
-        if (Handle(AIS_Shape) ais = gd->aisShape(wpcEntry); !ais.IsNull()) {
-            const auto& ctx = gd->scene()->context();
-            if (!ctx.IsNull())
-                ctx->Activate(ais, 0, Standard_False);
-        }
+    m_workpieceInstallPosition = targetPosition;
+    m_workpieceInstallPositionBaked = targetPosition;
+    if (!m_machineModelPath.isEmpty())
+        m_config.setWorkpieceInstallPositionForMachine(m_machineModelPath, m_workpieceInstallPosition);
+
+    refreshMachineDisplay();
+    emit machineWorkspaceChanged();
+    emit workpieceMounted(firstMountedEntry);
+}
+
+bool CamModule::autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition)
+{
+    LcncDocument* doc = machineDocument();
+    MachineKinematics* kin = doc ? doc->machineKinematics() : nullptr;
+    if (!doc || !kin)
+        return false;
+
+    auto* project = lcnc::Kernel::current().projectManager();
+    const DocumentId sourceDocId = project->workpieceDocumentId();
+    LcncDocument* sourceDoc = project->domainDocumentById(sourceDocId);
+    if (!sourceDoc || sourceDoc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() == 0) {
+        clearMountedWorkpieceDisplay(true);
+        return false;
     }
 
-    // 标记当前 baked 安装位置 = 已写入 TopoDS 的位置；后续轻量更新基于此 delta。
-    m_workpieceInstallPositionBaked = m_workpieceInstallPosition;
+    const QString axisName = kin->axes().isEmpty() ? QString() : defaultWorkpieceMountAxis();
+    mountWorkpiece(sourceDocId, axisName, alignToInstallPosition && !axisName.isEmpty());
+    return true;
+}
 
-    refreshMachineTransforms();
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
-    emit workpieceMounted(wpcEntry);
+bool CamModule::clearMountedWorkpieceDisplay(bool refreshView)
+{
+    LcncDocument* doc = machineDocument();
+    if (!doc)
+        return false;
+
+    MachineKinematics* kin = doc->machineKinematics();
+    const QStringList workpieceEntries = entityEntries(doc, LcncDocument::EntityKind::Workpiece);
+    const bool hadEntries = !workpieceEntries.isEmpty() || !m_mountedWorkpieceEntryBySourceEntry.isEmpty();
+    for (const QString& entry : workpieceEntries) {
+        if (kin)
+            kin->unmountWorkpiece(entry);
+    }
+    doc->clearEntityKind(LcncDocument::EntityKind::Workpiece);
+    m_mountedWorkpieceEntryBySourceEntry.clear();
+
+    if (!hadEntries)
+        return false;
+
+    if (refreshView)
+        refreshMachineDisplay();
+    emit workpieceUnmounted();
+    emit machineWorkspaceChanged();
+    return true;
 }
 
 void CamModule::unmountAllWorkpieces()
 {
-    LcncDocument* machDoc = machineDocument();
-    if (!machDoc) return;
+    LcncDocument* doc = machineDocument();
+    if (!doc) return;
 
-    const QStringList toRemove = entityEntries(machDoc, LcncDocument::EntityKind::Workpiece);
-    if (auto* gd = machineGuiDocument()) {
-        for (const QString& entry : toRemove)
-            gd->eraseEntity(entry);
+    MachineKinematics* kin = doc->machineKinematics();
+    const QStringList workpieceEntries = entityEntries(doc, LcncDocument::EntityKind::Workpiece);
+    bool hadMountedWorkpieces = false;
+    for (const QString& entry : workpieceEntries) {
+        if (!kin->mountedAxis(entry).isEmpty()) {
+            kin->unmountWorkpiece(entry);
+            hadMountedWorkpieces = true;
+        }
     }
-    for (const QString& entry : toRemove)
-        ShapeService::deleteShape(machDoc, entry);
+    m_mountedWorkpieceEntryBySourceEntry.clear();
 
-    const bool hadWorkpieces = !toRemove.isEmpty();
     const bool hadToolpath = hasToolpath();
     clearToolpath();
 
-    if (hadWorkpieces || hadToolpath)
+    if (hadMountedWorkpieces || hadToolpath)
         refreshMachineTransforms();
 
-    if (hadWorkpieces) {
-        lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
-        emit workpieceUnmounted();
+    if (hadMountedWorkpieces || hadToolpath) {
+        lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
+        emit machineWorkspaceChanged();
     }
+
+    if (hadMountedWorkpieces)
+        emit workpieceUnmounted();
 }
 
 // ── Shape Operations ──────────────────────────────────────────────────────────
@@ -1599,12 +1757,12 @@ void CamModule::deleteShape(const QString& entry)
     LcncDocument* doc = machineDocument();
     if (!doc || entry.isEmpty()) return;
 
-    if (auto* gd = machineGuiDocument())
-        gd->eraseEntity(entry);
+    if (auto* gd = workspaceGuiDocument())
+        gd->eraseEntity(doc->id(), entry);
 
     ShapeService::deleteShape(doc, entry);
     refreshMachineTransforms();
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
 }
 
 // ── Toolpath ──────────────────────────────────────────────────────────────────
@@ -1723,7 +1881,9 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
         return false;
 
     m_toolpath.contours() = std::move(allContours);
-    m_toolpathRenderer->setVisible(machineGuiDocument(), true);
+    m_camData->ensureContourIds();
+    syncCamDocumentContours();
+    m_toolpathRenderer->setVisible(workspaceGuiDocument(), true);
 
     refreshToolpathDisplay();
     emit toolpathGenerated();
@@ -1733,7 +1893,11 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 void CamModule::clearToolpath()
 {
     eraseToolpathDisplay();
-    m_toolpath.clear();
+    m_camData->clearToolpath();
+    if (LcncDocument* doc = camDocument()) {
+        doc->clearEntityKind(LcncDocument::EntityKind::Cam);
+        lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    }
     m_workpieceShape.Nullify();
     m_previewLeadInContour = -1;
     m_previewLeadInParam = 0.0;
@@ -1839,7 +2003,7 @@ void CamModule::setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double 
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
-    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
+    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 void CamModule::setLeadInLength(double mm)
@@ -1848,7 +2012,7 @@ void CamModule::setLeadInLength(double mm)
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
-    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
+    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 double CamModule::leadInLength() const
@@ -1862,7 +2026,7 @@ void CamModule::setNormalAngle(double deg)
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
-    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
+    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 double CamModule::normalAngle() const
@@ -1893,7 +2057,7 @@ void CamModule::setShowNormals(bool on)
     if (m_toolpathRenderer->showNormals() == on)
         return;
     m_toolpathRenderer->setShowNormals(on);
-    m_toolpathRenderer->refreshNormals(machineGuiDocument(), m_toolpath, kinematics());
+    m_toolpathRenderer->refreshNormals(workspaceGuiDocument(), m_toolpath, kinematics());
 }
 
 double CamModule::normalSampleStep() const
@@ -1910,7 +2074,7 @@ void CamModule::setNormalSampleStep(double mm)
         return;
     m_toolpathRenderer->setNormalSampleStep(mm);
     if (m_toolpathRenderer->showNormals())
-        m_toolpathRenderer->refreshNormals(machineGuiDocument(), m_toolpath, kinematics());
+        m_toolpathRenderer->refreshNormals(workspaceGuiDocument(), m_toolpath, kinematics());
 }
 
 bool CamModule::resolveLeadInHit(WidgetOccView* occView,
@@ -1949,7 +2113,7 @@ bool CamModule::updateLeadInPreview(WidgetOccView* occView, const QPoint& screen
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
-    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics(), preview);
+    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), m_toolpath, kinematics(), preview);
     return true;
 }
 
@@ -1969,7 +2133,7 @@ bool CamModule::commitLeadInPreview(WidgetOccView* occView, const QPoint& screen
     m_previewLeadInContour = -1;
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
-    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics());
+    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), m_toolpath, kinematics());
     return true;
 }
 
@@ -1981,7 +2145,7 @@ void CamModule::cancelLeadInPreview()
     m_previewLeadInContour = -1;
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
-    m_toolpathRenderer->refreshLeadIns(machineGuiDocument(), m_toolpath, kinematics());
+    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), m_toolpath, kinematics());
 }
 
 void CamModule::setContourEnabled(int contourIdx, bool enabled)
@@ -1997,30 +2161,35 @@ void CamModule::setContourEnabled(int contourIdx, bool enabled)
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
-    m_toolpathRenderer->refreshContour(machineGuiDocument(), m_toolpath, kinematics(), contourIdx, preview);
+    m_toolpathRenderer->refreshContour(workspaceGuiDocument(), m_toolpath, kinematics(), contourIdx, preview);
+}
+
+lcnc::cam::ContourId CamModule::contourIdAt(int contourIdx) const
+{
+    return m_camData ? m_camData->contourIdAt(contourIdx) : 0;
+}
+
+int CamModule::contourIndexById(lcnc::cam::ContourId contourId) const
+{
+    return m_camData ? m_camData->contourIndexById(contourId) : -1;
+}
+
+void CamModule::reorderContoursById(const QList<lcnc::cam::ContourId>& order)
+{
+    if (!m_camData || !m_camData->reorderContoursById(order))
+        return;
+
+    syncCamDocumentContours();
+    if (m_toolpathRenderer->isVisible())
+        refreshToolpathDisplay();
 }
 
 void CamModule::reorderContours(const QList<int>& order)
 {
-    if (order.size() != m_toolpath.contourCount())
+    if (!m_camData || !m_camData->reorderContours(order))
         return;
 
-    QSet<int> seen;
-    std::vector<LaserContour> current = std::move(m_toolpath.contours());
-    std::vector<LaserContour> reordered;
-    reordered.reserve(current.size());
-
-    for (int index : order) {
-        if (index < 0 || index >= static_cast<int>(current.size()) || seen.contains(index)) {
-            m_toolpath.contours() = std::move(current);
-            return;
-        }
-
-        seen.insert(index);
-        reordered.push_back(std::move(current[index]));
-    }
-
-    m_toolpath.contours() = std::move(reordered);
+    syncCamDocumentContours();
     if (m_toolpathRenderer->isVisible())
         refreshToolpathDisplay();
 }
@@ -2069,12 +2238,14 @@ void CamModule::recalcToolpath()
     }
 
     refreshToolpathDisplay();
+    m_camData->ensureContourIds();
+    syncCamDocumentContours();
 }
 
 void CamModule::setToolpathVisible(bool visible)
 {
     if (m_toolpathRenderer->isVisible() == visible) return;
-    m_toolpathRenderer->setVisible(machineGuiDocument(), visible);
+    m_toolpathRenderer->setVisible(workspaceGuiDocument(), visible);
     if (visible)
         refreshToolpathDisplay();
     emit toolpathVisibilityChanged(visible);
@@ -2107,17 +2278,17 @@ void CamModule::setUseFaceClassification(bool on)
 
 void CamModule::eraseAxisGuideDisplay()
 {
-    m_guideRenderer->erase(machineGuiDocument());
+    m_guideRenderer->erase(workspaceGuiDocument());
 }
 
 void CamModule::displayAxisGuides()
 {
-    m_guideRenderer->refresh(machineGuiDocument(), kinematics(), m_cutterHeadModelPosition);
+    m_guideRenderer->refresh(workspaceGuiDocument(), kinematics(), m_cutterHeadModelPosition);
 }
 
 void CamModule::updateAxisGuideTransforms()
 {
-    m_guideRenderer->updateTransforms(machineGuiDocument(), kinematics());
+    m_guideRenderer->updateTransforms(workspaceGuiDocument(), kinematics());
 }
 
 void CamModule::refreshToolpathDisplay()
@@ -2125,12 +2296,12 @@ void CamModule::refreshToolpathDisplay()
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
-    m_toolpathRenderer->refresh(machineGuiDocument(), m_toolpath, kinematics(), preview);
+    m_toolpathRenderer->refresh(workspaceGuiDocument(), m_toolpath, kinematics(), preview);
 }
 
 void CamModule::eraseToolpathDisplay()
 {
-    m_toolpathRenderer->erase(machineGuiDocument());
+    m_toolpathRenderer->erase(workspaceGuiDocument());
 }
 
 const QList<Handle(AIS_Shape)>& CamModule::contourAis() const
@@ -2183,8 +2354,8 @@ void CamModule::setEntityVisible(const QString& entry, bool visible)
     if (entry.isEmpty())
         return;
 
-    if (auto* gd = machineGuiDocument()) {
-        Handle(AIS_Shape) ais = gd->aisShape(entry);
+    if (auto* gd = workspaceGuiDocument()) {
+        Handle(AIS_Shape) ais = gd->aisShape(machineDocumentId(), entry);
         if (ais.IsNull())
             return;
 
@@ -2200,7 +2371,7 @@ void CamModule::setEntityVisible(const QString& entry, bool visible)
 
 void CamModule::setSelectedEntries(const QStringList& entries)
 {
-    GuiDocument* gd = machineGuiDocument();
+    GuiDocument* gd = workspaceGuiDocument();
     if (!gd)
         return;
 
@@ -2210,7 +2381,7 @@ void CamModule::setSelectedEntries(const QStringList& entries)
 
     ctx->ClearSelected(false);
     for (const QString& entry : entries) {
-        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        Handle(AIS_Shape) ais = gd->aisShape(machineDocumentId(), entry);
         if (!ais.IsNull())
             ctx->AddOrRemoveSelected(ais, false);
     }
@@ -2218,31 +2389,34 @@ void CamModule::setSelectedEntries(const QStringList& entries)
     if (gd->hasView())
         gd->view()->Redraw();
 
-    emit selectionChanged(gd->selectedEntries());
+    emit selectionChanged(gd->selectedEntries(machineDocumentId()));
 }
 
 QStringList CamModule::selectedEntries() const
 {
-    if (auto* gd = machineGuiDocument())
-        return gd->selectedEntries();
+    if (auto* gd = workspaceGuiDocument())
+        return gd->selectedEntries(machineDocumentId());
 
     return {};
 }
 
 void CamModule::syncSelectionFromView()
 {
-    GuiDocument* gd = machineGuiDocument();
-    emit selectionChanged(gd ? gd->selectedEntries() : QStringList{});
+    GuiDocument* gd = workspaceGuiDocument();
+    emit selectionChanged(gd ? gd->selectedEntries(machineDocumentId()) : QStringList{});
 
-    const int contourIndex = m_toolpathRenderer->selectedContourIndex(gd);
-    if (contourIndex >= 0)
-        emit toolpathContourSelected(contourIndex);
+    const QList<int> contourIndexes = m_toolpathRenderer->selectedContourIndexes(gd);
+    if (!contourIndexes.isEmpty()) {
+        emit toolpathContoursSelected(contourIndexes);
+        if (contourIndexes.size() == 1)
+            emit toolpathContourSelected(contourIndexes.first());
+    }
 }
 
 void CamModule::refreshMachineTransforms()
 {
-    if (auto* gd = machineGuiDocument()) {
-        gd->updateAxisTransforms();
+    if (auto* gd = workspaceGuiDocument()) {
+        gd->updateAxisTransforms(machineDocument());
         m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
         updateAxisGuideTransforms();
         if (gd->hasView())
@@ -2263,8 +2437,8 @@ void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
         refreshMachineTransforms();
         return;
     }
-    if (auto* gd = machineGuiDocument()) {
-        gd->updateAxisTransforms();
+    if (auto* gd = workspaceGuiDocument()) {
+        gd->updateAxisTransforms(machineDocument());
         m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
         updateAxisGuideTransforms();
         if (gd->hasView())
@@ -2274,12 +2448,36 @@ void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
 
 void CamModule::refreshMachineDisplay()
 {
-    if (auto* gd = machineGuiDocument()) {
-        gd->rebuildDisplay();
-        gd->updateAxisTransforms();
+    if (auto* gd = workspaceGuiDocument()) {
+        gd->rebuildDomain(lcnc::ProjectDomain::Machine, machineDocument());
+        gd->updateAxisTransforms(machineDocument());
         displayAxisGuides();
         if (gd->hasView())
             gd->view()->Redraw();
     }
-    lcnc::Kernel::current().app()->notifyDocumentModified(machineDocumentId());
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
 }
+
+void CamModule::syncCamDocumentContours()
+{
+    LcncDocument* doc = camDocument();
+    if (!doc)
+        return;
+
+    doc->clearEntityKind(LcncDocument::EntityKind::Cam);
+    for (int index = 0; index < m_toolpath.contourCount(); ++index) {
+        const LaserContour& contour = m_toolpath.contour(index);
+        if (contour.wire.IsNull())
+            continue;
+
+        const QString name = contour.name.trimmed().isEmpty()
+            ? tr("轮廓 %1").arg(index + 1)
+            : contour.name;
+        doc->addShapeEntity(contour.wire, name, LcncDocument::EntityKind::Cam);
+    }
+
+    if (GuiDocument* gd = workspaceGuiDocument())
+        gd->rebuildDomain(lcnc::ProjectDomain::Cam, doc);
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+}
+

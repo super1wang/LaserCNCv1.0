@@ -10,6 +10,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 
+#include <cstdint>
 #include <vector>
 
 // Forward declaration
@@ -58,6 +59,7 @@ struct LeadInParams
  */
 struct LaserContour
 {
+    std::uint64_t              contourId{0}; ///< Runtime-stable id, preserved across reordering.
     TopoDS_Wire                wire;     ///< The original topological wire
     TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour

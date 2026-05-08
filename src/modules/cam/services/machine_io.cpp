@@ -28,7 +28,8 @@ namespace lcnc::cam::machine_io {
 
 bool loadMachineFromFile(LcncDocument* doc,
                          const QString& filePath,
-                         TaskProgress* progress)
+                         TaskProgress* progress,
+                         const std::function<void(const QString& entry, const TopoDS_Shape& shape)>& onShapeLoaded)
 {
     if (!doc || filePath.isEmpty())
         return false;
@@ -61,7 +62,24 @@ bool loadMachineFromFile(LcncDocument* doc,
         cafReader.Transfer(xdeDoc);
         if (progress)
             progress->setValue(80);
+        QSet<QString> existingEntries;
+        if (onShapeLoaded) {
+            const TDF_LabelSequence existing = doc->entityLabels(LcncDocument::EntityKind::Machine);
+            for (int i = 1; i <= existing.Length(); ++i)
+                existingEntries.insert(XcafUtils::entry(existing.Value(i)));
+        }
+
         doc->importFromXcafRoots(xdeDoc, LcncDocument::EntityKind::Machine);
+
+        if (onShapeLoaded) {
+            const TDF_LabelSequence imported = doc->entityLabels(LcncDocument::EntityKind::Machine);
+            for (int i = 1; i <= imported.Length(); ++i) {
+                const TDF_Label label = imported.Value(i);
+                const QString entry = XcafUtils::entry(label);
+                if (!existingEntries.contains(entry))
+                    onShapeLoaded(entry, XcafUtils::shape(label));
+            }
+        }
     } else if (ext == "stl") {
         if (progress)
             progress->setStepName(QStringLiteral("读取 STL..."));
@@ -72,7 +90,9 @@ bool loadMachineFromFile(LcncDocument* doc,
             progress->setValue(80);
         if (shape.IsNull())
             return false;
-        doc->addShapeEntity(shape, fi.baseName(), LcncDocument::EntityKind::Machine);
+        const TDF_Label label = doc->addShapeEntity(shape, fi.baseName(), LcncDocument::EntityKind::Machine);
+        if (onShapeLoaded)
+            onShapeLoaded(XcafUtils::entry(label), shape);
     } else if (ext == "brep") {
         if (progress)
             progress->setStepName(QStringLiteral("读取 BREP..."));
@@ -81,7 +101,9 @@ bool loadMachineFromFile(LcncDocument* doc,
         BRepTools::Read(shape, filePath.toUtf8().constData(), builder);
         if (shape.IsNull())
             return false;
-        doc->addShapeEntity(shape, fi.baseName(), LcncDocument::EntityKind::Machine);
+        const TDF_Label label = doc->addShapeEntity(shape, fi.baseName(), LcncDocument::EntityKind::Machine);
+        if (onShapeLoaded)
+            onShapeLoaded(XcafUtils::entry(label), shape);
     } else {
         return false;
     }

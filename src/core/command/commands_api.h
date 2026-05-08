@@ -6,7 +6,7 @@
 #include <QMap>
 #include <functional>
 
-#include "core/command/command_context.h"
+class IAppContext;
 
 /**
  * @brief Abstract base for all application commands.
@@ -31,11 +31,6 @@ public:
 
     QAction*     action() const { return m_action; }
     IAppContext*  context() const { return m_ctx; }
-
-    // Convenience accessors
-    LcncApplication* app()     const { return m_ctx->app();     }
-    GuiApplication*  guiApp()  const { return m_ctx->guiApp();  }
-    TaskManager*     taskMgr() const { return m_ctx->taskMgr(); }
 
 protected:
     /// Subclasses call this in their constructor to supply the QAction.

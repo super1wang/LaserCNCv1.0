@@ -79,6 +79,7 @@ public:
 
     const QList<Handle(AIS_Shape)>& contourAis() const { return m_contourAis; }
     int contourIndexForAis(const Handle(AIS_InteractiveObject)& object) const;
+    QList<int> selectedContourIndexes(GuiDocument* gd) const;
     int selectedContourIndex(GuiDocument* gd) const;
 
 private:

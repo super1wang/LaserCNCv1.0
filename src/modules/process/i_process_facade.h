@@ -8,12 +8,19 @@ class QObject;
 
 namespace lcnc {
 
+enum class ProcessRunState {
+    Idle,
+    Running,
+    Paused,
+    Error,
+    EmergencyStop,
+};
+
 /**
- * @brief Process（激光加工执行）模块对外门面接口（Phase 7）。
+ * @brief Process（激光加工执行）模块对外门面接口。
  *
  * 暴露控制器连接、仿真模式开关、运行/暂停/停止以及状态信息读取等
- * UI 实际触达的动作；具体的运动学控制仍走 @c ProcessModule 私有 API。
- * 本接口继承 @ref IService；ProcessModule 不再直接继承 IService 以避免多重继承。
+ * UI 实际触达的动作；具体的运动学控制仍走模块内部控制器。
  */
 class IProcessFacade : public IService
 {
@@ -28,15 +35,21 @@ public:
     virtual bool connectController(const QString& endpoint) = 0;
     /// 断开当前控制器连接。
     virtual void disconnectController() = 0;
+    virtual bool isConnected() const = 0;
 
     /// 仿真模式开关（true 表示纯软件仿真，不发送下位机指令）。
     virtual bool simulationMode() const = 0;
     virtual void setSimulationMode(bool enabled) = 0;
 
+    virtual ProcessRunState state() const = 0;
+
     /// 加工流程：开始 / 暂停 / 停止。
     virtual void runStart() = 0;
     virtual void runPause() = 0;
     virtual void runStop()  = 0;
+    virtual void emergencyStop() = 0;
+    virtual void resetEmergencyStop() = 0;
+    virtual void home() = 0;
 
     /// 当前状态描述（用于状态栏）。
     virtual QString statusMessage() const = 0;

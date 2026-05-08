@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "core/document/lcnc_application.h"
+#include "core/project/project_types.h"
 #include "core/document/lcnc_document.h"
 #include "modules/cad/services/sketch_types.h"
 
@@ -15,7 +15,7 @@ namespace lcnc::cad {
 /**
  * @brief Document-level manager for finished sketch records.
  *
- * One instance per workpiece document. Machine documents do not own a manager.
+ * One instance per project workspace. Machine sections do not own a manager.
  * Owns geometry data, visibility, and used-by-feature state. The active in-progress
  * sketch is still edited via `CadModelingSession`; on `finishSketch`, CadModule
  * pushes the resulting record here for persistence and selection.
@@ -55,14 +55,14 @@ private:
 /**
  * @brief Per-document registry of sketch managers, keyed by DocumentId.
  *
- * CadModule owns one of these and ensures machine documents are not registered.
+ * CadModule owns one of these and keys managers by project DocumentId.
  */
 class SketchManagerRegistry
 {
 public:
     /// Get-or-create a manager for the document. Returns nullptr if docId is invalid.
     SketchManager* ensure(DocumentId docId);
-    /// Lookup an existing manager; returns nullptr if absent or document is machine.
+    /// Lookup an existing manager; returns nullptr if absent.
     SketchManager* get(DocumentId docId);
     const SketchManager* get(DocumentId docId) const;
     /// Erase the manager bound to a document (called on close).

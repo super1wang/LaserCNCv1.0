@@ -21,7 +21,6 @@ void registerCommands(CommandContainer* container)
     // Machine
     container->addCommand<CmdLoadMachine>(CmdLoadMachine::Name);
     container->addCommand<CmdCompressMachine>(CmdCompressMachine::Name);
-    container->addCommand<CmdMountWorkpiece>(CmdMountWorkpiece::Name);
     container->addCommand<CmdUnloadMachine>(CmdUnloadMachine::Name);
     container->addCommand<CmdExportMachine>(CmdExportMachine::Name);
 
@@ -49,7 +48,6 @@ void buildRibbonTab(SARibbonCategory* cat,
     SARibbonPanel* panelMach = cat->addPanel(QObject::tr("机台"));
     panelMach->addLargeAction(container->findAction(CmdLoadMachine::Name));
     panelMach->addSmallAction(container->findAction(CmdCompressMachine::Name));
-    panelMach->addSmallAction(container->findAction(CmdMountWorkpiece::Name));
     panelMach->addSmallAction(container->findAction(CmdUnloadMachine::Name));
     panelMach->addSmallAction(container->findAction(CmdExportMachine::Name));
 

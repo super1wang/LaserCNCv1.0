@@ -1,18 +1,18 @@
 #pragma once
 
-#include "core/document/lcnc_application.h"
+#include "core/project/project_types.h"
 #include "modules/cad/selection/cad_selection.h"
 #include "modules/cad/services/sketch_manager.h"
 
 namespace lcnc::cad {
 
-/// Presentation flags cached per CAD workpiece document.
+/// Presentation flags cached per CAD project workspace.
 struct CadPresentationState {
     int selectedSketchId{0};
     bool showSketchOverlay{true};
 };
 
-/// Aggregates all CAD-owned state for one workpiece document.
+/// Aggregates all CAD-owned state for one project workspace.
 class CadDocumentState
 {
 public:

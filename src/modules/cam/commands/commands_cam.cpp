@@ -1,8 +1,8 @@
 #include "modules/cam/commands/commands_cam.h"
-#include "core/command/command_context.h"
+#include "app/app_command_context.h"
 #include "view/widget_occ_view.h"
 
-#include "core/document/lcnc_application.h"
+#include "core/project/project_types.h"
 #include "core/document/lcnc_document.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/face_classifier.h"
@@ -50,7 +50,7 @@ CmdGenerateToolpath::CmdGenerateToolpath(IAppContext* ctx)
 
 bool CmdGenerateToolpath::isEnabled() const
 {
-    LcncDocument* doc = context()->machineDocument();
+    LcncDocument* doc = context()->camModule()->machineDocument();
     return doc && doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0;
 }
 
@@ -61,7 +61,7 @@ void CmdGenerateToolpath::execute()
                                cam->useFaceClassification(),
                                cam->deflection())) {
         QMessageBox::warning(nullptr, tr("生成刀路"),
-            tr("机台文档中未找到工件，或未找到可用的轮廓边缘。"));
+            tr("项目工作区中未找到工件，或未找到可用的轮廓边缘。"));
     }
     context()->updateCommandStates();
 }

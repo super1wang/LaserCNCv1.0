@@ -36,13 +36,7 @@ public:
     /// IProcessFacade：用于让调用方挂接 ProcessModule 的 Qt 信号。
     QObject* asQObject() override { return this; }
 
-    enum class State {
-        Idle,
-        Running,
-        Paused,
-        Error,
-        EmergencyStop,
-    };
+    using State = lcnc::ProcessRunState;
 
     // ── IModule ─────────────────────────────────────────────────────
     /// id="process"，依赖 ["cam"]。
@@ -53,7 +47,7 @@ public:
 
     bool connectController(const QString& endpoint) override;
     void disconnectController() override;
-    bool isConnected() const;
+    bool isConnected() const override;
 
     void setSimulationMode(bool on) override;
     bool simulationMode() const override;
@@ -61,7 +55,7 @@ public:
     void setAxisDefinitions(const QList<MachineAxisDef>& axes);
 
     void jog(const QString& axisName, int direction, int speedLevel);
-    void home();
+    void home() override;
 
     /// 启动加工运行（仿真或控制器）。
     /// @note 以 @c run 前缀区分于 @ref lcnc::IModule::start 生命周期调用。
@@ -70,14 +64,15 @@ public:
     void runPause() override;
     /// 停止当前运行（不释放资源）。
     void runStop() override;
-    void emergencyStop();
+    void emergencyStop() override;
     /// 复位急停 —— 仅当当前状态为 EmergencyStop 时把状态切回 Idle 并刷新
     /// 状态栏；不重连控制器、不重置轴位置。
-    void resetEmergencyStop();
+    void resetEmergencyStop() override;
 
     State state() const;
     QMap<QString, double> currentAxisPositions() const;
     void setAxisPosition(const QString& axisName, double value);
+    void setAxisPositions(const QMap<QString, double>& positions);
 
     void setFeedOverride(double factor);
     double feedOverride() const;

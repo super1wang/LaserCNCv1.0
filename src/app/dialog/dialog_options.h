@@ -84,8 +84,7 @@ private:
     QTreeWidget*    m_nav{nullptr};
     QStackedWidget* m_stack{nullptr};
 
-    RenderControls m_cadControls;
-    RenderControls m_camControls;
+    RenderControls m_renderControls;
 
     QPushButton* m_btnWorkpieceColor{nullptr};
     QPushButton* m_btnCadBackground{nullptr};
@@ -102,11 +101,10 @@ private:
     QComboBox* m_cbUnits{nullptr};
     QSpinBox* m_spRecentLimit{nullptr};
 
-    RenderProfileSettings m_cadDraft;
-    RenderProfileSettings m_camDraft;
-    ColorSettings m_colorDraft;
+    RenderProfileSettings m_renderDraft;
     RenderProfileSettings m_originalCad;
     RenderProfileSettings m_originalCam;
+    ColorSettings m_colorDraft;
     ColorSettings m_originalColors;
     QString m_originalLanguage;
     QString m_originalTheme;

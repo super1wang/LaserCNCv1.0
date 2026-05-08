@@ -9,6 +9,7 @@ class LcncDocument;
 class MachineKinematics;
 class QLabel;
 class QComboBox;
+class QCheckBox;
 class QFormLayout;
 class QGroupBox;
 class QDoubleSpinBox;
@@ -22,8 +23,7 @@ class QTabWidget;
  * @brief Right-panel widget shown when the "准备" tab is active.
  *
  * Sections:
- *  1. 机台模型页 — preset, model loading, machine-part assignment and calibration.
- *  2. 工件配置页 — mounting, install position and rotary-center alignment.
+ *  1. 机台模型页 — preset, model loading, machine-part assignment, calibration and workpiece install position.
  */
 class WidgetMachinePanel : public QWidget
 {
@@ -48,7 +48,6 @@ signals:
     void machineModelPathChanged(const QString& path);
     void loadMachineRequested();
     void compressMachineRequested();
-    void mountWorkpieceRequested();
     void unloadMachineRequested();
     void exportMachineRequested();
     void axisOriginChanged(const QString& axisName, double x, double y, double z);
@@ -60,6 +59,7 @@ signals:
     void axisCalibrationWizardRequested();
     void workpieceInstallPositionChanged(double x, double y, double z);
     void alignWorkpieceRotationCenterRequested();
+    void autoInstallWorkpieceChanged(bool enabled);
 
 private slots:
     void onAxisOriginEditorChanged();
@@ -79,7 +79,6 @@ private:
 
     QTabWidget* m_pages{nullptr};
     QWidget*    m_configPage{nullptr};
-    QWidget*    m_workpiecePage{nullptr};
 
     // Static widgets
     QComboBox* m_comboPreset{nullptr};
@@ -114,10 +113,8 @@ private:
     QGroupBox* m_assignGroup{nullptr};
     QLabel*    m_lblAssignSelection{nullptr};
     QGridLayout* m_assignGrid{nullptr};
-    QGroupBox* m_wpcGroup{nullptr};
-    QLabel* m_lblWorkpieceStatus{nullptr};
-    QPushButton* m_btnMountWorkpiece{nullptr};
     QGroupBox* m_installGroup{nullptr};
+    QCheckBox* m_chkAutoInstallWorkpiece{nullptr};
     QDoubleSpinBox* m_wpcInstallX{nullptr};
     QDoubleSpinBox* m_wpcInstallY{nullptr};
     QDoubleSpinBox* m_wpcInstallZ{nullptr};

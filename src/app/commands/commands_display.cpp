@@ -1,4 +1,5 @@
 #include "app/commands/commands_display.h"
+#include "app/app_command_context.h"
 #include "app/dialog/dialog_options.h"
 
 #include <QAction>
@@ -22,7 +23,7 @@
 static Handle(V3d_View) activeView(IAppContext* ctx)
 {
     // GuiDocument → scene → viewer → first active view
-    if (auto* gd = ctx->activeGuiDocument()) {
+    if (auto* gd = ctx->workspaceGuiDocument()) {
         auto& viewer = gd->scene()->viewer();
         if (!viewer.IsNull()) {
             viewer->InitActiveLights();
@@ -78,9 +79,7 @@ static void applyDisplayModeToCurrentView(IAppContext* ctx, int displayMode, boo
         return;
     }
 
-    GuiDocument* gd = ctx->isMachineViewActive()
-        ? ctx->machineGuiDocument()
-        : ctx->activeGuiDocument();
+    GuiDocument* gd = ctx->workspaceGuiDocument();
     if (!gd || !gd->renderingManager()) {
         LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
                   "applyDisplayModeToCurrentView: no active GuiDocument");
@@ -157,14 +156,8 @@ void CmdToggleWorldAxes::execute()
             action()->setChecked(false);
         return;
     }
-    // 把当前所有 GuiDocument 与机台 GuiDocument 的 scene 全部 attach 到渲染器，
-    // 这样切换全局可见性时所有视图同步显示/隐藏。
-    for (auto* gd : guiApp->guiDocuments()) {
-        if (gd && gd->scene())
-            renderer.attach(gd->scene());
-    }
-    if (auto* mgd = guiApp->machineGuiDocument(); mgd && mgd->scene())
-        renderer.attach(mgd->scene());
+    if (auto* workspace = guiApp->workspaceGuiDocument(); workspace && workspace->scene())
+        renderer.attach(workspace->scene());
 
     const bool wantVisible = action() && action()->isChecked();
     renderer.setGloballyVisible(wantVisible);

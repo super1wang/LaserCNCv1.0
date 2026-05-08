@@ -1,5 +1,6 @@
 #include "modules/cad/commands/commands_cad.h"
 
+#include "app/app_command_context.h"
 #include "view/widget_occ_view.h"
 
 #include <QAction>

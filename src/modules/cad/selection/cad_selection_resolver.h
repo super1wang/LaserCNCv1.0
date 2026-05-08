@@ -6,7 +6,7 @@
 
 namespace lcnc::cad::selection {
 
-/// Converts legacy view/tree selection data into normalized CAD selection contexts.
+/// Converts view and ProjectExplorer selection data into normalized CAD selection contexts.
 class CadSelectionResolver
 {
 public:
@@ -18,13 +18,13 @@ public:
                                                 bool hasSelectedSketch = false,
                                                 int selectedSketchId = 0);
 
-    /// Build a context from a model-tree node payload.
-    static CadSelectionContext fromDocumentTreeNode(DocumentId docId,
-                                                    const QString& nodeKey,
-                                                    const QString& entry,
-                                                    const QStringList& leafEntries,
-                                                    bool hasDocument = true,
-                                                    bool sketchEditing = false);
+    /// Build a context from a ProjectExplorer node payload.
+    static CadSelectionContext fromProjectExplorerNode(DocumentId docId,
+                                                       const QString& nodeKey,
+                                                       const QString& entry,
+                                                       const QStringList& leafEntries,
+                                                       bool hasDocument = true,
+                                                       bool sketchEditing = false);
 
     /// Build a context from a view overlay key emitted by SketchOverlayRenderer.
     static CadSelectionContext fromOverlayKey(DocumentId docId,

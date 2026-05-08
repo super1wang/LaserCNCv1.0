@@ -169,17 +169,14 @@ void DialogOptions::buildUi()
     m_nav->setMinimumWidth(230);
 
     m_stack = new QStackedWidget(this);
-    auto* itemCad = new QTreeWidgetItem(m_nav, QStringList(tr("CAD View 渲染")));
-    itemCad->setData(0, Qt::UserRole, 0);
-    auto* itemCam = new QTreeWidgetItem(m_nav, QStringList(tr("CAM View 渲染")));
-    itemCam->setData(0, Qt::UserRole, 1);
+    auto* itemRender = new QTreeWidgetItem(m_nav, QStringList(tr("视图渲染")));
+    itemRender->setData(0, Qt::UserRole, 0);
     auto* itemColors = new QTreeWidgetItem(m_nav, QStringList(tr("颜色配置")));
-    itemColors->setData(0, Qt::UserRole, 2);
+    itemColors->setData(0, Qt::UserRole, 1);
     auto* itemApp = new QTreeWidgetItem(m_nav, QStringList(tr("应用程序")));
-    itemApp->setData(0, Qt::UserRole, 3);
+    itemApp->setData(0, Qt::UserRole, 2);
 
-    buildRenderPage(tr("CAD View 渲染"), false, m_cadControls);
-    buildRenderPage(tr("CAM View 渲染"), true, m_camControls);
+    buildRenderPage(tr("视图渲染"), true, m_renderControls);
     buildColorPage();
     buildApplicationPage();
 
@@ -188,7 +185,7 @@ void DialogOptions::buildUi()
                 if (current)
                     m_stack->setCurrentIndex(current->data(0, Qt::UserRole).toInt());
             });
-    m_nav->setCurrentItem(itemCad);
+    m_nav->setCurrentItem(itemRender);
 
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->addWidget(m_nav);
@@ -467,14 +464,12 @@ void DialogOptions::loadFromSettings()
     m_originalUnitSystem = settings->unitSystem;
     m_originalRecentLimit = settings->recentLimit;
 
-    m_cadDraft = m_originalCad;
-    m_camDraft = m_originalCam;
+    m_renderDraft = m_originalCam;
     m_colorDraft = m_originalColors;
     if (m_colorDraft.machineAxisColors.isEmpty())
         m_colorDraft.machineAxisColors = defaultMachineAxisColors();
 
-    setProfileToUi(m_cadDraft, m_cadControls);
-    setProfileToUi(m_camDraft, m_camControls);
+    setProfileToUi(m_renderDraft, m_renderControls);
 
     styleColorButton(m_btnWorkpieceColor, m_colorDraft.workpieceColor);
     styleColorButton(m_btnCadBackground, m_colorDraft.cadBackgroundColor);
@@ -648,8 +643,7 @@ bool DialogOptions::applyChanges()
         return false;
     }
 
-    m_cadDraft = collectProfileFromUi(m_cadControls);
-    m_camDraft = collectProfileFromUi(m_camControls);
+    m_renderDraft = collectProfileFromUi(m_renderControls);
     m_colorDraft.highlightDisplayMode = m_cbHighlightMode->currentData().toInt();
     m_colorDraft.highlightLineWidth = m_spHighlightLineWidth->value();
 
@@ -658,10 +652,10 @@ bool DialogOptions::applyChanges()
     const QString newUnits = m_cbUnits->currentData().toString();
     const int newRecentLimit = m_spRecentLimit->value();
 
-    const bool cadRuntimeDirty = !profileRuntimeEqual(m_originalCad, m_cadDraft);
-    const bool camRuntimeDirty = !profileRuntimeEqual(m_originalCam, m_camDraft);
-    const bool cadDefaultDirty = m_originalCad.defaultDisplayMode != m_cadDraft.defaultDisplayMode;
-    const bool camDefaultDirty = m_originalCam.defaultDisplayMode != m_camDraft.defaultDisplayMode;
+    const bool cadRuntimeDirty = !profileRuntimeEqual(m_originalCad, m_renderDraft);
+    const bool camRuntimeDirty = !profileRuntimeEqual(m_originalCam, m_renderDraft);
+    const bool cadDefaultDirty = m_originalCad.defaultDisplayMode != m_renderDraft.defaultDisplayMode;
+    const bool camDefaultDirty = m_originalCam.defaultDisplayMode != m_renderDraft.defaultDisplayMode;
     const bool cadBackgroundDirty = m_originalColors.cadBackgroundColor != m_colorDraft.cadBackgroundColor;
     const bool camBackgroundDirty = m_originalColors.camBackgroundColor != m_colorDraft.camBackgroundColor;
     const bool modelColorDirty = !colorModelEqual(m_originalColors, m_colorDraft);
@@ -679,8 +673,8 @@ bool DialogOptions::applyChanges()
         return true;
     }
 
-    settings->cadViewRendering = m_cadDraft;
-    settings->camViewRendering = m_camDraft;
+    settings->cadViewRendering = m_renderDraft;
+    settings->camViewRendering = m_renderDraft;
     settings->colors = m_colorDraft;
     settings->language = newLanguage;
     settings->theme = newTheme;
@@ -730,8 +724,8 @@ bool DialogOptions::applyChanges()
             tr("语言修改将在重启软件后生效。"));
     }
 
-    m_originalCad = m_cadDraft;
-    m_originalCam = m_camDraft;
+    m_originalCad = m_renderDraft;
+    m_originalCam = m_renderDraft;
     m_originalColors = m_colorDraft;
     m_originalLanguage = newLanguage;
     m_originalTheme = newTheme;

@@ -9,11 +9,12 @@
 
 #include "core/algorithms/cad/primitives.h"
 #include "core/algorithms/cad/transform_ops.h"
-#include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/service_registry.h"
 #include "core/logging/logger.h"
+#include "core/project/lcnc_project_manager.h"
+#include "core/project/lcnc_project_package.h"
 #include "core/task/task_manager.h"
 #include "core/document/xcaf_utils.h"
 #include "view/gui_application.h"
@@ -153,73 +154,6 @@ QList<SketchHandlePoint> sketchHandlePoints(const lcnc::cad::SketchElement& elem
         break;
     }
     return handles;
-}
-
-void appendUniqueEntries(QStringList* target, const QStringList& entries)
-{
-    if (!target)
-        return;
-
-    for (const QString& entry : entries) {
-        if (!entry.isEmpty() && !target->contains(entry))
-            target->append(entry);
-    }
-}
-
-CadModule::DocumentTreeNode buildHierarchyNode(const LcncDocument::ShapeTreeNode& sourceNode,
-                                               DocumentId docId,
-                                               const QString& keyPrefix,
-                                               int childIndex)
-{
-    CadModule::DocumentTreeNode targetNode;
-    targetNode.nodeKey = sourceNode.entry.isEmpty()
-        ? QStringLiteral("group:%1/%2").arg(keyPrefix).arg(childIndex)
-        : QStringLiteral("entry:%1:%2").arg(docId).arg(sourceNode.entry);
-    targetNode.entry = sourceNode.entry;
-    targetNode.displayName = sourceNode.displayName.isEmpty()
-        ? sourceNode.entry
-        : sourceNode.displayName;
-
-    if (sourceNode.entry.isEmpty()) {
-        for (int index = 0; index < sourceNode.children.size(); ++index) {
-            const auto& childSourceNode = sourceNode.children.at(index);
-            CadModule::DocumentTreeNode childNode =
-                buildHierarchyNode(childSourceNode, docId, targetNode.nodeKey, index);
-            appendUniqueEntries(&targetNode.leafEntries, childNode.leafEntries);
-            targetNode.children.append(std::move(childNode));
-        }
-    } else {
-        targetNode.leafEntries.append(sourceNode.entry);
-    }
-
-    return targetNode;
-}
-
-QList<CadModule::DocumentTreeNode> buildFallbackNodes(LcncDocument* doc)
-{
-    QList<CadModule::DocumentTreeNode> nodes;
-    if (!doc)
-        return nodes;
-
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
-    nodes.reserve(labels.Length());
-
-    for (int i = 1; i <= labels.Length(); ++i) {
-        const TDF_Label label = labels.Value(i);
-        const QString entry = XcafUtils::entry(label);
-        QString displayName = XcafUtils::name(label);
-        if (displayName.isEmpty())
-            displayName = entry;
-
-        CadModule::DocumentTreeNode node;
-        node.nodeKey = QStringLiteral("entry:%1:%2").arg(doc->id()).arg(entry);
-        node.displayName = displayName;
-        node.entry = entry;
-        node.leafEntries.append(entry);
-        nodes.append(std::move(node));
-    }
-
-    return nodes;
 }
 
 int entityCount(LcncDocument* doc, LcncDocument::EntityKind kind)
@@ -479,7 +413,7 @@ DocumentId ensureTargetDocument(CadModule* module,
         *createdNew = false;
 
     if (targetDocId != kInvalidDocumentId &&
-        lcnc::Kernel::current().app()->documentById(targetDocId) != nullptr) {
+        module->domainDocumentById(targetDocId) != nullptr) {
         return targetDocId;
     }
 
@@ -541,41 +475,35 @@ CadModule::CadModule(QObject* parent)
     , m_commandDispatcher(std::make_unique<lcnc::cad::task::CadCommandDispatcher>(this))
 {
     m_commandDispatcher->registerDefaultTools();
-    LcncApplication* lcnc = lcnc::Kernel::current().app();
+    auto* project = lcnc::Kernel::current().projectManager();
+    connect(project, &lcnc::LcncProjectManager::projectReset, this, [this, project]() {
+        const DocumentId id = project->workpieceDocumentId();
+        m_documentRegistry->ensure(id);
+        m_selectedSketchDocId = kInvalidDocumentId;
+        m_selectedSketchId = 0;
+        emit documentListChanged();
+        emit workpieceStructureChanged();
+        emit sketchSelectionChanged(0);
+    });
+    connect(project, &lcnc::LcncProjectManager::domainDataChanged, this, [this, project](lcnc::ProjectDomain domain) {
+        const DocumentId id = project->documentId(domain);
+        if (id != kInvalidDocumentId)
+            emit documentModified(id);
+        if (domain == lcnc::ProjectDomain::Workpiece) {
+            m_documentRegistry->ensure(project->workpieceDocumentId());
+            emit workpieceStructureChanged();
+        }
+    });
 
-    connect(lcnc, &LcncApplication::documentAdded, this, [this, lcnc](DocumentId id) {
-        emit documentListChanged();
-        if (!lcnc->isMachineDocument(id)) {
-            m_documentRegistry->ensure(id);
-            emit documentTreeChanged();
-        }
-    });
-    connect(lcnc, &LcncApplication::documentClosed, this, [this, lcnc](DocumentId id) {
-        m_documentRegistry->erase(id);
-        if (m_selectedSketchDocId == id) {
-            m_selectedSketchDocId = kInvalidDocumentId;
-            m_selectedSketchId = 0;
-            emit sketchSelectionChanged(0);
-        }
-        emit documentListChanged();
-        if (!lcnc->isMachineDocument(id))
-            emit documentTreeChanged();
-    });
-    connect(lcnc, &LcncApplication::activeDocumentChanged, this, [this](DocumentId id) {
-        emit activeDocumentChanged(id);
-    });
-    connect(lcnc, &LcncApplication::documentModified, this, [this, lcnc](DocumentId id) {
-        emit documentModified(id);
-        if (!lcnc->isMachineDocument(id))
-            emit documentTreeChanged();
-    });
+    if (LcncDocument* doc = project->workpieceDocument())
+        m_documentRegistry->ensure(doc->id());
 }
 
 // ── Document Management ────────────────────────────────────────────────────────
 
 DocumentId CadModule::newDocument(const QString& name)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->newDocument(name);
+    LcncDocument* doc = lcnc::Kernel::current().projectManager()->newProject(name);
     return doc ? doc->id() : kInvalidDocumentId;
 }
 
@@ -595,6 +523,24 @@ DocumentId CadModule::openDocument(const QString& filePath)
     }
 
     const QString ext = fileInfo.suffix().toLower();
+    if (lcnc::LcncProjectPackage::isProjectPath(filePath)) {
+        QString err;
+        auto* project = lcnc::Kernel::current().projectManager();
+        LcncDocument* doc = project->openProject(filePath, &err);
+        if (!doc) {
+            emit operationFailed(tr("打开失败"), err.isEmpty() ? tr("无法读取项目文件") : err);
+            return kInvalidDocumentId;
+        }
+        if (auto* gd = workspaceGuiDocument()) {
+            gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
+            gd->rebuildDomain(lcnc::ProjectDomain::Machine, project->machineDocument());
+            gd->rebuildDomain(lcnc::ProjectDomain::Cam, project->camDocument());
+            gd->updateAxisTransforms(project->machineDocument());
+            gd->fitAll();
+        }
+        return doc->id();
+    }
+
     if (ext != "stp" && ext != "step" &&
         ext != "igs" && ext != "iges" &&
         ext != "stl" && ext != "brep") {
@@ -605,19 +551,21 @@ DocumentId CadModule::openDocument(const QString& filePath)
         return kInvalidDocumentId;
     }
 
-    const DocumentId docId = newDocument(fileInfo.baseName());
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    auto* project = lcnc::Kernel::current().projectManager();
+    LcncDocument* doc = project->workpieceDocument();
     if (!doc) {
         LCNC_WARN(lcnc::LogCode::Generic,
-                  "CadModule::openDocument failed to create document path={}",
+                  "CadModule::openDocument missing project document path={}",
                   filePath.toStdString());
         emit operationFailed(tr("打开失败"), tr("无法创建目标文档"));
         return kInvalidDocumentId;
     }
+    const DocumentId docId = doc->id();
 
-    doc->setFilePath(filePath);
+    doc->clearEntityKind(LcncDocument::EntityKind::Workpiece);
+    project->session().workpiece().clear();
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "CadModule::openDocument created docId={} ext={} path={}",
+               "CadModule::openDocument replacing workpiece docId={} ext={} path={}",
                docId, ext.toStdString(), filePath.toStdString());
 
     auto error = std::make_shared<QString>();
@@ -691,17 +639,25 @@ DocumentId CadModule::openDocument(const QString& filePath)
                "CadModule::openDocument task scheduled docId={} taskId={}",
                docId, taskId);
 
-    watchTask(this, taskId, [this, docId, error](bool success) {
+    const QString displayName = fileInfo.completeBaseName();
+    const QString sourceFilePath = fileInfo.absoluteFilePath();
+    watchTask(this, taskId, [this, docId, displayName, sourceFilePath, error](bool success) {
         LCNC_DEBUG(lcnc::LogCode::Generic,
                    "CadModule::openDocument task done docId={} success={}",
                    docId, success);
         if (!success) {
-            closeDocument(docId);
+            if (LcncDocument* doc = domainDocumentById(docId))
+                doc->clearEntityKind(LcncDocument::EntityKind::Workpiece);
+            lcnc::Kernel::current().projectManager()->session().workpiece().clear();
+            lcnc::Kernel::current().projectManager()->notifyDomainChanged(docId);
             emit operationFailed(tr("打开失败"),
                                  error->isEmpty() ? tr("打开文件失败") : *error);
             return;
         }
 
+        auto* project = lcnc::Kernel::current().projectManager();
+        project->session().workpiece().displayName = displayName;
+        project->session().workpiece().sourceFilePath = sourceFilePath;
         refreshDisplay(docId);
     });
 
@@ -718,7 +674,7 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
 
     bool createdNew = false;
     const DocumentId docId = ensureTargetDocument(this, targetDocId, fileInfo.baseName(), &createdNew);
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc) {
         emit operationFailed(tr("导入 STEP 失败"), tr("无法创建目标文档"));
         return kInvalidDocumentId;
@@ -743,7 +699,9 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
             prog->setValue(100);
         });
 
-    watchTask(this, taskId, [this, docId, createdNew, error](bool success) {
+    const QString displayName = fileInfo.completeBaseName();
+    const QString sourceFilePath = fileInfo.absoluteFilePath();
+    watchTask(this, taskId, [this, docId, createdNew, displayName, sourceFilePath, error](bool success) {
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
@@ -752,6 +710,11 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
             return;
         }
 
+        auto* project = lcnc::Kernel::current().projectManager();
+        if (project->isDomainDocument(docId, lcnc::ProjectDomain::Workpiece)) {
+            project->session().workpiece().displayName = displayName;
+            project->session().workpiece().sourceFilePath = sourceFilePath;
+        }
         refreshDisplay(docId);
     });
 
@@ -768,7 +731,7 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
 
     bool createdNew = false;
     const DocumentId docId = ensureTargetDocument(this, targetDocId, fileInfo.baseName(), &createdNew);
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc) {
         emit operationFailed(tr("导入 STL 失败"), tr("无法创建目标文档"));
         return kInvalidDocumentId;
@@ -795,7 +758,9 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
             prog->setValue(100);
         });
 
-    watchTask(this, taskId, [this, docId, createdNew, error](bool success) {
+    const QString displayName = fileInfo.completeBaseName();
+    const QString sourceFilePath = fileInfo.absoluteFilePath();
+    watchTask(this, taskId, [this, docId, createdNew, displayName, sourceFilePath, error](bool success) {
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
@@ -804,6 +769,11 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
             return;
         }
 
+        auto* project = lcnc::Kernel::current().projectManager();
+        if (project->isDomainDocument(docId, lcnc::ProjectDomain::Workpiece)) {
+            project->session().workpiece().displayName = displayName;
+            project->session().workpiece().sourceFilePath = sourceFilePath;
+        }
         refreshDisplay(docId);
     });
 
@@ -812,7 +782,7 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
 
 bool CadModule::saveDocument(DocumentId id, const QString& path)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(id);
+    LcncDocument* doc = domainDocumentById(id);
     if (!doc) {
         emit operationFailed(tr("保存失败"), tr("找不到目标文档"));
         return false;
@@ -823,7 +793,9 @@ bool CadModule::saveDocument(DocumentId id, const QString& path)
         return false;
     }
     QString err;
-    const bool ok = lcnc::Kernel::current().app()->saveDocument(id, target, &err);
+    const bool ok = lcnc::LcncProjectPackage::isProjectPath(target)
+        ? lcnc::Kernel::current().projectManager()->saveProject(target, &err)
+        : lcnc::Kernel::current().projectManager()->exportDomainAsStep(lcnc::ProjectDomain::Workpiece, target, &err);
     if (!ok)
         emit operationFailed(tr("保存失败"), err.isEmpty() ? tr("保存文档失败") : err);
     return ok;
@@ -831,7 +803,7 @@ bool CadModule::saveDocument(DocumentId id, const QString& path)
 
 void CadModule::exportStep(DocumentId id, const QString& filePath)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(id);
+    LcncDocument* doc = domainDocumentById(id);
     if (!doc) {
         emit operationFailed(tr("导出 STEP 失败"), tr("找不到目标文档"));
         return;
@@ -877,7 +849,8 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
 
 void CadModule::closeDocument(DocumentId id)
 {
-    lcnc::Kernel::current().app()->closeDocument(id);
+    if (id == workpieceDocumentId())
+        lcnc::Kernel::current().projectManager()->clearDomain(lcnc::ProjectDomain::Workpiece);
 }
 
 DocumentId CadModule::importFile(const QString& filePath)
@@ -890,83 +863,32 @@ DocumentId CadModule::importFile(const QString& filePath)
     return openDocument(filePath);
 }
 
-// ── Active Document ────────────────────────────────────────────────────────────
+// ── Project Domain Access ─────────────────────────────────────────────────────
 
-DocumentId CadModule::activeDocumentId() const
+DocumentId CadModule::workpieceDocumentId() const
 {
-    return lcnc::Kernel::current().app()->activeDocumentId();
+    return lcnc::Kernel::current().projectManager()->workpieceDocumentId();
 }
 
-LcncDocument* CadModule::activeDocument() const
+LcncDocument* CadModule::workpieceDocument() const
 {
-    return lcnc::Kernel::current().app()->activeDocument();
+    return lcnc::Kernel::current().projectManager()->workpieceDocument();
 }
 
-GuiDocument* CadModule::activeGuiDocument() const
+GuiDocument* CadModule::workspaceGuiDocument() const
 {
-    return lcnc::Kernel::current().guiApp()->activeGuiDocument();
+    return lcnc::Kernel::current().guiApp()->workspaceGuiDocument();
 }
 
-LcncDocument* CadModule::documentById(DocumentId id) const
+LcncDocument* CadModule::domainDocumentById(DocumentId id) const
 {
-    return lcnc::Kernel::current().app()->documentById(id);
-}
-
-GuiDocument* CadModule::guiDocument(DocumentId id) const
-{
-    return lcnc::Kernel::current().guiApp()->guiDocument(id);
-}
-
-QList<LcncDocument*> CadModule::workpieceDocuments() const
-{
-    return lcnc::Kernel::current().app()->workpieceDocuments();
-}
-
-QList<CadModule::DocumentTreeDocument> CadModule::documentTreeDocuments() const
-{
-    QList<DocumentTreeDocument> documents;
-    const QList<LcncDocument*> docs = workpieceDocuments();
-    documents.reserve(docs.size());
-
-    for (LcncDocument* doc : docs) {
-        if (!doc)
-            continue;
-
-        DocumentTreeDocument documentNode;
-        documentNode.documentId = doc->id();
-        documentNode.nodeKey = QStringLiteral("doc:%1").arg(doc->id());
-        documentNode.displayName = doc->name();
-
-        const auto& hierarchy = doc->entityTree(LcncDocument::EntityKind::Workpiece);
-        if (!hierarchy.isEmpty()) {
-            documentNode.children.reserve(hierarchy.size());
-            for (int index = 0; index < hierarchy.size(); ++index) {
-                DocumentTreeNode childNode =
-                    buildHierarchyNode(hierarchy.at(index), doc->id(), documentNode.nodeKey, index);
-                appendUniqueEntries(&documentNode.leafEntries, childNode.leafEntries);
-                documentNode.children.append(std::move(childNode));
-            }
-        } else {
-            documentNode.children = buildFallbackNodes(doc);
-            for (const auto& childNode : documentNode.children)
-                appendUniqueEntries(&documentNode.leafEntries, childNode.leafEntries);
-        }
-
-        documents.append(std::move(documentNode));
-    }
-
-    return documents;
-}
-
-void CadModule::setActiveDocument(DocumentId id)
-{
-    lcnc::Kernel::current().app()->setActiveDocument(id);
+    return lcnc::Kernel::current().projectManager()->domainDocumentById(id);
 }
 
 void CadModule::requestWorkpieceView(DocumentId id)
 {
     if (id == kInvalidDocumentId)
-        id = activeDocumentId();
+        id = workpieceDocumentId();
     emit workpieceViewRequested(id);
 }
 
@@ -975,8 +897,8 @@ void CadModule::setEntityVisible(DocumentId docId, const QString& entry, bool vi
     if (entry.isEmpty())
         return;
 
-    if (auto* gd = guiDocument(docId)) {
-        Handle(AIS_Shape) ais = gd->aisShape(entry);
+    if (auto* gd = workspaceGuiDocument()) {
+        Handle(AIS_Shape) ais = gd->aisShape(docId, entry);
         if (ais.IsNull())
             return;
 
@@ -998,7 +920,7 @@ void CadModule::setEntriesVisible(DocumentId docId, const QStringList& entries, 
 
 void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
 {
-    GuiDocument* gd = guiDocument(docId);
+    GuiDocument* gd = workspaceGuiDocument();
     if (!gd)
         return;
 
@@ -1008,7 +930,7 @@ void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
 
     ctx->ClearSelected(false);
     for (const QString& entry : entries) {
-        Handle(AIS_Shape) ais = gd->aisShape(entry);
+        Handle(AIS_Shape) ais = gd->aisShape(docId, entry);
         if (!ais.IsNull())
             ctx->AddOrRemoveSelected(ais, false);
     }
@@ -1016,7 +938,7 @@ void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
     if (gd->hasView())
         gd->view()->Redraw();
 
-    const QStringList selected = gd->selectedEntries();
+    const QStringList selected = gd->selectedEntries(docId);
     if (auto* state = m_documentRegistry->ensure(docId)) {
         state->selectionContext() = lcnc::cad::selection::CadSelectionResolver::fromShapeEntries(
             docId, selected, true, isSketchEditing(), hasSelectedSketch(), m_selectedSketchId);
@@ -1027,8 +949,8 @@ void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
 
 QStringList CadModule::selectedEntries(DocumentId docId) const
 {
-    if (auto* gd = guiDocument(docId))
-        return gd->selectedEntries();
+    if (auto* gd = workspaceGuiDocument())
+        return gd->selectedEntries(docId);
 
     return {};
 }
@@ -1036,7 +958,7 @@ QStringList CadModule::selectedEntries(DocumentId docId) const
 void CadModule::syncSelectionFromView(DocumentId docId)
 {
     if (docId == kInvalidDocumentId)
-        docId = activeDocumentId();
+        docId = workpieceDocumentId();
 
     const QStringList entries = selectedEntries(docId);
     if (auto* state = m_documentRegistry->ensure(docId)) {
@@ -1049,13 +971,13 @@ void CadModule::syncSelectionFromView(DocumentId docId)
 lcnc::cad::selection::CadSelectionContext CadModule::selectionContext(DocumentId docId) const
 {
     if (docId == kInvalidDocumentId)
-        docId = activeDocumentId();
+        docId = workpieceDocumentId();
 
     lcnc::cad::selection::CadSelectionContext context;
     if (const auto* state = m_documentRegistry->get(docId))
         context = state->selectionContext();
     context.docId = docId;
-    context.hasDocument = docId != kInvalidDocumentId && documentById(docId);
+    context.hasDocument = docId != kInvalidDocumentId && domainDocumentById(docId);
     context.sketchEditing = isSketchEditing();
     context.selectedSketchId = m_selectedSketchId;
     context.hasSelectedSketch = hasSelectedSketch();
@@ -1095,7 +1017,7 @@ void CadModule::setSelectionContext(const lcnc::cad::selection::CadSelectionCont
             m_selectedSketchId = context.selectedSketchId;
             emit sketchSelectionChanged(m_selectedSketchId);
         }
-        if (auto* gd = guiDocument(context.docId)) {
+        if (auto* gd = workspaceGuiDocument()) {
             const Handle(AIS_InteractiveContext)& ctx = gd->context();
             if (!ctx.IsNull())
                 ctx->ClearSelected(false);
@@ -1118,7 +1040,7 @@ void CadModule::setSelectionContext(const lcnc::cad::selection::CadSelectionCont
             entries.append(item.entry);
     }
     if (entries.isEmpty()) {
-        if (auto* gd = guiDocument(context.docId)) {
+        if (auto* gd = workspaceGuiDocument()) {
             const Handle(AIS_InteractiveContext)& ctx = gd->context();
             if (!ctx.IsNull())
                 ctx->ClearSelected(false);
@@ -1141,7 +1063,7 @@ bool CadModule::moveShape(DocumentId docId, const TDF_Label& label, const gp_Vec
 bool CadModule::moveShapes(DocumentId docId, const QList<TDF_Label>& labels,
                            const gp_Vec& translation)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc || labels.isEmpty())
         return false;
 
@@ -1167,7 +1089,7 @@ bool CadModule::rotateShape(DocumentId docId, const TDF_Label& label,
 bool CadModule::rotateShapes(DocumentId docId, const QList<TDF_Label>& labels,
                              const gp_Ax1& axis, double angleDeg)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc || labels.isEmpty())
         return false;
 
@@ -1191,14 +1113,14 @@ bool CadModule::deleteShape(DocumentId docId, const QString& entry)
 
 bool CadModule::deleteShapes(DocumentId docId, const QStringList& entries)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc || entries.isEmpty())
         return false;
 
     doc->openCommand(tr("删除形体"));
-    if (auto* gd = lcnc::Kernel::current().guiApp()->guiDocument(docId)) {
+    if (auto* gd = workspaceGuiDocument()) {
         for (const QString& entry : entries)
-            gd->eraseEntity(entry);
+            gd->eraseEntity(docId, entry);
     }
 
     for (const QString& entry : entries)
@@ -1211,15 +1133,15 @@ bool CadModule::deleteShapes(DocumentId docId, const QStringList& entries)
 
 int CadModule::explodeShape(DocumentId docId, const TDF_Label& label, int entityKind)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc) return 0;
 
     doc->openCommand(tr("拆解形体"));
 
     // Erase original AIS object
     const QString entry = XcafUtils::entry(label);
-    if (auto* gd = lcnc::Kernel::current().guiApp()->guiDocument(docId))
-        gd->eraseEntity(entry);
+    if (auto* gd = workspaceGuiDocument())
+        gd->eraseEntity(docId, entry);
 
     int count = ShapeService::explodeShape(doc, label, entityKind);
     if (count <= 0) {
@@ -1235,7 +1157,7 @@ int CadModule::explodeShape(DocumentId docId, const TDF_Label& label, int entity
 TDF_Label CadModule::createShape(DocumentId docId, const TopoDS_Shape& shape,
                                   const QString& name, int entityKind)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc) return TDF_Label();
 
     doc->openCommand(tr("创建形体"));
@@ -1300,10 +1222,10 @@ bool CadModule::createPrimitive(int primitiveIndex, const PrimitiveParameters& p
         return false;
     }
 
-    DocumentId docId = activeDocumentId();
+    DocumentId docId = workpieceDocumentId();
     if (docId == kInvalidDocumentId)
         docId = newDocument(primitiveName(primitiveIndex));
-    if (docId == kInvalidDocumentId || !documentById(docId)) {
+    if (docId == kInvalidDocumentId || !domainDocumentById(docId)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::createPrimitive failed to prepare document");
         emit operationFailed(tr("创建基础体失败"), tr("无法创建或激活目标文档"));
@@ -1322,7 +1244,6 @@ bool CadModule::createPrimitive(int primitiveIndex, const PrimitiveParameters& p
         return false;
     }
 
-    setActiveDocument(docId);
     requestWorkpieceView(docId);
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "CadModule::createPrimitive end success=true docId={}", docId);
@@ -1377,11 +1298,11 @@ bool CadModule::buildTransformPreview(const TransformParameters& params,
     if (outShape)
         outShape->Nullify();
 
-    const DocumentId docId = activeDocumentId();
-    LcncDocument* doc = documentById(docId);
+    const DocumentId docId = workpieceDocumentId();
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc) {
         if (errMsg)
-            *errMsg = tr("请先打开或创建工件文档");
+            *errMsg = tr("请先导入或创建工件模型");
         return false;
     }
 
@@ -1444,10 +1365,10 @@ bool CadModule::applyTransform(const TransformParameters& params, QString* errMs
         return false;
     };
 
-    const DocumentId docId = activeDocumentId();
-    LcncDocument* doc = documentById(docId);
+    const DocumentId docId = workpieceDocumentId();
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc)
-        return fail(tr("请先打开或创建工件文档"));
+        return fail(tr("请先导入或创建工件模型"));
 
     const QStringList entries = selectedEntries(docId);
     const QList<TDF_Label> labels = selectedShapeLabels(doc, entries);
@@ -1489,17 +1410,16 @@ bool CadModule::beginSketch(int planeIndex)
         return false;
     }
 
-    DocumentId docId = activeDocumentId();
+    DocumentId docId = workpieceDocumentId();
     if (docId == kInvalidDocumentId)
         docId = newDocument(tr("草图建模"));
-    if (docId == kInvalidDocumentId || !documentById(docId)) {
+    if (docId == kInvalidDocumentId || !domainDocumentById(docId)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::beginSketch failed to prepare document");
         emit operationFailed(tr("新建草图失败"), tr("无法创建或激活目标文档"));
         return false;
     }
 
-    setActiveDocument(docId);
     auto planeKind = lcnc::cad::SketchPlaneKind::XY;
     switch (planeIndex) {
     case 1:
@@ -1540,11 +1460,11 @@ bool CadModule::finishSketch()
         return false;
     }
 
-    DocumentId docId = activeDocumentId();
-    if (docId == kInvalidDocumentId || lcnc::Kernel::current().app()->isMachineDocument(docId)) {
+    DocumentId docId = workpieceDocumentId();
+    if (docId == kInvalidDocumentId) {
         LCNC_WARN(lcnc::LogCode::Generic,
-                  "CadModule::finishSketch no workpiece document active");
-        emit operationFailed(tr("完成草图失败"), tr("请在工件文档上完成草图"));
+                  "CadModule::finishSketch no project document active");
+        emit operationFailed(tr("完成草图失败"), tr("项目文档不可用"));
         return false;
     }
 
@@ -1568,7 +1488,7 @@ bool CadModule::finishSketch()
     m_selectedSketchId = sketchId;
     if (state) {
         state->presentationState().selectedSketchId = sketchId;
-        state->selectionContext() = lcnc::cad::selection::CadSelectionResolver::fromDocumentTreeNode(
+        state->selectionContext() = lcnc::cad::selection::CadSelectionResolver::fromProjectExplorerNode(
             docId,
             QStringLiteral("__sketch_finished_%1__").arg(sketchId),
             QString(),
@@ -1591,7 +1511,7 @@ bool CadModule::applyFeature(int featureIndex, double length, double angleDeg)
 
     DocumentId docId = m_selectedSketchDocId;
     if (docId == kInvalidDocumentId)
-        docId = activeDocumentId();
+        docId = workpieceDocumentId();
     auto* manager = m_documentRegistry->sketchManager(docId);
     if (!manager || m_selectedSketchId <= 0) {
         emit operationFailed(tr("应用特征失败"), tr("请先完成并选择一个草图"));
@@ -1626,7 +1546,7 @@ bool CadModule::applyFeature(int featureIndex, double length, double angleDeg)
         return false;
     }
 
-    if (!documentById(docId)) {
+    if (!domainDocumentById(docId)) {
         emit operationFailed(tr("应用特征失败"), tr("目标文档不存在"));
         return false;
     }
@@ -1641,7 +1561,6 @@ bool CadModule::applyFeature(int featureIndex, double length, double angleDeg)
         return false;
     }
 
-    setActiveDocument(docId);
     requestWorkpieceView(docId);
     manager->markSketchUsedByFeature(m_selectedSketchId, XcafUtils::entry(label));
     emit finishedSketchesChanged(docId);
@@ -1732,13 +1651,13 @@ void CadModule::setSelectedSketchId(int sketchId)
         return;
     m_selectedSketchId = sketchId;
     if (sketchId > 0)
-        m_selectedSketchDocId = activeDocumentId();
+        m_selectedSketchDocId = workpieceDocumentId();
     else
         m_selectedSketchDocId = kInvalidDocumentId;
     if (auto* state = m_documentRegistry->ensure(m_selectedSketchDocId)) {
         state->presentationState().selectedSketchId = sketchId;
         state->selectionContext() = sketchId > 0
-            ? lcnc::cad::selection::CadSelectionResolver::fromDocumentTreeNode(
+            ? lcnc::cad::selection::CadSelectionResolver::fromProjectExplorerNode(
                   m_selectedSketchDocId,
                   QStringLiteral("__sketch_finished_%1__").arg(sketchId),
                   QString(),
@@ -1753,7 +1672,7 @@ CadModule::finishedSketchSnapshots(DocumentId docId) const
 {
     QList<FinishedSketchSnapshot> snaps;
     if (docId == kInvalidDocumentId)
-        docId = activeDocumentId();
+        docId = workpieceDocumentId();
     auto* manager = m_documentRegistry->sketchManager(docId);
     if (!manager)
         return snaps;
@@ -1778,7 +1697,7 @@ CadModule::finishedSketchSnapshots(DocumentId docId) const
 bool CadModule::setSketchVisible(DocumentId docId, int sketchId, bool visible)
 {
     if (docId == kInvalidDocumentId)
-        docId = activeDocumentId();
+        docId = workpieceDocumentId();
     auto* manager = m_documentRegistry->sketchManager(docId);
     if (!manager)
         return false;
@@ -1791,7 +1710,7 @@ bool CadModule::setSketchVisible(DocumentId docId, int sketchId, bool visible)
 bool CadModule::deleteSketch(DocumentId docId, int sketchId)
 {
     if (docId == kInvalidDocumentId)
-        docId = activeDocumentId();
+        docId = workpieceDocumentId();
     auto* manager = m_documentRegistry->sketchManager(docId);
     if (!manager)
         return false;
@@ -1915,13 +1834,13 @@ QList<CadModule::SketchOverlaySnapshot> CadModule::sketchOverlaySnapshots(Docume
 {
     QList<SketchOverlaySnapshot> snapshots;
     if (docId == kInvalidDocumentId)
-        docId = activeDocumentId();
+        docId = workpieceDocumentId();
     if (docId == kInvalidDocumentId)
         return snapshots;
 
     const auto context = selectionContext(docId);
 
-    if (m_modelingSession && m_modelingSession->isSketchEditing() && docId == activeDocumentId()) {
+    if (m_modelingSession && m_modelingSession->isSketchEditing() && docId == workpieceDocumentId()) {
         const int plane = static_cast<int>(m_modelingSession->finishedPlane());
         for (const auto& element : m_modelingSession->sketchElements()) {
             SketchOverlaySnapshot snap;
@@ -1980,19 +1899,19 @@ QList<CadModule::SketchOverlaySnapshot> CadModule::sketchOverlaySnapshots(Docume
 
 bool CadModule::canUndo(DocumentId docId) const
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     return doc && doc->canUndo();
 }
 
 bool CadModule::canRedo(DocumentId docId) const
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     return doc && doc->canRedo();
 }
 
 void CadModule::undo(DocumentId docId)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc || !doc->canUndo()) return;
     doc->undo();
     refreshDisplay(docId);
@@ -2000,7 +1919,7 @@ void CadModule::undo(DocumentId docId)
 
 void CadModule::redo(DocumentId docId)
 {
-    LcncDocument* doc = lcnc::Kernel::current().app()->documentById(docId);
+    LcncDocument* doc = domainDocumentById(docId);
     if (!doc || !doc->canRedo()) return;
     doc->redo();
     refreshDisplay(docId);
@@ -2010,13 +1929,15 @@ void CadModule::redo(DocumentId docId)
 
 void CadModule::refreshDisplay(DocumentId docId)
 {
-    auto* gd = lcnc::Kernel::current().guiApp()->guiDocument(docId);
+    auto* gd = workspaceGuiDocument();
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "CadModule::refreshDisplay docId={} gd={}",
                docId, static_cast<void*>(gd));
     if (gd) {
-        gd->rebuildDisplay();
+        lcnc::ProjectDomain domain = lcnc::ProjectDomain::Workpiece;
+        lcnc::Kernel::current().projectManager()->domainForDocument(docId, &domain);
+        gd->rebuildDomain(domain, domainDocumentById(docId));
         gd->fitAll();
     }
-    lcnc::Kernel::current().app()->notifyDocumentModified(docId);
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(docId);
 }

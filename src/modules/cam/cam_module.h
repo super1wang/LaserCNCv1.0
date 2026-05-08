@@ -12,11 +12,11 @@
 #include "modules/cam/contracts/cam_data_contracts.h"
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
-#include "core/document/lcnc_application.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
+#include "core/project/project_types.h"
 
 #include <AIS_Shape.hxx>
 #include <TopoDS_Shape.hxx>
@@ -39,6 +39,7 @@ class MachineGuideRenderer;
 } // namespace lcnc::view
 
 namespace lcnc::cam {
+class CamDataManager;
 class ToolpathSimulator;
 } // namespace lcnc::cam
 
@@ -47,17 +48,17 @@ class ToolpathSimulator;
  *
  * Responsible for:
  *  - Machine model loading / unloading / export / axis configuration
- *  - Workpiece mounting onto machine axes
+ *  - Workpiece mounting onto machine axes inside the machine document
  *  - Toolpath generation, lead-in computation, preview display
  *  - Simulation (play / pause / stop / speed control)
  *  - Managing the "准备" (Prepare) tab page
- *  - Owns the machine document and its independent view
+ *  - Coordinates the machine domain view and CAM runtime display
  *
  * For shape operations (move/rotate/delete) on machine entities, delegates
  * to ShapeService — sharing the same geometry code as the CAD module.
  *
  * 微内核集成：同 CadModule，实现 @ref lcnc::IModule + @ref lcnc::IService，
- * 生命周期由 Kernel 接管，依赖 "cad" 模块（共享 LcncApplication 机台文档）。
+ * 生命周期由 Kernel 接管，依赖 "cad" 模块（三域文档由 LcncProjectManager 管理）。
  */
 class CamModule : public QObject, public lcnc::IModule, public lcnc::ICamFacade
 {
@@ -117,16 +118,18 @@ public:
     /// ICamFacade：用于让调用方挂接 Qt 信号。
     QObject* asQObject() override { return this; }
 
-    // ── Machine Document ─────────────────────────────────────────────────
+    // ── Domain Workspaces ────────────────────────────────────────────────
     LcncDocument*      machineDocument() const;
-    GuiDocument*       machineGuiDocument() const;
     DocumentId         machineDocumentId() const;
+    LcncDocument*      camDocument() const;
+    DocumentId         camDocumentId() const;
+    GuiDocument*       workspaceGuiDocument() const;
     MachineKinematics* kinematics() const;
     void               requestMachineView() override;
     QString            machineModelPath() const;
     void               setMachineModelPath(const QString& filePath);
-    MachineRenderQuality machineRenderQuality() const;
-    void               setMachineRenderQuality(MachineRenderQuality quality);
+    lcnc::RenderQualityPreset machineRenderQualityPreset() const;
+    void               setMachineRenderQualityPreset(lcnc::RenderQualityPreset quality);
 
     // ── Machine Management ───────────────────────────────────────────────
     /// Configure machine kinematics without requiring a machine model.
@@ -148,6 +151,8 @@ public:
     void unassignShape(const QString& entry);
     void clearAxisAssignments(const QString& axisName);
     QList<AxisOption> axisOptions(bool includeDetachOption = false) const;
+    /// Return the preferred workpiece mount axis for the current machine preset.
+    QString defaultWorkpieceMountAxis() const;
     gp_Pnt axisOrigin(const QString& axisName) const;
     void setAxisOrigin(const QString& axisName, const gp_Pnt& origin);
     bool setAxisLimits(const QString& axisName, double minVal, double maxVal);
@@ -191,6 +196,13 @@ public:
     bool compressMachineModel(MachineCompressionStrategy strategy = MachineCompressionStrategy::FilledSolid);
     QList<WorkpieceMountCandidate> mountableWorkpieces() const;
     gp_Pnt workpieceInstallPosition() const;
+    bool autoInstallWorkpiece() const;
+    void setAutoInstallWorkpiece(bool enabled);
+    bool autoInstallCurrentWorkpiece();
+    QStringList mountedWorkpieceEntriesForSourceEntries(const QStringList& sourceEntries) const;
+    QStringList sourceWorkpieceEntriesForMountedEntries(const QStringList& mountedEntries) const;
+    void setMountedWorkpieceEntriesVisible(const QStringList& sourceEntries, bool visible);
+    void setSelectedMountedWorkpieceEntries(const QStringList& sourceEntries);
     /// 重量级路径：完整重设安装位置，翻译底层 TopoDS 并重建机台 view（适用于「对齐」之类一次性操作）。
     void setWorkpieceInstallPosition(const gp_Pnt& position);
     /// 轻量级路径：仅对已展示的工件 AIS 调 SetLocation，不修改几何；适用于 spinbox
@@ -201,10 +213,10 @@ public:
     bool alignWorkpieceInstallPositionToRotationCenter();
 
     // ── Workpiece Mounting ───────────────────────────────────────────────
-    /// Mount workpiece from a source document onto a machine axis.
-    void mountWorkpiece(DocumentId sourceDocId, const QString& axisName);
+    /// Bind the current Workpiece section to a machine axis.
+    void mountWorkpiece(DocumentId sourceDocId, const QString& axisName, bool alignToInstallPosition = true);
 
-    /// Unmount all workpieces from the machine document.
+    /// Clear workpiece-axis bindings without deleting Workpiece section geometry.
     void unmountAllWorkpieces();
 
     // ── Shape Operations on Machine Doc (delegates to ShapeService) ──────
@@ -228,6 +240,9 @@ public:
     void setDeflection(double mm);
     double deflection() const;
     void setContourEnabled(int contourIdx, bool enabled);
+    lcnc::cam::ContourId contourIdAt(int contourIdx) const;
+    int contourIndexById(lcnc::cam::ContourId contourId) const;
+    void reorderContoursById(const QList<lcnc::cam::ContourId>& order);
     void reorderContours(const QList<int>& order);
 
     /// Recalculate all lead-in lines and machine coordinates with current parameters.
@@ -296,6 +311,7 @@ signals:
     void toolpathCleared();
     void toolpathVisibilityChanged(bool visible);
     void toolpathContourSelected(int contourIndex);
+    void toolpathContoursSelected(const QList<int>& contourIndexes);
     void simulationTick(int contourIdx, int pointIdx, int totalPoints);
     void simulationStateChanged(bool playing);
     void simulationFinished();
@@ -309,7 +325,7 @@ private:
         int componentIndex{0};
     };
 
-    /// Collect the workpiece compound shape from the machine document.
+    /// Collect the workpiece compound shape from the project document.
     TopoDS_Shape collectWorkpieceShape() const;
     QList<WorkpieceShapeSource> collectWorkpieceShapes() const;
 
@@ -334,8 +350,11 @@ private:
     void applyStoredMachineProfile(const QString& machinePath);
     gp_Pnt defaultWorkpieceInstallPosition() const;
     void updateToolpathMachineCoordinates();
+    bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
+    bool clearMountedWorkpieceDisplay(bool refreshView);
 
     void refreshMachineDisplay();
+    void syncCamDocumentContours();
 
     bool              m_initialized{false};
 
@@ -345,11 +364,15 @@ private:
     std::unique_ptr<lcnc::view::ToolpathRenderer>      m_toolpathRenderer;
     std::unique_ptr<lcnc::view::MachineGuideRenderer>  m_guideRenderer;
 
-    // ── Toolpath data (renderer owns AIS) ─────────────────────────────
-    LaserToolpath               m_toolpath;
+    // ── CAM data managers ─────────────────────────────────────────────
+    std::unique_ptr<lcnc::cam::CamDataManager>          m_camData;
+
+    // Temporary compatibility reference while callsites migrate to m_camData.
+    LaserToolpath&              m_toolpath;
     TopoDS_Shape                m_workpieceShape;
+    QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
     QString                     m_machineModelPath;
-    MachineRenderQuality        m_machineRenderQuality{MachineRenderQuality::Medium};
+    lcnc::RenderQualityPreset   m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     gp_Pnt                      m_cutterHeadModelPosition{0.0, 0.0, 0.0};
     gp_Pnt                      m_cutterHeadPhysicalPosition{0.0, 0.0, 0.0};
     gp_Pnt                      m_workpieceInstallPosition{0.0, 0.0, 0.0};

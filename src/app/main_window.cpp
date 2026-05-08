@@ -2,6 +2,7 @@
 #include "core/kernel/kernel.h"
 #include "app/app_context.h"
 #include "app/command_registry.h"
+#include "app/project_explorer_tree_utils.h"
 #include "core/command/commands_api.h"
 #include "core/logging/logger.h"
 #include "modules/cad/commands/commands_file.h"
@@ -15,7 +16,6 @@
 #include "modules/cam/ui/ribbon_cam_tab.h"
 #include "modules/process/ui/ribbon_process_tab.h"
 #include "view/widget_occ_view.h"
-#include "modules/cad/ui/widget_model_tree.h"
 #include "modules/cam/ui/widget_machine_panel.h"
 #include "modules/cam/ui/widget_toolpath_panel.h"
 #include "modules/cam/ui/dialog_axis_calibration_wizard.h"
@@ -23,8 +23,8 @@
 #include "app/dialog/dialog_task_manager.h"
 #include "modules/cam/settings/cam_config.h"
 #include "core/algorithms/cam/laser_toolpath.h"
-#include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
+#include "core/project/lcnc_project_manager.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
 #include "view/graphics_scene.h"
@@ -34,7 +34,6 @@
 #include "view/world_axes_renderer.h"
 #include "modules/cad/cad_module.h"
 #include "modules/cad/selection/cad_selection_resolver.h"
-#include "modules/cad/ui/cad_model_tree_adapter.h"
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
 
@@ -43,13 +42,15 @@
 #include <SARibbonPanel.h>
 
 #include <QSplitter>
-#include <QTabWidget>
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
+#include <QTabWidget>
 #include <QHeaderView>
 #include <QStatusBar>
 #include <QLabel>
+#include <QMenu>
+#include <QAction>
 
 #include <QVBoxLayout>
 #include <QComboBox>
@@ -63,6 +64,7 @@
 #include <QTimer>
 #include <QStyle>
 #include <QSignalBlocker>
+#include <QSet>
 #include <QVariantMap>
 #include <functional>
 #include <V3d_TypeOfOrientation.hxx>
@@ -73,15 +75,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
-constexpr int kRoleDocId = Qt::UserRole + 1;
-constexpr int kRoleEntry = Qt::UserRole + 2;
-constexpr int kRoleNodeKey = Qt::UserRole + 3;
-constexpr int kRoleLeafEntries = Qt::UserRole + 4;
-
-bool usesMachineWorkspace(int tabIndex)
-{
-    return tabIndex >= 1;
-}
+constexpr int kRoleDocId = lcnc::app::ProjectExplorerRoles::DocId;
+constexpr int kRoleEntry = lcnc::app::ProjectExplorerRoles::Entry;
+constexpr int kRoleNodeKey = lcnc::app::ProjectExplorerRoles::NodeKey;
+constexpr int kRoleLeafEntries = lcnc::app::ProjectExplorerRoles::LeafEntries;
+constexpr int kRoleContourIndex = lcnc::app::ProjectExplorerRoles::ContourIndex;
+constexpr int kRoleAxisName = lcnc::app::ProjectExplorerRoles::AxisName;
+constexpr int kRoleContourId = lcnc::app::ProjectExplorerRoles::ContourId;
+using lcnc::app::projectNodeKind;
 
 QString primitiveToolId(int primitiveIndex)
 {
@@ -147,23 +148,6 @@ bool isActiveSketchOverlayKey(const QString& key)
         || key.startsWith(QStringLiteral("__sketch_active_handle_"));
 }
 
-QIcon iconForCadNode(lcnc::cad::ui::CadTreeNodeKind kind)
-{
-    using lcnc::cad::ui::CadTreeNodeKind;
-    switch (kind) {
-    case CadTreeNodeKind::Document:
-        return QIcon(":/icons/new_doc.svg");
-    case CadTreeNodeKind::Sketch:
-    case CadTreeNodeKind::TemporarySketch:
-        return QIcon(":/icons/sketch.svg");
-    case CadTreeNodeKind::Shape:
-    case CadTreeNodeKind::SketchElement:
-        return QIcon(":/icons/shape.svg");
-    case CadTreeNodeKind::Group:
-    default:
-        return QIcon(":/icons/machine.svg");
-    }
-}
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -180,49 +164,24 @@ MainWindow::MainWindow(QWidget* parent)
     createRibbon();         // Ribbon uses m_cmdContainer (must exist)
     createStatusBar();
 
-    // Wire document lifecycle signals
-    LcncApplication* lcnc = lcnc::Kernel::current().app();
-    connect(lcnc, &LcncApplication::documentAdded,
-            this, &MainWindow::onDocumentAdded);
-    connect(lcnc, &LcncApplication::documentClosed,
-            this, &MainWindow::onDocumentClosed);
-    connect(lcnc, &LcncApplication::activeDocumentChanged,
-            this, &MainWindow::onActiveDocumentChanged);
-        connect(lcnc, &LcncApplication::documentModified,
-            this, &MainWindow::onDocumentModified);
+        auto* project = lcnc::Kernel::current().projectManager();
+        connect(project, &lcnc::LcncProjectManager::projectReset,
+            this, &MainWindow::onProjectReset);
+        connect(project, &lcnc::LcncProjectManager::domainDataChanged,
+            this, &MainWindow::onProjectDomainChanged);
 
     // 世界坐标系渲染器：新建/关闭文档时自动 attach/detach 到该文档场景，
     // 全局可见性由 ribbon 上的 CmdToggleWorldAxes 控制。
     if (auto* guiApp = lcnc::Kernel::current().guiApp()) {
-        connect(guiApp, &GuiApplication::guiDocumentAdded, this,
-                [guiApp](DocumentId id) {
-            auto* gd = guiApp->guiDocument(id);
-            if (!gd || !gd->scene()) {
-                LCNC_WARN(lcnc::LogCode::Generic,
-                          "WorldAxes auto-attach: missing scene for doc {}",
-                          static_cast<int>(id));
-                return;
-            }
+        if (auto* gd = guiApp->workspaceGuiDocument(); gd && gd->scene()) {
             LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "WorldAxes auto-attach for new doc {}",
-                       static_cast<int>(id));
+                       "WorldAxes auto-attach for workspace");
             lcnc::view::WorldAxesRenderer::instance().attach(gd->scene());
-        });
-        connect(guiApp, &GuiApplication::guiDocumentClosed, this,
-                [guiApp](DocumentId id) {
-            auto* gd = guiApp->guiDocument(id);
-            if (gd && gd->scene())
-                lcnc::view::WorldAxesRenderer::instance().detach(gd->scene());
-        });
-        // 启动时机台 GuiDocument 通常已经存在，直接 attach。
-        if (auto* mgd = guiApp->machineGuiDocument(); mgd && mgd->scene()) {
-            LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "WorldAxes auto-attach for machine doc");
-            lcnc::view::WorldAxesRenderer::instance().attach(mgd->scene());
         }
     }
 
     restorePersistedCamState();
+    showMachineView();
 
     updateCommandStates();
 }
@@ -238,10 +197,7 @@ void MainWindow::createContext()
     lcnc::Kernel::current().guiApp();
     // Task manager
     lcnc::Kernel::current().taskManager();
-    // Create the permanent machine workspace document.
-    // Must be called AFTER lcnc::Kernel::current().guiApp() so the documentAdded
-    // signal is received and a GuiDocument is created for the machine doc.
-    lcnc::Kernel::current().app()->ensureMachineDocument();
+    lcnc::Kernel::current().projectManager()->ensureProject();
 
     connect(m_appContext->cadModule(), &CadModule::operationFailed,
             this, [this](const QString& title, const QString& message) {
@@ -294,8 +250,8 @@ void MainWindow::createCentralLayout()
     // Task dialog (non-modal, floats on top)
     m_taskDialog = new DialogTaskManager(this);
 
-        connect(m_appContext->cadModule(), &CadModule::documentTreeChanged,
-            this, &MainWindow::rebuildDocumentTree);
+        connect(m_appContext->cadModule(), &CadModule::workpieceStructureChanged,
+            this, &MainWindow::rebuildProjectExplorer);
         connect(m_appContext->cadModule(), &CadModule::workpieceViewRequested,
             this, &MainWindow::showWorkpieceView);
         connect(m_appContext->camModule(), &CamModule::machineViewRequested,
@@ -311,7 +267,7 @@ void MainWindow::createCentralLayout()
         }
 
         m_appContext->cadModule()->syncSelectionFromView(
-            m_appContext->cadModule()->activeDocumentId());
+            m_appContext->cadModule()->workpieceDocumentId());
     });
 
             connect(m_occView, &WidgetOccView::sketchOverlayPicked,
@@ -395,75 +351,33 @@ void MainWindow::createCentralLayout()
 
     connect(m_appContext->camModule(), &CamModule::selectionChanged, this,
             [this](const QStringList& entries) {
-                m_modelTree->highlightEntries(entries);
+                const QStringList sourceEntries = m_appContext->camModule()
+                    ->sourceWorkpieceEntriesForMountedEntries(entries);
+                if (!sourceEntries.isEmpty())
+                    selectProjectExplorerEntries(
+                        m_appContext->workpieceDocumentId(), sourceEntries, true);
+                else
+                    selectProjectExplorerEntries(kInvalidDocumentId, entries, false);
                 m_machinePanel->setSelectedEntries(entries);
             });
     connect(m_appContext->camModule(), &CamModule::toolpathContourSelected, this,
             [this](int contourIndex) {
-                if (!m_contourListWidget
-                    || contourIndex < 0
-                    || contourIndex >= m_contourListWidget->topLevelItemCount()) {
-                    return;
-                }
-
-                QTreeWidgetItem* item = m_contourListWidget->topLevelItem(contourIndex);
-                if (!item)
-                    return;
-
-                {
-                    QSignalBlocker blocker(m_contourListWidget);
-                    m_contourListWidget->clearSelection();
-                    m_contourListWidget->setCurrentItem(item);
-                    item->setSelected(true);
-                }
-                m_contourListWidget->scrollToItem(item);
+                const auto contourId = m_appContext->camModule()->contourIdAt(contourIndex);
+                selectProjectExplorerContourById(contourId, contourIndex);
                 m_toolpathPanel->showContourCoordinates(contourIndex);
+            });
+    connect(m_appContext->camModule(), &CamModule::toolpathContoursSelected, this,
+            [this](const QList<int>& contourIndexes) {
+                selectProjectExplorerContours(contourIndexes);
             });
 
     connect(m_appContext->cadModule(), &CadModule::selectionChanged, this,
             [this](DocumentId docId, const QStringList& entries) {
-                if (!m_documentTree)
-                    return;
-
-                QSignalBlocker blocker(m_documentTree);
-                m_documentTree->clearSelection();
-                QTreeWidgetItemIterator it(m_documentTree);
-                while (*it) {
-                    const DocumentId itemDocId = (*it)->data(0, kRoleDocId).toInt();
-                    const QString entry = (*it)->data(0, kRoleEntry).toString();
-                    if (itemDocId == docId && !entry.isEmpty() && entries.contains(entry)) {
-                        (*it)->setSelected(true);
-                        for (QTreeWidgetItem* p = (*it)->parent(); p; p = p->parent())
-                            p->setExpanded(true);
-                    }
-                    ++it;
-                }
+                selectProjectExplorerEntries(docId, entries, true);
                 updateCommandStates();
             });
 
-    // Tree selection → module selection and machine panel context
-    connect(m_modelTree, &WidgetModelTree::selectionChanged, this,
-            [this](const QStringList& entries) {
-                m_appContext->camModule()->setSelectedEntries(entries);
-            });
-
-    // Checkbox visibility toggle → CAM module owns machine-side visibility
-    connect(m_modelTree, &WidgetModelTree::visibilityChanged, this,
-            [this](const QString& entry, bool visible) {
-                m_appContext->camModule()->setEntityVisible(entry, visible);
-            });
-
-    // Context menu → CAM module owns axis assignment storage
-    connect(m_modelTree, &WidgetModelTree::axisShapeUnassignRequested, this,
-            [this](const QString& shapeEntry) {
-                m_appContext->camModule()->unassignShape(shapeEntry);
-            });
-    connect(m_modelTree, &WidgetModelTree::axisAssignmentsClearRequested, this,
-            [this](const QString& axisName) {
-                m_appContext->camModule()->clearAxisAssignments(axisName);
-            });
-
-    rebuildDocumentTree();
+    rebuildProjectExplorer();
     syncMachineWorkspaceUiInternal(true);
 }
 
@@ -477,101 +391,71 @@ void MainWindow::create3DView()
 void MainWindow::createLeftPanel()
 {
     m_leftTabs = new QTabWidget(this);
-    m_leftTabs->setMinimumWidth(220);
-    m_leftTabs->setMaximumWidth(350);
+    m_leftTabs->setDocumentMode(true);
+    m_leftTabs->setMinimumWidth(240);
+    m_leftTabs->setMaximumWidth(380);
 
-    // ── 文档 tab (all opened files + assembly tree) ──────────────────────
-    m_documentTree = new QTreeWidget(m_leftTabs);
-    m_documentTree->setHeaderLabel(tr("文档结构"));
-    m_documentTree->setColumnCount(1);
-    m_documentTree->header()->setVisible(false);
-    m_documentTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    // 选中节点蓝底白字，与左侧"准备"模型树保持一致
-    m_documentTree->setStyleSheet(
+    m_projectExplorerTree = new QTreeWidget(this);
+    m_projectExplorerTree->setColumnCount(2);
+    m_projectExplorerTree->setHeaderLabels({tr("项目"), tr("信息")});
+    m_projectExplorerTree->header()->setStretchLastSection(false);
+    m_projectExplorerTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_projectExplorerTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_projectExplorerTree->setAnimated(true);
+    m_projectExplorerTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_projectExplorerTree->setDragDropMode(QAbstractItemView::InternalMove);
+    m_projectExplorerTree->setDefaultDropAction(Qt::MoveAction);
+    m_projectExplorerTree->setDropIndicatorShown(true);
+    m_projectExplorerTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_projectExplorerTree->setStyleSheet(
         "QTreeWidget::item:selected { background-color: #2A6FDB; color: white; }"
         "QTreeWidget::item:selected:!active { background-color: #2A6FDB; color: white; }");
-    m_leftTabs->addTab(m_documentTree, tr("文档"));
 
-    // ── 准备 tab ───────────────────────────────────────────────────────────
-    m_modelTree = new WidgetModelTree(m_leftTabs);
-    m_leftTabs->addTab(m_modelTree, tr("准备"));
-
-    // ── 刀路 tab ───────────────────────────────────────────────────────────
-    m_contourListWidget = new QTreeWidget(m_leftTabs);
-    m_contourListWidget->setHeaderLabels({tr("名称"), tr("点数")});
-    m_contourListWidget->setColumnCount(2);
-    m_contourListWidget->header()->setStretchLastSection(false);
-    m_contourListWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_contourListWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_contourListWidget->setDragDropMode(QAbstractItemView::InternalMove);
-    m_contourListWidget->setDefaultDropAction(Qt::MoveAction);
-    m_contourListWidget->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_contourListWidget->setRootIsDecorated(false);
-    m_contourListWidget->setItemsExpandable(false);
-    m_contourListWidget->setExpandsOnDoubleClick(false);
-    m_contourListWidget->setDropIndicatorShown(true);
-    m_leftTabs->addTab(m_contourListWidget, tr("刀路"));
-
-    // ── 执行 tab ───────────────────────────────────────────────────────────
-    m_processTree = new QTreeWidget(m_leftTabs);
-    m_processTree->setHeaderLabel(tr("加工流程"));
-    m_processTree->setColumnCount(2);
-    m_processTree->setHeaderLabels({tr("步骤"), tr("信息")});
-    m_processTree->header()->setStretchLastSection(true);
-    // Placeholder items
-    auto* startItem = new QTreeWidgetItem(m_processTree);
-    startItem->setText(0, tr("开始"));
-    startItem->setBackground(0, QColor(60, 160, 60));
-    startItem->setForeground(0, Qt::white);
-    auto* stopItem = new QTreeWidgetItem(m_processTree);
-    stopItem->setText(0, tr("结束"));
-    stopItem->setBackground(0, QColor(160, 60, 60));
-    stopItem->setForeground(0, Qt::white);
-
-    m_leftTabs->addTab(m_processTree, tr("执行"));
-
-    connect(m_leftTabs, &QTabWidget::currentChanged,
-            this, &MainWindow::onLeftTabChanged);
-    connect(m_documentTree, &QTreeWidget::itemClicked,
-            this, &MainWindow::onDocumentTreeItemClicked);
-
-    // Document tree checkbox visibility toggle
-    connect(m_documentTree, &QTreeWidget::itemChanged, this,
-            [this](QTreeWidgetItem* item, int /*column*/) {
-                if (!item) return;
-                const DocumentId docId = item->data(0, kRoleDocId).toInt();
-                const QString entry = item->data(0, kRoleEntry).toString();
-                const QString nodeKey = item->data(0, kRoleNodeKey).toString();
-                const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
-                if (docId == kInvalidDocumentId) return;
-                const bool visible = (item->checkState(0) == Qt::Checked);
-
-                if (lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(nodeKey)) {
-                    const int sketchId = lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(nodeKey);
-                    m_appContext->cadModule()->setSketchVisible(docId, sketchId, visible);
+    connect(m_projectExplorerTree, &QTreeWidget::currentItemChanged,
+            this, &MainWindow::onProjectExplorerCurrentItemChanged);
+    connect(m_projectExplorerTree, &QTreeWidget::itemChanged,
+            this, &MainWindow::onProjectExplorerItemChanged);
+    connect(m_projectExplorerTree, &QTreeWidget::customContextMenuRequested,
+            this, &MainWindow::onProjectExplorerContextMenuRequested);
+    connect(m_projectExplorerTree->model(), &QAbstractItemModel::rowsMoved,
+            this, [this]() { handleProjectExplorerRowsMoved(); });
+    connect(m_projectExplorerTree, &QTreeWidget::itemSelectionChanged, this,
+            [this]() {
+                if (m_blockProjectExplorerSignals || !m_projectExplorerTree)
                     return;
-                }
-
-                // Group / doc item: cascade then apply to all leaves
-                if (entry.isEmpty()) {
-                    QSignalBlocker sb(m_documentTree);
-                    std::function<void(QTreeWidgetItem*)> cascade = [&](QTreeWidgetItem* node) {
-                        for (int i = 0; i < node->childCount(); ++i) {
-                            QTreeWidgetItem* child = node->child(i);
-                            if (child->flags() & Qt::ItemIsUserCheckable)
-                                child->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
-                            cascade(child);
-                        }
-                    };
-                    cascade(item);
-                    m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
+                const auto currentKind = projectNodeKind(m_projectExplorerTree->currentItem());
+                if (!lcnc::app::isMachineProjectNode(currentKind))
                     return;
-                }
 
-                // Leaf item
-                m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
+                QStringList entries;
+                for (QTreeWidgetItem* item : m_projectExplorerTree->selectedItems()) {
+                    const auto kind = projectNodeKind(item);
+                    if (kind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
+                        const QString entry = item->data(0, kRoleEntry).toString();
+                        if (!entry.isEmpty())
+                            entries.append(entry);
+                    }
+                }
+                m_appContext->camModule()->setSelectedEntries(entries);
             });
 
+    m_processLeftPanel = new QWidget(m_leftTabs);
+    m_leftTabs->addTab(m_projectExplorerTree, tr("项目"));
+    m_leftTabs->addTab(m_processLeftPanel, tr("执行"));
+    connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int index) {
+        if (index == 1) {
+            if (m_rightStack)
+                m_rightStack->setCurrentWidget(m_laserControl);
+            m_appContext->camModule()->requestMachineView();
+        } else if (m_projectExplorerTree && m_projectExplorerTree->currentItem()) {
+            onProjectExplorerCurrentItemChanged(m_projectExplorerTree->currentItem(), nullptr);
+        } else {
+            if (m_rightStack)
+                m_rightStack->setCurrentWidget(m_cadTaskPanel);
+            showWorkpieceView();
+        }
+        updateCommandStates();
+    });
 }
 
 void MainWindow::createRightPanel()
@@ -694,7 +578,7 @@ void MainWindow::createRightPanel()
     connect(cad, &CadModule::sketchElementsChanged,
             this, [this]() {
         refreshSketchElementsView();
-        rebuildDocumentTree();
+        rebuildProjectExplorer();
         updateCadSketchOverlay();
         updateCadTaskPanelState();
         });
@@ -702,7 +586,7 @@ void MainWindow::createRightPanel()
     connect(cad, &CadModule::finishedSketchesChanged,
             this, [this](DocumentId) {
         refreshFinishedSketchesView();
-        rebuildDocumentTree();
+        rebuildProjectExplorer();
         updateCadSketchOverlay();
         updateCadTaskPanelState();
         });
@@ -847,8 +731,10 @@ void MainWindow::createRightPanel()
             [this]{ m_cmdContainer->findCommand(CmdLoadMachine::Name)->execute(); });
         connect(m_machinePanel, &WidgetMachinePanel::compressMachineRequested, this,
             [this]{ m_cmdContainer->findCommand(CmdCompressMachine::Name)->execute(); });
-    connect(m_machinePanel, &WidgetMachinePanel::mountWorkpieceRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdMountWorkpiece::Name)->execute(); });
+    connect(m_machinePanel, &WidgetMachinePanel::autoInstallWorkpieceChanged, this,
+            [this](bool enabled) {
+                m_appContext->camModule()->setAutoInstallWorkpiece(enabled);
+            });
     // 注：旧的"轴原点 / AC 中心 / 切割头"独立设置 UI 已被移除（向导唯一入口），
     // 这里也相应移除了对应的信号-槽接线。仅保留向导入口。
     connect(m_machinePanel, &WidgetMachinePanel::axisCalibrationWizardRequested, this,
@@ -908,19 +794,20 @@ void MainWindow::createRightPanel()
 
         connect(m_appContext->camModule(), &CamModule::toolpathGenerated, this,
             [this]() {
-            if (m_leftTabs && m_leftTabs->currentIndex() != 2)
-                m_leftTabs->setCurrentIndex(2);
+            if (m_rightStack)
+                m_rightStack->setCurrentWidget(m_toolpathPanel);
             m_occView->endLeadInPick();
             m_appContext->camModule()->cancelLeadInPreview();
             m_toolpathPanel->setToolpath(&m_appContext->camModule()->toolpathRef());
-            rebuildContourListWidget();
+            rebuildProjectExplorer();
+            selectProjectExplorerContourById(m_appContext->camModule()->contourIdAt(0), 0);
             });
         connect(m_appContext->camModule(), &CamModule::toolpathCleared, this,
             [this]() {
             m_occView->endLeadInPick();
             m_appContext->camModule()->cancelLeadInPreview();
             m_toolpathPanel->setToolpath(nullptr);
-            rebuildContourListWidget();
+            rebuildProjectExplorer();
             });
 
     // ── Toolpath panel signals ──────────────────────────────────────────
@@ -953,98 +840,6 @@ void MainWindow::createRightPanel()
             [this](bool on) { m_appContext->camModule()->setShowNormals(on); });
         connect(m_toolpathPanel, &WidgetToolpathPanel::normalSampleStepChanged, this,
             [this](double step) { m_appContext->camModule()->setNormalSampleStep(step); });
-
-    // ── Left contour list (刀路 tab) ────────────────────────────────────
-    connect(m_contourListWidget, &QTreeWidget::itemChanged, this,
-            [this](QTreeWidgetItem* item, int /*column*/) {
-                if (!item) return;
-                int row = m_contourListWidget->indexOfTopLevelItem(item);
-                if (row < 0) return;
-                bool checked = (item->checkState(0) == Qt::Checked);
-                m_appContext->camModule()->setContourEnabled(row, checked);
-                if (item == m_contourListWidget->currentItem())
-                    highlightContourInView(row);
-            });
-
-    // Reorder contours when drag-drop finishes
-    connect(m_contourListWidget->model(), &QAbstractItemModel::rowsMoved, this,
-            [this]() {
-                struct ContourRowState {
-                    QString name;
-                    QString pointCount;
-                    Qt::CheckState checkState{Qt::Unchecked};
-                    int originalIndex{-1};
-                    QString toolTip;
-                };
-
-                QList<ContourRowState> rows;
-                rows.reserve(m_appContext->camModule()->toolpath().contourCount());
-
-                const QTreeWidgetItem* currentItem = m_contourListWidget->currentItem();
-                int currentRow = -1;
-                QTreeWidgetItemIterator it(m_contourListWidget);
-                while (*it) {
-                    QTreeWidgetItem* item = *it;
-                    ContourRowState row;
-                    row.name = item->text(0);
-                    row.pointCount = item->text(1);
-                    row.checkState = item->checkState(0);
-                    row.originalIndex = item->data(0, Qt::UserRole).toInt();
-                    row.toolTip = item->toolTip(0);
-                    if (item == currentItem)
-                        currentRow = rows.size();
-                    rows.append(row);
-                    ++it;
-                }
-
-                if (rows.isEmpty())
-                    return;
-
-                {
-                    QSignalBlocker blocker(m_contourListWidget);
-                    m_contourListWidget->clear();
-                    for (int i = 0; i < rows.size(); ++i) {
-                        const auto& row = rows.at(i);
-                        auto* item = new QTreeWidgetItem(m_contourListWidget);
-                        item->setText(0, row.name);
-                        item->setText(1, row.pointCount);
-                        item->setFlags((item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled)
-                                       & ~Qt::ItemIsDropEnabled);
-                        item->setCheckState(0, row.checkState);
-                        item->setData(0, Qt::UserRole, row.originalIndex);
-                        if (!row.toolTip.isEmpty())
-                            item->setToolTip(0, row.toolTip);
-                    }
-                    if (currentRow >= 0 && currentRow < m_contourListWidget->topLevelItemCount())
-                        m_contourListWidget->setCurrentItem(m_contourListWidget->topLevelItem(currentRow));
-                }
-
-                QList<int> order;
-                order.reserve(rows.size());
-                for (const auto& row : rows)
-                    order.append(row.originalIndex);
-
-                m_appContext->camModule()->reorderContours(order);
-
-                QSignalBlocker blocker(m_contourListWidget);
-                for (int i = 0; i < m_contourListWidget->topLevelItemCount(); ++i) {
-                    auto* item = m_contourListWidget->topLevelItem(i);
-                    if (item)
-                        item->setData(0, Qt::UserRole, i);
-                }
-
-                m_toolpathPanel->showContourCoordinates(currentRow);
-                highlightContourInView(currentRow);
-            });
-
-    // When user clicks a contour in the left list, show its coordinates in the right panel
-    connect(m_contourListWidget, &QTreeWidget::currentItemChanged, this,
-            [this](QTreeWidgetItem* current, QTreeWidgetItem* /*previous*/) {
-                if (!current) return;
-                int idx = current->data(0, Qt::UserRole).toInt();
-                m_toolpathPanel->showContourCoordinates(idx);
-                highlightContourInView(idx);
-            });
 
         // ── Process module ↔ execution page ─────────────────────────────────
         ProcessModule* process = m_appContext->processModule();
@@ -1188,7 +983,7 @@ void MainWindow::updateCadTaskPanelState()
         return;
 
     CadModule* cad = m_appContext->cadModule();
-    const DocumentId docId = cad->activeDocumentId();
+    const DocumentId docId = cad->workpieceDocumentId();
     m_cadTaskPanel->setSelectionContext(cad->selectionContext(docId));
     if (m_cadTaskPanel->isTransformPageActive())
         updateCadTransformPreview();
@@ -1235,7 +1030,8 @@ void MainWindow::updateCadSketchOverlay()
     if (!m_occView || !m_appContext || !m_appContext->cadModule())
         return;
 
-    if (isMachineViewActive()) {
+    const bool cadContextActive = m_rightStack && m_rightStack->currentWidget() == m_cadTaskPanel;
+    if (!cadContextActive) {
         m_occView->clearSketchOverlay();
         return;
     }
@@ -1265,12 +1061,13 @@ void MainWindow::updateCadSketchOverlay()
 
 void MainWindow::handleCadSketchOverlayPicked(const QString& key)
 {
-    if (key.isEmpty() || isMachineViewActive() || !m_appContext || !m_appContext->cadModule())
+    const bool cadContextActive = m_rightStack && m_rightStack->currentWidget() == m_cadTaskPanel;
+    if (key.isEmpty() || !cadContextActive || !m_appContext || !m_appContext->cadModule())
         return;
 
     CadModule* cad = m_appContext->cadModule();
     auto context = lcnc::cad::selection::CadSelectionResolver::fromOverlayKey(
-        cad->activeDocumentId(), key, true, cad->isSketchEditing());
+        cad->workpieceDocumentId(), key, true, cad->isSketchEditing());
     cad->setSelectionContext(context);
     updateCadSketchOverlay();
     updateCadTaskPanelState();
@@ -1279,14 +1076,15 @@ void MainWindow::handleCadSketchOverlayPicked(const QString& key)
 void MainWindow::handleCadSketchOverlayDrag(const QString& key, double deltaX, double deltaY)
 {
     if (!isActiveSketchOverlayKey(key)
-        || isMachineViewActive()
         || !m_appContext
-        || !m_appContext->cadModule()) {
+        || !m_appContext->cadModule()
+        || !m_rightStack
+        || m_rightStack->currentWidget() != m_cadTaskPanel) {
         return;
     }
 
     const auto context = lcnc::cad::selection::CadSelectionResolver::fromOverlayKey(
-        m_appContext->cadModule()->activeDocumentId(), key, true, true);
+        m_appContext->cadModule()->workpieceDocumentId(), key, true, true);
     if (context.items.isEmpty())
         return;
 
@@ -1390,206 +1188,510 @@ void MainWindow::createStatusBar()
 }
 
 // ── Slots ──────────────────────────────────────────────────────────────────────
-void MainWindow::onLeftTabChanged(int index)
+void MainWindow::onProjectReset()
 {
-    // index 0 = 文档 / 1 = 准备 / 2 = 刀路 / 3 = 执行
-    // Right stack: 0=machine, 1=toolpath, 2=laser, 3=cad task
-    if (index == 3)
-        m_rightStack->setCurrentIndex(2);   // 执行 → laser control
-    else if (index == 2)
-        m_rightStack->setCurrentIndex(1);   // 刀路 → toolpath params
-    else if (index == 1)
-        m_rightStack->setCurrentIndex(0);   // 准备 → machine panel
-    else
-        m_rightStack->setCurrentIndex(3);   // 文档 → CAD task panel
+    if (m_appContext && m_appContext->camModule()) {
+        if (auto* gd = m_appContext->camModule()->workspaceGuiDocument()) {
+            gd->eraseDomain(lcnc::ProjectDomain::Workpiece);
+            gd->eraseDomain(lcnc::ProjectDomain::Machine);
+            gd->eraseDomain(lcnc::ProjectDomain::Cam);
+        }
+    }
+    if (m_appContext && m_appContext->cadModule()) {
+        if (LcncDocument* doc = m_appContext->cadModule()->workpieceDocument())
+            m_sbDocName->setText(doc->name());
+        showWorkpieceView(m_appContext->cadModule()->workpieceDocumentId());
+    }
+    updateCommandStates();
+    updateCadSketchOverlay();
+}
 
-    if (usesMachineWorkspace(index))
+void MainWindow::onProjectDomainChanged(lcnc::ProjectDomain domain)
+{
+    if (domain == lcnc::ProjectDomain::Workpiece && m_appContext && m_appContext->camModule()) {
+        if (LcncDocument* doc = m_appContext->cadModule()->workpieceDocument())
+            m_sbDocName->setText(doc->name());
+        m_appContext->camModule()->autoInstallCurrentWorkpiece();
+        if (m_occView && m_appContext->camModule()->workspaceGuiDocument())
+            m_occView->attachDocument(m_appContext->camModule()->workspaceGuiDocument());
+    }
+    updateCommandStates();
+    updateCadSketchOverlay();
+}
+
+void MainWindow::onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current,
+                                                     QTreeWidgetItem* /*previous*/)
+{
+    if (m_blockProjectExplorerSignals || !current)
+        return;
+
+    const auto kind = projectNodeKind(current);
+    const DocumentId docId = current->data(0, kRoleDocId).toInt();
+    const QString entry = current->data(0, kRoleEntry).toString();
+    const QString nodeKey = current->data(0, kRoleNodeKey).toString();
+    const QStringList leafEntries = current->data(0, kRoleLeafEntries).toStringList();
+    const auto contourId = static_cast<lcnc::cam::ContourId>(current->data(0, kRoleContourId).toULongLong());
+    int contourIndex = m_appContext->camModule()->contourIndexById(contourId);
+    if (contourIndex < 0)
+        contourIndex = current->data(0, kRoleContourIndex).toInt();
+
+    if (lcnc::app::isCadProjectNode(kind)) {
+        if (m_rightStack)
+            m_rightStack->setCurrentWidget(m_cadTaskPanel);
+        showWorkpieceView(docId);
+
+        if (docId != kInvalidDocumentId) {
+            auto context = lcnc::cad::selection::CadSelectionResolver::fromProjectExplorerNode(
+                docId,
+                nodeKey,
+                entry,
+                leafEntries,
+                true,
+                m_appContext->cadModule()->isSketchEditing());
+            m_appContext->cadModule()->setSelectionContext(context);
+            QStringList sourceEntries = leafEntries;
+            if (sourceEntries.isEmpty() && !entry.isEmpty())
+                sourceEntries.append(entry);
+            m_appContext->camModule()->setSelectedMountedWorkpieceEntries(sourceEntries);
+            updateCadSketchOverlay();
+            updateCadTaskPanelState();
+        }
+    } else if (lcnc::app::isMachineProjectNode(kind)) {
+        if (m_rightStack)
+            m_rightStack->setCurrentWidget(m_machinePanel);
         m_appContext->camModule()->requestMachineView();
-    else
-        m_appContext->cadModule()->requestWorkpieceView();
+
+        QStringList entries;
+        for (QTreeWidgetItem* item : m_projectExplorerTree->selectedItems()) {
+            const auto itemKind = projectNodeKind(item);
+            if (itemKind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
+                const QString selectedEntry = item->data(0, kRoleEntry).toString();
+                if (!selectedEntry.isEmpty())
+                    entries.append(selectedEntry);
+            }
+        }
+        if (entries.isEmpty() && !entry.isEmpty())
+            entries.append(entry);
+        m_appContext->camModule()->setSelectedEntries(entries);
+    } else if (lcnc::app::isToolpathProjectNode(kind)) {
+        if (m_rightStack)
+            m_rightStack->setCurrentWidget(m_toolpathPanel);
+        m_appContext->camModule()->requestMachineView();
+        m_toolpathPanel->showContourCoordinates(contourIndex);
+        highlightContourInView(contourIndex);
+    }
 
     updateCommandStates();
 }
 
-void MainWindow::onDocumentAdded(DocumentId id)
+void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*column*/)
 {
-    // Machine workspace document is managed via showMachineView(); skip normal flow.
-    if (lcnc::Kernel::current().app()->isMachineDocument(id)) {
-        if (isMachineViewActive())
-            m_appContext->camModule()->requestMachineView();
-        updateCommandStates();
+    if (m_blockProjectExplorerSignals || !item)
+        return;
+
+    const auto kind = projectNodeKind(item);
+    const bool visible = item->checkState(0) == Qt::Checked;
+
+    auto cascadeCheckState = [this, visible](QTreeWidgetItem* root,
+                                             const std::function<bool(QTreeWidgetItem*)>& shouldChange) {
+        m_blockProjectExplorerSignals = true;
+        for (int index = 0; index < root->childCount(); ++index) {
+            QTreeWidgetItem* child = root->child(index);
+            std::function<void(QTreeWidgetItem*)> cascade = [&](QTreeWidgetItem* node) {
+                if ((node->flags() & Qt::ItemIsUserCheckable) && shouldChange(node))
+                    node->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+                for (int childIndex = 0; childIndex < node->childCount(); ++childIndex)
+                    cascade(node->child(childIndex));
+            };
+            cascade(child);
+        }
+        m_blockProjectExplorerSignals = false;
+    };
+
+    auto applyCadVisibility = [this, visible](QTreeWidgetItem* root) {
+        QMap<DocumentId, QSet<QString>> entriesByDocument;
+        QList<QPair<DocumentId, int>> sketches;
+
+        std::function<void(QTreeWidgetItem*)> collect = [&](QTreeWidgetItem* node) {
+            if (!node || !lcnc::app::isCadProjectNode(projectNodeKind(node)))
+                return;
+
+            const DocumentId nodeDocId = node->data(0, kRoleDocId).toInt();
+            const QString nodeKey = node->data(0, kRoleNodeKey).toString();
+            if (nodeDocId != kInvalidDocumentId
+                && lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(nodeKey)) {
+                sketches.append({nodeDocId,
+                    lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(nodeKey)});
+            }
+
+            if (nodeDocId != kInvalidDocumentId) {
+                const QStringList leafEntries = node->data(0, kRoleLeafEntries).toStringList();
+                for (const QString& leafEntry : leafEntries) {
+                    if (!leafEntry.isEmpty())
+                        entriesByDocument[nodeDocId].insert(leafEntry);
+                }
+            }
+
+            for (int childIndex = 0; childIndex < node->childCount(); ++childIndex)
+                collect(node->child(childIndex));
+        };
+
+        collect(root);
+
+        for (auto it = entriesByDocument.cbegin(); it != entriesByDocument.cend(); ++it) {
+            QStringList entries;
+            for (const QString& entry : it.value())
+                entries.append(entry);
+            m_appContext->cadModule()->setEntriesVisible(it.key(), entries, visible);
+            if (m_appContext->projectManager()->isDomainDocument(it.key(), lcnc::ProjectDomain::Workpiece))
+                m_appContext->camModule()->setMountedWorkpieceEntriesVisible(entries, visible);
+        }
+
+        for (const auto& sketch : sketches)
+            m_appContext->cadModule()->setSketchVisible(sketch.first, sketch.second, visible);
+    };
+
+    if (lcnc::app::isCadProjectNode(kind)) {
+        const DocumentId docId = item->data(0, kRoleDocId).toInt();
+        const QString entry = item->data(0, kRoleEntry).toString();
+        const QString nodeKey = item->data(0, kRoleNodeKey).toString();
+        const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
+
+        if (docId != kInvalidDocumentId
+            && lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(nodeKey)) {
+            const int sketchId = lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(nodeKey);
+            m_appContext->cadModule()->setSketchVisible(docId, sketchId, visible);
+            return;
+        }
+
+        if (entry.isEmpty()) {
+            cascadeCheckState(item, [](QTreeWidgetItem* child) {
+                return lcnc::app::isCadProjectNode(projectNodeKind(child));
+            });
+            applyCadVisibility(item);
+            return;
+        }
+
+        if (docId == kInvalidDocumentId)
+            return;
+
+        m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
+        if (m_appContext->projectManager()->isDomainDocument(docId, lcnc::ProjectDomain::Workpiece))
+            m_appContext->camModule()->setMountedWorkpieceEntriesVisible(leafEntries, visible);
         return;
     }
 
-    LcncDocument* doc = m_appContext->cadModule()->documentById(id);
-    if (doc)
-        m_sbDocName->setText(doc->name());
+    if (lcnc::app::isMachineProjectNode(kind)) {
+        const QString entry = item->data(0, kRoleEntry).toString();
 
-    if (!isMachineViewActive())
-        m_appContext->cadModule()->requestWorkpieceView(id);
+        if (entry.isEmpty()) {
+            cascadeCheckState(item, [](QTreeWidgetItem* child) {
+                return lcnc::app::isMachineProjectNode(projectNodeKind(child));
+            });
 
-    updateCommandStates();
-}
-
-void MainWindow::onDocumentClosed(DocumentId /*id*/)
-{
-    updateCommandStates();
-}
-
-void MainWindow::onActiveDocumentChanged(DocumentId id)
-{
-    LcncDocument* doc = m_appContext->cadModule()->documentById(id);
-    if (doc) {
-        m_sbDocName->setText(doc->name());
-        if (!isMachineViewActive())
-            m_appContext->cadModule()->requestWorkpieceView(id);
-    } else {
-        m_sbDocName->setText(tr("无文档"));
-        if (!isMachineViewActive())
-            m_occView->attachDefaultScene(m_defaultScene);
-    }
-
-    updateCommandStates();
-    updateCadSketchOverlay();
-}
-
-void MainWindow::onDocumentModified(DocumentId id)
-{
-    Q_UNUSED(id);
-    updateCommandStates();
-    updateCadSketchOverlay();
-}
-
-void MainWindow::onDocumentTreeItemClicked(QTreeWidgetItem* item, int /*column*/)
-{
-    if (!item) return;
-
-    // IMPORTANT: Read ALL data from item BEFORE any operation that may
-    // trigger rebuildDocumentTree() and invalidate the item pointer.
-    const DocumentId docId  = item->data(0, kRoleDocId).toInt();
-    const QString entry = item->data(0, kRoleEntry).toString();
-    const QString nodeKey = item->data(0, kRoleNodeKey).toString();
-    const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
-
-    if (docId == kInvalidDocumentId) return;
-
-    // Switch document AFTER reading item data.
-    // setActiveDocument emits activeDocumentChanged → onActiveDocumentChanged
-    // → rebuildDocumentTree() → m_documentTree->clear() which deletes 'item'.
-    if (m_appContext->cadModule()->activeDocumentId() != docId)
-        m_appContext->cadModule()->setActiveDocument(docId);
-
-    auto context = lcnc::cad::selection::CadSelectionResolver::fromDocumentTreeNode(
-        docId,
-        nodeKey,
-        entry,
-        leafEntries,
-        true,
-        m_appContext->cadModule()->isSketchEditing());
-    m_appContext->cadModule()->setSelectionContext(context);
-    updateCadSketchOverlay();
-    updateCadTaskPanelState();
-}
-
-void MainWindow::rebuildDocumentTree()
-{
-    if (!m_documentTree) return;
-    QSignalBlocker blocker(m_documentTree);
-    m_documentTree->clear();
-
-    const auto docs = lcnc::cad::ui::CadModelTreeAdapter::build(m_appContext->cadModule());
-    std::function<void(QTreeWidgetItem*, const lcnc::cad::ui::CadTreeNode&)> addNode;
-    addNode = [this, &addNode](QTreeWidgetItem* parent,
-                               const lcnc::cad::ui::CadTreeNode& node) {
-        auto* item = new QTreeWidgetItem(parent);
-        item->setText(0, node.displayName);
-        item->setIcon(0, iconForCadNode(node.kind));
-        item->setData(0, kRoleDocId, node.documentId);
-        item->setData(0, kRoleNodeKey, node.nodeKey);
-        item->setData(0, kRoleEntry, node.entry);
-        item->setData(0, kRoleLeafEntries, node.leafEntries);
-        Qt::ItemFlags flags = item->flags();
-        flags = node.checkable ? (flags | Qt::ItemIsUserCheckable)
-                               : (flags & ~Qt::ItemIsUserCheckable);
-        flags = node.selectable ? (flags | Qt::ItemIsSelectable)
-                                : (flags & ~Qt::ItemIsSelectable);
-        item->setFlags(flags);
-        if (node.checkable)
-            item->setCheckState(0, node.checked ? Qt::Checked : Qt::Unchecked);
-        if (node.muted)
-            item->setForeground(0, Qt::gray);
-
-        for (const auto& childNode : node.children)
-            addNode(item, childNode);
-        if (node.kind == lcnc::cad::ui::CadTreeNodeKind::TemporarySketch
-            || node.kind == lcnc::cad::ui::CadTreeNodeKind::Sketch) {
-            item->setExpanded(true);
+            std::function<void(QTreeWidgetItem*)> applyMachineVisibility = [&](QTreeWidgetItem* node) {
+                const auto childKind = projectNodeKind(node);
+                if (childKind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
+                    const QString childEntry = node->data(0, kRoleEntry).toString();
+                    if (!childEntry.isEmpty())
+                        m_appContext->camModule()->setEntityVisible(childEntry, visible);
+                }
+                for (int childIndex = 0; childIndex < node->childCount(); ++childIndex)
+                    applyMachineVisibility(node->child(childIndex));
+            };
+            for (int childIndex = 0; childIndex < item->childCount(); ++childIndex)
+                applyMachineVisibility(item->child(childIndex));
+            return;
         }
-    };
 
-    for (const auto& doc : docs) {
-        auto* docItem = new QTreeWidgetItem(m_documentTree);
-        docItem->setText(0, doc.displayName);
-        docItem->setIcon(0, iconForCadNode(doc.kind));
-        docItem->setData(0, kRoleDocId, doc.documentId);
-        docItem->setData(0, kRoleNodeKey, doc.nodeKey);
-        docItem->setData(0, kRoleEntry, QString());
-        docItem->setData(0, kRoleLeafEntries, doc.leafEntries);
-        docItem->setFlags(docItem->flags() | Qt::ItemIsUserCheckable);
-        docItem->setCheckState(0, Qt::Checked);
-
-        for (const auto& node : doc.children)
-            addNode(docItem, node);
+        m_appContext->camModule()->setEntityVisible(entry, visible);
+        return;
     }
 
-    m_documentTree->expandToDepth(2);
+    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathRoot) {
+        cascadeCheckState(item, [](QTreeWidgetItem* child) {
+            return lcnc::app::isToolpathProjectNode(projectNodeKind(child));
+        });
+
+        for (int childIndex = 0; childIndex < item->childCount(); ++childIndex) {
+            QTreeWidgetItem* child = item->child(childIndex);
+            if (projectNodeKind(child) != lcnc::app::ProjectExplorerNodeKind::ToolpathContour)
+                continue;
+            const auto contourId = static_cast<lcnc::cam::ContourId>(child->data(0, kRoleContourId).toULongLong());
+            int contourIndex = m_appContext->camModule()->contourIndexById(contourId);
+            if (contourIndex < 0)
+                contourIndex = child->data(0, kRoleContourIndex).toInt();
+            if (contourIndex >= 0)
+                m_appContext->camModule()->setContourEnabled(contourIndex, visible);
+        }
+        return;
+    }
+
+    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
+        const auto contourId = static_cast<lcnc::cam::ContourId>(item->data(0, kRoleContourId).toULongLong());
+        int contourIndex = m_appContext->camModule()->contourIndexById(contourId);
+        if (contourIndex < 0)
+            contourIndex = item->data(0, kRoleContourIndex).toInt();
+        m_appContext->camModule()->setContourEnabled(contourIndex, visible);
+        if (item == m_projectExplorerTree->currentItem())
+            highlightContourInView(contourIndex);
+    }
+}
+
+void MainWindow::onProjectExplorerContextMenuRequested(const QPoint& pos)
+{
+    if (!m_projectExplorerTree)
+        return;
+
+    QTreeWidgetItem* item = m_projectExplorerTree->itemAt(pos);
+    if (!item)
+        return;
+
+    const auto kind = projectNodeKind(item);
+    QString axisName = item->data(0, kRoleAxisName).toString();
+    QString shapeEntry;
+
+    if (kind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
+        shapeEntry = item->data(0, kRoleEntry).toString();
+        for (QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent()) {
+            if (projectNodeKind(parent) == lcnc::app::ProjectExplorerNodeKind::MachineAxis) {
+                axisName = parent->data(0, kRoleAxisName).toString();
+                break;
+            }
+        }
+    }
+
+    if (axisName.isEmpty())
+        return;
+
+    QMenu menu(this);
+    QAction* removeAction = nullptr;
+    if (!shapeEntry.isEmpty())
+        removeAction = menu.addAction(tr("删除所选节点"));
+    QAction* clearAction = menu.addAction(tr("清除该轴系所有标记节点"));
+
+    QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
+    if (!chosen)
+        return;
+
+    if (chosen == removeAction)
+        m_appContext->camModule()->unassignShape(shapeEntry);
+    else if (chosen == clearAction)
+        m_appContext->camModule()->clearAxisAssignments(axisName);
+}
+
+void MainWindow::rebuildProjectExplorer()
+{
+    if (!m_projectExplorerTree)
+        return;
+
+    m_projectExplorerSnapshot = lcnc::app::ProjectExplorerModel::build(
+        m_appContext->cadModule(),
+        m_appContext->camModule());
+
+    m_blockProjectExplorerSignals = true;
+    QSignalBlocker blocker(m_projectExplorerTree);
+    lcnc::app::populateProjectExplorerTree(m_projectExplorerTree, m_projectExplorerSnapshot);
+    m_blockProjectExplorerSignals = false;
 
     if (!isMachineViewActive())
         m_appContext->cadModule()->syncSelectionFromView();
 }
 
-void MainWindow::rebuildContourListWidget()
+void MainWindow::handleProjectExplorerRowsMoved()
 {
-    if (!m_contourListWidget) return;
+    if (m_blockProjectExplorerSignals || !m_projectExplorerTree)
+        return;
 
-    const int previousIndex = m_contourListWidget->currentItem()
-        ? m_contourListWidget->currentItem()->data(0, Qt::UserRole).toInt()
-        : -1;
+    QTreeWidgetItem* toolpathRoot = nullptr;
+    for (int index = 0; index < m_projectExplorerTree->topLevelItemCount(); ++index) {
+        QTreeWidgetItem* item = m_projectExplorerTree->topLevelItem(index);
+        if (projectNodeKind(item) == lcnc::app::ProjectExplorerNodeKind::ToolpathRoot) {
+            toolpathRoot = item;
+            break;
+        }
+    }
+    if (!toolpathRoot)
+        return;
 
-    QSignalBlocker blocker(m_contourListWidget);
-    m_contourListWidget->clear();
-
-    const auto& tp = m_appContext->camModule()->toolpath();
+    QList<int> order;
+    QList<lcnc::cam::ContourId> idOrder;
+    bool hasStableIds = true;
     int selectedRow = -1;
-    for (int i = 0; i < tp.contourCount(); ++i) {
-        const LaserContour& c = tp.contour(i);
-        auto* item = new QTreeWidgetItem(m_contourListWidget);
-        item->setText(0, c.name);
-        item->setText(1, QString::number(c.points.size()));
-        item->setFlags((item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled)
-                       & ~Qt::ItemIsDropEnabled);
-        item->setCheckState(0, c.enabled ? Qt::Checked : Qt::Unchecked);
-        item->setData(0, Qt::UserRole, i);
-        if (!c.sourceInfo.isEmpty())
-            item->setToolTip(0, c.sourceInfo);
-        if (i == previousIndex)
-            selectedRow = i;
+    lcnc::cam::ContourId selectedContourId = 0;
+    for (int index = 0; index < toolpathRoot->childCount(); ++index) {
+        QTreeWidgetItem* child = toolpathRoot->child(index);
+        if (projectNodeKind(child) != lcnc::app::ProjectExplorerNodeKind::ToolpathContour)
+            continue;
+        order.append(child->data(0, kRoleContourIndex).toInt());
+        const auto contourId = static_cast<lcnc::cam::ContourId>(child->data(0, kRoleContourId).toULongLong());
+        idOrder.append(contourId);
+        hasStableIds = hasStableIds && contourId != 0;
+        if (child == m_projectExplorerTree->currentItem())
+            selectedRow = order.size() - 1;
+        if (child == m_projectExplorerTree->currentItem())
+            selectedContourId = contourId;
     }
 
-    if (selectedRow < 0 && m_contourListWidget->topLevelItemCount() > 0)
-        selectedRow = 0;
+    if (order.size() != m_appContext->camModule()->toolpath().contourCount()) {
+        rebuildProjectExplorer();
+        return;
+    }
 
-    if (selectedRow >= 0)
-        m_contourListWidget->setCurrentItem(m_contourListWidget->topLevelItem(selectedRow));
+    if (hasStableIds)
+        m_appContext->camModule()->reorderContoursById(idOrder);
+    else
+        m_appContext->camModule()->reorderContours(order);
+    rebuildProjectExplorer();
+    selectProjectExplorerContourById(selectedContourId, selectedRow >= 0 ? selectedRow : 0);
+}
 
-    m_toolpathPanel->showContourCoordinates(selectedRow);
-    highlightContourInView(selectedRow);
+void MainWindow::selectProjectExplorerContour(int contourIndex)
+{
+    const auto contourId = m_appContext && m_appContext->camModule()
+        ? m_appContext->camModule()->contourIdAt(contourIndex)
+        : 0;
+    selectProjectExplorerContourById(contourId, contourIndex);
+}
+
+void MainWindow::selectProjectExplorerContourById(lcnc::cam::ContourId contourId, int fallbackIndex)
+{
+    if (!m_projectExplorerTree || (contourId == 0 && fallbackIndex < 0))
+        return;
+
+    QTreeWidgetItem* target = nullptr;
+    QTreeWidgetItemIterator iterator(m_projectExplorerTree);
+    while (*iterator) {
+        const auto itemContourId =
+            static_cast<lcnc::cam::ContourId>((*iterator)->data(0, kRoleContourId).toULongLong());
+        if (projectNodeKind(*iterator) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour
+            && ((contourId != 0 && itemContourId == contourId)
+                || (contourId == 0 && (*iterator)->data(0, kRoleContourIndex).toInt() == fallbackIndex))) {
+            target = *iterator;
+            break;
+        }
+        ++iterator;
+    }
+
+    if (!target)
+        return;
+
+    m_blockProjectExplorerSignals = true;
+    QSignalBlocker blocker(m_projectExplorerTree);
+    m_projectExplorerTree->clearSelection();
+    m_projectExplorerTree->setCurrentItem(target);
+    target->setSelected(true);
+    m_projectExplorerTree->scrollToItem(target);
+    m_blockProjectExplorerSignals = false;
+
+    int contourIndex = m_appContext && m_appContext->camModule()
+        ? m_appContext->camModule()->contourIndexById(contourId)
+        : -1;
+    if (contourIndex < 0)
+        contourIndex = fallbackIndex;
+
+    m_toolpathPanel->showContourCoordinates(contourIndex);
+    highlightContourInView(contourIndex);
+}
+
+void MainWindow::selectProjectExplorerContours(const QList<int>& contourIndexes)
+{
+    if (!m_projectExplorerTree || contourIndexes.isEmpty())
+        return;
+
+    QSet<lcnc::cam::ContourId> contourIds;
+    QSet<int> fallbackIndexes;
+    for (int contourIndex : contourIndexes) {
+        if (contourIndex < 0)
+            continue;
+        const auto contourId = m_appContext && m_appContext->camModule()
+            ? m_appContext->camModule()->contourIdAt(contourIndex)
+            : 0;
+        if (contourId != 0)
+            contourIds.insert(contourId);
+        fallbackIndexes.insert(contourIndex);
+    }
+
+    if (contourIds.isEmpty() && fallbackIndexes.isEmpty())
+        return;
+
+    QTreeWidgetItem* firstSelected = nullptr;
+    QTreeWidgetItem* lastSelected = nullptr;
+
+    m_blockProjectExplorerSignals = true;
+    QSignalBlocker blocker(m_projectExplorerTree);
+    m_projectExplorerTree->clearSelection();
+
+    QTreeWidgetItemIterator iterator(m_projectExplorerTree);
+    while (*iterator) {
+        if (projectNodeKind(*iterator) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
+            const auto itemContourId =
+                static_cast<lcnc::cam::ContourId>((*iterator)->data(0, kRoleContourId).toULongLong());
+            const int itemIndex = (*iterator)->data(0, kRoleContourIndex).toInt();
+            if ((itemContourId != 0 && contourIds.contains(itemContourId))
+                || fallbackIndexes.contains(itemIndex)) {
+                (*iterator)->setSelected(true);
+                if (!firstSelected)
+                    firstSelected = *iterator;
+                lastSelected = *iterator;
+            }
+        }
+        ++iterator;
+    }
+
+    if (lastSelected)
+        m_projectExplorerTree->setCurrentItem(lastSelected);
+    if (firstSelected)
+        m_projectExplorerTree->scrollToItem(firstSelected);
+
+    m_blockProjectExplorerSignals = false;
+
+    if (lastSelected) {
+        const auto contourId = static_cast<lcnc::cam::ContourId>(
+            lastSelected->data(0, kRoleContourId).toULongLong());
+        int contourIndex = m_appContext && m_appContext->camModule()
+            ? m_appContext->camModule()->contourIndexById(contourId)
+            : -1;
+        if (contourIndex < 0)
+            contourIndex = lastSelected->data(0, kRoleContourIndex).toInt();
+        m_toolpathPanel->showContourCoordinates(contourIndex);
+    }
+}
+
+void MainWindow::selectProjectExplorerEntries(DocumentId docId, const QStringList& entries, bool cadOnly)
+{
+    if (!m_projectExplorerTree)
+        return;
+
+    m_blockProjectExplorerSignals = true;
+    QSignalBlocker blocker(m_projectExplorerTree);
+    m_projectExplorerTree->clearSelection();
+
+    if (!entries.isEmpty()) {
+        QTreeWidgetItemIterator iterator(m_projectExplorerTree);
+        while (*iterator) {
+            const auto kind = projectNodeKind(*iterator);
+            const bool kindMatches = cadOnly
+                ? lcnc::app::isCadProjectNode(kind)
+                : lcnc::app::isMachineProjectNode(kind);
+            const bool docMatches = !cadOnly
+                || docId == kInvalidDocumentId
+                || (*iterator)->data(0, kRoleDocId).toInt() == docId;
+            const QString entry = (*iterator)->data(0, kRoleEntry).toString();
+            if (kindMatches && docMatches && !entry.isEmpty() && entries.contains(entry)) {
+                (*iterator)->setSelected(true);
+            }
+            ++iterator;
+        }
+    }
+
+    m_blockProjectExplorerSignals = false;
 }
 
 void MainWindow::highlightContourInView(int contourIndex)
 {
     CamModule* cam = m_appContext ? m_appContext->camModule() : nullptr;
-    GuiDocument* gd = cam ? cam->machineGuiDocument() : nullptr;
+    GuiDocument* gd = cam ? cam->workspaceGuiDocument() : nullptr;
     if (!gd || gd->context().IsNull())
         return;
 
@@ -1643,7 +1745,8 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
     CamModule* cam = m_appContext->camModule();
     LcncDocument* machineDoc = m_appContext->camModule()->machineDocument();
     if (!machineDoc) {
-        m_modelTree->clear();
+        if (rebuildTree)
+            rebuildProjectExplorer();
         m_machinePanel->setDocument(nullptr);
         m_machinePanel->setMachineModelPath(cam->machineModelPath());
         if (process)
@@ -1653,8 +1756,8 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         return;
     }
 
-    if (rebuildTree || m_modelTree->currentDocument() != machineDoc)
-        m_modelTree->rebuildForDocument(machineDoc);
+    if (rebuildTree)
+        rebuildProjectExplorer();
 
     m_machinePanel->setDocument(machineDoc);
     m_machinePanel->setMachineModelPath(cam->machineModelPath());
@@ -1676,7 +1779,10 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
 void MainWindow::showMachineView()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "MainWindow::showMachineView");
-    if (auto* gd = m_appContext->camModule()->machineGuiDocument())
+    m_machineWorkspaceActive = true;
+    if (m_rightStack && m_rightStack->currentWidget() == m_cadTaskPanel)
+        m_rightStack->setCurrentWidget(m_machinePanel);
+    if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
         m_occView->attachDocument(gd);
     else
         m_occView->attachDefaultScene(m_defaultScene);
@@ -1688,18 +1794,15 @@ void MainWindow::showMachineView()
 void MainWindow::showWorkpieceView(DocumentId id)
 {
     if (id == kInvalidDocumentId)
-        id = m_appContext->cadModule()->activeDocumentId();
+        id = m_appContext->cadModule()->workpieceDocumentId();
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "MainWindow::showWorkpieceView docId={}", id);
+               "MainWindow::showWorkpieceView unified docId={}", id);
 
-    if (m_leftTabs && m_leftTabs->currentIndex() != 0) {
-        QSignalBlocker blocker(m_leftTabs);
-        m_leftTabs->setCurrentIndex(0);
-    }
+    m_machineWorkspaceActive = true;
     if (m_rightStack)
-        m_rightStack->setCurrentIndex(3);
+        m_rightStack->setCurrentWidget(m_cadTaskPanel);
 
-    if (auto* gd = m_appContext->cadModule()->guiDocument(id))
+    if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
         m_occView->attachDocument(gd);
     else
         m_occView->attachDefaultScene(m_defaultScene);
@@ -1715,7 +1818,7 @@ void MainWindow::updateCommandStates()
 
 bool MainWindow::isMachineViewActive() const
 {
-    return m_leftTabs && usesMachineWorkspace(m_leftTabs->currentIndex());
+    return m_machineWorkspaceActive;
 }
 
 void MainWindow::closeEvent(QCloseEvent* e)

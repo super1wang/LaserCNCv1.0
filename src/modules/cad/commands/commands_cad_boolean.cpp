@@ -1,5 +1,6 @@
 #include "modules/cad/commands/commands_cad.h"
 
+#include "app/app_command_context.h"
 #include "core/algorithms/cad/boolean_ops.h"
 #include "modules/cad/commands/command_helpers.h"
 
@@ -23,7 +24,7 @@ bool CmdBoolUnion::isEnabled() const
 
 void CmdBoolUnion::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc)
         return;
 
@@ -58,7 +59,7 @@ bool CmdBoolCut::isEnabled() const
 
 void CmdBoolCut::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc)
         return;
 
@@ -93,7 +94,7 @@ bool CmdBoolCommon::isEnabled() const
 
 void CmdBoolCommon::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc)
         return;
 

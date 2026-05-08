@@ -9,10 +9,10 @@
 #include <TDF_Label.hxx>
 #include <TopoDS_Shape.hxx>
 
-#include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
+#include "core/project/project_types.h"
 #include "modules/cad/i_cad_facade.h"
 #include "modules/cad/selection/cad_selection.h"
 
@@ -49,22 +49,6 @@ public:
     /// 公开构造函数：由 Kernel/main 通过 @c std::make_unique 持有；其余
     /// 代码应使用 @ref instance() 取得唯一实例，禁止再 new 第二个。
     explicit CadModule(QObject* parent = nullptr);
-    struct DocumentTreeNode {
-        QString nodeKey;
-        QString displayName;
-        QString entry;
-        QStringList leafEntries;
-        QList<DocumentTreeNode> children;
-    };
-
-    struct DocumentTreeDocument {
-        DocumentId documentId{kInvalidDocumentId};
-        QString nodeKey;
-        QString displayName;
-        QStringList leafEntries;
-        QList<DocumentTreeNode> children;
-    };
-
     /**
      * @brief Parameter bundle for TaskPanel primitive creation.
      *
@@ -136,14 +120,14 @@ public:
     // ── IModule ───────────────────────────────────────────────────
     /// 模块元信息：id="cad"，无依赖；CAM/Process 依赖本模块。
     lcnc::ModuleInfo info() const override;
-    /// 注册自身为 IService 并建立与 LcncApplication 的信号槽。失败返回 false。
+    /// 注册自身为 IService 并建立项目域信号转发。失败返回 false。
     bool init(lcnc::IKernel& kernel) override;
     /// 启动阶段：当前为占位（init 已完成所有连接）。
     bool start() override;
     /// 反向释放：注销服务。已注册的 Qt 连接由 QObject 在析构时自动断开。
     void stop() override;
 
-    // ── Document Management (delegates to LcncApplication) ───────────────
+    // ── Project / Workpiece Management ──────────────────────────────────
     DocumentId  newDocument(const QString& name = QString());
     DocumentId  openDocument(const QString& filePath);
     DocumentId  importStep(const QString& filePath,
@@ -155,15 +139,11 @@ public:
     void        closeDocument(DocumentId id);
     DocumentId  importFile(const QString& filePath);
 
-    // ── Active Document ──────────────────────────────────────────────────
-    DocumentId    activeDocumentId() const override;
-    LcncDocument* activeDocument() const;
-    GuiDocument*  activeGuiDocument() const;
-    LcncDocument* documentById(DocumentId id) const;
-    GuiDocument*  guiDocument(DocumentId id) const;
-    QList<LcncDocument*> workpieceDocuments() const;
-    QList<DocumentTreeDocument> documentTreeDocuments() const;
-    void          setActiveDocument(DocumentId id);
+    // ── Project Domain Access ────────────────────────────────────────────
+    DocumentId    workpieceDocumentId() const override;
+    LcncDocument* workpieceDocument() const;
+    GuiDocument*  workspaceGuiDocument() const;
+    LcncDocument* domainDocumentById(DocumentId id) const;
     void          requestWorkpieceView(DocumentId id = kInvalidDocumentId) override;
 
     /// ICadFacade：用于让调用方挂接 CadModule 的 Qt 信号。
@@ -292,17 +272,15 @@ public:
 signals:
     /// Emitted whenever the document list changes (add/remove).
     void documentListChanged();
-    /// Emitted when the workpiece document tree should be rebuilt.
-    void documentTreeChanged();
-    /// Emitted when the active document switches.
-    void activeDocumentChanged(DocumentId id);
-    /// Emitted when the UI should attach the requested workpiece document view.
+    /// Emitted when the workpiece section tree should be rebuilt.
+    void workpieceStructureChanged();
+    /// Emitted when the UI should attach the requested workpiece workspace view.
     void workpieceViewRequested(DocumentId id);
     /// Emitted when a document's content is modified.
     void documentModified(DocumentId id);
     /// Emitted when a module-level operation fails and should be surfaced by the UI.
     void operationFailed(const QString& title, const QString& message);
-    /// Emitted when a workpiece document selection changes via module coordination.
+    /// Emitted when a workpiece selection changes via module coordination.
     void selectionChanged(DocumentId id, const QStringList& entries);
     /// Emitted when a command requests activation of a primitive TaskPanel tool.
     void primitiveToolRequested(int primitiveIndex);

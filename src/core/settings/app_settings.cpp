@@ -19,10 +19,19 @@ QString colorToHex(const QColor& c)
     return c.name(QColor::HexRgb);
 }
 
+const QColor kLegacyCadBackground(60, 68, 82);
+const QColor kLegacyCamBackground(42, 48, 58);
+
 QColor colorFromHex(const QString& s, const QColor& def)
 {
     const QColor c(s);
     return c.isValid() ? c : def;
+}
+
+void syncLegacyBackgroundFields(ColorSettings& colors)
+{
+    colors.cadBackgroundColor = colors.backgroundColor;
+    colors.camBackgroundColor = colors.backgroundColor;
 }
 
 QString presetToString(RenderQualityPreset preset)
@@ -281,7 +290,8 @@ void AppSettings::readFrom(const toml::value& root)
         cadViewRendering.qualityPreset = static_cast<RenderQualityPreset>(get_int(r, "quality_level", 1));
         camViewRendering.qualityPreset = cadViewRendering.qualityPreset;
         colors.workpieceColor = colorFromHex(get_qstring(r, "file_color", colorToHex(colors.workpieceColor)), colors.workpieceColor);
-        colors.camBackgroundColor = colorFromHex(get_qstring(r, "machine_default_color", colorToHex(colors.camBackgroundColor)), colors.camBackgroundColor);
+        colors.backgroundColor = colorFromHex(get_qstring(r, "machine_default_color", colorToHex(colors.backgroundColor)), colors.backgroundColor);
+        syncLegacyBackgroundFields(colors);
         if (r.contains("axis_colors") && r.at("axis_colors").is_table()) {
             const auto& ac = r.at("axis_colors");
             for (const auto& kv : ac.as_table()) {
@@ -296,8 +306,16 @@ void AppSettings::readFrom(const toml::value& root)
     if (root.contains("colors") && root.at("colors").is_table()) {
         const auto& c = root.at("colors");
         colors.workpieceColor = colorFromHex(get_qstring(c, "workpiece", colorToHex(colors.workpieceColor)), colors.workpieceColor);
-        colors.cadBackgroundColor = colorFromHex(get_qstring(c, "cad_background", colorToHex(colors.cadBackgroundColor)), colors.cadBackgroundColor);
-        colors.camBackgroundColor = colorFromHex(get_qstring(c, "cam_background", colorToHex(colors.camBackgroundColor)), colors.camBackgroundColor);
+        const QColor legacyCad = colorFromHex(get_qstring(c, "cad_background", colorToHex(kLegacyCadBackground)), kLegacyCadBackground);
+        const QColor legacyCam = colorFromHex(get_qstring(c, "cam_background", colorToHex(kLegacyCamBackground)), kLegacyCamBackground);
+        if (c.contains("background") && c.at("background").is_string()) {
+            colors.backgroundColor = colorFromHex(QString::fromStdString(c.at("background").as_string()), colors.backgroundColor);
+        } else if (legacyCad != kLegacyCadBackground && legacyCam == kLegacyCamBackground) {
+            colors.backgroundColor = legacyCad;
+        } else {
+            colors.backgroundColor = legacyCam;
+        }
+        syncLegacyBackgroundFields(colors);
         colors.selectionColor = colorFromHex(get_qstring(c, "selection", colorToHex(colors.selectionColor)), colors.selectionColor);
         colors.hoverColor = colorFromHex(get_qstring(c, "hover", colorToHex(colors.hoverColor)), colors.hoverColor);
         colors.treeSelectionColor = colorFromHex(get_qstring(c, "tree_selection", colorToHex(colors.treeSelectionColor)), colors.treeSelectionColor);
@@ -368,8 +386,9 @@ void AppSettings::writeTo(toml::value& root) const
 
     toml::value colorTable(toml::table{});
     colorTable["workpiece"] = qs(colorToHex(colors.workpieceColor));
-    colorTable["cad_background"] = qs(colorToHex(colors.cadBackgroundColor));
-    colorTable["cam_background"] = qs(colorToHex(colors.camBackgroundColor));
+    colorTable["background"] = qs(colorToHex(colors.backgroundColor));
+    colorTable["cad_background"] = qs(colorToHex(colors.backgroundColor));
+    colorTable["cam_background"] = qs(colorToHex(colors.backgroundColor));
     colorTable["selection"] = qs(colorToHex(colors.selectionColor));
     colorTable["hover"] = qs(colorToHex(colors.hoverColor));
     colorTable["tree_selection"] = qs(colorToHex(colors.treeSelectionColor));

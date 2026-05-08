@@ -51,6 +51,24 @@ QColor darkerGradientColor(const QColor& color)
     return bottom;
 }
 
+void configureHighlightDrawer(const Handle(Prs3d_Drawer)& drawer,
+                              const Quantity_Color& color,
+                              int displayMode,
+                              double lineWidth)
+{
+    if (drawer.IsNull())
+        return;
+
+    drawer->SetColor(color);
+    drawer->SetDisplayMode(displayMode);
+    drawer->SetLineAspect(new Prs3d_LineAspect(color, Aspect_TOL_SOLID, lineWidth));
+    Handle(Prs3d_ShadingAspect) shading = new Prs3d_ShadingAspect();
+    shading->SetColor(color);
+    drawer->SetShadingAspect(shading);
+    drawer->SetFaceBoundaryDraw(true);
+    drawer->SetFaceBoundaryAspect(new Prs3d_LineAspect(color, Aspect_TOL_SOLID, lineWidth));
+}
+
 Graphic3d_NameOfMaterial materialName(const QString& id)
 {
     const QString key = id.toLower();
@@ -215,7 +233,7 @@ void RenderingManager::applyDocumentStyles(const QMap<QString, Handle(AIS_Shape)
     if (!m_document || !m_document->scene())
         return;
 
-    LcncDocument* doc = m_document->document();
+    LcncDocument* doc = m_document->sourceDocument();
     if (!doc)
         return;
 
@@ -260,6 +278,8 @@ void RenderingManager::applyViewRenderingParams()
         return;
 
     const RenderProfileSettings p = effectiveProfile();
+    if (m_document->animTimer())
+        m_document->animTimer()->setInterval(qMax(1, qRound(1000.0 / qBound(15, p.targetFps, 240))));
     Handle(V3d_View) view = m_document->view();
     Graphic3d_RenderingParams& params = view->ChangeRenderingParams();
     params.Method = p.renderMethod == RenderMethod::RayTracing
@@ -292,7 +312,7 @@ void RenderingManager::applyBackground()
     if (!m_document || !m_document->hasView())
         return;
 
-    const QColor top = m_machineView ? m_colors.camBackgroundColor : m_colors.cadBackgroundColor;
+    const QColor top = m_colors.backgroundColor;
     const QColor bottom = darkerGradientColor(top);
     m_document->view()->SetBgGradientColors(
         toQuantity(top), toQuantity(bottom), Aspect_GFM_VER, Standard_False);
@@ -310,20 +330,26 @@ void RenderingManager::applyHighlight()
 
     const Quantity_Color selection = toQuantity(m_colors.selectionColor);
     const Quantity_Color hover = toQuantity(m_colors.hoverColor);
-    if (Handle(Prs3d_Drawer) selected = ctx->HighlightStyle(Prs3d_TypeOfHighlight_Selected); !selected.IsNull()) {
-        selected->SetColor(selection);
-        selected->SetDisplayMode(m_colors.highlightDisplayMode);
-        selected->SetLineAspect(new Prs3d_LineAspect(selection, Aspect_TOL_SOLID, m_colors.highlightLineWidth));
-        Handle(Prs3d_ShadingAspect) shading = new Prs3d_ShadingAspect();
-        shading->SetColor(selection);
-        selected->SetShadingAspect(shading);
-        selected->SetFaceBoundaryDraw(true);
-        selected->SetFaceBoundaryAspect(new Prs3d_LineAspect(selection, Aspect_TOL_SOLID, m_colors.highlightLineWidth));
+    configureHighlightDrawer(ctx->HighlightStyle(Prs3d_TypeOfHighlight_Selected),
+                             selection, m_colors.highlightDisplayMode, m_colors.highlightLineWidth);
+    configureHighlightDrawer(ctx->HighlightStyle(Prs3d_TypeOfHighlight_LocalSelected),
+                             selection, m_colors.highlightDisplayMode, m_colors.highlightLineWidth);
+    configureHighlightDrawer(ctx->HighlightStyle(Prs3d_TypeOfHighlight_Dynamic),
+                             hover, m_colors.highlightDisplayMode, m_colors.highlightLineWidth);
+    configureHighlightDrawer(ctx->HighlightStyle(Prs3d_TypeOfHighlight_LocalDynamic),
+                             hover, m_colors.highlightDisplayMode, m_colors.highlightLineWidth);
+    AIS_ListOfInteractive displayed;
+    ctx->DisplayedObjects(displayed);
+    for (AIS_ListIteratorOfListOfInteractive it(displayed); it.More(); it.Next()) {
+        if (Handle(AIS_Shape) shape = Handle(AIS_Shape)::DownCast(it.Value()); !shape.IsNull()) {
+            if (m_colors.highlightDisplayMode >= 0)
+                shape->SetHilightMode(m_colors.highlightDisplayMode);
+            else
+                shape->UnsetHilightMode();
+        }
     }
-    if (Handle(Prs3d_Drawer) dynamic = ctx->HighlightStyle(Prs3d_TypeOfHighlight_Dynamic); !dynamic.IsNull()) {
-        dynamic->SetColor(hover);
-        dynamic->SetDisplayMode(m_colors.highlightDisplayMode);
-    }
+    ctx->UnhilightSelected(Standard_False);
+    ctx->HilightSelected(Standard_False);
     ctx->UpdateCurrentViewer();
 }
 

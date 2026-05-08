@@ -15,7 +15,7 @@ namespace lcnc {
  *      服务（如 @c ICamFacade）。
  *   2. **事件总线** @ref events() — 用于类型化发布订阅。
  *
- * 核心容器（LcncApplication / GuiApplication / TaskManager / AppSettings /
+ * 核心容器（ProjectManager / GuiApplication / TaskManager / AppSettings /
  * CommandContainer）不走 IService，请通过 @c lcnc::Kernel 具体类的强类型
  * getter 访问（如 @c app() / @c guiApp() / @c taskManager() / @c appSettings() /
  * @c commandContainer()）。

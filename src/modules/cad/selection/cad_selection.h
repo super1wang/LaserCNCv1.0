@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/document/lcnc_application.h"
+#include "core/project/project_types.h"
 
 #include <QList>
 #include <QString>

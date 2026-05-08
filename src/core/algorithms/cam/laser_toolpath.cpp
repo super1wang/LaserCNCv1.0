@@ -567,48 +567,48 @@ TopoDS_Edge LaserToolpathBuilder::computeLeadInEdge(const LaserContour& contour,
 
     const gp_Pnt& entryPt = contour.leadIn.entryPoint;
 
-    // Find the surface normal at the entry point (use stored or compute from points)
+    // Find the machining normal near the entry point; the lead-in start should stay
+    // outside the outer contour instead of landing on another surface.
     gp_Dir normal(0, 0, 1);
+    gp_Dir tangent(1, 0, 0);
+    double leadStartZ = entryPt.Z();
     if (!contour.points.empty()) {
-        // Find the closest sampled point to the entry point
+        leadStartZ = contour.points.front().position.Z();
         double bestDist = std::numeric_limits<double>::max();
         for (const auto& tp : contour.points) {
             double d = entryPt.Distance(tp.position);
             if (d < bestDist) {
                 bestDist = d;
                 normal = tp.normal;
+                tangent = tp.tangent;
             }
         }
     }
 
-    // Apply normal angle offset: rotate the normal around the tangent direction
+    gp_Vec approachVec(normal.X(), normal.Y(), 0.0);
+    if (approachVec.Magnitude() <= 1e-6) {
+        const gp_Vec tangentVec(tangent.X(), tangent.Y(), 0.0);
+        if (tangentVec.Magnitude() > 1e-6)
+            approachVec = gp_Vec(-tangentVec.Y(), tangentVec.X(), 0.0);
+    }
+    if (approachVec.Magnitude() <= 1e-6)
+        approachVec = gp_Vec(1.0, 0.0, 0.0);
+    approachVec.Normalize();
+
+    // Apply normal angle offset in the machining plane, preserving the lead-in height.
     if (std::abs(normalAngleDeg) > 0.01) {
-        // Use Z-axis cross normal as rotation axis (approximate tangent)
-        gp_Vec nVec(normal);
-        gp_Vec zVec(0, 0, 1);
-        gp_Vec rotAxis = nVec.Crossed(zVec);
-        if (rotAxis.Magnitude() > 1e-6) {
-            rotAxis.Normalize();
-            gp_Trsf rot;
-            rot.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(rotAxis)),
-                            normalAngleDeg * M_PI / 180.0);
-            nVec.Transform(rot);
-            normal = gp_Dir(nVec);
-        }
+        gp_Trsf rot;
+        rot.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                        normalAngleDeg * M_PI / 180.0);
+        approachVec.Transform(rot);
+        if (approachVec.Magnitude() > 1e-6)
+            approachVec.Normalize();
     }
 
-    // The approach direction is opposite to the surface normal
-    // (laser approaches from outside the surface)
-    gp_Dir approachDir = normal;
-
-    // Ensure the approach does NOT come from directly above
-    approachDir = ensureNotFromAbove(approachDir);
-
-    // Lead-in start point: step back from entry point along adjusted approach direction
     gp_Pnt startPt(
-        entryPt.X() + approachDir.X() * length,
-        entryPt.Y() + approachDir.Y() * length,
-        entryPt.Z() + approachDir.Z() * length
+        entryPt.X() + approachVec.X() * length,
+        entryPt.Y() + approachVec.Y() * length,
+        leadStartZ
     );
 
     // Build the lead-in edge

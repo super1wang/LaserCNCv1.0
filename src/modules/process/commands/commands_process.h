@@ -5,9 +5,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Process commands —— 加工运行 / 控制器连接 / 仿真模式
 //
-// 每个命令仅负责"对话/触发 → 转发到 ProcessModule 业务方法"，不直接持有
-// 加工业务状态。需要参数交互的（如 jog、setFeedOverride）暂时仍由 widget
-// 层直接调 ProcessModule，后续抽 IProcessFacade 时再统一。
+// 每个命令仅负责"对话/触发 → 转发到 IProcessFacade"，不直接持有
+// 加工业务状态。需要参数交互的（如 jog、setFeedOverride）由执行面板
+// 发出信号后交给应用层编排。
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace lcnc::process {
@@ -52,7 +52,7 @@ public:
     bool isEnabled() const override;
 };
 
-/// 复位急停（占位 —— 当前 ProcessModule 未实现复位逻辑，仅切回 Idle）。
+/// 复位急停。
 class CmdResetEmergencyStop : public CommandBase {
     Q_OBJECT
 public:
@@ -92,7 +92,7 @@ public:
     bool isEnabled() const override;
 };
 
-/// 切换仿真模式（Action 自身 checkable，会与 ProcessModule 信号双向同步）。
+/// 切换仿真模式（Action 自身 checkable，会与模块信号双向同步）。
 class CmdToggleSimulationMode : public CommandBase {
     Q_OBJECT
 public:

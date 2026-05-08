@@ -240,7 +240,7 @@ void WidgetOccView::activateView(const Handle(V3d_View)& view,
     m_context = ctx;
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "WidgetOccView::activateView activeDoc={} viewNull={} ctxNull={}",
-               m_activeDoc ? m_activeDoc->documentId() : kInvalidDocumentId,
+               static_cast<void*>(m_activeDoc),
                m_view.IsNull(),
                m_context.IsNull());
     if (!m_view.IsNull()) {
@@ -447,8 +447,8 @@ void WidgetOccView::attachDocument(GuiDocument* doc)
 {
     if (!doc) return;
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "WidgetOccView::attachDocument docId={} visible={} alreadyActive={}",
-               doc->documentId(), isVisible(), doc == m_activeDoc && !m_view.IsNull());
+               "WidgetOccView::attachDocument doc={} visible={} alreadyActive={}",
+               static_cast<void*>(doc), isVisible(), doc == m_activeDoc && !m_view.IsNull());
     // Already showing this exact document and view?  Nothing to do.
     if (doc == m_activeDoc && !m_view.IsNull()) return;
 
@@ -868,7 +868,7 @@ void WidgetOccView::fitAll()
     if (m_view.IsNull()) return;
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "WidgetOccView::fitAll activeDoc={}",
-               m_activeDoc ? m_activeDoc->documentId() : kInvalidDocumentId);
+               static_cast<void*>(m_activeDoc));
     m_view->FitAll(0.01, true);
     m_view->ZFitAll();
     m_view->Redraw();

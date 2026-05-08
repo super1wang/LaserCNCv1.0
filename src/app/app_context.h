@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QObject>
-#include "core/command/command_context.h"
+#include "app/app_command_context.h"
 
 class MainWindow;
 class CadModule;
@@ -20,16 +20,18 @@ class AppContext : public QObject, public IAppContext
 public:
     explicit AppContext(MainWindow* mainWindow, QObject* parent = nullptr);
 
-    LcncApplication* app()     const override;
+    lcnc::LcncProjectManager* projectManager() const override;
     GuiApplication*  guiApp()  const override;
     TaskManager*     taskMgr() const override;
 
-    DocumentId    activeDocumentId()  const override;
-    LcncDocument* activeDocument()    const override;
-    GuiDocument*  activeGuiDocument() const override;
+    GuiDocument*  workspaceGuiDocument() const override;
 
-    LcncDocument* machineDocument()    const override;
-    GuiDocument*  machineGuiDocument() const override;
+    DocumentId    workpieceDocumentId() const override;
+    DocumentId    machineDocumentId()   const override;
+    DocumentId    camDocumentId()       const override;
+    LcncDocument* workpieceDocument() const override;
+    LcncDocument* machineDocument()   const override;
+    LcncDocument* camDocument()       const override;
     WidgetOccView* occView()           const override;
 
     CadModule*     cadModule()     const override;

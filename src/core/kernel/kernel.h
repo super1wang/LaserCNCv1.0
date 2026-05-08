@@ -5,14 +5,14 @@
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/module_registry.h"
 
-// 前置声明（这三个类位于全局命名空间，AppSettings 位于 lcnc 命名空间）。
-class LcncApplication;
+// 前置声明（这两个类位于全局命名空间，AppSettings 位于 lcnc 命名空间）。
 class GuiApplication;
 class TaskManager;
 
 namespace lcnc {
 
 class AppSettings;
+class LcncProjectManager;
 
 /**
  * @brief 微内核实现。
@@ -51,8 +51,8 @@ public:
     // ── 启动 / 关闭 ─────────────────────────────────────────────────────
 
     /**
-     * @brief 注册全部核心服务：创建并持有 AppSettings/LcncApplication/
-     *        TaskManager 这些核心对象的实例（GuiApplication 由 main 负责创建
+    * @brief 注册全部核心服务：创建并持有 AppSettings/LcncProjectManager/
+    *        TaskManager 这些核心对象的实例（GuiApplication 由 main 负责创建
      *        并以 @ref setGuiApp 注入）。
      *
      * 必须在 @ref bootstrap 之前调用。
@@ -88,8 +88,8 @@ public:
 
     // ── 直达 getter（不再有任何 XxxClass::instance() 调用） ──────────────
 
-    /// 返回 Kernel 持有的应用文档管理器（在 registerCoreServices 后非空）。
-    LcncApplication* app() const     { return m_app.get(); }
+    /// 返回 Kernel 持有的项目管理器（在 registerCoreServices 后非空）。
+    LcncProjectManager* projectManager() const { return m_projectMgr.get(); }
     /// 返回由 main() 创建并交付 Kernel 的图形/视图管理器。
     /// 所有权不在 Kernel（避免 core 反向 include view），在
     /// @ref setGuiApp 调用后非空。
@@ -134,7 +134,7 @@ private:
     ModuleRegistry  m_modules;
 
     // 由 Kernel 直接拥有所有权（取代原来的 self-managing singleton）。
-    std::unique_ptr<::LcncApplication> m_app;
+    std::unique_ptr<LcncProjectManager> m_projectMgr;
     std::unique_ptr<::TaskManager>     m_taskMgr;
     std::unique_ptr<AppSettings>       m_appSettings;
     // GuiApplication 仅裸指针；所有权在 main()，避免 core 依赖 view。

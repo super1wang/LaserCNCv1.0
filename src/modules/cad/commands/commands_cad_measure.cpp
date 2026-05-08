@@ -1,5 +1,6 @@
 #include "modules/cad/commands/commands_cad.h"
 
+#include "app/app_command_context.h"
 #include "core/algorithms/cad/measure.h"
 #include "modules/cad/commands/command_helpers.h"
 
@@ -32,7 +33,7 @@ bool CmdMeasureDistance::isEnabled() const
 
 void CmdMeasureDistance::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc)
         return;
 
@@ -69,7 +70,7 @@ bool CmdMeasureAngle::isEnabled() const
 
 void CmdMeasureAngle::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc)
         return;
 
@@ -109,7 +110,7 @@ bool CmdMeasureArea::isEnabled() const
 
 void CmdMeasureArea::execute()
 {
-    LcncDocument* doc = context()->activeDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     if (!doc)
         return;
 

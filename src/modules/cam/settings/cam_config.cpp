@@ -18,22 +18,24 @@ constexpr double kEps2   = 1e-12;
 bool nearlyEqual(double a, double b)        { return qAbs(a - b) <= kEps; }
 bool samePoint(const gp_Pnt& a, const gp_Pnt& b) { return a.SquareDistance(b) <= kEps2; }
 
-QString renderQualityToString(MachineRenderQuality q)
+QString renderQualityToString(lcnc::RenderQualityPreset q)
 {
     switch (q) {
-    case MachineRenderQuality::High:   return QStringLiteral("high");
-    case MachineRenderQuality::Medium: return QStringLiteral("medium");
-    case MachineRenderQuality::Low:    return QStringLiteral("low");
+    case lcnc::RenderQualityPreset::High:   return QStringLiteral("high");
+    case lcnc::RenderQualityPreset::Medium: return QStringLiteral("medium");
+    case lcnc::RenderQualityPreset::Low:    return QStringLiteral("low");
+    case lcnc::RenderQualityPreset::Custom: return QStringLiteral("custom");
     }
     return QStringLiteral("medium");
 }
 
-MachineRenderQuality renderQualityFromString(const QString& v)
+lcnc::RenderQualityPreset renderQualityFromString(const QString& v)
 {
     const QString s = v.trimmed().toLower();
-    if (s == QStringLiteral("high")) return MachineRenderQuality::High;
-    if (s == QStringLiteral("low"))  return MachineRenderQuality::Low;
-    return MachineRenderQuality::Medium;
+    if (s == QStringLiteral("high")) return lcnc::RenderQualityPreset::High;
+    if (s == QStringLiteral("low"))  return lcnc::RenderQualityPreset::Low;
+    if (s == QStringLiteral("custom")) return lcnc::RenderQualityPreset::Custom;
+    return lcnc::RenderQualityPreset::Medium;
 }
 
 // ── TOML <-> gp_Pnt ─────────────────────────────────────────────────────────
@@ -151,7 +153,8 @@ bool CamConfig::importLegacyJson(const QString& jsonPath)
     const auto root = doc.object();
     m_machineModelPath     = root.value(QStringLiteral("machineModelPath")).toString();
     m_machinePreset        = root.value(QStringLiteral("machinePreset")).toString();
-    m_machineRenderQuality = renderQualityFromString(
+    m_autoInstallWorkpiece = root.value(QStringLiteral("autoInstallWorkpiece")).toBool(true);
+    m_machineRenderQualityPreset = renderQualityFromString(
         root.value(QStringLiteral("machineRenderQuality")).toString());
 
     const auto tp = root.value(QStringLiteral("toolpath")).toObject();
@@ -193,8 +196,12 @@ void CamConfig::readFrom(const toml::value& root)
 
     m_machineModelPath     = get_qstring(root, "machineModelPath",     QString());
     m_machinePreset        = get_qstring(root, "machinePreset",        QString());
-    m_machineRenderQuality = renderQualityFromString(
+    m_autoInstallWorkpiece = get_bool(root, "autoInstallWorkpiece", true);
+    const QString presetText = get_qstring(
+        root,
+        "machineRenderQualityPreset",
         get_qstring(root, "machineRenderQuality", QStringLiteral("medium")));
+    m_machineRenderQualityPreset = renderQualityFromString(presetText);
 
     if (root.contains("toolpath") && root.at("toolpath").is_table()) {
         const auto& tp = root.at("toolpath");
@@ -253,7 +260,8 @@ void CamConfig::writeTo(toml::value& root) const
 
     root["machineModelPath"]     = qs(m_machineModelPath);
     root["machinePreset"]        = qs(m_machinePreset);
-    root["machineRenderQuality"] = qs(renderQualityToString(m_machineRenderQuality));
+    root["autoInstallWorkpiece"] = m_autoInstallWorkpiece;
+    root["machineRenderQualityPreset"] = qs(renderQualityToString(m_machineRenderQualityPreset));
 
     toml::value tp(toml::table{});
     tp["leadInLength"]          = m_leadInLength;
@@ -311,10 +319,17 @@ void CamConfig::setMachinePreset(const QString& preset)
     saveDefault();
 }
 
-void CamConfig::setMachineRenderQuality(MachineRenderQuality quality)
+void CamConfig::setMachineRenderQualityPreset(lcnc::RenderQualityPreset quality)
 {
-    if (m_machineRenderQuality == quality) return;
-    m_machineRenderQuality = quality;
+    if (m_machineRenderQualityPreset == quality) return;
+    m_machineRenderQualityPreset = quality;
+    saveDefault();
+}
+
+void CamConfig::setAutoInstallWorkpiece(bool enabled)
+{
+    if (m_autoInstallWorkpiece == enabled) return;
+    m_autoInstallWorkpiece = enabled;
     saveDefault();
 }
 

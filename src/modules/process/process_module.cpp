@@ -325,6 +325,12 @@ void ProcessModule::setAxisPosition(const QString& axisName, double value)
     emit axisPositionChanged(axisName, value);
 }
 
+void ProcessModule::setAxisPositions(const QMap<QString, double>& positions)
+{
+    for (auto it = positions.cbegin(); it != positions.cend(); ++it)
+        setAxisPosition(it.key(), it.value());
+}
+
 void ProcessModule::setFeedOverride(double factor)
 {
     const double clamped = std::clamp(factor, 0.0, 2.0);

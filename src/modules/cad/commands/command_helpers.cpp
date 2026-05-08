@@ -1,5 +1,6 @@
 #include "modules/cad/commands/command_helpers.h"
 
+#include "app/app_command_context.h"
 #include "core/document/xcaf_utils.h"
 #include "modules/cad/cad_module.h"
 #include "view/gui_document.h"
@@ -25,16 +26,14 @@ LcncDocument* contextualDocument(IAppContext* ctx)
         return nullptr;
     if (ctx->isMachineViewActive())
         return ctx->machineDocument();
-    return ctx->activeDocument();
+    return ctx->workpieceDocument();
 }
 
 GuiDocument* contextualGuiDocument(IAppContext* ctx)
 {
     if (!ctx)
         return nullptr;
-    if (ctx->isMachineViewActive())
-        return ctx->machineGuiDocument();
-    return ctx->activeGuiDocument();
+    return ctx->workspaceGuiDocument();
 }
 
 QList<EntityInfo> collectEntities(LcncDocument* doc, LcncDocument::EntityKind kind)
@@ -97,7 +96,7 @@ void commitShape(IAppContext* ctx, const TopoDS_Shape& shape, const QString& nam
 {
     if (!ctx || !ctx->cadModule())
         return;
-    DocumentId docId = ctx->activeDocumentId();
+    DocumentId docId = ctx->workpieceDocumentId();
     if (docId == kInvalidDocumentId)
         docId = ctx->cadModule()->newDocument(name);
     ctx->cadModule()->createShape(
@@ -128,9 +127,11 @@ QList<EntityInfo> selectedEntities(IAppContext* ctx, const QList<EntityInfo>& al
     if (aisContext.IsNull())
         return {};
 
+    LcncDocument* doc = contextualDocument(ctx);
+    const DocumentId documentId = doc ? doc->id() : kInvalidDocumentId;
     QList<EntityInfo> result;
     for (const EntityInfo& entity : all) {
-        Handle(AIS_Shape) ais = guiDocument->aisShape(XcafUtils::entry(entity.label));
+        Handle(AIS_Shape) ais = guiDocument->aisShape(documentId, XcafUtils::entry(entity.label));
         if (!ais.IsNull() && aisContext->IsSelected(ais))
             result.append(entity);
     }

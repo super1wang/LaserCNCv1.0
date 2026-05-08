@@ -1,7 +1,7 @@
 #include "core/kernel/kernel.h"
 
-#include "core/document/lcnc_application.h"
 #include "core/logging/logger.h"
+#include "core/project/lcnc_project_manager.h"
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
 
@@ -30,7 +30,7 @@ Kernel::~Kernel()
     // 释放顺序：依赖反向（gui 订阅了 lcnc 信号，故需在 main 中先于
     // Kernel 销毁 GuiApplication；Kernel 不拥有以避免 core 依赖 view）。
     m_taskMgr.reset();
-    m_app.reset();
+    m_projectMgr.reset();
     m_appSettings.reset();
     if (g_kernelCurrent == this) g_kernelCurrent = nullptr;
 }
@@ -54,8 +54,8 @@ void Kernel::registerCoreServices()
     // 1) AppSettings — 由 Kernel 直接拥有
     m_appSettings = std::make_unique<AppSettings>();
 
-    // 2) LcncApplication（纯文档层）— 依赖 0
-    m_app = std::make_unique<LcncApplication>();
+    // 2) ProjectManager — 单项目生命周期和三域文档入口。
+    m_projectMgr = std::make_unique<LcncProjectManager>();
 
     // 3) GuiApplication 不在 Kernel 创建（core 反向 view 依赖），由 main()
     //    在 registerCoreServices 后、bootstrap 前调用 setGuiApp(...)。

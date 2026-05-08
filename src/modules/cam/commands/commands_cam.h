@@ -13,7 +13,7 @@ class QTimer;
 /**
  * @brief Extract contours from the mounted workpiece and generate laser toolpath.
  *
- * Collects all workpiece entities from the machine document, extracts
+ * Collects all workpiece entities from the project document, extracts
  * edge/wire contours, discretises them, and displays the toolpath as
  * coloured AIS overlays in the machine 3D view.
  */

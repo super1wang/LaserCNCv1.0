@@ -74,7 +74,8 @@ struct RenderProfileSettings {
  */
 struct ColorSettings {
     QColor workpieceColor = QColor(200, 200, 210);
-    QColor cadBackgroundColor = QColor(60, 68, 82);
+    QColor backgroundColor = QColor(42, 48, 58);
+    QColor cadBackgroundColor = QColor(42, 48, 58);
     QColor camBackgroundColor = QColor(42, 48, 58);
     QColor selectionColor = QColor(255, 0, 0);
     QColor hoverColor = QColor(255, 165, 0);

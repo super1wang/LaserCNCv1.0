@@ -71,12 +71,12 @@ CadSelectionContext CadSelectionResolver::fromShapeEntries(DocumentId docId,
     return context;
 }
 
-CadSelectionContext CadSelectionResolver::fromDocumentTreeNode(DocumentId docId,
-                                                              const QString& nodeKey,
-                                                              const QString& entry,
-                                                              const QStringList& leafEntries,
-                                                              bool hasDocument,
-                                                              bool sketchEditing)
+CadSelectionContext CadSelectionResolver::fromProjectExplorerNode(DocumentId docId,
+                                                                  const QString& nodeKey,
+                                                                  const QString& entry,
+                                                                  const QStringList& leafEntries,
+                                                                  bool hasDocument,
+                                                                  bool sketchEditing)
 {
     if (isFinishedSketchNode(nodeKey)) {
         CadSelectionContext context;
@@ -156,12 +156,12 @@ CadSelectionContext CadSelectionResolver::fromOverlayKey(DocumentId docId,
         return context;
     }
 
-    return fromDocumentTreeNode(docId,
-                                overlayKey,
-                                QString(),
-                                {},
-                                hasDocument,
-                                sketchEditing);
+    return fromProjectExplorerNode(docId,
+                                   overlayKey,
+                                   QString(),
+                                   {},
+                                   hasDocument,
+                                   sketchEditing);
 }
 
 bool CadSelectionResolver::isFinishedSketchNode(const QString& nodeKey)

@@ -4,7 +4,6 @@
 #include <QSurfaceFormat>
 
 #include "app/main_window.h"
-#include "core/document/lcnc_application.h"
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
 #include "core/settings/app_settings.h"
@@ -67,10 +66,9 @@ int main(int argc, char* argv[])
               glFormat.swapInterval());
 
     // ── Kernel：注册核心服务 + 加载业务模块 ────────────────────────────
-    //    Kernel 直接持有 LcncApplication / GuiApplication / TaskManager /
-    //    AppSettings 实例，不再有 XxxClass::instance() 懒加载单例。
-    //    模块依赖：cad ← cam ← process（CAM 共享 LcncApplication 的机台
-    //    文档；Process 使用 CAM 的轴定义）。Kernel 内部用 Kahn 拓扑排序，
+    //    Kernel 直接持有 ProjectManager / TaskManager / AppSettings 实例，
+    //    GuiApplication 由 main 创建并注入，不再有 XxxClass::instance() 懒加载单例。
+    //    模块依赖：cad ← cam ← process（Process 使用 CAM 的轴定义）。Kernel 内部用 Kahn 拓扑排序，
     //    保证依赖在前。
     //    [modules].disabled = [...] 可在 mainwindow.toml 中关闭某些模块；
     //    被关闭的模块连同依赖它的下游模块都不会加入 Kernel。
@@ -80,7 +78,7 @@ int main(int argc, char* argv[])
 
     // GuiApplication 不在 core/Kernel 内创建（避免 core 反向依赖 view），
     // 改在此处由 main 拥有并注入 Kernel。须在模块 init 之前完成，
-    // 因为 CAM 在 init() 里会访问 guiApp() 创建机台 GUI 文档。
+    // 因为 CAM 在 init() 里会访问 guiApp() 获取 workspace 视图。
     auto guiAppOwner = std::make_unique<GuiApplication>();
     kernel.setGuiApp(guiAppOwner.get());
 
@@ -128,7 +126,7 @@ int main(int argc, char* argv[])
     kernel.shutdown();
 
     // 作用域销毁顺序：mainWin → guiAppOwner → kernel（声明顺序的反序），
-    // 满足 "UI → GuiApplication → LcncApplication/TaskManager" 的依赖
+    // 满足 "UI → GuiApplication → ProjectManager/TaskManager" 的依赖
     // 反向释放，无需在此处手动 reset。
 
     LCNC_INFO(lcnc::LogCode::Generic, "Shutdown rc={}", rc);

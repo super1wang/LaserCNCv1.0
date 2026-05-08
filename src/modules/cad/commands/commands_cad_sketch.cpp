@@ -1,5 +1,6 @@
 #include "modules/cad/commands/commands_cad.h"
 
+#include "app/app_command_context.h"
 #include "core/logging/logger.h"
 #include "modules/cad/cad_module.h"
 

@@ -118,17 +118,15 @@ void ToolpathSimulator::onTick()
         return;
     }
 
-    if (m_applyAxis) {
-        m_applyAxis(QStringLiteral("X"), mc.x, false);
-        m_applyAxis(QStringLiteral("Y"), mc.y, false);
-        m_applyAxis(QStringLiteral("Z"), mc.z, false);
-        if (!mc.r1Name.isEmpty())
-            m_applyAxis(mc.r1Name, mc.r1, false);
-        if (!mc.r2Name.isEmpty())
-            m_applyAxis(mc.r2Name, mc.r2, false);
-        if (m_refresh)
-            m_refresh();
-    }
+    m_applyAxis(QStringLiteral("X"), mc.x, false);
+    m_applyAxis(QStringLiteral("Y"), mc.y, false);
+    m_applyAxis(QStringLiteral("Z"), mc.z, false);
+    if (!mc.r1Name.isEmpty())
+        m_applyAxis(mc.r1Name, mc.r1, false);
+    if (!mc.r2Name.isEmpty())
+        m_applyAxis(mc.r2Name, mc.r2, false);
+    if (m_refresh)
+        m_refresh();
 
     emit simulationTick(m_currentContour, m_currentPoint, m_totalPoints);
     ++m_currentPoint;

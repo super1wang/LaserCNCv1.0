@@ -2,10 +2,10 @@
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
 #include "core/settings/app_settings.h"
-#include "core/document/lcnc_application.h"
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "core/project/lcnc_project_manager.h"
 #include "view/rendering_manager.h"
 #include "view/shape_object_driver.h"
 
@@ -26,6 +26,7 @@
 #include <V3d_Viewer.hxx>
 #include <QTimer>
 #include <QSet>
+#include <QList>
 
 namespace {
 
@@ -48,58 +49,17 @@ Quantity_Color axisDisplayColor(const QString& axisName)
     return Quantity_Color(0.78, 0.78, 0.80, Quantity_TOC_RGB);
 }
 
-void applyRenderQuality(const Handle(AIS_Shape)& ais,
-                        MachineRenderQuality quality)
-{
-    if (ais.IsNull())
-        return;
-
-    bool drawBoundary = true;
-    double deviationCoefficient = 0.02;
-    double deviationAngle = 0.18;
-    double boundaryWidth = 1.0;
-
-    switch (quality) {
-    case MachineRenderQuality::High:
-        drawBoundary = true;
-        deviationCoefficient = 0.01;
-        deviationAngle = 0.12;
-        boundaryWidth = 1.1;
-        break;
-    case MachineRenderQuality::Medium:
-        drawBoundary = true;
-        deviationCoefficient = 0.05;
-        deviationAngle = 0.35;
-        boundaryWidth = 0.8;
-        break;
-    case MachineRenderQuality::Low:
-        drawBoundary = false;
-        deviationCoefficient = 0.12;
-        deviationAngle = 0.70;
-        boundaryWidth = 0.6;
-        break;
-    }
-
-    ais->SetOwnDeviationCoefficient(deviationCoefficient);
-    ais->SetOwnDeviationAngle(deviationAngle);
-    ais->Attributes()->SetFaceBoundaryDraw(drawBoundary);
-    ais->Attributes()->FaceBoundaryAspect()->SetColor(Quantity_NOC_GRAY40);
-    ais->Attributes()->FaceBoundaryAspect()->SetWidth(boundaryWidth);
-}
-
 } // namespace
 
-GuiDocument::GuiDocument(DocumentId id, QObject* parent)
+GuiDocument::GuiDocument(QObject* parent)
     : QObject(parent)
-    , m_docId(id)
     , m_scene(new GraphicsScene(this))
     , m_renderingManager(new lcnc::view::RenderingManager(this, this))
 {
-    const bool isMachine = id == lcnc::Kernel::current().app()->machineDocumentId();
-    m_renderingManager->setMachineView(isMachine);
+    m_renderingManager->setMachineView(true);
     if (auto* settings = lcnc::Kernel::current().appSettings()) {
         m_renderingManager->configure(
-            isMachine ? settings->camViewRendering : settings->cadViewRendering,
+            settings->camViewRendering,
             settings->colors);
         m_renderingManager->applyNow(lcnc::view::RenderDirtyFlag::All);
     }
@@ -107,9 +67,9 @@ GuiDocument::GuiDocument(DocumentId id, QObject* parent)
 
 GuiDocument::~GuiDocument() = default;
 
-LcncDocument* GuiDocument::document() const
+void GuiDocument::setSourceDocument(LcncDocument* document)
 {
-    return lcnc::Kernel::current().app()->documentById(m_docId);
+    m_sourceDocument = document;
 }
 
 const Handle(AIS_InteractiveContext)& GuiDocument::context() const
@@ -144,7 +104,7 @@ void GuiDocument::attachView(const Handle(Aspect_NeutralWindow)& win, int w, int
     m_view->Redraw();
     m_scene->logOpenGlContextState("document");
 
-    if (!m_aisMap.isEmpty()) {
+    if (!m_displayObjects.isEmpty()) {
         m_view->FitAll(0.01, false);
         m_view->ZFitAll();
         m_view->Redraw();
@@ -180,8 +140,8 @@ void GuiDocument::fitAll()
 {
     if (m_view.IsNull()) return;
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "GuiDocument::fitAll doc={} count={}",
-               m_docId, m_aisMap.size());
+               "GuiDocument::fitAll count={}",
+               m_displayObjects.size());
     m_view->FitAll(0.01, true);
     m_view->ZFitAll();
     m_view->Redraw();
@@ -262,15 +222,24 @@ Handle(AIS_Shape) GuiDocument::displayShape(const TopoDS_Shape& shape,
                                              const QString&      name,
                                              bool                fitAll)
 {
+    return displayShape(domainForDocument(m_sourceDocument), m_sourceDocument, shape, name, fitAll);
+}
+
+Handle(AIS_Shape) GuiDocument::displayShape(lcnc::ProjectDomain domain,
+                                             LcncDocument* document,
+                                             const TopoDS_Shape& shape,
+                                             const QString& name,
+                                             bool fitAll)
+{
     Handle(AIS_Shape) ais = m_scene->displayShape(shape, fitAll, true, false);
-    m_aisMap.insert(name, ais);
+    registerDisplayObject(domain, document, name, ais);
     applyMachineDisplayStyle();
     if (m_renderingManager)
         m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
                                                   m_renderingManager->runtimeFaceBoundary());
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "GuiDocument::displayShape doc={} name={} fit={} count={}",
-               m_docId, name.toStdString(), fitAll, m_aisMap.size());
+               "GuiDocument::displayShape name={} fit={} count={}",
+               name.toStdString(), fitAll, m_displayObjects.size());
     if (!m_view.IsNull()) {
         if (fitAll) {
             m_view->FitAll(0.01, false);
@@ -284,29 +253,69 @@ Handle(AIS_Shape) GuiDocument::displayShape(const TopoDS_Shape& shape,
 
 void GuiDocument::eraseEntity(const QString& labelEntry)
 {
-    if (m_aisMap.contains(labelEntry)) {
-        m_scene->eraseShape(m_aisMap.value(labelEntry));
-        m_aisMap.remove(labelEntry);
-        emit displayUpdated();
+    if (labelEntry.isEmpty())
+        return;
+
+    QList<DisplayKey> matches;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().entry == labelEntry)
+            matches.append(it.key());
     }
+
+    if (matches.size() == 1 && eraseKey(matches.first()))
+        emit displayUpdated();
 }
 
-void GuiDocument::rebuildDisplay()
+void GuiDocument::eraseEntity(DocumentId documentId, const QString& labelEntry)
 {
-    LcncDocument* doc = document();
+    if (labelEntry.isEmpty())
+        return;
+
+    if (eraseKey(DisplayKey{documentId, labelEntry}))
+        emit displayUpdated();
+}
+
+void GuiDocument::eraseDocument(DocumentId documentId)
+{
+    if (eraseDocumentObjects(documentId))
+        emit displayUpdated();
+}
+
+void GuiDocument::eraseDomain(lcnc::ProjectDomain domain)
+{
+    if (eraseDomainObjects(domain))
+        emit displayUpdated();
+}
+
+void GuiDocument::rebuildDisplay(LcncDocument* document)
+{
+    LcncDocument* doc = document ? document : m_sourceDocument;
     if (!doc) {
         LCNC_DEBUG(lcnc::LogCode::Generic,
-                   "GuiDocument::rebuildDisplay doc={} no LcncDocument", m_docId);
+                   "GuiDocument::rebuildDisplay no source document");
         return;
     }
 
+    rebuildDomain(domainForDocument(doc), doc);
+}
+
+void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* document)
+{
+    eraseDomainObjects(domain);
+
+    if (!document) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "GuiDocument::rebuildDomain domain={} no document",
+                   static_cast<int>(domain));
+        emit displayUpdated();
+        return;
+    }
+
+    m_sourceDocument = document;
+
     // Erase only tracked shapes — do NOT call eraseAll() which would also
     // erase the overlay gizmos (ViewCube / Trihedron) stored in the same context.
-    for (auto it = m_aisMap.constBegin(); it != m_aisMap.constEnd(); ++it)
-        m_scene->eraseShape(it.value());
-    m_aisMap.clear();
-
-    Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
+    Handle(XCAFDoc_ShapeTool) st = document->shapeTool();
     TDF_LabelSequence freeShapes;
     st->GetFreeShapes(freeShapes);
 
@@ -315,7 +324,7 @@ void GuiDocument::rebuildDisplay()
         TopoDS_Shape sh = XcafUtils::shape(lbl);
         if (!sh.IsNull()) {
             Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
-            m_aisMap.insert(XcafUtils::entry(lbl), ais);
+            registerDisplayObject(domain, document, XcafUtils::entry(lbl), ais);
         }
     }
 
@@ -324,8 +333,8 @@ void GuiDocument::rebuildDisplay()
         m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
                                                   m_renderingManager->runtimeFaceBoundary());
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "GuiDocument::rebuildDisplay doc={} count={}",
-               m_docId, m_aisMap.size());
+               "GuiDocument::rebuildDomain domain={} docId={} count={}",
+               static_cast<int>(domain), document->id(), m_displayObjects.size());
 
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
     if (!ctx.IsNull())
@@ -337,22 +346,23 @@ void GuiDocument::rebuildDisplay()
     emit displayUpdated();
 }
 
-void GuiDocument::setMachineRenderQuality(MachineRenderQuality quality)
+void GuiDocument::setRenderQualityPreset(lcnc::RenderQualityPreset quality)
 {
-    if (m_machineRenderQuality == quality)
+    if (m_renderQualityPreset == quality)
         return;
 
-    m_machineRenderQuality = quality;
+    m_renderQualityPreset = quality;
     if (m_renderingManager) {
         lcnc::RenderProfileSettings profile = m_renderingManager->profile();
         switch (quality) {
-        case MachineRenderQuality::High:
+        case lcnc::RenderQualityPreset::High:
             profile.qualityPreset = lcnc::RenderQualityPreset::High;
             break;
-        case MachineRenderQuality::Low:
+        case lcnc::RenderQualityPreset::Low:
             profile.qualityPreset = lcnc::RenderQualityPreset::Low;
             break;
-        case MachineRenderQuality::Medium:
+        case lcnc::RenderQualityPreset::Medium:
+        case lcnc::RenderQualityPreset::Custom:
             profile.qualityPreset = lcnc::RenderQualityPreset::Medium;
             break;
         }
@@ -369,14 +379,52 @@ void GuiDocument::setMachineRenderQuality(MachineRenderQuality quality)
 void GuiDocument::applyMachineDisplayStyle()
 {
     if (m_renderingManager) {
-        m_renderingManager->applyDocumentStyles(m_aisMap);
-        return;
+        QMap<DocumentId, LcncDocument*> documents;
+        QMap<DocumentId, QMap<QString, Handle(AIS_Shape)>> shapesByDocument;
+        for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+            const DisplayObject& object = it.value();
+            if (!object.document || object.ais.IsNull())
+                continue;
+            documents.insert(object.documentId, object.document);
+            shapesByDocument[object.documentId].insert(object.entry, object.ais);
+        }
+
+        LcncDocument* previousSource = m_sourceDocument;
+        for (auto it = shapesByDocument.cbegin(); it != shapesByDocument.cend(); ++it) {
+            m_sourceDocument = documents.value(it.key(), nullptr);
+            m_renderingManager->applyDocumentStyles(it.value());
+        }
+        m_sourceDocument = previousSource;
     }
 }
 
 Handle(AIS_Shape) GuiDocument::aisShape(const QString& labelEntry) const
 {
-    return m_aisMap.value(labelEntry, Handle(AIS_Shape)());
+    if (labelEntry.isEmpty())
+        return {};
+
+    if (m_sourceDocument) {
+        Handle(AIS_Shape) ais = aisShape(m_sourceDocument->id(), labelEntry);
+        if (!ais.IsNull())
+            return ais;
+    }
+
+    Handle(AIS_Shape) found;
+    int matches = 0;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().entry != labelEntry)
+            continue;
+        found = it.value().ais;
+        ++matches;
+        if (matches > 1)
+            return {};
+    }
+    return matches == 1 ? found : Handle(AIS_Shape)();
+}
+
+Handle(AIS_Shape) GuiDocument::aisShape(DocumentId documentId, const QString& labelEntry) const
+{
+    return m_displayObjects.value(DisplayKey{documentId, labelEntry}).ais;
 }
 
 void GuiDocument::setEntitySelectionMode(int selectionMode)
@@ -385,8 +433,8 @@ void GuiDocument::setEntitySelectionMode(int selectionMode)
     if (ctx.IsNull())
         return;
 
-    for (auto it = m_aisMap.cbegin(); it != m_aisMap.cend(); ++it) {
-        const Handle(AIS_Shape)& ais = it.value();
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        const Handle(AIS_Shape)& ais = it.value().ais;
         if (ais.IsNull())
             continue;
 
@@ -399,6 +447,11 @@ void GuiDocument::setEntitySelectionMode(int selectionMode)
 
 QStringList GuiDocument::selectedEntries() const
 {
+    return selectedEntries(kInvalidDocumentId);
+}
+
+QStringList GuiDocument::selectedEntries(DocumentId documentId) const
+{
     QStringList result;
     if (!m_scene) return result;
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
@@ -406,9 +459,12 @@ QStringList GuiDocument::selectedEntries() const
     for (ctx->InitSelected(); ctx->MoreSelected(); ctx->NextSelected()) {
         // Compare raw pointers — Handle equality compares underlying object addresses
         const AIS_InteractiveObject* objPtr = ctx->SelectedInteractive().get();
-        for (auto it = m_aisMap.cbegin(); it != m_aisMap.cend(); ++it) {
-            if (it.value().get() == objPtr) {
-                result << it.key();
+        for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+            const DisplayObject& object = it.value();
+            if (documentId != kInvalidDocumentId && object.documentId != documentId)
+                continue;
+            if (object.ais.get() == objPtr) {
+                result << object.entry;
                 break;
             }
         }
@@ -416,18 +472,23 @@ QStringList GuiDocument::selectedEntries() const
     return result;
 }
 
-void GuiDocument::updateAxisTransforms()
+void GuiDocument::updateAxisTransforms(LcncDocument* document)
 {
-    LcncDocument* doc = document();
+    LcncDocument* doc = document ? document : m_sourceDocument;
     if (!doc) return;
 
     MachineKinematics* kin = doc->machineKinematics();
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
     if (ctx.IsNull()) return;
 
-    for (auto it = m_aisMap.constBegin(); it != m_aisMap.constEnd(); ++it) {
-        const QString&         entry = it.key();
-        const Handle(AIS_Shape)& ais = it.value();
+    const DocumentId documentId = doc->id();
+    for (auto it = m_displayObjects.constBegin(); it != m_displayObjects.constEnd(); ++it) {
+        const DisplayObject& object = it.value();
+        if (object.documentId != documentId)
+            continue;
+
+        const QString& entry = object.entry;
+        const Handle(AIS_Shape)& ais = object.ais;
         if (ais.IsNull()) continue;
 
         gp_Trsf t;
@@ -444,4 +505,73 @@ void GuiDocument::updateAxisTransforms()
         ais->SetLocalTransformation(t);
         ctx->RecomputePrsOnly(ais, Standard_False);
     }
+}
+
+lcnc::ProjectDomain GuiDocument::domainForDocument(LcncDocument* document) const
+{
+    if (!document)
+        return lcnc::ProjectDomain::Project;
+
+    lcnc::ProjectDomain domain = lcnc::ProjectDomain::Project;
+    if (auto* manager = lcnc::Kernel::current().projectManager())
+        manager->domainForDocument(document->id(), &domain);
+    return domain;
+}
+
+bool GuiDocument::eraseKey(const DisplayKey& key)
+{
+    auto it = m_displayObjects.find(key);
+    if (it == m_displayObjects.end())
+        return false;
+
+    if (!it.value().ais.IsNull())
+        m_scene->eraseShape(it.value().ais);
+    m_displayObjects.erase(it);
+    return true;
+}
+
+bool GuiDocument::eraseKeys(const QList<DisplayKey>& keys)
+{
+    bool changed = false;
+    for (const DisplayKey& key : keys)
+        changed = eraseKey(key) || changed;
+    return changed;
+}
+
+bool GuiDocument::eraseDocumentObjects(DocumentId documentId)
+{
+    QList<DisplayKey> keys;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().documentId == documentId)
+            keys.append(it.key());
+    }
+    return eraseKeys(keys);
+}
+
+bool GuiDocument::eraseDomainObjects(lcnc::ProjectDomain domain)
+{
+    QList<DisplayKey> keys;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == domain)
+            keys.append(it.key());
+    }
+    return eraseKeys(keys);
+}
+
+void GuiDocument::registerDisplayObject(lcnc::ProjectDomain domain,
+                                        LcncDocument* document,
+                                        const QString& entry,
+                                        const Handle(AIS_Shape)& ais)
+{
+    if (entry.isEmpty() || ais.IsNull())
+        return;
+
+    const DocumentId documentId = document ? document->id() : kInvalidDocumentId;
+    DisplayObject object;
+    object.domain = domain;
+    object.documentId = documentId;
+    object.document = document;
+    object.entry = entry;
+    object.ais = ais;
+    m_displayObjects.insert(DisplayKey{documentId, entry}, object);
 }

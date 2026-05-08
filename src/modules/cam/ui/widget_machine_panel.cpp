@@ -21,6 +21,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QAbstractSpinBox>
+#include <QCheckBox>
 
 #include <QSet>
 
@@ -145,7 +146,6 @@ void WidgetMachinePanel::buildUi()
     m_pages = new QTabWidget(this);
     m_pages->setDocumentMode(true);
     buildConfigPage();
-    buildWorkpiecePage();
     const auto spins = findChildren<QAbstractSpinBox*>();
     for (QAbstractSpinBox* spin : spins) {
         spin->setFocusPolicy(Qt::StrongFocus);
@@ -247,52 +247,36 @@ void WidgetMachinePanel::buildConfigPage()
 
     mainLayout->addWidget(calibrationGroup, 1);
 
+    buildWorkpiecePage();
+
     mainLayout->addStretch();
     m_pages->addTab(m_configPage, tr("机台模型"));
 }
 
 void WidgetMachinePanel::buildWorkpiecePage()
 {
-    m_workpiecePage = new QWidget(m_pages);
-    auto* mainLayout = new QVBoxLayout(m_workpiecePage);
-    mainLayout->setContentsMargins(4, 4, 4, 4);
-    mainLayout->setSpacing(8);
+    auto* mainLayout = qobject_cast<QVBoxLayout*>(m_configPage ? m_configPage->layout() : nullptr);
+    if (!mainLayout)
+        return;
 
-    auto* infoLabel = new QLabel(
-        tr("挂载后的工件会按工件包围盒中心对齐到安装位置坐标。存在转台构型时，可直接把安装位置 X/Y 对齐到旋转中心。"),
-        m_workpiecePage);
-    infoLabel->setWordWrap(true);
-    infoLabel->setStyleSheet("color: #888; font-size: 11px;");
-    mainLayout->addWidget(infoLabel);
-
-    m_wpcGroup = new QGroupBox(tr("工件挂载"), m_workpiecePage);
-    auto* mountLayout = new QVBoxLayout(m_wpcGroup);
-    mountLayout->setContentsMargins(6, 6, 6, 6);
-    mountLayout->setSpacing(6);
-    m_lblWorkpieceStatus = new QLabel(tr("暂无工件挂载"), m_wpcGroup);
-    m_lblWorkpieceStatus->setWordWrap(true);
-    m_lblWorkpieceStatus->setStyleSheet("color: gray; font-size: 11px;");
-    m_btnMountWorkpiece = new QPushButton(QIcon(":/icons/workpiece.svg"), tr("挂载工件..."), m_wpcGroup);
-    mountLayout->addWidget(m_lblWorkpieceStatus);
-    mountLayout->addWidget(m_btnMountWorkpiece);
-    mainLayout->addWidget(m_wpcGroup);
-
-    m_installGroup = new QGroupBox(tr("工件安装位置"), m_workpiecePage);
+    m_installGroup = new QGroupBox(tr("工件安装位置"), m_configPage);
     auto* installLayout = new QFormLayout(m_installGroup);
     installLayout->setContentsMargins(6, 6, 6, 6);
     installLayout->setSpacing(6);
+    m_chkAutoInstallWorkpiece = new QCheckBox(tr("自动安装工件"), m_installGroup);
     m_wpcInstallX = createMillimeterSpin(m_installGroup);
     m_wpcInstallY = createMillimeterSpin(m_installGroup);
     m_wpcInstallZ = createMillimeterSpin(m_installGroup);
     m_btnAlignRotationCenter = new QPushButton(tr("对齐旋转中心"), m_installGroup);
+    installLayout->addRow(m_chkAutoInstallWorkpiece);
     installLayout->addRow(tr("安装 X:"), m_wpcInstallX);
     installLayout->addRow(tr("安装 Y:"), m_wpcInstallY);
     installLayout->addRow(tr("安装 Z:"), m_wpcInstallZ);
     installLayout->addRow(m_btnAlignRotationCenter);
     mainLayout->addWidget(m_installGroup);
 
-    connect(m_btnMountWorkpiece, &QPushButton::clicked,
-        this, &WidgetMachinePanel::mountWorkpieceRequested);
+    connect(m_chkAutoInstallWorkpiece, &QCheckBox::toggled,
+        this, &WidgetMachinePanel::autoInstallWorkpieceChanged);
     connect(m_btnAlignRotationCenter, &QPushButton::clicked,
         this, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested);
     connect(m_wpcInstallX, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -301,9 +285,6 @@ void WidgetMachinePanel::buildWorkpiecePage()
         this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
     connect(m_wpcInstallZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
         this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
-
-    mainLayout->addStretch();
-    m_pages->addTab(m_workpiecePage, tr("工件配置"));
 }
 
 void WidgetMachinePanel::refreshCalibrationSection()
@@ -496,42 +477,17 @@ void WidgetMachinePanel::rebuildAssignmentSection()
 void WidgetMachinePanel::rebuildWpcSection()
 {
     const MachineKinematics* kin = m_doc ? m_doc->machineKinematics() : nullptr;
-    const bool hasMachineEntities = m_doc
-        && m_doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
     const bool hasPreset = kin && !kin->configType().isEmpty();
     const QString configType = kin ? kin->configType() : QString();
     const bool showRotationButton = configType == QStringLiteral("VERTICAL_AC_TABLE")
         || configType == QStringLiteral("VERTICAL_BC_TABLE")
         || configType == QStringLiteral("XYZA");
 
-    if (m_btnMountWorkpiece)
-        m_btnMountWorkpiece->setEnabled(hasMachineEntities && hasPreset);
-
-    if (m_lblWorkpieceStatus && kin && !kin->wpcMounts().isEmpty()) {
-        TDF_LabelSequence wpcLabels = m_doc->entityLabels(LcncDocument::EntityKind::Workpiece);
-        QMap<QString, QString> workpieceNames;
-        for (int i = 1; i <= wpcLabels.Length(); ++i) {
-            const TDF_Label label = wpcLabels.Value(i);
-            workpieceNames.insert(XcafUtils::entry(label), XcafUtils::name(label));
-        }
-
-        QStringList mountLines;
-        for (auto it = kin->wpcMounts().cbegin(); it != kin->wpcMounts().cend(); ++it) {
-            mountLines << tr("<b>%1</b> → %2 轴")
-                              .arg(workpieceNames.value(it.key(), it.key()), it.value());
-        }
-
-        m_lblWorkpieceStatus->setText(mountLines.join(QStringLiteral("<br/>")));
-        m_lblWorkpieceStatus->setStyleSheet("color: #3a8; font-size: 11px;");
-    } else if (m_lblWorkpieceStatus) {
-        if (!hasMachineEntities) {
-            m_lblWorkpieceStatus->setText(tr("请先加载机台模型，再从这里挂载工件。"));
-        } else if (!hasPreset) {
-            m_lblWorkpieceStatus->setText(tr("请先在“机台模型”页选择机台构型。"));
-        } else {
-            m_lblWorkpieceStatus->setText(tr("暂无工件挂载"));
-        }
-        m_lblWorkpieceStatus->setStyleSheet("color: gray; font-size: 11px;");
+    if (m_chkAutoInstallWorkpiece) {
+        const QSignalBlocker blocker(m_chkAutoInstallWorkpiece);
+        const bool autoInstall = lcnc::Kernel::current().service<CamModule>()->autoInstallWorkpiece();
+        m_chkAutoInstallWorkpiece->setChecked(autoInstall);
+        m_chkAutoInstallWorkpiece->setEnabled(hasPreset);
     }
 
     if (m_wpcInstallX && m_wpcInstallY && m_wpcInstallZ) {

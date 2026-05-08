@@ -1,8 +1,8 @@
 #include "modules/cam/commands/commands_machine.h"
 #include "modules/cam/ui/dialog_mark_axes.h"
-#include "core/command/command_context.h"
+#include "app/app_command_context.h"
 
-#include "core/document/lcnc_application.h"
+#include "core/project/project_types.h"
 #include "core/document/lcnc_document.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/algorithms/cam/machine_model_compressor.h"
@@ -139,8 +139,9 @@ bool CmdMountWorkpiece::isEnabled() const
     if (!machDoc) return false;
     if (machDoc->entityLabels(LcncDocument::EntityKind::Machine).Length() == 0)
         return false;
-    // At least one workpiece document must exist
-    return !app()->workpieceDocuments().isEmpty();
+    LcncDocument* workpieceDoc = context()->workpieceDocument();
+    return workpieceDoc
+        && workpieceDoc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0;
 }
 
 void CmdMountWorkpiece::execute()
@@ -148,7 +149,17 @@ void CmdMountWorkpiece::execute()
     LcncDocument* machDoc = context()->machineDocument();
     if (!machDoc) return;
 
-    const auto axisOptions = context()->camModule()->axisOptions(true);
+    QList<CamModule::AxisOption> axisOptions = context()->camModule()->axisOptions(true);
+    const QString defaultAxisName = context()->camModule()->defaultWorkpieceMountAxis();
+    if (!defaultAxisName.isEmpty()) {
+        QList<CamModule::AxisOption> filteredOptions;
+        for (const auto& axis : axisOptions) {
+            if (axis.name.isEmpty() || axis.name == defaultAxisName)
+                filteredOptions.append(axis);
+        }
+        if (filteredOptions.size() > 1)
+            axisOptions = filteredOptions;
+    }
     if (axisOptions.size() <= 1) {
         QMessageBox::information(nullptr, tr("挂载工件"),
             tr("请先加载机台模型并配置轴系。"));
@@ -158,7 +169,7 @@ void CmdMountWorkpiece::execute()
     const auto mountCandidates = context()->camModule()->mountableWorkpieces();
     if (mountCandidates.isEmpty()) {
         QMessageBox::information(nullptr, tr("挂载工件"),
-            tr("请先打开至少一个工件文档。"));
+            tr("请先导入一个工件模型。"));
         return;
     }
 
@@ -173,14 +184,20 @@ void CmdMountWorkpiece::execute()
     for (const auto& candidate : mountCandidates)
         cbDoc->addItem(candidate.displayName, candidate.documentId);
 
-    for (const auto& axis : axisOptions)
+    int defaultAxisIndex = -1;
+    for (const auto& axis : axisOptions) {
         cbAxis->addItem(axis.displayName, axis.name);
+        if (axis.name == defaultAxisName)
+            defaultAxisIndex = cbAxis->count() - 1;
+    }
+    if (defaultAxisIndex >= 0)
+        cbAxis->setCurrentIndex(defaultAxisIndex);
 
-    frm->addRow(tr("工件文档:"), cbDoc);
+    frm->addRow(tr("工件:"), cbDoc);
     frm->addRow(tr("挂载到:"),   cbAxis);
 
     // Info label showing what will happen
-    auto* lblInfo = new QLabel(tr("将选中文档的所有工件合并为一个整体加载到机台文档"), &dlg);
+    auto* lblInfo = new QLabel(tr("将当前工件绑定到指定轴系，原始工件目录保持不变。"), &dlg);
     lblInfo->setStyleSheet("color: gray; font-size: 11px;");
     lblInfo->setWordWrap(true);
 
@@ -197,9 +214,6 @@ void CmdMountWorkpiece::execute()
 
     const DocumentId srcDocId = cbDoc->currentData().toInt();
     const QString    axisName = cbAxis->currentData().toString();
-
-    LcncDocument* srcDoc = app()->documentById(srcDocId);
-    if (!srcDoc) return;
 
     context()->camModule()->mountWorkpiece(srcDocId, axisName);
     context()->updateCommandStates();

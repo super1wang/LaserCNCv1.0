@@ -10,7 +10,7 @@ namespace lcnc::cad {
  * @brief 注册 CAD 模块所有命令到 CommandContainer。
  *
  * 调用方负责保证 @p container 已经构造、@p kernel 已 bootstrap（CAD 命令
- * 执行时会通过 Kernel::current() 取得 CadModule / LcncApplication 等）。
+ * 执行时会通过 Kernel::current() 取得 CadModule / ProjectManager 等）。
  *
  * 命令按面板组织：File（新建/打开/保存/导入/导出/关闭）、Edit（撤销/重做）、
  * Primitives、Transforms、Boolean、Measurement、Delete。

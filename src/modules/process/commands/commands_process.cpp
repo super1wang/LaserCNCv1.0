@@ -5,21 +5,22 @@
 #include <QInputDialog>
 #include <QKeySequence>
 #include <QLineEdit>
+#include <QObject>
 
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
-#include "modules/process/process_module.h"
+#include "modules/process/i_process_facade.h"
 
 namespace lcnc::process {
 
 namespace {
-/// 从 Kernel 取 ProcessModule 裸指针；未注册时返回 nullptr 并打 WARN。
-ProcessModule* pm()
+/// 从 Kernel 取 Process facade；未注册时返回 nullptr 并打 WARN。
+lcnc::IProcessFacade* processFacade()
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
     if (!p) {
         LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
-                  "process.cmd: ProcessModule service not registered");
+                  "process.cmd: IProcessFacade service not registered");
     }
     return p;
 }
@@ -35,13 +36,13 @@ CmdRunStart::CmdRunStart(IAppContext* ctx) : CommandBase(ctx)
 }
 bool CmdRunStart::isEnabled() const
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
-    return p && p->state() != ProcessModule::State::EmergencyStop
-             && p->state() != ProcessModule::State::Running;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() != lcnc::ProcessRunState::EmergencyStop
+             && p->state() != lcnc::ProcessRunState::Running;
 }
 void CmdRunStart::execute()
 {
-    if (auto* p = pm()) p->runStart();
+    if (auto* p = processFacade()) p->runStart();
 }
 
 // ── CmdRunPause ─────────────────────────────────────────────────────────────
@@ -53,12 +54,12 @@ CmdRunPause::CmdRunPause(IAppContext* ctx) : CommandBase(ctx)
 }
 bool CmdRunPause::isEnabled() const
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
-    return p && p->state() == ProcessModule::State::Running;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() == lcnc::ProcessRunState::Running;
 }
 void CmdRunPause::execute()
 {
-    if (auto* p = pm()) p->runPause();
+    if (auto* p = processFacade()) p->runPause();
 }
 
 // ── CmdRunStop ──────────────────────────────────────────────────────────────
@@ -70,14 +71,14 @@ CmdRunStop::CmdRunStop(IAppContext* ctx) : CommandBase(ctx)
 }
 bool CmdRunStop::isEnabled() const
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
     if (!p) return false;
     auto s = p->state();
-    return s == ProcessModule::State::Running || s == ProcessModule::State::Paused;
+    return s == lcnc::ProcessRunState::Running || s == lcnc::ProcessRunState::Paused;
 }
 void CmdRunStop::execute()
 {
-    if (auto* p = pm()) p->runStop();
+    if (auto* p = processFacade()) p->runStop();
 }
 
 // ── CmdEmergencyStop ────────────────────────────────────────────────────────
@@ -89,12 +90,12 @@ CmdEmergencyStop::CmdEmergencyStop(IAppContext* ctx) : CommandBase(ctx)
 }
 bool CmdEmergencyStop::isEnabled() const
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
-    return p && p->state() != ProcessModule::State::EmergencyStop;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() != lcnc::ProcessRunState::EmergencyStop;
 }
 void CmdEmergencyStop::execute()
 {
-    if (auto* p = pm()) p->emergencyStop();
+    if (auto* p = processFacade()) p->emergencyStop();
 }
 
 // ── CmdResetEmergencyStop ───────────────────────────────────────────────────
@@ -106,12 +107,12 @@ CmdResetEmergencyStop::CmdResetEmergencyStop(IAppContext* ctx) : CommandBase(ctx
 }
 bool CmdResetEmergencyStop::isEnabled() const
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
-    return p && p->state() == ProcessModule::State::EmergencyStop;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() == lcnc::ProcessRunState::EmergencyStop;
 }
 void CmdResetEmergencyStop::execute()
 {
-    if (auto* p = pm()) p->resetEmergencyStop();
+    if (auto* p = processFacade()) p->resetEmergencyStop();
 }
 
 // ── CmdHome ─────────────────────────────────────────────────────────────────
@@ -123,13 +124,13 @@ CmdHome::CmdHome(IAppContext* ctx) : CommandBase(ctx)
 }
 bool CmdHome::isEnabled() const
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
-    return p && p->state() != ProcessModule::State::EmergencyStop
-             && p->state() != ProcessModule::State::Running;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() != lcnc::ProcessRunState::EmergencyStop
+             && p->state() != lcnc::ProcessRunState::Running;
 }
 void CmdHome::execute()
 {
-    if (auto* p = pm()) p->home();
+    if (auto* p = processFacade()) p->home();
 }
 
 // ── CmdConnectController ────────────────────────────────────────────────────
@@ -141,11 +142,11 @@ CmdConnectController::CmdConnectController(IAppContext* ctx) : CommandBase(ctx)
 }
 bool CmdConnectController::isEnabled() const
 {
-    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+    return lcnc::Kernel::current().service<lcnc::IProcessFacade>() != nullptr;
 }
 void CmdConnectController::execute()
 {
-    auto* p = pm();
+    auto* p = processFacade();
     if (!p) return;
     bool ok = false;
     const QString endpoint = QInputDialog::getText(
@@ -165,11 +166,11 @@ CmdDisconnectController::CmdDisconnectController(IAppContext* ctx) : CommandBase
 }
 bool CmdDisconnectController::isEnabled() const
 {
-    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+    return lcnc::Kernel::current().service<lcnc::IProcessFacade>() != nullptr;
 }
 void CmdDisconnectController::execute()
 {
-    if (auto* p = pm()) p->disconnectController();
+    if (auto* p = processFacade()) p->disconnectController();
 }
 
 // ── CmdToggleSimulationMode ─────────────────────────────────────────────────
@@ -177,23 +178,22 @@ CmdToggleSimulationMode::CmdToggleSimulationMode(IAppContext* ctx) : CommandBase
 {
     auto* a = new QAction(QIcon(":/icons/simulate.svg"), tr("仿真模式"), this);
     a->setCheckable(true);
-    if (auto* p = lcnc::Kernel::current().service<ProcessModule>()) {
+    if (auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>()) {
         a->setChecked(p->simulationMode());
-        // 把 ProcessModule 的状态变化反向同步到 QAction，避免脱钩。
-        QObject::connect(p, &ProcessModule::simulationModeChanged,
-                         a, &QAction::setChecked);
+        QObject::connect(p->asQObject(), SIGNAL(simulationModeChanged(bool)),
+                         a, SLOT(setChecked(bool)));
     }
     a->setStatusTip(tr("仿真模式：不下发指令到控制器"));
     setAction(a);
 }
 bool CmdToggleSimulationMode::isEnabled() const
 {
-    auto* p = lcnc::Kernel::current().service<ProcessModule>();
-    return p && p->state() == ProcessModule::State::Idle;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() == lcnc::ProcessRunState::Idle;
 }
 void CmdToggleSimulationMode::execute()
 {
-    auto* p = pm();
+    auto* p = processFacade();
     if (!p) return;
     p->setSimulationMode(action()->isChecked());
 }

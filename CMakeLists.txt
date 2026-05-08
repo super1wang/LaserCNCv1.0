@@ -9,15 +9,18 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # ─── Qt ───────────────────────────────────────────────────────────────────────
-set(Qt6_DIR "E:/Qt6.9.1/6.9.1/msvc2022_64/lib/cmake/Qt6")
+set(LCNC_QT6_ROOT "E:/Qt6.9.1/6.9.1/msvc2022_64" CACHE PATH "Qt6 installation root")
+set(Qt6_DIR "${LCNC_QT6_ROOT}/lib/cmake/Qt6" CACHE PATH "Qt6 CMake package directory")
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent)
 
 # ─── OpenCASCADE ──────────────────────────────────────────────────────────────
-set(OpenCASCADE_DIR "G:/environment/occt7.9-vc144-64-combined/occt-vc144-64/cmake")
+set(LCNC_OCCT_ROOT "G:/environment/occt7.9-vc144-64-combined/occt-vc144-64" CACHE PATH "OpenCASCADE installation root")
+set(OpenCASCADE_DIR "${LCNC_OCCT_ROOT}/cmake" CACHE PATH "OpenCASCADE CMake package directory")
 find_package(OpenCASCADE REQUIRED)
 
 # ─── SARibbon ─────────────────────────────────────────────────────────────────
-set(SARibbonBar_DIR "F:/wangchao/SARibbon/bin_qt6.9.1_MSVC_x64/lib/cmake/SARibbonBar")
+set(LCNC_SARIBBON_ROOT "F:/wangchao/SARibbon/bin_qt6.9.1_MSVC_x64" CACHE PATH "SARibbon installation root")
+set(SARibbonBar_DIR "${LCNC_SARIBBON_ROOT}/lib/cmake/SARibbonBar" CACHE PATH "SARibbonBar CMake package directory")
 find_package(SARibbonBar REQUIRED)
 
 # ─── Sources ──────────────────────────────────────────────────────────────────
@@ -25,7 +28,10 @@ set(SRCS_CORE
     src/core/logging/logger.cpp
     src/core/settings/toml_config.cpp
     src/core/settings/app_settings.cpp
-    src/core/document/lcnc_application.cpp
+    src/core/project/lcnc_project_manifest.cpp
+    src/core/project/lcnc_project_package.cpp
+    src/core/project/lcnc_project_session.cpp
+    src/core/project/lcnc_project_manager.cpp
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_kinematics.cpp
@@ -88,11 +94,10 @@ set(SRCS_MODULES
     src/modules/cad/commands/commands_cad_measure.cpp
     src/modules/cad/commands/commands_cad_delete.cpp
     src/modules/cad/ui/widget_cad_task_panel.cpp
-    src/modules/cad/ui/cad_model_tree_adapter.cpp
-    src/modules/cad/ui/widget_model_tree.cpp
     src/modules/cad/ui/ribbon_cad_tab.cpp
     src/modules/cam/cam_module.cpp
     src/modules/cam/settings/cam_config.cpp
+    src/modules/cam/services/cam_data_manager.cpp
     src/modules/cam/services/toolpath_simulator.cpp
     src/modules/cam/services/machine_axis_detector.cpp
     src/modules/cam/services/machine_io.cpp
@@ -118,6 +123,8 @@ set(SRCS_APP
     src/app/commands/commands_display.cpp
     src/app/dialog/dialog_options.cpp
     src/app/dialog/dialog_task_manager.cpp
+    src/app/project_explorer_model.cpp
+    src/app/project_explorer_tree_utils.cpp
     src/app/main_window.cpp
 )
 
@@ -153,18 +160,20 @@ set(OCC_LIBS
     TKDE TKXSBase TKDESTEP TKXCAF TKDEIGES TKDESTL TKRWMesh TKDECascade TKBinXCAF TKXmlXCAF TKDEGLTF
 )
 
+set(LCNC_OCCT_3RDPARTY_DIR "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64" CACHE PATH "OpenCASCADE third-party library root")
+
 # Add 3rd-party lib paths required by OCCT (openvr, etc.)
 target_link_directories(LaserCNC PRIVATE
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/openvr-1.14.15-64/lib/win64"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/freeimage-3.18.0-x64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/freetype-2.13.3-x64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/gl2ps-1.3.8-vc14-64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/tbb-2021.13.0-x64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/draco-1.4.1-vc14-64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/tcltk-8.6.15-x64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/zlib-1.2.8-vc14-64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/lzma-5.2.2-vc14-64/lib"
-    "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/ffmpeg-3.3.4-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/openvr-1.14.15-64/lib/win64"
+    "${LCNC_OCCT_3RDPARTY_DIR}/freeimage-3.18.0-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/freetype-2.13.3-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/gl2ps-1.3.8-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/tbb-2021.13.0-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/draco-1.4.1-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/tcltk-8.6.15-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/zlib-1.2.8-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/lzma-5.2.2-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/ffmpeg-3.3.4-64/lib"
 )
 
 target_link_libraries(LaserCNC PRIVATE
@@ -193,22 +202,30 @@ if(WIN32)
 endif()
 
 # ─── Deploy OCC DLLs ──────────────────────────────────────────────────────────
-set(OCC_BIN_DIR "G:/environment/occt7.9-vc144-64-combined/occt-vc144-64/win64/vc14/bin")
-add_custom_command(TARGET LaserCNC POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${OCC_BIN_DIR}"
-        "$<TARGET_FILE_DIR:LaserCNC>"
-    COMMENT "Copying OCC DLLs to output directory"
-)
+set(OCC_BIN_DIR "${LCNC_OCCT_ROOT}/win64/vc14/bin" CACHE PATH "OpenCASCADE runtime DLL directory")
+if(EXISTS "${OCC_BIN_DIR}")
+    add_custom_command(TARGET LaserCNC POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${OCC_BIN_DIR}"
+            "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMENT "Copying OCC DLLs to output directory"
+    )
+else()
+    message(WARNING "OCC_BIN_DIR does not exist: ${OCC_BIN_DIR}")
+endif()
 
 # Deploy SARibbon DLLs
-set(SARIBBON_BIN_DIR "F:/wangchao/SARibbon/bin_qt6.9.1_MSVC_x64/bin")
-add_custom_command(TARGET LaserCNC POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${SARIBBON_BIN_DIR}"
-        "$<TARGET_FILE_DIR:LaserCNC>"
-    COMMENT "Copying SARibbon DLLs to output directory"
-)
+set(SARIBBON_BIN_DIR "${LCNC_SARIBBON_ROOT}/bin" CACHE PATH "SARibbon runtime DLL directory")
+if(EXISTS "${SARIBBON_BIN_DIR}")
+    add_custom_command(TARGET LaserCNC POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SARIBBON_BIN_DIR}"
+            "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMENT "Copying SARibbon DLLs to output directory"
+    )
+else()
+    message(WARNING "SARIBBON_BIN_DIR does not exist: ${SARIBBON_BIN_DIR}")
+endif()
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")
 message(STATUS "OpenCASCADE version: ${OpenCASCADE_MAJOR_VERSION}.${OpenCASCADE_MINOR_VERSION}.${OpenCASCADE_MAINTENANCE_VERSION}")

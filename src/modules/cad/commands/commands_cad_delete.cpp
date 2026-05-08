@@ -1,5 +1,6 @@
 #include "modules/cad/commands/commands_cad.h"
 
+#include "app/app_command_context.h"
 #include "core/document/xcaf_utils.h"
 #include "modules/cad/cad_module.h"
 #include "modules/cad/commands/command_helpers.h"
@@ -124,7 +125,7 @@ CmdExplodeShape::CmdExplodeShape(IAppContext* ctx) : CommandBase(ctx)
 
 bool CmdExplodeShape::isEnabled() const
 {
-    LcncDocument* activeDoc = context()->activeDocument();
+    LcncDocument* activeDoc = context()->workpieceDocument();
     LcncDocument* machineDoc = context()->machineDocument();
     if (activeDoc && activeDoc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0)
         return true;
@@ -156,7 +157,7 @@ void CmdExplodeShape::execute()
         for (int index = 1; index <= labels.Length(); ++index) {
             TDF_Label label = labels.Value(index);
             QString entry = XcafUtils::entry(label);
-            Handle(AIS_Shape) ais = guiDocument->aisShape(entry);
+            Handle(AIS_Shape) ais = guiDocument->aisShape(doc->id(), entry);
             if (!ais.IsNull() && aisContext->IsSelected(ais)) {
                 Hit hit;
                 hit.doc = doc;
@@ -173,15 +174,15 @@ void CmdExplodeShape::execute()
 
     Hit hit = tryFind(context()->machineDocument(),
                       LcncDocument::EntityKind::Machine,
-                      context()->machineGuiDocument());
+                      context()->workspaceGuiDocument());
     if (!hit.doc) {
-        hit = tryFind(context()->activeDocument(),
+        hit = tryFind(context()->workpieceDocument(),
                       LcncDocument::EntityKind::Workpiece,
-                      context()->activeGuiDocument());
+                      context()->workspaceGuiDocument());
     }
 
     if (!hit.doc) {
-        LcncDocument* doc = context()->activeDocument();
+        LcncDocument* doc = context()->workpieceDocument();
         if (!doc) {
             doc = context()->machineDocument();
             if (!doc)

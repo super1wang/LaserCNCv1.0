@@ -188,23 +188,29 @@ int ToolpathRenderer::contourIndexForAis(const Handle(AIS_InteractiveObject)& ob
     return -1;
 }
 
-int ToolpathRenderer::selectedContourIndex(GuiDocument* gd) const
+QList<int> ToolpathRenderer::selectedContourIndexes(GuiDocument* gd) const
 {
+    QList<int> indexes;
     if (!gd)
-        return -1;
+        return indexes;
 
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
     if (ctx.IsNull())
-        return -1;
+        return indexes;
 
-    int selectedIndex = -1;
     for (ctx->InitSelected(); ctx->MoreSelected(); ctx->NextSelected()) {
         const int index = contourIndexForAis(ctx->SelectedInteractive());
-        if (index >= 0)
-            selectedIndex = index;
+        if (index >= 0 && !indexes.contains(index))
+            indexes.append(index);
     }
 
-    return selectedIndex;
+    return indexes;
+}
+
+int ToolpathRenderer::selectedContourIndex(GuiDocument* gd) const
+{
+    const QList<int> indexes = selectedContourIndexes(gd);
+    return indexes.isEmpty() ? -1 : indexes.last();
 }
 
 void ToolpathRenderer::erase(GuiDocument* gd)

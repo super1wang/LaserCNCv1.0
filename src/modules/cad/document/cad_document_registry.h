@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/document/lcnc_application.h"
+#include "core/project/project_types.h"
 #include "modules/cad/document/cad_document_state.h"
 
 #include <memory>
@@ -12,7 +12,7 @@ namespace lcnc::cad {
 class CadDocumentRegistry
 {
 public:
-    /// Get-or-create state for a workpiece document. Returns nullptr for invalid ids.
+    /// Get-or-create state for a project workspace. Returns nullptr for invalid ids.
     CadDocumentState* ensure(DocumentId docId);
 
     /// Lookup state for a document. Returns nullptr if absent.

@@ -18,12 +18,19 @@
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Iterator.hxx>
 
+#include <QSignalBlocker>
+
+#include <memory>
+
 // IMPLEMENT_STANDARD_RTTIEXT(LcncDocument, TDocStd_Document)
 
 // Internal tag constants for category group labels
+static constexpr int kTagProject    = 20;
 static constexpr int kTagWorkpiece  = 10;
 static constexpr int kTagMachine    = 11;
 static constexpr int kTagAuxiliary  = 12;
+static constexpr int kTagCam        = 21;
+static constexpr int kTagProcess    = 22;
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 LcncDocument::LcncDocument(int id, const QString& name)
@@ -42,12 +49,18 @@ void LcncDocument::initXcaf()
 
     // Create persistent category group labels under the root
     TDF_Label root = this->Main();
+    m_projectGroup    = XcafUtils::findOrCreateChild(root, kTagProject);
     m_workpieceGroup  = XcafUtils::findOrCreateChild(root, kTagWorkpiece);
     m_machineGroup    = XcafUtils::findOrCreateChild(root, kTagMachine);
+    m_camGroup        = XcafUtils::findOrCreateChild(root, kTagCam);
+    m_processGroup    = XcafUtils::findOrCreateChild(root, kTagProcess);
     m_auxiliaryGroup  = XcafUtils::findOrCreateChild(root, kTagAuxiliary);
 
+    XcafUtils::setName(m_projectGroup,    QStringLiteral("项目"));
     XcafUtils::setName(m_workpieceGroup,  QStringLiteral("工件模型"));
     XcafUtils::setName(m_machineGroup,    QStringLiteral("机台模型"));
+    XcafUtils::setName(m_camGroup,        QStringLiteral("CAM 数据"));
+    XcafUtils::setName(m_processGroup,    QStringLiteral("加工过程"));
     XcafUtils::setName(m_auxiliaryGroup,  QStringLiteral("辅助对象"));
 }
 
@@ -69,14 +82,45 @@ Handle(XCAFDoc_ColorTool) LcncDocument::colorTool() const
 }
 
 // ── Entity management ─────────────────────────────────────────────────────────
-TDF_Label LcncDocument::entityGroup(EntityKind kind) const
+void LcncDocument::clearEntityKind(EntityKind kind)
 {
-    switch (kind) {
-    case EntityKind::Workpiece:  return m_workpieceGroup;
-    case EntityKind::Machine:    return m_machineGroup;
-    case EntityKind::Auxiliary:  return m_auxiliaryGroup;
+    TDF_LabelSequence labels = entityLabels(kind);
+
+    MachineKinematics* kin = m_kinematics;
+    std::unique_ptr<QSignalBlocker> kinBlocker;
+    if (kin)
+        kinBlocker = std::make_unique<QSignalBlocker>(kin);
+
+    for (int i = 1; i <= labels.Length(); ++i) {
+        TDF_Label label = labels.Value(i);
+        const QString entry = XcafUtils::entry(label);
+        if (kin) {
+            if (kind == EntityKind::Machine)
+                kin->unassignShape(entry);
+            else if (kind == EntityKind::Workpiece)
+                kin->unmountWorkpiece(entry);
+        }
+        label.ForgetAllAttributes(Standard_True);
     }
-    return m_workpieceGroup;
+
+    if (kind == EntityKind::Machine)
+        m_machineTree.clear();
+    else if (kind == EntityKind::Cam)
+        m_camTree.clear();
+    else if (kind == EntityKind::Workpiece)
+        m_workpieceTree.clear();
+}
+
+void LcncDocument::clearProjectData()
+{
+    clearEntityKind(EntityKind::Workpiece);
+    clearEntityKind(EntityKind::Machine);
+    clearEntityKind(EntityKind::Cam);
+    clearEntityKind(EntityKind::Auxiliary);
+    m_treeUndoStack.clear();
+    m_treeRedoStack.clear();
+    if (m_kinematics)
+        m_kinematics->clear();
 }
 
 TDF_Label LcncDocument::addShapeEntity(const TopoDS_Shape& shape,
@@ -152,6 +196,7 @@ void LcncDocument::removeShapeEntity(const QString& entry)
         };
         TreeHelper::remove(m_machineTree,   entry);
         TreeHelper::remove(m_workpieceTree, entry);
+        TreeHelper::remove(m_camTree,       entry);
         break;
     }
 }
@@ -267,7 +312,9 @@ void LcncDocument::importFromXcaf(const Handle(TDocStd_Document)& xdeDoc,
                "LcncDocument::importFromXcaf kind={} freeShapes={}",
                static_cast<int>(kind), freeShapes.Length());
 
-    auto& tree = (kind == EntityKind::Machine) ? m_machineTree : m_workpieceTree;
+    auto& tree = (kind == EntityKind::Machine)
+        ? m_machineTree
+        : (kind == EntityKind::Cam ? m_camTree : m_workpieceTree);
 
     for (int i = 1; i <= freeShapes.Length(); ++i) {
         const TDF_Label& root     = freeShapes.Value(i);
@@ -281,7 +328,11 @@ void LcncDocument::importFromXcaf(const Handle(TDocStd_Document)& xdeDoc,
 
 const QList<LcncDocument::ShapeTreeNode>& LcncDocument::entityTree(EntityKind kind) const
 {
-    return (kind == EntityKind::Machine) ? m_machineTree : m_workpieceTree;
+    if (kind == EntityKind::Machine)
+        return m_machineTree;
+    if (kind == EntityKind::Cam)
+        return m_camTree;
+    return m_workpieceTree;
 }
 
 // ── Flat import (one-level, for machine models) ───────────────────────────────
@@ -293,7 +344,9 @@ void LcncDocument::importFromXcafFlat(const Handle(TDocStd_Document)& xdeDoc,
     TDF_LabelSequence freeShapes;
     st->GetFreeShapes(freeShapes);
 
-    auto& tree = (kind == EntityKind::Machine) ? m_machineTree : m_workpieceTree;
+    auto& tree = (kind == EntityKind::Machine)
+        ? m_machineTree
+        : (kind == EntityKind::Cam ? m_camTree : m_workpieceTree);
 
     for (int ri = 1; ri <= freeShapes.Length(); ++ri) {
         const TDF_Label& root     = freeShapes.Value(ri);
@@ -367,7 +420,9 @@ void LcncDocument::importFromXcafRoots(const Handle(TDocStd_Document)& xdeDoc,
     TDF_LabelSequence freeShapes;
     st->GetFreeShapes(freeShapes);
 
-    auto& tree = (kind == EntityKind::Machine) ? m_machineTree : m_workpieceTree;
+    auto& tree = (kind == EntityKind::Machine)
+        ? m_machineTree
+        : (kind == EntityKind::Cam ? m_camTree : m_workpieceTree);
 
     for (int i = 1; i <= freeShapes.Length(); ++i) {
         const TDF_Label& root = freeShapes.Value(i);
@@ -401,10 +456,11 @@ void LcncDocument::undo()
     if (canUndo()) {
         if (!m_treeUndoStack.isEmpty()) {
             // push current state onto redo stack before overwriting
-            m_treeRedoStack.push_back({m_workpieceTree, m_machineTree});
+            m_treeRedoStack.push_back({m_workpieceTree, m_machineTree, m_camTree});
             TreeSnapshot snap = m_treeUndoStack.takeLast();
             m_workpieceTree = snap.workpieceTree;
             m_machineTree   = snap.machineTree;
+            m_camTree       = snap.camTree;
         }
         Undo();
     }
@@ -415,10 +471,11 @@ void LcncDocument::redo()
     if (canRedo()) {
         if (!m_treeRedoStack.isEmpty()) {
             // push current state onto undo stack before overwriting
-            m_treeUndoStack.push_back({m_workpieceTree, m_machineTree});
+            m_treeUndoStack.push_back({m_workpieceTree, m_machineTree, m_camTree});
             TreeSnapshot snap = m_treeRedoStack.takeLast();
             m_workpieceTree = snap.workpieceTree;
             m_machineTree   = snap.machineTree;
+            m_camTree       = snap.camTree;
         }
         Redo();
     }
@@ -428,7 +485,7 @@ void LcncDocument::openCommand(const QString& /*description*/)
 {
     // Snapshot the trees BEFORE the command modifies them so that undo can
     // restore the exact pre-command hierarchy (including virtual group nodes).
-    m_treeUndoStack.push_back({m_workpieceTree, m_machineTree});
+    m_treeUndoStack.push_back({m_workpieceTree, m_machineTree, m_camTree});
     m_treeRedoStack.clear();
     OpenCommand();
 }
@@ -441,6 +498,7 @@ void LcncDocument::abortCommand()
         TreeSnapshot snap = m_treeUndoStack.takeLast();
         m_workpieceTree = snap.workpieceTree;
         m_machineTree   = snap.machineTree;
+        m_camTree       = snap.camTree;
     }
     AbortCommand();
 }

@@ -4,6 +4,9 @@ class LcncDocument;
 class MachineKinematics;
 class TaskProgress;
 class QString;
+class TopoDS_Shape;
+
+#include <functional>
 
 namespace lcnc::cam::machine_io {
 
@@ -19,7 +22,8 @@ namespace lcnc::cam::machine_io {
 /// 失败返回 false（文件不存在/格式不支持/读取失败）。
 bool loadMachineFromFile(LcncDocument* doc,
                          const QString& filePath,
-                         TaskProgress* progress);
+                         TaskProgress* progress,
+                         const std::function<void(const QString& entry, const TopoDS_Shape& shape)>& onShapeLoaded = {});
 
 /// 把当前机台 LcncDocument 按轴分组导出为 STEP（含 LCNC_AXIS_* 命名）。
 /// 失败返回 false。
