@@ -51,6 +51,10 @@ public:
     virtual void resetEmergencyStop() = 0;
     virtual void home() = 0;
 
+    virtual void newProcess() = 0;
+    virtual bool loadProcess(const QString& filePath) = 0;
+    virtual bool saveProcess(const QString& filePath) = 0;
+
     /// 当前状态描述（用于状态栏）。
     virtual QString statusMessage() const = 0;
 };

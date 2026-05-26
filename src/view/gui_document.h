@@ -89,6 +89,10 @@ public:
     /// Recomputes and applies AIS local transforms for all axis-assigned
     /// machine shapes and all mounted workpieces at their current positions.
     void updateAxisTransforms(LcncDocument* document = nullptr);
+    /// Recomputes transforms for a composed machine workspace where workpieces
+    /// are displayed from the Workpiece domain but mounted by machine kinematics.
+    void updateMachineWorkspaceTransforms(LcncDocument* machineDocument,
+                                          LcncDocument* workpieceDocument);
 signals:
     void displayUpdated();
 
@@ -115,10 +119,11 @@ private:
 
     void initGizmos();   ///< Called once inside attachView() after m_view is created
     lcnc::ProjectDomain domainForDocument(LcncDocument* document) const;
-    bool eraseKey(const DisplayKey& key);
-    bool eraseKeys(const QList<DisplayKey>& keys);
+    int displayObjectCount(lcnc::ProjectDomain domain) const;
+    bool eraseKey(const DisplayKey& key, bool updateViewer = true);
+    bool eraseKeys(const QList<DisplayKey>& keys, bool updateViewer = true);
     bool eraseDocumentObjects(DocumentId documentId);
-    bool eraseDomainObjects(lcnc::ProjectDomain domain);
+    bool eraseDomainObjects(lcnc::ProjectDomain domain, bool updateViewer = true);
     void registerDisplayObject(lcnc::ProjectDomain domain,
                                LcncDocument* document,
                                const QString& entry,

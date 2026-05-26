@@ -111,7 +111,15 @@ set(SRCS_MODULES
     src/modules/cam/ui/ribbon_cam_tab.cpp
     src/modules/process/process_module.cpp
     src/modules/process/controllers/simulation_motion_controller.cpp
+    src/modules/process/device/process_device_manager.cpp
     src/modules/process/settings/process_settings.cpp
+    src/modules/process/Setting/process_settings_dialog.cpp
+    src/modules/process/Process/qg_processeswidget.cpp
+    src/modules/process/Process/qg_processeswidget.ui
+    src/modules/process/Process/ProcessModule/mimeData.cpp
+    src/modules/process/Process/ProcessModule/treeitem.cpp
+    src/modules/process/Process/ProcessModule/treemodel.cpp
+    src/modules/process/Process/ProcessModule/Process_TreeView.cpp
     src/modules/process/commands/commands_process.cpp
     src/modules/process/ui/widget_laser_control.cpp
     src/modules/process/ui/ribbon_process_tab.cpp

@@ -46,6 +46,16 @@ public:
                      const ProjectSaveOptions& options,
                      QString* errorMsg = nullptr);
 
+    /// Save using project/session metadata supplied by LcncProjectManager.
+    static bool save(const LcncDocument& workpieceDocument,
+                     const LcncDocument* machineDocument,
+                     const LcncDocument* camDocument,
+                     const QString& path,
+                     const LcncProjectManifest& manifestTemplate,
+                     const ProjectSaveOptions& options,
+                     LcncProjectManifest* savedManifest = nullptr,
+                     QString* errorMsg = nullptr);
+
     static bool load(LcncDocument& document,
                      const QString& path,
                      ProjectLoadResult* result = nullptr,

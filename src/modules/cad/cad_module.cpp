@@ -535,7 +535,7 @@ DocumentId CadModule::openDocument(const QString& filePath)
             gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
             gd->rebuildDomain(lcnc::ProjectDomain::Machine, project->machineDocument());
             gd->rebuildDomain(lcnc::ProjectDomain::Cam, project->camDocument());
-            gd->updateAxisTransforms(project->machineDocument());
+            gd->updateMachineWorkspaceTransforms(project->machineDocument(), project->workpieceDocument());
             gd->fitAll();
         }
         return doc->id();

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>QG_dlgCuttingProcessSettingClass</class>
+ <widget class="QDialog" name="QG_dlgCuttingProcessSettingClass">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>219</width>
+    <height>252</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>QG_dlgCuttingProcessSetting</string>
+  </property>
+  <layout class="QGridLayout" name="gridLayout">
+   <item row="0" column="0">
+    <widget class="QGroupBox" name="groupBox_ConeCutting">
+     <property name="title">
+      <string>锥面打孔</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_5">
+      <property name="fieldGrowthPolicy">
+       <enum>QFormLayout::AllNonFixedFieldsGrow</enum>
+      </property>
+      <item row="0" column="0">
+       <widget class="QCheckBox" name="checkBox_ConeCutting_ConeCutting">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>锥面打孔</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_100">
+        <property name="text">
+         <string>孔间距(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="lineEdit_ConeCutting_CircleSpacing"/>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_101">
+        <property name="text">
+         <string>螺旋线间距(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLineEdit" name="lineEdit_ConeCutting_LineSpacing"/>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_99">
+        <property name="text">
+         <string>圆锥角角度(°)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QLineEdit" name="lineEdit_ConeCutting_ConeAngle"/>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="label_102">
+        <property name="text">
+         <string>起始圆所在锥面直径(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QLineEdit" name="lineEdit_ConeCutting_ConeDiamStart"/>
+      </item>
+      <item row="7" column="0">
+       <widget class="QLabel" name="label_103">
+        <property name="text">
+         <string>末点圆所在锥面直径(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="1">
+       <widget class="QLineEdit" name="lineEdit_ConeCutting_ConeDiamEnd"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QCheckBox" name="checkBox_ConeCutting_AntiClockWise">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>反向旋转打孔</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QCheckBox" name="checkBox_ConeCutting_OppositeDirectionX">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>X轴反向递进</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <resources/>
+ <connections/>
+</ui>

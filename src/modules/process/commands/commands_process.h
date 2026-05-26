@@ -12,6 +12,66 @@
 
 namespace lcnc::process {
 
+/// 新建流程树。
+class CmdNewProcess : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.newProcess";
+    explicit CmdNewProcess(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 从 TOML 文件加载流程树。
+class CmdLoadProcess : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.loadProcess";
+    explicit CmdLoadProcess(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 保存当前流程树为 TOML 文件。
+class CmdSaveProcess : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.saveProcess";
+    explicit CmdSaveProcess(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 打开加工参数页。
+class CmdOpenProcessSettings : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.settings.process";
+    explicit CmdOpenProcessSettings(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 打开运动控制参数页。
+class CmdOpenMotionSettings : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.settings.motion";
+    explicit CmdOpenMotionSettings(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 打开激光参数页。
+class CmdOpenLaserSettings : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.settings.laser";
+    explicit CmdOpenLaserSettings(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
 /// 启动加工运行（仿真或实控）。
 class CmdRunStart : public CommandBase {
     Q_OBJECT

@@ -34,7 +34,7 @@ public:
                                    bool updateViewer = true);
 
     void redisplayShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
-    void eraseShape(const Handle(AIS_Shape)& aisShape);
+    void eraseShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
     void eraseAll();
 
     void setShapeColor(const Handle(AIS_Shape)& aisShape,

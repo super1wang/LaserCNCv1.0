@@ -100,6 +100,8 @@ private:
     void showMachineView();
     /// Route CAD context through the unified machine 3D view (defaults to active workpiece).
     void showWorkpieceView(DocumentId id = kInvalidDocumentId);
+    /// Keep the right-side parameter page in sync with the active Ribbon page.
+    void syncRightPanelForRibbonIndex(int index);
 
     // ── Slots ─────────────────────────────────────────────────────────────────
     void onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);

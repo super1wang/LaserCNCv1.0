@@ -203,17 +203,16 @@ public:
     QStringList sourceWorkpieceEntriesForMountedEntries(const QStringList& mountedEntries) const;
     void setMountedWorkpieceEntriesVisible(const QStringList& sourceEntries, bool visible);
     void setSelectedMountedWorkpieceEntries(const QStringList& sourceEntries);
-    /// 重量级路径：完整重设安装位置，翻译底层 TopoDS 并重建机台 view（适用于「对齐」之类一次性操作）。
+    /// 重量级路径：完整重设安装位置，翻译 Workpiece 源 document 的底层 TopoDS。
     void setWorkpieceInstallPosition(const gp_Pnt& position);
-    /// 轻量级路径：仅对已展示的工件 AIS 调 SetLocation，不修改几何；适用于 spinbox
-    /// 频繁拖动，以避免整个机台 view 被重建。后续打开重量路径（如 mount/setWorkpieceInstallPosition）
-    /// 会重新 bake 位置并复位 AIS Location。
+    /// 轻量级路径：仅对 Workpiece 源 AIS 调 SetLocation，不修改几何；适用于 spinbox
+    /// 频繁拖动，以避免重建其它 domain。后续重量路径会重新 bake 位置并复位 AIS Location。
     void updateWorkpieceInstallLocation(const gp_Pnt& position);
     bool supportsWorkpieceRotationAlignment() const;
     bool alignWorkpieceInstallPositionToRotationCenter();
 
-    // ── Workpiece Mounting ───────────────────────────────────────────────
-    /// Bind the current Workpiece section to a machine axis.
+    // ── Workpiece Installation ───────────────────────────────────────────
+    /// Install the current Workpiece source document by translating it to the install position.
     void mountWorkpiece(DocumentId sourceDocId, const QString& axisName, bool alignToInstallPosition = true);
 
     /// Clear workpiece-axis bindings without deleting Workpiece section geometry.
@@ -240,6 +239,7 @@ public:
     void setDeflection(double mm);
     double deflection() const;
     void setContourEnabled(int contourIdx, bool enabled);
+    void setAllContoursEnabled(bool enabled);
     lcnc::cam::ContourId contourIdAt(int contourIdx) const;
     int contourIndexById(lcnc::cam::ContourId contourId) const;
     void reorderContoursById(const QList<lcnc::cam::ContourId>& order);
@@ -352,6 +352,16 @@ private:
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
     bool clearMountedWorkpieceDisplay(bool refreshView);
+    LcncDocument* workpieceDocument() const;
+    DocumentId workpieceDocumentId() const;
+    void refreshWorkpieceDisplay();
+    void resetWorkpieceDisplayLocation();
+    bool translateWorkpieceDocument(const gp_Vec& translation);
+    void setCamContoursVisible(bool visible, bool updateView = true);
+    void setCamContourVisible(int contourIndex, bool visible, bool updateView = true);
+    void applyCamContourVisibility();
+    void applyCamContourTransforms();
+    QList<int> selectedCamContourIndexes() const;
 
     void refreshMachineDisplay();
     void syncCamDocumentContours();
@@ -371,6 +381,7 @@ private:
     LaserToolpath&              m_toolpath;
     TopoDS_Shape                m_workpieceShape;
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
+    mutable QList<Handle(AIS_Shape)> m_camContourAisCache;
     QString                     m_machineModelPath;
     lcnc::RenderQualityPreset   m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     gp_Pnt                      m_cutterHeadModelPosition{0.0, 0.0, 0.0};

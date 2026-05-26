@@ -122,14 +122,24 @@ bool LcncProjectManager::saveProject(const QString& filePath, QString* errorMsg)
     }
 
     ProjectSaveOptions options = m_session.saveOptions();
+    LcncProjectManifest manifest = m_session.manifest();
+    manifest.projectName = m_session.projectName().trimmed().isEmpty()
+        ? workpieceDocument()->name()
+        : m_session.projectName().trimmed();
+    manifest.documentName = manifest.projectName;
+    manifest.sourceFilePath = m_session.workpiece().sourceFilePath;
+    manifest.saveOptions = options;
+
+    LcncProjectManifest savedManifest;
     const bool ok = LcncProjectPackage::save(*workpieceDocument(), machineDocument(), camDocument(),
-                                             targetPath, options, errorMsg);
+                                             targetPath, manifest, options, &savedManifest, errorMsg);
     if (!ok)
         return false;
 
     const QString packagePath = LcncProjectPackage::packageDirectory(targetPath);
     workpieceDocument()->setFilePath(packagePath);
     m_session.setProjectPath(packagePath);
+    m_session.setManifest(savedManifest);
     m_session.clearDirty();
     emit projectSaved(m_session.projectPath());
     emit projectDirtyChanged(false);

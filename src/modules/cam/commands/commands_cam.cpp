@@ -44,13 +44,13 @@ CmdGenerateToolpath::CmdGenerateToolpath(IAppContext* ctx)
     : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/toolpath.svg"), tr("生成刀路"), this);
-    a->setStatusTip(tr("从挂载的工件中提取轮廓并生成激光刀路"));
+    a->setStatusTip(tr("从当前工件中提取轮廓并生成激光刀路"));
     setAction(a);
 }
 
 bool CmdGenerateToolpath::isEnabled() const
 {
-    LcncDocument* doc = context()->camModule()->machineDocument();
+    LcncDocument* doc = context()->workpieceDocument();
     return doc && doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0;
 }
 

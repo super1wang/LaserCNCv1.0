@@ -14,8 +14,8 @@ namespace lcnc::view {
 /**
  * @brief 刀路 AIS 渲染器（v2.2 从 CamModule 抽出）。
  *
- * 拥有所有刀路相关 AIS 对象（轮廓 / 引入线 / 法线）以及可见性 / 法线显示
- * 状态。CamModule 持有 unique_ptr 并在需要时传入 GuiDocument 调用 refresh()。
+ * 拥有刀路派生覆盖 AIS 对象（引入线 / 法线 / 预览）以及可见性 / 法线显示
+ * 状态。轮廓主体由 CAM document 通过 GuiDocument registry 唯一显示。
  *
  * 算法上零业务依赖：仅根据传入的 LaserToolpath + 参数 + 引入线预览生成 AIS。
  */
@@ -33,7 +33,7 @@ public:
     ToolpathRenderer();
     ~ToolpathRenderer();
 
-    /// 擦除并按当前 visible/normal 标志重绘所有刀路 AIS。
+    /// 擦除并按当前 visible/normal 标志重绘刀路派生覆盖 AIS。
     void refresh(GuiDocument* gd,
                  const LaserToolpath& toolpath,
                  MachineKinematics* kin,
@@ -50,14 +50,14 @@ public:
                         const LaserToolpath& toolpath,
                         MachineKinematics* kin);
 
-    /// 只刷新单条轮廓对应的轮廓 / 引入线 / 法线 AIS。
+    /// 只刷新单条轮廓对应的引入线 / 法线 AIS。
     void refreshContour(GuiDocument* gd,
                         const LaserToolpath& toolpath,
                         MachineKinematics* kin,
                         int contourIndex,
                         const LeadInPreview& preview = {});
 
-    /// Apply the current mounted-workpiece transform to all cached contour AIS.
+    /// Apply the current workpiece transform to cached derived overlay AIS.
     void updateTransforms(GuiDocument* gd,
                           const LaserToolpath& toolpath,
                           MachineKinematics* kin);
@@ -84,7 +84,6 @@ public:
 
 private:
     struct ContourAisBundle {
-        Handle(AIS_Shape) contour;
         Handle(AIS_Shape) leadIn;
         Handle(AIS_Shape) normal;
     };
@@ -93,7 +92,6 @@ private:
     void clearAis(GuiDocument* gd, bool updateView);
     void eraseAis(GuiDocument* gd, Handle(AIS_Shape)& ais);
     void eraseBundle(GuiDocument* gd, ContourAisBundle& bundle);
-    void rebuildContourAis(GuiDocument* gd, const LaserToolpath& tp, int contourIndex);
     void rebuildLeadInAis(GuiDocument* gd, const LaserToolpath& tp, int contourIndex);
     void rebuildNormalAis(GuiDocument* gd, const LaserToolpath& tp, int contourIndex);
     void rebuildPreviewAis(GuiDocument* gd, const LaserToolpath& tp, const LeadInPreview& preview);

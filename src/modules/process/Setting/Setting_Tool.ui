@@ -1,0 +1,1166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Dialog_Setting_Tool</class>
+ <widget class="QDialog" name="Dialog_Setting_Tool">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>606</width>
+    <height>857</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Tool Setting</string>
+  </property>
+  <layout class="QGridLayout" name="gridLayout_4">
+   <item row="0" column="0">
+    <widget class="QSplitter" name="splitter_2">
+     <property name="orientation">
+      <enum>Qt::Orientation::Horizontal</enum>
+     </property>
+     <widget class="QLabel" name="label_Tool_ToolIndex">
+      <property name="minimumSize">
+       <size>
+        <width>80</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="text">
+       <string>ToolIndex</string>
+      </property>
+     </widget>
+     <widget class="QComboBox" name="comboBox_Tool_sToolIndex"/>
+    </widget>
+   </item>
+   <item row="1" column="0">
+    <widget class="QStackedWidget" name="stackedWidget">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <widget class="QWidget" name="page_MotionAndLaser">
+      <layout class="QGridLayout" name="gridLayout_6">
+       <item row="3" column="0">
+        <widget class="QGroupBox" name="groupBox_ACSCutting">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="title">
+          <string>ACSCut（CMHP）</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_11">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_ACSCutting_CornerVelocity">
+            <property name="text">
+             <string>CornerVelocity(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_ACSCutting_fCornerVelocity"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_ACSCutting_CornerAngle">
+            <property name="text">
+             <string>CornerAngle(degree)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_ACSCutting_fCornerAngle"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_ACSCutting_XSEGVelocity">
+            <property name="text">
+             <string>XSEGVelocity(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="lineEdit_ACSCutting_fXSEGVelocity"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QGroupBox" name="groupBox_LaserDelay">
+         <property name="title">
+          <string>LaserDelay</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_8">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_LaserDelay_BeforeOpenLaser">
+            <property name="text">
+             <string>BeforeOpenLaser(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_LaserDelay_fBeforeOpenLaser"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_LaserDelay_AfterOpenLaser">
+            <property name="text">
+             <string>AfterOpenLaser(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_LaserDelay_fAfterOpenLaser"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_LaserDelay_BeforeCloseLaser">
+            <property name="text">
+             <string>BeforeCloseLaser(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="lineEdit_LaserDelay_fBeforeCloseLaser"/>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_LaserDelay_AfterCloseLaser">
+            <property name="text">
+             <string>AfterCloseLaser(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="lineEdit_LaserDelay_fAfterCloseLaser"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="0" column="0">
+        <widget class="QGroupBox" name="groupBox_Cutting">
+         <property name="title">
+          <string>Cut</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_10">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_Cutting_LineVel">
+            <property name="text">
+             <string>LineVel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_Cutting_fLineVel">
+            <property name="minimumSize">
+             <size>
+              <width>60</width>
+              <height>0</height>
+             </size>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_Cutting_ArcVel">
+            <property name="text">
+             <string>ArcVel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_Cutting_fArcVel"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_Cutting_Acc">
+            <property name="text">
+             <string>Acc(mm/s^2)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="lineEdit_Cutting_fCutAcc"/>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_Cutting_Jerk">
+            <property name="text">
+             <string>Jerk(mm/s^3)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="lineEdit_Cutting_fCutJerk"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="4" column="0">
+        <widget class="QGroupBox" name="groupBox_GTNCutting">
+         <property name="title">
+          <string>GTNCut(Smooth)</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_12">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_Cutting_fSmoothTime">
+            <property name="text">
+             <string>CuttingSmoothTime(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_Cutting_fCutSmoothTime"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_Cutting_fSmoothK">
+            <property name="text">
+             <string>CuttingSmoothK</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_Cutting_fCutSmoothK"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_Axis_fSmoothTime">
+            <property name="text">
+             <string>AxisSmoothTime(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="lineEdit_Axis_fAxisSmoothTime"/>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_Axis_fSmoothK">
+            <property name="text">
+             <string>AxisSmoothK</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="lineEdit_Axis_fAxisSmoothK"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QGroupBox" name="groupBox_Laser">
+         <property name="title">
+          <string>Laser</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_7">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_Laser_Energy">
+            <property name="text">
+             <string>Energy(%)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_Laser_Frequency">
+            <property name="text">
+             <string>Frequency(Hz)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLCDNumber" name="lcdNumber_Laser_DutyCycle"/>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_Laser_fFrequency"/>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="lineEdit_Laser_fPluse"/>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="lable_Laser_DutyCycle">
+            <property name="text">
+             <string>DutyCycle</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="label">
+            <property name="maximumSize">
+             <size>
+              <width>110</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;AttenuatorPercentage(%)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="text">
+             <string>AttenuatorPercentage(%)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QLineEdit" name="lineEdit_Laser_fAttenuatorPercentage"/>
+          </item>
+          <item row="5" column="0">
+           <widget class="QLabel" name="label_2">
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;PpDivider&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="text">
+             <string>PpDivider</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="1">
+           <widget class="QLineEdit" name="lineEdit_Laser_fPpDivider"/>
+          </item>
+          <item row="6" column="0">
+           <widget class="QLabel" name="label_3">
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Delay(ms)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="text">
+             <string>Delay(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="1">
+           <widget class="QLineEdit" name="lineEdit_Laser_iDelay"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_Laser_Pluse">
+            <property name="text">
+             <string>Pluse(μs)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_Laser_fEnergy"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="5" column="0">
+        <spacer name="verticalSpacer">
+         <property name="orientation">
+          <enum>Qt::Orientation::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="2" column="1">
+        <spacer name="verticalSpacer_4">
+         <property name="orientation">
+          <enum>Qt::Orientation::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="1" column="0" rowspan="2">
+        <widget class="QGroupBox" name="groupBox_Idel">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="title">
+          <string>Jump</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_9">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_Idel_XVel">
+            <property name="text">
+             <string>XVel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fXVel"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_Idel_YVel">
+            <property name="text">
+             <string>YVel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fYVel"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_Idel_AVel">
+            <property name="text">
+             <string>AVel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fAVel"/>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_Idel_A1Vel">
+            <property name="text">
+             <string>A1Vel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fA1Vel"/>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="label_Idel_X1Vel">
+            <property name="text">
+             <string>X1Vel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fX1Vel"/>
+          </item>
+          <item row="5" column="0">
+           <widget class="QLabel" name="label_Idel_Y1Vel">
+            <property name="text">
+             <string>Y1Vel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fY1Vel"/>
+          </item>
+          <item row="6" column="0">
+           <widget class="QLabel" name="label_Idel_ZVel">
+            <property name="text">
+             <string>ZVel(mm/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fZVel"/>
+          </item>
+          <item row="7" column="0">
+           <widget class="QLabel" name="label_Idel_Acc">
+            <property name="text">
+             <string>Acc(mm/s^2)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fIdelAcc"/>
+          </item>
+          <item row="8" column="0">
+           <widget class="QLabel" name="label_Idel_Jerk">
+            <property name="text">
+             <string>Jerk(mm/s^3)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="8" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fIdelJerk"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_Normal">
+      <layout class="QGridLayout" name="gridLayout_13">
+       <item row="0" column="0">
+        <widget class="QGroupBox" name="groupBox_Height">
+         <property name="title">
+          <string>Height</string>
+         </property>
+         <layout class="QFormLayout" name="formLayout_5">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_Height_CuttingHeight">
+            <property name="minimumSize">
+             <size>
+              <width>150</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>CuttingHeight(mm)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_Height_fCuttingHeight"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_Height_IdleHeight">
+            <property name="text">
+             <string>IdleHeight(mm)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_Height_fIdleHeight"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QGroupBox" name="groupBox_SetPos">
+         <property name="title">
+          <string>SetPos</string>
+         </property>
+         <layout class="QFormLayout" name="formLayout_8">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="checkBox_SetPos_bSetPosA">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>SetAPos(degree)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_SetPos_fSetPosA"/>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_SetPos_fSetPosA1"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QCheckBox" name="checkBox_SetPos_bSetPosA1">
+            <property name="text">
+             <string>SetA1Pos(degree)</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <layout class="QVBoxLayout" name="verticalLayout">
+         <item>
+          <widget class="QGroupBox" name="groupBox_Directions">
+           <property name="title">
+            <string>Directions</string>
+           </property>
+           <layout class="QFormLayout" name="formLayout_12">
+            <item row="0" column="0">
+             <widget class="QLabel" name="label_Directions_DirectionsX">
+              <property name="minimumSize">
+               <size>
+                <width>150</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>Direction X</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QComboBox" name="comboBox_Directions_sDirectionsX">
+              <item>
+               <property name="text">
+                <string>X</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>X1</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="label_Directions_DirectionsY">
+              <property name="minimumSize">
+               <size>
+                <width>150</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="text">
+               <string>Direction Y</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="comboBox_Directions_sDirectionsY">
+              <item>
+               <property name="text">
+                <string>A</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Y</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Y1</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="groupBox_General">
+           <property name="title">
+            <string>General</string>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_3">
+            <item row="0" column="0">
+             <widget class="QCheckBox" name="checkBox_General_bStopBlow">
+              <property name="text">
+               <string>StopBlow</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QCheckBox" name="checkBox_General_bPunch">
+              <property name="text">
+               <string>Punch</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item row="1" column="1">
+        <widget class="QGroupBox" name="groupBox_MovePos">
+         <property name="title">
+          <string>MovePos</string>
+         </property>
+         <layout class="QFormLayout" name="formLayout_3">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="checkBox_MovePos_bMovePosX">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>MoveXPos</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="lineEdit_MovePos_fMovePosX"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QCheckBox" name="checkBox_MovePos_bMovePosX1">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>MoveX1Pos</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_MovePos_fMovePosX1"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QCheckBox" name="checkBox_MovePos_bMovePosA">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>MoveAPos(degree)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="lineEdit_MovePos_fMovePosA"/>
+          </item>
+          <item row="3" column="0">
+           <widget class="QCheckBox" name="checkBox_MovePos_bMovePosA1">
+            <property name="text">
+             <string>MoveA1Pos(degree)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="lineEdit_MovePos_fMovePosA1"/>
+          </item>
+          <item row="4" column="0">
+           <widget class="QCheckBox" name="checkBox_MovePos_bMovePosY">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>MoveYPos</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QLineEdit" name="lineEdit_MovePos_fMovePosY"/>
+          </item>
+          <item row="5" column="0">
+           <widget class="QCheckBox" name="checkBox_MovePos_bMovePosY1">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>MoveY1Pos</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="1">
+           <widget class="QLineEdit" name="lineEdit_MovePos_fMovePosY1"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="2" column="0">
+        <widget class="QGroupBox" name="groupBox_FlightCutting">
+         <property name="title">
+          <string>FlightCutting</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_2">
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_FlightCutting_fMotorDelay"/>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_FlightCutting_MotorDelay">
+            <property name="minimumSize">
+             <size>
+              <width>150</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>MotorDelay(0~100)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="checkBox_FlightCutting_bFlightCutting">
+            <property name="text">
+             <string>FlightCutting</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="3" column="0">
+        <widget class="QGroupBox" name="groupBox_EnergySwitch">
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>60</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;It must be used in conjunction with the &amp;quot;Energy Switch&amp;quot; operation of the background running group. If used alone, it will only modify the instruction flag bit EnergySwitch = 1. Improper use may cause errors in the operation instructions.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         </property>
+         <property name="title">
+          <string>EnergySwitch</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout">
+          <item row="0" column="0">
+           <spacer name="horizontalSpacer">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>75</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item row="0" column="1">
+           <widget class="QCheckBox" name="checkBox_EnergySwitch_bEnergySwitch">
+            <property name="text">
+             <string>EnergySwitch</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <spacer name="horizontalSpacer_2">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>74</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="4" column="0">
+        <spacer name="verticalSpacer_2">
+         <property name="orientation">
+          <enum>Qt::Orientation::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>69</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_Servo">
+      <layout class="QGridLayout" name="gridLayout_5">
+       <item row="0" column="0">
+        <widget class="QGroupBox" name="groupBox_Servo">
+         <property name="title">
+          <string>Servo cutting head</string>
+         </property>
+         <layout class="QFormLayout" name="formLayout_11">
+          <property name="fieldGrowthPolicy">
+           <enum>QFormLayout::FieldGrowthPolicy::AllNonFixedFieldsGrow</enum>
+          </property>
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="checkBox_Servo_bCuttingHead">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>CuttingHead</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QCheckBox" name="checkBox_Servo_bCrossBridge">
+            <property name="text">
+             <string>CrossBridge</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_Servo_fCuttingHeight">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>20</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>108</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>CuttingHeight</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_Servo_fServoCuttingHeight"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="2" column="0">
+        <spacer name="verticalSpacer_3">
+         <property name="orientation">
+          <enum>Qt::Orientation::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>500</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item row="1" column="0">
+        <widget class="QGroupBox" name="groupBox_Linkage">
+         <property name="title">
+          <string>Linkage</string>
+         </property>
+         <layout class="QFormLayout" name="formLayout_9">
+          <item row="0" column="0">
+           <widget class="QCheckBox" name="checkBox_Linkage_bAxisZLinkage">
+            <property name="minimumSize">
+             <size>
+              <width>120</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>AxisZLinkage</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_Linkage_LinkedDirection">
+            <property name="text">
+             <string>LinkedDirection</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_Linkage_LinkedMode">
+            <property name="text">
+             <string>LinkedMode</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QComboBox" name="comboBox_Linkage_sLinkedDirection">
+            <item>
+             <property name="text">
+              <string>X</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Y</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QComboBox" name="comboBox_Linkage_iLinkedMode">
+            <item>
+             <property name="text">
+              <string>Line</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Arc</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Formula</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="label_Linkage_LinkageParameterA">
+            <property name="text">
+             <string>LinkageParameterA</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QLineEdit" name="lineEdit_Linkage_fLinkageParameterA"/>
+          </item>
+          <item row="5" column="0">
+           <widget class="QLabel" name="label_Linkage_LinkageParameterB">
+            <property name="text">
+             <string>LinkageParameterB</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="1">
+           <widget class="QLineEdit" name="lineEdit_Linkage_fLinkageParameterB"/>
+          </item>
+          <item row="6" column="1">
+           <widget class="QLineEdit" name="lineEdit_Linkage_sLinkedFormula"/>
+          </item>
+          <item row="6" column="0">
+           <widget class="QLabel" name="label_Linkage_LinkedFormula">
+            <property name="text">
+             <string>LinkedFormula</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_Linkage_LinkedDelay">
+            <property name="text">
+             <string>LinkedDelay(ms)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="lineEdit_Linkage_fLinkedDelay"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="2" column="1">
+        <spacer name="horizontalSpacer_3">
+         <property name="orientation">
+          <enum>Qt::Orientation::Horizontal</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>40</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page">
+      <widget class="QGroupBox" name="groupBox_Trough">
+       <property name="geometry">
+        <rect>
+         <x>20</x>
+         <y>10</y>
+         <width>418</width>
+         <height>244</height>
+        </rect>
+       </property>
+       <property name="title">
+        <string>Trough</string>
+       </property>
+       <layout class="QFormLayout" name="formLayout_6">
+        <item row="1" column="0">
+         <widget class="QLabel" name="label_Trough_RunBuffer">
+          <property name="text">
+           <string>RunBuffer</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLineEdit" name="lineEdit_Trough_iRunBuffer"/>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="label_Trough_CuttingHeightCompensate">
+          <property name="text">
+           <string>CuttingHeightCompensate(mm)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QLineEdit" name="lineEdit_Trough_fCHCompensate"/>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="label_Trough_ExtendStart">
+          <property name="text">
+           <string>ExtendStart(mm)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QLineEdit" name="lineEdit_Trough_fExtendSctart"/>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="label_Trough_ExtendEnd">
+          <property name="text">
+           <string>ExtendEnd(mm)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QLineEdit" name="lineEdit_Trough_fExtendEnd"/>
+        </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="label_Trough_AccTime">
+          <property name="text">
+           <string>AccTime(ms)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="5" column="1">
+         <widget class="QLineEdit" name="lineEdit_Trough_fAccTime"/>
+        </item>
+        <item row="6" column="0">
+         <widget class="QLabel" name="label_Trough_Delay">
+          <property name="text">
+           <string>Delay(ms)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="6" column="1">
+         <widget class="QLineEdit" name="lineEdit_Trough_fDelay"/>
+        </item>
+        <item row="0" column="0">
+         <widget class="QCheckBox" name="checkBox_Trough_bTrough">
+          <property name="minimumSize">
+           <size>
+            <width>150</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>Trough</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </widget>
+   </item>
+   <item row="2" column="0">
+    <widget class="QSplitter" name="splitter">
+     <property name="orientation">
+      <enum>Qt::Orientation::Horizontal</enum>
+     </property>
+     <widget class="QPushButton" name="pushButton_Tool_CreatTool">
+      <property name="text">
+       <string>CreatTool</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Tool_CopyTool">
+      <property name="text">
+       <string>CopyTool</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Tool_DeleteTool">
+      <property name="text">
+       <string>DeleteTool</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Tool_RenameTool">
+      <property name="text">
+       <string>RenameTool</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Tool_ImportTool">
+      <property name="text">
+       <string>ImportTool</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="pushButton_Tool_ExportTool">
+      <property name="text">
+       <string>ExportTool</string>
+      </property>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <resources/>
+ <connections/>
+</ui>

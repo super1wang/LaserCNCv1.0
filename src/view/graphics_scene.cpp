@@ -196,10 +196,11 @@ void GraphicsScene::redisplayShape(const Handle(AIS_Shape)& aisShape, bool updat
         m_context->UpdateCurrentViewer();
 }
 
-void GraphicsScene::eraseShape(const Handle(AIS_Shape)& aisShape)
+void GraphicsScene::eraseShape(const Handle(AIS_Shape)& aisShape, bool updateViewer)
 {
     m_context->Erase(aisShape, false);
-    m_context->UpdateCurrentViewer();
+    if (updateViewer)
+        m_context->UpdateCurrentViewer();
 }
 
 void GraphicsScene::eraseAll()

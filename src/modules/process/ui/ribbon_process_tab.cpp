@@ -17,6 +17,13 @@ void registerCommands(CommandContainer* container)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::registerCommands begin");
 
+    container->addCommand<CmdNewProcess>(CmdNewProcess::Name);
+    container->addCommand<CmdLoadProcess>(CmdLoadProcess::Name);
+    container->addCommand<CmdSaveProcess>(CmdSaveProcess::Name);
+    container->addCommand<CmdOpenProcessSettings>(CmdOpenProcessSettings::Name);
+    container->addCommand<CmdOpenMotionSettings>(CmdOpenMotionSettings::Name);
+    container->addCommand<CmdOpenLaserSettings>(CmdOpenLaserSettings::Name);
+
     container->addCommand<CmdConnectController>(CmdConnectController::Name);
     container->addCommand<CmdDisconnectController>(CmdDisconnectController::Name);
     container->addCommand<CmdToggleSimulationMode>(CmdToggleSimulationMode::Name);
@@ -50,9 +57,9 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     // ── 流程（占位） ───────────────────────────────────────────────────────
     SARibbonPanel* panelProc = cat->addPanel(QObject::tr("流程"));
-    panelProc->addLargeAction(makeAct(QObject::tr("新建流程"), QStringLiteral(":/icons/new_process.svg")));
-    panelProc->addLargeAction(makeAct(QObject::tr("加载流程"), QStringLiteral(":/icons/open_process.svg")));
-    panelProc->addSmallAction(makeAct(QObject::tr("保存流程"), QStringLiteral(":/icons/save_process.svg")));
+    panelProc->addLargeAction(container->findAction(CmdNewProcess::Name));
+    panelProc->addLargeAction(container->findAction(CmdLoadProcess::Name));
+    panelProc->addSmallAction(container->findAction(CmdSaveProcess::Name));
 
     // ── 运行 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelRun = cat->addPanel(QObject::tr("运行"));
@@ -68,9 +75,9 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     // ── 参数（占位） ───────────────────────────────────────────────────────
     SARibbonPanel* panelParam = cat->addPanel(QObject::tr("参数"));
-    panelParam->addSmallAction(makeAct(QObject::tr("激光参数"), QStringLiteral(":/icons/laser_param.svg")));
-    panelParam->addSmallAction(makeAct(QObject::tr("运动参数"), QStringLiteral(":/icons/motion_param.svg")));
-    panelParam->addSmallAction(makeAct(QObject::tr("加工设置"), QStringLiteral(":/icons/process_param.svg")));
+    panelParam->addSmallAction(container->findAction(CmdOpenLaserSettings::Name));
+    panelParam->addSmallAction(container->findAction(CmdOpenMotionSettings::Name));
+    panelParam->addSmallAction(container->findAction(CmdOpenProcessSettings::Name));
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab end");
 }

@@ -283,8 +283,17 @@ void GuiDocument::eraseDocument(DocumentId documentId)
 
 void GuiDocument::eraseDomain(lcnc::ProjectDomain domain)
 {
+    const int beforeDomainCount = displayObjectCount(domain);
+    const int beforeTotalCount = m_displayObjects.size();
     if (eraseDomainObjects(domain))
         emit displayUpdated();
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "GuiDocument::eraseDomain domain={} beforeDomain={} beforeTotal={} afterDomain={} afterTotal={}",
+               static_cast<int>(domain),
+               beforeDomainCount,
+               beforeTotalCount,
+               displayObjectCount(domain),
+               m_displayObjects.size());
 }
 
 void GuiDocument::rebuildDisplay(LcncDocument* document)
@@ -301,12 +310,17 @@ void GuiDocument::rebuildDisplay(LcncDocument* document)
 
 void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* document)
 {
-    eraseDomainObjects(domain);
+    const int beforeDomainCount = displayObjectCount(domain);
+    const int beforeTotalCount = m_displayObjects.size();
+    eraseDomainObjects(domain, false);
 
     if (!document) {
         LCNC_DEBUG(lcnc::LogCode::Generic,
-                   "GuiDocument::rebuildDomain domain={} no document",
-                   static_cast<int>(domain));
+                   "GuiDocument::rebuildDomain domain={} no document beforeDomain={} beforeTotal={} afterTotal={}",
+                   static_cast<int>(domain),
+                   beforeDomainCount,
+                   beforeTotalCount,
+                   m_displayObjects.size());
         emit displayUpdated();
         return;
     }
@@ -333,8 +347,14 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
         m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
                                                   m_renderingManager->runtimeFaceBoundary());
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "GuiDocument::rebuildDomain domain={} docId={} count={}",
-               static_cast<int>(domain), document->id(), m_displayObjects.size());
+               "GuiDocument::rebuildDomain domain={} docId={} beforeDomain={} beforeTotal={} freeShapes={} afterDomain={} afterTotal={}",
+               static_cast<int>(domain),
+               document->id(),
+               beforeDomainCount,
+               beforeTotalCount,
+               freeShapes.Length(),
+               displayObjectCount(domain),
+               m_displayObjects.size());
 
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
     if (!ctx.IsNull())
@@ -507,6 +527,59 @@ void GuiDocument::updateAxisTransforms(LcncDocument* document)
     }
 }
 
+void GuiDocument::updateMachineWorkspaceTransforms(LcncDocument* machineDocument,
+                                                   LcncDocument* workpieceDocument)
+{
+    if (!machineDocument)
+        return;
+
+    MachineKinematics* kin = machineDocument->machineKinematics();
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (!kin || ctx.IsNull())
+        return;
+
+    const DocumentId machineDocumentId = machineDocument->id();
+    const DocumentId workpieceDocumentId = workpieceDocument ? workpieceDocument->id() : kInvalidDocumentId;
+    for (auto it = m_displayObjects.constBegin(); it != m_displayObjects.constEnd(); ++it) {
+        const DisplayObject& object = it.value();
+        const bool machineObject = object.documentId == machineDocumentId;
+        const bool workpieceObject = object.documentId == workpieceDocumentId;
+        if (!machineObject && !workpieceObject)
+            continue;
+
+        const Handle(AIS_Shape)& ais = object.ais;
+        if (ais.IsNull())
+            continue;
+
+        gp_Trsf t;
+        bool hasTransform = false;
+        if (machineObject) {
+            const QString machineAxis = kin->axisForShape(object.entry);
+            if (!machineAxis.isEmpty()) {
+                t = kin->computeShapeTransform(object.entry);
+                hasTransform = true;
+            } else if (!kin->mountedAxis(object.entry).isEmpty()) {
+                t = kin->computeWpcTransform(object.entry);
+                hasTransform = true;
+            }
+        } else if (workpieceObject) {
+            const QString wpcAxis = kin->mountedAxis(object.entry);
+            if (!wpcAxis.isEmpty()) {
+                t = kin->computeWpcTransform(object.entry);
+                hasTransform = true;
+            } else {
+                hasTransform = true;
+            }
+        }
+
+        if (!hasTransform)
+            continue;
+
+        ais->SetLocalTransformation(t);
+        ctx->RecomputePrsOnly(ais, Standard_False);
+    }
+}
+
 lcnc::ProjectDomain GuiDocument::domainForDocument(LcncDocument* document) const
 {
     if (!document)
@@ -518,23 +591,25 @@ lcnc::ProjectDomain GuiDocument::domainForDocument(LcncDocument* document) const
     return domain;
 }
 
-bool GuiDocument::eraseKey(const DisplayKey& key)
+bool GuiDocument::eraseKey(const DisplayKey& key, bool updateViewer)
 {
     auto it = m_displayObjects.find(key);
     if (it == m_displayObjects.end())
         return false;
 
     if (!it.value().ais.IsNull())
-        m_scene->eraseShape(it.value().ais);
+        m_scene->eraseShape(it.value().ais, updateViewer);
     m_displayObjects.erase(it);
     return true;
 }
 
-bool GuiDocument::eraseKeys(const QList<DisplayKey>& keys)
+bool GuiDocument::eraseKeys(const QList<DisplayKey>& keys, bool updateViewer)
 {
     bool changed = false;
     for (const DisplayKey& key : keys)
-        changed = eraseKey(key) || changed;
+        changed = eraseKey(key, false) || changed;
+    if (changed && updateViewer && m_scene && !m_scene->context().IsNull())
+        m_scene->context()->UpdateCurrentViewer();
     return changed;
 }
 
@@ -548,14 +623,24 @@ bool GuiDocument::eraseDocumentObjects(DocumentId documentId)
     return eraseKeys(keys);
 }
 
-bool GuiDocument::eraseDomainObjects(lcnc::ProjectDomain domain)
+int GuiDocument::displayObjectCount(lcnc::ProjectDomain domain) const
+{
+    int count = 0;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == domain)
+            ++count;
+    }
+    return count;
+}
+
+bool GuiDocument::eraseDomainObjects(lcnc::ProjectDomain domain, bool updateViewer)
 {
     QList<DisplayKey> keys;
     for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
         if (it.value().domain == domain)
             keys.append(it.key());
     }
-    return eraseKeys(keys);
+    return eraseKeys(keys, updateViewer);
 }
 
 void GuiDocument::registerDisplayObject(lcnc::ProjectDomain domain,

@@ -4,13 +4,16 @@
 #include "core/kernel/service_registry.h"
 #include "core/kinematics/i_motion_controller.h"
 #include "core/logging/logger.h"
+#include "modules/process/Process/ProcessModule/Process_TreeView.h"
 #include "modules/process/controllers/simulation_motion_controller.h"
+#include "modules/process/device/process_device_manager.h"
 
 #include <QList>
 #include <QTimer>
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 
 namespace {
 
@@ -110,6 +113,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     // 加载持久化设置（首次运行则使用默认值）并同步到运行时状态。
     m_settings.loadDefault();
     m_simulationMode = m_settings.simulationMode();
+    m_deviceManager = std::make_unique<lcnc::process::ProcessDeviceManager>();
+    m_deviceManager->syncFromSettings(m_settings);
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 
     // 注册仿真运动控制器作为 IMotionController 服务（默认为活动控制器）。
@@ -305,6 +310,76 @@ void ProcessModule::resetEmergencyStop()
     setState(State::Idle, defaultStatusText(m_simulationMode, m_connected));
 }
 
+void ProcessModule::newProcess()
+{
+    if (!m_processTreeView) {
+        setStatusMessage(tr("流程树尚未初始化"));
+        return;
+    }
+
+    m_processTreeView->CreateNewFileData();
+    setStatusMessage(tr("已新建流程"));
+}
+
+bool ProcessModule::loadProcess(const QString& filePath)
+{
+    if (!m_processTreeView) {
+        setStatusMessage(tr("流程树尚未初始化"));
+        return false;
+    }
+
+    if (filePath.trimmed().isEmpty()) {
+        setStatusMessage(tr("流程文件路径为空"));
+        return false;
+    }
+
+    try {
+        const toml::value root = toml::parse(filePath.toStdString());
+        if (!m_processTreeView->LoadValue(root)) {
+            setStatusMessage(tr("流程文件格式无效"));
+            return false;
+        }
+    } catch (const std::exception& e) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "ProcessModule: load process failed: {}",
+                  e.what());
+        setStatusMessage(tr("加载流程失败: %1").arg(QString::fromLocal8Bit(e.what())));
+        return false;
+    }
+
+    setStatusMessage(tr("已加载流程: %1").arg(filePath));
+    return true;
+}
+
+bool ProcessModule::saveProcess(const QString& filePath)
+{
+    if (!m_processTreeView) {
+        setStatusMessage(tr("流程树尚未初始化"));
+        return false;
+    }
+
+    if (filePath.trimmed().isEmpty()) {
+        setStatusMessage(tr("流程文件路径为空"));
+        return false;
+    }
+
+    toml::value root;
+    if (!m_processTreeView->SaveValue(root)) {
+        setStatusMessage(tr("流程数据为空或无效"));
+        return false;
+    }
+
+    std::ofstream out(filePath.toStdString(), std::ios::binary);
+    if (!out.is_open()) {
+        setStatusMessage(tr("无法写入流程文件: %1").arg(filePath));
+        return false;
+    }
+    out << toml::format(root);
+
+    setStatusMessage(tr("已保存流程: %1").arg(filePath));
+    return true;
+}
+
 ProcessModule::State ProcessModule::state() const
 {
     return m_state;
@@ -351,6 +426,33 @@ void ProcessModule::setFeedOverride(double factor)
 double ProcessModule::feedOverride() const
 {
     return m_feedOverride;
+}
+
+void ProcessModule::reloadDeviceSettings()
+{
+    if (!m_deviceManager)
+        m_deviceManager = std::make_unique<lcnc::process::ProcessDeviceManager>();
+    m_deviceManager->syncFromSettings(m_settings);
+
+    const bool nextSimulationMode = m_settings.simulationMode();
+    if (m_simulationMode != nextSimulationMode) {
+        m_simulationMode = nextSimulationMode;
+        emit simulationModeChanged(m_simulationMode);
+    }
+
+    setStatusMessage(tr("设备配置已更新: %1 / %2").arg(
+        m_deviceManager->activeMotionController(),
+        m_deviceManager->activeLaserDevice()));
+}
+
+void ProcessModule::setProcessTreeView(ProcessTreeView* treeView)
+{
+    m_processTreeView = treeView;
+}
+
+ProcessTreeView* ProcessModule::processTreeView() const
+{
+    return m_processTreeView;
 }
 
 QString ProcessModule::statusMessage() const

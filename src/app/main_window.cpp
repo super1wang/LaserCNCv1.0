@@ -15,6 +15,7 @@
 #include "modules/cad/ui/widget_cad_task_panel.h"
 #include "modules/cam/ui/ribbon_cam_tab.h"
 #include "modules/process/ui/ribbon_process_tab.h"
+#include "modules/process/Process/qg_processeswidget.h"
 #include "view/widget_occ_view.h"
 #include "modules/cam/ui/widget_machine_panel.h"
 #include "modules/cam/ui/widget_toolpath_panel.h"
@@ -147,6 +148,11 @@ bool isActiveSketchOverlayKey(const QString& key)
     return key.startsWith(QStringLiteral("__sketch_active_element_"))
         || key.startsWith(QStringLiteral("__sketch_active_handle_"));
 }
+
+constexpr int kRibbonFileIndex = 0;
+constexpr int kRibbonCadIndex = 1;
+constexpr int kRibbonCamIndex = 2;
+constexpr int kRibbonLaserIndex = 3;
 
 }
 
@@ -439,19 +445,19 @@ void MainWindow::createLeftPanel()
                 m_appContext->camModule()->setSelectedEntries(entries);
             });
 
-    m_processLeftPanel = new QWidget(m_leftTabs);
+    auto* processWidget = new QG_ProcessesWidget(m_leftTabs);
+    m_processLeftPanel = processWidget;
+    if (auto* process = m_appContext->processModule()) {
+        process->setProcessTreeView(processWidget->GetTreeView());
+    }
     m_leftTabs->addTab(m_projectExplorerTree, tr("项目"));
     m_leftTabs->addTab(m_processLeftPanel, tr("执行"));
     connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if (index == 1) {
-            if (m_rightStack)
-                m_rightStack->setCurrentWidget(m_laserControl);
             m_appContext->camModule()->requestMachineView();
         } else if (m_projectExplorerTree && m_projectExplorerTree->currentItem()) {
             onProjectExplorerCurrentItemChanged(m_projectExplorerTree->currentItem(), nullptr);
         } else {
-            if (m_rightStack)
-                m_rightStack->setCurrentWidget(m_cadTaskPanel);
             showWorkpieceView();
         }
         updateCommandStates();
@@ -484,10 +490,10 @@ void MainWindow::createRightPanel()
     });
 
     m_rightStack = new QStackedWidget(this);
-    m_rightStack->addWidget(m_machinePanel);   // index 0 — shown when "准备"
-    m_rightStack->addWidget(m_toolpathPanel);  // index 1 — shown when CAM tab
-    m_rightStack->addWidget(m_laserControl);   // index 2 — shown when "执行"
-    m_rightStack->addWidget(m_cadTaskPanel);    // index 3 — shown when "文档"
+    m_rightStack->addWidget(m_machinePanel);   // index 0 — CAM ribbon page
+    m_rightStack->addWidget(m_toolpathPanel);  // index 1 — data detail page, updated by selection
+    m_rightStack->addWidget(m_laserControl);   // index 2 — laser/process ribbon page
+    m_rightStack->addWidget(m_cadTaskPanel);   // index 3 — CAD ribbon page
     m_rightStack->setMinimumWidth(320);
     m_rightStack->setMaximumWidth(420);
     m_rightStack->setCurrentIndex(3);
@@ -794,8 +800,6 @@ void MainWindow::createRightPanel()
 
         connect(m_appContext->camModule(), &CamModule::toolpathGenerated, this,
             [this]() {
-            if (m_rightStack)
-                m_rightStack->setCurrentWidget(m_toolpathPanel);
             m_occView->endLeadInPick();
             m_appContext->camModule()->cancelLeadInPreview();
             m_toolpathPanel->setToolpath(&m_appContext->camModule()->toolpathRef());
@@ -1111,6 +1115,10 @@ void MainWindow::createRibbon()
     buildCadTab(ribbon->addCategoryPage(tr("CAD")));
     buildCamTab(ribbon->addCategoryPage(tr("CAM")));
     buildLaserTab(ribbon->addCategoryPage(tr("激光加工")));
+
+    connect(ribbon, &SARibbonBar::currentRibbonTabChanged,
+            this, &MainWindow::syncRightPanelForRibbonIndex);
+    syncRightPanelForRibbonIndex(ribbon->currentIndex());
 }
 
 void MainWindow::buildFileTab(SARibbonCategory* cat)
@@ -1236,8 +1244,6 @@ void MainWindow::onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current,
         contourIndex = current->data(0, kRoleContourIndex).toInt();
 
     if (lcnc::app::isCadProjectNode(kind)) {
-        if (m_rightStack)
-            m_rightStack->setCurrentWidget(m_cadTaskPanel);
         showWorkpieceView(docId);
 
         if (docId != kInvalidDocumentId) {
@@ -1252,13 +1258,11 @@ void MainWindow::onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current,
             QStringList sourceEntries = leafEntries;
             if (sourceEntries.isEmpty() && !entry.isEmpty())
                 sourceEntries.append(entry);
-            m_appContext->camModule()->setSelectedMountedWorkpieceEntries(sourceEntries);
+            m_appContext->cadModule()->setSelectedEntries(docId, sourceEntries);
             updateCadSketchOverlay();
             updateCadTaskPanelState();
         }
     } else if (lcnc::app::isMachineProjectNode(kind)) {
-        if (m_rightStack)
-            m_rightStack->setCurrentWidget(m_machinePanel);
         m_appContext->camModule()->requestMachineView();
 
         QStringList entries;
@@ -1274,8 +1278,6 @@ void MainWindow::onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current,
             entries.append(entry);
         m_appContext->camModule()->setSelectedEntries(entries);
     } else if (lcnc::app::isToolpathProjectNode(kind)) {
-        if (m_rightStack)
-            m_rightStack->setCurrentWidget(m_toolpathPanel);
         m_appContext->camModule()->requestMachineView();
         m_toolpathPanel->showContourCoordinates(contourIndex);
         highlightContourInView(contourIndex);
@@ -1295,6 +1297,9 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
     auto cascadeCheckState = [this, visible](QTreeWidgetItem* root,
                                              const std::function<bool(QTreeWidgetItem*)>& shouldChange) {
         m_blockProjectExplorerSignals = true;
+        QSignalBlocker blocker(m_projectExplorerTree);
+        const bool updatesEnabled = m_projectExplorerTree->updatesEnabled();
+        m_projectExplorerTree->setUpdatesEnabled(false);
         for (int index = 0; index < root->childCount(); ++index) {
             QTreeWidgetItem* child = root->child(index);
             std::function<void(QTreeWidgetItem*)> cascade = [&](QTreeWidgetItem* node) {
@@ -1305,6 +1310,7 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
             };
             cascade(child);
         }
+        m_projectExplorerTree->setUpdatesEnabled(updatesEnabled);
         m_blockProjectExplorerSignals = false;
     };
 
@@ -1343,8 +1349,6 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
             for (const QString& entry : it.value())
                 entries.append(entry);
             m_appContext->cadModule()->setEntriesVisible(it.key(), entries, visible);
-            if (m_appContext->projectManager()->isDomainDocument(it.key(), lcnc::ProjectDomain::Workpiece))
-                m_appContext->camModule()->setMountedWorkpieceEntriesVisible(entries, visible);
         }
 
         for (const auto& sketch : sketches)
@@ -1376,8 +1380,6 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
             return;
 
         m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
-        if (m_appContext->projectManager()->isDomainDocument(docId, lcnc::ProjectDomain::Workpiece))
-            m_appContext->camModule()->setMountedWorkpieceEntriesVisible(leafEntries, visible);
         return;
     }
 
@@ -1413,17 +1415,7 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
             return lcnc::app::isToolpathProjectNode(projectNodeKind(child));
         });
 
-        for (int childIndex = 0; childIndex < item->childCount(); ++childIndex) {
-            QTreeWidgetItem* child = item->child(childIndex);
-            if (projectNodeKind(child) != lcnc::app::ProjectExplorerNodeKind::ToolpathContour)
-                continue;
-            const auto contourId = static_cast<lcnc::cam::ContourId>(child->data(0, kRoleContourId).toULongLong());
-            int contourIndex = m_appContext->camModule()->contourIndexById(contourId);
-            if (contourIndex < 0)
-                contourIndex = child->data(0, kRoleContourIndex).toInt();
-            if (contourIndex >= 0)
-                m_appContext->camModule()->setContourEnabled(contourIndex, visible);
-        }
+        m_appContext->camModule()->setAllContoursEnabled(visible);
         return;
     }
 
@@ -1780,8 +1772,6 @@ void MainWindow::showMachineView()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "MainWindow::showMachineView");
     m_machineWorkspaceActive = true;
-    if (m_rightStack && m_rightStack->currentWidget() == m_cadTaskPanel)
-        m_rightStack->setCurrentWidget(m_machinePanel);
     if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
         m_occView->attachDocument(gd);
     else
@@ -1798,15 +1788,40 @@ void MainWindow::showWorkpieceView(DocumentId id)
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "MainWindow::showWorkpieceView unified docId={}", id);
 
-    m_machineWorkspaceActive = true;
-    if (m_rightStack)
-        m_rightStack->setCurrentWidget(m_cadTaskPanel);
+    m_machineWorkspaceActive = false;
 
     if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
         m_occView->attachDocument(gd);
     else
         m_occView->attachDefaultScene(m_defaultScene);
     updateCadSketchOverlay();
+}
+
+void MainWindow::syncRightPanelForRibbonIndex(int index)
+{
+    if (!m_rightStack)
+        return;
+
+    switch (index) {
+    case kRibbonCadIndex:
+        m_rightStack->setCurrentWidget(m_cadTaskPanel);
+        showWorkpieceView();
+        break;
+    case kRibbonCamIndex:
+        m_rightStack->setCurrentWidget(m_machinePanel);
+        showMachineView();
+        break;
+    case kRibbonLaserIndex:
+        m_rightStack->setCurrentWidget(m_laserControl);
+        showMachineView();
+        break;
+    case kRibbonFileIndex:
+    default:
+        break;
+    }
+
+    updateCadSketchOverlay();
+    updateCommandStates();
 }
 
 void MainWindow::updateCommandStates()

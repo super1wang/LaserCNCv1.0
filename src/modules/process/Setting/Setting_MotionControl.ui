@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Dialog_Setting_MotionControl</class>
+ <widget class="QDialog" name="Dialog_Setting_MotionControl">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>363</width>
+    <height>416</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Motion Control Setting</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="groupBox_MotionControl">
+     <property name="title">
+      <string>MotionControl</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_MotionControl_Type">
+        <property name="minimumSize">
+         <size>
+          <width>160</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Type</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="comboBox_MotionControl_sType">
+        <property name="minimumSize">
+         <size>
+          <width>150</width>
+          <height>0</height>
+         </size>
+        </property>
+        <item>
+         <property name="text">
+          <string>SimulatorCMHP</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>ACSCMHP</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>GTN</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_MotionControl_Axis">
+        <property name="text">
+         <string>Axis</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="comboBox_MotionControl_sAxis"/>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBox_AxisSetting">
+     <property name="title">
+      <string>AxisSetting</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_2">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_AxisSetting_Index">
+        <property name="minimumSize">
+         <size>
+          <width>160</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Index</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_iIndex"/>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_AxisSetting_Rotation">
+        <property name="text">
+         <string>Rotation</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="comboBox_AxisSetting_bRotation">
+        <item>
+         <property name="text">
+          <string>False</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>True</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_AxisSetting_Resolution">
+        <property name="text">
+         <string>Resolution</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_AxisSetting_Vel">
+        <property name="text">
+         <string>Vel(mm/s)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_fVel"/>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_AxisSetting_Acc">
+        <property name="text">
+         <string>Acc(mm/s^2)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_fAcc"/>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="label_AxisSetting_Jerk">
+        <property name="text">
+         <string>Jerk(mm/s^3)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_fJerk"/>
+      </item>
+      <item row="7" column="0">
+       <widget class="QLabel" name="label_AxisSetting_LeftLimit">
+        <property name="text">
+         <string>LeftLimit(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_fLeftLimit"/>
+      </item>
+      <item row="8" column="0">
+       <widget class="QLabel" name="label_AxisSetting_RightLimit">
+        <property name="text">
+         <string>RightLimit(mm)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_fRightLimit">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_fResolution"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_AxisSetting_HomeIndex">
+        <property name="text">
+         <string>HomeIndex</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="lineEdit_AxisSetting_iHomeIndex"/>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Orientation::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>0</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <resources/>
+ <connections/>
+</ui>

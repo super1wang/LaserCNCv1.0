@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Dialog_ProcessSetting_Feeding</class>
+ <widget class="QDialog" name="Dialog_ProcessSetting_Feeding">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>325</width>
+    <height>240</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Feeding Process Setting</string>
+  </property>
+  <layout class="QFormLayout" name="formLayout">
+   <item row="0" column="0">
+    <widget class="QLabel" name="label_Feeding_OpenChuckDelay">
+     <property name="text">
+      <string>Open  chuck  delay (ms)</string>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="1">
+    <widget class="QLineEdit" name="lineEdit_Feeding_OpenChuckDelay"/>
+   </item>
+   <item row="1" column="0">
+    <widget class="QLabel" name="label_Feeding_OpenPliersDelay">
+     <property name="text">
+      <string>Open  pliers delay (ms)</string>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="1">
+    <widget class="QLineEdit" name="lineEdit_Feeding_OpenPliersDelay"/>
+   </item>
+   <item row="2" column="0">
+    <widget class="QLabel" name="label_Feeding_CloseChuckDelay">
+     <property name="text">
+      <string>Close chuck  delay (ms)</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="QLineEdit" name="lineEdit_Feeding_CloseChuckDelay"/>
+   </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="label_Feeding_ClosePliersDelay">
+     <property name="text">
+      <string>Close pliers delay (ms)</string>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="1">
+    <widget class="QLineEdit" name="lineEdit_Feeding_ClosePliersDelay"/>
+   </item>
+   <item row="4" column="0">
+    <widget class="QLabel" name="label_Feeding_Compensation">
+     <property name="text">
+      <string>Feed  compensation (mm)</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="1">
+    <widget class="QLineEdit" name="lineEdit_Feeding_Compensation"/>
+   </item>
+   <item row="5" column="0">
+    <widget class="QLabel" name="label_Feeding_Speed">
+     <property name="text">
+      <string>Feed  axis  speed</string>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="1">
+    <widget class="QComboBox" name="comboBox_Feeding_Speed">
+     <item>
+      <property name="text">
+       <string>Low</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>Medium</string>
+      </property>
+     </item>
+     <item>
+      <property name="text">
+       <string>High</string>
+      </property>
+     </item>
+    </widget>
+   </item>
+   <item row="6" column="0" colspan="2">
+    <layout class="QHBoxLayout" name="Buttons_Feeding">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <spacer>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>131</width>
+         <height>31</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="Button_Feeding_OK">
+       <property name="text">
+        <string>OK</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="Button_Feeding_Cancel">
+       <property name="text">
+        <string>Cancel</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

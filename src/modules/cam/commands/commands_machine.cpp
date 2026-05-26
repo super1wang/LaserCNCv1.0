@@ -128,17 +128,13 @@ void CmdMarkAxes::execute()
 CmdMountWorkpiece::CmdMountWorkpiece(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/workpiece.svg"), tr("挂载工件"), this);
-    a->setStatusTip(tr("将工件模型绑定到指定轴系，随轴运动"));
+    auto* a = new QAction(QIcon(":/icons/workpiece.svg"), tr("安装工件"), this);
+    a->setStatusTip(tr("将工件源模型平移到当前安装位置"));
     setAction(a);
 }
 
 bool CmdMountWorkpiece::isEnabled() const
 {
-    LcncDocument* machDoc = context()->machineDocument();
-    if (!machDoc) return false;
-    if (machDoc->entityLabels(LcncDocument::EntityKind::Machine).Length() == 0)
-        return false;
     LcncDocument* workpieceDoc = context()->workpieceDocument();
     return workpieceDoc
         && workpieceDoc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0;
@@ -146,76 +142,14 @@ bool CmdMountWorkpiece::isEnabled() const
 
 void CmdMountWorkpiece::execute()
 {
-    LcncDocument* machDoc = context()->machineDocument();
-    if (!machDoc) return;
-
-    QList<CamModule::AxisOption> axisOptions = context()->camModule()->axisOptions(true);
-    const QString defaultAxisName = context()->camModule()->defaultWorkpieceMountAxis();
-    if (!defaultAxisName.isEmpty()) {
-        QList<CamModule::AxisOption> filteredOptions;
-        for (const auto& axis : axisOptions) {
-            if (axis.name.isEmpty() || axis.name == defaultAxisName)
-                filteredOptions.append(axis);
-        }
-        if (filteredOptions.size() > 1)
-            axisOptions = filteredOptions;
-    }
-    if (axisOptions.size() <= 1) {
-        QMessageBox::information(nullptr, tr("挂载工件"),
-            tr("请先加载机台模型并配置轴系。"));
-        return;
-    }
-
     const auto mountCandidates = context()->camModule()->mountableWorkpieces();
     if (mountCandidates.isEmpty()) {
-        QMessageBox::information(nullptr, tr("挂载工件"),
+        QMessageBox::information(nullptr, tr("安装工件"),
             tr("请先导入一个工件模型。"));
         return;
     }
 
-    // ── Build dialog ───────────────────────────────────────────────────────
-    QDialog dlg;
-    dlg.setWindowTitle(tr("工件挂载"));
-    auto* frm = new QFormLayout;
-
-    auto* cbDoc  = new QComboBox;
-    auto* cbAxis = new QComboBox;
-
-    for (const auto& candidate : mountCandidates)
-        cbDoc->addItem(candidate.displayName, candidate.documentId);
-
-    int defaultAxisIndex = -1;
-    for (const auto& axis : axisOptions) {
-        cbAxis->addItem(axis.displayName, axis.name);
-        if (axis.name == defaultAxisName)
-            defaultAxisIndex = cbAxis->count() - 1;
-    }
-    if (defaultAxisIndex >= 0)
-        cbAxis->setCurrentIndex(defaultAxisIndex);
-
-    frm->addRow(tr("工件:"), cbDoc);
-    frm->addRow(tr("挂载到:"),   cbAxis);
-
-    // Info label showing what will happen
-    auto* lblInfo = new QLabel(tr("将当前工件绑定到指定轴系，原始工件目录保持不变。"), &dlg);
-    lblInfo->setStyleSheet("color: gray; font-size: 11px;");
-    lblInfo->setWordWrap(true);
-
-    auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-
-    auto* vl = new QVBoxLayout(&dlg);
-    vl->addLayout(frm);
-    vl->addWidget(lblInfo);
-    vl->addWidget(btns);
-
-    if (dlg.exec() != QDialog::Accepted) return;
-
-    const DocumentId srcDocId = cbDoc->currentData().toInt();
-    const QString    axisName = cbAxis->currentData().toString();
-
-    context()->camModule()->mountWorkpiece(srcDocId, axisName);
+    context()->camModule()->mountWorkpiece(mountCandidates.first().documentId, QString());
     context()->updateCommandStates();
 }
 

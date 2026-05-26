@@ -35,6 +35,21 @@ public:
     bool simulationMode() const { return m_simulationMode; }
     void setSimulationMode(bool enabled);
 
+    QString motionControllerName() const { return m_motionControllerName; }
+    void setMotionControllerName(const QString& name);
+
+    QString laserDeviceName() const { return m_laserDeviceName; }
+    void setLaserDeviceName(const QString& name);
+
+    double laserEnergy() const { return m_laserEnergy; }
+    void setLaserEnergy(double value);
+
+    double laserFrequency() const { return m_laserFrequency; }
+    void setLaserFrequency(double value);
+
+    double laserPulseWidth() const { return m_laserPulseWidth; }
+    void setLaserPulseWidth(double value);
+
 protected:
     void readFrom(const toml::value& root) override;
     void writeTo(toml::value& root) const override;
@@ -45,6 +60,11 @@ private:
 
     QString m_controllerEndpoint;
     bool    m_simulationMode{true};
+    QString m_motionControllerName{QStringLiteral("SimulatorCMHP")};
+    QString m_laserDeviceName{QStringLiteral("Simulator")};
+    double  m_laserEnergy{0.0};
+    double  m_laserFrequency{0.0};
+    double  m_laserPulseWidth{0.0};
 };
 
 } // namespace lcnc

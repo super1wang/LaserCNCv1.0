@@ -1,15 +1,20 @@
 #include "modules/process/commands/commands_process.h"
 
 #include <QAction>
+#include <QFileDialog>
 #include <QIcon>
 #include <QInputDialog>
 #include <QKeySequence>
 #include <QLineEdit>
 #include <QObject>
+#include <QStandardPaths>
 
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
 #include "modules/process/i_process_facade.h"
+#include "modules/process/process_module.h"
+#include "modules/process/Setting/process_settings_dialog.h"
+#include "modules/process/device/process_device_manager.h"
 
 namespace lcnc::process {
 
@@ -24,7 +29,153 @@ lcnc::IProcessFacade* processFacade()
     }
     return p;
 }
+
+ProcessModule* processModule()
+{
+    auto* module = lcnc::Kernel::current().service<ProcessModule>();
+    if (!module) {
+        LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
+                  "process.cmd: ProcessModule service not registered");
+    }
+    return module;
+}
+
+void openSettingsDialog(ProcessSettingsDialog::InitialPage page)
+{
+    auto* module = processModule();
+    if (!module)
+        return;
+
+    auto* devices = module->deviceManager();
+    const QStringList motionControllers = devices
+        ? devices->availableMotionControllers()
+        : QStringList{ QStringLiteral("SimulatorCMHP") };
+    const QStringList laserDevices = devices
+        ? devices->availableLaserDevices()
+        : QStringList{ QStringLiteral("Simulator") };
+
+    ProcessSettingsDialog dialog(module->settings(), motionControllers, laserDevices, page);
+    if (dialog.exec() == QDialog::Accepted)
+        module->reloadDeviceSettings();
+}
 } // namespace
+
+// ── CmdNewProcess ────────────────────────────────────────────────────────
+CmdNewProcess::CmdNewProcess(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/new_process.svg"), tr("新建流程"), this);
+    a->setStatusTip(tr("清空当前流程树并创建新流程"));
+    setAction(a);
+}
+bool CmdNewProcess::isEnabled() const
+{
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() != lcnc::ProcessRunState::Running;
+}
+void CmdNewProcess::execute()
+{
+    if (auto* p = processFacade()) p->newProcess();
+}
+
+// ── CmdLoadProcess ───────────────────────────────────────────────────────
+CmdLoadProcess::CmdLoadProcess(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/open_process.svg"), tr("加载流程"), this);
+    a->setStatusTip(tr("从 TOML 文件加载流程树"));
+    setAction(a);
+}
+bool CmdLoadProcess::isEnabled() const
+{
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() != lcnc::ProcessRunState::Running;
+}
+void CmdLoadProcess::execute()
+{
+    auto* p = processFacade();
+    if (!p) return;
+
+    const QString filePath = QFileDialog::getOpenFileName(
+        nullptr,
+        tr("加载流程"),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        tr("Process TOML (*.toml)"));
+    if (filePath.isEmpty())
+        return;
+    p->loadProcess(filePath);
+}
+
+// ── CmdSaveProcess ───────────────────────────────────────────────────────
+CmdSaveProcess::CmdSaveProcess(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/save_process.svg"), tr("保存流程"), this);
+    a->setStatusTip(tr("保存当前流程树为 TOML 文件"));
+    setAction(a);
+}
+bool CmdSaveProcess::isEnabled() const
+{
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->state() != lcnc::ProcessRunState::Running;
+}
+void CmdSaveProcess::execute()
+{
+    auto* p = processFacade();
+    if (!p) return;
+
+    const QString filePath = QFileDialog::getSaveFileName(
+        nullptr,
+        tr("保存流程"),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        tr("Process TOML (*.toml)"));
+    if (filePath.isEmpty())
+        return;
+    p->saveProcess(filePath);
+}
+
+// ── Settings commands ───────────────────────────────────────────────────
+CmdOpenProcessSettings::CmdOpenProcessSettings(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/process_param.svg"), tr("加工设置"), this);
+    a->setStatusTip(tr("打开加工参数"));
+    setAction(a);
+}
+bool CmdOpenProcessSettings::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+}
+void CmdOpenProcessSettings::execute()
+{
+    openSettingsDialog(ProcessSettingsDialog::InitialPage::Process);
+}
+
+CmdOpenMotionSettings::CmdOpenMotionSettings(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/motion_param.svg"), tr("运动参数"), this);
+    a->setStatusTip(tr("打开运动控制参数"));
+    setAction(a);
+}
+bool CmdOpenMotionSettings::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+}
+void CmdOpenMotionSettings::execute()
+{
+    openSettingsDialog(ProcessSettingsDialog::InitialPage::Motion);
+}
+
+CmdOpenLaserSettings::CmdOpenLaserSettings(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/laser_param.svg"), tr("激光参数"), this);
+    a->setStatusTip(tr("打开激光参数"));
+    setAction(a);
+}
+bool CmdOpenLaserSettings::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+}
+void CmdOpenLaserSettings::execute()
+{
+    openSettingsDialog(ProcessSettingsDialog::InitialPage::Laser);
+}
 
 // ── CmdRunStart ─────────────────────────────────────────────────────────────
 CmdRunStart::CmdRunStart(IAppContext* ctx) : CommandBase(ctx)

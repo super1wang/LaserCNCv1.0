@@ -13,8 +13,12 @@
 #include "modules/process/settings/process_settings.h"
 
 class QTimer;
+class ProcessTreeView;
 
-namespace lcnc::process { class SimulationMotionController; }
+namespace lcnc::process {
+class ProcessDeviceManager;
+class SimulationMotionController;
+}
 
 /**
  * @brief Process module singleton — manages execution process, peripherals, and parameters.
@@ -69,6 +73,10 @@ public:
     /// 状态栏；不重连控制器、不重置轴位置。
     void resetEmergencyStop() override;
 
+    void newProcess() override;
+    bool loadProcess(const QString& filePath) override;
+    bool saveProcess(const QString& filePath) override;
+
     State state() const;
     QMap<QString, double> currentAxisPositions() const;
     void setAxisPosition(const QString& axisName, double value);
@@ -76,6 +84,15 @@ public:
 
     void setFeedOverride(double factor);
     double feedOverride() const;
+
+    lcnc::ProcessSettings& settings() { return m_settings; }
+    const lcnc::ProcessSettings& settings() const { return m_settings; }
+
+    lcnc::process::ProcessDeviceManager* deviceManager() const { return m_deviceManager.get(); }
+    void reloadDeviceSettings();
+
+    void setProcessTreeView(ProcessTreeView* treeView);
+    ProcessTreeView* processTreeView() const;
 
     QString statusMessage() const override;
 
@@ -107,6 +124,8 @@ private:
     double m_feedOverride{1.0};
     double m_simPhase{0.0};
     QString m_statusMessage;
+    ProcessTreeView* m_processTreeView{nullptr};
     lcnc::ProcessSettings m_settings;
+    std::unique_ptr<lcnc::process::ProcessDeviceManager> m_deviceManager;
     std::unique_ptr<lcnc::process::SimulationMotionController> m_simController;
 };

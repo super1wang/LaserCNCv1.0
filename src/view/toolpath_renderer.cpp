@@ -55,8 +55,6 @@ void ToolpathRenderer::refresh(GuiDocument* gd,
     ensureBundleCount(gd, toolpath.contourCount());
     if (m_visible) {
         for (int i = 0; i < toolpath.contourCount(); ++i)
-            rebuildContourAis(gd, toolpath, i);
-        for (int i = 0; i < toolpath.contourCount(); ++i)
             rebuildLeadInAis(gd, toolpath, i);
         if (m_showNormals) {
             for (int i = 0; i < toolpath.contourCount(); ++i)
@@ -121,7 +119,6 @@ void ToolpathRenderer::refreshContour(GuiDocument* gd,
     eraseBundle(gd, bundle);
 
     if (m_visible) {
-        rebuildContourAis(gd, toolpath, contourIndex);
         rebuildLeadInAis(gd, toolpath, contourIndex);
         if (m_showNormals)
             rebuildNormalAis(gd, toolpath, contourIndex);
@@ -153,12 +150,10 @@ void ToolpathRenderer::updateTransforms(GuiDocument* gd,
     const int count = qMin(m_bundles.size(), toolpath.contourCount());
     for (int i = 0; i < count; ++i) {
         gp_Trsf transform;
-        const LaserContour& contour = toolpath.contour(i);
-        if (kin && !contour.workpieceEntry.isEmpty())
-            transform = kin->computeWpcTransform(contour.workpieceEntry);
+        if (kin && !toolpath.contour(i).workpieceEntry.isEmpty())
+            transform = kin->computeWpcTransform(toolpath.contour(i).workpieceEntry);
 
         ContourAisBundle& bundle = m_bundles[i];
-        applyLocalTransform(ctx, bundle.contour, transform);
         applyLocalTransform(ctx, bundle.leadIn, transform);
         applyLocalTransform(ctx, bundle.normal, transform);
     }
@@ -167,9 +162,8 @@ void ToolpathRenderer::updateTransforms(GuiDocument* gd,
         && m_previewContourIndex >= 0
         && m_previewContourIndex < toolpath.contourCount()) {
         gp_Trsf transform;
-        const LaserContour& contour = toolpath.contour(m_previewContourIndex);
-        if (kin && !contour.workpieceEntry.isEmpty())
-            transform = kin->computeWpcTransform(contour.workpieceEntry);
+        if (kin && !toolpath.contour(m_previewContourIndex).workpieceEntry.isEmpty())
+            transform = kin->computeWpcTransform(toolpath.contour(m_previewContourIndex).workpieceEntry);
         applyLocalTransform(ctx, m_previewLeadInAis, transform);
     }
 }
@@ -178,13 +172,7 @@ int ToolpathRenderer::contourIndexForAis(const Handle(AIS_InteractiveObject)& ob
 {
     if (object.IsNull())
         return -1;
-
-    const AIS_InteractiveObject* objectPtr = object.get();
-    for (int i = 0; i < m_bundles.size(); ++i) {
-        if (m_bundles.at(i).contour.get() == objectPtr)
-            return i;
-    }
-
+    Q_UNUSED(object);
     return -1;
 }
 
@@ -235,7 +223,6 @@ void ToolpathRenderer::setVisible(GuiDocument* gd, bool visible)
     };
 
     for (const ContourAisBundle& bundle : m_bundles) {
-        toggle(bundle.contour);
         toggle(bundle.leadIn);
         toggle(bundle.normal);
     }
@@ -281,34 +268,8 @@ void ToolpathRenderer::eraseAis(GuiDocument* gd, Handle(AIS_Shape)& ais)
 
 void ToolpathRenderer::eraseBundle(GuiDocument* gd, ContourAisBundle& bundle)
 {
-    eraseAis(gd, bundle.contour);
     eraseAis(gd, bundle.leadIn);
     eraseAis(gd, bundle.normal);
-}
-
-void ToolpathRenderer::rebuildContourAis(GuiDocument* gd,
-                                         const LaserToolpath& tp,
-                                         int contourIndex)
-{
-    const Handle(AIS_InteractiveContext)& ctx = gd->context();
-    if (ctx.IsNull()) return;
-    if (contourIndex < 0 || contourIndex >= tp.contourCount()) return;
-    if (contourIndex >= m_bundles.size()) return;
-
-    ContourAisBundle& bundle = m_bundles[contourIndex];
-    eraseAis(gd, bundle.contour);
-
-    const LaserContour& contour = tp.contour(contourIndex);
-    if (!contour.enabled || contour.wire.IsNull())
-        return;
-
-    const Quantity_Color green(0.1, 0.8, 0.2, Quantity_TOC_RGB);
-    Handle(AIS_Shape) ais = new AIS_Shape(contour.wire);
-    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
-    ctx->SetColor(ais, green, Standard_False);
-    ctx->SetWidth(ais, 3.0, Standard_False);
-    ctx->Activate(ais, 0, Standard_False);
-    bundle.contour = ais;
 }
 
 void ToolpathRenderer::rebuildLeadInAis(GuiDocument* gd,
@@ -436,9 +397,6 @@ void ToolpathRenderer::rebuildPreviewAis(GuiDocument* gd,
 void ToolpathRenderer::rebuildContourMirror()
 {
     m_contourAis.clear();
-    m_contourAis.reserve(m_bundles.size());
-    for (const ContourAisBundle& bundle : m_bundles)
-        m_contourAis.append(bundle.contour);
 }
 
 void ToolpathRenderer::redraw(GuiDocument* gd)

@@ -64,12 +64,20 @@ bool runPowerShellArchiveCommand(const QString& script,
     if (!process.waitForStarted(10000)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法启动 PowerShell zip 后端");
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "PowerShell archive backend failed to start");
         return false;
     }
     process.waitForFinished(-1);
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        const QString message = processError(process);
         if (errorMsg)
-            *errorMsg = processError(process);
+            *errorMsg = message;
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "PowerShell archive command failed status={} code={} message={}",
+                 static_cast<int>(process.exitStatus()),
+                 process.exitCode(),
+                 message.toStdString());
         return false;
     }
     return true;
@@ -78,6 +86,8 @@ bool runPowerShellArchiveCommand(const QString& script,
     Q_UNUSED(scriptArgs);
     if (errorMsg)
         *errorMsg = QStringLiteral("当前平台尚未集成 .lcnc zip 后端");
+    LCNC_ERR(lcnc::LogCode::Generic,
+             "PowerShell archive backend is unavailable on this platform");
     return false;
 #endif
 }
@@ -88,6 +98,9 @@ bool archiveDirectoryToZip(const QString& sourceDir, const QString& archivePath,
     if (!QDir().mkpath(targetInfo.absolutePath())) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法创建项目包目录: %1").arg(targetInfo.absolutePath());
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to create package directory '{}'",
+                 targetInfo.absolutePath().toStdString());
         return false;
     }
 
@@ -95,23 +108,37 @@ bool archiveDirectoryToZip(const QString& sourceDir, const QString& archivePath,
     if (!archiveTemp.isValid()) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法创建 .lcnc 临时压缩目录");
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to create temporary .lcnc archive directory");
         return false;
     }
     const QString tempZip = QDir(archiveTemp.path()).filePath(QStringLiteral("package.zip"));
     const QString script = QStringLiteral(
         "$source=$args[0]; $dest=$args[1]; "
         "Compress-Archive -Path (Join-Path $source '*') -DestinationPath $dest -Force");
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "Archiving .lcnc staging directory source='{}' tempZip='{}' target='{}'",
+               sourceDir.toStdString(),
+               tempZip.toStdString(),
+               archivePath.toStdString());
     if (!runPowerShellArchiveCommand(script, {sourceDir, tempZip}, errorMsg))
         return false;
 
     if (QFileInfo::exists(archivePath) && !QFile::remove(archivePath)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法覆盖已有项目包: %1").arg(archivePath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to remove existing package '{}'",
+                 archivePath.toStdString());
         return false;
     }
     if (!QFile::copy(tempZip, archivePath)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法写入项目包: %1").arg(archivePath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to copy temporary package '{}' to '{}'",
+                 tempZip.toStdString(),
+                 archivePath.toStdString());
         return false;
     }
     return true;
@@ -123,19 +150,60 @@ bool extractZipToDirectory(const QString& archivePath, const QString& targetDir,
     if (!archiveTemp.isValid()) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法创建 .lcnc 临时解压目录");
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to create temporary .lcnc extract directory");
         return false;
     }
     const QString tempZip = QDir(archiveTemp.path()).filePath(QStringLiteral("package.zip"));
     if (!QFile::copy(archivePath, tempZip)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法读取项目包: %1").arg(archivePath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to copy package '{}' into temporary zip '{}'",
+                 archivePath.toStdString(),
+                 tempZip.toStdString());
         return false;
     }
 
     const QString script = QStringLiteral(
         "$source=$args[0]; $dest=$args[1]; "
         "Expand-Archive -Path $source -DestinationPath $dest -Force");
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "Extracting .lcnc archive source='{}' targetDir='{}'",
+               archivePath.toStdString(),
+               targetDir.toStdString());
     return runPowerShellArchiveCommand(script, {tempZip, targetDir}, errorMsg);
+}
+
+lcnc::LcncProjectManifest prepareSaveManifest(const LcncDocument& workpieceDocument,
+                                              const QFileInfo& packageInfo,
+                                              const lcnc::LcncProjectManifest& manifestTemplate,
+                                              const lcnc::ProjectSaveOptions& options)
+{
+    lcnc::LcncProjectManifest manifest = manifestTemplate;
+    const QString fallbackName = workpieceDocument.name().trimmed().isEmpty()
+        ? packageInfo.completeBaseName()
+        : workpieceDocument.name().trimmed();
+
+    if (manifest.schema.trimmed().isEmpty())
+        manifest.schema = QStringLiteral("lcnc.project");
+    if (manifest.formatVersion <= 0)
+        manifest.formatVersion = lcnc::LcncProjectManifest::kCurrentFormatVersion;
+    if (manifest.projectName.trimmed().isEmpty())
+        manifest.projectName = fallbackName;
+    if (manifest.documentName.trimmed().isEmpty())
+        manifest.documentName = manifest.projectName;
+    if (manifest.projectXcafPath.trimmed().isEmpty())
+        manifest.projectXcafPath = QStringLiteral("project.xbf");
+    if (manifest.camCacheDirectory.trimmed().isEmpty())
+        manifest.camCacheDirectory = QStringLiteral("cam/cache");
+
+    manifest.saveOptions = options;
+    const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    if (manifest.createdUtc.trimmed().isEmpty())
+        manifest.createdUtc = now;
+    manifest.savedUtc = now;
+    return manifest;
 }
 
 TCollection_ExtendedString occPath(const QString& path)
@@ -316,6 +384,21 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
                               const ProjectSaveOptions& options,
                               QString* errorMsg)
 {
+    LcncProjectManifest manifestTemplate;
+    manifestTemplate.sourceFilePath = workpieceDocument.filePath();
+    return save(workpieceDocument, machineDocument, camDocument,
+                path, manifestTemplate, options, nullptr, errorMsg);
+}
+
+bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
+                              const LcncDocument* machineDocument,
+                              const LcncDocument* camDocument,
+                              const QString& path,
+                              const LcncProjectManifest& manifestTemplate,
+                              const ProjectSaveOptions& options,
+                              LcncProjectManifest* savedManifest,
+                              QString* errorMsg)
+{
     const QFileInfo targetInfo(path);
     const bool writeArchive = targetInfo.suffix().compare(QStringLiteral("lcnc"), Qt::CaseInsensitive) == 0
         && !targetInfo.isDir();
@@ -324,6 +407,9 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
     if (writeArchive && !tempPackage.isValid()) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法创建 .lcnc 临时项目目录");
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to create temporary .lcnc staging directory for '{}'",
+                 path.toStdString());
         return false;
     }
 
@@ -332,43 +418,59 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
     if (!packageDir.exists() && !QDir().mkpath(packagePath)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法创建项目目录: %1").arg(packagePath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to create .lcnc package directory '{}'",
+                 packagePath.toStdString());
         return false;
     }
 
-    LcncProjectManifest manifest;
     const QFileInfo packageInfo(writeArchive ? targetInfo.absoluteFilePath() : packagePath);
-    manifest.projectName = workpieceDocument.name().isEmpty() ? packageInfo.completeBaseName() : workpieceDocument.name();
-    manifest.documentName = manifest.projectName;
-    manifest.sourceFilePath = workpieceDocument.filePath();
-    manifest.saveOptions = options;
-    const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    manifest.createdUtc = now;
-    manifest.savedUtc = now;
+    LcncProjectManifest manifest = prepareSaveManifest(workpieceDocument, packageInfo, manifestTemplate, options);
+    if (!manifest.validate(errorMsg)) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Refusing to save invalid .lcnc manifest for '{}'",
+                 path.toStdString());
+        return false;
+    }
 
     const QString xcafPath = projectXcafPath(packagePath, manifest);
     if (!saveXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, options, errorMsg))
+                          xcafPath, options, errorMsg)) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to save .lcnc XCAF snapshot '{}'",
+                 xcafPath.toStdString());
         return false;
+    }
 
     const QString cacheDir = packageDir.filePath(manifest.camCacheDirectory);
     if (options.includeCamCache && !QDir().mkpath(cacheDir)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法创建 CAM 缓存目录: %1").arg(cacheDir);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to create .lcnc CAM cache directory '{}'",
+                 cacheDir.toStdString());
         return false;
     }
 
     if (!manifest.save(manifestPath(packagePath))) {
         if (errorMsg)
             *errorMsg = QStringLiteral("写入项目 manifest 失败: %1").arg(manifestPath(packagePath));
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to write .lcnc manifest '{}'",
+                 manifestPath(packagePath).toStdString());
         return false;
     }
 
     if (writeArchive && !archiveDirectoryToZip(packagePath, targetInfo.absoluteFilePath(), errorMsg))
         return false;
 
-    LCNC_INFO(LogCode::Generic,
-              "Saved .lcnc project package '{}'",
-              (writeArchive ? targetInfo.absoluteFilePath() : packagePath).toStdString());
+    if (savedManifest)
+        *savedManifest = manifest;
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "Saved .lcnc project package '{}' source='{}'",
+              (writeArchive ? targetInfo.absoluteFilePath() : packagePath).toStdString(),
+              manifest.sourceFilePath.toStdString());
     return true;
 }
 
@@ -395,6 +497,9 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
         if (!tempPackage.isValid()) {
             if (errorMsg)
                 *errorMsg = QStringLiteral("无法创建 .lcnc 临时解压目录");
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "Failed to create temporary extraction directory for '{}'",
+                     path.toStdString());
             return false;
         }
         if (!extractZipToDirectory(inputInfo.absoluteFilePath(), tempPackage.path(), errorMsg))
@@ -407,20 +512,34 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
     if (!manifest.load(manifestFile)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("读取项目 manifest 失败: %1").arg(manifestFile);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to read .lcnc manifest '{}'",
+                 manifestFile.toStdString());
         return false;
     }
-    if (!manifest.validate(errorMsg))
+    if (!manifest.validate(errorMsg)) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Invalid .lcnc manifest '{}'",
+                 manifestFile.toStdString());
         return false;
+    }
 
     const QString xcafPath = projectXcafPath(packagePath, manifest);
     if (!QFileInfo::exists(xcafPath)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("项目缺少 XCAF 数据文件: %1").arg(xcafPath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Missing .lcnc XCAF resource '{}'",
+                 xcafPath.toStdString());
         return false;
     }
     if (!loadXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, errorMsg))
+                          xcafPath, errorMsg)) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to load .lcnc XCAF snapshot '{}'",
+                 xcafPath.toStdString());
         return false;
+    }
 
     if (result) {
         result->manifest = manifest;
@@ -430,7 +549,7 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
             : manifest.documentName;
     }
 
-    LCNC_INFO(LogCode::Generic,
+    LCNC_INFO(lcnc::LogCode::Generic,
               "Loaded .lcnc project package '{}'",
               (readArchive ? inputInfo.absoluteFilePath() : packagePath).toStdString());
     return true;
