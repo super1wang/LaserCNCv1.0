@@ -4,6 +4,22 @@
 
 目标：在不破坏当前微内核边界的前提下，完成 `device / Process / Setting` 三个旧子模块的合理迁移。最终 Process 模块应支持完整外设迁移、统一参数界面、完整流程节点、流程树拖拽排序、双击编辑节点、节点编辑界面迁移，以及面向仿真和真实设备的流程执行。
 
+## 0. 本轮 Phase 1-8 执行结果
+
+已完成目标框架的可运行闭环，后续重点从“搭框架”转为“迁移旧业务细节和真实 SDK adapter”：
+
+- Phase 1：`ProcessModule` 已移除旧 UI 树依赖，流程新建/加载/保存/运行只通过 `ProcessFlowDocument` / `ProcessFlowStore`。
+- Phase 2：`ProcessFlowModel`、`ProcessFlowTreeView`、`ProcessNodeRegistry` 已接入，右键菜单、默认节点、Info 摘要、拖放放置规则均统一走 registry。
+- Phase 3：`ProcessSettingsDialog` 已是左树右页，页面覆盖 Process、Motion Controller、Laser、Axis、Tool、IO、Gas、Water、Monitor、LoadingPos、Camera、Internet；`ProcessSettings` 已持久化对应基础字段。
+- Phase 4：所有当前 `ProcessNodeType` 已有 registry metadata/defaults/executor key；节点编辑器已为运动、切割、IO、视觉、测量、逻辑和结构节点提供 typed 参数控件，并保留通用参数表兜底。
+- Phase 5：`ProcessWorkflowExecutor` 已按流程树异步推进节点，Run/Pause/Resume/Stop/EStop 可控制流程树运行，节点状态会回写并刷新 UI。
+- Phase 6：新增 `ILaserDevice`、`IProcessIo`、`IProcessAuxDevice`；`ProcessDeviceManager` 拥有仿真激光和仿真 IO，EnergySwitch/IO 节点可驱动 simulator；真实 SDK 入口通过 CMake option 默认关闭。
+- Phase 7：`ICamFacade` 已暴露只读刀路摘要，Cutting/OverCutting 支持参数校验、CAM dry-run 反馈和无刀路失败边界。
+- Phase 8：旧轻量树兼容源已退出 CMake，文档和 `实施进度.md` 已按当前框架同步。
+- 验证：`cmake --build build --config Debug -- /m /nologo` 通过，相关源码 `get_errors` 无错误。
+
+剩余工作主要是旧 Setting 复杂表、真实 Pharos/IPG/Raycus/ACS/GTN/BDAQ adapter、真实相机/测量服务、非 dry-run 切割实控和更细粒度执行恢复。
+
 ## 1. 总目标
 
 ### 1.1 用户功能目标
@@ -44,6 +60,14 @@
 - 已支持流程树 TOML 保存/加载，结构为 `Process.items`。
 - 已把流程新建/加载/保存命令接入 Ribbon，并通过 `IProcessFacade` 转到 `ProcessModule`。
 
+### 已完成：workflow 数据模型第一步
+
+- 已新增 `workflow/process_node_type.h`，收敛新流程节点类型与节点状态枚举。
+- 已新增 `workflow/process_node.*`，为流程节点提供 stable id、类型、名称、启用状态、运行状态、参数和子节点。
+- 已新增 `workflow/process_flow_document.*`，作为独立于 UI 树的流程业务事实源。
+- 已新增 `workflow/process_flow_store.*`，支持新 `Process.nodes` schema，并兼容读取旧 `Process.items`。
+- `ProcessModule::newProcess/loadProcess/saveProcess` 已改为优先操作 workflow document/store，同时用旧流程树做过渡 UI 同步。
+
 ### 已完成：参数第一阶段
 
 - 已新增 `ProcessSettings`，持久化基础 process/motion/laser 参数。
@@ -67,14 +91,13 @@
 
 | 区域 | 当前缺口 | 风险 |
 | --- | --- | --- |
-| 模块边界 | `ProcessModule` 持有 `ProcessTreeView*` | module 依赖 UI，后续执行/保存难以测试 |
-| 流程树模型 | 节点无 stable id，拖拽 API 未完整实现 | 保存、拖动、执行定位容易不稳定 |
-| 节点迁移 | 只支持 7 个轻量节点 | 不能满足切割和完整工艺流程 |
-| 节点编辑 | 双击未打开编辑器 | 节点参数不能配置 |
-| 参数界面 | 当前是 tab 结构 | 不符合统一左树右页要求 |
-| 参数数据 | 只覆盖少数字段 | 旧工艺、轴、IO、气、水、相机参数缺失 |
-| 外设 | 只有仿真设备目录 | 无法连接真实控制器/激光器 |
-| 执行引擎 | 新执行器未建立 | 流程树只能编辑保存，不能真实运行 |
+| 模块边界 | 新边界已建立；真实 adapter 尚未迁入 | SDK 接入时需保持 option/offline 构建 |
+| 流程树模型 | stable id、拖放、状态回写已完成 | 仍需手工 smoke 覆盖复杂嵌套流程 |
+| 节点迁移 | 全部当前节点已有 metadata/defaults/typed 编辑 | 旧专用 UI 和复杂校验仍需继续迁移 |
+| 参数界面 | 左树右页基础页已完成 | 旧 Setting 复杂列表和设备详情页未完全迁移 |
+| 参数数据 | 基础字段已覆盖 | 旧工艺全量字段、版本迁移和 schema 校验待补 |
+| 外设 | 仿真激光/IO 已闭环 | 真实控制器、激光器、BDAQ、相机 adapter 未启用 |
+| 执行引擎 | QTimer 顺序执行和按钮控制已完成 | 细粒度暂停恢复、并行/条件语义和真实节点 executor 待增强 |
 | 旧依赖 | 旧源码仍引用 Service、DT、Vision、LibreCAD、Boost、SDK | 直接编译会破坏微内核边界和构建稳定性 |
 
 ## 4. 目标架构拆分

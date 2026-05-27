@@ -2085,6 +2085,18 @@ bool CamModule::hasToolpath() const
     return m_toolpath.contourCount() > 0;
 }
 
+int CamModule::toolpathContourCount() const
+{
+    return m_toolpath.contourCount();
+}
+
+int CamModule::toolpathContourPointCount(int contourIndex) const
+{
+    if (contourIndex < 0 || contourIndex >= m_toolpath.contourCount())
+        return 0;
+    return static_cast<int>(m_toolpath.contour(contourIndex).points.size());
+}
+
 void CamModule::setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double entryParam)
 {
     if (contourIdx < 0 || contourIdx >= m_toolpath.contourCount()) return;

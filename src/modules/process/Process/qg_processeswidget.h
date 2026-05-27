@@ -1,8 +1,12 @@
 #pragma once
 
 #include <QWidget>
-#include "ui_qg_processeswidget.h"
-//#include "service.h"
+
+namespace lcnc::process {
+class ProcessFlowDocument;
+class ProcessFlowModel;
+class ProcessFlowTreeView;
+}
 
 class QG_ProcessesWidget : public QWidget
 {
@@ -12,10 +16,11 @@ public:
 	QG_ProcessesWidget(QWidget* parent = 0, const char* name = 0/*, Service* pService = nullptr*/);
 	~QG_ProcessesWidget();
 
-	ProcessTreeView*			GetTreeView();
+	void					setFlowDocument(lcnc::process::ProcessFlowDocument* document);
+	void					reloadFlowModel();
+	lcnc::process::ProcessFlowTreeView* flowTreeView() const { return m_flowTreeView; }
 
 private:
-
-	Ui::QG_dlgProcessesClass	ui;
-	//Service* m_pService;
+	lcnc::process::ProcessFlowModel* m_flowModel{nullptr};
+	lcnc::process::ProcessFlowTreeView* m_flowTreeView{nullptr};
 };

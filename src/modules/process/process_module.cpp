@@ -4,9 +4,13 @@
 #include "core/kernel/service_registry.h"
 #include "core/kinematics/i_motion_controller.h"
 #include "core/logging/logger.h"
-#include "modules/process/Process/ProcessModule/Process_TreeView.h"
+#include "modules/cam/i_cam_facade.h"
 #include "modules/process/controllers/simulation_motion_controller.h"
+#include "modules/process/device/i_laser_device.h"
+#include "modules/process/device/i_process_io.h"
 #include "modules/process/device/process_device_manager.h"
+#include "modules/process/execution/process_workflow_executor.h"
+#include "modules/process/workflow/process_flow_store.h"
 
 #include <QList>
 #include <QTimer>
@@ -109,12 +113,73 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     kernel.services().registerService<ProcessModule>(svc);
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
     kernel.services().registerService<lcnc::IProcessFacade>(facade);
+    m_camFacade = kernel.services().getService<lcnc::ICamFacade>();
 
     // 加载持久化设置（首次运行则使用默认值）并同步到运行时状态。
     m_settings.loadDefault();
     m_simulationMode = m_settings.simulationMode();
     m_deviceManager = std::make_unique<lcnc::process::ProcessDeviceManager>();
     m_deviceManager->syncFromSettings(m_settings);
+    m_workflowExecutor = std::make_unique<lcnc::process::ProcessWorkflowExecutor>(this);
+    m_workflowExecutor->setToolpathSnapshotProvider([this] {
+        lcnc::process::ProcessToolpathSnapshot snapshot;
+        if (!m_camFacade) {
+            snapshot.description = tr("未连接 CAM facade");
+            return snapshot;
+        }
+
+        snapshot.available = m_camFacade->hasToolpath();
+        snapshot.contourCount = m_camFacade->toolpathContourCount();
+        for (int index = 0; index < snapshot.contourCount; ++index)
+            snapshot.totalPointCount += m_camFacade->toolpathContourPointCount(index);
+        snapshot.description = snapshot.available
+            ? tr("CAM 刀路可用")
+            : tr("CAM 当前无刀路");
+        return snapshot;
+    });
+    connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::messageLogged,
+            this, &ProcessModule::setStatusMessage);
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeStateChanged,
+            this, [this](const QString&) { emit processFlowChanged(); });
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeStarted,
+            this, [this](const QString&) { emit processFlowChanged(); });
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeFinished,
+            this, [this](const QString&) { emit processFlowChanged(); });
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeFailed,
+            this, [this](const QString&, const QString& message) {
+            emit processFlowChanged();
+            setState(State::Error, tr("流程节点失败: %1").arg(message));
+            });
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::axisPositionRequested,
+            this, &ProcessModule::setAxisPosition);
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::laserEnergyRequested,
+                this, [this](double value) {
+                    if (!m_deviceManager || !m_deviceManager->laserDevice())
+                        return;
+                    QString errorMessage;
+                    if (!m_deviceManager->laserDevice()->setEnergy(value, &errorMessage)) {
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "process.executor: set laser energy failed: {}",
+                                  errorMessage.toStdString());
+                    }
+                });
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::digitalOutputRequested,
+                this, [this](const QString& channel, bool value) {
+                    if (!m_deviceManager || !m_deviceManager->processIo())
+                        return;
+                    QString errorMessage;
+                    if (!m_deviceManager->processIo()->setDigitalOutput(channel, value, &errorMessage)) {
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "process.executor: set digital output failed: {}",
+                                  errorMessage.toStdString());
+                    }
+                });
+        connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::workflowFinished,
+            this, [this] {
+            m_simTimer->stop();
+            setState(State::Idle, tr("流程运行完成"));
+            emit processFlowChanged();
+            });
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 
     // 注册仿真运动控制器作为 IMotionController 服务（默认为活动控制器）。
@@ -144,6 +209,8 @@ void ProcessModule::stop()
     if (m_simController) {
         m_simController->stop();
     }
+    if (m_workflowExecutor)
+        m_workflowExecutor->stop();
     m_initialized = false;
     LCNC_INFO(lcnc::LogCode::Generic, "ProcessModule stop done");
 }
@@ -272,6 +339,27 @@ void ProcessModule::runStart()
         return;
     }
 
+    if (m_state == State::Paused) {
+        if (m_workflowExecutor)
+            m_workflowExecutor->resume();
+        if (m_simulationMode)
+            m_simTimer->start(std::max(30, static_cast<int>(100.0 / std::max(0.1, m_feedOverride))));
+        setState(State::Running, tr("运行继续"));
+        return;
+    }
+
+    if (m_workflowExecutor) {
+        QString errorMessage;
+        if (!m_workflowExecutor->start(m_processFlowDocument, &errorMessage)) {
+            setState(State::Error, tr("流程启动失败: %1").arg(errorMessage));
+            return;
+        }
+        if (m_workflowExecutor->state() == lcnc::process::ProcessWorkflowExecutor::State::Error)
+            return;
+        if (m_workflowExecutor->state() == lcnc::process::ProcessWorkflowExecutor::State::Idle)
+            return;
+    }
+
     if (m_simulationMode) {
         const int intervalMs = std::max(30, static_cast<int>(100.0 / std::max(0.1, m_feedOverride)));
         m_simTimer->start(intervalMs);
@@ -287,12 +375,16 @@ void ProcessModule::runPause()
         return;
 
     m_simTimer->stop();
+    if (m_workflowExecutor)
+        m_workflowExecutor->pause();
     setState(State::Paused, tr("运行已暂停"));
 }
 
 void ProcessModule::runStop()
 {
     m_simTimer->stop();
+    if (m_workflowExecutor)
+        m_workflowExecutor->stop();
     setState(State::Idle,
              m_simulationMode ? tr("仿真已停止") : tr("运行已停止"));
 }
@@ -300,6 +392,8 @@ void ProcessModule::runStop()
 void ProcessModule::emergencyStop()
 {
     m_simTimer->stop();
+    if (m_workflowExecutor)
+        m_workflowExecutor->emergencyStop();
     setState(State::EmergencyStop, tr("急停已触发"));
 }
 
@@ -312,70 +406,47 @@ void ProcessModule::resetEmergencyStop()
 
 void ProcessModule::newProcess()
 {
-    if (!m_processTreeView) {
-        setStatusMessage(tr("流程树尚未初始化"));
-        return;
-    }
-
-    m_processTreeView->CreateNewFileData();
+    m_processFlowDocument.clear();
+    m_processFlowDocument.markClean();
+    emit processFlowChanged();
     setStatusMessage(tr("已新建流程"));
 }
 
 bool ProcessModule::loadProcess(const QString& filePath)
 {
-    if (!m_processTreeView) {
-        setStatusMessage(tr("流程树尚未初始化"));
-        return false;
-    }
-
     if (filePath.trimmed().isEmpty()) {
         setStatusMessage(tr("流程文件路径为空"));
         return false;
     }
 
-    try {
-        const toml::value root = toml::parse(filePath.toStdString());
-        if (!m_processTreeView->LoadValue(root)) {
-            setStatusMessage(tr("流程文件格式无效"));
-            return false;
-        }
-    } catch (const std::exception& e) {
+    QString errorMessage;
+    if (!lcnc::process::ProcessFlowStore::loadFromFile(filePath, m_processFlowDocument, &errorMessage)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "ProcessModule: load process failed: {}",
-                  e.what());
-        setStatusMessage(tr("加载流程失败: %1").arg(QString::fromLocal8Bit(e.what())));
+                  errorMessage.toStdString());
+        setStatusMessage(tr("加载流程失败: %1").arg(errorMessage));
         return false;
     }
 
+    emit processFlowChanged();
     setStatusMessage(tr("已加载流程: %1").arg(filePath));
     return true;
 }
 
 bool ProcessModule::saveProcess(const QString& filePath)
 {
-    if (!m_processTreeView) {
-        setStatusMessage(tr("流程树尚未初始化"));
-        return false;
-    }
-
     if (filePath.trimmed().isEmpty()) {
         setStatusMessage(tr("流程文件路径为空"));
         return false;
     }
 
-    toml::value root;
-    if (!m_processTreeView->SaveValue(root)) {
-        setStatusMessage(tr("流程数据为空或无效"));
+    QString errorMessage;
+    if (!lcnc::process::ProcessFlowStore::saveToFile(filePath, m_processFlowDocument, &errorMessage)) {
+        setStatusMessage(tr("保存流程失败: %1").arg(errorMessage));
         return false;
     }
 
-    std::ofstream out(filePath.toStdString(), std::ios::binary);
-    if (!out.is_open()) {
-        setStatusMessage(tr("无法写入流程文件: %1").arg(filePath));
-        return false;
-    }
-    out << toml::format(root);
-
+    m_processFlowDocument.markClean();
     setStatusMessage(tr("已保存流程: %1").arg(filePath));
     return true;
 }
@@ -443,16 +514,6 @@ void ProcessModule::reloadDeviceSettings()
     setStatusMessage(tr("设备配置已更新: %1 / %2").arg(
         m_deviceManager->activeMotionController(),
         m_deviceManager->activeLaserDevice()));
-}
-
-void ProcessModule::setProcessTreeView(ProcessTreeView* treeView)
-{
-    m_processTreeView = treeView;
-}
-
-ProcessTreeView* ProcessModule::processTreeView() const
-{
-    return m_processTreeView;
 }
 
 QString ProcessModule::statusMessage() const

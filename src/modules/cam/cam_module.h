@@ -228,7 +228,9 @@ public:
     void clearToolpath();
     const LaserToolpath& toolpath() const;
     LaserToolpath& toolpathRef();
-    bool hasToolpath() const;
+    bool hasToolpath() const override;
+    int toolpathContourCount() const override;
+    int toolpathContourPointCount(int contourIndex) const override;
 
     /// Set lead-in entry point for a specific contour.
     void setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double entryParam);

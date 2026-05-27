@@ -50,6 +50,75 @@ public:
     double laserPulseWidth() const { return m_laserPulseWidth; }
     void setLaserPulseWidth(double value);
 
+    double axisTravelX() const { return m_axisTravelX; }
+    void setAxisTravelX(double value);
+
+    double axisTravelY() const { return m_axisTravelY; }
+    void setAxisTravelY(double value);
+
+    double axisTravelZ() const { return m_axisTravelZ; }
+    void setAxisTravelZ(double value);
+
+    double axisMaxVelocity() const { return m_axisMaxVelocity; }
+    void setAxisMaxVelocity(double value);
+
+    double axisAcceleration() const { return m_axisAcceleration; }
+    void setAxisAcceleration(double value);
+
+    double toolFeedRate() const { return m_toolFeedRate; }
+    void setToolFeedRate(double value);
+
+    double toolKerfWidth() const { return m_toolKerfWidth; }
+    void setToolKerfWidth(double value);
+
+    int pierceDelayMs() const { return m_pierceDelayMs; }
+    void setPierceDelayMs(int value);
+
+    QString ioDefaultChannel() const { return m_ioDefaultChannel; }
+    void setIoDefaultChannel(const QString& channel);
+
+    bool ioDefaultValue() const { return m_ioDefaultValue; }
+    void setIoDefaultValue(bool value);
+
+    QString assistGas() const { return m_assistGas; }
+    void setAssistGas(const QString& gas);
+
+    double gasPressure() const { return m_gasPressure; }
+    void setGasPressure(double value);
+
+    bool waterCoolingEnabled() const { return m_waterCoolingEnabled; }
+    void setWaterCoolingEnabled(bool enabled);
+
+    double waterMinFlow() const { return m_waterMinFlow; }
+    void setWaterMinFlow(double value);
+
+    bool monitorEnabled() const { return m_monitorEnabled; }
+    void setMonitorEnabled(bool enabled);
+
+    int monitorIntervalMs() const { return m_monitorIntervalMs; }
+    void setMonitorIntervalMs(int value);
+
+    double loadingPositionX() const { return m_loadingPositionX; }
+    void setLoadingPositionX(double value);
+
+    double loadingPositionY() const { return m_loadingPositionY; }
+    void setLoadingPositionY(double value);
+
+    double loadingPositionZ() const { return m_loadingPositionZ; }
+    void setLoadingPositionZ(double value);
+
+    QString cameraName() const { return m_cameraName; }
+    void setCameraName(const QString& name);
+
+    int cameraExposureMs() const { return m_cameraExposureMs; }
+    void setCameraExposureMs(int value);
+
+    QString internetHost() const { return m_internetHost; }
+    void setInternetHost(const QString& host);
+
+    int internetPort() const { return m_internetPort; }
+    void setInternetPort(int value);
+
 protected:
     void readFrom(const toml::value& root) override;
     void writeTo(toml::value& root) const override;
@@ -65,6 +134,29 @@ private:
     double  m_laserEnergy{0.0};
     double  m_laserFrequency{0.0};
     double  m_laserPulseWidth{0.0};
+    double  m_axisTravelX{300.0};
+    double  m_axisTravelY{300.0};
+    double  m_axisTravelZ{100.0};
+    double  m_axisMaxVelocity{50.0};
+    double  m_axisAcceleration{200.0};
+    double  m_toolFeedRate{10.0};
+    double  m_toolKerfWidth{0.05};
+    int     m_pierceDelayMs{0};
+    QString m_ioDefaultChannel{QStringLiteral("DO0")};
+    bool    m_ioDefaultValue{true};
+    QString m_assistGas{QStringLiteral("Air")};
+    double  m_gasPressure{0.0};
+    bool    m_waterCoolingEnabled{false};
+    double  m_waterMinFlow{0.0};
+    bool    m_monitorEnabled{true};
+    int     m_monitorIntervalMs{500};
+    double  m_loadingPositionX{0.0};
+    double  m_loadingPositionY{0.0};
+    double  m_loadingPositionZ{0.0};
+    QString m_cameraName{QStringLiteral("SimulatorCamera")};
+    int     m_cameraExposureMs{30};
+    QString m_internetHost{QStringLiteral("127.0.0.1")};
+    int     m_internetPort{0};
 };
 
 } // namespace lcnc

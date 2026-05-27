@@ -29,6 +29,11 @@ public:
     /// 模块持有的持久化配置（cam.toml）。
     virtual CamConfig& config() = 0;
     virtual const CamConfig& config() const = 0;
+
+    /// Process dry-run 只读查询；默认实现表示当前没有可用刀路。
+    virtual bool hasToolpath() const { return false; }
+    virtual int toolpathContourCount() const { return 0; }
+    virtual int toolpathContourPointCount(int contourIndex) const { Q_UNUSED(contourIndex); return 0; }
 };
 
 } // namespace lcnc

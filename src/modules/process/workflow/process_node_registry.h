@@ -1,0 +1,48 @@
+#pragma once
+
+#include "modules/process/workflow/process_node.h"
+
+#include <QVariantMap>
+#include <QVector>
+
+namespace lcnc::process {
+
+struct ProcessNodeDescriptor
+{
+    ProcessNodeType type{ProcessNodeType::Base};
+    QString displayName;
+    QString category;
+    bool canHaveChildren{false};
+    bool topLevelOnly{false};
+    QVariantMap defaultParameters;
+    QString executorKey;
+};
+
+class ProcessNodeRegistry
+{
+public:
+    static const ProcessNodeRegistry& instance();
+
+    const QVector<ProcessNodeDescriptor>& descriptors() const { return m_descriptors; }
+    const ProcessNodeDescriptor* descriptor(ProcessNodeType type) const;
+    QVector<ProcessNodeType> addableTypes() const;
+
+    ProcessNode createDefaultNode(ProcessNodeType type) const;
+    QString summary(const ProcessNode& node) const;
+    bool canPlaceNode(ProcessNodeType type, const ProcessNodeType* parentType) const;
+    bool canHaveChildren(ProcessNodeType type) const;
+
+private:
+    ProcessNodeRegistry();
+    void registerBuiltIns();
+    void add(ProcessNodeType type,
+             const QString& category,
+             bool canHaveChildren,
+             bool topLevelOnly,
+             QVariantMap defaults = {},
+             const QString& executorKey = QString());
+
+    QVector<ProcessNodeDescriptor> m_descriptors;
+};
+
+} // namespace lcnc::process

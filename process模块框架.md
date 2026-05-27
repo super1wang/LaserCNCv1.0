@@ -4,6 +4,21 @@
 
 本文记录当前 `src/modules/process` 的真实完成状态、现有框架边界、已接入能力、遗留导入代码和下一阶段重构约束。后续实现以本文、`代码规范.md`、`微内核框架结构.md` 和 `process模块重构计划.md` 为准。
 
+## 0. 2026-05-26 阶段 1-8 实施后状态
+
+本轮已把 Process 模块推进到可运行的新框架闭环。若后文历史审阅缺口与本节冲突，以本节和 `实施进度.md` 为准。
+
+- `ProcessModule` 已彻底移除旧 `ProcessTreeView*` 反向依赖，新建、加载、保存和运行只以 `ProcessFlowDocument` / `ProcessFlowStore` 为事实源。
+- `ui/process_flow_model.*`、`ui/process_flow_tree_view.*` 已承接左侧执行页，支持 stable id、拖放、右键增删启禁、清空、保存/加载、双击编辑和运行状态刷新。
+- `workflow/process_node_registry.*` 统一管理全部当前节点的 metadata、默认参数、摘要、可放置规则和执行 key；流程树新增菜单、Info 列和拖放规则均从 registry 取数。
+- `ui/process_node_edit_dialog.*` 已支持 Wait、Axis 以及 AxesMove、Feeding、Cutting、OverCutting、EnergySwitch、IO、Camera、Measurement、MarkAcquire、Alignment、AutoFocus、Monitor、Commands、Loop、RunGroup、If、Compare、Calculation 等节点的 typed 参数编辑；未知参数仍可通过通用参数表兜底。
+- `Setting/process_settings_dialog.*` 已改为左侧树 + 右侧 `QStackedWidget`，页面覆盖 Process、Motion Controller、Laser、Axis、Tool、IO、Gas、Water、Monitor、LoadingPos、Camera、Internet 的基础字段。
+- `ProcessSettings` 已扩展对应基础参数并持久化到 `process.toml`；复杂旧 Setting 表、设备列表页和旧权限逻辑仍待逐项迁移。
+- `device/process_device_manager.*` 已拥有仿真激光 `SimulatorLaserDevice` 和仿真 IO `SimulatorProcessIo`，真实 ACS/GTN/BDAQ/激光 adapter 通过 SDK-off CMake option 保持默认不可用。
+- `ProcessWorkflowExecutor` 已能按流程树顺序异步推进节点，Run/Pause/Resume/Stop/EStop 按钮控制执行生命周期，节点状态回写流程树；Axis/AxesMove、EnergySwitch、IO、Cutting/OverCutting 已有仿真副作用或明确 dry-run 反馈。
+- `ICamFacade` 暴露只读刀路摘要，Cutting dry-run 可读取 CAM 当前轮廓/点数；非 dry-run 切割在无刀路时明确失败，不直接依赖 CAM UI。
+- Debug 构建已多次验证通过；当前仍仅可能出现既有 `qrc_resources.cpp.obj : warning LNK4099` PDB 警告。
+
 ## 1. 当前定位
 
 Process 模块在 LaserCNC 微内核中的职责是加工执行、流程编排、运行状态、参数管理与外设控制。当前工程已经把 Process 挂入模块系统：
@@ -16,10 +31,13 @@ Kernel
             ├─ IMotionController service: SimulationMotionController
             ├─ ProcessSettings
             ├─ ProcessDeviceManager
-            └─ 临时 UI 桥接: ProcessTreeView*
+            ├─ ProcessFlowDocument
+            ├─ ProcessNodeRegistry
+            ├─ ProcessWorkflowExecutor
+            └─ CAM toolpath snapshot provider
 ```
 
-当前实现处于迁移第一阶段：能构建、能显示执行页、能做基础流程树保存/加载、能打开轻量参数界面、能提供仿真运动控制器和仿真设备目录；但旧程序中的完整流程执行引擎、完整节点编辑界面、完整参数树、真实外设驱动尚未完成新框架迁移。
+当前实现已形成“流程文档 + registry + model/view + typed editor + executor + simulator device”的新闭环。旧程序中的真实 SDK adapter、复杂 Setting 表、真实相机/测量服务和完整切割实控逻辑仍需在新接口后继续迁移。
 
 ## 2. 当前目录状态
 
@@ -35,8 +53,21 @@ src/modules/process/
 │   ├── MotionControl/*                   # 旧 yuncocore2 运动控制源码，已导入但未纳入 CMake
 │   └── Laser/*                           # 旧 yuncocore2 激光器源码，已导入但未纳入 CMake
 ├── settings/process_settings.*           # 新 Process TOML 配置入口
+├── workflow/
+│   ├── process_node_type.h               # 新流程节点类型与状态枚举
+│   ├── process_node.h/.cpp               # 新流程节点数据结构，包含 stable id
+│   ├── process_flow_document.h/.cpp      # 新流程树业务事实源
+│   └── process_flow_store.h/.cpp         # 新/旧流程 TOML 读写与兼容转换
+├── execution/
+│   └── process_workflow_executor.*       # 新流程执行器壳，负责运行计划准备和生命周期状态
+├── ui/
+│   ├── process_flow_model.*              # 新流程文档 QAbstractItemModel adapter
+│   ├── process_flow_tree_view.*          # 新流程树 view，右键、拖放、双击编辑、文件操作
+│   ├── process_node_edit_dialog.*        # 通用节点编辑器壳
+│   ├── widget_laser_control.*            # 右侧运行/点动/安全控制面板
+│   └── ribbon_process_tab.*              # Process ribbon tab
 ├── Setting/
-│   ├── process_settings_dialog.*         # 当前编译的轻量参数对话框
+│   ├── process_settings_dialog.*         # 当前编译的左树右页参数对话框
 │   └── qg_/Setting_*                     # 旧参数界面源码，已导入但多数未纳入 CMake
 ├── Process/
 │   ├── qg_processeswidget.*              # 左侧“执行”页容器，当前编译
@@ -50,7 +81,7 @@ src/modules/process/
     └── legacy_message_adapter.h          # 旧 MessageModule 最小日志兼容入口
 ```
 
-当前 `CMakeLists.txt` 只纳入了安全的轻量文件：`process_module.cpp`、`simulation_motion_controller.cpp`、`process_device_manager.cpp`、`process_settings.cpp`、`process_settings_dialog.cpp`、`qg_processeswidget.cpp/.ui`、`mimeData.cpp`、`treeitem.cpp`、`treemodel.cpp`、`Process_TreeView.cpp`、`commands_process.cpp`、`widget_laser_control.cpp`、`ribbon_process_tab.cpp`。
+当前 `CMakeLists.txt` 纳入的是新框架文件与安全兼容文件：`process_module.cpp`、`simulation_motion_controller.cpp`、`process_device_manager.cpp`、`execution/process_workflow_executor.cpp`、`process_settings.cpp`、`workflow/process_node.cpp`、`workflow/process_flow_document.cpp`、`workflow/process_flow_store.cpp`、`process_settings_dialog.cpp`、`ui/process_flow_model.cpp`、`ui/process_flow_tree_view.cpp`、`ui/process_node_edit_dialog.cpp`、`qg_processeswidget.cpp/.ui`、旧树兼容文件、`commands_process.cpp`、`widget_laser_control.cpp`、`ribbon_process_tab.cpp`。
 
 ## 3. 已完成能力
 
@@ -78,6 +109,7 @@ src/modules/process/
 - Ribbon 已注册流程命令：新建流程、加载流程、保存流程。
 - Ribbon 已注册参数命令：加工设置、运动参数、激光参数。
 - Ribbon 已注册运行/安全命令：运行、暂停、停止、回零、急停、复位急停、连接、断开、仿真模式。
+- `ProcessModule::newProcess/loadProcess/saveProcess` 已开始通过 `ProcessFlowDocument` + `ProcessFlowStore` 读写流程数据；旧 `ProcessTreeView` 仅作为过渡 UI 同步。
 
 当前不足：
 
@@ -93,6 +125,7 @@ src/modules/process/
 - 当前 `ProcessTreeView` 为 Qt6 友好的轻量实现，支持右键添加、删除、启用、禁用、清空、保存、加载。
 - 当前可添加节点：`Start`、`Stop`、`Wait`、`Axis`、`Group`、`If`、`Loop`。
 - `SaveValue()` / `LoadValue()` 使用 TOML，结构为 `Process.items`，可保存类型、状态、标签、信息和子节点。
+- 新 `ProcessFlowStore` 输出 `Process.schemaVersion` 和 `Process.nodes`，同时保留 `Process.items` 兼容旧流程树。
 - `GetTreeItemVector()` 可导出 `std::vector<Item>`，用于后续执行引擎适配。
 
 当前不足：

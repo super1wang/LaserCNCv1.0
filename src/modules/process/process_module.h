@@ -11,14 +11,17 @@
 #include "core/kernel/i_service.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/settings/process_settings.h"
+#include "modules/process/workflow/process_flow_document.h"
 
 class QTimer;
-class ProcessTreeView;
 
 namespace lcnc::process {
 class ProcessDeviceManager;
 class SimulationMotionController;
+class ProcessWorkflowExecutor;
 }
+
+namespace lcnc { class ICamFacade; }
 
 /**
  * @brief Process module singleton — manages execution process, peripherals, and parameters.
@@ -88,11 +91,11 @@ public:
     lcnc::ProcessSettings& settings() { return m_settings; }
     const lcnc::ProcessSettings& settings() const { return m_settings; }
 
+    lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
+    const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
+
     lcnc::process::ProcessDeviceManager* deviceManager() const { return m_deviceManager.get(); }
     void reloadDeviceSettings();
-
-    void setProcessTreeView(ProcessTreeView* treeView);
-    ProcessTreeView* processTreeView() const;
 
     QString statusMessage() const override;
 
@@ -103,6 +106,7 @@ signals:
     void axisPositionChanged(const QString& axisName, double value);
     void feedOverrideChanged(double factor);
     void statusMessageChanged(const QString& message);
+    void processFlowChanged();
 
 private slots:
     void onSimulationTick();
@@ -124,8 +128,10 @@ private:
     double m_feedOverride{1.0};
     double m_simPhase{0.0};
     QString m_statusMessage;
-    ProcessTreeView* m_processTreeView{nullptr};
+    lcnc::process::ProcessFlowDocument m_processFlowDocument;
     lcnc::ProcessSettings m_settings;
+    std::shared_ptr<lcnc::ICamFacade> m_camFacade;
     std::unique_ptr<lcnc::process::ProcessDeviceManager> m_deviceManager;
     std::unique_ptr<lcnc::process::SimulationMotionController> m_simController;
+    std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
 };

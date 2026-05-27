@@ -23,6 +23,30 @@ set(LCNC_SARIBBON_ROOT "F:/wangchao/SARibbon/bin_qt6.9.1_MSVC_x64" CACHE PATH "S
 set(SARibbonBar_DIR "${LCNC_SARIBBON_ROOT}/lib/cmake/SARibbonBar" CACHE PATH "SARibbonBar CMake package directory")
 find_package(SARibbonBar REQUIRED)
 
+# ─── Optional process device SDKs ─────────────────────────────────────────────
+option(LCNC_WITH_ACS "Enable ACS motion controller adapter" OFF)
+option(LCNC_WITH_GTN "Enable GTN motion controller adapter" OFF)
+option(LCNC_WITH_BDAQ "Enable BDAQ IO adapter" OFF)
+option(LCNC_WITH_REAL_LASER "Enable real laser adapters" OFF)
+
+set(LCNC_ACS_SDK_ROOT "" CACHE PATH "ACS SDK root")
+set(LCNC_GTN_SDK_ROOT "" CACHE PATH "GTN SDK root")
+set(LCNC_BDAQ_SDK_ROOT "" CACHE PATH "BDAQ SDK root")
+set(LCNC_REAL_LASER_SDK_ROOT "" CACHE PATH "Real laser SDK root or protocol support root")
+
+if(LCNC_WITH_ACS AND NOT EXISTS "${LCNC_ACS_SDK_ROOT}")
+    message(FATAL_ERROR "LCNC_WITH_ACS=ON requires LCNC_ACS_SDK_ROOT")
+endif()
+if(LCNC_WITH_GTN AND NOT EXISTS "${LCNC_GTN_SDK_ROOT}")
+    message(FATAL_ERROR "LCNC_WITH_GTN=ON requires LCNC_GTN_SDK_ROOT")
+endif()
+if(LCNC_WITH_BDAQ AND NOT EXISTS "${LCNC_BDAQ_SDK_ROOT}")
+    message(FATAL_ERROR "LCNC_WITH_BDAQ=ON requires LCNC_BDAQ_SDK_ROOT")
+endif()
+if(LCNC_WITH_REAL_LASER AND NOT EXISTS "${LCNC_REAL_LASER_SDK_ROOT}")
+    message(FATAL_ERROR "LCNC_WITH_REAL_LASER=ON requires LCNC_REAL_LASER_SDK_ROOT")
+endif()
+
 # ─── Sources ──────────────────────────────────────────────────────────────────
 set(SRCS_CORE
     src/core/logging/logger.cpp
@@ -112,17 +136,22 @@ set(SRCS_MODULES
     src/modules/process/process_module.cpp
     src/modules/process/controllers/simulation_motion_controller.cpp
     src/modules/process/device/process_device_manager.cpp
+    src/modules/process/device/simulator_laser_device.cpp
+    src/modules/process/device/simulator_process_io.cpp
     src/modules/process/settings/process_settings.cpp
+    src/modules/process/workflow/process_node.cpp
+    src/modules/process/workflow/process_node_registry.cpp
+    src/modules/process/workflow/process_flow_document.cpp
+    src/modules/process/workflow/process_flow_store.cpp
     src/modules/process/Setting/process_settings_dialog.cpp
+    src/modules/process/ui/process_flow_model.cpp
+    src/modules/process/ui/process_flow_tree_view.cpp
+    src/modules/process/ui/process_node_edit_dialog.cpp
     src/modules/process/Process/qg_processeswidget.cpp
-    src/modules/process/Process/qg_processeswidget.ui
-    src/modules/process/Process/ProcessModule/mimeData.cpp
-    src/modules/process/Process/ProcessModule/treeitem.cpp
-    src/modules/process/Process/ProcessModule/treemodel.cpp
-    src/modules/process/Process/ProcessModule/Process_TreeView.cpp
     src/modules/process/commands/commands_process.cpp
     src/modules/process/ui/widget_laser_control.cpp
     src/modules/process/ui/ribbon_process_tab.cpp
+    src/modules/process/execution/process_workflow_executor.cpp
 )
 
 set(SRCS_APP

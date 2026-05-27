@@ -448,7 +448,9 @@ void MainWindow::createLeftPanel()
     auto* processWidget = new QG_ProcessesWidget(m_leftTabs);
     m_processLeftPanel = processWidget;
     if (auto* process = m_appContext->processModule()) {
-        process->setProcessTreeView(processWidget->GetTreeView());
+        processWidget->setFlowDocument(&process->processFlowDocument());
+        connect(process, &ProcessModule::processFlowChanged,
+                processWidget, &QG_ProcessesWidget::reloadFlowModel);
     }
     m_leftTabs->addTab(m_projectExplorerTree, tr("项目"));
     m_leftTabs->addTab(m_processLeftPanel, tr("执行"));
