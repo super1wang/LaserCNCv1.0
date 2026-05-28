@@ -1,24 +1,151 @@
 #include "modules/process/Setting/process_settings_dialog.h"
 
+#include "modules/process/communication/ui/communication_settings_page.h"
 #include "modules/process/settings/process_settings.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QSet>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QXmlStreamReader>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 
 namespace lcnc::process {
 
 namespace {
+
+struct LegacyUiPage {
+    const char* pageId;
+    const char* title;
+    const char* resourcePath;
+};
+
+struct LegacyUiField {
+    QString objectName;
+    QString className;
+    QString label;
+    QStringList options;
+};
+
+const LegacyUiPage* legacyUiPages(int* count)
+{
+    static const LegacyUiPage pages[] = {
+        {"Setting", QT_TR_NOOP("Setting 全量"), ":/process/setting/Setting.ui"},
+        {"Setting_Tool", QT_TR_NOOP("Tool"), ":/process/setting/Setting_Tool.ui"},
+        {"Setting_Laser", QT_TR_NOOP("Laser"), ":/process/setting/Setting_Laser.ui"},
+        {"Setting_MotionControl", QT_TR_NOOP("Motion Control"), ":/process/setting/Setting_MotionControl.ui"},
+        {"Setting_Axis", QT_TR_NOOP("Axis"), ":/process/setting/Setting_Axis.ui"},
+        {"Setting_IOIndex", QT_TR_NOOP("IO Index"), ":/process/setting/Setting_IOIndex.ui"},
+        {"Setting_Gas", QT_TR_NOOP("Gas"), ":/process/setting/Setting_Gas.ui"},
+        {"Setting_Water", QT_TR_NOOP("Water"), ":/process/setting/Setting_Water.ui"},
+        {"Setting_Monitor", QT_TR_NOOP("Monitor"), ":/process/setting/Setting_Monitor.ui"},
+        {"Setting_LoadingPos", QT_TR_NOOP("Loading Pos"), ":/process/setting/Setting_LoadingPos.ui"},
+        {"Setting_Camera", QT_TR_NOOP("Camera"), ":/process/setting/Setting_Camera.ui"},
+        {"Setting_Internet", QT_TR_NOOP("Internet"), ":/process/setting/Setting_Internet.ui"},
+        {"qg_dlgpbasicsetting", QT_TR_NOOP("Process Basic"), ":/process/setting/qg_dlgpbasicsetting.ui"},
+        {"qg_dlgtbasicsetting", QT_TR_NOOP("Technology Basic"), ":/process/setting/qg_dlgtbasicsetting.ui"},
+        {"qg_dlgmotionsetting", QT_TR_NOOP("Motion Process"), ":/process/setting/qg_dlgmotionsetting.ui"},
+        {"qg_dlgcuttingprocesssetting", QT_TR_NOOP("Cutting Process"), ":/process/setting/qg_dlgcuttingprocesssetting.ui"},
+        {"qg_dlgautomationsetting", QT_TR_NOOP("Automation"), ":/process/setting/qg_dlgautomationsetting.ui"},
+        {"qg_dlgsensorsetting", QT_TR_NOOP("Sensor"), ":/process/setting/qg_dlgsensorsetting.ui"},
+        {"qg_dlgsignalsourcesetting", QT_TR_NOOP("Signal Source"), ":/process/setting/qg_dlgsignalsourcesetting.ui"},
+        {"qg_dlgjsonsetting", QT_TR_NOOP("JSON Signal"), ":/process/setting/qg_dlgjsonsetting.ui"},
+        {"qg_dlgsmcsetting", QT_TR_NOOP("SMC"), ":/process/setting/qg_dlgsmcsetting.ui"},
+        {"qg_dlgtcpsetting", QT_TR_NOOP("TCP"), ":/process/setting/qg_dlgtcpsetting.ui"},
+    };
+    if (count)
+        *count = static_cast<int>(sizeof(pages) / sizeof(pages[0]));
+    return pages;
+}
+
+bool isLegacyEditorClass(const QString& className)
+{
+    return className == QStringLiteral("QLineEdit")
+        || className == QStringLiteral("QComboBox")
+        || className == QStringLiteral("QCheckBox")
+        || className == QStringLiteral("QSpinBox")
+        || className == QStringLiteral("QDoubleSpinBox")
+        || className == QStringLiteral("QTextEdit")
+        || className == QStringLiteral("QPlainTextEdit");
+}
+
+QString legacyFieldLabel(QString objectName)
+{
+    static const QStringList prefixes = {
+        QStringLiteral("lineEdit_"),
+        QStringLiteral("comboBox_"),
+        QStringLiteral("checkBox_"),
+        QStringLiteral("spinBox_"),
+        QStringLiteral("doubleSpinBox_"),
+        QStringLiteral("textEdit_"),
+        QStringLiteral("plainTextEdit_"),
+    };
+    for (const QString& prefix : prefixes) {
+        if (objectName.startsWith(prefix)) {
+            objectName = objectName.mid(prefix.size());
+            break;
+        }
+    }
+    return objectName.replace(QLatin1Char('_'), QStringLiteral(" / "));
+}
+
+QList<LegacyUiField> parseLegacyUiFields(const QString& resourcePath)
+{
+    QFile file(resourcePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+
+    QList<LegacyUiField> fields;
+    QSet<QString> seen;
+    QXmlStreamReader xml(&file);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement() || xml.name() != QStringLiteral("widget"))
+            continue;
+
+        const QString className = xml.attributes().value(QStringLiteral("class")).toString();
+        const QString objectName = xml.attributes().value(QStringLiteral("name")).toString();
+        if (!isLegacyEditorClass(className) || objectName.isEmpty() || seen.contains(objectName))
+            continue;
+
+        LegacyUiField field;
+        field.className = className;
+        field.objectName = objectName;
+        field.label = legacyFieldLabel(objectName);
+        seen.insert(objectName);
+
+        int depth = 1;
+        while (!xml.atEnd() && depth > 0) {
+            xml.readNext();
+            if (xml.isStartElement()) {
+                if (xml.name() == QStringLiteral("widget")) {
+                    ++depth;
+                } else if (className == QStringLiteral("QComboBox")
+                           && xml.name() == QStringLiteral("string")) {
+                    const QString option = xml.readElementText().trimmed();
+                    if (!option.isEmpty() && !field.options.contains(option))
+                        field.options.append(option);
+                }
+            } else if (xml.isEndElement() && xml.name() == QStringLiteral("widget")) {
+                --depth;
+            }
+        }
+
+        fields.append(field);
+    }
+    return fields;
+}
 
 QDoubleSpinBox* makeDoubleSpin(QWidget* parent, double maxValue, const QString& suffix)
 {
@@ -75,6 +202,7 @@ ProcessSettingsDialog::ProcessSettingsDialog(lcnc::ProcessSettings& settings,
         const int loadingPage = m_pages->addWidget(buildLoadingPage());
         const int cameraPage = m_pages->addWidget(buildCameraPage());
         const int internetPage = m_pages->addWidget(buildInternetPage());
+        const int communicationPage = m_pages->addWidget(buildCommunicationPage());
 
         auto* processRoot = addPageNode(nullptr, tr("Process"), processPage);
         addPageNode(processRoot, tr("运行"), processPage);
@@ -90,6 +218,9 @@ ProcessSettingsDialog::ProcessSettingsDialog(lcnc::ProcessSettings& settings,
         addPageNode(deviceRoot, tr("LoadingPos"), loadingPage);
         addPageNode(deviceRoot, tr("Camera"), cameraPage);
         addPageNode(deviceRoot, tr("Internet"), internetPage);
+        addPageNode(deviceRoot, tr("Communication"), communicationPage);
+        auto* legacyRoot = addPageNode(nullptr, tr("Legacy Setting"), processPage);
+        addLegacySettingsPages(legacyRoot);
         m_pageTree->expandAll();
 
         connect(m_pageTree, &QTreeWidget::itemClicked,
@@ -335,6 +466,121 @@ QWidget* ProcessSettingsDialog::buildInternetPage()
     return page;
 }
 
+QWidget* ProcessSettingsDialog::buildCommunicationPage()
+{
+    m_communicationPage = new CommunicationSettingsPage(this);
+    return m_communicationPage;
+}
+
+QWidget* ProcessSettingsDialog::buildLegacySettingsPage(const QString& pageId,
+                                                        const QString& title,
+                                                        const QString& resourcePath)
+{
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+
+    auto* page = new QWidget(scroll);
+    auto* form = new QFormLayout(page);
+    form->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+
+    const QList<LegacyUiField> fields = parseLegacyUiFields(resourcePath);
+    if (fields.isEmpty()) {
+        auto* empty = new QLineEdit(page);
+        empty->setReadOnly(true);
+        empty->setText(tr("未找到可迁移字段：%1").arg(resourcePath));
+        form->addRow(title, empty);
+    }
+
+    for (const LegacyUiField& field : fields) {
+        QWidget* editor = nullptr;
+        if (field.className == QStringLiteral("QCheckBox")) {
+            auto* check = new QCheckBox(page);
+            editor = check;
+        } else if (field.className == QStringLiteral("QComboBox")) {
+            auto* combo = new QComboBox(page);
+            combo->setEditable(true);
+            combo->addItems(field.options);
+            editor = combo;
+        } else if (field.className == QStringLiteral("QSpinBox")) {
+            auto* spin = makeIntSpin(page, 100000000, QString());
+            editor = spin;
+        } else if (field.className == QStringLiteral("QDoubleSpinBox")) {
+            auto* spin = makeDoubleSpin(page, 100000000.0, QString());
+            spin->setMinimum(-100000000.0);
+            editor = spin;
+        } else {
+            auto* edit = new QLineEdit(page);
+            edit->setPlaceholderText(field.objectName);
+            editor = edit;
+        }
+
+        const QString key = QStringLiteral("%1.%2").arg(pageId, field.objectName);
+        editor->setProperty("legacySettingKey", key);
+        editor->setProperty("legacySettingClass", field.className);
+        m_legacyEditors.insert(key, editor);
+        form->addRow(field.label, editor);
+    }
+
+    scroll->setWidget(page);
+    return scroll;
+}
+
+void ProcessSettingsDialog::addLegacySettingsPages(QTreeWidgetItem* parent)
+{
+    int count = 0;
+    const LegacyUiPage* pages = legacyUiPages(&count);
+    for (int index = 0; index < count; ++index) {
+        const QString pageId = QString::fromLatin1(pages[index].pageId);
+        const QString title = tr(pages[index].title);
+        const int pageIndex = m_pages->addWidget(buildLegacySettingsPage(
+            pageId,
+            title,
+            QString::fromLatin1(pages[index].resourcePath)));
+        addPageNode(parent, title, pageIndex);
+    }
+}
+
+void ProcessSettingsDialog::loadLegacySettings()
+{
+    for (auto it = m_legacyEditors.cbegin(); it != m_legacyEditors.cend(); ++it) {
+        QWidget* editor = it.value();
+        const QString className = editor->property("legacySettingClass").toString();
+        const QString value = m_settings.legacySettingValue(it.key());
+        if (auto* check = qobject_cast<QCheckBox*>(editor)) {
+            check->setChecked(value == QStringLiteral("true") || value == QStringLiteral("1"));
+        } else if (auto* combo = qobject_cast<QComboBox*>(editor)) {
+            if (!value.isEmpty() && combo->findText(value) < 0)
+                combo->addItem(value);
+            combo->setCurrentText(value);
+        } else if (auto* spin = qobject_cast<QSpinBox*>(editor)) {
+            spin->setValue(value.toInt());
+        } else if (auto* doubleSpin = qobject_cast<QDoubleSpinBox*>(editor)) {
+            doubleSpin->setValue(value.toDouble());
+        } else if (auto* edit = qobject_cast<QLineEdit*>(editor)) {
+            edit->setText(value);
+        }
+        Q_UNUSED(className);
+    }
+}
+
+void ProcessSettingsDialog::applyLegacySettings(QMap<QString, QString>& values) const
+{
+    for (auto it = m_legacyEditors.cbegin(); it != m_legacyEditors.cend(); ++it) {
+        QString value;
+        if (auto* check = qobject_cast<QCheckBox*>(it.value()))
+            value = check->isChecked() ? QStringLiteral("true") : QStringLiteral("false");
+        else if (auto* combo = qobject_cast<QComboBox*>(it.value()))
+            value = combo->currentText().trimmed();
+        else if (auto* spin = qobject_cast<QSpinBox*>(it.value()))
+            value = QString::number(spin->value());
+        else if (auto* doubleSpin = qobject_cast<QDoubleSpinBox*>(it.value()))
+            value = QString::number(doubleSpin->value(), 'g', 15);
+        else if (auto* edit = qobject_cast<QLineEdit*>(it.value()))
+            value = edit->text().trimmed();
+        values.insert(it.key(), value);
+    }
+}
+
 void ProcessSettingsDialog::loadFromSettings()
 {
     m_simulationModeCheck->setChecked(m_settings.simulationMode());
@@ -367,6 +613,9 @@ void ProcessSettingsDialog::loadFromSettings()
     m_cameraExposureSpin->setValue(m_settings.cameraExposureMs());
     m_internetHostEdit->setText(m_settings.internetHost());
     m_internetPortSpin->setValue(m_settings.internetPort());
+    if (m_communicationPage)
+        m_communicationPage->loadFromSettings(m_settings);
+    loadLegacySettings();
 }
 
 void ProcessSettingsDialog::applyToSettings()
@@ -401,6 +650,11 @@ void ProcessSettingsDialog::applyToSettings()
     m_settings.setCameraExposureMs(m_cameraExposureSpin->value());
     m_settings.setInternetHost(m_internetHostEdit->text());
     m_settings.setInternetPort(m_internetPortSpin->value());
+    if (m_communicationPage)
+        m_communicationPage->applyToSettings(m_settings);
+    QMap<QString, QString> legacyValues = m_settings.legacySettingValues();
+    applyLegacySettings(legacyValues);
+    m_settings.setLegacySettingValues(legacyValues);
 }
 
 } // namespace lcnc::process

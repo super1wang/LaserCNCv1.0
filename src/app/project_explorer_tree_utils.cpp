@@ -27,6 +27,7 @@ QIcon iconForProjectNode(ProjectExplorerNodeKind kind)
     case ProjectExplorerNodeKind::MachineAxis:
         return QIcon(":/icons/coordinate.svg");
     case ProjectExplorerNodeKind::ToolpathRoot:
+    case ProjectExplorerNodeKind::ToolpathLayer:
     case ProjectExplorerNodeKind::ToolpathContour:
         return QIcon(":/icons/toolpath.svg");
     case ProjectExplorerNodeKind::CadGroup:
@@ -50,6 +51,7 @@ void configureProjectTreeItem(QTreeWidgetItem* item,
     item->setData(0, ProjectExplorerRoles::LeafEntries, node.leafEntries);
     item->setData(0, ProjectExplorerRoles::ContourIndex, node.contourIndex);
     item->setData(0, ProjectExplorerRoles::ContourId, static_cast<qulonglong>(node.contourId));
+    item->setData(0, ProjectExplorerRoles::LayerId, static_cast<qulonglong>(node.layerId));
     item->setData(0, ProjectExplorerRoles::AxisName, node.axisName);
     if (!node.toolTip.isEmpty())
         item->setToolTip(0, node.toolTip);
@@ -70,6 +72,10 @@ void configureProjectTreeItem(QTreeWidgetItem* item,
         item->setForeground(0, Qt::gray);
     if (node.kind == ProjectExplorerNodeKind::MachineUnassignedGroup)
         item->setForeground(0, QColor(160, 100, 60));
+    if (node.kind == ProjectExplorerNodeKind::ToolpathLayer && node.layerColor.isValid()) {
+        item->setForeground(0, node.layerColor.darker(130));
+        item->setBackground(1, node.layerColor.lighter(175));
+    }
     if (!parent || node.kind == ProjectExplorerNodeKind::MachineAxis) {
         QFont font = item->font(0);
         font.setBold(true);

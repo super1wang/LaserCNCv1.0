@@ -5,7 +5,6 @@
 #include "core/kinematics/i_motion_controller.h"
 #include "core/logging/logger.h"
 #include "modules/cam/i_cam_facade.h"
-#include "modules/process/controllers/simulation_motion_controller.h"
 #include "modules/process/device/i_laser_device.h"
 #include "modules/process/device/i_process_io.h"
 #include "modules/process/device/process_device_manager.h"
@@ -109,6 +108,7 @@ lcnc::ModuleInfo ProcessModule::info() const
 bool ProcessModule::init(lcnc::IKernel& kernel)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::init begin");
+    m_kernel = &kernel;
     auto svc = std::shared_ptr<ProcessModule>(this, [](ProcessModule*) {});
     kernel.services().registerService<ProcessModule>(svc);
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
@@ -182,14 +182,12 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
             });
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 
-    // 注册仿真运动控制器作为 IMotionController 服务（默认为活动控制器）。
-    m_simController = std::make_unique<lcnc::process::SimulationMotionController>(this);
-    m_simController->start();
-    auto motionSvc = std::shared_ptr<lcnc::IMotionController>(
-        m_simController.get(), [](lcnc::IMotionController*) {});
-    kernel.services().registerService<lcnc::IMotionController>(motionSvc);
-    LCNC_INFO(lcnc::LogCode::Generic,
-              "ProcessModule: SimulationMotionController registered as IMotionController");
+    QString motionError;
+    if (!switchMotionControllerFromSettings(&motionError)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "ProcessModule: active motion controller setup failed: {}",
+                  motionError.toStdString());
+    }
 
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "ProcessModule init done");
@@ -206,9 +204,10 @@ void ProcessModule::stop()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::stop begin");
     if (!m_initialized) return;
-    if (m_simController) {
-        m_simController->stop();
-    }
+    if (m_motionController)
+        m_motionController->stop();
+    if (m_kernel)
+        m_kernel->services().unregisterService<lcnc::IMotionController>();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
     m_initialized = false;
@@ -246,6 +245,8 @@ bool ProcessModule::connectController(const QString& endpoint)
     }
 
     m_settings.setControllerEndpoint(endpoint);
+    if (m_motionController)
+        m_motionController->start();
 
     if (m_state == State::Error) {
         m_state = State::Idle;
@@ -311,6 +312,8 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel)
         return;
 
     const double delta = jogStepForLevel(speedLevel) * (direction > 0 ? 1.0 : -1.0);
+    if (!m_simulationMode && m_motionController)
+        m_motionController->jog(axisName, delta);
     setAxisPosition(axisName, m_axisPositions.value(axisName) + delta);
     setStatusMessage(tr("点动 %1 轴 %2").arg(
         axisName,
@@ -323,6 +326,8 @@ void ProcessModule::home()
         return;
 
     initializeAxisPositions();
+    if (!m_simulationMode && m_motionController)
+        m_motionController->home();
     m_simPhase = 0.0;
     setStatusMessage(tr("回零完成"));
 }
@@ -394,6 +399,8 @@ void ProcessModule::emergencyStop()
     m_simTimer->stop();
     if (m_workflowExecutor)
         m_workflowExecutor->emergencyStop();
+    if (m_motionController)
+        m_motionController->emergencyStop();
     setState(State::EmergencyStop, tr("急停已触发"));
 }
 
@@ -505,6 +512,13 @@ void ProcessModule::reloadDeviceSettings()
         m_deviceManager = std::make_unique<lcnc::process::ProcessDeviceManager>();
     m_deviceManager->syncFromSettings(m_settings);
 
+    QString motionError;
+    if (!switchMotionControllerFromSettings(&motionError)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "ProcessModule: reload motion controller failed: {}",
+                  motionError.toStdString());
+    }
+
     const bool nextSimulationMode = m_settings.simulationMode();
     if (m_simulationMode != nextSimulationMode) {
         m_simulationMode = nextSimulationMode;
@@ -561,6 +575,61 @@ void ProcessModule::initializeAxisPositions()
     m_axisPositions = nextPositions;
     for (auto it = m_axisPositions.cbegin(); it != m_axisPositions.cend(); ++it)
         emit axisPositionChanged(it.key(), it.value());
+}
+
+bool ProcessModule::switchMotionControllerFromSettings(QString* errorMessage)
+{
+    if (!m_deviceManager) {
+        if (errorMessage)
+            *errorMessage = tr("设备管理器未初始化");
+        return false;
+    }
+
+    if (m_state == State::Running || m_state == State::Paused || m_state == State::EmergencyStop) {
+        if (errorMessage)
+            *errorMessage = tr("运行中、暂停或急停状态禁止切换运动控制器");
+        return false;
+    }
+
+    QString createError;
+    auto nextController = m_deviceManager->createMotionController(m_settings, this, &createError);
+    if (!nextController) {
+        if (errorMessage)
+            *errorMessage = createError;
+        return false;
+    }
+
+    const QString nextId = nextController->id();
+    if (m_motionController && m_motionController->id().compare(nextId, Qt::CaseInsensitive) == 0) {
+        registerActiveMotionControllerService();
+        return true;
+    }
+
+    if (m_motionController)
+        m_motionController->stop();
+    m_motionController = std::move(nextController);
+
+    if (!m_motionController->start()) {
+        if (errorMessage)
+            *errorMessage = tr("运动控制器启动失败: %1").arg(nextId);
+        registerActiveMotionControllerService();
+        return false;
+    }
+
+    registerActiveMotionControllerService();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "ProcessModule: active motion controller '{}' registered",
+              nextId.toStdString());
+    return true;
+}
+
+void ProcessModule::registerActiveMotionControllerService()
+{
+    if (!m_kernel || !m_motionController)
+        return;
+    auto motionSvc = std::shared_ptr<lcnc::IMotionController>(
+        m_motionController.get(), [](lcnc::IMotionController*) {});
+    m_kernel->services().registerService<lcnc::IMotionController>(motionSvc);
 }
 
 void ProcessModule::setState(State state, const QString& statusMessage)

@@ -246,12 +246,85 @@ void ProcessSettings::setInternetPort(int value)
     saveDefault();
 }
 
+void ProcessSettings::setCommunicationDeviceId(const QString& value)
+{
+    const QString trimmed = value.trimmed().isEmpty() ? QStringLiteral("laser") : value.trimmed();
+    if (m_communicationDeviceId == trimmed) return;
+    m_communicationDeviceId = trimmed;
+    saveDefault();
+}
+
+void ProcessSettings::setCommunicationProtocol(const QString& value)
+{
+    const QString trimmed = value.trimmed().isEmpty() ? QStringLiteral("Mock") : value.trimmed();
+    if (m_communicationProtocol == trimmed) return;
+    m_communicationProtocol = trimmed;
+    saveDefault();
+}
+
+void ProcessSettings::setCommunicationHost(const QString& value)
+{
+    const QString trimmed = value.trimmed();
+    if (m_communicationHost == trimmed) return;
+    m_communicationHost = trimmed;
+    saveDefault();
+}
+
+void ProcessSettings::setCommunicationPort(int value)
+{
+    if (m_communicationPort == value) return;
+    m_communicationPort = value;
+    saveDefault();
+}
+
+void ProcessSettings::setCommunicationPath(const QString& value)
+{
+    const QString trimmed = value.trimmed().isEmpty() ? QStringLiteral("/") : value.trimmed();
+    if (m_communicationPath == trimmed) return;
+    m_communicationPath = trimmed;
+    saveDefault();
+}
+
+void ProcessSettings::setCommunicationSerialPort(const QString& value)
+{
+    const QString trimmed = value.trimmed().isEmpty() ? QStringLiteral("COM1") : value.trimmed();
+    if (m_communicationSerialPort == trimmed) return;
+    m_communicationSerialPort = trimmed;
+    saveDefault();
+}
+
+void ProcessSettings::setCommunicationBaudRate(int value)
+{
+    if (m_communicationBaudRate == value) return;
+    m_communicationBaudRate = value;
+    saveDefault();
+}
+
+void ProcessSettings::setCommunicationTimeoutMs(int value)
+{
+    if (m_communicationTimeoutMs == value) return;
+    m_communicationTimeoutMs = value;
+    saveDefault();
+}
+
+QString ProcessSettings::legacySettingValue(const QString& key, const QString& defaultValue) const
+{
+    return m_legacySettingValues.value(key, defaultValue);
+}
+
+void ProcessSettings::setLegacySettingValues(const QMap<QString, QString>& values)
+{
+    if (m_legacySettingValues == values) return;
+    m_legacySettingValues = values;
+    saveDefault();
+}
+
 void ProcessSettings::readFrom(const toml::value& root)
 {
     using namespace lcnc::toml_io;
     m_controllerEndpoint = get_qstring(root, "controllerEndpoint", QString());
     m_simulationMode     = get_bool(root, "simulationMode", true);
-    m_motionControllerName = get_qstring(root, "motionController", QStringLiteral("SimulatorCMHP"));
+    m_motionControllerName = get_qstring(root, "motionController", QStringLiteral("PureSimulation"));
     m_laserDeviceName = get_qstring(root, "laserDevice", QStringLiteral("Simulator"));
     m_laserEnergy = get_double(root, "laserEnergy", 0.0);
     m_laserFrequency = get_double(root, "laserFrequency", 0.0);
@@ -279,6 +352,40 @@ void ProcessSettings::readFrom(const toml::value& root)
     m_cameraExposureMs = get_int(root, "cameraExposureMs", 30);
     m_internetHost = get_qstring(root, "internetHost", QStringLiteral("127.0.0.1"));
     m_internetPort = get_int(root, "internetPort", 0);
+    m_communicationDeviceId = get_qstring(root, "communicationDeviceId", QStringLiteral("laser"));
+    m_communicationProtocol = get_qstring(root, "communicationProtocol", QStringLiteral("Mock"));
+    m_communicationHost = get_qstring(root, "communicationHost", QStringLiteral("127.0.0.1"));
+    m_communicationPort = get_int(root, "communicationPort", 5000);
+    m_communicationPath = get_qstring(root, "communicationPath", QStringLiteral("/"));
+    m_communicationSerialPort = get_qstring(root, "communicationSerialPort", QStringLiteral("COM1"));
+    m_communicationBaudRate = get_int(root, "communicationBaudRate", 115200);
+    m_communicationTimeoutMs = get_int(root, "communicationTimeoutMs", 3000);
+
+    m_legacySettingValues.clear();
+    if (root.is_table() && root.contains("legacySetting") && root.at("legacySetting").is_table()) {
+        const auto& legacyRoot = root.at("legacySetting").as_table();
+        for (const auto& pagePair : legacyRoot) {
+            if (!pagePair.second.is_table())
+                continue;
+            const QString page = QString::fromStdString(pagePair.first);
+            for (const auto& fieldPair : pagePair.second.as_table()) {
+                const QString field = QString::fromStdString(fieldPair.first);
+                const toml::value& value = fieldPair.second;
+                QString text;
+                if (value.is_string())
+                    text = QString::fromStdString(value.as_string());
+                else if (value.is_boolean())
+                    text = value.as_boolean() ? QStringLiteral("true") : QStringLiteral("false");
+                else if (value.is_integer())
+                    text = QString::number(value.as_integer());
+                else if (value.is_floating())
+                    text = QString::number(value.as_floating(), 'g', 15);
+                else
+                    continue;
+                m_legacySettingValues.insert(QStringLiteral("%1.%2").arg(page, field), text);
+            }
+        }
+    }
 }
 
 void ProcessSettings::writeTo(toml::value& root) const
@@ -314,6 +421,27 @@ void ProcessSettings::writeTo(toml::value& root) const
     root["cameraExposureMs"] = m_cameraExposureMs;
     root["internetHost"] = qs(m_internetHost);
     root["internetPort"] = m_internetPort;
+    root["communicationDeviceId"] = qs(m_communicationDeviceId);
+    root["communicationProtocol"] = qs(m_communicationProtocol);
+    root["communicationHost"] = qs(m_communicationHost);
+    root["communicationPort"] = m_communicationPort;
+    root["communicationPath"] = qs(m_communicationPath);
+    root["communicationSerialPort"] = qs(m_communicationSerialPort);
+    root["communicationBaudRate"] = m_communicationBaudRate;
+    root["communicationTimeoutMs"] = m_communicationTimeoutMs;
+
+    if (!m_legacySettingValues.isEmpty()) {
+        toml::value legacy(toml::table{});
+        for (auto it = m_legacySettingValues.cbegin(); it != m_legacySettingValues.cend(); ++it) {
+            const int dot = it.key().indexOf(QLatin1Char('.'));
+            if (dot <= 0 || dot >= it.key().size() - 1)
+                continue;
+            const QString page = it.key().left(dot);
+            const QString field = it.key().mid(dot + 1);
+            legacy[qs(page)][qs(field)] = qs(it.value());
+        }
+        root["legacySetting"] = legacy;
+    }
 }
 
 } // namespace lcnc

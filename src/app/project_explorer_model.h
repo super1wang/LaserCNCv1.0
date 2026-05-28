@@ -4,8 +4,11 @@
 #include "modules/cam/contracts/cam_data_contracts.h"
 
 #include <QList>
+#include <QColor>
 #include <QString>
 #include <QStringList>
+
+#include <cstdint>
 
 class CadModule;
 class CamModule;
@@ -25,6 +28,7 @@ enum class ProjectExplorerNodeKind {
     MachineShape,
     MachineUnassignedGroup,
     ToolpathRoot,
+    ToolpathLayer,
     ToolpathContour
 };
 
@@ -37,6 +41,9 @@ struct ProjectExplorerNode {
     QString entry;
     QStringList leafEntries;
     QString axisName;
+    std::uint64_t layerId{0};
+    QColor layerColor;
+    QString toolName;
     int contourIndex{-1};
     lcnc::cam::ContourId contourId{0};
     bool checkable{true};

@@ -11,7 +11,20 @@ set(CMAKE_AUTORCC ON)
 # ─── Qt ───────────────────────────────────────────────────────────────────────
 set(LCNC_QT6_ROOT "E:/Qt6.9.1/6.9.1/msvc2022_64" CACHE PATH "Qt6 installation root")
 set(Qt6_DIR "${LCNC_QT6_ROOT}/lib/cmake/Qt6" CACHE PATH "Qt6 CMake package directory")
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network)
+
+option(LCNC_WITH_SERIAL_COMM "Enable Qt SerialPort communication channel" ON)
+if(LCNC_WITH_SERIAL_COMM)
+    find_package(Qt6 QUIET COMPONENTS SerialPort)
+    if(TARGET Qt6::SerialPort)
+        set(LCNC_PROCESS_HAS_SERIAL_COMM ON)
+    else()
+        set(LCNC_PROCESS_HAS_SERIAL_COMM OFF)
+        message(WARNING "LCNC_WITH_SERIAL_COMM=ON but Qt6 SerialPort was not found; serial communication will be unavailable")
+    endif()
+else()
+    set(LCNC_PROCESS_HAS_SERIAL_COMM OFF)
+endif()
 
 # ─── OpenCASCADE ──────────────────────────────────────────────────────────────
 set(LCNC_OCCT_ROOT "G:/environment/occt7.9-vc144-64-combined/occt-vc144-64" CACHE PATH "OpenCASCADE installation root")
@@ -29,22 +42,39 @@ option(LCNC_WITH_GTN "Enable GTN motion controller adapter" OFF)
 option(LCNC_WITH_BDAQ "Enable BDAQ IO adapter" OFF)
 option(LCNC_WITH_REAL_LASER "Enable real laser adapters" OFF)
 
-set(LCNC_ACS_SDK_ROOT "" CACHE PATH "ACS SDK root")
-set(LCNC_GTN_SDK_ROOT "" CACHE PATH "GTN SDK root")
-set(LCNC_BDAQ_SDK_ROOT "" CACHE PATH "BDAQ SDK root")
-set(LCNC_REAL_LASER_SDK_ROOT "" CACHE PATH "Real laser SDK root or protocol support root")
+set(LCNC_PROCESS_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/3rd" CACHE PATH "Process device SDK root")
+set(LCNC_PROCESS_SDK_INCLUDE_DIR "${LCNC_PROCESS_SDK_ROOT}/include_3rd" CACHE PATH "Process device SDK include directory")
+set(LCNC_PROCESS_SDK_LIB_DEBUG_DIR "${LCNC_PROCESS_SDK_ROOT}/lib_3rd/debug" CACHE PATH "Process device SDK debug library directory")
+set(LCNC_PROCESS_SDK_LIB_RELEASE_DIR "${LCNC_PROCESS_SDK_ROOT}/lib_3rd/release" CACHE PATH "Process device SDK release library directory")
 
-if(LCNC_WITH_ACS AND NOT EXISTS "${LCNC_ACS_SDK_ROOT}")
-    message(FATAL_ERROR "LCNC_WITH_ACS=ON requires LCNC_ACS_SDK_ROOT")
+set(LCNC_ACS_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "ACS SDK include directory")
+set(LCNC_ACS_LIB "${LCNC_PROCESS_SDK_LIB_DEBUG_DIR}/ACSCL_x64.LIB" CACHE FILEPATH "ACS controller import library")
+set(LCNC_GTN_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "GTN SDK include directory")
+set(LCNC_GTN_LIB "" CACHE FILEPATH "GTN controller import library")
+set(LCNC_BDAQ_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "BDAQ SDK include directory")
+set(LCNC_BDAQ_LIB "" CACHE FILEPATH "BDAQ import library")
+set(LCNC_REAL_LASER_SDK_ROOT "${LCNC_PROCESS_SDK_ROOT}" CACHE PATH "Real laser SDK root or protocol support root")
+
+function(lcnc_require_existing path label)
+    if(NOT EXISTS "${path}")
+        message(FATAL_ERROR "${label} does not exist: ${path}")
+    endif()
+endfunction()
+
+if(LCNC_WITH_ACS)
+    lcnc_require_existing("${LCNC_ACS_INCLUDE_DIR}/ACSC.h" "LCNC_WITH_ACS requires ACSC.h")
+    lcnc_require_existing("${LCNC_ACS_LIB}" "LCNC_WITH_ACS requires LCNC_ACS_LIB")
 endif()
-if(LCNC_WITH_GTN AND NOT EXISTS "${LCNC_GTN_SDK_ROOT}")
-    message(FATAL_ERROR "LCNC_WITH_GTN=ON requires LCNC_GTN_SDK_ROOT")
+if(LCNC_WITH_GTN)
+    lcnc_require_existing("${LCNC_GTN_INCLUDE_DIR}/gts.h" "LCNC_WITH_GTN requires gts.h")
+    lcnc_require_existing("${LCNC_GTN_LIB}" "LCNC_WITH_GTN requires LCNC_GTN_LIB")
 endif()
-if(LCNC_WITH_BDAQ AND NOT EXISTS "${LCNC_BDAQ_SDK_ROOT}")
-    message(FATAL_ERROR "LCNC_WITH_BDAQ=ON requires LCNC_BDAQ_SDK_ROOT")
+if(LCNC_WITH_BDAQ)
+    lcnc_require_existing("${LCNC_BDAQ_INCLUDE_DIR}" "LCNC_WITH_BDAQ requires LCNC_BDAQ_INCLUDE_DIR")
+    lcnc_require_existing("${LCNC_BDAQ_LIB}" "LCNC_WITH_BDAQ requires LCNC_BDAQ_LIB")
 endif()
-if(LCNC_WITH_REAL_LASER AND NOT EXISTS "${LCNC_REAL_LASER_SDK_ROOT}")
-    message(FATAL_ERROR "LCNC_WITH_REAL_LASER=ON requires LCNC_REAL_LASER_SDK_ROOT")
+if(LCNC_WITH_REAL_LASER)
+    lcnc_require_existing("${LCNC_REAL_LASER_SDK_ROOT}" "LCNC_WITH_REAL_LASER requires LCNC_REAL_LASER_SDK_ROOT")
 endif()
 
 # ─── Sources ──────────────────────────────────────────────────────────────────
@@ -138,6 +168,29 @@ set(SRCS_MODULES
     src/modules/process/device/process_device_manager.cpp
     src/modules/process/device/simulator_laser_device.cpp
     src/modules/process/device/simulator_process_io.cpp
+    src/modules/process/communication/communication_types.h
+    src/modules/process/communication/communication_types.cpp
+    src/modules/process/communication/communication_endpoint.h
+    src/modules/process/communication/communication_endpoint.cpp
+    src/modules/process/communication/communication_message.h
+    src/modules/process/communication/communication_message.cpp
+    src/modules/process/communication/i_communication_channel.h
+    src/modules/process/communication/communication_channel_base.h
+    src/modules/process/communication/communication_channel_base.cpp
+    src/modules/process/communication/communication_log_model.h
+    src/modules/process/communication/communication_log_model.cpp
+    src/modules/process/communication/communication_manager.h
+    src/modules/process/communication/communication_manager.cpp
+    src/modules/process/communication/communication_device_base.h
+    src/modules/process/communication/communication_device_base.cpp
+    src/modules/process/communication/protocols/mock_channel.h
+    src/modules/process/communication/protocols/mock_channel.cpp
+    src/modules/process/communication/protocols/tcp_channel.h
+    src/modules/process/communication/protocols/tcp_channel.cpp
+    src/modules/process/communication/protocols/http_channel.h
+    src/modules/process/communication/protocols/http_channel.cpp
+    src/modules/process/communication/ui/communication_settings_page.h
+    src/modules/process/communication/ui/communication_settings_page.cpp
     src/modules/process/settings/process_settings.cpp
     src/modules/process/workflow/process_node.cpp
     src/modules/process/workflow/process_node_registry.cpp
@@ -164,6 +217,25 @@ set(SRCS_APP
     src/app/project_explorer_tree_utils.cpp
     src/app/main_window.cpp
 )
+
+if(LCNC_WITH_ACS)
+    list(APPEND SRCS_MODULES
+        src/modules/process/controllers/acs_motion_controller_adapter.h
+        src/modules/process/controllers/acs_motion_controller_adapter.cpp
+    )
+endif()
+if(LCNC_WITH_GTN)
+    list(APPEND SRCS_MODULES
+        src/modules/process/controllers/gtn_motion_controller_adapter.h
+        src/modules/process/controllers/gtn_motion_controller_adapter.cpp
+    )
+endif()
+if(TARGET Qt6::SerialPort)
+    list(APPEND SRCS_MODULES
+        src/modules/process/communication/protocols/serial_channel.h
+        src/modules/process/communication/protocols/serial_channel.cpp
+    )
+endif()
 
 add_executable(LaserCNC WIN32
     src/main.cpp
@@ -220,9 +292,34 @@ target_link_libraries(LaserCNC PRIVATE
     Qt6::OpenGL
     Qt6::OpenGLWidgets
     Qt6::Concurrent
+    Qt6::Network
     SARibbonBar::SARibbonBar
     ${OCC_LIBS}
 )
+
+target_compile_definitions(LaserCNC PRIVATE
+    LCNC_PROCESS_HAS_ACS=$<BOOL:${LCNC_WITH_ACS}>
+    LCNC_PROCESS_HAS_GTN=$<BOOL:${LCNC_WITH_GTN}>
+    LCNC_PROCESS_HAS_BDAQ=$<BOOL:${LCNC_WITH_BDAQ}>
+    LCNC_PROCESS_HAS_REAL_LASER=$<BOOL:${LCNC_WITH_REAL_LASER}>
+    LCNC_PROCESS_HAS_SERIAL_COMM=$<BOOL:${LCNC_PROCESS_HAS_SERIAL_COMM}>
+)
+
+if(LCNC_WITH_ACS)
+    target_include_directories(LaserCNC PRIVATE "${LCNC_ACS_INCLUDE_DIR}")
+    target_link_libraries(LaserCNC PRIVATE "${LCNC_ACS_LIB}")
+endif()
+if(LCNC_WITH_GTN)
+    target_include_directories(LaserCNC PRIVATE "${LCNC_GTN_INCLUDE_DIR}")
+    target_link_libraries(LaserCNC PRIVATE "${LCNC_GTN_LIB}")
+endif()
+if(LCNC_WITH_BDAQ)
+    target_include_directories(LaserCNC PRIVATE "${LCNC_BDAQ_INCLUDE_DIR}")
+    target_link_libraries(LaserCNC PRIVATE "${LCNC_BDAQ_LIB}")
+endif()
+if(TARGET Qt6::SerialPort)
+    target_link_libraries(LaserCNC PRIVATE Qt6::SerialPort)
+endif()
 
 if(WIN32)
     target_compile_definitions(LaserCNC PRIVATE

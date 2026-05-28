@@ -59,6 +59,11 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QPushButton>
+#include <QColorDialog>
 #include <QApplication>
 #include <QFileInfo>
 #include <QIcon>
@@ -83,6 +88,7 @@ constexpr int kRoleLeafEntries = lcnc::app::ProjectExplorerRoles::LeafEntries;
 constexpr int kRoleContourIndex = lcnc::app::ProjectExplorerRoles::ContourIndex;
 constexpr int kRoleAxisName = lcnc::app::ProjectExplorerRoles::AxisName;
 constexpr int kRoleContourId = lcnc::app::ProjectExplorerRoles::ContourId;
+constexpr int kRoleLayerId = lcnc::app::ProjectExplorerRoles::LayerId;
 using lcnc::app::projectNodeKind;
 
 QString primitiveToolId(int primitiveIndex)
@@ -421,6 +427,8 @@ void MainWindow::createLeftPanel()
             this, &MainWindow::onProjectExplorerCurrentItemChanged);
     connect(m_projectExplorerTree, &QTreeWidget::itemChanged,
             this, &MainWindow::onProjectExplorerItemChanged);
+        connect(m_projectExplorerTree, &QTreeWidget::itemDoubleClicked,
+            this, &MainWindow::onProjectExplorerItemDoubleClicked);
     connect(m_projectExplorerTree, &QTreeWidget::customContextMenuRequested,
             this, &MainWindow::onProjectExplorerContextMenuRequested);
     connect(m_projectExplorerTree->model(), &QAbstractItemModel::rowsMoved,
@@ -1421,6 +1429,15 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
         return;
     }
 
+    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathLayer) {
+        cascadeCheckState(item, [](QTreeWidgetItem* child) {
+            return projectNodeKind(child) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour;
+        });
+        const std::uint64_t layerId = item->data(0, kRoleLayerId).toULongLong();
+        m_appContext->camModule()->setToolpathLayerEnabled(layerId, visible);
+        return;
+    }
+
     if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
         const auto contourId = static_cast<lcnc::cam::ContourId>(item->data(0, kRoleContourId).toULongLong());
         int contourIndex = m_appContext->camModule()->contourIndexById(contourId);
@@ -1430,6 +1447,67 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
         if (item == m_projectExplorerTree->currentItem())
             highlightContourInView(contourIndex);
     }
+}
+
+void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /*column*/)
+{
+    if (!item || projectNodeKind(item) != lcnc::app::ProjectExplorerNodeKind::ToolpathLayer)
+        return;
+
+    const std::uint64_t layerId = item->data(0, kRoleLayerId).toULongLong();
+    CamModule* cam = m_appContext ? m_appContext->camModule() : nullptr;
+    if (!cam || layerId == 0)
+        return;
+
+    const ToolpathLayer* sourceLayer = nullptr;
+    for (const ToolpathLayer& layer : cam->toolpathLayers()) {
+        if (layer.layerId == layerId) {
+            sourceLayer = &layer;
+            break;
+        }
+    }
+    if (!sourceLayer)
+        return;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("图层配置"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout();
+    auto* nameEdit = new QLineEdit(sourceLayer->name, &dialog);
+    auto* toolEdit = new QLineEdit(sourceLayer->toolName, &dialog);
+    auto* colorButton = new QPushButton(&dialog);
+    QColor selectedColor = sourceLayer->color.isValid() ? sourceLayer->color : QColor(80, 190, 150);
+
+    auto refreshColorButton = [&]() {
+        colorButton->setText(selectedColor.name(QColor::HexRgb).toUpper());
+        colorButton->setStyleSheet(QStringLiteral("QPushButton { background: %1; color: %2; }")
+            .arg(selectedColor.name(QColor::HexRgb), selectedColor.lightness() < 128 ? QStringLiteral("white") : QStringLiteral("black")));
+    };
+    refreshColorButton();
+
+    connect(colorButton, &QPushButton::clicked, &dialog, [&]() {
+        const QColor color = QColorDialog::getColor(selectedColor, &dialog, tr("选择图层颜色"));
+        if (!color.isValid())
+            return;
+        selectedColor = color;
+        refreshColorButton();
+    });
+
+    form->addRow(tr("名称"), nameEdit);
+    form->addRow(tr("颜色"), colorButton);
+    form->addRow(tr("工具"), toolEdit);
+    layout->addLayout(form);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    if (cam->updateToolpathLayer(layerId, nameEdit->text(), selectedColor, toolEdit->text()))
+        rebuildProjectExplorer();
 }
 
 void MainWindow::onProjectExplorerContextMenuRequested(const QPoint& pos)
@@ -1513,19 +1591,23 @@ void MainWindow::handleProjectExplorerRowsMoved()
     bool hasStableIds = true;
     int selectedRow = -1;
     lcnc::cam::ContourId selectedContourId = 0;
-    for (int index = 0; index < toolpathRoot->childCount(); ++index) {
-        QTreeWidgetItem* child = toolpathRoot->child(index);
-        if (projectNodeKind(child) != lcnc::app::ProjectExplorerNodeKind::ToolpathContour)
-            continue;
-        order.append(child->data(0, kRoleContourIndex).toInt());
-        const auto contourId = static_cast<lcnc::cam::ContourId>(child->data(0, kRoleContourId).toULongLong());
-        idOrder.append(contourId);
-        hasStableIds = hasStableIds && contourId != 0;
-        if (child == m_projectExplorerTree->currentItem())
-            selectedRow = order.size() - 1;
-        if (child == m_projectExplorerTree->currentItem())
-            selectedContourId = contourId;
-    }
+    std::function<void(QTreeWidgetItem*)> collectContours = [&](QTreeWidgetItem* node) {
+        if (!node)
+            return;
+        if (projectNodeKind(node) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
+            order.append(node->data(0, kRoleContourIndex).toInt());
+            const auto contourId = static_cast<lcnc::cam::ContourId>(node->data(0, kRoleContourId).toULongLong());
+            idOrder.append(contourId);
+            hasStableIds = hasStableIds && contourId != 0;
+            if (node == m_projectExplorerTree->currentItem())
+                selectedRow = order.size() - 1;
+            if (node == m_projectExplorerTree->currentItem())
+                selectedContourId = contourId;
+        }
+        for (int index = 0; index < node->childCount(); ++index)
+            collectContours(node->child(index));
+    };
+    collectContours(toolpathRoot);
 
     if (order.size() != m_appContext->camModule()->toolpath().contourCount()) {
         rebuildProjectExplorer();

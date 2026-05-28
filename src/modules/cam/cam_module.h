@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QObject>
+#include <QColor>
 #include <QList>
 #include <QMap>
 #include <QSet>
@@ -246,6 +247,13 @@ public:
     int contourIndexById(lcnc::cam::ContourId contourId) const;
     void reorderContoursById(const QList<lcnc::cam::ContourId>& order);
     void reorderContours(const QList<int>& order);
+    const std::vector<ToolpathLayer>& toolpathLayers() const;
+    QList<int> contourIndexesInLayer(std::uint64_t layerId) const;
+    bool updateToolpathLayer(std::uint64_t layerId,
+                             const QString& name,
+                             const QColor& color,
+                             const QString& toolName);
+    bool setToolpathLayerEnabled(std::uint64_t layerId, bool enabled);
 
     /// Recalculate all lead-in lines and machine coordinates with current parameters.
     void recalcToolpath();
@@ -314,6 +322,7 @@ signals:
     void toolpathVisibilityChanged(bool visible);
     void toolpathContourSelected(int contourIndex);
     void toolpathContoursSelected(const QList<int>& contourIndexes);
+    void toolpathLayersChanged();
     void simulationTick(int contourIdx, int pointIdx, int totalPoints);
     void simulationStateChanged(bool playing);
     void simulationFinished();
@@ -363,6 +372,7 @@ private:
     void setCamContourVisible(int contourIndex, bool visible, bool updateView = true);
     void applyCamContourVisibility();
     void applyCamContourTransforms();
+    void applyToolpathLayerColors(bool updateView = true);
     QList<int> selectedCamContourIndexes() const;
 
     void refreshMachineDisplay();

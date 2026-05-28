@@ -1,16 +1,24 @@
 #include "modules/process/device/process_device_manager.h"
 
 #include "core/logging/logger.h"
+#include "modules/process/controllers/simulation_motion_controller.h"
 #include "modules/process/device/simulator_laser_device.h"
 #include "modules/process/device/simulator_process_io.h"
 #include "modules/process/settings/process_settings.h"
+
+#if LCNC_PROCESS_HAS_ACS
+#include "modules/process/controllers/acs_motion_controller_adapter.h"
+#endif
+#if LCNC_PROCESS_HAS_GTN
+#include "modules/process/controllers/gtn_motion_controller_adapter.h"
+#endif
 
 #include <algorithm>
 
 namespace lcnc::process {
 
 ProcessDeviceManager::ProcessDeviceManager()
-    : m_activeMotionController(QStringLiteral("SimulatorCMHP"))
+    : m_activeMotionController(QStringLiteral("PureSimulation"))
     , m_activeLaserDevice(QStringLiteral("Simulator"))
 {
     registerBuiltInDevices();
@@ -43,9 +51,9 @@ QStringList ProcessDeviceManager::availableLaserDevices() const
 void ProcessDeviceManager::syncFromSettings(const lcnc::ProcessSettings& settings)
 {
     const QString motion = settings.motionControllerName().trimmed();
-    m_activeMotionController = isMotionControllerAvailable(motion)
+    m_activeMotionController = isDeviceUsable(ProcessDeviceKind::MotionController, motion)
         ? motion
-        : QStringLiteral("SimulatorCMHP");
+        : QStringLiteral("PureSimulation");
 
     const QString laser = settings.laserDeviceName().trimmed();
     m_activeLaserDevice = isLaserDeviceAvailable(laser)
@@ -68,6 +76,36 @@ void ProcessDeviceManager::syncFromSettings(const lcnc::ProcessSettings& setting
         laser->setFrequency(settings.laserFrequency());
         laser->setPulseWidth(settings.laserPulseWidth());
     }
+}
+
+std::unique_ptr<lcnc::IMotionController> ProcessDeviceManager::createMotionController(
+    const lcnc::ProcessSettings& settings,
+    QObject* parent,
+    QString* errorMessage) const
+{
+    const QString active = normalizedName(m_activeMotionController);
+    if (active == normalizedName(QStringLiteral("PureSimulation")) || active == normalizedName(QStringLiteral("sim")))
+        return std::make_unique<SimulationMotionController>(parent);
+
+#if LCNC_PROCESS_HAS_ACS
+    if (active == normalizedName(QStringLiteral("SimulatorCMHP")))
+        return std::make_unique<AcsSimulatorCmhpControllerAdapter>(settings.controllerEndpoint(), parent);
+    if (active == normalizedName(QStringLiteral("ACS")))
+        return std::make_unique<AcsMotionControllerAdapter>(settings.controllerEndpoint(), false, parent);
+#endif
+
+#if LCNC_PROCESS_HAS_GTN
+    if (active == normalizedName(QStringLiteral("GTN")))
+        return std::make_unique<GtnMotionControllerAdapter>(parent);
+#endif
+
+    if (errorMessage) {
+        const auto* item = descriptor(ProcessDeviceKind::MotionController, m_activeMotionController);
+        *errorMessage = item && item->availability == ProcessDeviceAvailability::Unavailable
+            ? QStringLiteral("Motion controller '%1' is unavailable in this build").arg(m_activeMotionController)
+            : QStringLiteral("Unknown motion controller '%1'").arg(m_activeMotionController);
+    }
+    return nullptr;
 }
 
 bool ProcessDeviceManager::isMotionControllerAvailable(const QString& name) const
@@ -99,20 +137,37 @@ const ProcessDeviceDescriptor* ProcessDeviceManager::descriptor(ProcessDeviceKin
 void ProcessDeviceManager::registerBuiltInDevices()
 {
     m_descriptors = {
-        { ProcessDeviceKind::MotionController,
-          QStringLiteral("SimulatorCMHP"),
-          QStringLiteral("CMHP Simulator"),
-          ProcessDeviceAvailability::Simulation,
-          { QStringLiteral("axis"), QStringLiteral("jog"), QStringLiteral("home") } },
+                { ProcessDeviceKind::MotionController,
+                    QStringLiteral("PureSimulation"),
+                    QStringLiteral("Pure Software Simulation"),
+                    ProcessDeviceAvailability::Simulation,
+                    { QStringLiteral("axis"), QStringLiteral("jog"), QStringLiteral("home"), QStringLiteral("no-sdk") } },
+                { ProcessDeviceKind::MotionController,
+                    QStringLiteral("SimulatorCMHP"),
+                    QStringLiteral("CMHP Simulator (ACS)"),
+#if LCNC_PROCESS_HAS_ACS
+                    ProcessDeviceAvailability::Simulation,
+#else
+                    ProcessDeviceAvailability::Unavailable,
+#endif
+                    { QStringLiteral("axis"), QStringLiteral("jog"), QStringLiteral("home"), QStringLiteral("acs-api-access"), QStringLiteral("simulation-mode") } },
         { ProcessDeviceKind::MotionController,
           QStringLiteral("ACS"),
           QStringLiteral("ACS Motion Controller"),
+#if LCNC_PROCESS_HAS_ACS
+                    ProcessDeviceAvailability::Available,
+#else
           ProcessDeviceAvailability::Unavailable,
+#endif
           { QStringLiteral("axis"), QStringLiteral("io"), QStringLiteral("laser-table") } },
         { ProcessDeviceKind::MotionController,
           QStringLiteral("GTN"),
           QStringLiteral("GTN Motion Controller"),
+#if LCNC_PROCESS_HAS_GTN
+                    ProcessDeviceAvailability::Available,
+#else
           ProcessDeviceAvailability::Unavailable,
+#endif
           { QStringLiteral("axis"), QStringLiteral("io") } },
         { ProcessDeviceKind::Laser,
           QStringLiteral("Simulator"),

@@ -12,6 +12,7 @@
 #include <QObject>
 #include <QMap>
 #include <QSet>
+#include <QHash>
 
 #include <TDF_LabelSequence.hxx>
 
@@ -312,15 +313,19 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     }
 
     const LaserToolpath& toolpath = cam->toolpath();
+    const auto& layers = cam->toolpathLayers();
     root.infoText = toolpath.contourCount() > 0
-        ? QObject::tr("%1 条轮廓").arg(toolpath.contourCount())
+        ? QObject::tr("%1 图层 / %2 条轮廓")
+            .arg(static_cast<int>(layers.size()))
+            .arg(toolpath.contourCount())
         : QObject::tr("未生成");
 
-    for (int index = 0; index < toolpath.contourCount(); ++index) {
+    auto contourNode = [&](int index) {
         const LaserContour& contour = toolpath.contour(index);
         ProjectExplorerNode node;
         node.kind = ProjectExplorerNodeKind::ToolpathContour;
         node.documentId = root.documentId;
+        node.layerId = contour.layerId;
         node.contourId = static_cast<lcnc::cam::ContourId>(contour.contourId);
         node.nodeKey = QStringLiteral("project.toolpath.contour.%1").arg(
             node.contourId != 0
@@ -333,7 +338,47 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
         node.checked = contour.enabled;
         node.draggable = true;
         node.toolTip = contour.sourceInfo;
-        root.children.append(node);
+        return node;
+    };
+
+    QSet<int> placedContourIndexes;
+    for (const ToolpathLayer& layer : layers) {
+        ProjectExplorerNode layerNode;
+        layerNode.kind = ProjectExplorerNodeKind::ToolpathLayer;
+        layerNode.documentId = root.documentId;
+        layerNode.layerId = layer.layerId;
+        layerNode.layerColor = layer.color;
+        layerNode.toolName = layer.toolName;
+        layerNode.nodeKey = QStringLiteral("project.toolpath.layer.%1").arg(
+            QString::number(static_cast<qulonglong>(layer.layerId)));
+        layerNode.displayName = layer.name.trimmed().isEmpty()
+            ? QObject::tr("图层 %1").arg(root.children.size() + 1)
+            : layer.name;
+        layerNode.checkable = true;
+        layerNode.checked = layer.enabled;
+        layerNode.selectable = true;
+        layerNode.droppable = true;
+        layerNode.infoText = layer.toolName.trimmed().isEmpty()
+            ? QObject::tr("%1 条轮廓").arg(static_cast<int>(layer.contourIds.size()))
+            : QObject::tr("%1 条 / %2")
+                .arg(static_cast<int>(layer.contourIds.size()))
+                .arg(layer.toolName.trimmed());
+
+        for (std::uint64_t contourId : layer.contourIds) {
+            const int index = cam->contourIndexById(static_cast<lcnc::cam::ContourId>(contourId));
+            if (index < 0 || index >= toolpath.contourCount())
+                continue;
+            layerNode.children.append(contourNode(index));
+            placedContourIndexes.insert(index);
+        }
+
+        root.children.append(layerNode);
+    }
+
+    for (int index = 0; index < toolpath.contourCount(); ++index) {
+        if (placedContourIndexes.contains(index))
+            continue;
+        root.children.append(contourNode(index));
     }
 
     if (toolpath.contourCount() == 0) {
@@ -403,6 +448,7 @@ bool isMachineProjectNode(ProjectExplorerNodeKind kind)
 bool isToolpathProjectNode(ProjectExplorerNodeKind kind)
 {
     return kind == ProjectExplorerNodeKind::ToolpathRoot
+    || kind == ProjectExplorerNodeKind::ToolpathLayer
         || kind == ProjectExplorerNodeKind::ToolpathContour;
 }
 

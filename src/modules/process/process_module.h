@@ -17,11 +17,14 @@ class QTimer;
 
 namespace lcnc::process {
 class ProcessDeviceManager;
-class SimulationMotionController;
 class ProcessWorkflowExecutor;
 }
 
-namespace lcnc { class ICamFacade; }
+namespace lcnc {
+class ICamFacade;
+class IKernel;
+class IMotionController;
+}
 
 /**
  * @brief Process module singleton — manages execution process, peripherals, and parameters.
@@ -113,6 +116,8 @@ private slots:
 
 private:
     void initializeAxisPositions();
+    bool switchMotionControllerFromSettings(QString* errorMessage = nullptr);
+    void registerActiveMotionControllerService();
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
 
@@ -128,10 +133,11 @@ private:
     double m_feedOverride{1.0};
     double m_simPhase{0.0};
     QString m_statusMessage;
+    lcnc::IKernel* m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
     lcnc::ProcessSettings m_settings;
     std::shared_ptr<lcnc::ICamFacade> m_camFacade;
     std::unique_ptr<lcnc::process::ProcessDeviceManager> m_deviceManager;
-    std::unique_ptr<lcnc::process::SimulationMotionController> m_simController;
+    std::unique_ptr<lcnc::IMotionController> m_motionController;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
 };

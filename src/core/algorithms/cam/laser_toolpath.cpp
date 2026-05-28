@@ -45,6 +45,7 @@
 void LaserToolpath::clear()
 {
     m_contours.clear();
+    m_layers.clear();
     m_globalLeadInLength = 5.0;
     m_globalNormalAngle  = 0.0;
 }

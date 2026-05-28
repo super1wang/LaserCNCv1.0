@@ -2,6 +2,7 @@
 
 #include "core/settings/toml_config.h"
 
+#include <QMap>
 #include <QString>
 
 namespace lcnc {
@@ -119,6 +120,34 @@ public:
     int internetPort() const { return m_internetPort; }
     void setInternetPort(int value);
 
+    QString communicationDeviceId() const { return m_communicationDeviceId; }
+    void setCommunicationDeviceId(const QString& value);
+
+    QString communicationProtocol() const { return m_communicationProtocol; }
+    void setCommunicationProtocol(const QString& value);
+
+    QString communicationHost() const { return m_communicationHost; }
+    void setCommunicationHost(const QString& value);
+
+    int communicationPort() const { return m_communicationPort; }
+    void setCommunicationPort(int value);
+
+    QString communicationPath() const { return m_communicationPath; }
+    void setCommunicationPath(const QString& value);
+
+    QString communicationSerialPort() const { return m_communicationSerialPort; }
+    void setCommunicationSerialPort(const QString& value);
+
+    int communicationBaudRate() const { return m_communicationBaudRate; }
+    void setCommunicationBaudRate(int value);
+
+    int communicationTimeoutMs() const { return m_communicationTimeoutMs; }
+    void setCommunicationTimeoutMs(int value);
+
+    QString legacySettingValue(const QString& key, const QString& defaultValue = QString()) const;
+    const QMap<QString, QString>& legacySettingValues() const { return m_legacySettingValues; }
+    void setLegacySettingValues(const QMap<QString, QString>& values);
+
 protected:
     void readFrom(const toml::value& root) override;
     void writeTo(toml::value& root) const override;
@@ -129,7 +158,7 @@ private:
 
     QString m_controllerEndpoint;
     bool    m_simulationMode{true};
-    QString m_motionControllerName{QStringLiteral("SimulatorCMHP")};
+    QString m_motionControllerName{QStringLiteral("PureSimulation")};
     QString m_laserDeviceName{QStringLiteral("Simulator")};
     double  m_laserEnergy{0.0};
     double  m_laserFrequency{0.0};
@@ -157,6 +186,15 @@ private:
     int     m_cameraExposureMs{30};
     QString m_internetHost{QStringLiteral("127.0.0.1")};
     int     m_internetPort{0};
+    QString m_communicationDeviceId{QStringLiteral("laser")};
+    QString m_communicationProtocol{QStringLiteral("Mock")};
+    QString m_communicationHost{QStringLiteral("127.0.0.1")};
+    int     m_communicationPort{5000};
+    QString m_communicationPath{QStringLiteral("/")};
+    QString m_communicationSerialPort{QStringLiteral("COM1")};
+    int     m_communicationBaudRate{115200};
+    int     m_communicationTimeoutMs{3000};
+    QMap<QString, QString> m_legacySettingValues;
 };
 
 } // namespace lcnc

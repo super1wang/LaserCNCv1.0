@@ -5,7 +5,12 @@
 #include <QVector>
 #include <memory>
 
-namespace lcnc { class ProcessSettings; }
+class QObject;
+
+namespace lcnc {
+class IMotionController;
+class ProcessSettings;
+}
 
 namespace lcnc::process {
 
@@ -53,6 +58,10 @@ public:
 
     ILaserDevice* laserDevice() const { return m_laserDevice.get(); }
     IProcessIo* processIo() const { return m_processIo.get(); }
+
+    std::unique_ptr<lcnc::IMotionController> createMotionController(const lcnc::ProcessSettings& settings,
+                                                                    QObject* parent,
+                                                                    QString* errorMessage = nullptr) const;
 
     bool isMotionControllerAvailable(const QString& name) const;
     bool isLaserDeviceAvailable(const QString& name) const;

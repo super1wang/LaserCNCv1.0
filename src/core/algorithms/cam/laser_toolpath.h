@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QString>
 #include <QList>
 
@@ -60,6 +61,7 @@ struct LeadInParams
 struct LaserContour
 {
     std::uint64_t              contourId{0}; ///< Runtime-stable id, preserved across reordering.
+    std::uint64_t              layerId{0};   ///< Runtime-stable layer id used by CAM layer management.
     TopoDS_Wire                wire;     ///< The original topological wire
     TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
@@ -71,6 +73,16 @@ struct LaserContour
     // ── Face-classification metadata (set when using face-based extraction) ──
     int  contourType{3};   ///< FaceGroupKind cast to int (3 = Unknown / legacy)
     QString sourceInfo;    ///< Debug info, e.g. "outer ∩ crossSection"
+};
+
+struct ToolpathLayer
+{
+    std::uint64_t layerId{0};
+    QString name;
+    QColor color{QColor(80, 190, 150)};
+    QString toolName;
+    bool enabled{true};
+    std::vector<std::uint64_t> contourIds;
 };
 
 /**
@@ -90,6 +102,10 @@ public:
     std::vector<LaserContour>&       contours()       { return m_contours; }
     const std::vector<LaserContour>& contours() const { return m_contours; }
 
+    std::vector<ToolpathLayer>&       layers()       { return m_layers; }
+    const std::vector<ToolpathLayer>& layers() const { return m_layers; }
+    int layerCount() const { return static_cast<int>(m_layers.size()); }
+
     // Global parameters applied to all contours
     double globalLeadInLength()  const { return m_globalLeadInLength; }
     double globalNormalAngle()   const { return m_globalNormalAngle; }
@@ -99,6 +115,7 @@ public:
 
 private:
     std::vector<LaserContour> m_contours;
+    std::vector<ToolpathLayer> m_layers;
     double m_globalLeadInLength{5.0};
     double m_globalNormalAngle{0.0};
 };

@@ -106,6 +106,7 @@ private:
     // ── Slots ─────────────────────────────────────────────────────────────────
     void onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);
     void onProjectExplorerItemChanged(QTreeWidgetItem* item, int column);
+    void onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int column);
     void onProjectExplorerContextMenuRequested(const QPoint& pos);
     void onProjectReset();
     void onProjectDomainChanged(lcnc::ProjectDomain domain);

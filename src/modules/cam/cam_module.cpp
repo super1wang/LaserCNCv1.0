@@ -1982,11 +1982,13 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 
     m_toolpath.contours() = std::move(allContours);
     m_camData->ensureContourIds();
+    m_camData->ensureToolpathLayers();
     syncCamDocumentContours();
     m_toolpathRenderer->setVisible(workspaceGuiDocument(), true);
 
     refreshToolpathDisplay();
     emit toolpathGenerated();
+    emit toolpathLayersChanged();
     return true;
 }
 
@@ -2005,6 +2007,7 @@ void CamModule::clearToolpath()
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
     emit toolpathCleared();
+    emit toolpathLayersChanged();
 }
 
 bool CamModule::resolveReferencePlaneCenter(WidgetOccView* occView,
@@ -2269,6 +2272,7 @@ void CamModule::setContourEnabled(int contourIdx, bool enabled)
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
     m_toolpathRenderer->refreshContour(workspaceGuiDocument(), m_toolpath, kinematics(), contourIdx, preview);
+    emit toolpathLayersChanged();
 }
 
 void CamModule::setAllContoursEnabled(bool enabled)
@@ -2290,6 +2294,7 @@ void CamModule::setAllContoursEnabled(bool enabled)
         m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
     m_toolpathRenderer->refresh(workspaceGuiDocument(), m_toolpath, kinematics(), preview);
+    emit toolpathLayersChanged();
 }
 
 lcnc::cam::ContourId CamModule::contourIdAt(int contourIdx) const
@@ -2310,6 +2315,7 @@ void CamModule::reorderContoursById(const QList<lcnc::cam::ContourId>& order)
     syncCamDocumentContours();
     if (m_toolpathRenderer->isVisible())
         refreshToolpathDisplay();
+    emit toolpathLayersChanged();
 }
 
 void CamModule::reorderContours(const QList<int>& order)
@@ -2320,6 +2326,47 @@ void CamModule::reorderContours(const QList<int>& order)
     syncCamDocumentContours();
     if (m_toolpathRenderer->isVisible())
         refreshToolpathDisplay();
+    emit toolpathLayersChanged();
+}
+
+const std::vector<ToolpathLayer>& CamModule::toolpathLayers() const
+{
+    static const std::vector<ToolpathLayer> empty;
+    return m_camData ? m_camData->toolpathLayers() : empty;
+}
+
+QList<int> CamModule::contourIndexesInLayer(std::uint64_t layerId) const
+{
+    return m_camData ? m_camData->contourIndexesInLayer(layerId) : QList<int>{};
+}
+
+bool CamModule::updateToolpathLayer(std::uint64_t layerId,
+                                    const QString& name,
+                                    const QColor& color,
+                                    const QString& toolName)
+{
+    if (!m_camData || !m_camData->updateToolpathLayer(layerId, name, color, toolName))
+        return false;
+
+    applyToolpathLayerColors();
+    emit toolpathLayersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
+bool CamModule::setToolpathLayerEnabled(std::uint64_t layerId, bool enabled)
+{
+    if (!m_camData || !m_camData->setToolpathLayerEnabled(layerId, enabled))
+        return false;
+
+    setCamContoursVisible(m_toolpathRenderer->isVisible(), false);
+    lcnc::view::ToolpathRenderer::LeadInPreview preview{
+        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+    };
+    m_toolpathRenderer->refresh(workspaceGuiDocument(), m_toolpath, kinematics(), preview);
+    emit toolpathLayersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
 }
 
 void CamModule::recalcToolpath()
@@ -2745,8 +2792,44 @@ void CamModule::syncCamDocumentContours()
     if (GuiDocument* gd = workspaceGuiDocument()) {
         gd->rebuildDomain(lcnc::ProjectDomain::Cam, doc);
         applyCamContourTransforms();
+        applyToolpathLayerColors(false);
         applyCamContourVisibility();
     }
     lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+}
+
+void CamModule::applyToolpathLayerColors(bool updateView)
+{
+    LcncDocument* doc = camDocument();
+    GuiDocument* gd = workspaceGuiDocument();
+    if (!doc || !gd || !gd->scene())
+        return;
+
+    const TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Cam);
+    const int count = qMin(labels.Length(), m_toolpath.contourCount());
+    for (int index = 0; index < count; ++index) {
+        const LaserContour& contour = m_toolpath.contour(index);
+        const ToolpathLayer* layer = m_camData ? m_camData->toolpathLayer(contour.layerId) : nullptr;
+        if (!layer || !layer->color.isValid())
+            continue;
+
+        const QString entry = XcafUtils::entry(labels.Value(index + 1));
+        Handle(AIS_Shape) ais = gd->aisShape(doc->id(), entry);
+        if (ais.IsNull())
+            continue;
+
+        const QColor color = layer->color;
+        gd->scene()->setShapeColor(
+            ais,
+            Quantity_Color(color.redF(), color.greenF(), color.blueF(), Quantity_TOC_RGB),
+            false);
+    }
+
+    if (!updateView)
+        return;
+    if (!gd->context().IsNull())
+        gd->context()->UpdateCurrentViewer();
+    if (gd->hasView())
+        gd->view()->Redraw();
 }
 

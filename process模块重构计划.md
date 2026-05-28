@@ -1,6 +1,6 @@
 # Process 模块重构计划
 
-审阅日期：2026-05-26
+审阅日期：2026-05-27
 
 目标：在不破坏当前微内核边界的前提下，完成 `device / Process / Setting` 三个旧子模块的合理迁移。最终 Process 模块应支持完整外设迁移、统一参数界面、完整流程节点、流程树拖拽排序、双击编辑节点、节点编辑界面迁移，以及面向仿真和真实设备的流程执行。
 
@@ -10,15 +10,16 @@
 
 - Phase 1：`ProcessModule` 已移除旧 UI 树依赖，流程新建/加载/保存/运行只通过 `ProcessFlowDocument` / `ProcessFlowStore`。
 - Phase 2：`ProcessFlowModel`、`ProcessFlowTreeView`、`ProcessNodeRegistry` 已接入，右键菜单、默认节点、Info 摘要、拖放放置规则均统一走 registry。
-- Phase 3：`ProcessSettingsDialog` 已是左树右页，页面覆盖 Process、Motion Controller、Laser、Axis、Tool、IO、Gas、Water、Monitor、LoadingPos、Camera、Internet；`ProcessSettings` 已持久化对应基础字段。
+- Phase 3：`ProcessSettingsDialog` 已是左树右页，页面覆盖 Process、Motion Controller、Laser、Axis、Tool、IO、Gas、Water、Monitor、LoadingPos、Camera、Internet、Communication；旧 Setting `.ui` 全量字段已通过 Legacy Setting 镜像页迁入 `ProcessSettings`。
 - Phase 4：所有当前 `ProcessNodeType` 已有 registry metadata/defaults/executor key；节点编辑器已为运动、切割、IO、视觉、测量、逻辑和结构节点提供 typed 参数控件，并保留通用参数表兜底。
 - Phase 5：`ProcessWorkflowExecutor` 已按流程树异步推进节点，Run/Pause/Resume/Stop/EStop 可控制流程树运行，节点状态会回写并刷新 UI。
-- Phase 6：新增 `ILaserDevice`、`IProcessIo`、`IProcessAuxDevice`；`ProcessDeviceManager` 拥有仿真激光和仿真 IO，EnergySwitch/IO 节点可驱动 simulator；真实 SDK 入口通过 CMake option 默认关闭。
+- Phase 6：新增 `ILaserDevice`、`IProcessIo`、`IProcessAuxDevice`；`ProcessDeviceManager` 拥有仿真激光、仿真 IO、运动控制 profile 工厂和活动 controller 创建；`PureSimulation` 与 ACS-based `SimulatorCMHP` 已拆分，ACS/GTN adapter 源通过 CMake option 默认关闭。
 - Phase 7：`ICamFacade` 已暴露只读刀路摘要，Cutting/OverCutting 支持参数校验、CAM dry-run 反馈和无刀路失败边界。
 - Phase 8：旧轻量树兼容源已退出 CMake，文档和 `实施进度.md` 已按当前框架同步。
+- Phase 9-12：统一通讯模块、旧 Setting 全量字段镜像、ACS/GTN 运动控制 adapter 源和 CAM 图层基础已完成 SDK-off 构建验证。
 - 验证：`cmake --build build --config Debug -- /m /nologo` 通过，相关源码 `get_errors` 无错误。
 
-剩余工作主要是旧 Setting 复杂表、真实 Pharos/IPG/Raycus/ACS/GTN/BDAQ adapter、真实相机/测量服务、非 dry-run 切割实控和更细粒度执行恢复。
+剩余工作主要是 SDK-on 编译/硬件验证、真实 Pharos/IPG/Raycus/BDAQ adapter、真实相机/测量服务、非 dry-run 切割实控、Legacy Setting typed schema 提升和 CAM 图层持久化。
 
 ## 1. 总目标
 
@@ -91,14 +92,23 @@
 
 | 区域 | 当前缺口 | 风险 |
 | --- | --- | --- |
-| 模块边界 | 新边界已建立；真实 adapter 尚未迁入 | SDK 接入时需保持 option/offline 构建 |
+| 模块边界 | 新边界已建立；ACS/GTN adapter 源已迁入 option 路径 | SDK-on 编译和硬件联调仍需保持隔离验证 |
 | 流程树模型 | stable id、拖放、状态回写已完成 | 仍需手工 smoke 覆盖复杂嵌套流程 |
 | 节点迁移 | 全部当前节点已有 metadata/defaults/typed 编辑 | 旧专用 UI 和复杂校验仍需继续迁移 |
-| 参数界面 | 左树右页基础页已完成 | 旧 Setting 复杂列表和设备详情页未完全迁移 |
-| 参数数据 | 基础字段已覆盖 | 旧工艺全量字段、版本迁移和 schema 校验待补 |
-| 外设 | 仿真激光/IO 已闭环 | 真实控制器、激光器、BDAQ、相机 adapter 未启用 |
+| 参数界面 | 左树右页、通讯页和 Legacy Setting 全量字段镜像已完成 | 旧表格/列表业务语义需 DTO 化 |
+| 参数数据 | 基础字段、通讯字段和旧 UI 字段镜像已覆盖 | typed schema、默认值、单位、范围、版本迁移和校验待补 |
+| 外设 | 仿真激光/IO、通讯模块、ACS/GTN adapter 源已接入 | SDK-on 编译、真实激光器/BDAQ/相机 adapter 待验证或迁移 |
 | 执行引擎 | QTimer 顺序执行和按钮控制已完成 | 细粒度暂停恢复、并行/条件语义和真实节点 executor 待增强 |
-| 旧依赖 | 旧源码仍引用 Service、DT、Vision、LibreCAD、Boost、SDK | 直接编译会破坏微内核边界和构建稳定性 |
+| 旧依赖 | 旧源码仍引用 Service、DT、Vision、LibreCAD、Boost、SDK | 继续保持隔离，仅迁移字段/协议/行为，不直接扩散旧全局依赖 |
+
+## 3.1 本轮新增缺口迁移计划状态
+
+| 项 | 目标 | 状态 | 后续 |
+| --- | --- | --- | --- |
+| 运动控制器 | 接入 PureSimulation、SimulatorCMHP、ACS、GTN 三类真实/半实物 profile | SDK-off 完成 | ACS/GTN SDK-on 编译与硬件联调 |
+| 统一通讯 | 支持 Mock、TCP、HTTP、Serial，提供 UI 配置和日志 | 完成 | 真实激光器 adapter 复用通讯基类 |
+| Setting 全量字段 | 完全复制旧 Setting UI 可编辑字段到现参数模块 | 镜像完成 | typed schema、默认值、校验和设备刷新 |
+| CAM 图层 | CAM 数据节点显示图层，图层可配颜色和工具 | 基础完成 | 持久化、跨图层拖拽、工具联动执行 |
 
 ## 4. 目标架构拆分
 

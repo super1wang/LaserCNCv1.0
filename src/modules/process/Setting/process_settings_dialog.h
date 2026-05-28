@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QMap>
 #include <QStringList>
 
 class QCheckBox;
@@ -15,6 +16,8 @@ class QTreeWidgetItem;
 namespace lcnc { class ProcessSettings; }
 
 namespace lcnc::process {
+
+class CommunicationSettingsPage;
 
 class ProcessSettingsDialog : public QDialog
 {
@@ -44,6 +47,11 @@ private:
     QWidget* buildLoadingPage();
     QWidget* buildCameraPage();
     QWidget* buildInternetPage();
+    QWidget* buildCommunicationPage();
+    QWidget* buildLegacySettingsPage(const QString& pageId, const QString& title, const QString& resourcePath);
+    void addLegacySettingsPages(QTreeWidgetItem* parent);
+    void loadLegacySettings();
+    void applyLegacySettings(QMap<QString, QString>& values) const;
     QTreeWidgetItem* addPageNode(QTreeWidgetItem* parent, const QString& text, int pageIndex);
     void switchPage(QTreeWidgetItem* item, int column);
     void loadFromSettings();
@@ -84,6 +92,8 @@ private:
     QSpinBox* m_cameraExposureSpin{nullptr};
     QLineEdit* m_internetHostEdit{nullptr};
     QSpinBox* m_internetPortSpin{nullptr};
+    CommunicationSettingsPage* m_communicationPage{nullptr};
+    QMap<QString, QWidget*> m_legacyEditors;
 };
 
 } // namespace lcnc::process
