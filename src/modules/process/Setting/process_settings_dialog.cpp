@@ -1,5 +1,6 @@
 #include "modules/process/Setting/process_settings_dialog.h"
 
+#include "core/logging/logger.h"
 #include "modules/process/communication/ui/communication_settings_page.h"
 #include "modules/process/settings/process_settings.h"
 
@@ -10,13 +11,17 @@
 #include <QFile>
 #include <QFormLayout>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSet>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include <QTextEdit>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QUiLoader>
 #include <QXmlStreamReader>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -38,6 +43,23 @@ struct LegacyUiField {
     QStringList options;
 };
 
+class LegacyUiLoader : public QUiLoader
+{
+public:
+    using QUiLoader::QUiLoader;
+
+protected:
+    QWidget* createWidget(const QString& className, QWidget* parent, const QString& name) override
+    {
+        if (className == QStringLiteral("CSwitchWidget")) {
+            auto* widget = new QCheckBox(parent);
+            widget->setObjectName(name);
+            return widget;
+        }
+        return QUiLoader::createWidget(className, parent, name);
+    }
+};
+
 const LegacyUiPage* legacyUiPages(int* count)
 {
     static const LegacyUiPage pages[] = {
@@ -46,6 +68,8 @@ const LegacyUiPage* legacyUiPages(int* count)
         {"Setting_Laser", QT_TR_NOOP("Laser"), ":/process/setting/Setting_Laser.ui"},
         {"Setting_MotionControl", QT_TR_NOOP("Motion Control"), ":/process/setting/Setting_MotionControl.ui"},
         {"Setting_Axis", QT_TR_NOOP("Axis"), ":/process/setting/Setting_Axis.ui"},
+        {"Setting_Analog", QT_TR_NOOP("Analog"), ":/process/setting/Setting_Analog.ui"},
+        {"Setting_Digital", QT_TR_NOOP("Digital"), ":/process/setting/Setting_Digital.ui"},
         {"Setting_IOIndex", QT_TR_NOOP("IO Index"), ":/process/setting/Setting_IOIndex.ui"},
         {"Setting_Gas", QT_TR_NOOP("Gas"), ":/process/setting/Setting_Gas.ui"},
         {"Setting_Water", QT_TR_NOOP("Water"), ":/process/setting/Setting_Water.ui"},
@@ -53,6 +77,7 @@ const LegacyUiPage* legacyUiPages(int* count)
         {"Setting_LoadingPos", QT_TR_NOOP("Loading Pos"), ":/process/setting/Setting_LoadingPos.ui"},
         {"Setting_Camera", QT_TR_NOOP("Camera"), ":/process/setting/Setting_Camera.ui"},
         {"Setting_Internet", QT_TR_NOOP("Internet"), ":/process/setting/Setting_Internet.ui"},
+        {"qg_dlgsetting", QT_TR_NOOP("Process Setting Shell"), ":/process/setting/qg_dlgsetting.ui"},
         {"qg_dlgpbasicsetting", QT_TR_NOOP("Process Basic"), ":/process/setting/qg_dlgpbasicsetting.ui"},
         {"qg_dlgtbasicsetting", QT_TR_NOOP("Technology Basic"), ":/process/setting/qg_dlgtbasicsetting.ui"},
         {"qg_dlgmotionsetting", QT_TR_NOOP("Motion Process"), ":/process/setting/qg_dlgmotionsetting.ui"},
@@ -78,6 +103,126 @@ bool isLegacyEditorClass(const QString& className)
         || className == QStringLiteral("QDoubleSpinBox")
         || className == QStringLiteral("QTextEdit")
         || className == QStringLiteral("QPlainTextEdit");
+}
+
+QString visibleNodePathForPage(const QString& pageId)
+{
+    if (pageId == QStringLiteral("Setting_MotionControl"))
+        return QStringLiteral("Settings/外设/运动控制器");
+    if (pageId == QStringLiteral("Setting_Axis"))
+        return QStringLiteral("Settings/外设/运动轴");
+    if (pageId == QStringLiteral("Setting_IOIndex")
+        || pageId == QStringLiteral("Setting_Digital")
+        || pageId == QStringLiteral("Setting_Analog"))
+        return QStringLiteral("Settings/外设/I/O索引");
+    if (pageId == QStringLiteral("Setting_Laser"))
+        return QStringLiteral("Settings/外设/激光器");
+    if (pageId == QStringLiteral("Setting_Tool"))
+        return QStringLiteral("Settings/加工设置/工具");
+    if (pageId == QStringLiteral("Setting_Gas"))
+        return QStringLiteral("Settings/加工设置/吹气");
+    if (pageId == QStringLiteral("Setting_Water"))
+        return QStringLiteral("Settings/加工设置/湿切");
+    if (pageId == QStringLiteral("Setting_Monitor"))
+        return QStringLiteral("Settings/加工设置/监控");
+    if (pageId == QStringLiteral("Setting_LoadingPos"))
+        return QStringLiteral("Settings/加工设置/上料位");
+    return QString();
+}
+
+bool isVisibleSettingsPage(const QString& pageId)
+{
+    return !visibleNodePathForPage(pageId).isEmpty();
+}
+
+QString legacyEditorClassName(QWidget* editor)
+{
+    if (qobject_cast<QLineEdit*>(editor))
+        return QStringLiteral("QLineEdit");
+    if (qobject_cast<QComboBox*>(editor))
+        return QStringLiteral("QComboBox");
+    if (qobject_cast<QCheckBox*>(editor))
+        return QStringLiteral("QCheckBox");
+    if (qobject_cast<QSpinBox*>(editor))
+        return QStringLiteral("QSpinBox");
+    if (qobject_cast<QDoubleSpinBox*>(editor))
+        return QStringLiteral("QDoubleSpinBox");
+    if (qobject_cast<QTextEdit*>(editor))
+        return QStringLiteral("QTextEdit");
+    if (qobject_cast<QPlainTextEdit*>(editor))
+        return QStringLiteral("QPlainTextEdit");
+    return QString();
+}
+
+bool isLegacyEditorWidget(QWidget* editor)
+{
+    return !legacyEditorClassName(editor).isEmpty() && !editor->objectName().trimmed().isEmpty();
+}
+
+void registerLegacyEditor(QMap<QString, QWidget*>& editors, const QString& pageId, QWidget* editor)
+{
+    if (!isLegacyEditorWidget(editor))
+        return;
+    const QString key = QStringLiteral("%1.%2").arg(pageId, editor->objectName().trimmed());
+    editor->setProperty("uiSettingKey", key);
+    editor->setProperty("uiSettingPage", pageId);
+    editor->setProperty("uiSettingField", editor->objectName().trimmed());
+    editor->setProperty("uiSettingClass", legacyEditorClassName(editor));
+    editor->setProperty("legacySettingKey", key);
+    editor->setProperty("legacySettingClass", legacyEditorClassName(editor));
+    editors.insert(key, editor);
+}
+
+void registerLegacyEditors(QMap<QString, QWidget*>& editors, const QString& pageId, QWidget* root)
+{
+    if (!root)
+        return;
+    registerLegacyEditor(editors, pageId, root);
+    const auto children = root->findChildren<QWidget*>();
+    for (QWidget* child : children)
+        registerLegacyEditor(editors, pageId, child);
+}
+
+void hideEmbeddedSettingDialogButtons(QWidget* root)
+{
+    if (!root)
+        return;
+    const QStringList buttonNames = {
+        QStringLiteral("pushButton_Setting_Apply"),
+        QStringLiteral("pushButton_Setting_OK"),
+        QStringLiteral("pushButton_Setting_Cancel"),
+        QStringLiteral("pushButton_Setting_ExportConfig"),
+        QStringLiteral("pushButton_Setting_ImportConfig"),
+    };
+    for (const QString& name : buttonNames) {
+        if (QWidget* button = root->findChild<QWidget*>(name))
+            button->hide();
+    }
+    for (QDialogButtonBox* buttons : root->findChildren<QDialogButtonBox*>())
+        buttons->hide();
+}
+
+QWidget* loadLegacyUiWidget(const QString& resourcePath, QWidget* parent)
+{
+    QFile file(resourcePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "process.settings.ui: open failed resource='{}'",
+                  resourcePath.toStdString());
+        return nullptr;
+    }
+
+    LegacyUiLoader loader;
+    QWidget* widget = loader.load(&file, parent);
+    if (!widget) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "process.settings.ui: load failed resource='{}' error='{}'",
+                  resourcePath.toStdString(),
+                  loader.errorString().toStdString());
+        return nullptr;
+    }
+    widget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    return widget;
 }
 
 QString legacyFieldLabel(QString objectName)
@@ -179,56 +324,55 @@ ProcessSettingsDialog::ProcessSettingsDialog(lcnc::ProcessSettings& settings,
     , m_laserDevices(laserDevices)
 {
     setWindowTitle(tr("加工参数"));
-        resize(720, 420);
+    resize(720, 420);
 
     auto* layout = new QVBoxLayout(this);
-        auto* body = new QHBoxLayout();
+    auto* body = new QHBoxLayout();
 
-        m_pageTree = new QTreeWidget(this);
-        m_pageTree->setHeaderHidden(true);
-        m_pageTree->setMinimumWidth(190);
-        m_pageTree->setMaximumWidth(240);
+    m_pageTree = new QTreeWidget(this);
+    m_pageTree->setHeaderHidden(true);
+    m_pageTree->setMinimumWidth(190);
+    m_pageTree->setMaximumWidth(240);
 
-        m_pages = new QStackedWidget(this);
-        const int processPage = m_pages->addWidget(buildProcessPage());
-        const int motionPage = m_pages->addWidget(buildMotionPage());
-        const int laserPage = m_pages->addWidget(buildLaserPage());
-        const int axisPage = m_pages->addWidget(buildAxisPage());
-        const int toolPage = m_pages->addWidget(buildToolPage());
-        const int ioPage = m_pages->addWidget(buildIoPage());
-        const int gasPage = m_pages->addWidget(buildGasPage());
-        const int waterPage = m_pages->addWidget(buildWaterPage());
-        const int monitorPage = m_pages->addWidget(buildMonitorPage());
-        const int loadingPage = m_pages->addWidget(buildLoadingPage());
-        const int cameraPage = m_pages->addWidget(buildCameraPage());
-        const int internetPage = m_pages->addWidget(buildInternetPage());
-        const int communicationPage = m_pages->addWidget(buildCommunicationPage());
+    m_pages = new QStackedWidget(this);
+    const int processPage = m_pages->addWidget(buildProcessPage());
+    const int motionPage = m_pages->addWidget(buildMotionPage());
+    const int laserPage = m_pages->addWidget(buildLaserPage());
+    const int axisPage = m_pages->addWidget(buildAxisPage());
+    const int toolPage = m_pages->addWidget(buildToolPage());
+    const int ioPage = m_pages->addWidget(buildIoPage());
+    const int gasPage = m_pages->addWidget(buildGasPage());
+    const int waterPage = m_pages->addWidget(buildWaterPage());
+    const int monitorPage = m_pages->addWidget(buildMonitorPage());
+    const int loadingPage = m_pages->addWidget(buildLoadingPage());
+    const int cameraPage = m_pages->addWidget(buildCameraPage());
+    const int internetPage = m_pages->addWidget(buildInternetPage());
+    const int communicationPage = m_pages->addWidget(buildCommunicationPage());
 
-        auto* processRoot = addPageNode(nullptr, tr("Process"), processPage);
-        addPageNode(processRoot, tr("运行"), processPage);
-        addPageNode(processRoot, tr("Axis"), axisPage);
-        addPageNode(processRoot, tr("Tool"), toolPage);
-        auto* deviceRoot = addPageNode(nullptr, tr("External"), motionPage);
-        addPageNode(deviceRoot, tr("Motion Controller"), motionPage);
-        addPageNode(deviceRoot, tr("Laser"), laserPage);
-        addPageNode(deviceRoot, tr("IO"), ioPage);
-        addPageNode(deviceRoot, tr("Gas"), gasPage);
-        addPageNode(deviceRoot, tr("Water"), waterPage);
-        addPageNode(deviceRoot, tr("Monitor"), monitorPage);
-        addPageNode(deviceRoot, tr("LoadingPos"), loadingPage);
-        addPageNode(deviceRoot, tr("Camera"), cameraPage);
-        addPageNode(deviceRoot, tr("Internet"), internetPage);
-        addPageNode(deviceRoot, tr("Communication"), communicationPage);
-        auto* legacyRoot = addPageNode(nullptr, tr("Legacy Setting"), processPage);
-        addLegacySettingsPages(legacyRoot);
-        m_pageTree->expandAll();
+    m_legacyPageIndexes.insert(QStringLiteral("_process"), processPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_motion"), motionPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_laser"), laserPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_axis"), axisPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_tool"), toolPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_io"), ioPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_gas"), gasPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_water"), waterPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_monitor"), monitorPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_loading"), loadingPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_camera"), cameraPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_internet"), internetPage);
+    m_legacyPageIndexes.insert(QStringLiteral("_communication"), communicationPage);
 
-        connect(m_pageTree, &QTreeWidget::itemClicked,
+    loadLegacySettingsPages();
+    buildSettingsTree();
+    m_pageTree->expandAll();
+
+    connect(m_pageTree, &QTreeWidget::itemClicked,
             this, &ProcessSettingsDialog::switchPage);
 
-        body->addWidget(m_pageTree);
-        body->addWidget(m_pages, 1);
-        layout->addLayout(body, 1);
+    body->addWidget(m_pageTree);
+    body->addWidget(m_pages, 1);
+    layout->addLayout(body, 1);
 
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel,
@@ -246,26 +390,45 @@ ProcessSettingsDialog::ProcessSettingsDialog(lcnc::ProcessSettings& settings,
 
     switch (initialPage) {
     case InitialPage::Motion:
-        m_pages->setCurrentIndex(motionPage);
+        m_pages->setCurrentIndex(pageIndexFor(QStringLiteral("Setting_MotionControl"), motionPage));
         break;
     case InitialPage::Laser:
-        m_pages->setCurrentIndex(laserPage);
+        m_pages->setCurrentIndex(pageIndexFor(QStringLiteral("Setting_Laser"), laserPage));
         break;
     case InitialPage::Process:
     default:
-        m_pages->setCurrentIndex(processPage);
+        m_pages->setCurrentIndex(pageIndexFor(QStringLiteral("Setting_Tool"), toolPage));
         break;
     }
 }
 
-QTreeWidgetItem* ProcessSettingsDialog::addPageNode(QTreeWidgetItem* parent, const QString& text, int pageIndex)
+QTreeWidgetItem* ProcessSettingsDialog::addGroupNode(QTreeWidgetItem* parent, const QString& text)
+{
+    auto* item = parent
+        ? new QTreeWidgetItem(parent)
+        : new QTreeWidgetItem(m_pageTree);
+    item->setText(0, text);
+    item->setData(0, Qt::UserRole, -1);
+    return item;
+}
+
+QTreeWidgetItem* ProcessSettingsDialog::addPageNode(QTreeWidgetItem* parent,
+                                                    const QString& text,
+                                                    int pageIndex,
+                                                    const QString& pageId)
 {
     auto* item = parent
         ? new QTreeWidgetItem(parent)
         : new QTreeWidgetItem(m_pageTree);
     item->setText(0, text);
     item->setData(0, Qt::UserRole, pageIndex);
+    item->setData(0, Qt::UserRole + 1, pageId);
     return item;
+}
+
+int ProcessSettingsDialog::pageIndexFor(const QString& pageId, int fallbackPageIndex) const
+{
+    return m_legacyPageIndexes.value(pageId, fallbackPageIndex);
 }
 
 void ProcessSettingsDialog::switchPage(QTreeWidgetItem* item, int column)
@@ -479,6 +642,18 @@ QWidget* ProcessSettingsDialog::buildLegacySettingsPage(const QString& pageId,
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
 
+    if (QWidget* loadedUi = loadLegacyUiWidget(resourcePath, scroll)) {
+        const int editorCountBefore = m_legacyEditors.size();
+        hideEmbeddedSettingDialogButtons(loadedUi);
+        registerLegacyEditors(m_legacyEditors, pageId, loadedUi);
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "process.settings.ui: loaded page='{}' editors={}",
+                  pageId.toStdString(),
+                  m_legacyEditors.size() - editorCountBefore);
+        scroll->setWidget(loadedUi);
+        return scroll;
+    }
+
     auto* page = new QWidget(scroll);
     auto* form = new QFormLayout(page);
     form->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
@@ -525,27 +700,105 @@ QWidget* ProcessSettingsDialog::buildLegacySettingsPage(const QString& pageId,
     return scroll;
 }
 
-void ProcessSettingsDialog::addLegacySettingsPages(QTreeWidgetItem* parent)
+void ProcessSettingsDialog::loadLegacySettingsPages()
 {
+    m_fieldRegistry.clear();
     int count = 0;
     const LegacyUiPage* pages = legacyUiPages(&count);
     for (int index = 0; index < count; ++index) {
         const QString pageId = QString::fromLatin1(pages[index].pageId);
         const QString title = tr(pages[index].title);
+        const QString resourcePath = QString::fromLatin1(pages[index].resourcePath);
+        const QString visibleNodePath = visibleNodePathForPage(pageId);
+        QString registryError;
+        if (!m_fieldRegistry.registerUiFile(pageId,
+                                            resourcePath,
+                                            visibleNodePath,
+                                            isVisibleSettingsPage(pageId),
+                                            &registryError)) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "process.settings.ui: field registry failed page='{}' error='{}'",
+                      pageId.toStdString(),
+                      registryError.toStdString());
+        }
         const int pageIndex = m_pages->addWidget(buildLegacySettingsPage(
             pageId,
             title,
-            QString::fromLatin1(pages[index].resourcePath)));
-        addPageNode(parent, title, pageIndex);
+            resourcePath));
+        m_legacyPageIndexes.insert(pageId, pageIndex);
     }
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "process.settings.ui: legacy pages loaded pages={} fields={}",
+              count,
+              m_fieldRegistry.fieldCount());
+}
+
+void ProcessSettingsDialog::buildSettingsTree()
+{
+    m_pageTree->clear();
+
+    auto* root = addGroupNode(nullptr, tr("Settings"));
+    auto* deviceRoot = addGroupNode(root, tr("外设"));
+    addPageNode(deviceRoot,
+                tr("运动控制器"),
+                pageIndexFor(QStringLiteral("Setting_MotionControl"), m_legacyPageIndexes.value(QStringLiteral("_motion"), 0)),
+                QStringLiteral("Setting_MotionControl"));
+    addPageNode(deviceRoot,
+                tr("运动轴"),
+                pageIndexFor(QStringLiteral("Setting_Axis"), m_legacyPageIndexes.value(QStringLiteral("_axis"), 0)),
+                QStringLiteral("Setting_Axis"));
+    addPageNode(deviceRoot,
+                tr("I/O索引"),
+                pageIndexFor(QStringLiteral("Setting_IOIndex"), m_legacyPageIndexes.value(QStringLiteral("_io"), 0)),
+                QStringLiteral("Setting_IOIndex"));
+    addPageNode(deviceRoot,
+                tr("激光器"),
+                pageIndexFor(QStringLiteral("Setting_Laser"), m_legacyPageIndexes.value(QStringLiteral("_laser"), 0)),
+                QStringLiteral("Setting_Laser"));
+
+    auto* processRoot = addGroupNode(root, tr("加工设置"));
+    auto* toolRoot = addPageNode(processRoot,
+                                 tr("工具"),
+                                 pageIndexFor(QStringLiteral("Setting_Tool"), m_legacyPageIndexes.value(QStringLiteral("_tool"), 0)),
+                                 QStringLiteral("Setting_Tool"));
+    addPageNode(toolRoot,
+                tr("运动&激光"),
+                pageIndexFor(QStringLiteral("Setting_Tool"), m_legacyPageIndexes.value(QStringLiteral("_tool"), 0)),
+                QStringLiteral("Setting_Tool"));
+    addPageNode(toolRoot,
+                tr("基础参数"),
+                pageIndexFor(QStringLiteral("Setting_Tool"), m_legacyPageIndexes.value(QStringLiteral("_tool"), 0)),
+                QStringLiteral("Setting_Tool"));
+    addPageNode(toolRoot,
+                tr("随动"),
+                pageIndexFor(QStringLiteral("Setting_Tool"), m_legacyPageIndexes.value(QStringLiteral("_tool"), 0)),
+                QStringLiteral("Setting_Tool"));
+    addPageNode(processRoot,
+                tr("吹气"),
+                pageIndexFor(QStringLiteral("Setting_Gas"), m_legacyPageIndexes.value(QStringLiteral("_gas"), 0)),
+                QStringLiteral("Setting_Gas"));
+    addPageNode(processRoot,
+                tr("湿切"),
+                pageIndexFor(QStringLiteral("Setting_Water"), m_legacyPageIndexes.value(QStringLiteral("_water"), 0)),
+                QStringLiteral("Setting_Water"));
+    addPageNode(processRoot,
+                tr("监控"),
+                pageIndexFor(QStringLiteral("Setting_Monitor"), m_legacyPageIndexes.value(QStringLiteral("_monitor"), 0)),
+                QStringLiteral("Setting_Monitor"));
+    addPageNode(processRoot,
+                tr("上料位"),
+                pageIndexFor(QStringLiteral("Setting_LoadingPos"), m_legacyPageIndexes.value(QStringLiteral("_loading"), 0)),
+                QStringLiteral("Setting_LoadingPos"));
 }
 
 void ProcessSettingsDialog::loadLegacySettings()
 {
     for (auto it = m_legacyEditors.cbegin(); it != m_legacyEditors.cend(); ++it) {
         QWidget* editor = it.value();
+        if (!m_settings.uiSettingValues().contains(it.key()))
+            continue;
         const QString className = editor->property("legacySettingClass").toString();
-        const QString value = m_settings.legacySettingValue(it.key());
+        const QString value = m_settings.uiSettingValue(it.key());
         if (auto* check = qobject_cast<QCheckBox*>(editor)) {
             check->setChecked(value == QStringLiteral("true") || value == QStringLiteral("1"));
         } else if (auto* combo = qobject_cast<QComboBox*>(editor)) {
@@ -558,6 +811,10 @@ void ProcessSettingsDialog::loadLegacySettings()
             doubleSpin->setValue(value.toDouble());
         } else if (auto* edit = qobject_cast<QLineEdit*>(editor)) {
             edit->setText(value);
+        } else if (auto* textEdit = qobject_cast<QTextEdit*>(editor)) {
+            textEdit->setPlainText(value);
+        } else if (auto* plainTextEdit = qobject_cast<QPlainTextEdit*>(editor)) {
+            plainTextEdit->setPlainText(value);
         }
         Q_UNUSED(className);
     }
@@ -577,8 +834,86 @@ void ProcessSettingsDialog::applyLegacySettings(QMap<QString, QString>& values) 
             value = QString::number(doubleSpin->value(), 'g', 15);
         else if (auto* edit = qobject_cast<QLineEdit*>(it.value()))
             value = edit->text().trimmed();
+        else if (auto* textEdit = qobject_cast<QTextEdit*>(it.value()))
+            value = textEdit->toPlainText().trimmed();
+        else if (auto* plainTextEdit = qobject_cast<QPlainTextEdit*>(it.value()))
+            value = plainTextEdit->toPlainText().trimmed();
         values.insert(it.key(), value);
     }
+}
+
+void ProcessSettingsDialog::applyKnownLegacyTypedSettings(const QMap<QString, QString>& values)
+{
+    auto firstValue = [&values](std::initializer_list<const char*> keys) {
+        for (const char* key : keys) {
+            const QString value = values.value(QString::fromLatin1(key)).trimmed();
+            if (!value.isEmpty())
+                return value;
+        }
+        return QString();
+    };
+
+    auto applyDouble = [&](std::initializer_list<const char*> keys, auto setter) {
+        const QString valueText = firstValue(keys);
+        if (valueText.isEmpty())
+            return false;
+        bool ok = false;
+        const double value = valueText.toDouble(&ok);
+        if (!ok)
+            return false;
+        setter(value);
+        return true;
+    };
+
+    auto applyInt = [&](std::initializer_list<const char*> keys, auto setter) {
+        const QString valueText = firstValue(keys);
+        if (valueText.isEmpty())
+            return false;
+        bool ok = false;
+        const int value = valueText.toInt(&ok);
+        if (!ok)
+            return false;
+        setter(value);
+        return true;
+    };
+
+    auto applyString = [&](std::initializer_list<const char*> keys, auto setter) {
+        const QString value = firstValue(keys);
+        if (value.isEmpty())
+            return false;
+        setter(value);
+        return true;
+    };
+
+    int mappedCount = 0;
+    mappedCount += applyDouble({"Setting_Tool.lineEdit_Laser_fEnergy", "Setting_Laser.lineEdit_Laser_fEnergy"},
+                               [this](double value) { m_settings.setLaserEnergy(value); });
+    mappedCount += applyDouble({"Setting_Tool.lineEdit_Laser_fFrequency", "Setting_Laser.lineEdit_Laser_fFrequency"},
+                               [this](double value) { m_settings.setLaserFrequency(value); });
+    mappedCount += applyDouble({"Setting_Tool.lineEdit_Laser_fPluse", "Setting_Laser.lineEdit_Laser_fPulseWidth"},
+                               [this](double value) { m_settings.setLaserPulseWidth(value); });
+    mappedCount += applyDouble({"Setting_Tool.lineEdit_Cutting_fLineVel"},
+                               [this](double value) { m_settings.setToolFeedRate(value); });
+    mappedCount += applyDouble({"Setting_MotionControl.lineEdit_AxisSetting_fVel"},
+                               [this](double value) { m_settings.setAxisMaxVelocity(value); });
+    mappedCount += applyDouble({"Setting_MotionControl.lineEdit_AxisSetting_fAcc"},
+                               [this](double value) { m_settings.setAxisAcceleration(value); });
+    mappedCount += applyDouble({"Setting_Gas.lineEdit_Gas_fPressure"},
+                               [this](double value) { m_settings.setGasPressure(value); });
+    mappedCount += applyDouble({"Setting_LoadingPos.lineEdit_LoadingPos_fLoadingPosX", "qg_dlgpbasicsetting.lineEdit_X_Position"},
+                               [this](double value) { m_settings.setLoadingPositionX(value); });
+    mappedCount += applyDouble({"Setting_LoadingPos.lineEdit_LoadingPos_fLoadingPosY", "qg_dlgpbasicsetting.lineEdit_Y_Position"},
+                               [this](double value) { m_settings.setLoadingPositionY(value); });
+    mappedCount += applyDouble({"Setting_LoadingPos.lineEdit_LoadingPos_fLoadingPosZ", "qg_dlgpbasicsetting.lineEdit_Z_Position"},
+                               [this](double value) { m_settings.setLoadingPositionZ(value); });
+    mappedCount += applyInt({"Setting_Tool.lineEdit_Laser_iDelay"},
+                            [this](int value) { m_settings.setPierceDelayMs(value); });
+    mappedCount += applyString({"Setting_IOIndex.lineEdit_DigitalOUT_aLaser"},
+                               [this](const QString& value) { m_settings.setIoDefaultChannel(value); });
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "process.settings.ui: mapped legacy fields to typed settings count={}",
+              mappedCount);
 }
 
 void ProcessSettingsDialog::loadFromSettings()
@@ -652,9 +987,10 @@ void ProcessSettingsDialog::applyToSettings()
     m_settings.setInternetPort(m_internetPortSpin->value());
     if (m_communicationPage)
         m_communicationPage->applyToSettings(m_settings);
-    QMap<QString, QString> legacyValues = m_settings.legacySettingValues();
-    applyLegacySettings(legacyValues);
-    m_settings.setLegacySettingValues(legacyValues);
+    QMap<QString, QString> uiValues = m_settings.uiSettingValues();
+    applyLegacySettings(uiValues);
+    m_settings.setUiSettingValues(uiValues);
+    applyKnownLegacyTypedSettings(uiValues);
 }
 
 } // namespace lcnc::process

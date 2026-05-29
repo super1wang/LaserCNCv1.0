@@ -1,0 +1,75 @@
+#include "modules/process/toolpath/process_toolpath_service.h"
+
+#include "core/logging/logger.h"
+#include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/process/settings/process_settings.h"
+
+#include <QObject>
+
+namespace lcnc::process {
+
+ProcessToolpathService::ProcessToolpathService(std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider)
+    : m_provider(std::move(provider))
+{
+}
+
+void ProcessToolpathService::setProvider(std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider)
+{
+    m_provider = std::move(provider);
+}
+
+lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshot()
+{
+    if (!m_provider) {
+        m_snapshot = {};
+        m_snapshot.description = QObject::tr("未连接 CAM 刀路提供者");
+        return m_snapshot;
+    }
+    m_snapshot = m_provider->exportToolpathSnapshot();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "process.toolpath: snapshot revision={} contours={} points={}",
+              m_snapshot.revision,
+              m_snapshot.contours.size(),
+              m_snapshot.totalPointCount());
+    return m_snapshot;
+}
+
+ProcessJobPlan ProcessToolpathService::buildJobPlan(const lcnc::ProcessSettings& settings) const
+{
+    ProcessJobPlan plan;
+    plan.revision = m_snapshot.revision;
+    const ProcessTypedSettingsSnapshot typed = ProcessSettingsSchema::snapshotFrom(settings);
+
+    for (const auto& contour : m_snapshot.contours) {
+        if (!contour.enabled || !contour.layerEnabled)
+            continue;
+
+        ProcessJobContour jobContour;
+        jobContour.contour = contour;
+        jobContour.points = m_snapshot.pointsByContourId.value(contour.contourId);
+        jobContour.toolSettings = typed.tool;
+        if (jobContour.points.isEmpty())
+            jobContour.warnings.append(QObject::tr("轮廓 %1 没有刀路点").arg(QString::number(contour.contourId)));
+
+        bool hasInvalidMachinePoint = false;
+        for (const auto& point : jobContour.points) {
+            if (!point.machineCoordValid) {
+                hasInvalidMachinePoint = true;
+                break;
+            }
+        }
+        if (hasInvalidMachinePoint)
+            jobContour.warnings.append(QObject::tr("轮廓 %1 包含无效机床坐标点").arg(QString::number(contour.contourId)));
+
+        plan.totalPointCount += jobContour.points.size();
+        plan.warnings.append(jobContour.warnings);
+        plan.contours.append(jobContour);
+    }
+
+    plan.valid = !plan.contours.isEmpty() && plan.totalPointCount > 0;
+    if (!plan.valid)
+        plan.warnings.append(QObject::tr("没有可执行的启用刀路轮廓"));
+    return plan;
+}
+
+} // namespace lcnc::process

@@ -13,6 +13,7 @@
 #include "modules/cam/contracts/cam_data_contracts.h"
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
+#include "modules/cam/i_cam_toolpath_provider.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/kernel/i_module.h"
@@ -232,6 +233,8 @@ public:
     bool hasToolpath() const override;
     int toolpathContourCount() const override;
     int toolpathContourPointCount(int contourIndex) const override;
+    std::uint64_t toolpathRevision() const;
+    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const;
 
     /// Set lead-in entry point for a specific contour.
     void setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double entryParam);

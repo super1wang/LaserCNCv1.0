@@ -307,15 +307,15 @@ void ProcessSettings::setCommunicationTimeoutMs(int value)
     saveDefault();
 }
 
-QString ProcessSettings::legacySettingValue(const QString& key, const QString& defaultValue) const
+QString ProcessSettings::uiSettingValue(const QString& key, const QString& defaultValue) const
 {
-    return m_legacySettingValues.value(key, defaultValue);
+    return m_uiSettingValues.value(key, defaultValue);
 }
 
-void ProcessSettings::setLegacySettingValues(const QMap<QString, QString>& values)
+void ProcessSettings::setUiSettingValues(const QMap<QString, QString>& values)
 {
-    if (m_legacySettingValues == values) return;
-    m_legacySettingValues = values;
+    if (m_uiSettingValues == values) return;
+    m_uiSettingValues = values;
     saveDefault();
 }
 
@@ -361,10 +361,12 @@ void ProcessSettings::readFrom(const toml::value& root)
     m_communicationBaudRate = get_int(root, "communicationBaudRate", 115200);
     m_communicationTimeoutMs = get_int(root, "communicationTimeoutMs", 3000);
 
-    m_legacySettingValues.clear();
-    if (root.is_table() && root.contains("legacySetting") && root.at("legacySetting").is_table()) {
-        const auto& legacyRoot = root.at("legacySetting").as_table();
-        for (const auto& pagePair : legacyRoot) {
+    m_uiSettingValues.clear();
+    auto readUiSettingTable = [this, &root](const char* tableName) {
+        if (!root.is_table() || !root.contains(tableName) || !root.at(tableName).is_table())
+            return;
+        const auto& uiRoot = root.at(tableName).as_table();
+        for (const auto& pagePair : uiRoot) {
             if (!pagePair.second.is_table())
                 continue;
             const QString page = QString::fromStdString(pagePair.first);
@@ -382,10 +384,12 @@ void ProcessSettings::readFrom(const toml::value& root)
                     text = QString::number(value.as_floating(), 'g', 15);
                 else
                     continue;
-                m_legacySettingValues.insert(QStringLiteral("%1.%2").arg(page, field), text);
+                m_uiSettingValues.insert(QStringLiteral("%1.%2").arg(page, field), text);
             }
         }
-    }
+    };
+    readUiSettingTable("legacySetting");
+    readUiSettingTable("uiSetting");
 }
 
 void ProcessSettings::writeTo(toml::value& root) const
@@ -430,17 +434,17 @@ void ProcessSettings::writeTo(toml::value& root) const
     root["communicationBaudRate"] = m_communicationBaudRate;
     root["communicationTimeoutMs"] = m_communicationTimeoutMs;
 
-    if (!m_legacySettingValues.isEmpty()) {
-        toml::value legacy(toml::table{});
-        for (auto it = m_legacySettingValues.cbegin(); it != m_legacySettingValues.cend(); ++it) {
+    if (!m_uiSettingValues.isEmpty()) {
+        toml::value uiSetting(toml::table{});
+        for (auto it = m_uiSettingValues.cbegin(); it != m_uiSettingValues.cend(); ++it) {
             const int dot = it.key().indexOf(QLatin1Char('.'));
             if (dot <= 0 || dot >= it.key().size() - 1)
                 continue;
             const QString page = it.key().left(dot);
             const QString field = it.key().mid(dot + 1);
-            legacy[qs(page)][qs(field)] = qs(it.value());
+            uiSetting[qs(page)][qs(field)] = qs(it.value());
         }
-        root["legacySetting"] = legacy;
+        root["uiSetting"] = uiSetting;
     }
 }
 

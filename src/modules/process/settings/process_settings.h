@@ -144,9 +144,16 @@ public:
     int communicationTimeoutMs() const { return m_communicationTimeoutMs; }
     void setCommunicationTimeoutMs(int value);
 
-    QString legacySettingValue(const QString& key, const QString& defaultValue = QString()) const;
-    const QMap<QString, QString>& legacySettingValues() const { return m_legacySettingValues; }
-    void setLegacySettingValues(const QMap<QString, QString>& values);
+    QString uiSettingValue(const QString& key, const QString& defaultValue = QString()) const;
+    const QMap<QString, QString>& uiSettingValues() const { return m_uiSettingValues; }
+    void setUiSettingValues(const QMap<QString, QString>& values);
+
+    QString legacySettingValue(const QString& key, const QString& defaultValue = QString()) const
+    {
+        return uiSettingValue(key, defaultValue);
+    }
+    const QMap<QString, QString>& legacySettingValues() const { return uiSettingValues(); }
+    void setLegacySettingValues(const QMap<QString, QString>& values) { setUiSettingValues(values); }
 
 protected:
     void readFrom(const toml::value& root) override;
@@ -194,7 +201,7 @@ private:
     QString m_communicationSerialPort{QStringLiteral("COM1")};
     int     m_communicationBaudRate{115200};
     int     m_communicationTimeoutMs{3000};
-    QMap<QString, QString> m_legacySettingValues;
+    QMap<QString, QString> m_uiSettingValues;
 };
 
 } // namespace lcnc

@@ -137,6 +137,33 @@ QString compressionStrategyText(CamModule::MachineCompressionStrategy strategy)
     return QObject::tr("机台压缩");
 }
 
+class CamToolpathProviderAdapter final : public lcnc::cam::ICamToolpathProvider
+{
+public:
+    explicit CamToolpathProviderAdapter(CamModule* module)
+        : m_module(module)
+    {
+    }
+
+    bool hasToolpath() const override
+    {
+        return m_module && m_module->hasToolpath();
+    }
+
+    std::uint64_t toolpathRevision() const override
+    {
+        return m_module ? m_module->toolpathRevision() : 0;
+    }
+
+    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const override
+    {
+        return m_module ? m_module->exportToolpathSnapshot() : lcnc::cam::ToolpathExportSnapshot{};
+    }
+
+private:
+    CamModule* m_module{nullptr};
+};
+
 TopoDS_Shape translatedShapeCopy(const TopoDS_Shape& shape, const gp_Vec& translation)
 {
     if (shape.IsNull() || translation.SquareMagnitude() < 1e-12)
@@ -198,6 +225,8 @@ bool CamModule::init(lcnc::IKernel& kernel)
     kernel.services().registerService<CamModule>(svc);
     auto facade = std::shared_ptr<lcnc::ICamFacade>(svc, static_cast<lcnc::ICamFacade*>(this));
     kernel.services().registerService<lcnc::ICamFacade>(facade);
+    auto toolpathProvider = std::make_shared<CamToolpathProviderAdapter>(this);
+    kernel.services().registerService<lcnc::cam::ICamToolpathProvider>(toolpathProvider);
     if (m_pose) {
         // 把 MachinePose 也作为共享 IService 暴露，跨模块（process/UI）可读写姿态。
         auto poseSvc = std::shared_ptr<lcnc::MachinePose>(m_pose.get(), [](lcnc::MachinePose*) {});
@@ -2098,6 +2127,96 @@ int CamModule::toolpathContourPointCount(int contourIndex) const
     if (contourIndex < 0 || contourIndex >= m_toolpath.contourCount())
         return 0;
     return static_cast<int>(m_toolpath.contour(contourIndex).points.size());
+}
+
+std::uint64_t CamModule::toolpathRevision() const
+{
+    std::uint64_t revision = 1469598103934665603ull;
+    auto mix = [&revision](std::uint64_t value) {
+        revision ^= value + 0x9e3779b97f4a7c15ull + (revision << 6) + (revision >> 2);
+    };
+
+    mix(static_cast<std::uint64_t>(m_toolpath.contourCount()));
+    for (const LaserContour& contour : m_toolpath.contours()) {
+        mix(contour.contourId);
+        mix(contour.layerId);
+        mix(contour.enabled ? 1ull : 0ull);
+        mix(static_cast<std::uint64_t>(contour.points.size()));
+        if (!contour.points.empty()) {
+            const ToolpathPoint& first = contour.points.front();
+            const ToolpathPoint& last = contour.points.back();
+            mix(static_cast<std::uint64_t>(std::llround(first.position.X() * 1000.0)));
+            mix(static_cast<std::uint64_t>(std::llround(first.position.Y() * 1000.0)));
+            mix(static_cast<std::uint64_t>(std::llround(last.position.X() * 1000.0)));
+            mix(static_cast<std::uint64_t>(std::llround(last.position.Y() * 1000.0)));
+        }
+    }
+    for (const ToolpathLayer& layer : m_toolpath.layers()) {
+        mix(layer.layerId);
+        mix(layer.enabled ? 1ull : 0ull);
+        mix(static_cast<std::uint64_t>(layer.contourIds.size()));
+    }
+    return revision;
+}
+
+lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshot() const
+{
+    lcnc::cam::ToolpathExportSnapshot snapshot;
+    snapshot.revision = toolpathRevision();
+    snapshot.description = hasToolpath()
+        ? tr("CAM 刀路快照已导出")
+        : tr("CAM 当前无刀路");
+
+    auto layerForId = [this](std::uint64_t layerId) -> const ToolpathLayer* {
+        for (const ToolpathLayer& layer : m_toolpath.layers()) {
+            if (layer.layerId == layerId)
+                return &layer;
+        }
+        return nullptr;
+    };
+
+    for (const LaserContour& contour : m_toolpath.contours()) {
+        const ToolpathLayer* layer = layerForId(contour.layerId);
+        lcnc::cam::ToolpathExportContour exportedContour;
+        exportedContour.contourId = contour.contourId;
+        exportedContour.layerId = contour.layerId;
+        exportedContour.contourName = contour.name;
+        exportedContour.layerName = layer ? layer->name : QString();
+        exportedContour.toolName = layer ? layer->toolName : QString();
+        exportedContour.workpieceEntry = contour.workpieceEntry;
+        exportedContour.enabled = contour.enabled;
+        exportedContour.layerEnabled = layer ? layer->enabled : true;
+        exportedContour.pointCount = static_cast<int>(contour.points.size());
+        snapshot.contours.append(exportedContour);
+
+        QVector<lcnc::cam::ToolpathExportPoint> points;
+        points.reserve(static_cast<int>(contour.points.size()));
+        for (const ToolpathPoint& point : contour.points) {
+            lcnc::cam::ToolpathExportPoint exportedPoint;
+            exportedPoint.x = point.position.X();
+            exportedPoint.y = point.position.Y();
+            exportedPoint.z = point.position.Z();
+            exportedPoint.normalX = point.normal.X();
+            exportedPoint.normalY = point.normal.Y();
+            exportedPoint.normalZ = point.normal.Z();
+            exportedPoint.tangentX = point.tangent.X();
+            exportedPoint.tangentY = point.tangent.Y();
+            exportedPoint.tangentZ = point.tangent.Z();
+            exportedPoint.curveParam = point.param;
+            exportedPoint.machineX = point.machineCoord.x;
+            exportedPoint.machineY = point.machineCoord.y;
+            exportedPoint.machineZ = point.machineCoord.z;
+            exportedPoint.machineR1 = point.machineCoord.r1;
+            exportedPoint.machineR2 = point.machineCoord.r2;
+            exportedPoint.rotaryAxis1Name = point.machineCoord.r1Name;
+            exportedPoint.rotaryAxis2Name = point.machineCoord.r2Name;
+            exportedPoint.machineCoordValid = point.machineCoord.valid;
+            points.append(exportedPoint);
+        }
+        snapshot.pointsByContourId.insert(contour.contourId, points);
+    }
+
+    return snapshot;
 }
 
 void CamModule::setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double entryParam)

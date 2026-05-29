@@ -17,11 +17,17 @@ class QTimer;
 
 namespace lcnc::process {
 class ProcessDeviceManager;
+class ProcessDeviceCoordinator;
+class ProcessExecutionService;
+class ProcessRuntime;
+class ProcessToolpathService;
+class ProcessWorkflowService;
 class ProcessWorkflowExecutor;
 }
 
+namespace lcnc::cam { class ICamToolpathProvider; }
+
 namespace lcnc {
-class ICamFacade;
 class IKernel;
 class IMotionController;
 }
@@ -136,8 +142,13 @@ private:
     lcnc::IKernel* m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
     lcnc::ProcessSettings m_settings;
-    std::shared_ptr<lcnc::ICamFacade> m_camFacade;
+    std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_toolpathProvider;
     std::unique_ptr<lcnc::process::ProcessDeviceManager> m_deviceManager;
+    std::unique_ptr<lcnc::process::ProcessDeviceCoordinator> m_deviceCoordinator;
+    std::unique_ptr<lcnc::process::ProcessRuntime> m_runtime;
+    std::unique_ptr<lcnc::process::ProcessToolpathService> m_toolpathService;
+    std::unique_ptr<lcnc::process::ProcessWorkflowService> m_workflowService;
+    std::unique_ptr<lcnc::process::ProcessExecutionService> m_executionService;
     std::unique_ptr<lcnc::IMotionController> m_motionController;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
 };

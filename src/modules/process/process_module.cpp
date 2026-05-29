@@ -4,12 +4,17 @@
 #include "core/kernel/service_registry.h"
 #include "core/kinematics/i_motion_controller.h"
 #include "core/logging/logger.h"
-#include "modules/cam/i_cam_facade.h"
+#include "modules/cam/i_cam_toolpath_provider.h"
 #include "modules/process/device/i_laser_device.h"
 #include "modules/process/device/i_process_io.h"
+#include "modules/process/device/process_device_coordinator.h"
 #include "modules/process/device/process_device_manager.h"
+#include "modules/process/execution/process_execution_service.h"
 #include "modules/process/execution/process_workflow_executor.h"
+#include "modules/process/runtime/process_runtime.h"
+#include "modules/process/toolpath/process_toolpath_service.h"
 #include "modules/process/workflow/process_flow_store.h"
+#include "modules/process/workflow/process_workflow_service.h"
 
 #include <QList>
 #include <QTimer>
@@ -113,28 +118,41 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     kernel.services().registerService<ProcessModule>(svc);
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
     kernel.services().registerService<lcnc::IProcessFacade>(facade);
-    m_camFacade = kernel.services().getService<lcnc::ICamFacade>();
+    m_toolpathProvider = kernel.services().getService<lcnc::cam::ICamToolpathProvider>();
 
     // 加载持久化设置（首次运行则使用默认值）并同步到运行时状态。
     m_settings.loadDefault();
     m_simulationMode = m_settings.simulationMode();
     m_deviceManager = std::make_unique<lcnc::process::ProcessDeviceManager>();
     m_deviceManager->syncFromSettings(m_settings);
+    m_deviceCoordinator = std::make_unique<lcnc::process::ProcessDeviceCoordinator>(*m_deviceManager, this);
+    m_runtime = std::make_unique<lcnc::process::ProcessRuntime>(m_settings, *m_deviceManager, this);
+    m_toolpathService = std::make_unique<lcnc::process::ProcessToolpathService>(m_toolpathProvider);
+    m_workflowService = std::make_unique<lcnc::process::ProcessWorkflowService>(*m_toolpathService, this);
+    m_executionService = std::make_unique<lcnc::process::ProcessExecutionService>(*m_deviceCoordinator, this);
+    connect(m_runtime.get(), &lcnc::process::ProcessRuntime::runtimeMessage,
+            this, &ProcessModule::setStatusMessage);
+    connect(m_workflowService.get(), &lcnc::process::ProcessWorkflowService::workflowPrepared,
+            this, [this](int contourCount, int commandCount) {
+                setStatusMessage(tr("加工指令已准备: %1 个轮廓 / %2 条指令")
+                                     .arg(contourCount)
+                                     .arg(commandCount));
+            });
+    connect(m_workflowService.get(), &lcnc::process::ProcessWorkflowService::workflowRejected,
+            this, &ProcessModule::setStatusMessage);
     m_workflowExecutor = std::make_unique<lcnc::process::ProcessWorkflowExecutor>(this);
     m_workflowExecutor->setToolpathSnapshotProvider([this] {
         lcnc::process::ProcessToolpathSnapshot snapshot;
-        if (!m_camFacade) {
-            snapshot.description = tr("未连接 CAM facade");
+        if (!m_toolpathService || !m_toolpathProvider) {
+            snapshot.description = tr("未连接 CAM 刀路服务");
             return snapshot;
         }
 
-        snapshot.available = m_camFacade->hasToolpath();
-        snapshot.contourCount = m_camFacade->toolpathContourCount();
-        for (int index = 0; index < snapshot.contourCount; ++index)
-            snapshot.totalPointCount += m_camFacade->toolpathContourPointCount(index);
-        snapshot.description = snapshot.available
-            ? tr("CAM 刀路可用")
-            : tr("CAM 当前无刀路");
+        const auto camSnapshot = m_toolpathService->refreshSnapshot();
+        snapshot.available = camSnapshot.hasEnabledContours();
+        snapshot.contourCount = camSnapshot.contours.size();
+        snapshot.totalPointCount = camSnapshot.totalPointCount();
+        snapshot.description = camSnapshot.description;
         return snapshot;
     });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::messageLogged,
@@ -188,6 +206,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                   "ProcessModule: active motion controller setup failed: {}",
                   motionError.toStdString());
     }
+    if (m_runtime)
+        m_runtime->initialize();
 
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "ProcessModule init done");
@@ -351,6 +371,15 @@ void ProcessModule::runStart()
             m_simTimer->start(std::max(30, static_cast<int>(100.0 / std::max(0.1, m_feedOverride))));
         setState(State::Running, tr("运行继续"));
         return;
+    }
+
+    if (m_workflowService && m_toolpathProvider && m_toolpathProvider->hasToolpath()) {
+        QString prepareError;
+        if (!m_workflowService->prepare(m_settings, &prepareError)) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "ProcessModule: process workflow prepare failed: {}",
+                      prepareError.toStdString());
+        }
     }
 
     if (m_workflowExecutor) {
@@ -519,6 +548,15 @@ void ProcessModule::reloadDeviceSettings()
                   motionError.toStdString());
     }
 
+    if (m_runtime) {
+        QString runtimeError;
+        if (!m_runtime->refreshSettings(&runtimeError)) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "ProcessModule: runtime settings refresh failed: {}",
+                      runtimeError.toStdString());
+        }
+    }
+
     const bool nextSimulationMode = m_settings.simulationMode();
     if (m_simulationMode != nextSimulationMode) {
         m_simulationMode = nextSimulationMode;
@@ -602,6 +640,8 @@ bool ProcessModule::switchMotionControllerFromSettings(QString* errorMessage)
     const QString nextId = nextController->id();
     if (m_motionController && m_motionController->id().compare(nextId, Qt::CaseInsensitive) == 0) {
         registerActiveMotionControllerService();
+        if (m_deviceCoordinator)
+            m_deviceCoordinator->setMotionController(m_motionController.get());
         return true;
     }
 
@@ -617,6 +657,8 @@ bool ProcessModule::switchMotionControllerFromSettings(QString* errorMessage)
     }
 
     registerActiveMotionControllerService();
+    if (m_deviceCoordinator)
+        m_deviceCoordinator->setMotionController(m_motionController.get());
     LCNC_INFO(lcnc::LogCode::Generic,
               "ProcessModule: active motion controller '{}' registered",
               nextId.toStdString());
@@ -638,6 +680,9 @@ void ProcessModule::setState(State state, const QString& statusMessage)
         m_state = state;
         emit stateChanged(m_state);
     }
+
+    if (m_runtime)
+        m_runtime->applyFacadeState(state, statusMessage);
 
     setStatusMessage(statusMessage);
 }

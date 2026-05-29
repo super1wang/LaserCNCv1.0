@@ -11,7 +11,7 @@ set(CMAKE_AUTORCC ON)
 # ─── Qt ───────────────────────────────────────────────────────────────────────
 set(LCNC_QT6_ROOT "E:/Qt6.9.1/6.9.1/msvc2022_64" CACHE PATH "Qt6 installation root")
 set(Qt6_DIR "${LCNC_QT6_ROOT}/lib/cmake/Qt6" CACHE PATH "Qt6 CMake package directory")
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network UiTools)
 
 option(LCNC_WITH_SERIAL_COMM "Enable Qt SerialPort communication channel" ON)
 if(LCNC_WITH_SERIAL_COMM)
@@ -150,6 +150,7 @@ set(SRCS_MODULES
     src/modules/cad/ui/widget_cad_task_panel.cpp
     src/modules/cad/ui/ribbon_cad_tab.cpp
     src/modules/cam/cam_module.cpp
+    src/modules/cam/contracts/toolpath_export_dto.cpp
     src/modules/cam/settings/cam_config.cpp
     src/modules/cam/services/cam_data_manager.cpp
     src/modules/cam/services/toolpath_simulator.cpp
@@ -165,6 +166,7 @@ set(SRCS_MODULES
     src/modules/cam/ui/ribbon_cam_tab.cpp
     src/modules/process/process_module.cpp
     src/modules/process/controllers/simulation_motion_controller.cpp
+    src/modules/process/device/process_device_coordinator.cpp
     src/modules/process/device/process_device_manager.cpp
     src/modules/process/device/simulator_laser_device.cpp
     src/modules/process/device/simulator_process_io.cpp
@@ -192,10 +194,23 @@ set(SRCS_MODULES
     src/modules/process/communication/ui/communication_settings_page.h
     src/modules/process/communication/ui/communication_settings_page.cpp
     src/modules/process/settings/process_settings.cpp
+    src/modules/process/settings/process_settings_field_registry.cpp
+    src/modules/process/settings/process_settings_schema.cpp
+    src/modules/process/runtime/process_runtime.cpp
+    src/modules/process/runtime/process_state_machine.cpp
+    src/modules/process/toolpath/process_tool_matcher.cpp
+    src/modules/process/toolpath/process_toolpath_service.cpp
+    src/modules/process/toolpath/process_toolpath_sorter.cpp
+    src/modules/process/instructions/process_command.cpp
+    src/modules/process/instructions/process_instruction_planner.cpp
+    src/modules/process/instructions/acs_translator.cpp
+    src/modules/process/instructions/gtn_translator.cpp
+    src/modules/process/instructions/pure_simulation_translator.cpp
     src/modules/process/workflow/process_node.cpp
     src/modules/process/workflow/process_node_registry.cpp
     src/modules/process/workflow/process_flow_document.cpp
     src/modules/process/workflow/process_flow_store.cpp
+    src/modules/process/workflow/process_workflow_service.cpp
     src/modules/process/Setting/process_settings_dialog.cpp
     src/modules/process/ui/process_flow_model.cpp
     src/modules/process/ui/process_flow_tree_view.cpp
@@ -205,6 +220,8 @@ set(SRCS_MODULES
     src/modules/process/ui/widget_laser_control.cpp
     src/modules/process/ui/ribbon_process_tab.cpp
     src/modules/process/execution/process_workflow_executor.cpp
+    src/modules/process/execution/process_execution_service.cpp
+    src/modules/process/execution/process_node_executor_registry.cpp
 )
 
 set(SRCS_APP
@@ -293,6 +310,7 @@ target_link_libraries(LaserCNC PRIVATE
     Qt6::OpenGLWidgets
     Qt6::Concurrent
     Qt6::Network
+    Qt6::UiTools
     SARibbonBar::SARibbonBar
     ${OCC_LIBS}
 )

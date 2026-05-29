@@ -1,579 +1,296 @@
 # Process 模块重构计划
 
-审阅日期：2026-05-27
+审阅日期：2026-05-28  
+依据：[process模块框架.md](process模块框架.md)
 
-目标：在不破坏当前微内核边界的前提下，完成 `device / Process / Setting` 三个旧子模块的合理迁移。最终 Process 模块应支持完整外设迁移、统一参数界面、完整流程节点、流程树拖拽排序、双击编辑节点、节点编辑界面迁移，以及面向仿真和真实设备的流程执行。
+## 1. 重构目标
 
-## 0. 本轮 Phase 1-8 执行结果
+本轮重构目标是把 Process 模块从“可运行的基础闭环”收敛为清晰的加工运行域：
 
-已完成目标框架的可运行闭环，后续重点从“搭框架”转为“迁移旧业务细节和真实 SDK adapter”：
+- 符合微内核结构：`ProcessModule` 只负责模块生命周期、service 注册和 facade 转发。
+- 运行数据不依赖 OCC：Process 只消费 CAM 输出的刀路点集 DTO，不 include OCC/CAM 几何类型。
+- 具备显式状态机制：待机、准备、加工中、暂停、停止中、异常、急停等状态由统一状态机管理。
+- 内部子模块清晰：外设、参数、刀路、指令、工作流、执行、通讯各自独立。
+- 可根据控制器类型生成执行路径：PureSimulation、SimulatorCMHP、ACS、GTN 分别由 translator/adapter 处理。
+- 支持 CAM 刀路排序、图层/工具匹配、运行前校验和工作流运行控制。
 
-- Phase 1：`ProcessModule` 已移除旧 UI 树依赖，流程新建/加载/保存/运行只通过 `ProcessFlowDocument` / `ProcessFlowStore`。
-- Phase 2：`ProcessFlowModel`、`ProcessFlowTreeView`、`ProcessNodeRegistry` 已接入，右键菜单、默认节点、Info 摘要、拖放放置规则均统一走 registry。
-- Phase 3：`ProcessSettingsDialog` 已是左树右页，页面覆盖 Process、Motion Controller、Laser、Axis、Tool、IO、Gas、Water、Monitor、LoadingPos、Camera、Internet、Communication；旧 Setting `.ui` 全量字段已通过 Legacy Setting 镜像页迁入 `ProcessSettings`。
-- Phase 4：所有当前 `ProcessNodeType` 已有 registry metadata/defaults/executor key；节点编辑器已为运动、切割、IO、视觉、测量、逻辑和结构节点提供 typed 参数控件，并保留通用参数表兜底。
-- Phase 5：`ProcessWorkflowExecutor` 已按流程树异步推进节点，Run/Pause/Resume/Stop/EStop 可控制流程树运行，节点状态会回写并刷新 UI。
-- Phase 6：新增 `ILaserDevice`、`IProcessIo`、`IProcessAuxDevice`；`ProcessDeviceManager` 拥有仿真激光、仿真 IO、运动控制 profile 工厂和活动 controller 创建；`PureSimulation` 与 ACS-based `SimulatorCMHP` 已拆分，ACS/GTN adapter 源通过 CMake option 默认关闭。
-- Phase 7：`ICamFacade` 已暴露只读刀路摘要，Cutting/OverCutting 支持参数校验、CAM dry-run 反馈和无刀路失败边界。
-- Phase 8：旧轻量树兼容源已退出 CMake，文档和 `实施进度.md` 已按当前框架同步。
-- Phase 9-12：统一通讯模块、旧 Setting 全量字段镜像、ACS/GTN 运动控制 adapter 源和 CAM 图层基础已完成 SDK-off 构建验证。
-- 验证：`cmake --build build --config Debug -- /m /nologo` 通过，相关源码 `get_errors` 无错误。
+## 2. 当前审阅摘要
 
-剩余工作主要是 SDK-on 编译/硬件验证、真实 Pharos/IPG/Raycus/BDAQ adapter、真实相机/测量服务、非 dry-run 切割实控、Legacy Setting typed schema 提升和 CAM 图层持久化。
+已完成基础能力：
 
-## 1. 总目标
+- `ProcessFlowDocument` 已是流程事实源，流程树 UI 已通过 model/view 展示。
+- `ProcessNodeRegistry` 已注册当前主要节点类型和默认参数。
+- `ProcessWorkflowExecutor` 已有顺序 dry-run 和状态回写。
+- `ProcessDeviceManager` 已有设备 descriptor 和 PureSimulation/SimulatorCMHP/ACS/GTN profile 基础。
+- `ProcessSettingsDialog` 已直接加载 25 个旧 Setting `.ui`，并通过 `uiSetting` 落地字段值。
+- 通讯模块已支持 Mock/TCP/HTTP/Serial。
 
-### 1.1 用户功能目标
+本轮已按最终框架补齐 Phase 0-11 的代码骨架和接入点：CAM 通过 `ICamToolpathProvider` 导出 OCC-free 点集，Process 侧建立 `ProcessRuntime`、状态机、typed settings snapshot、设备协调器、刀路服务、排序/工具匹配、指令 planner/translator、workflow service、execution service 和 node executor registry。默认 SDK-off Debug 构建通过。
 
-- 参数界面统一为一个入口，左侧为参数树，右侧为对应参数页，交互形态参考原程序。
-- 工作流程树迁移所有必要节点，至少覆盖切割流程、IO、运动、视觉、测量、计算、分组、循环、条件、等待、能量切换等节点。
-- 流程树支持：
-  - 右键添加/删除/启用/禁用节点。
-  - 拖拽移动节点，支持同级重排和合法父子关系移动。
-  - 双击节点打开对应编辑界面。
-  - 保存/加载流程文件。
-  - 运行时节点状态高亮。
-- 外设完整迁移：运动控制、激光器、IO/气/水/相机等必要外设通过新接口接入。
-- 支持纯仿真、半实物和真实设备 profile，未启用 SDK 时工程仍可构建。
+主要缺口：
 
-### 1.2 架构目标
-
-- `ProcessModule` 只做模块生命周期、service 注册、状态机维护、信号转发和 facade 实现。
-- 流程数据不再由 UI 树持有，改为 `ProcessFlowDocument` / workflow service 持有。
-- UI/dialog/ribbon 只负责展示和参数收集，不持有业务数据所有权。
-- 跨模块调用只走 facade/service，Process 不直接 include CAD/CAM 具体 UI 或 app 细节。
-- 外设 adapter 隔离 vendor SDK，真实设备能力通过可选 CMake 目标启用。
-- 旧 `Service`、`DT`、全局 boost atomic 和静态 factory 不再作为新框架公开依赖。
-
-## 2. 当前已完成步骤
-
-### 已完成：基础分析与隔离
-
-- 已分析旧 `device / Process / Setting` 依赖，确认旧 `Service` 和旧 Process 执行引擎是依赖集中点。
-- 已确认旧 `SimulateCMHPMotionControl` 继承 `ACSMotionControl`，不是纯仿真实现，暂不纳入 CMake。
-- 已选择“轻量兼容 + 新框架逐步接入”的迁移策略，避免一次性编译旧模块导致 ACS/GTN/bdaq/LibreCAD/Vision/Boost 依赖扩散。
-
-### 已完成：流程树第一阶段
-
-- 已导入 `Process/qg_processeswidget.*` 并挂到 MainWindow 左侧“执行”tab。
-- 已用轻量 Qt6 实现替换旧重依赖 `Process_TreeView`。
-- 当前支持节点：Start、Stop、Wait、Axis、Group、If、Loop。
-- 已支持流程树 TOML 保存/加载，结构为 `Process.items`。
-- 已把流程新建/加载/保存命令接入 Ribbon，并通过 `IProcessFacade` 转到 `ProcessModule`。
-
-### 已完成：workflow 数据模型第一步
-
-- 已新增 `workflow/process_node_type.h`，收敛新流程节点类型与节点状态枚举。
-- 已新增 `workflow/process_node.*`，为流程节点提供 stable id、类型、名称、启用状态、运行状态、参数和子节点。
-- 已新增 `workflow/process_flow_document.*`，作为独立于 UI 树的流程业务事实源。
-- 已新增 `workflow/process_flow_store.*`，支持新 `Process.nodes` schema，并兼容读取旧 `Process.items`。
-- `ProcessModule::newProcess/loadProcess/saveProcess` 已改为优先操作 workflow document/store，同时用旧流程树做过渡 UI 同步。
-
-### 已完成：参数第一阶段
-
-- 已新增 `ProcessSettings`，持久化基础 process/motion/laser 参数。
-- 已新增轻量 `ProcessSettingsDialog`，提供加工、运动、激光三个 tab。
-- 已把参数 Ribbon 命令接入，能打开不同初始页。
-- 已在参数应用后调用 `ProcessModule::reloadDeviceSettings()` 同步当前设备状态。
-
-### 已完成：外设第一阶段
-
-- 已新增 `ProcessDeviceManager`。
-- 当前设备目录只暴露安全仿真项：`SimulatorCMHP` 和 `Simulator`。
-- 已保留真实运动控制和激光器旧源码，但未纳入 CMake。
-- 已注册 `SimulationMotionController` 为 `IMotionController` service。
-
-### 已完成：构建验证
-
-- `cmake --build build --config Debug -- /m /nologo` 已通过。
-- 当前仅有既有 `qrc_resources.cpp.obj` PDB 警告。
-
-## 3. 主要缺口
-
-| 区域 | 当前缺口 | 风险 |
+| 区域 | 缺口 | 目标 |
 | --- | --- | --- |
-| 模块边界 | 新边界已建立；ACS/GTN adapter 源已迁入 option 路径 | SDK-on 编译和硬件联调仍需保持隔离验证 |
-| 流程树模型 | stable id、拖放、状态回写已完成 | 仍需手工 smoke 覆盖复杂嵌套流程 |
-| 节点迁移 | 全部当前节点已有 metadata/defaults/typed 编辑 | 旧专用 UI 和复杂校验仍需继续迁移 |
-| 参数界面 | 左树右页、通讯页和 Legacy Setting 全量字段镜像已完成 | 旧表格/列表业务语义需 DTO 化 |
-| 参数数据 | 基础字段、通讯字段和旧 UI 字段镜像已覆盖 | typed schema、默认值、单位、范围、版本迁移和校验待补 |
-| 外设 | 仿真激光/IO、通讯模块、ACS/GTN adapter 源已接入 | SDK-on 编译、真实激光器/BDAQ/相机 adapter 待验证或迁移 |
-| 执行引擎 | QTimer 顺序执行和按钮控制已完成 | 细粒度暂停恢复、并行/条件语义和真实节点 executor 待增强 |
-| 旧依赖 | 旧源码仍引用 Service、DT、Vision、LibreCAD、Boost、SDK | 继续保持隔离，仅迁移字段/协议/行为，不直接扩散旧全局依赖 |
+| 模块职责 | `ProcessModule` 仍集中处理设备、状态、CAM 适配和执行器桥接 | 拆出 `ProcessRuntime` 与内部服务 |
+| 状态机制 | 当前只有简化 `Idle/Running/Paused/Error/EStop` | 建立完整状态机与合法转换表 |
+| CAM 边界 | CAM facade 只提供计数，不提供点集 DTO | 新增 OCC-free `ProcessToolpathSnapshot` |
+| 刀路处理 | 未排序、未按图层/工具匹配 | 新增 toolpath service/sorter/matcher |
+| 指令生成 | 节点直接触发少量副作用信号 | 新增中间命令缓冲与 controller translator |
+| 参数系统 | `uiSetting` 可落地但未 typed 化 | 建 typed schema、默认值、校验和迁移 |
+| 设备管理 | descriptor/factory 初步完成 | 建 registry/session/adapter 生命周期 |
+| 执行引擎 | QTimer dry-run | 建 execution service、节点 executor、暂停/停止/急停语义 |
 
-## 3.1 本轮新增缺口迁移计划状态
+## 3. 设计决策
 
-| 项 | 目标 | 状态 | 后续 |
-| --- | --- | --- | --- |
-| 运动控制器 | 接入 PureSimulation、SimulatorCMHP、ACS、GTN 三类真实/半实物 profile | SDK-off 完成 | ACS/GTN SDK-on 编译与硬件联调 |
-| 统一通讯 | 支持 Mock、TCP、HTTP、Serial，提供 UI 配置和日志 | 完成 | 真实激光器 adapter 复用通讯基类 |
-| Setting 全量字段 | 完全复制旧 Setting UI 可编辑字段到现参数模块 | 镜像完成 | typed schema、默认值、校验和设备刷新 |
-| CAM 图层 | CAM 数据节点显示图层，图层可配颜色和工具 | 基础完成 | 持久化、跨图层拖拽、工具联动执行 |
+### 3.1 不恢复旧式 Service
 
-## 4. 目标架构拆分
+不设计旧工程那种全局 `Service` 类。旧式 Service 会把参数、设备、流程、UI、SDK 和全局状态揉在一起，违背微内核边界。
 
-### 4.1 Workflow 子系统
-
-新增建议目录：
+采用以下结构：
 
 ```text
-src/modules/process/workflow/
-├── process_node_type.h
-├── process_node.h
-├── process_flow_document.h/.cpp
-├── process_flow_store.h/.cpp
-├── process_node_registry.h/.cpp
-├── process_node_validation.h/.cpp
-└── process_executor.h/.cpp
+ProcessModule             # 模块装配和 facade
+  └─ ProcessRuntime        # 内部协调器，非全局单例
+       ├─ ProcessStateMachine
+       ├─ ProcessSettingsService
+       ├─ ProcessDeviceService
+       ├─ ProcessToolpathService
+       ├─ ProcessInstructionService
+       ├─ ProcessWorkflowService
+       └─ ProcessExecutionService
 ```
 
-职责：
+### 3.2 Process 只消费 CAM 点集
 
-- `ProcessNode`：保存 stable id、type、name、enabled、children、typed parameters。
-- `ProcessFlowDocument`：流程树业务事实源，提供增删改移、查询和 dirty 状态。
-- `ProcessFlowStore`：负责 TOML 读写、版本号和旧流程格式迁移。
-- `ProcessNodeRegistry`：注册节点元信息、可放置规则、默认参数、编辑器 factory 和执行器 factory。
-- `ProcessExecutor`：解释执行流程树，负责暂停、继续、停止、急停、运行状态回传。
+CAM 继续拥有 OCC/CAM 几何，Process 只读取纯数据：轮廓 id、图层 id、工具名、启用状态、点集、机床坐标、法向/切向、版本号。
 
-### 4.2 UI 子系统
+禁止 Process include：`TopoDS_*`、`AIS_*`、`gp_*`、`Geom_*`、`BRep*`、`XCAF*`。
 
-新增或重命名建议目录：
+### 3.3 先生成中间指令，再适配控制器
 
-```text
-src/modules/process/ui/
-├── process_flow_model.h/.cpp
-├── process_flow_tree_view.h/.cpp
-├── process_settings_dialog.h/.cpp
-├── process_settings_tree_model.h/.cpp
-├── node_editors/
-└── settings_pages/
-```
+工作流和刀路生成 controller-neutral command buffer，再由 translator 转换为 PureSimulation/ACS/GTN 对应执行路径。这样切割逻辑不依赖具体控制器 SDK。
 
-职责：
+## 4. 阶段计划
 
-- `ProcessFlowModel` 是 `QAbstractItemModel` adapter，不拥有业务事实。
-- `ProcessFlowTreeView` 只处理视图、右键菜单、拖放手势、双击触发编辑。
-- `node_editors/*` 每个节点一个编辑器或共享编辑器，负责参数收集和校验提示。
-- `ProcessSettingsDialog` 统一为左侧参数树 + 右侧 `QStackedWidget`。
-- `settings_pages/*` 迁移旧 MotionControl、Axis、IO、Laser、Tool、Gas、Water、Monitor、LoadingPos、Camera 等页面。
+### Phase 0：文档和边界固化
 
-### 4.3 Device 子系统
-
-新增建议结构：
-
-```text
-src/modules/process/device/
-├── process_device_registry.h/.cpp
-├── process_device_profile.h/.cpp
-├── i_laser_device.h
-├── i_process_io.h
-├── i_aux_device.h
-├── motion/
-│   ├── simulator_motion_controller_adapter.*
-│   ├── acs_motion_controller_adapter.*
-│   └── gtn_motion_controller_adapter.*
-└── laser/
-    ├── simulator_laser_device.*
-    ├── ipg_laser_device_adapter.*
-    ├── pharos_laser_device_adapter.*
-    ├── raycus_laser_device_adapter.*
-    ├── raycus_qcw_laser_device_adapter.*
-    └── analog_laser_device_adapter.*
-```
-
-职责：
-
-- `ProcessDeviceRegistry`：管理设备类型、可用性、当前 profile、活动实例和状态信号。
-- `IMotionController`：优先复用现有 `core/kinematics/i_motion_controller.h`，真实 adapter 适配到此接口。
-- `ILaserDevice`：定义 start/stop/aiming/energy/frequency/pulseWidth/status 等统一能力。
-- `IProcessIo` / `IAuxDevice`：封装数字 IO、模拟 IO、气、水、门禁、传感器等能力。
-- Vendor SDK 依赖通过 CMake option 控制，例如 `LCNC_WITH_ACS`、`LCNC_WITH_GTN`、`LCNC_WITH_BDAQ`。
-
-### 4.4 Settings 子系统
-
-新增建议结构：
-
-```text
-src/modules/process/settings/
-├── process_settings.h/.cpp
-├── process_settings_schema.h/.cpp
-├── process_settings_store.h/.cpp
-├── process_device_settings.h
-├── process_tool_settings.h
-└── process_io_settings.h
-```
-
-职责：
-
-- 统一 process 参数持久化，不再让 UI 页直接读写旧全局 `Settings`。
-- 每类参数有默认值、TOML key、版本迁移和校验。
-- 页面只读写 settings DTO，点击 Apply 后由 settings store 保存并通知相关 service。
-
-## 5. 分阶段计划
-
-### 阶段 0：现状固化与文档化（当前阶段）
-
-状态：进行中。
+状态：本轮执行。
 
 任务：
 
-- 生成 `process模块框架.md`。
-- 生成 `process模块重构计划.md`。
-- 记录当前已完成能力、已导入但未接入的旧源码、构建状态和主要风险。
+- 清理并重写 `process模块框架.md`。
+- 清理并重写 `process模块重构计划.md`。
+- 明确不恢复旧式全局 `Service`，改为内部 runtime coordinator。
+- 明确 Process 不依赖 OCC，只消费 CAM 点集 DTO。
 
 完成标准：
 
-- 文档能指导后续开发顺序。
-- 明确哪些旧文件不能直接加入 CMake。
+- 两份文档能作为后续代码重构依据。
+- 设计边界、状态机、子模块职责和阶段计划清晰。
 
-### 阶段 1：拆除 UI 反向依赖，建立流程数据模型
+### Phase 1：建立 OCC-free CAM 到 Process 数据合同
 
 优先级：最高。
 
 任务：
 
-1. 新建 `workflow/process_node_type.h`，收敛 `ItemType`，保留旧类型映射。
-2. 新建 `ProcessNode`，字段至少包括：`id`、`type`、`name`、`enabled`、`state`、`parameters`、`children`。
-3. 新建 `ProcessFlowDocument`，提供 `appendNode`、`removeNode`、`moveNode`、`updateNodeParameters`、`nodeById`。
-4. 新建 `ProcessFlowStore`，读写 TOML，加入 `schemaVersion`。
-5. `ProcessModule` 改为持有 `ProcessFlowDocument` 或 workflow service，不再持有 `ProcessTreeView*`。
-6. `IProcessFacade` 新增面向流程文档的接口，UI 通过 facade 或 model service 操作流程。
+1. 新增不依赖 OCC 的 contract 头，例如 `src/modules/cam/contracts/process_toolpath_contracts.h` 或 `src/modules/process/toolpath/process_toolpath_types.h`。
+2. 定义 `ProcessToolpathPoint`、`ProcessToolpathContour`、`ProcessToolpathLayer`、`ProcessToolpathSnapshot`。
+3. 扩展 `ICamFacade` 或新增 `ICamToolpathProvider`，提供 `processToolpathSnapshot()` 和 revision。
+4. 在 CAM 模块内把 `LaserToolpath` 转换为纯 DTO，转换发生在 CAM 边界内。
+5. 修改 Process dry-run，不再只读取轮廓数/点数，而是读取 snapshot 统计。
+6. 增加 include 检查：Process 不 include OCC 类型。
 
 完成标准：
 
-- 新建/加载/保存流程不再依赖 `ProcessTreeView*`。
-- 当前 7 个轻量节点可通过新 document 保存/加载。
-- 旧 TOML `Process.items` 可兼容导入。
+- Process 可获得完整刀路点集、图层和工具信息。
+- Process 源码不直接包含 OCC 头。
+- Debug 构建通过。
 
-### 阶段 2：流程树 UI 完整化
+### Phase 2：建立 Process 状态机与运行时协调器
+
+优先级：最高。
+
+任务：
+
+1. 新增 `runtime/process_state_machine.*`，定义 `Uninitialized/Idle/Connecting/Preparing/Ready/Processing/Paused/Stopping/Stopped/Error/EmergencyStop`。
+2. 明确所有合法状态转换和拒绝原因。
+3. 新增 `runtime/process_runtime.*`，承接 `runStart/runPause/runStop/emergencyStop/reloadSettings/connectDevices` 编排。
+4. `ProcessModule` 缩减为 IModule + IProcessFacade，内部只转调 runtime。
+5. 所有状态变化统一从 state machine 发出 signal。
+6. 加工中、暂停、急停时禁止切换控制器和关键设备参数。
+
+完成标准：
+
+- 状态转换有集中实现和日志。
+- UI 状态栏、控制按钮和执行器状态都来自同一状态机。
+- `ProcessModule` 不再直接处理执行细节。
+
+### Phase 3：参数系统 typed schema 化
 
 优先级：高。
 
 任务：
 
-1. 新建或改造 `ProcessFlowModel`，绑定 `ProcessFlowDocument`。
-2. 实现 `flags()`、`supportedDropActions()`、`mimeData()`、`dropMimeData()` 或 `moveRows()`。
-3. 实现合法拖放规则：
-   - `Group`、`If`、`Loop`、`RunGroup` 可作为容器。
-   - `Start`/`Stop` 默认限制为顶层或流程结构规则允许位置。
-   - 禁止把节点拖到自身子树中。
-4. 双击节点时触发 `editNodeRequested(nodeId)`。
-5. 节点状态显示由 model role 提供，view 只根据 role 绘制。
-6. 保留右键菜单添加/删除/启用/禁用/清空/保存/加载。
+1. 新增 `settings/process_settings_schema.*`，定义 key、默认值、范围、单位、描述和迁移版本。
+2. 新增 typed DTO：`ProcessDeviceSettings`、`ProcessToolSettings`、`ProcessLayerToolSettings`、`ProcessIoSettings`、`ProcessAuxSettings`。
+3. 保留 `.ui` 直接加载和 `uiSetting`，但建立 UI 字段到 typed DTO 的映射表。
+4. Apply/OK 时先采集 UI，再校验 schema，再写 TOML。
+5. 关键运行逻辑只读取 typed DTO，不直接读 `uiSetting` 字符串。
+6. 保存后发送 settings revision changed，runtime 决定是否刷新设备或要求空闲态。
 
 完成标准：
 
-- 拖拽移动同级节点和移动到容器节点均可工作。
-- 双击节点能打开至少基础节点编辑器。
-- 节点移动后保存/加载顺序稳定。
+- 运动控制器、激光、轴、工具、图层工具绑定、IO、气水监控等关键参数 typed 化。
+- 非法范围能在 UI/日志中明确提示。
+- 旧 `uiSetting` 仍可兼容保存。
 
-### 阶段 3：统一参数界面
+### Phase 4：设备 registry/session 重构
 
 优先级：高。
 
 任务：
 
-1. 将当前 `ProcessSettingsDialog` 从 tab 改为左侧树 + 右侧 `QStackedWidget`。
-2. 建立参数页 registry：每个页面有 id、标题、父节点、权限等级、widget factory。
-3. 第一批迁移页面：
-   - External / Motion Controller
-   - External / Axis
-   - External / Laser
-   - Processing / Tool / Motion&Laser
-   - Processing / Tool / General
-4. 第二批迁移页面：
-   - IO Index / Digital IN/OUT / Analog IN/OUT
-   - Gas
-   - Water
-   - Monitor
-   - LoadingPos
-   - Camera
-   - Internet
-5. 从旧 `QG_dlgSetting` 复制交互结构，但不复制旧 `Service*` 和 `DT` 依赖。
-6. 将页面数据接入 `ProcessSettings` 或拆分后的 settings store。
-7. Apply/OK 统一保存并发出 settings changed 信号。
+1. 将 `ProcessDeviceManager` 拆为 `ProcessDeviceRegistry` 和 `ProcessDeviceSession`。
+2. Registry 负责描述设备、SDK 可用性、能力、缺失原因。
+3. Session 负责活动设备实例、连接/断开、错误状态、安全停机、profile 切换。
+4. 保留 `PureSimulation` 默认 profile。
+5. `SimulatorCMHP` 明确为 ACS SDK simulator profile，不与纯仿真混用。
+6. ACS/GTN adapter 继续 option-gated，SDK 头不进入公共接口。
+7. 激光器、IO、气、水、监控设备逐步接入 `ILaserDevice/IProcessIo/IProcessAuxDevice`。
 
 完成标准：
 
-- 参数命令只打开一个统一设置窗口。
-- 左侧参数树选择能切换右侧页面。
-- 至少运动、轴、激光、工具、气、水、监控、上料位页面可保存/加载。
-- 旧 tab 对话框入口被替换或只作为兼容内部实现。
+- 设备列表能展示 available/unavailable/simulation 和原因。
+- 活动设备切换只允许在安全状态。
+- Run 前能统一检查 motion/laser/io ready。
 
-### 阶段 4：节点定义和节点编辑器迁移
+### Phase 5：刀路排序与工具匹配服务
 
 优先级：高。
 
 任务：
 
-1. 建立 `ProcessNodeRegistry`，为每种节点注册：显示名、图标、默认参数、是否容器、允许子节点、编辑器 factory、执行器 key。
-2. 迁移基础节点编辑器：Start、Stop、Wait、Axis、Group、If、Loop。
-3. 迁移运动节点编辑器：AxesMove、Feeding、AutoFocus。
-4. 迁移 IO/命令节点编辑器：IO、Commands、EnergySwitch、Monitor。
-5. 迁移工艺节点编辑器：Cutting、OverCutting。
-6. 迁移视觉/测量节点编辑器：Camera、Measurement、MarkAcquire、Alignment、Calculation、Compare。
-7. 迁移 RunGroup 和 RunGroupCheck。
-8. 每个节点编辑器输出类型化参数，并可转换到旧 `map<QString, QString>` 以兼容旧流程文件。
+1. 新增 `toolpath/process_toolpath_service.*`，持有运行时 snapshot 副本。
+2. 新增 `process_toolpath_sorter.*`，支持按图层、工具、轮廓顺序、距离策略排序。
+3. 新增 `process_tool_matcher.*`，按 layer/toolName/contour 参数匹配 typed 工具参数。
+4. 定义 `ProcessJobPlan`：有序轮廓、匹配工具、工艺参数、校验结果。
+5. 切割前检查：空点集、禁用图层、缺工具、点机床坐标无效、参数越界。
+6. 将 CAM 图层工具配置与 Process 工具参数打通。
 
 完成标准：
 
-- 必要节点均可在树中添加。
-- 双击每种节点能打开对应参数界面。
-- 编辑后节点 Info 列能摘要显示关键参数。
-- 节点参数可保存/加载并通过校验。
+- Process 能把 CAM 点集转换为可执行 job plan。
+- 同一图层轮廓能使用图层工具参数。
+- 排序策略可配置并可日志追踪。
 
-### 阶段 5：流程执行引擎迁移
+### Phase 6：控制器无关指令规划与 translator
 
 优先级：高。
 
 任务：
 
-1. 新建 `ProcessExecutor`，解释 `ProcessFlowDocument`。
-2. 使用 Qt 或 `TaskManager` 管理后台执行，替换旧 boost thread 和全局 atomic。
-3. 建立执行状态：Idle、Preparing、Running、Paused、Stopping、Stopped、Error、EmergencyStop。
-4. 节点执行器通过 registry 获取，执行时只调用 facade/service：运动、激光、IO、相机、CAM 数据。
-5. 实现暂停、继续、停止、急停和节点状态回传。
-6. 第一批执行节点：Start、Stop、Wait、Axis、AxesMove、Group、If、Loop。
-7. 第二批执行节点：IO、Commands、EnergySwitch、Feeding、Cutting、OverCutting。
-8. 第三批执行节点：Measurement、MarkAcquire、Alignment、AutoFocus、Camera、Calculation、Compare、Monitor、RunGroup。
+1. 新增 `instructions/process_command.h` 和 `ProcessCommandBuffer`。
+2. 定义中间命令：`SetFeed`、`MoveLinear`、`LaserOn/Off`、`SetLaserPower`、`SetDigitalOutput`、`Dwell`、`WaitSignal`、`Home`、`Stop`。
+3. 新增 `ProcessInstructionPlanner`，把 workflow + job plan 编译成 command buffer。
+4. 新增 `IControllerTranslator`。
+5. 实现 `PureSimulationTranslator`，用于仿真执行和 UI 反馈。
+6. 实现 ACS translator 与 GTN translator 的接口壳，真实 SDK 调用由 adapter 完成。
+7. 将 controller-specific 差异从 workflow executor 中移走。
 
 完成标准：
 
-- 流程树可以在仿真设备上执行。
-- 运行状态能回写流程树节点颜色。
-- 停止/急停不会让线程异常逃逸。
-- 所有 catch 块记录 `LCNC_ERR` 日志。
+- Cutting 节点不直接调用 ACS/GTN。
+- 同一个 job plan 可输出仿真执行动作或真实控制器动作。
+- 指令 buffer 可打印日志用于调试。
 
-### 阶段 6：外设完整迁移
+### Phase 7：工作流服务与执行服务重构
 
 优先级：高。
 
 任务：
 
-1. 定义 `ILaserDevice`、`IProcessIo`、`IProcessAuxDevice`。
-2. 将 `ProcessDeviceManager` 升级为 `ProcessDeviceRegistry`，支持设备描述、可用性、active profile、错误状态。
-3. 新增 `SimulatorLaserDevice`，使仿真 profile 覆盖运动和激光。
-4. 迁移运动控制 adapter：
-   - `ACSMotionControl` adapter。
-   - `GTNMotionControl` adapter。
-   - `SimulatorCMHP` 作为纯仿真 adapter，不再继承 ACS。
-5. 迁移激光 adapter：
-   - IPG。
-   - Pharos。
-   - Raycus。
-   - RaycusQCW。
-   - AnalogControl。
-6. 迁移 IO/模拟量/气水相关 adapter，替换旧 bdaq 直接 include。
-7. CMake 增加可选开关：
-   - `LCNC_WITH_ACS`
-   - `LCNC_WITH_GTN`
-   - `LCNC_WITH_BDAQ`
-   - `LCNC_WITH_REAL_LASER`
-8. 真实 SDK 未启用时，设备显示为 unavailable，但工程仍可构建。
-9. 参数界面根据 registry 动态列出可用设备和缺失原因。
+1. 新增 `workflow/process_workflow_service.*`，负责编辑态 document、保存加载、校验和编译入口。
+2. 新增 `execution/process_execution_service.*`，负责执行 command buffer 和节点 executor。
+3. 新增 `process_node_executor_registry.*`，按 executor key 注册节点运行器。
+4. 拆分当前 `ProcessWorkflowExecutor` 中的节点副作用到 node executors。
+5. 支持暂停、继续、停止、急停对等待、运动、切割、IO 节点的统一取消语义。
+6. 节点状态只通过 node id 回写 document/model。
+7. catch/log 所有执行异常，禁止异常逃逸线程或 Qt 回调栈。
 
 完成标准：
 
-- 仿真 profile 默认可用。
-- 真实设备 profile 可按 CMake option 启用。
-- 不再需要旧静态 `MCFactory` / `LDFactory` 作为全局入口。
-- 设备连接、断开、状态和错误能通过 Process facade/UI 展示。
+- 工作流编辑和运行解耦。
+- 运行中节点状态、错误和进度稳定回写。
+- Stop/EStop 能让激光、IO、运动进入安全态。
 
-### 阶段 7：切割流程和 CAM 集成
-
-优先级：中高。
-
-任务：
-
-1. 明确切割节点输入：CAM contour stable id、刀路/轮廓集合、工艺参数、激光参数、进给参数。
-2. `Cutting` 节点执行时通过 Cam facade 获取所需 runtime 数据，避免直接 include CAM UI。
-3. `OverCutting` 节点迁移旧过切参数和执行逻辑。
-4. 对齐/打标/测量节点通过 Vision 或未来视觉 facade 获取数据，不直接依赖旧 `VisionModule::instance()`。
-5. 切割前安全检查：机台已加载、轴已回零、设备已连接、激光 ready、流程参数有效、急停未触发。
-6. 仿真模式下以 `MachinePose` 和 CAM 仿真显示反馈运行。
-
-完成标准：
-
-- 至少一个完整切割流程可在仿真 profile 运行。
-- 真实设备 profile 下能完成连接前检查和 dry-run。
-- 切割节点错误能定位到节点并显示错误信息。
-
-### 阶段 8：清理旧兼容层和验收
+### Phase 8：UI 接入与清理验收
 
 优先级：中。
 
 任务：
 
-1. 移除或隔离不再使用的旧 `ProcessModule.*`、旧 `Service` 依赖和旧全局宏。
-2. 将仍需保留的旧代码放入 `legacy/` 或 adapter private 区域。
-3. 统一文件命名为 snake_case，新增公共类补齐用途说明。
-4. 清理 `TreeItem` / `TreeModel` 旧实现或替换为新 model。
-5. 更新 `文件结构.md`、`实施进度.md` 和相关 README。
-6. 增加 smoke 验证清单。
+1. 参数 UI 使用 typed schema 提示单位、范围、错误。
+2. 流程树 UI 只操作 workflow service/model，不触碰执行器内部。
+3. 设备页面显示 SDK 缺失原因、连接状态和错误。
+4. 删除或隔离不再使用的旧兼容源码，保留 `.ui` 资源加载桥。
+5. 更新 `实施进度.md`、`文件结构.md`、`微内核框架结构.md`。
+6. 补手工 smoke 清单。
 
 完成标准：
 
-- 新代码通过分层 include 检查。
-- `ProcessModule` 不 include QWidget/QDialog/QTreeView。
 - Debug 构建通过。
-- 完成执行页、参数界面、流程树、仿真运行、设备 profile 的手工 smoke。
+- Process 源码无 OCC 依赖。
+- UI 可完成参数编辑、设备选择、流程编辑、加载保存、仿真运行、暂停、停止、急停。
 
-## 6. 节点迁移优先级
+## 5. 近期执行顺序
 
-### P0：流程骨架节点
+1. 先做 Phase 1：新增 CAM 到 Process 的纯数据刀路 DTO，并让 Process dry-run 使用真实点集快照。
+2. 再做 Phase 2：引入状态机和 runtime，缩小 `ProcessModule`。
+3. 并行推进 Phase 3：把运动、激光、工具、图层工具绑定参数 typed 化。
+4. 做 Phase 5 和 Phase 6：把点集排序、工具匹配和指令 buffer 串起来。
+5. 最后做 Phase 7/8：替换当前 QTimer dry-run 执行器，完善 UI 和清理旧兼容层。
 
-- Start
-- Stop
-- Wait
-- Group
-- If
-- Loop
-- RunGroup
-- RunGroupCheck
+## 6. 验收清单
 
-原因：这些节点决定流程树结构、执行控制和拖放规则。
+### 构建
 
-### P1：运动与切割主链路
+- `cmake --build build --config Debug -- /m /nologo` 通过。
+- SDK-off 必须可构建。
+- ACS/GTN option 缺路径时 CMake 明确报错。
 
-- Axis
-- AxesMove
-- Feeding
-- Cutting
-- OverCutting
-- EnergySwitch
+### 架构
 
-原因：这是加工流程最小闭环。
+- `ProcessModule` 不 include QWidget/QDialog/QTreeView/OCC/vendor SDK。
+- Process 运行态不 include `LaserToolpath`、`TopoDS_*`、`gp_*`。
+- 旧 `.cpp/.h` 业务实现不整包加入 CMake。
+- 内部 runtime/services 非全局单例。
 
-### P2：IO 与辅助设备
+### 状态
 
-- IO
-- Commands
-- Monitor
-- AutoFocus
+- Idle/Preparing/Processing/Paused/Stopping/Error/EmergencyStop 都可触达并有日志。
+- 非法转换会被拒绝并返回明确原因。
+- 急停能中断等待、运动、切割、激光和 IO。
 
-原因：与外设迁移强相关，但可以在仿真接口稳定后分批接入。
+### 数据
 
-### P3：视觉、测量和计算
+- CAM 输出的 Process 点集快照包含 contourId/layerId/toolName/points/revision。
+- Process 能按图层和工具参数生成 job plan。
+- 保存/加载后 workflow、参数、工具绑定一致。
 
-- Camera
-- Measurement
-- MarkAcquire
-- Alignment
-- Calculation
-- Compare
+### 功能
 
-原因：这些节点依赖视觉、CAD/CAM 几何上下文和旧 LibreCAD 选择逻辑，需要先定义 facade 边界。
+- 仿真 profile 能执行完整 dry-run。
+- Cutting 使用 CAM 点集，不依赖 OCC。
+- ACS/GTN profile 能通过 translator 进入对应 adapter 路径。
+- 参数界面可编辑旧 UI 字段，关键字段有 typed 校验。
 
-## 7. 参数界面迁移优先级
+## 7. 风险控制
 
-### P0：统一壳和基础页
-
-- 左侧参数树。
-- 右侧 stacked page。
-- Apply/OK/Cancel。
-- Motion Controller。
-- Axis。
-- Laser。
-- Tool / Motion&Laser。
-- Tool / General。
-
-### P1：工艺和辅助页
-
-- Tool / Servo。
-- Tool / Special。
-- Gas。
-- Water。
-- Monitor。
-- LoadingPos。
-
-### P2：IO 与通讯
-
-- IO Index。
-- Digital IN/OUT。
-- Analog IN/OUT。
-- Internet。
-- TCP/SMC/SignalSource/Sensor 等旧独立对话框按需要合并。
-
-### P3：相机和客户差异
-
-- Camera。
-- 客户/权限相关页面显隐。
-- 导入/导出配置。
-
-## 8. 外设迁移优先级
-
-### P0：仿真设备完善
-
-- `SimulatorCMHP` 纯仿真运动控制器。
-- `Simulator` 激光器。
-- 仿真 IO/气/水状态。
-
-### P1：激光器
-
-- Pharos：已有 HTTP 风格实现，适合先 adapter 化。
-- IPG。
-- Raycus。
-- RaycusQCW。
-- AnalogControl。
-
-### P2：运动控制
-
-- ACSCMHP：SDK 依赖重，必须可选启用。
-- GTN：SDK 和 bdaq 依赖需要独立 CMake 开关。
-- 旧 SimulateCMHP：不沿用继承 ACS 的实现，改为纯仿真或 ACS simulator profile。
-
-### P3：IO/辅助硬件
-
-- bdaq IO。
-- 气压/水泵/门禁/传感器。
-- 相机触发和外部信号源。
-
-## 9. 验收清单
-
-### 构建验收
-
-- Debug 构建通过：`cmake --build build --config Debug -- /m /nologo`。
-- 不启用真实 SDK 时仍可构建。
-- 启用每个 SDK option 时缺失路径有明确 CMake 错误。
-
-### 分层验收
-
-- `core/**` 不 include `view/`、`modules/`、`app/`。
-- `view/**` 不 include `modules/`、`app/`。
-- `ProcessModule` 不 include QWidget/QDialog/QTreeView。
-- 外设 adapter 不把 vendor SDK 头扩散到公共接口。
-
-### 功能验收
-
-- 参数窗口为左树右页，一个入口覆盖 process 参数。
-- 流程树支持添加、删除、拖拽移动、双击编辑、保存、加载。
-- 必要节点均可添加并保存参数。
-- 仿真 profile 能执行基础流程。
-- 切割流程能在仿真 profile 下完成 dry-run。
-- 真实设备 profile 能完成设备发现、连接、断开、状态展示和错误提示。
-
-### 稳定性验收
-
-- 后台执行线程 catch/log 所有异常，不让异常逃逸线程栈。
-- 急停能打断等待、运动、激光和 IO 节点。
-- 拖拽移动后节点 stable id 不变。
-- 保存/加载后节点顺序、父子关系和参数一致。
-
-## 10. 近期推荐执行顺序
-
-1. 建立 `workflow` 数据模型和 TOML schema，先把当前轻量树从 UI 事实源迁出来。
-2. 重做流程树 model 的拖放和双击编辑信号，保持当前 UI 可用。
-3. 把参数窗口改为左树右页统一壳，先迁移当前已有 process/motion/laser 字段。
-4. 建立节点 registry，迁移基础节点编辑器。
-5. 建立 `ILaserDevice` 和 simulator laser，让设备 profile 闭环。
-6. 迁移 Cutting / OverCutting 节点编辑器和仿真执行。
-7. 再按 adapter 方式迁移真实激光器和真实运动控制器。
-
-## 11. 风险控制
-
-- 不要把旧 `Process/ProcessModule.cpp` 直接加入 CMake；它会拉入旧 Service、Boost、LibreCAD、Vision 和全局状态。
-- 不要把旧 `SimulateCMHPMotionControl` 当纯仿真接入；它继承 ACS 控制器。
-- 不要在 `ProcessModule` 中继续增加 UI 对话框或 QWidget 依赖。
-- 不要让节点执行器直接操作 UI item；必须通过 node id 和 workflow document。
-- 不要让 settings 页面直接保存全局旧 table；先转换为新 settings DTO。
-- 不要在 CMake 长期硬编码个人 SDK 路径；使用 cache variable 或 toolchain。
+- 不恢复旧全局 `Service`。
+- 不把旧 `Process/ProcessModule.cpp`、旧 Setting cpp、旧 device cpp 整包加入 CMake。
+- 不把 `SimulatorCMHP` 当作纯软件仿真；它是 ACS SDK simulator profile。
+- 不让执行器直接操作 UI item。
+- 不让执行逻辑长期依赖 `uiSetting` 字符串 map。
+- 不让真实 SDK 路径硬编码到源码。
+- 不在加工中切换控制器、工具 schema 或关键设备 profile。

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "modules/process/settings/process_settings_field_registry.h"
+
 #include <QDialog>
 #include <QMap>
 #include <QStringList>
@@ -49,10 +51,17 @@ private:
     QWidget* buildInternetPage();
     QWidget* buildCommunicationPage();
     QWidget* buildLegacySettingsPage(const QString& pageId, const QString& title, const QString& resourcePath);
-    void addLegacySettingsPages(QTreeWidgetItem* parent);
+    void loadLegacySettingsPages();
+    void buildSettingsTree();
     void loadLegacySettings();
     void applyLegacySettings(QMap<QString, QString>& values) const;
-    QTreeWidgetItem* addPageNode(QTreeWidgetItem* parent, const QString& text, int pageIndex);
+    void applyKnownLegacyTypedSettings(const QMap<QString, QString>& values);
+    QTreeWidgetItem* addGroupNode(QTreeWidgetItem* parent, const QString& text);
+    QTreeWidgetItem* addPageNode(QTreeWidgetItem* parent,
+                                 const QString& text,
+                                 int pageIndex,
+                                 const QString& pageId = QString());
+    int pageIndexFor(const QString& pageId, int fallbackPageIndex) const;
     void switchPage(QTreeWidgetItem* item, int column);
     void loadFromSettings();
     void applyToSettings();
@@ -94,6 +103,8 @@ private:
     QSpinBox* m_internetPortSpin{nullptr};
     CommunicationSettingsPage* m_communicationPage{nullptr};
     QMap<QString, QWidget*> m_legacyEditors;
+    QMap<QString, int> m_legacyPageIndexes;
+    ProcessSettingsFieldRegistry m_fieldRegistry;
 };
 
 } // namespace lcnc::process
