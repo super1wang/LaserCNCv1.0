@@ -84,7 +84,7 @@ void Dialog_Setting_Water::setupLineEditValidators(QWidget* dialog)
 		{
 			QString typeIndicator = parts[2].left(1);
 			if (typeIndicator == "f")
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Double));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
 		}
 	}
 }

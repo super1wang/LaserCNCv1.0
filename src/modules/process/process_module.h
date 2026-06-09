@@ -10,46 +10,32 @@
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "modules/process/i_process_facade.h"
-#include "modules/process/monitor/process_monitor_types.h"
-#include "modules/process/settings/process_settings.h"
 #include "modules/process/workflow/process_flow_document.h"
 
 class QTimer;
+class Service;
 
 namespace lcnc::process {
-class ProcessDeviceManager;
-class ProcessDeviceCoordinator;
-class ProcessExecutionService;
-class ProcessMonitorService;
-class ProcessRuntime;
-class ProcessToolpathService;
-class ProcessWorkflowService;
+class SimulationMotionController;
 class ProcessWorkflowExecutor;
 }
 
-namespace lcnc::cam { class ICamToolpathProvider; }
-
 namespace lcnc {
 class IKernel;
-class IMotionController;
 class MachineConfigurationService;
 }
 
 /**
- * @brief Process module singleton — manages execution process, peripherals, and parameters.
+ * @brief Process module — manages execution process, peripherals, and parameters.
  *
- * Phase 5 is still in progress, so this module currently provides a thin
- * placeholder API and state container. Ribbon/UI should depend on this module
- * instead of embedding process logic directly.
- *
- * 微内核集成：同样实现 @ref lcnc::IModule + @ref lcnc::IService，依赖 "cam"
- * 以获取机台轴定义。
+ * 使用旧 System/Service 类作为外设和参数统一管理器，
+ * 通过唯一的 qg_dlgsetting 对话框提供共同参数界面。
+ * 运动仿真依赖 SimulatorCmhpMotionController。
  */
 class ProcessModule : public QObject, public lcnc::IModule, public lcnc::IProcessFacade
 {
     Q_OBJECT
 public:
-    /// 公开构造：由 Kernel 拥有。
     explicit ProcessModule(QObject* parent = nullptr);
 
     /// IProcessFacade：用于让调用方挂接 ProcessModule 的 Qt 信号。
@@ -58,7 +44,6 @@ public:
     using State = lcnc::ProcessRunState;
 
     // ── IModule ─────────────────────────────────────────────────────
-    /// id="process"，依赖 ["cam"]。
     lcnc::ModuleInfo info() const override;
     bool init(lcnc::IKernel& kernel) override;
     bool start() override;
@@ -66,8 +51,6 @@ public:
 
     bool connectController(const QString& endpoint) override;
     void disconnectController() override;
-    bool connectDevices() override;
-    void disconnectDevices() override;
     bool isConnected() const override;
 
     void setSimulationMode(bool on) override;
@@ -82,16 +65,10 @@ public:
     QMap<QString, bool> digitalOutputStates() const { return m_digitalOutputs; }
     void home() override;
 
-    /// 启动加工运行（仿真或控制器）。
-    /// @note 以 @c run 前缀区分于 @ref lcnc::IModule::start 生命周期调用。
     void runStart() override;
-    /// 暂停当前运行。
     void runPause() override;
-    /// 停止当前运行（不释放资源）。
     void runStop() override;
     void emergencyStop() override;
-    /// 复位急停 —— 仅当当前状态为 EmergencyStop 时把状态切回 Idle 并刷新
-    /// 状态栏；不重连控制器、不重置轴位置。
     void resetEmergencyStop() override;
 
     void newProcess() override;
@@ -106,16 +83,10 @@ public:
     void setFeedOverride(double factor);
     double feedOverride() const;
 
-    lcnc::ProcessSettings& settings() { return m_settings; }
-    const lcnc::ProcessSettings& settings() const { return m_settings; }
-
     lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
     const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
-    lcnc::process::ProcessMonitorSnapshot monitorSnapshot() const { return m_monitorSnapshot; }
-
-    lcnc::process::ProcessDeviceManager* deviceManager() const { return m_deviceManager.get(); }
-    void reloadDeviceSettings();
-
+    void setService(Service* svc) { m_service = svc; }
+    Service* service() const { return m_service; }
     QString statusMessage() const override;
 
 signals:
@@ -129,7 +100,6 @@ signals:
     void statusMessageChanged(const QString& message);
     void processLogMessage(const QString& level, const QString& message);
     void processFlowChanged();
-    void monitorSnapshotChanged(const lcnc::process::ProcessMonitorSnapshot& snapshot);
 
 private slots:
     void onSimulationTick();
@@ -137,45 +107,25 @@ private slots:
 private:
     void initializeAxisPositions();
     void initializeAxisEnabledStates();
-    bool switchMotionControllerFromSettings(QString* errorMessage = nullptr);
-    void registerActiveMotionControllerService();
-    void startDeviceAcquisition();
-    void stopDeviceAcquisition();
-    void pollDeviceSnapshotAsync();
     void safeStopProcessOutputs();
-    bool executeCuttingCommandBuffer(bool dryRun, QString* errorMessage = nullptr);
-    void applyMonitorSnapshot(const lcnc::process::ProcessMonitorSnapshot& snapshot);
-    void handleMonitorAlarmRaised(const lcnc::process::ProcessMonitorAlarm& alarm);
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
 
-    /// 生命周期由 Kernel 接管。
     bool                  m_initialized{false};
-
-    bool m_connected{false};
-    bool m_simulationMode{true};
-    State m_state{State::Idle};
+    bool                  m_connected{false};
+    bool                  m_simulationMode{true};
+    State                 m_state{State::Idle};
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, double> m_axisPositions;
-    QMap<QString, bool> m_axisEnabled;
-    QMap<QString, bool> m_digitalOutputs;
-    std::shared_ptr<lcnc::MachineConfigurationService> m_machineConfig;
-    QTimer* m_simTimer{nullptr};
-    double m_feedOverride{1.0};
-    double m_simPhase{0.0};
-    QString m_statusMessage;
-    lcnc::IKernel* m_kernel{nullptr};
+    QMap<QString, bool>   m_axisEnabled;
+    QMap<QString, bool>   m_digitalOutputs;
+    QTimer*               m_simTimer{nullptr};
+    double                m_feedOverride{1.0};
+    double                m_simPhase{0.0};
+    QString               m_statusMessage;
+    lcnc::IKernel*        m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
-    lcnc::ProcessSettings m_settings;
-    std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_toolpathProvider;
-    std::unique_ptr<lcnc::process::ProcessDeviceManager> m_deviceManager;
-    std::unique_ptr<lcnc::process::ProcessDeviceCoordinator> m_deviceCoordinator;
-    std::unique_ptr<lcnc::process::ProcessMonitorService> m_monitorService;
-    std::unique_ptr<lcnc::process::ProcessRuntime> m_runtime;
-    std::unique_ptr<lcnc::process::ProcessToolpathService> m_toolpathService;
-    std::unique_ptr<lcnc::process::ProcessWorkflowService> m_workflowService;
-    std::unique_ptr<lcnc::process::ProcessExecutionService> m_executionService;
-    std::unique_ptr<lcnc::IMotionController> m_motionController;
+    Service* m_service{nullptr};
+    std::unique_ptr<lcnc::process::SimulationMotionController> m_motionController;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
-    lcnc::process::ProcessMonitorSnapshot m_monitorSnapshot;
 };

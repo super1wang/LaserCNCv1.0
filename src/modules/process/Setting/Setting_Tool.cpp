@@ -512,7 +512,7 @@ void Dialog_Setting_Tool::UpdatePage()
 
 void Dialog_Setting_Tool::LinkedModeChanged()
 {
-	ui.lineEdit_Linkage_fLinkageParameterA->setValidator(new QRegExpValidator(Regex_Pos_Double));
+	ui.lineEdit_Linkage_fLinkageParameterA->setValidator(new QRegularExpressionValidator(Regex_Pos_Double(, nullptr)));
 
 	int iMode = ui.comboBox_Linkage_iLinkedMode->currentIndex();
 	switch (iMode)
@@ -850,17 +850,17 @@ void Dialog_Setting_Tool::setupLineEditValidators(QWidget* dialog)
 			if (typeIndicator == "f")
 			{
 				if (parts[1] == "SetPos" || parts[1] == "MovePos")
-					lineEdit->setValidator(new QRegExpValidator(Regex_Pos_Double));
+					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Pos_Double(, nullptr)));
 				else
-					lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Double));
+					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
 				lineEdit->setMaxLength(8);  // 最多输入8个字符
 			}
 			else if (typeIndicator == "i")
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Int));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
 		}
 	}
-	ui.lineEdit_Height_fCuttingHeight->setValidator(new QRegExpValidator(Regex_Pos_Double));
-	ui.lineEdit_Height_fIdleHeight->setValidator(new QRegExpValidator(Regex_Pos_Double));
+	ui.lineEdit_Height_fCuttingHeight->setValidator(new QRegularExpressionValidator(Regex_Pos_Double(, nullptr)));
+	ui.lineEdit_Height_fIdleHeight->setValidator(new QRegularExpressionValidator(Regex_Pos_Double(, nullptr)));
 }
 
 void Dialog_Setting_Tool::setUI()

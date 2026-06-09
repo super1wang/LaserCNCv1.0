@@ -1,9 +1,13 @@
 #pragma once
+// Ensure consistent Windows header setup (MOC batch may include this
+// before Qt's own windows.h inclusion, breaking SDK types).
+#include <QtCore/QtGlobal>
 #include <map>
 #include <vector>
 #include <string>
 #include <QString>
-#include <QRegExpValidator>
+#include <QRegularExpression>
+#include <QValidator>
 #include "magic_enum.hpp"
 #include "MessageCode.h"
 
@@ -36,22 +40,22 @@ using magic_enum::enum_cast;	//string -> enum		enum_cast<>().value()
 using magic_enum::enum_name;	//enum -> string		enum_name().data()
 using magic_enum::enum_names;	//enum -> auto			
 
-// 正则表达式
-static QRegExp Regex_All_Int			("^-?\\d{1,15}$");											// 1~15位整数
-static QRegExp Regex_Nonnegative_Int	("^\\d{1,15}$");											// 1~15位非负整数
-static QRegExp Regex_Positive_Int		("^[1-9]\\d{0,7}$");										// 1~8位正整数
-static QRegExp Regex_All_Double			("^-?(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$");			// 1~15位浮点数
-static QRegExp Regex_Nonnegative_Double	("^(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$");				// 1~15位非负浮点数
-static QRegExp Regex_Pos_Double			("^-?\\d{1,5}(\\.\\d{1,3})?$");								// 至多5位整数+3位小数的浮点数
-static QRegExp Regex_Normal_String		("^[a-zA-Z0-9_\\-\\.]?$");									// 字符串
-static QRegExp Regex_Digital_IndexOut	("^-?N?\\d\\.\\d(\\d)?=[01]$");								// 数字量索引和下发
-static QRegExp Regex_Digital_Index		("^-?N?\\d\\.\\d(\\d)?$");									// 数字量索引
-static QRegExp Regex_Digital_Out		("^[01]$");													// 数字量下发
-static QRegExp Regex_Analog_IndexOut	("^N?\\d(\\d)?=(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$");	// 模拟量索引和下发
-static QRegExp Regex_Analog_Index		("^N?\\d(\\d)?$");											// 模拟量索引
-static QRegExp Regex_Analog_Out			("^(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$");				// 模拟量下发 
-static QRegExp Regex_Internet_IP		("^N?\\d\\.\\d(\\d)?$");									// IP
-static QRegExp Regex_Internet_Port		("^N?\\d(\\d)?$");											// 端口
+// ── Regex patterns (inline accessors to avoid static init in header) ──
+inline const QRegularExpression& Regex_All_Int()          { static QRegularExpression re("^-?\\d{1,15}$"); return re; }
+inline const QRegularExpression& Regex_Nonnegative_Int()  { static QRegularExpression re("^\\d{1,15}$"); return re; }
+inline const QRegularExpression& Regex_Positive_Int()     { static QRegularExpression re("^[1-9]\\d{0,7}$"); return re; }
+inline const QRegularExpression& Regex_All_Double()       { static QRegularExpression re("^-?(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
+inline const QRegularExpression& Regex_Nonnegative_Double(){ static QRegularExpression re("^(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
+inline const QRegularExpression& Regex_Pos_Double()       { static QRegularExpression re("^-?\\d{1,5}(\\.\\d{1,3})?$"); return re; }
+inline const QRegularExpression& Regex_Digital_Index()    { static QRegularExpression re("^-?N?\\d\\.\\d(\\d)?$"); return re; }
+inline const QRegularExpression& Regex_Digital_Out()      { static QRegularExpression re("^[01]$"); return re; }
+inline const QRegularExpression& Regex_Digital_IndexOut() { static QRegularExpression re("^-?N?\\d\\.\\d(\\d)?=[01]$"); return re; }
+inline const QRegularExpression& Regex_Analog_Index()     { static QRegularExpression re("^N?\\d(\\d)?$"); return re; }
+inline const QRegularExpression& Regex_Analog_Out()       { static QRegularExpression re("^(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
+inline const QRegularExpression& Regex_Analog_IndexOut()  { static QRegularExpression re("^N?\\d(\\d)?=(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
+inline const QRegularExpression& Regex_Internet_IP()      { static QRegularExpression re("^N?\\d\\.\\d(\\d)?$"); return re; }
+inline const QRegularExpression& Regex_Internet_Port()    { static QRegularExpression re("^N?\\d(\\d)?$"); return re; }
+inline const QRegularExpression& Regex_Normal_String()    { static QRegularExpression re("^[a-zA-Z0-9_\\-\\.]?$"); return re; }
 
 // 用户权限
 enum class PermissionLevel

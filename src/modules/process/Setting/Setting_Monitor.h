@@ -22,12 +22,10 @@ public:
 private:
 	void setupLineEditValidators(QWidget* dialog);
 	void setupCheckBoxValidators(QWidget* dialog);
-	void setupComboBoxValidators(QWidget* dialog);
 
 private slots:
 	void lineEditChanged();
 	void checkBoxChanged();
-	void comboBoxChanged();
 
 public:
 	Ui::Dialog_Setting_Monitor	ui;
@@ -37,7 +35,7 @@ private:
 
 	QList<QLineEdit*>			m_qlLineEditI;		// 存int	类型的LineEdit控件指针
 	QList<QLineEdit*>			m_qlLineEditF;		// 存float类型的LineEdit控件指针
+	QList<QLineEdit*>			m_qlLineEditS;		// 存string类型的LineEdit控件指针
 	QList<QCheckBox*>			m_qlCheckBoxB;		// 存bool类型的CheckBox控件指针
-	QList<QComboBox*>			m_qlComboBoxI;		// 存int	类型的ComboBox控件指针
 
 };

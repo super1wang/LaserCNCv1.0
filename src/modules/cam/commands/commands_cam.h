@@ -77,46 +77,4 @@ public:
     void execute()   override;
 };
 
-/**
- * @brief Continuous machine simulation animation.
- *
- * Plays through all toolpath contour points sequentially, driving
- * the machine axes to their computed IK positions each tick.
- * Supports play / pause / stop, and adjustable speed.
- */
-class CmdSimulate : public CommandBase
-{
-    Q_OBJECT
-public:
-    explicit CmdSimulate(IAppContext* ctx);
-    static constexpr const char* Name = "cam.simulate";
-
-    bool isEnabled() const override;
-    void execute()   override;
-
-    /// Control methods (called by ribbon buttons)
-    void play();
-    void pause();
-    void stop();
-    void setSpeed(double factor);  ///< 1.0 = normal, 2.0 = 2x, etc.
-
-    bool isPlaying() const;
-    bool isPaused()  const;
-
-signals:
-    void simulationTick(int contourIndex, int pointIndex, int totalPoints);
-    void simulationFinished();
-
-private slots:
-    void onTick();
-
-private:
-    QTimer* m_timer{nullptr};
-    int     m_currentContour{0};
-    int     m_currentPoint{0};
-    int     m_totalPoints{0};
-    double  m_speed{1.0};
-    bool    m_playing{false};
-    bool    m_paused{false};
-};
 

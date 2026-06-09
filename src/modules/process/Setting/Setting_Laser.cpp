@@ -5,6 +5,8 @@ Dialog_Setting_Laser::Dialog_Setting_Laser(QWidget* parent)
 	, set_Changed()
 {
 	ui.setupUi(this);
+	ui.gridLayout_4->setAlignment(Qt::AlignTop);
+	ui.gridLayout_4->setRowStretch(3, 1);
 	setWindowFlags(Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
 	setupLineEditValidators(this);
 	setupComboBoxValidators(this);
@@ -81,7 +83,7 @@ void Dialog_Setting_Laser::SetPage(table table_Set)
 	for (QLineEdit* lineEdit : m_qlLineEditF)
 	{
 		parts = lineEdit->objectName().split('_');
-		lineEdit->setText(QString::number(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_floating(), 'g', 3));
+		lineEdit->setText(QString::number(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_floating(), 'g', 16));
 	}
 
 	UpdatePage();
@@ -226,7 +228,7 @@ void Dialog_Setting_Laser::UpdatePage()
 void Dialog_Setting_Laser::setupLineEditValidators(QWidget* dialog)
 {
 	const QList<QLineEdit*> lineEdits = dialog->findChildren<QLineEdit*>();
-	static const QRegExp Regex_HTTP_IP("^((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)$");
+	static const QRegularExpression Regex_HTTP_IP("^((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)$");
 	for (QLineEdit* lineEdit : lineEdits)
 	{
 		QStringList parts = lineEdit->objectName().split('_');
@@ -238,22 +240,22 @@ void Dialog_Setting_Laser::setupLineEditValidators(QWidget* dialog)
 			}
 			else if (parts[2].left(1) == "i")
 			{
-				lineEdit->setValidator(new QRegExpValidator(Regex_All_Int));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Int(, nullptr)));
 				m_qlLineEditI.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Double));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
 				m_qlLineEditF.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
 		}
 	}
 
-	ui.lineEdit_HTTP_sHost		->setValidator(new QRegExpValidator(Regex_HTTP_IP));
-	ui.lineEdit_HTTP_iPort		->setValidator(new QRegExpValidator(Regex_Nonnegative_Int));
-	ui.lineEdit_HTTP_iTimeOut	->setValidator(new QRegExpValidator(Regex_Nonnegative_Int));
-	ui.lineEdit_Laser_iDelay	->setValidator(new QRegExpValidator(Regex_Nonnegative_Int));
+	ui.lineEdit_HTTP_sHost		->setValidator(new QRegularExpressionValidator(Regex_HTTP_IP, nullptr));
+	ui.lineEdit_HTTP_iPort		->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
+	ui.lineEdit_HTTP_iTimeOut	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
+	ui.lineEdit_Laser_iDelay	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
 }
 
 void Dialog_Setting_Laser::setupComboBoxValidators(QWidget* dialog)

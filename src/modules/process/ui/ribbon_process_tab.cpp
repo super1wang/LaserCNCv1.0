@@ -21,13 +21,9 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdLoadProcess>(CmdLoadProcess::Name);
     container->addCommand<CmdSaveProcess>(CmdSaveProcess::Name);
     container->addCommand<CmdOpenProcessSettings>(CmdOpenProcessSettings::Name);
-    container->addCommand<CmdOpenMotionSettings>(CmdOpenMotionSettings::Name);
-    container->addCommand<CmdOpenLaserSettings>(CmdOpenLaserSettings::Name);
-    container->addCommand<CmdOpenDeviceManager>(CmdOpenDeviceManager::Name);
 
     container->addCommand<CmdConnectController>(CmdConnectController::Name);
     container->addCommand<CmdDisconnectController>(CmdDisconnectController::Name);
-    container->addCommand<CmdToggleSimulationMode>(CmdToggleSimulationMode::Name);
 
     container->addCommand<CmdRunStart>(CmdRunStart::Name);
     container->addCommand<CmdRunPause>(CmdRunPause::Name);
@@ -46,19 +42,13 @@ void buildRibbonTab(SARibbonCategory* cat,
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab begin");
 
-    auto makeAct = [parent](const QString& label, const QString& iconPath) -> QAction* {
-        return new QAction(QIcon(iconPath), label, parent);
-    };
-
     // ── 连接 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelConn = cat->addPanel(QObject::tr("连接"));
-    panelConn->addLargeAction(container->findAction(CmdOpenDeviceManager::Name));
     panelConn->addLargeAction(container->findAction(CmdConnectController::Name));
     panelConn->addLargeAction(container->findAction(CmdHome::Name));
-    panelConn->addLargeAction(container->findAction(CmdToggleSimulationMode::Name));
     panelConn->addSmallAction(container->findAction(CmdDisconnectController::Name));
 
-    // ── 流程（占位） ───────────────────────────────────────────────────────
+    // ── 流程 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelProc = cat->addPanel(QObject::tr("流程"));
     panelProc->addLargeAction(container->findAction(CmdNewProcess::Name));
     panelProc->addLargeAction(container->findAction(CmdLoadProcess::Name));
@@ -75,11 +65,9 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelSafe->addLargeAction(container->findAction(CmdEmergencyStop::Name));
     panelSafe->addSmallAction(container->findAction(CmdResetEmergencyStop::Name));
 
-    // ── 参数（占位） ───────────────────────────────────────────────────────
+    // ── 参数 (唯一设置按钮) ────────────────────────────────────────────────
     SARibbonPanel* panelParam = cat->addPanel(QObject::tr("参数"));
-    panelParam->addSmallAction(container->findAction(CmdOpenLaserSettings::Name));
-    panelParam->addSmallAction(container->findAction(CmdOpenMotionSettings::Name));
-    panelParam->addSmallAction(container->findAction(CmdOpenProcessSettings::Name));
+    panelParam->addLargeAction(container->findAction(CmdOpenProcessSettings::Name));
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab end");
 }

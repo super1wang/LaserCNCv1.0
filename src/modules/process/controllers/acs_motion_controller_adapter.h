@@ -1,7 +1,5 @@
 #pragma once
 
-#include "core/kinematics/i_motion_controller.h"
-
 #include <QObject>
 #include <QMap>
 #include <QString>
@@ -10,38 +8,38 @@
 
 namespace lcnc::process {
 
-class AcsMotionControllerAdapter : public QObject, public lcnc::IMotionController
+class AcsMotionControllerAdapter : public QObject
 {
     Q_OBJECT
 public:
     AcsMotionControllerAdapter(QString endpoint, bool simulator, QObject* parent = nullptr);
     ~AcsMotionControllerAdapter() override;
 
-    QString id() const override;
-    bool start() override;
-    void stop() override;
-    bool isRunning() const override { return m_running; }
-    bool jog(const QString& axis, double delta) override;
-    bool moveTo(const QString& axis, double absolutePos) override;
-    bool home(const QString& axis = QString()) override;
-    void emergencyStop() override;
-    QMap<QString, double> axisPositions() const override;
-    bool setAxisEnabled(const QString& axis, bool enabled) override;
-    bool axisEnabled(const QString& axis) const override;
-    bool axisHomed(const QString& axis) const override;
-    bool setDigitalOutput(const QString& channel, bool value, QString* errorMessage = nullptr) override;
-    bool digitalInput(const QString& channel, bool* value, QString* errorMessage = nullptr) const override;
-    bool setAnalogOutput(const QString& channel, double value, QString* errorMessage = nullptr) override;
-    bool analogInput(const QString& channel, double* value, QString* errorMessage = nullptr) const override;
+    QString id() const;
+    bool start();
+    void stop();
+    bool isRunning() const { return m_running; }
+    bool jog(const QString& axis, double delta);
+    bool moveTo(const QString& axis, double absolutePos);
+    bool home(const QString& axis = QString());
+    void emergencyStop();
+    QMap<QString, double> axisPositions() const;
+    bool setAxisEnabled(const QString& axis, bool enabled);
+    bool axisEnabled(const QString& axis) const;
+    bool axisHomed(const QString& axis) const;
+    bool setDigitalOutput(const QString& channel, bool value, QString* errorMessage = nullptr);
+    bool digitalInput(const QString& channel, bool* value, QString* errorMessage = nullptr) const;
+    bool setAnalogOutput(const QString& channel, double value, QString* errorMessage = nullptr);
+    bool analogInput(const QString& channel, double* value, QString* errorMessage = nullptr) const;
     bool executeProgram(const QString& program,
                         int bufferIndex,
                         bool waitForFinish,
                         int timeoutMs,
-                        QString* errorMessage = nullptr) override;
-    bool programRunning(int bufferIndex, bool* running, QString* errorMessage = nullptr) const override;
-    bool supportsProgramPause() const override { return true; }
-    bool pauseProgram(int bufferIndex, QString* errorMessage = nullptr) override;
-    bool resumeProgram(int bufferIndex, QString* errorMessage = nullptr) override;
+                        QString* errorMessage = nullptr);
+    bool programRunning(int bufferIndex, bool* running, QString* errorMessage = nullptr) const;
+    bool supportsProgramPause() const { return true; }
+    bool pauseProgram(int bufferIndex, QString* errorMessage = nullptr);
+    bool resumeProgram(int bufferIndex, QString* errorMessage = nullptr);
 
 private:
     int axisIndex(const QString& axis) const;

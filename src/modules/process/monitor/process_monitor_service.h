@@ -9,9 +9,6 @@
 
 class QTimer;
 
-namespace lcnc { class IMotionController; }
-namespace lcnc::process { class IProcessIo; }
-
 namespace lcnc::process {
 
 struct ProcessMonitorOutputChannel
@@ -36,8 +33,6 @@ struct ProcessMonitorPollContext
     QString waterTankChannel;
     QString waterPressureChannel;
     QString waterLevelChannel;
-    lcnc::IMotionController* motionController{nullptr};
-    IProcessIo* processIo{nullptr};
 };
 
 class ProcessMonitorService : public QObject

@@ -1,12 +1,31 @@
 #pragma once
 
-#include "modules/process/settings/process_settings.h"
-
 #include <QMetaType>
 #include <QList>
 #include <QMap>
 #include <QString>
 #include <QStringList>
+
+namespace lcnc {
+
+enum class ProcessMonitorFaultAction { Continue, Pause, Stop };
+
+struct ProcessMonitorSettings {
+    ProcessMonitorFaultAction faultAction{ProcessMonitorFaultAction::Pause};
+    bool interLockEnabled{true};
+    bool safetyLightCurtainEnabled{false};
+    bool pressureMonitorEnabled{false};
+    bool waterLeakageMonitorEnabled{false};
+    bool waterTankMonitorEnabled{false};
+    bool waterPressureMonitorEnabled{false};
+    double waterPressureConversions{1};
+    double waterPressureLimitMpa{1.6};
+    bool waterLevelMonitorEnabled{false};
+    double waterLevelConversions{1};
+    double waterLevelLimitMm{10.0};
+};
+
+} // namespace lcnc
 
 namespace lcnc::process {
 

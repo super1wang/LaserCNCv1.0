@@ -43,7 +43,7 @@ void Dialog_Setting_Gas::SetPage(table table_Set)
 	for (QLineEdit* lineEdit : m_qlLineEditF)
 	{
 		parts = lineEdit->objectName().split('_');
-		lineEdit->setText(QString::number(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_floating(), 'g', 3));
+		lineEdit->setText(QString::number(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_floating(), 'g', 16));
 	}
 }
 
@@ -95,12 +95,12 @@ void Dialog_Setting_Gas::setupLineEditValidators(QWidget* dialog)
 		{
 			if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Double));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
 				m_qlLineEditF.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "i")
 			{
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Int));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
 				m_qlLineEditI.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
@@ -130,4 +130,3 @@ void Dialog_Setting_Gas::checkBoxChanged()
 	string		strKey		= parts.at(parts.size() - 1).toStdString();
 
 	set_Changed.insert(make_pair(strTable, strKey));
-}

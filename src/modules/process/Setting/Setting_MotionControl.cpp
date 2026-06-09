@@ -194,11 +194,11 @@ void Dialog_Setting_MotionControl::setupLineEditValidators(QWidget* dialog)
 		{
 			QString typeIndicator = parts[2].left(1);
 			if (parts[2] == "fLeftLimit" || parts[2] == "fRightLimit")
-				lineEdit->setValidator(new QRegExpValidator(Regex_All_Double));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Double(, nullptr)));
 			else if (typeIndicator == "f")
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Double));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
 			else if (typeIndicator == "i")
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Int));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
 		}
 	}
 }

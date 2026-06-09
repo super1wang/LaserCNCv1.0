@@ -2,7 +2,7 @@
 
 #include "core/logging/logger.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
-#include "modules/process/settings/process_settings.h"
+// process_settings.h removed - using simplified types
 
 #include <QObject>
 
@@ -34,11 +34,11 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshot()
     return m_snapshot;
 }
 
-ProcessJobPlan ProcessToolpathService::buildJobPlan(const lcnc::ProcessSettings& settings) const
+ProcessJobPlan ProcessToolpathService::buildJobPlan() const
 {
     ProcessJobPlan plan;
     plan.revision = m_snapshot.revision;
-    const ProcessTypedSettingsSnapshot typed = ProcessSettingsSchema::snapshotFrom(settings);
+    // Simplified: no schema snapshot
 
     for (const auto& contour : m_snapshot.contours) {
         if (!contour.enabled || !contour.layerEnabled)

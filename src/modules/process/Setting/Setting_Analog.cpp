@@ -181,7 +181,7 @@ void Dialog_Setting_Analog::addRow(bool bIN)
 
 	QLineEdit* lineEditIndex = new QLineEdit();
 	lineEditIndex->setObjectName(qstrIndexName);
-	lineEditIndex->setValidator(new QRegExpValidator(Regex_Analog_Index));
+	lineEditIndex->setValidator(new QRegularExpressionValidator(Regex_Analog_Index, nullptr));
 	connect(lineEditIndex, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
 
 	rowLayout->addWidget(label);
@@ -242,4 +242,3 @@ void Dialog_Setting_Analog::SetIndexEnabled(bool bEnabled)
 	for (QLineEdit* lineEdit : lineEdits) {
 		lineEdit->setEnabled(bEnabled);
 	}
-}

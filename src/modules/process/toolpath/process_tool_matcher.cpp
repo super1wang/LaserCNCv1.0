@@ -1,6 +1,6 @@
 #include "modules/process/toolpath/process_tool_matcher.h"
 
-#include "modules/process/settings/process_settings.h"
+// process_settings.h removed - using simplified types
 
 #include <QObject>
 

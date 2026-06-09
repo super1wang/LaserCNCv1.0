@@ -57,26 +57,21 @@ void WidgetLaserControl::buildUi()
 
     m_tabs = new QTabWidget(this);
     m_controlPage = new QWidget(m_tabs);
-    m_monitorPage = new QWidget(m_tabs);
     m_controlLayout = new QVBoxLayout(m_controlPage);
-    m_monitorLayout = new QVBoxLayout(m_monitorPage);
     m_controlLayout->setContentsMargins(4, 4, 4, 4);
     m_controlLayout->setSpacing(6);
-    m_monitorLayout->setContentsMargins(4, 4, 4, 4);
-    m_monitorLayout->setSpacing(6);
 
-    auto* logPage = new QWidget(m_tabs);
-    auto* logLayout = new QVBoxLayout(logPage);
+    m_logPage = new QWidget(m_tabs);
+    auto* logLayout = new QVBoxLayout(m_logPage);
     logLayout->setContentsMargins(4, 4, 4, 4);
-    m_logView = new QTextEdit(logPage);
+    m_logView = new QTextEdit(m_logPage);
     m_logView->setReadOnly(true);
     m_logView->setAcceptRichText(true);
     m_logView->setStyleSheet("QTextEdit { background: #101820; color: #E5E7EB; font-family: Consolas, monospace; font-size: 11px; }");
     logLayout->addWidget(m_logView);
 
     m_tabs->addTab(m_controlPage, tr("控制"));
-    m_tabs->addTab(m_monitorPage, tr("监控"));
-    m_tabs->addTab(logPage, tr("系统日志"));
+    m_tabs->addTab(m_logPage, tr("系统日志"));
     mainLayout->addWidget(m_tabs);
 
     buildProcessGroup();
@@ -85,10 +80,8 @@ void WidgetLaserControl::buildUi()
     buildIoGroup();
     buildStatusGroup();
     buildDeviceGroup();
-    buildMonitorGroup();
 
     m_controlLayout->addStretch();
-    m_monitorLayout->addStretch();
 }
 
 void WidgetLaserControl::buildAxisGroup()
@@ -163,21 +156,14 @@ void WidgetLaserControl::buildIoGroup()
 
 void WidgetLaserControl::buildDeviceGroup()
 {
-    m_deviceGroup = new QGroupBox(tr("设备状态"), m_monitorPage ? m_monitorPage : this);
+    m_deviceGroup = new QGroupBox(tr("设备状态"), this);
     auto* layout = new QVBoxLayout(m_deviceGroup);
 
     m_deviceSummaryLabel = new QLabel(tr("等待设备状态刷新"), m_deviceGroup);
     m_deviceSummaryLabel->setWordWrap(true);
     layout->addWidget(m_deviceSummaryLabel);
 
-    m_deviceGrid = new QGridLayout();
-    m_deviceGrid->setColumnStretch(1, 1);
-    m_deviceGrid->setColumnStretch(2, 2);
-    layout->addLayout(m_deviceGrid);
-
-    if (m_monitorLayout)
-        m_monitorLayout->addWidget(m_deviceGroup);
-
+    m_controlLayout->addWidget(m_deviceGroup);
     refreshDeviceSummary();
 }
 
@@ -191,27 +177,6 @@ void WidgetLaserControl::buildStatusGroup()
     m_statusLabel->setMinimumHeight(36);
     layout->addWidget(m_statusLabel);
     m_controlLayout->addWidget(group);
-}
-
-void WidgetLaserControl::buildMonitorGroup()
-{
-    m_monitorGroup = new QGroupBox(tr("监控信息"), m_monitorPage ? m_monitorPage : this);
-    auto* layout = new QVBoxLayout(m_monitorGroup);
-    m_monitorActionLabel = new QLabel(tr("异常策略: 进入暂停"), m_monitorGroup);
-    m_monitorActionLabel->setStyleSheet("color: #475569; font-weight: 600;");
-    layout->addWidget(m_monitorActionLabel);
-
-    m_monitorSummaryLabel = new QLabel(tr("监控服务已启动，等待采样"), m_monitorGroup);
-    m_monitorSummaryLabel->setWordWrap(true);
-    m_monitorSummaryLabel->setStyleSheet("background: #E2E8F0; color: #0F172A; padding: 4px 6px; border-radius: 4px;");
-    layout->addWidget(m_monitorSummaryLabel);
-
-    m_monitorGrid = new QGridLayout();
-    m_monitorGrid->setColumnStretch(1, 1);
-    m_monitorGrid->setColumnStretch(2, 2);
-    layout->addLayout(m_monitorGrid);
-    if (m_monitorLayout)
-        m_monitorLayout->addWidget(m_monitorGroup);
 }
 
 void WidgetLaserControl::setAxisDefinitions(const QList<MachineAxisDef>& axes)
@@ -422,132 +387,6 @@ void WidgetLaserControl::updateDigitalOutput(const QString& outputName, const QS
     updateIoButtonStyle(outputName, value);
 }
 
-void WidgetLaserControl::updateDeviceSessions(const QVector<lcnc::process::ProcessDeviceSession>& sessions)
-{
-    m_deviceSessions = sessions;
-
-    if (m_deviceGrid) {
-        clearLayout(m_deviceGrid);
-        m_deviceStateLabels.clear();
-        m_deviceDetailLabels.clear();
-        m_deviceRows.clear();
-
-        int row = 0;
-        for (const lcnc::process::ProcessDeviceSession& session : sessions) {
-            auto* nameLabel = new QLabel(deviceSessionTitle(session) + ":", m_deviceGroup);
-            auto* stateLabel = new QLabel(m_deviceGroup);
-            auto* detailLabel = new QLabel(m_deviceGroup);
-            detailLabel->setWordWrap(true);
-            detailLabel->setStyleSheet("color: #64748B; font-size: 11px;");
-
-            const QString key = session.instanceId;
-            m_deviceRows.insert(key, row);
-            m_deviceStateLabels.insert(key, stateLabel);
-            m_deviceDetailLabels.insert(key, detailLabel);
-
-            const QString stateText = session.enabled
-                ? deviceStateText(session.connectionState)
-                : tr("禁用");
-            const QString stateStyle = session.enabled
-                ? deviceStateStyle(session.connectionState)
-                : QStringLiteral("color: #64748B; font-weight: 600;");
-
-            QStringList detailParts;
-            detailParts.append(tr("实例: %1").arg(session.instanceId));
-            if (!session.enabled)
-                detailParts.append(tr("当前未启用"));
-            if (!session.lastError.trimmed().isEmpty())
-                detailParts.append(tr("异常: %1").arg(session.lastError.trimmed()));
-
-            stateLabel->setText(stateText);
-            stateLabel->setStyleSheet(stateStyle);
-            detailLabel->setText(detailParts.join(tr("；")));
-
-            m_deviceGrid->addWidget(nameLabel, row, 0);
-            m_deviceGrid->addWidget(stateLabel, row, 1);
-            m_deviceGrid->addWidget(detailLabel, row, 2);
-            ++row;
-        }
-
-        if (row == 0) {
-            auto* placeholder = new QLabel(tr("设备管理器尚未返回活动外设"), m_deviceGroup);
-            placeholder->setStyleSheet("color: #64748B; font-size: 11px;");
-            m_deviceGrid->addWidget(placeholder, 0, 0, 1, 3);
-        }
-    }
-
-    refreshDeviceSummary();
-}
-
-void WidgetLaserControl::updateMonitorSnapshot(const lcnc::process::ProcessMonitorSnapshot& snapshot)
-{
-    m_monitorSnapshot = snapshot;
-    if (m_monitorActionLabel)
-        m_monitorActionLabel->setText(tr("异常策略: %1").arg(monitorActionText(snapshot.faultAction)));
-
-    if (m_monitorSummaryLabel) {
-        const QString summary = snapshot.summary.trimmed().isEmpty()
-            ? tr("监控服务已启动，等待采样")
-            : snapshot.summary;
-        const QString style = snapshot.hasActiveAlarm()
-            ? QStringLiteral("background: #7F1D1D; color: white; padding: 4px 6px; border-radius: 4px;")
-            : QStringLiteral("background: #E2E8F0; color: #0F172A; padding: 4px 6px; border-radius: 4px;");
-        m_monitorSummaryLabel->setText(summary);
-        m_monitorSummaryLabel->setStyleSheet(style);
-    }
-
-    if (!m_monitorGrid)
-        return;
-
-    for (const lcnc::process::ProcessMonitorStateItem& state : snapshot.states) {
-        if (!m_monitorRows.contains(state.id)) {
-            const int row = m_monitorRows.size();
-            m_monitorRows.insert(state.id, row);
-
-            auto* nameLabel = new QLabel(state.title + ":", m_monitorGroup);
-            auto* valueLabel = new QLabel(m_monitorGroup);
-            auto* detailLabel = new QLabel(m_monitorGroup);
-            detailLabel->setWordWrap(true);
-            detailLabel->setStyleSheet("color: #64748B; font-size: 11px;");
-            m_monitorGrid->addWidget(nameLabel, row, 0);
-            m_monitorGrid->addWidget(valueLabel, row, 1);
-            m_monitorGrid->addWidget(detailLabel, row, 2);
-            m_monitorValueLabels.insert(state.id, valueLabel);
-            m_monitorDetailLabels.insert(state.id, detailLabel);
-        }
-
-        QLabel* valueLabel = m_monitorValueLabels.value(state.id, nullptr);
-        QLabel* detailLabel = m_monitorDetailLabels.value(state.id, nullptr);
-        if (!valueLabel || !detailLabel)
-            continue;
-
-        QString valueText;
-        QString valueStyle = QStringLiteral("color: #0F172A; font-weight: 600;");
-        if (!state.enabled) {
-            valueText = tr("关闭");
-            valueStyle = QStringLiteral("color: #64748B;");
-        } else if (!state.available) {
-            valueText = tr("不可用");
-            valueStyle = QStringLiteral("color: #B45309; font-weight: 600;");
-        } else if (state.digital) {
-            valueText = state.alarm ? tr("告警") : tr("正常");
-            valueStyle = state.alarm
-                ? QStringLiteral("color: #B91C1C; font-weight: 700;")
-                : QStringLiteral("color: #15803D; font-weight: 600;");
-        } else {
-            valueText = tr("%1 %2").arg(QString::number(state.displayValue, 'f', 3), state.unit);
-            valueStyle = state.alarm
-                ? QStringLiteral("color: #B91C1C; font-weight: 700;")
-                : QStringLiteral("color: #0F172A; font-weight: 600;");
-        }
-
-        valueLabel->setText(valueText);
-        valueLabel->setStyleSheet(valueStyle);
-        detailLabel->setText(state.detail);
-        detailLabel->setToolTip(tr("通道: %1").arg(state.channel));
-    }
-}
-
 void WidgetLaserControl::appendLogMessage(const QString& level, const QString& message)
 {
     if (!m_logView || message.trimmed().isEmpty())
@@ -650,117 +489,35 @@ QString WidgetLaserControl::stateText(lcnc::ProcessRunState state) const
     return tr("未知");
 }
 
-QString WidgetLaserControl::monitorActionText(lcnc::ProcessMonitorFaultAction action) const
-{
-    switch (action) {
-    case lcnc::ProcessMonitorFaultAction::Continue:
-        return tr("继续加工");
-    case lcnc::ProcessMonitorFaultAction::Pause:
-        return tr("进入暂停");
-    case lcnc::ProcessMonitorFaultAction::Stop:
-        return tr("停止加工");
-    }
-    return tr("进入暂停");
-}
-
-QString WidgetLaserControl::deviceStateText(lcnc::process::ProcessDeviceConnectionState state) const
-{
-    switch (state) {
-    case lcnc::process::ProcessDeviceConnectionState::Disconnected:
-        return tr("未连接");
-    case lcnc::process::ProcessDeviceConnectionState::Connecting:
-        return tr("连接中");
-    case lcnc::process::ProcessDeviceConnectionState::Connected:
-        return tr("已连接");
-    case lcnc::process::ProcessDeviceConnectionState::Disconnecting:
-        return tr("断开中");
-    case lcnc::process::ProcessDeviceConnectionState::Error:
-        return tr("异常");
-    }
-    return tr("未知");
-}
-
-QString WidgetLaserControl::deviceStateStyle(lcnc::process::ProcessDeviceConnectionState state) const
-{
-    switch (state) {
-    case lcnc::process::ProcessDeviceConnectionState::Connected:
-        return QStringLiteral("color: #15803D; font-weight: 700;");
-    case lcnc::process::ProcessDeviceConnectionState::Connecting:
-    case lcnc::process::ProcessDeviceConnectionState::Disconnecting:
-        return QStringLiteral("color: #1D4ED8; font-weight: 600;");
-    case lcnc::process::ProcessDeviceConnectionState::Error:
-        return QStringLiteral("color: #B91C1C; font-weight: 700;");
-    case lcnc::process::ProcessDeviceConnectionState::Disconnected:
-        return QStringLiteral("color: #64748B; font-weight: 600;");
-    }
-    return QStringLiteral("color: #0F172A; font-weight: 600;");
-}
-
-QString WidgetLaserControl::deviceKindText(lcnc::process::ProcessDeviceKind kind) const
-{
-    switch (kind) {
-    case lcnc::process::ProcessDeviceKind::MotionController:
-        return tr("控制器");
-    case lcnc::process::ProcessDeviceKind::Laser:
-        return tr("激光器");
-    case lcnc::process::ProcessDeviceKind::Io:
-        return tr("IO外设");
-    case lcnc::process::ProcessDeviceKind::Aux:
-        return tr("辅助设备");
-    }
-    return tr("设备");
-}
-
-QString WidgetLaserControl::deviceSessionTitle(const lcnc::process::ProcessDeviceSession& session) const
-{
-    const QString name = session.displayName.trimmed().isEmpty()
-        ? session.descriptorName.trimmed()
-        : session.displayName.trimmed();
-    if (name.isEmpty())
-        return deviceKindText(session.kind);
-    return tr("%1 - %2").arg(deviceKindText(session.kind), name);
-}
-
 void WidgetLaserControl::refreshDeviceSummary()
 {
     if (!m_deviceSummaryLabel)
         return;
 
-    int enabledCount = 0;
-    int connectedCount = 0;
-    int errorCount = 0;
-    for (const lcnc::process::ProcessDeviceSession& session : std::as_const(m_deviceSessions)) {
-        if (!session.enabled)
-            continue;
-        ++enabledCount;
-        if (session.connectionState == lcnc::process::ProcessDeviceConnectionState::Connected)
-            ++connectedCount;
-        if (session.connectionState == lcnc::process::ProcessDeviceConnectionState::Error || !session.lastError.trimmed().isEmpty())
-            ++errorCount;
-    }
-
     const QString modeText = m_simulationMode ? tr("纯仿真") : tr("控制器联机");
     QString summary = tr("模式: %1  流程: %2").arg(modeText, stateText(m_runState));
-    if (enabledCount > 0)
-        summary += tr("  已连接设备: %1/%2").arg(connectedCount).arg(enabledCount);
-    else
-        summary += tr("  已连接: %1").arg(m_connected ? tr("是") : tr("否"));
-    if (errorCount > 0)
-        summary += tr("  异常设备: %1").arg(errorCount);
+    summary += tr("  已连接: %1").arg(m_connected ? tr("是") : tr("否"));
     if (!m_statusText.trimmed().isEmpty())
         summary += tr("\n%1").arg(m_statusText.trimmed());
 
     QString style = QStringLiteral("background: #E2E8F0; color: #0F172A; padding: 4px 6px; border-radius: 4px;");
-    if (m_runState == lcnc::ProcessRunState::EmergencyStop || m_runState == lcnc::ProcessRunState::Error || errorCount > 0) {
+    if (m_runState == lcnc::ProcessRunState::EmergencyStop || m_runState == lcnc::ProcessRunState::Error) {
         style = QStringLiteral("background: #7F1D1D; color: white; padding: 4px 6px; border-radius: 4px;");
     } else if (m_runState == lcnc::ProcessRunState::Paused) {
         style = QStringLiteral("background: #B45309; color: white; padding: 4px 6px; border-radius: 4px;");
-    } else if (enabledCount > 0 && connectedCount == enabledCount) {
+    } else if (m_connected && !m_simulationMode) {
         style = QStringLiteral("background: #14532D; color: #DCFCE7; padding: 4px 6px; border-radius: 4px;");
     }
 
     m_deviceSummaryLabel->setText(summary);
     m_deviceSummaryLabel->setStyleSheet(style);
+}
+
+QString WidgetLaserControl::deviceStateStyle(bool connected) const
+{
+    return connected
+        ? QStringLiteral("color: #15803D; font-weight: 700;")
+        : QStringLiteral("color: #64748B; font-weight: 600;");
 }
 
 QString WidgetLaserControl::logColor(const QString& level) const

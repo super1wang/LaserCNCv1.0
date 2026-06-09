@@ -43,17 +43,15 @@ class MachineGuideRenderer;
 
 namespace lcnc::cam {
 class CamDataManager;
-class ToolpathSimulator;
 } // namespace lcnc::cam
 
 /**
- * @brief CAM module singleton — manages machine, toolpath, and simulation.
+ * @brief CAM module singleton — manages machine, toolpath, and CAM data.
  *
  * Responsible for:
  *  - Machine model loading / unloading / export / axis configuration
  *  - Workpiece mounting onto machine axes inside the machine document
  *  - Toolpath generation, lead-in computation, preview display
- *  - Simulation (play / pause / stop / speed control)
  *  - Managing the "准备" (Prepare) tab page
  *  - Coordinates the machine domain view and CAM runtime display
  *
@@ -288,14 +286,6 @@ public:
 
     const QList<Handle(AIS_Shape)>& contourAis() const;
 
-    // ── Simulation ───────────────────────────────────────────────────────
-    void simulatePlay();
-    void simulatePause();
-    void simulateStop();
-    void setSimulationSpeed(double factor);
-    bool isSimulating() const;
-    bool isSimPaused() const;
-
     // ── Axis Position ────────────────────────────────────────────────────
     void setAxisPosition(const QString& axisName, double value, bool refreshNow = true);
     void refreshMachineTransforms();
@@ -327,9 +317,6 @@ signals:
     void toolpathContourSelected(int contourIndex);
     void toolpathContoursSelected(const QList<int>& contourIndexes);
     void toolpathLayersChanged();
-    void simulationTick(int contourIdx, int pointIdx, int totalPoints);
-    void simulationStateChanged(bool playing);
-    void simulationFinished();
     void selectionChanged(const QStringList& entries);
     void axisAssignmentsChanged();
 
@@ -420,9 +407,6 @@ private:
     gp_Pnt m_previewLeadInPoint;
     double m_previewLeadInParam{0.0};
     bool   m_previewLeadInValid{false};
-
-    // ── Simulation (delegates to ToolpathSimulator) ────────────────────
-    std::unique_ptr<lcnc::cam::ToolpathSimulator> m_simulator;
 
     // ── Pose state + 局部刷新 coalescer ─────────────────────────────────
     /// 当前姿态显式状态对象；CAM 持有，跨模块共享读/写。

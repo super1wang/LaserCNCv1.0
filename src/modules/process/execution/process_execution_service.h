@@ -4,18 +4,18 @@
 
 #include <QObject>
 
-namespace lcnc::process { class ProcessDeviceCoordinator; }
-
 namespace lcnc::process {
 
 /**
- * @brief Executes controller-neutral Process commands through active device adapters.
+ * @brief Executes controller-neutral Process commands with simple dry-run semantics.
+ *
+ * Simplified version without ProcessDeviceCoordinator dependency.
  */
 class ProcessExecutionService : public QObject
 {
     Q_OBJECT
 public:
-    explicit ProcessExecutionService(ProcessDeviceCoordinator& devices, QObject* parent = nullptr);
+    explicit ProcessExecutionService(QObject* parent = nullptr);
 
     bool executeDryRun(const ProcessCommandBuffer& buffer, QString* errorMessage = nullptr);
     int executedCommandCount() const { return m_executedCommandCount; }
@@ -27,7 +27,6 @@ signals:
 private:
     bool executeOne(const ProcessCommand& command, QString* errorMessage);
 
-    ProcessDeviceCoordinator& m_devices;
     int m_executedCommandCount{0};
 };
 

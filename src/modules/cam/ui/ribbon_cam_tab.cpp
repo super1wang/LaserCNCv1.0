@@ -8,7 +8,6 @@
 #include <SARibbonCategory.h>
 #include <SARibbonPanel.h>
 #include <QAction>
-#include <QComboBox>
 #include <QIcon>
 #include <QWidget>
 
@@ -29,7 +28,6 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdSetLeadIn>(CmdSetLeadIn::Name);
     container->addCommand<CmdToolpathPreview>(CmdToolpathPreview::Name);
     container->addCommand<CmdRecalcToolpath>(CmdRecalcToolpath::Name);
-    container->addCommand<CmdSimulate>(CmdSimulate::Name);
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::registerCommands end");
 }
@@ -64,41 +62,6 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelNC->addSmallAction(makeAct(QObject::tr("导入G代码"), QStringLiteral(":/icons/import.svg")));
     panelNC->addSmallAction(makeAct(QObject::tr("导出G代码"), QStringLiteral(":/icons/export.svg")));
     panelNC->addSmallAction(makeAct(QObject::tr("代码查看"),  QStringLiteral(":/icons/code.svg")));
-
-    // ── 仿真 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelSim = cat->addPanel(QObject::tr("仿真"));
-    panelSim->addLargeAction(container->findAction(CmdSimulate::Name));
-
-    auto* actPause = makeAct(QObject::tr("暂停"), QStringLiteral(":/icons/pause.svg"));
-    QObject::connect(actPause, &QAction::triggered, parent, [container] {
-        if (auto* cmd = static_cast<CmdSimulate*>(container->findCommand(CmdSimulate::Name)))
-            cmd->pause();
-    });
-    panelSim->addSmallAction(actPause);
-
-    auto* actStop = makeAct(QObject::tr("停止"), QStringLiteral(":/icons/stop.svg"));
-    QObject::connect(actStop, &QAction::triggered, parent, [container] {
-        if (auto* cmd = static_cast<CmdSimulate*>(container->findCommand(CmdSimulate::Name)))
-            cmd->stop();
-    });
-    panelSim->addSmallAction(actStop);
-
-    // 速度倍率（0.5x / 1x / 2x / 5x / 10x）
-    auto* parentWidget = qobject_cast<QWidget*>(parent);
-    auto* speedCombo = new QComboBox(parentWidget);
-    speedCombo->addItem(QObject::tr("0.5x"), 0.5);
-    speedCombo->addItem(QObject::tr("1x"),   1.0);
-    speedCombo->addItem(QObject::tr("2x"),   2.0);
-    speedCombo->addItem(QObject::tr("5x"),   5.0);
-    speedCombo->addItem(QObject::tr("10x"),  10.0);
-    speedCombo->setCurrentIndex(1);
-    QObject::connect(speedCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), parent,
-                     [container, speedCombo](int idx) {
-                         double factor = speedCombo->itemData(idx).toDouble();
-                         if (auto* cmd = static_cast<CmdSimulate*>(container->findCommand(CmdSimulate::Name)))
-                             cmd->setSpeed(factor);
-                     });
-    panelSim->addSmallWidget(speedCombo);
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::buildRibbonTab end");
 }

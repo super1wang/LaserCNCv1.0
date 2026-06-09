@@ -3,7 +3,6 @@
 #include "view/toolpath_renderer.h"
 #include "view/machine_guide_renderer.h"
 #include "modules/cam/services/cam_data_manager.h"
-#include "modules/cam/services/toolpath_simulator.h"
 #include "modules/cam/services/machine_axis_detector.h"
 #include "modules/cam/services/machine_io.h"
 #include "modules/cam/services/reference_pick.h"
@@ -289,19 +288,6 @@ CamModule::CamModule(QObject* parent)
     m_useFaceClassification = config.useFaceClassification();
     m_toolpathRenderer->setShowNormals(config.showNormals());
     m_toolpathRenderer->setNormalSampleStep(config.normalSampleStep());
-
-    m_simulator = std::make_unique<lcnc::cam::ToolpathSimulator>(this);
-    m_simulator->setToolpath(&m_toolpath);
-    m_simulator->setApplyAxisFn([this](const QString& axis, double value, bool refreshNow) {
-        setAxisPosition(axis, value, refreshNow);
-    });
-    m_simulator->setRefreshFn([this]() { refreshMachineTransforms(); });
-    connect(m_simulator.get(), &lcnc::cam::ToolpathSimulator::simulationTick,
-            this, &CamModule::simulationTick);
-    connect(m_simulator.get(), &lcnc::cam::ToolpathSimulator::simulationStateChanged,
-            this, &CamModule::simulationStateChanged);
-    connect(m_simulator.get(), &lcnc::cam::ToolpathSimulator::simulationFinished,
-            this, &CamModule::simulationFinished);
 
     connect(project, &lcnc::LcncProjectManager::domainDataChanged,
             this, [this](lcnc::ProjectDomain domain) {
@@ -2649,15 +2635,6 @@ const QList<Handle(AIS_Shape)>& CamModule::contourAis() const
     }
     return m_camContourAisCache;
 }
-
-// ── Simulation (delegated to ToolpathSimulator) ──────────────────────────────
-
-void CamModule::simulatePlay()           { m_simulator->play(); }
-void CamModule::simulatePause()          { m_simulator->pause(); }
-void CamModule::simulateStop()           { m_simulator->stop(); }
-void CamModule::setSimulationSpeed(double f) { m_simulator->setSpeed(f); }
-bool CamModule::isSimulating() const     { return m_simulator->isPlaying(); }
-bool CamModule::isSimPaused() const      { return m_simulator->isPaused(); }
 
 void CamModule::setAxisPosition(const QString& axisName, double value, bool refreshNow)
 {

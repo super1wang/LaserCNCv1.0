@@ -1,5 +1,51 @@
 #include "Setting_Monitor.h"
 
+namespace
+{
+const char* kWaterSettingTable = "WaterSetting";
+const char* kWaterPressureFormulaKey = "sWaterPressureConversions";
+const char* kWaterLevelFormulaKey = "sWaterLevelConversions";
+const char* kLegacyWaterPressureFormulaKey = "iWaterPressureConversions";
+const char* kLegacyWaterLevelFormulaKey = "iWaterLevelConversions";
+
+QString ToFormulaText(const value& field)
+{
+	if (field.is_string())
+		return QString::fromStdString(field.as_string());
+
+	double coefficient = 0.0;
+	if (field.is_integer())
+		coefficient = static_cast<double>(field.as_integer());
+	else if (field.is_floating())
+		coefficient = field.as_floating();
+
+	return QString("Y=X*%1").arg(QString::number(coefficient, 'g', 15));
+}
+
+QString ReadWaterSettingFormula(const table& tableSet, const QString& key)
+{
+	if (!tableSet.count(kWaterSettingTable))
+		return QString();
+
+	const value& waterSettingValue = tableSet.at(kWaterSettingTable);
+	if (!waterSettingValue.is_table())
+		return QString();
+
+	const table& waterSetting = waterSettingValue.as_table();
+	const std::string keyStd = key.toStdString();
+	if (waterSetting.count(keyStd))
+		return ToFormulaText(waterSetting.at(keyStd));
+
+	if (key == kWaterPressureFormulaKey && waterSetting.count(kLegacyWaterPressureFormulaKey))
+		return ToFormulaText(waterSetting.at(kLegacyWaterPressureFormulaKey));
+
+	if (key == kWaterLevelFormulaKey && waterSetting.count(kLegacyWaterLevelFormulaKey))
+		return ToFormulaText(waterSetting.at(kLegacyWaterLevelFormulaKey));
+
+	return QString();
+}
+}
+
 Dialog_Setting_Monitor::Dialog_Setting_Monitor(QWidget* parent)
 	: QDialog(parent)
 	, set_Changed()
@@ -8,7 +54,6 @@ Dialog_Setting_Monitor::Dialog_Setting_Monitor(QWidget* parent)
 	setWindowFlags(Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
 	setupLineEditValidators(this);
 	setupCheckBoxValidators(this);
-	setupComboBoxValidators(this);
 }
 
 Dialog_Setting_Monitor::~Dialog_Setting_Monitor()
@@ -27,9 +72,8 @@ void Dialog_Setting_Monitor::InitSetting()
 	t_Init["Water"]["fWaterPressureLimit"]				= 1.0;
 	t_Init["Water"]["bWaterLevelMonitor"]				= false;
 	t_Init["Water"]["fWaterLevelLimit"]					= 50.0;
-	t_Init["WaterSetting"]["iWaterPressureConversions"] = 4096;
-	t_Init["WaterSetting"]["iWaterLevelConversions"]	= 4096;
-	t_Init["General"]["iFaultAction"]					= 1;
+	t_Init[kWaterSettingTable][kWaterPressureFormulaKey] = string("Y=X*4096");
+	t_Init[kWaterSettingTable][kWaterLevelFormulaKey]	 = string("Y=X*4096");
 
 	SETTINGS->SetTable(true, SettingSection::Monitor, t_Init);
 }
@@ -49,19 +93,30 @@ void Dialog_Setting_Monitor::SetPage(table table_Set)
 	for (QLineEdit* lineEdit : m_qlLineEditF)
 	{
 		parts = lineEdit->objectName().split('_');
-		lineEdit->setText(QString::number(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_floating(), 'g', 3));
+		lineEdit->setText(QString::number(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_floating(), 'g', 16));
+	}
+
+	for (QLineEdit* lineEdit : m_qlLineEditS)
+	{
+		parts = lineEdit->objectName().split('_');
+		if (parts.size() < 3)
+			continue;
+
+		QString text = ReadWaterSettingFormula(table_Set, parts[2]);
+		if (text.isEmpty() && table_Set.count(parts[1].toStdString()) &&
+			table_Set.at(parts[1].toStdString()).is_table())
+		{
+			const table& currentTable = table_Set.at(parts[1].toStdString()).as_table();
+			if (currentTable.count(parts[2].toStdString()) && currentTable.at(parts[2].toStdString()).is_string())
+				text = QString::fromStdString(currentTable.at(parts[2].toStdString()).as_string());
+		}
+		lineEdit->setText(text);
 	}
 
 	for (QCheckBox* checkBox : m_qlCheckBoxB)
 	{
 		parts = checkBox->objectName().split('_');
 		checkBox->setChecked(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_boolean());
-	}
-
-	for (QComboBox* comboBox : m_qlComboBoxI)
-	{
-		parts = comboBox->objectName().split('_');
-		comboBox->setCurrentIndex(table_Set[parts[1].toStdString()][parts[2].toStdString()].as_integer());
 	}
 }
 
@@ -81,16 +136,16 @@ void Dialog_Setting_Monitor::GetPage(table& table_Page)
 		table_Page[parts[1].toStdString()][parts[2].toStdString()] = lineEdit->text().toDouble();
 	}
 
+	for (QLineEdit* lineEdit : m_qlLineEditS)
+	{
+		parts = lineEdit->objectName().split('_');
+		table_Page[parts[1].toStdString()][parts[2].toStdString()] = lineEdit->text().toStdString();
+	}
+
 	for (QCheckBox* checkBox : m_qlCheckBoxB)
 	{
 		parts = checkBox->objectName().split('_');
 		table_Page[parts[1].toStdString()][parts[2].toStdString()] = checkBox->isChecked();
-	}
-
-	for (QComboBox* comboBox : m_qlComboBoxI)
-	{
-		parts = comboBox->objectName().split('_');
-		table_Page[parts[1].toStdString()][parts[2].toStdString()] = comboBox->currentIndex();
 	}
 }
 
@@ -124,13 +179,18 @@ void Dialog_Setting_Monitor::setupLineEditValidators(QWidget* dialog)
 		{
 			if (parts[2].left(1) == "i")
 			{
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Int));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
 				m_qlLineEditI.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegExpValidator(Regex_Nonnegative_Double));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
 				m_qlLineEditF.append(lineEdit);
+			}
+			else if (parts[2].left(1) == "s")
+			{
+				lineEdit->setMaxLength(64);
+				m_qlLineEditS.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
 		}
@@ -151,20 +211,6 @@ void Dialog_Setting_Monitor::setupCheckBoxValidators(QWidget* dialog)
 	}
 }
 
-void Dialog_Setting_Monitor::setupComboBoxValidators(QWidget* dialog)
-{
-	const QList<QComboBox*> comboBoxs = dialog->findChildren<QComboBox*>();
-	for (QComboBox* comboBox : comboBoxs)
-	{
-		QStringList parts = comboBox->objectName().split('_');
-		if (parts.size() >= 3)
-		{
-			m_qlComboBoxI.append(comboBox);
-			connect(comboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(comboBoxChanged()));
-		}
-	}
-}
-
 void Dialog_Setting_Monitor::lineEditChanged()
 {
 	QLineEdit*	lineEdit	= qobject_cast<QLineEdit*>(sender());
@@ -181,18 +227,6 @@ void Dialog_Setting_Monitor::checkBoxChanged()
 {
 	QCheckBox*	CheckBox	= qobject_cast<QCheckBox*>(sender());
 	QString		qstChanged	= CheckBox->objectName();
-
-	QStringList parts		= qstChanged.split("_");
-	string		strTable	= parts.at(parts.size() - 2).toStdString();
-	string		strKey		= parts.at(parts.size() - 1).toStdString();
-
-	set_Changed.insert(make_pair(strTable, strKey));
-}
-
-void Dialog_Setting_Monitor::comboBoxChanged()
-{
-	QComboBox*	comboBox	= qobject_cast<QComboBox*>(sender());
-	QString		qstChanged	= comboBox->objectName();
 
 	QStringList parts		= qstChanged.split("_");
 	string		strTable	= parts.at(parts.size() - 2).toStdString();

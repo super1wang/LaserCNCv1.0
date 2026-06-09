@@ -1,29 +1,27 @@
 #pragma once
 
-#include "core/kinematics/i_motion_controller.h"
-
 #include <QHash>
 #include <QObject>
 #include <QString>
 
 namespace lcnc::process {
 
-class GtnMotionControllerAdapter : public QObject, public lcnc::IMotionController
+class GtnMotionControllerAdapter : public QObject
 {
     Q_OBJECT
 public:
     explicit GtnMotionControllerAdapter(QObject* parent = nullptr);
     ~GtnMotionControllerAdapter() override;
 
-    QString id() const override { return QStringLiteral("GTN"); }
-    bool start() override;
-    void stop() override;
-    bool isRunning() const override { return m_running; }
-    bool jog(const QString& axis, double delta) override;
-    bool moveTo(const QString& axis, double absolutePos) override;
-    bool home(const QString& axis = QString()) override;
-    void emergencyStop() override;
-    bool supportsProgramPause() const override { return false; }
+    QString id() const { return QStringLiteral("GTN"); }
+    bool start();
+    void stop();
+    bool isRunning() const { return m_running; }
+    bool jog(const QString& axis, double delta);
+    bool moveTo(const QString& axis, double absolutePos);
+    bool home(const QString& axis = QString());
+    void emergencyStop();
+    bool supportsProgramPause() const { return false; }
 
 private:
     short axisIndex(const QString& axis) const;

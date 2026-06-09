@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <ui version="4.0">
  <class>Dialog_Setting_Laser</class>
  <widget class="QDialog" name="Dialog_Setting_Laser">
@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>559</width>
-    <height>515</height>
+    <width>537</width>
+    <height>634</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -32,16 +32,136 @@
       <string>Laser</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_3">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_Laser_Type">
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_Laser_Frequency">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>20</height>
+         </size>
+        </property>
         <property name="text">
-         <string>Type</string>
+         <string>Frequency(Hz)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="2">
+       <widget class="QLabel" name="label_Laser_Resolution">
+        <property name="text">
+         <string>A_Resolution</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="3">
+       <widget class="QLineEdit" name="lineEdit_Laser_fPulseWidth">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="inputMethodHints">
+         <set>Qt::InputMethodHint::ImhNone</set>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="3">
+       <widget class="QLineEdit" name="lineEdit_Laser_fPpDivider">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>20</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_Laser_Delay">
+        <property name="text">
+         <string>Delay(ms)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="lineEdit_Laser_fEnergy">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>20</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_Laser_fEnergy">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Energy(%)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_Laser_AttenuatorPercentage">
+        <property name="maximumSize">
+         <size>
+          <width>85</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;AttenuatorPercentage(%)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+        </property>
+        <property name="text">
+         <string>AttenuatorPercentage(%)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="lineEdit_Laser_fAttenuatorPercentage">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>20</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="3">
+       <widget class="QLineEdit" name="lineEdit_Laser_fResolution" />
+      </item>
+      <item row="0" column="2">
+       <widget class="QCheckBox" name="checkBox_SignalSource_bSignal">
+        <property name="text">
+         <string>Signal</string>
         </property>
        </widget>
       </item>
@@ -82,6 +202,11 @@
         </item>
         <item>
          <property name="text">
+          <string>RaycusAirCool</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
           <string>RaycusQCW</string>
          </property>
         </item>
@@ -102,72 +227,26 @@
         </item>
        </widget>
       </item>
-      <item row="0" column="2">
-       <widget class="QCheckBox" name="checkBox_SignalSource_bSignal">
-        <property name="text">
-         <string>Signal</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_Laser_fEnergy">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>20</height>
-         </size>
-        </property>
-        <property name="text">
-         <string>Energy(%)</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QLineEdit" name="lineEdit_Laser_fEnergy">
+      <item row="2" column="2">
+       <widget class="QLabel" name="label_Laser_Pulse">
         <property name="minimumSize">
          <size>
           <width>0</width>
           <height>20</height>
          </size>
         </property>
-       </widget>
-      </item>
-      <item row="1" column="2">
-       <widget class="QLabel" name="label_Laser_Resolution">
         <property name="text">
-         <string>A_Resolution</string>
+         <string>Pulse(μs)</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="3">
-       <widget class="QLineEdit" name="lineEdit_Laser_fResolution"/>
-      </item>
-      <item row="1" column="4">
-       <spacer name="horizontalSpacer">
-        <property name="orientation">
-         <enum>Qt::Orientation::Vertical</enum>
-        </property>
-        <property name="sizeHint" stdset="0">
+      <item row="3" column="2">
+       <widget class="QLabel" name="label_Laser_PpDivider">
+        <property name="minimumSize">
          <size>
-          <width>40</width>
-          <height>20</height>
+          <width>78</width>
+          <height>0</height>
          </size>
-        </property>
-       </spacer>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_Laser_Frequency">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
         </property>
         <property name="maximumSize">
          <size>
@@ -175,8 +254,11 @@
           <height>20</height>
          </size>
         </property>
+        <property name="toolTip">
+         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;PpDivider&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+        </property>
         <property name="text">
-         <string>Frequency(Hz)</string>
+         <string>PpDivider</string>
         </property>
        </widget>
       </item>
@@ -204,115 +286,25 @@
          <set>Qt::InputMethodHint::ImhNone</set>
         </property>
         <property name="text">
-         <string/>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="2">
-       <widget class="QLabel" name="label_Laser_Pulse">
-        <property name="minimumSize">
-         <size>
-          <width>0</width>
-          <height>20</height>
-         </size>
-        </property>
-        <property name="text">
-         <string>Pulse(μs)</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="3">
-       <widget class="QLineEdit" name="lineEdit_Laser_fPulseWidth">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="minimumSize">
-         <size>
-          <width>0</width>
-          <height>20</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>20</height>
-         </size>
-        </property>
-        <property name="inputMethodHints">
-         <set>Qt::InputMethodHint::ImhNone</set>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QLabel" name="label_Laser_AttenuatorPercentage">
-        <property name="maximumSize">
-         <size>
-          <width>85</width>
-          <height>20</height>
-         </size>
-        </property>
-        <property name="toolTip">
-         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;AttenuatorPercentage(%)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-        </property>
-        <property name="text">
-         <string>AttenuatorPercentage(%)</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="1">
-       <widget class="QLineEdit" name="lineEdit_Laser_fAttenuatorPercentage">
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>20</height>
-         </size>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="2">
-       <widget class="QLabel" name="label_Laser_PpDivider">
-        <property name="minimumSize">
-         <size>
-          <width>78</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>20</height>
-         </size>
-        </property>
-        <property name="toolTip">
-         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;PpDivider&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-        </property>
-        <property name="text">
-         <string>PpDivider</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="3">
-       <widget class="QLineEdit" name="lineEdit_Laser_fPpDivider">
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>20</height>
-         </size>
-        </property>
-       </widget>
-      </item>
-      <item row="4" column="0">
-       <widget class="QLabel" name="label_Laser_Delay">
-        <property name="text">
-         <string>Delay(ms)</string>
+         <string />
         </property>
        </widget>
       </item>
       <item row="4" column="1">
-       <widget class="QLineEdit" name="lineEdit_Laser_iDelay"/>
+       <widget class="QLineEdit" name="lineEdit_Laser_iDelay" />
+      </item>
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_Laser_Type">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Type</string>
+        </property>
+       </widget>
       </item>
      </layout>
     </widget>
@@ -1021,19 +1013,6 @@
      </layout>
     </widget>
    </item>
-   <item row="2" column="1">
-    <spacer name="horizontalSpacer_4">
-     <property name="orientation">
-      <enum>Qt::Orientation::Horizontal</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>272</width>
-       <height>20</height>
-      </size>
-     </property>
-    </spacer>
-   </item>
    <item row="3" column="0">
     <spacer name="verticalSpacer">
      <property name="orientation">
@@ -1049,7 +1028,7 @@
    </item>
   </layout>
  </widget>
- <layoutdefault spacing="6" margin="11"/>
- <resources/>
- <connections/>
+ <layoutdefault spacing="6" margin="11" />
+ <resources />
+ <connections />
 </ui>

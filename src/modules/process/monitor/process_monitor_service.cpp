@@ -1,8 +1,5 @@
 #include "modules/process/monitor/process_monitor_service.h"
 
-#include "core/kinematics/i_motion_controller.h"
-#include "modules/process/device/i_process_io.h"
-
 #include <QFutureWatcher>
 #include <QMetaObject>
 #include <QPointer>
@@ -25,15 +22,13 @@ bool readDigitalValue(const ProcessMonitorPollContext& context,
     if (!value)
         return false;
 
-    bool ok = false;
-    QString error;
-    if (context.motionController)
-        ok = context.motionController->digitalInput(channel, value, &error);
-    if (!ok && context.processIo)
-        ok = context.processIo->digitalInput(channel, value, &error);
-    if (!ok && errorMessage)
-        *errorMessage = error;
-    return ok;
+    Q_UNUSED(context);
+    Q_UNUSED(channel);
+    // Simulation mode: always return default value.
+    *value = false;
+    if (errorMessage)
+        *errorMessage = QObject::tr("仿真模式：IO 不可用");
+    return false;
 }
 
 bool readAnalogValue(const ProcessMonitorPollContext& context,
@@ -44,15 +39,13 @@ bool readAnalogValue(const ProcessMonitorPollContext& context,
     if (!value)
         return false;
 
-    bool ok = false;
-    QString error;
-    if (context.motionController)
-        ok = context.motionController->analogInput(channel, value, &error);
-    if (!ok && context.processIo)
-        ok = context.processIo->analogInput(channel, value, &error);
-    if (!ok && errorMessage)
-        *errorMessage = error;
-    return ok;
+    Q_UNUSED(context);
+    Q_UNUSED(channel);
+    // Simulation mode: always return default value.
+    *value = 0.0;
+    if (errorMessage)
+        *errorMessage = QObject::tr("仿真模式：模拟量不可用");
+    return false;
 }
 
 QString channelText(const QString& channel)
@@ -143,11 +136,6 @@ ProcessMonitorSnapshot buildSnapshot(const ProcessMonitorPollContext& context)
     snapshot.intervalMs = context.intervalMs;
     snapshot.faultAction = context.settings.faultAction;
     snapshot.axisPositions = context.cachedAxisPositions;
-    if (context.motionController) {
-        const QMap<QString, double> controllerPositions = context.motionController->axisPositions();
-        if (!controllerPositions.isEmpty())
-            snapshot.axisPositions = controllerPositions;
-    }
 
     for (const ProcessMonitorOutputChannel& output : context.outputChannels) {
         bool value = false;

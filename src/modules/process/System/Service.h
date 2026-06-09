@@ -1,111 +1,91 @@
 #pragma once
-//#include <windows.h>
+
 #include "Settings.h"
 #include "MCFactory.h"
 #include "LDFactory.h"
-#include "COMPFactory.h"
 #include "ToolFactory.h"
-#include "CuttingFactory.h"
-#include "SignalSource.h"
 
-#include "MessageModule.h"
-#include <QList>
-
-#include <boost/thread.hpp>
-#include <boost/atomic.hpp>
+#include <QTimer>
+#include <QElapsedTimer>
 
 struct ButtonState
 {
-	QTimer*			pressTimer;
-	QElapsedTimer	elapsedTimer;
-	bool			bLongPress;
-	bool			bPressed;
+    QTimer*         pressTimer{nullptr};
+    QElapsedTimer   elapsedTimer;
+    bool            bLongPress{false};
+    bool            bPressed{false};
 };
 
-class  Service
+class Service
 {
 public:
-	Service(void);
+    Service(void);
 
-public:
+    Settings* GetSETTING() { return &m_Settings; };
 
-	Settings* GetSETTING()							{ return &m_Settings; };
+    void SetMotionControl(string strName = "");
+    MotionControl* GetMotionControl() { return m_pMotionControl; };
 
-	void SetMotionControl(string strName = "");
-	MotionControl* GetMotionControl()				{ return m_pMotionControl; };
-	
-	void SetLaserDevice(string strName = "");
-	LaserDevice* GetLaserDevice()					{ return m_pLaserDevice; };
-	
-	void SetCompDevice(string strName = "");
-	CompDevice* GetCompDevice()						{ return m_pCompDevice; };
+    void SetLaserDevice(string strName = "");
+    LaserDevice* GetLaserDevice() { return m_pLaserDevice; };
 
-	void SetCuttingDevice(string);
-	CuttingDevice* GetCuttingDevice()				{ return m_pCuttingDevice; };
+    void SetCompDevice(string = "") {}
+    void* GetCompDevice() { return nullptr; }
 
-	void SetCuttingHeadShow(bool bFlag)				{ m_bCuttingHeadShow = bFlag; };
-	bool GetCuttingHeadShow()						{ return m_bCuttingHeadShow; };
+    // CuttingDevice and SignalSource removed.
+    void SetCuttingDevice(string) {}
+    void* GetCuttingDevice() { return nullptr; }
+    void* GetSignalSource()  { return nullptr; }
 
-	void SetShowDirectionFlag(bool bFlag)			{ m_bShowDirection = bFlag; };
-	bool GetShowDirectionFlag()						{ return m_bShowDirection; };
+    void SetCuttingHeadShow(bool bFlag) { m_bCuttingHeadShow = bFlag; };
+    bool GetCuttingHeadShow() { return m_bCuttingHeadShow; };
 
-	void SetShowCuttingPath(bool bFlag)				{ m_bShowCuttingPath = bFlag; };
-	bool GetShowCuttingPath()						{ return m_bShowCuttingPath; };
+    void SetShowDirectionFlag(bool bFlag) { m_bShowDirection = bFlag; };
+    bool GetShowDirectionFlag() { return m_bShowDirection; };
 
-	void SetShowPathID(bool bFlag)					{ m_bShowPathID = bFlag; };
-	bool GetShowPathID()							{ return m_bShowPathID; };
+    void SetShowCuttingPath(bool bFlag) { m_bShowCuttingPath = bFlag; };
+    bool GetShowCuttingPath() { return m_bShowCuttingPath; };
 
-	void SetRedrawLayers(bool bFlag)				{ m_bRedrawLayers = bFlag; };
-	bool GetRedrawLayers()							{ return m_bRedrawLayers; };
+    void SetShowPathID(bool bFlag) { m_bShowPathID = bFlag; };
+    bool GetShowPathID() { return m_bShowPathID; };
 
-	SignalSource* GetSignalSource()					{ return &m_SignalSource; };
+    void SetRedrawLayers(bool bFlag) { m_bRedrawLayers = bFlag; };
+    bool GetRedrawLayers() { return m_bRedrawLayers; };
 
-	void SetToolTable();
-	void ClearToolDate();	//清空工具数据
+    void SetToolTable();
+    void ClearToolDate();
 
-	void SetMotionControlTable	(const table& table_MotionControl	= {});
-	void SetDigitalTable		(const table& table_Digital			= {});
-	void SetAnalogTable			(const table& table_Analog			= {});
-	void SetLaserTable			(const table& table_Laser			= {});
-	void SetSignalSourceTable	(const table& table_SerialPort		= {});
-	void SetGasTable			(const table& table_Gas				= {});
-	void SetCompTable			(const table& table_Comp			= {});
+    void SetMotionControlTable(const table& table_MotionControl = {});
+    void SetDigitalTable(const table& table_Digital = {});
+    void SetAnalogTable(const table& table_Analog = {});
+    void SetLaserTable(const table& table_Laser = {});
+    void SetSignalSourceTable(const table& = {}) {}
+    void SetGasTable(const table& table_Gas = {});
+    void SetCompTable(const table& table_Comp = {});
 
-	void RedrawDrawing();	// 重绘图纸部分
+    void RedrawDrawing();
 
 private:
-	Settings		m_Settings;
+    Settings        m_Settings;
 
-	MCFactory		m_MCFactory;
-	MotionControl*	m_pMotionControl;
+    MCFactory       m_MCFactory;
+    MotionControl*  m_pMotionControl{nullptr};
 
-	LDFactory		m_LDFactory;
-	LaserDevice*	m_pLaserDevice;
+    LDFactory       m_LDFactory;
+    LaserDevice*    m_pLaserDevice{nullptr};
 
-	COMPFactory		m_COMPFactory;
-	CompDevice*		m_pCompDevice;
+    ToolFactory     m_ToolFactory;
 
-	CuttingFactory	m_CuttingFactory;
-	CuttingDevice*	m_pCuttingDevice;
+    bool    m_bCuttingHeadShow{false};
+    bool    m_bShowDirection{false};
+    bool    m_bShowCuttingPath{false};
+    bool    m_bShowPathID{false};
+    bool    m_bRedrawLayers{false};
 
-	ToolFactory		m_ToolFactory;
+    string  m_strMotionControl;
+    string  m_strLaserDevice;
+    string  m_strCompDevice;
 
-	SignalSource	m_SignalSource;
-
-private:
-	//切割头坐标的显示和隐藏，当为绘图界面时，切割头不再显示和刷新
-	bool	m_bCuttingHeadShow;		//是否显示切割头的十字光标
-	bool	m_bShowDirection;		//是否显示开口方向、路径
-	bool	m_bShowCuttingPath;		//切割路径的绘制
-	bool	m_bShowPathID;			//已加入路径特征的ID
-	bool	m_bRedrawLayers;		//重绘整个图纸
-
-	string	m_strMotionControl;		//运动控制器型号
-	string	m_strLaserDevice;		//激光器型号
-	string	m_strCompDevice;		//补偿类设备型号
-
-	QString m_qstrDirectionX;
-	QString m_qstrDirectionY;
-
+    QString m_qstrDirectionX;
+    QString m_qstrDirectionY;
 };
-

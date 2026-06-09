@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting")
 set(CMAKE_AUTORCC ON)
 
 # ─── Qt ───────────────────────────────────────────────────────────────────────
@@ -154,7 +155,6 @@ set(SRCS_MODULES
     src/modules/cam/contracts/toolpath_export_dto.cpp
     src/modules/cam/settings/cam_config.cpp
     src/modules/cam/services/cam_data_manager.cpp
-    src/modules/cam/services/toolpath_simulator.cpp
     src/modules/cam/services/machine_axis_detector.cpp
     src/modules/cam/services/machine_io.cpp
     src/modules/cam/services/reference_pick.cpp
@@ -167,11 +167,7 @@ set(SRCS_MODULES
     src/modules/cam/ui/ribbon_cam_tab.cpp
     src/modules/process/process_module.cpp
     src/modules/process/controllers/simulation_motion_controller.cpp
-    src/modules/process/device/i_process_device.cpp
-    src/modules/process/device/process_device_coordinator.cpp
-    src/modules/process/device/process_device_manager.cpp
-    src/modules/process/device/simulator_laser_device.cpp
-    src/modules/process/device/simulator_process_io.cpp
+    src/modules/process/ui/settings/settings_dialog.cpp
     src/modules/process/communication/communication_types.h
     src/modules/process/communication/communication_types.cpp
     src/modules/process/communication/communication_endpoint.h
@@ -195,16 +191,11 @@ set(SRCS_MODULES
     src/modules/process/communication/protocols/http_channel.cpp
     src/modules/process/communication/ui/communication_settings_page.h
     src/modules/process/communication/ui/communication_settings_page.cpp
-    src/modules/process/settings/process_settings.cpp
-    src/modules/process/settings/process_settings_field_registry.cpp
-    src/modules/process/settings/process_settings_schema.cpp
     src/modules/process/monitor/process_monitor_types.h
     src/modules/process/monitor/process_monitor_service.h
     src/modules/process/monitor/process_monitor_service.cpp
     src/modules/process/runtime/process_runtime.cpp
     src/modules/process/runtime/process_state_machine.cpp
-    src/modules/process/toolpath/process_tool_matcher.cpp
-    src/modules/process/toolpath/process_toolpath_service.cpp
     src/modules/process/toolpath/process_toolpath_sorter.cpp
     src/modules/process/instructions/process_command.cpp
     src/modules/process/instructions/process_instruction_planner.cpp
@@ -215,12 +206,9 @@ set(SRCS_MODULES
     src/modules/process/workflow/process_node_registry.cpp
     src/modules/process/workflow/process_flow_document.cpp
     src/modules/process/workflow/process_flow_store.cpp
-    src/modules/process/workflow/process_workflow_service.cpp
-    src/modules/process/Setting/process_settings_dialog.cpp
     src/modules/process/ui/process_flow_model.cpp
     src/modules/process/ui/process_flow_tree_view.cpp
     src/modules/process/ui/process_node_edit_dialog.cpp
-    src/modules/process/ui/device/process_device_manager_dialog.cpp
     src/modules/process/Process/qg_processeswidget.cpp
     src/modules/process/commands/commands_process.cpp
     src/modules/process/ui/widget_laser_control.cpp
@@ -273,9 +261,31 @@ add_executable(LaserCNC WIN32
 target_include_directories(LaserCNC PRIVATE
     src
     3rd
+    3rd/include_3rd
+    3rd/magic_enum
     3rd/toml11
+    src/modules/process/System
+    src/modules/process/Setting
+    src/modules/process/Tool
+    src/modules/process/CuttingCommand
+    src/modules/process/device/MotionControl
+    src/modules/process/device/Laser
+    src/modules/process/device/Compensation
+    src/modules/process/device/Connect
     ${OpenCASCADE_INCLUDE_DIR}
 )
+
+# Prevent AUTOMOC from batch-processing old Setting headers (use manual moc_*.cpp includes).
+foreach(hdr IN ITEMS
+    qg_dlgsetting Setting_Analog Setting_Axis Setting_Camera Setting_Digital
+    Setting_Gas Setting_IOIndex Setting_Internet Setting_Laser Setting_LoadingPos
+    Setting_Monitor Setting_MotionControl Setting_Tool Setting_Water
+)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting/${hdr}.h"
+        PROPERTIES SKIP_AUTOMOC TRUE
+    )
+endforeach()
 
 # OCC modules needed for Phase 1
 set(OCC_LIBS

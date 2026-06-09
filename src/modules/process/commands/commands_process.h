@@ -3,7 +3,7 @@
 #include "core/command/commands_api.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Process commands —— 加工运行 / 控制器连接 / 仿真模式
+// Process commands —— 加工运行 / 控制器连接 / 参数设置
 //
 // 每个命令仅负责"对话/触发 → 转发到 IProcessFacade"，不直接持有
 // 加工业务状态。需要参数交互的（如 jog、setFeedOverride）由执行面板
@@ -42,42 +42,12 @@ public:
     bool isEnabled() const override;
 };
 
-/// 打开加工参数页。
+/// 打开统一参数设置对话框（qg_dlgsetting）。
 class CmdOpenProcessSettings : public CommandBase {
     Q_OBJECT
 public:
-    inline static const QString Name = "process.settings.process";
+    inline static const QString Name = "process.settings";
     explicit CmdOpenProcessSettings(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-/// 打开运动控制参数页。
-class CmdOpenMotionSettings : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.settings.motion";
-    explicit CmdOpenMotionSettings(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-/// 打开激光参数页。
-class CmdOpenLaserSettings : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.settings.laser";
-    explicit CmdOpenLaserSettings(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-/// 打开外设管理与调试界面。
-class CmdOpenDeviceManager : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.deviceManager";
-    explicit CmdOpenDeviceManager(IAppContext* ctx);
     void execute() override;
     bool isEnabled() const override;
 };
@@ -158,16 +128,6 @@ class CmdDisconnectController : public CommandBase {
 public:
     inline static const QString Name = "process.disconnectController";
     explicit CmdDisconnectController(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-/// 切换仿真模式（Action 自身 checkable，会与模块信号双向同步）。
-class CmdToggleSimulationMode : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.toggleSimulationMode";
-    explicit CmdToggleSimulationMode(IAppContext* ctx);
     void execute() override;
     bool isEnabled() const override;
 };

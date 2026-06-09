@@ -13,7 +13,7 @@ ProcessWorkflowService::ProcessWorkflowService(ProcessToolpathService& toolpaths
 bool ProcessWorkflowService::prepare(const lcnc::ProcessSettings& settings, QString* errorMessage)
 {
     m_toolpaths.refreshSnapshot();
-    m_jobPlan = m_toolpaths.buildJobPlan(settings);
+    m_jobPlan = m_toolpaths.buildJobPlan();
     if (!m_jobPlan.valid) {
         const QString message = m_jobPlan.warnings.isEmpty()
             ? tr("Process 工作流准备失败")

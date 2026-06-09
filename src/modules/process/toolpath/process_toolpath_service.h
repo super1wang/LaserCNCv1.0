@@ -1,15 +1,18 @@
 #pragma once
 
 #include "modules/cam/contracts/toolpath_export_dto.h"
-#include "modules/process/settings/process_settings_schema.h"
 
 #include <QVector>
 #include <memory>
 
 namespace lcnc::cam { class ICamToolpathProvider; }
-namespace lcnc { class ProcessSettings; }
 
 namespace lcnc::process {
+
+struct ProcessToolSettings {
+    double laserEnergy{0}, laserFrequency{0}, laserPulseWidth{0}, feedRate{10.0};
+    QString laserDeviceName{"Simulator"};
+};
 
 /**
  * @brief One contour selected for a Process job plan.
@@ -45,7 +48,7 @@ public:
     void setProvider(std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider);
     lcnc::cam::ToolpathExportSnapshot refreshSnapshot();
     const lcnc::cam::ToolpathExportSnapshot& currentSnapshot() const { return m_snapshot; }
-    ProcessJobPlan buildJobPlan(const lcnc::ProcessSettings& settings) const;
+    ProcessJobPlan buildJobPlan() const;
 
 private:
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_provider;

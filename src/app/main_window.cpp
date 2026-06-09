@@ -889,8 +889,6 @@ void MainWindow::createRightPanel()
             m_laserControl, &WidgetLaserControl::updateAxisEnabled);
         connect(process, &ProcessModule::digitalOutputChanged,
             m_laserControl, &WidgetLaserControl::updateDigitalOutput);
-        connect(process, &ProcessModule::monitorSnapshotChanged,
-            m_laserControl, &WidgetLaserControl::updateMonitorSnapshot);
         connect(process, &ProcessModule::axisPositionChanged, this,
             [this](const QString& axis, double value) {
             m_laserControl->updateAxisPosition(axis, value);
@@ -933,7 +931,6 @@ void MainWindow::createRightPanel()
         const auto outputStates = process->digitalOutputStates();
         for (auto it = outputStates.cbegin(); it != outputStates.cend(); ++it)
             m_laserControl->updateDigitalOutput(it.key(), QString(), it.value());
-        m_laserControl->updateMonitorSnapshot(process->monitorSnapshot());
 }
 
 void MainWindow::updateCadPrimitivePreview()
