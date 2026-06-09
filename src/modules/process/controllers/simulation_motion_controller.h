@@ -1,6 +1,9 @@
 #pragma once
 
+#include <QMap>
+#include <QMutex>
 #include <QObject>
+#include <QSet>
 
 #include "core/kinematics/i_motion_controller.h"
 
@@ -40,6 +43,23 @@ public:
     bool moveTo(const QString& axis, double absolutePos) override;
     bool home(const QString& axis = QString()) override;
     void emergencyStop() override;
+    QMap<QString, double> axisPositions() const override;
+    bool setAxisEnabled(const QString& axis, bool enabled) override;
+    bool axisEnabled(const QString& axis) const override;
+    bool axisHomed(const QString& axis) const override;
+    bool setDigitalOutput(const QString& channel, bool value, QString* errorMessage = nullptr) override;
+    bool digitalInput(const QString& channel, bool* value, QString* errorMessage = nullptr) const override;
+    bool setAnalogOutput(const QString& channel, double value, QString* errorMessage = nullptr) override;
+    bool analogInput(const QString& channel, double* value, QString* errorMessage = nullptr) const override;
+    bool executeProgram(const QString& program,
+                        int bufferIndex,
+                        bool waitForFinish,
+                        int timeoutMs,
+                        QString* errorMessage = nullptr) override;
+    bool programRunning(int bufferIndex, bool* running, QString* errorMessage = nullptr) const override;
+    bool supportsProgramPause() const override { return true; }
+    bool pauseProgram(int bufferIndex, QString* errorMessage = nullptr) override;
+    bool resumeProgram(int bufferIndex, QString* errorMessage = nullptr) override;
 
 private:
     /// 取共享 MachinePose（首次调用时通过 Kernel::services() 解析）。
@@ -48,6 +68,13 @@ private:
 private:
     bool m_running{false};
     bool m_estop{false};
+    QSet<QString> m_disabledAxes;
+    mutable QMutex m_ioMutex;
+    QMap<QString, bool> m_digitalValues;
+    QMap<QString, double> m_analogValues;
+    QMap<int, QString> m_loadedPrograms;
+    QSet<int> m_runningPrograms;
+    QSet<int> m_pausedPrograms;
     mutable lcnc::MachinePose* m_poseCache{nullptr};
 };
 

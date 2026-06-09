@@ -54,6 +54,7 @@ public:
     State state() const { return m_state; }
     const QVector<ProcessExecutionStep>& plan() const { return m_plan; }
     void setToolpathSnapshotProvider(std::function<ProcessToolpathSnapshot()> provider);
+    void setCuttingExecutor(std::function<bool(bool dryRun, QString* errorMessage)> executor);
 
 signals:
     void messageLogged(const QString& message);
@@ -83,6 +84,7 @@ private:
     QTimer* m_stepTimer{nullptr};
     int m_currentIndex{-1};
     std::function<ProcessToolpathSnapshot()> m_toolpathSnapshotProvider;
+    std::function<bool(bool dryRun, QString* errorMessage)> m_cuttingExecutor;
 };
 
 } // namespace lcnc::process

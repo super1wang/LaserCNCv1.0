@@ -88,6 +88,7 @@ src/modules/process/
 │   ├── process_device_settings.*
 │   └── process_layer_tool_settings.*
 ├── device/
+│   ├── i_process_device.*
 │   ├── process_device_service.*
 │   ├── process_device_registry.*
 │   ├── process_device_session.*
@@ -128,6 +129,7 @@ src/modules/process/
 │   ├── process_flow_model.*
 │   ├── process_flow_tree_view.*
 │   ├── process_node_edit_dialog.*
+│   ├── device/process_device_manager_dialog.*
 │   └── settings_pages/*
 ├── Setting/
 │   └── 旧 `.ui` 资源与直接加载桥接，不编译旧业务 cpp
@@ -206,6 +208,16 @@ Error -> Idle                # 清错或重新加载配置后
 - `ProcessDeviceRegistry`：记录所有可用设备、profile、能力、SDK 可用性和缺失原因。
 - `ProcessDeviceSession`：管理当前活动设备实例、连接状态、错误状态、安全关闭和 profile 切换。
 - Adapter：`IMotionController`、`ILaserDevice`、`IProcessIo`、`IProcessAuxDevice` 的具体实现。
+
+2026-05-29 已开始落地外设管理器第一版：`IProcessDevice` 作为统一外设接口，`ProcessDeviceManager` 维护外设 role session，默认包含 PureSimulation 运动控制器和 Simulator 激光器；Ribbon“连接设备”通过 `TaskManager` 异步连接全部启用外设。
+
+2026-05-31 外设管理器 UI 调整为固定角色入口：左侧只显示 `运动控制器`、`激光器` 等外设角色，右侧在角色页内选择具体型号并嵌入原 Setting 外设 `.ui`。IO 不作为独立外设入口，归入运动控制器页的 IO 参数和 IO 调试 tab，便于加工流程始终按统一 role 获取当前运动控制器、激光器和控制器 IO。
+
+同日已将加工设置窗口中的 `外设` 树分支剥离，外设相关旧 `.ui` 继续作为字段来源加载和保存，但可见编辑入口集中到外设管理器。Ribbon 的“运动参数”“激光参数”命令进入外设管理器对应角色页，“加工设置”只保留工具、吹气、湿切、监控、上料位等加工参数。
+
+外设管理器 IO 页进一步调整为两层来源：`IO索引` tab 保留旧 UI 预设字段，`数字IO` 和 `模拟IO` tab 提供自定义 IO 表，持久化到 `ProcessSettings` 的 `ioTable.digital` / `ioTable.analog`。`IO调试` tab 合并预设 IO 和自定义 IO 生成控制台，数字输入/输出以红绿指示灯展示，数字输出可直接点击切换，状态刷新通过 `QTimer + QtConcurrent` 异步读取 IO。
+
+机台构型已提升为系统级配置：`MachineConfigurationService` 由 Kernel 注册并持久化到 `config/machine.toml`。文件 Ribbon 的“应用程序选项”提供 `机台构型` 页，配置机台预设、轴类型、父轴、方向和原点等轴系关系；外设管理器运动控制器页的 `轴系配置` 只配置硬件参数，包括控制器索引、归零索引、低/中/高速、加速度、加加速度和正负限位。CAM 根据服务给出的三轴/五轴策略选择刀路提取模式；Process 启动和构型变化时读取同一份轴定义，刷新运动控制器轴系和运行控制面板。
 
 设备 profile：
 

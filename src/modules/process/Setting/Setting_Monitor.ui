@@ -47,6 +47,32 @@
         </property>
        </widget>
       </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="label_General_FaultAction">
+                <property name="text">
+                 <string>FaultAction</string>
+                </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QComboBox" name="comboBox_General_iFaultAction">
+                <item>
+                 <property name="text">
+                    <string>Continue</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                    <string>Pause</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                    <string>Stop</string>
+                 </property>
+                </item>
+             </widget>
+            </item>
      </layout>
     </widget>
    </item>

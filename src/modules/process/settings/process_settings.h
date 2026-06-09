@@ -4,8 +4,46 @@
 
 #include <QMap>
 #include <QString>
+#include <QVector>
 
 namespace lcnc {
+
+struct ProcessIoTableEntry
+{
+    QString name;
+    QString ioIndex;
+    bool output{false};
+};
+
+enum class ProcessMonitorFaultAction
+{
+    Continue,
+    Pause,
+    Stop,
+};
+
+struct ProcessMonitorSettings
+{
+    bool interLockEnabled{false};
+    bool safetyLightCurtainEnabled{false};
+    bool pressureMonitorEnabled{false};
+    bool waterLeakageMonitorEnabled{false};
+    bool waterTankMonitorEnabled{false};
+    bool waterPressureMonitorEnabled{false};
+    bool waterLevelMonitorEnabled{false};
+    double waterPressureLimitMpa{1.0};
+    double waterLevelLimitMm{50.0};
+    int waterPressureConversions{4096};
+    int waterLevelConversions{4096};
+    ProcessMonitorFaultAction faultAction{ProcessMonitorFaultAction::Pause};
+};
+
+inline bool operator==(const ProcessIoTableEntry& lhs, const ProcessIoTableEntry& rhs)
+{
+    return lhs.name == rhs.name
+        && lhs.ioIndex == rhs.ioIndex
+        && lhs.output == rhs.output;
+}
 
 /**
  * @brief Process（激光加工执行）模块持久化设置占位实现。
@@ -99,6 +137,9 @@ public:
     int monitorIntervalMs() const { return m_monitorIntervalMs; }
     void setMonitorIntervalMs(int value);
 
+    ProcessMonitorSettings monitorSettings() const;
+    void setMonitorSettings(const ProcessMonitorSettings& settings);
+
     double loadingPositionX() const { return m_loadingPositionX; }
     void setLoadingPositionX(double value);
 
@@ -147,6 +188,12 @@ public:
     QString uiSettingValue(const QString& key, const QString& defaultValue = QString()) const;
     const QMap<QString, QString>& uiSettingValues() const { return m_uiSettingValues; }
     void setUiSettingValues(const QMap<QString, QString>& values);
+
+    QVector<ProcessIoTableEntry> customDigitalIoTable() const { return m_customDigitalIoTable; }
+    void setCustomDigitalIoTable(const QVector<ProcessIoTableEntry>& values);
+
+    QVector<ProcessIoTableEntry> customAnalogIoTable() const { return m_customAnalogIoTable; }
+    void setCustomAnalogIoTable(const QVector<ProcessIoTableEntry>& values);
 
     QString legacySettingValue(const QString& key, const QString& defaultValue = QString()) const
     {
@@ -202,6 +249,8 @@ private:
     int     m_communicationBaudRate{115200};
     int     m_communicationTimeoutMs{3000};
     QMap<QString, QString> m_uiSettingValues;
+    QVector<ProcessIoTableEntry> m_customDigitalIoTable;
+    QVector<ProcessIoTableEntry> m_customAnalogIoTable;
 };
 
 } // namespace lcnc

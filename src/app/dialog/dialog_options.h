@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/kinematics/machine_configuration_service.h"
 #include "core/settings/app_settings.h"
 
 #include <QColor>
@@ -12,9 +13,11 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QEvent;
+class QLabel;
 class QPushButton;
 class QSpinBox;
 class QStackedWidget;
+class QTableWidget;
 class QTreeWidget;
 
 namespace lcnc {
@@ -72,8 +75,11 @@ private:
     void buildRenderPage(const QString& title, bool camView, RenderControls& controls);
     void buildColorPage();
     void buildApplicationPage();
+    void buildMachineConfigurationPage();
     void disableSpinWheel(QWidget* root);
     void loadFromSettings();
+    void populateMachineAxisTable(const QVector<MachineAxisRuntimeConfig>& configs);
+    QList<MachineAxisDef> collectMachineAxisDefinitions() const;
     void setProfileToUi(const RenderProfileSettings& profile, const RenderControls& controls);
     RenderProfileSettings collectProfileFromUi(const RenderControls& controls) const;
     void wireRenderPresetBehavior(RenderControls& controls, bool camView);
@@ -101,6 +107,11 @@ private:
     QComboBox* m_cbUnits{nullptr};
     QSpinBox* m_spRecentLimit{nullptr};
 
+    QComboBox* m_cbMachinePreset{nullptr};
+    QLabel* m_lblMachineAlgorithm{nullptr};
+    QTableWidget* m_machineAxesTable{nullptr};
+    MachineConfigurationService* m_machineConfig{nullptr};
+
     RenderProfileSettings m_renderDraft;
     RenderProfileSettings m_originalCad;
     RenderProfileSettings m_originalCam;
@@ -110,6 +121,8 @@ private:
     QString m_originalTheme;
     QString m_originalUnitSystem;
     int m_originalRecentLimit{10};
+    QString m_originalMachinePreset;
+    QVector<MachineAxisRuntimeConfig> m_originalMachineConfigs;
     bool m_loadingUi{false};
 };
 

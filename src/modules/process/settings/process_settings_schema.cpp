@@ -56,6 +56,7 @@ ProcessTypedSettingsSnapshot ProcessSettingsSchema::snapshotFrom(const lcnc::Pro
     snapshot.aux.waterMinFlow = settings.waterMinFlow();
     snapshot.aux.monitorEnabled = settings.monitorEnabled();
     snapshot.aux.monitorIntervalMs = settings.monitorIntervalMs();
+    snapshot.aux.monitor = settings.monitorSettings();
     snapshot.aux.loadingX = settings.loadingPositionX();
     snapshot.aux.loadingY = settings.loadingPositionY();
     snapshot.aux.loadingZ = settings.loadingPositionZ();

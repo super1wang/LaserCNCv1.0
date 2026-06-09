@@ -89,6 +89,7 @@ set(SRCS_CORE
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_kinematics.cpp
+    src/core/kinematics/machine_configuration_service.cpp
     src/core/kinematics/machine_pose.cpp
     src/core/kinematics/ik_solver.cpp
     src/core/algorithms/cad/primitives.cpp
@@ -166,6 +167,7 @@ set(SRCS_MODULES
     src/modules/cam/ui/ribbon_cam_tab.cpp
     src/modules/process/process_module.cpp
     src/modules/process/controllers/simulation_motion_controller.cpp
+    src/modules/process/device/i_process_device.cpp
     src/modules/process/device/process_device_coordinator.cpp
     src/modules/process/device/process_device_manager.cpp
     src/modules/process/device/simulator_laser_device.cpp
@@ -196,6 +198,9 @@ set(SRCS_MODULES
     src/modules/process/settings/process_settings.cpp
     src/modules/process/settings/process_settings_field_registry.cpp
     src/modules/process/settings/process_settings_schema.cpp
+    src/modules/process/monitor/process_monitor_types.h
+    src/modules/process/monitor/process_monitor_service.h
+    src/modules/process/monitor/process_monitor_service.cpp
     src/modules/process/runtime/process_runtime.cpp
     src/modules/process/runtime/process_state_machine.cpp
     src/modules/process/toolpath/process_tool_matcher.cpp
@@ -215,6 +220,7 @@ set(SRCS_MODULES
     src/modules/process/ui/process_flow_model.cpp
     src/modules/process/ui/process_flow_tree_view.cpp
     src/modules/process/ui/process_node_edit_dialog.cpp
+    src/modules/process/ui/device/process_device_manager_dialog.cpp
     src/modules/process/Process/qg_processeswidget.cpp
     src/modules/process/commands/commands_process.cpp
     src/modules/process/ui/widget_laser_control.cpp
@@ -222,6 +228,7 @@ set(SRCS_MODULES
     src/modules/process/execution/process_workflow_executor.cpp
     src/modules/process/execution/process_execution_service.cpp
     src/modules/process/execution/process_node_executor_registry.cpp
+    src/modules/process/controllers/simulator_cmhp_motion_controller.h
 )
 
 set(SRCS_APP

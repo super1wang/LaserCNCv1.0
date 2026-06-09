@@ -26,6 +26,7 @@
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/document/lcnc_document.h"
 #include "core/project/lcnc_project_manager.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
 #include "view/graphics_scene.h"
@@ -861,25 +862,35 @@ void MainWindow::createRightPanel()
             process, &ProcessModule::runStart);
         connect(m_laserControl, &WidgetLaserControl::pauseRequested,
             process, &ProcessModule::runPause);
+        connect(m_laserControl, &WidgetLaserControl::resumeRequested,
+            process, &ProcessModule::runStart);
         connect(m_laserControl, &WidgetLaserControl::stopRequested,
             process, &ProcessModule::runStop);
-        connect(m_laserControl, &WidgetLaserControl::eStopRequested,
-            process, &ProcessModule::emergencyStop);
         connect(m_laserControl, &WidgetLaserControl::jogRequested, this,
-            [process](const QString& axis, int direction, int speedLevel) {
-            process->jog(axis, direction, speedLevel);
+            [process](const QString& axis, int direction, int speedLevel, double distance) {
+            process->jog(axis, direction, speedLevel, distance);
             });
-        connect(m_laserControl, &WidgetLaserControl::homeRequested,
-            process, &ProcessModule::home);
-        connect(m_laserControl, &WidgetLaserControl::feedOverrideChanged,
-            process, &ProcessModule::setFeedOverride);
+        connect(m_laserControl, &WidgetLaserControl::axisEnableToggled,
+            process, &ProcessModule::setAxisEnabled);
+        connect(m_laserControl, &WidgetLaserControl::digitalOutputToggled,
+            process, &ProcessModule::setDigitalOutput);
 
         connect(process, &ProcessModule::connectionChanged,
             m_laserControl, &WidgetLaserControl::updateConnectionStatus);
+        connect(process, &ProcessModule::stateChanged,
+            m_laserControl, &WidgetLaserControl::updateRunState);
         connect(process, &ProcessModule::simulationModeChanged,
             m_laserControl, &WidgetLaserControl::updateSimulationMode);
         connect(process, &ProcessModule::statusMessageChanged,
             m_laserControl, &WidgetLaserControl::updateSystemStatus);
+        connect(process, &ProcessModule::processLogMessage,
+            m_laserControl, &WidgetLaserControl::appendLogMessage);
+        connect(process, &ProcessModule::axisEnabledChanged,
+            m_laserControl, &WidgetLaserControl::updateAxisEnabled);
+        connect(process, &ProcessModule::digitalOutputChanged,
+            m_laserControl, &WidgetLaserControl::updateDigitalOutput);
+        connect(process, &ProcessModule::monitorSnapshotChanged,
+            m_laserControl, &WidgetLaserControl::updateMonitorSnapshot);
         connect(process, &ProcessModule::axisPositionChanged, this,
             [this](const QString& axis, double value) {
             m_laserControl->updateAxisPosition(axis, value);
@@ -896,12 +907,33 @@ void MainWindow::createRightPanel()
                 .arg(positions.value(QStringLiteral("Z"), 0.0), 0, 'f', 3));
             });
 
+        if (auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>()) {
+            connect(machineConfig, &lcnc::MachineConfigurationService::machineConfigurationChanged,
+                    this, [this, process, machineConfig] {
+                        const QList<MachineAxisDef> axes = machineConfig->axisDefinitions();
+                        process->setAxisDefinitions(axes);
+                        m_laserControl->setAxisDefinitions(axes);
+                        const auto enabledStates = process->axisEnabledStates();
+                        for (auto it = enabledStates.cbegin(); it != enabledStates.cend(); ++it)
+                            m_laserControl->updateAxisEnabled(it.key(), it.value());
+                    });
+            m_laserControl->setAxisDefinitions(machineConfig->axisDefinitions());
+        }
+
         m_laserControl->updateConnectionStatus(process->isConnected());
+        m_laserControl->updateRunState(process->state());
         m_laserControl->updateSimulationMode(process->simulationMode());
         m_laserControl->updateSystemStatus(process->statusMessage());
         const auto axisPositions = process->currentAxisPositions();
         for (auto it = axisPositions.cbegin(); it != axisPositions.cend(); ++it)
         m_laserControl->updateAxisPosition(it.key(), it.value());
+        const auto axisEnabledStates = process->axisEnabledStates();
+        for (auto it = axisEnabledStates.cbegin(); it != axisEnabledStates.cend(); ++it)
+            m_laserControl->updateAxisEnabled(it.key(), it.value());
+        const auto outputStates = process->digitalOutputStates();
+        for (auto it = outputStates.cbegin(); it != outputStates.cend(); ++it)
+            m_laserControl->updateDigitalOutput(it.key(), QString(), it.value());
+        m_laserControl->updateMonitorSnapshot(process->monitorSnapshot());
 }
 
 void MainWindow::updateCadPrimitivePreview()
@@ -1820,15 +1852,19 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
     ProcessModule* process = m_appContext->processModule();
     CamModule* cam = m_appContext->camModule();
     LcncDocument* machineDoc = m_appContext->camModule()->machineDocument();
+    auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
+    const QList<MachineAxisDef> configuredAxes = machineConfig
+        ? machineConfig->axisDefinitions()
+        : QList<MachineAxisDef>{};
     if (!machineDoc) {
         if (rebuildTree)
             rebuildProjectExplorer();
         m_machinePanel->setDocument(nullptr);
         m_machinePanel->setMachineModelPath(cam->machineModelPath());
         if (process)
-            process->setAxisDefinitions({});
+            process->setAxisDefinitions(configuredAxes);
         if (m_laserControl)
-            m_laserControl->setAxisDefinitions({});
+            m_laserControl->setAxisDefinitions(configuredAxes);
         return;
     }
 
@@ -1838,7 +1874,9 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
     m_machinePanel->setDocument(machineDoc);
     m_machinePanel->setMachineModelPath(cam->machineModelPath());
 
-    const QList<MachineAxisDef> axes = machineDoc->machineKinematics()->axes();
+    const QList<MachineAxisDef> axes = configuredAxes.isEmpty()
+        ? machineDoc->machineKinematics()->axes()
+        : configuredAxes;
     if (process)
         process->setAxisDefinitions(axes);
     if (m_laserControl)

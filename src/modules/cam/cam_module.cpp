@@ -7,6 +7,7 @@
 #include "modules/cam/services/machine_axis_detector.h"
 #include "modules/cam/services/machine_io.h"
 #include "modules/cam/services/reference_pick.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "core/kernel/kernel.h"
 #include "modules/cad/services/shape_service.h"
 
@@ -263,6 +264,20 @@ CamModule::CamModule(QObject* parent)
 
     auto* project = lcnc::Kernel::current().projectManager();
     project->ensureProject();
+    m_machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
+    if (m_machineConfig) {
+        connect(m_machineConfig, &lcnc::MachineConfigurationService::machineConfigurationChanged,
+                this, [this] {
+                    MachineKinematics* kin = kinematics();
+                    if (!kin || !m_machineConfig)
+                        return;
+                    kin->setAxes(m_machineConfig->axisDefinitions(), m_machineConfig->presetName());
+                    displayAxisGuides();
+                    refreshMachineTransforms();
+                    emit axisAssignmentsChanged();
+                    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
+                });
+    }
 
     CamConfig& config = m_config;
     m_machineModelPath = config.machineModelPath();
@@ -416,6 +431,8 @@ void CamModule::configureMachine(const QString& presetName)
     const bool sameConfig = (kin->configType() == presetName);
     kin->loadPreset(presetName);
     m_config.setMachinePreset(presetName);
+    if (m_machineConfig)
+        m_machineConfig->syncFromKinematics(kin);
     if (m_machineModelPath.isEmpty())
         m_workpieceInstallPosition = defaultWorkpieceInstallPosition();
     else
@@ -514,6 +531,8 @@ void CamModule::autoDetectAxes()
     lcnc::cam::machine_axis_detector::autoDetectAxisNames(doc, doc->machineKinematics());
     autoDetectAxisOrigins();
     applyStoredMachineProfile(m_machineModelPath);
+    if (m_machineConfig)
+        m_machineConfig->syncFromKinematics(doc->machineKinematics());
     if (auto* gd = workspaceGuiDocument())
         gd->applyMachineDisplayStyle();
     refreshMachineTransforms();
@@ -1970,13 +1989,29 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 
     clearToolpath();
     m_workpieceShape = collectWorkpieceShape();
+    bool effectiveUseFaceClassification = useFaceClassification;
+    if (m_machineConfig) {
+        switch (m_machineConfig->toolpathAlgorithm()) {
+        case lcnc::MachineToolpathAlgorithm::ThreeAxis:
+            effectiveUseFaceClassification = false;
+            break;
+        case lcnc::MachineToolpathAlgorithm::FiveAxisTable:
+        case lcnc::MachineToolpathAlgorithm::FiveAxisHead:
+            effectiveUseFaceClassification = true;
+            break;
+        }
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "cam.toolpath: machine algorithm='{}' faceClassification={}",
+                  m_machineConfig->toolpathAlgorithmText().toStdString(),
+                  effectiveUseFaceClassification);
+    }
     m_smoothAngle = smoothAngle;
-    m_useFaceClassification = useFaceClassification;
+    m_useFaceClassification = effectiveUseFaceClassification;
     m_deflection = deflection;
 
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = smoothAngle;
-    params.useFaceClassification = useFaceClassification;
+    params.useFaceClassification = effectiveUseFaceClassification;
     params.deflection = deflection;
 
     std::vector<LaserContour> allContours;

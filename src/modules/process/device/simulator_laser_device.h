@@ -11,6 +11,9 @@ public:
     bool connectDevice(QString* errorMessage = nullptr) override;
     void disconnectDevice() override;
     bool isConnected() const override { return m_connected; }
+    ProcessDeviceConnectionState connectionState() const override { return m_state; }
+    QString lastError() const override { return m_lastError; }
+    QList<ProcessDeviceStatusItem> statusItems() const override;
 
     bool startLaser(QString* errorMessage = nullptr) override;
     bool stopLaser(QString* errorMessage = nullptr) override;
@@ -27,6 +30,8 @@ public:
 
 private:
     bool m_connected{true};
+    ProcessDeviceConnectionState m_state{ProcessDeviceConnectionState::Connected};
+    QString m_lastError;
     bool m_laserOn{false};
     bool m_aimingOn{false};
     double m_energy{0.0};

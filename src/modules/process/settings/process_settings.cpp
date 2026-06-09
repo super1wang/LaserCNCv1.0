@@ -10,6 +10,101 @@
 
 namespace lcnc {
 
+namespace {
+
+QString legacySettingKey(const char* field)
+{
+    return QStringLiteral("Setting_Monitor.%1").arg(QString::fromLatin1(field));
+}
+
+bool legacyBoolValue(const QMap<QString, QString>& values,
+                     const char* field,
+                     bool defaultValue)
+{
+    const QString raw = values.value(legacySettingKey(field)).trimmed();
+    if (raw.isEmpty())
+        return defaultValue;
+
+    if (raw == QStringLiteral("1")
+        || raw.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
+        || raw.compare(QStringLiteral("yes"), Qt::CaseInsensitive) == 0
+        || raw.compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0) {
+        return true;
+    }
+    if (raw == QStringLiteral("0")
+        || raw.compare(QStringLiteral("false"), Qt::CaseInsensitive) == 0
+        || raw.compare(QStringLiteral("no"), Qt::CaseInsensitive) == 0
+        || raw.compare(QStringLiteral("off"), Qt::CaseInsensitive) == 0) {
+        return false;
+    }
+
+    return defaultValue;
+}
+
+int legacyIntValue(const QMap<QString, QString>& values,
+                   const char* field,
+                   int defaultValue)
+{
+    const QString raw = values.value(legacySettingKey(field)).trimmed();
+    if (raw.isEmpty())
+        return defaultValue;
+
+    bool ok = false;
+    const int value = raw.toInt(&ok);
+    return ok ? value : defaultValue;
+}
+
+double legacyDoubleValue(const QMap<QString, QString>& values,
+                         const char* field,
+                         double defaultValue)
+{
+    const QString raw = values.value(legacySettingKey(field)).trimmed();
+    if (raw.isEmpty())
+        return defaultValue;
+
+    bool ok = false;
+    const double value = raw.toDouble(&ok);
+    return ok ? value : defaultValue;
+}
+
+ProcessMonitorFaultAction monitorFaultActionFromText(const QString& rawText)
+{
+    const QString text = rawText.trimmed();
+    if (text.isEmpty())
+        return ProcessMonitorFaultAction::Pause;
+
+    if (text == QStringLiteral("0")
+        || text.compare(QStringLiteral("Continue"), Qt::CaseInsensitive) == 0
+        || text.compare(QStringLiteral("ContinueProcess"), Qt::CaseInsensitive) == 0
+        || text.compare(QStringLiteral("继续加工"), Qt::CaseInsensitive) == 0) {
+        return ProcessMonitorFaultAction::Continue;
+    }
+
+    if (text == QStringLiteral("2")
+        || text.compare(QStringLiteral("Stop"), Qt::CaseInsensitive) == 0
+        || text.compare(QStringLiteral("StopProcess"), Qt::CaseInsensitive) == 0
+        || text.compare(QStringLiteral("停止加工"), Qt::CaseInsensitive) == 0) {
+        return ProcessMonitorFaultAction::Stop;
+    }
+
+    return ProcessMonitorFaultAction::Pause;
+}
+
+QString monitorFaultActionToText(ProcessMonitorFaultAction action)
+{
+    switch (action) {
+    case ProcessMonitorFaultAction::Continue:
+        return QStringLiteral("Continue");
+    case ProcessMonitorFaultAction::Pause:
+        return QStringLiteral("Pause");
+    case ProcessMonitorFaultAction::Stop:
+        return QStringLiteral("Stop");
+    }
+    return QStringLiteral("Pause");
+}
+
+} // namespace
+
 QString ProcessSettings::defaultFilePath()
 {
     const QString exeDir = QFileInfo(QCoreApplication::applicationFilePath()).absolutePath();
@@ -195,6 +290,43 @@ void ProcessSettings::setMonitorIntervalMs(int value)
     saveDefault();
 }
 
+ProcessMonitorSettings ProcessSettings::monitorSettings() const
+{
+    ProcessMonitorSettings config;
+    config.interLockEnabled = legacyBoolValue(m_uiSettingValues, "checkBox_Cutting_bInterLock", false);
+    config.safetyLightCurtainEnabled = legacyBoolValue(m_uiSettingValues, "checkBox_Cutting_bSafetyLightCurtain", false);
+    config.pressureMonitorEnabled = legacyBoolValue(m_uiSettingValues, "checkBox_Gas_bPressureMonitor", false);
+    config.waterLeakageMonitorEnabled = legacyBoolValue(m_uiSettingValues, "checkBox_Water_bWaterLeakageMonitor", false);
+    config.waterTankMonitorEnabled = legacyBoolValue(m_uiSettingValues, "checkBox_Water_bWaterTankMonitor", false);
+    config.waterPressureMonitorEnabled = legacyBoolValue(m_uiSettingValues, "checkBox_Water_bWaterPressureMonitor", false);
+    config.waterLevelMonitorEnabled = legacyBoolValue(m_uiSettingValues, "checkBox_Water_bWaterLevelMonitor", false);
+    config.waterPressureLimitMpa = legacyDoubleValue(m_uiSettingValues, "lineEdit_Water_fWaterPressureLimit", 1.0);
+    config.waterLevelLimitMm = legacyDoubleValue(m_uiSettingValues, "lineEdit_Water_fWaterLevelLimit", 50.0);
+    config.waterPressureConversions = legacyIntValue(m_uiSettingValues, "lineEdit_WaterSetting_iWaterPressureConversions", 4096);
+    config.waterLevelConversions = legacyIntValue(m_uiSettingValues, "lineEdit_WaterSetting_iWaterLevelConversions", 4096);
+    config.faultAction = monitorFaultActionFromText(
+        m_uiSettingValues.value(legacySettingKey("comboBox_General_iFaultAction")));
+    return config;
+}
+
+void ProcessSettings::setMonitorSettings(const ProcessMonitorSettings& settings)
+{
+    QMap<QString, QString> nextValues = m_uiSettingValues;
+    nextValues.insert(legacySettingKey("checkBox_Cutting_bInterLock"), settings.interLockEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+    nextValues.insert(legacySettingKey("checkBox_Cutting_bSafetyLightCurtain"), settings.safetyLightCurtainEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+    nextValues.insert(legacySettingKey("checkBox_Gas_bPressureMonitor"), settings.pressureMonitorEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+    nextValues.insert(legacySettingKey("checkBox_Water_bWaterLeakageMonitor"), settings.waterLeakageMonitorEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+    nextValues.insert(legacySettingKey("checkBox_Water_bWaterTankMonitor"), settings.waterTankMonitorEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+    nextValues.insert(legacySettingKey("checkBox_Water_bWaterPressureMonitor"), settings.waterPressureMonitorEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+    nextValues.insert(legacySettingKey("checkBox_Water_bWaterLevelMonitor"), settings.waterLevelMonitorEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+    nextValues.insert(legacySettingKey("lineEdit_Water_fWaterPressureLimit"), QString::number(settings.waterPressureLimitMpa, 'g', 15));
+    nextValues.insert(legacySettingKey("lineEdit_Water_fWaterLevelLimit"), QString::number(settings.waterLevelLimitMm, 'g', 15));
+    nextValues.insert(legacySettingKey("lineEdit_WaterSetting_iWaterPressureConversions"), QString::number(settings.waterPressureConversions));
+    nextValues.insert(legacySettingKey("lineEdit_WaterSetting_iWaterLevelConversions"), QString::number(settings.waterLevelConversions));
+    nextValues.insert(legacySettingKey("comboBox_General_iFaultAction"), monitorFaultActionToText(settings.faultAction));
+    setUiSettingValues(nextValues);
+}
+
 void ProcessSettings::setLoadingPositionX(double value)
 {
     if (std::abs(m_loadingPositionX - value) < 1e-9) return;
@@ -319,6 +451,20 @@ void ProcessSettings::setUiSettingValues(const QMap<QString, QString>& values)
     saveDefault();
 }
 
+void ProcessSettings::setCustomDigitalIoTable(const QVector<ProcessIoTableEntry>& values)
+{
+    if (m_customDigitalIoTable == values) return;
+    m_customDigitalIoTable = values;
+    saveDefault();
+}
+
+void ProcessSettings::setCustomAnalogIoTable(const QVector<ProcessIoTableEntry>& values)
+{
+    if (m_customAnalogIoTable == values) return;
+    m_customAnalogIoTable = values;
+    saveDefault();
+}
+
 void ProcessSettings::readFrom(const toml::value& root)
 {
     using namespace lcnc::toml_io;
@@ -390,6 +536,30 @@ void ProcessSettings::readFrom(const toml::value& root)
     };
     readUiSettingTable("legacySetting");
     readUiSettingTable("uiSetting");
+
+    auto readIoTable = [&root](const char* tableName) {
+        QVector<ProcessIoTableEntry> entries;
+        if (!root.is_table()
+            || !root.contains("ioTable")
+            || !root.at("ioTable").is_table()
+            || !root.at("ioTable").contains(tableName)
+            || !root.at("ioTable").at(tableName).is_array()) {
+            return entries;
+        }
+        for (const toml::value& item : root.at("ioTable").at(tableName).as_array()) {
+            if (!item.is_table())
+                continue;
+            ProcessIoTableEntry entry;
+            entry.name = get_qstring(item, "name", QString()).trimmed();
+            entry.ioIndex = get_qstring(item, "index", QString()).trimmed();
+            entry.output = get_bool(item, "output", false);
+            if (!entry.name.isEmpty() && !entry.ioIndex.isEmpty())
+                entries.append(entry);
+        }
+        return entries;
+    };
+    m_customDigitalIoTable = readIoTable("digital");
+    m_customAnalogIoTable = readIoTable("analog");
 }
 
 void ProcessSettings::writeTo(toml::value& root) const
@@ -446,6 +616,29 @@ void ProcessSettings::writeTo(toml::value& root) const
         }
         root["uiSetting"] = uiSetting;
     }
+
+    auto writeIoTable = [](const QVector<ProcessIoTableEntry>& entries) {
+        toml::array array;
+        for (const ProcessIoTableEntry& entry : entries) {
+            if (entry.name.trimmed().isEmpty() || entry.ioIndex.trimmed().isEmpty())
+                continue;
+            toml::value item(toml::table{});
+            item["name"] = qs(entry.name.trimmed());
+            item["index"] = qs(entry.ioIndex.trimmed());
+            item["output"] = entry.output;
+            array.emplace_back(item);
+        }
+        return array;
+    };
+    toml::value ioTable(toml::table{});
+    toml::array digitalIo = writeIoTable(m_customDigitalIoTable);
+    toml::array analogIo = writeIoTable(m_customAnalogIoTable);
+    if (!digitalIo.empty())
+        ioTable["digital"] = digitalIo;
+    if (!analogIo.empty())
+        ioTable["analog"] = analogIo;
+    if (!digitalIo.empty() || !analogIo.empty())
+        root["ioTable"] = ioTable;
 }
 
 } // namespace lcnc

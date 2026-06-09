@@ -72,6 +72,16 @@ public:
     bool isEnabled() const override;
 };
 
+/// 打开外设管理与调试界面。
+class CmdOpenDeviceManager : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.deviceManager";
+    explicit CmdOpenDeviceManager(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
 /// 启动加工运行（仿真或实控）。
 class CmdRunStart : public CommandBase {
     Q_OBJECT
@@ -132,7 +142,7 @@ public:
     bool isEnabled() const override;
 };
 
-/// 通过对话框输入控制器地址并连接。
+/// 异步连接当前已启用的全部外设。
 class CmdConnectController : public CommandBase {
     Q_OBJECT
 public:
@@ -142,7 +152,7 @@ public:
     bool isEnabled() const override;
 };
 
-/// 断开控制器连接。
+/// 断开当前已连接的全部外设。
 class CmdDisconnectController : public CommandBase {
     Q_OBJECT
 public:

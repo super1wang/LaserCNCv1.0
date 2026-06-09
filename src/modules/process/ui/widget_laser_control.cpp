@@ -4,12 +4,17 @@
 #include <QHBoxLayout>
 #include <QGroupBox>
 #include <QButtonGroup>
+#include <QDateTime>
+#include <QDoubleSpinBox>
 #include <QPushButton>
 #include <QLabel>
-#include <QSlider>
-#include <QGridLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QLayoutItem>
+#include <QSignalBlocker>
+#include <QTabWidget>
+#include <QTextEdit>
+#include <QTimer>
 
 namespace {
 
@@ -34,6 +39,12 @@ void clearLayout(QLayout* layout)
 WidgetLaserControl::WidgetLaserControl(QWidget* parent)
     : QWidget(parent)
 {
+    m_jogHoldTimer = new QTimer(this);
+    m_jogHoldTimer->setInterval(120);
+    connect(m_jogHoldTimer, &QTimer::timeout, this, [this] {
+        if (!m_activeJogAxis.isEmpty() && m_activeJogDirection != 0)
+            emitJogRequest(m_activeJogAxis, m_activeJogDirection);
+    });
     buildUi();
     refreshStatusBanner();
 }
@@ -44,29 +55,53 @@ void WidgetLaserControl::buildUi()
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(6);
 
+    m_tabs = new QTabWidget(this);
+    m_controlPage = new QWidget(m_tabs);
+    m_monitorPage = new QWidget(m_tabs);
+    m_controlLayout = new QVBoxLayout(m_controlPage);
+    m_monitorLayout = new QVBoxLayout(m_monitorPage);
+    m_controlLayout->setContentsMargins(4, 4, 4, 4);
+    m_controlLayout->setSpacing(6);
+    m_monitorLayout->setContentsMargins(4, 4, 4, 4);
+    m_monitorLayout->setSpacing(6);
+
+    auto* logPage = new QWidget(m_tabs);
+    auto* logLayout = new QVBoxLayout(logPage);
+    logLayout->setContentsMargins(4, 4, 4, 4);
+    m_logView = new QTextEdit(logPage);
+    m_logView->setReadOnly(true);
+    m_logView->setAcceptRichText(true);
+    m_logView->setStyleSheet("QTextEdit { background: #101820; color: #E5E7EB; font-family: Consolas, monospace; font-size: 11px; }");
+    logLayout->addWidget(m_logView);
+
+    m_tabs->addTab(m_controlPage, tr("控制"));
+    m_tabs->addTab(m_monitorPage, tr("监控"));
+    m_tabs->addTab(logPage, tr("系统日志"));
+    mainLayout->addWidget(m_tabs);
+
+    buildProcessGroup();
     buildAxisGroup();
     buildJogGroup();
-    buildProcessGroup();
+    buildIoGroup();
+    buildStatusGroup();
+    buildDeviceGroup();
+    buildMonitorGroup();
 
-    mainLayout->addStretch();
-
-    // ── Status bar ────────────────────────────────────────────────────────
-    m_statusLabel = new QLabel(this);
-    m_statusLabel->setAlignment(Qt::AlignCenter);
-    mainLayout->addWidget(m_statusLabel);
+    m_controlLayout->addStretch();
+    m_monitorLayout->addStretch();
 }
 
 void WidgetLaserControl::buildAxisGroup()
 {
     m_axisGroup = new QGroupBox(tr("轴位置"), this);
-    this->layout()->addWidget(m_axisGroup);
+    m_controlLayout->addWidget(m_axisGroup);
     rebuildAxisGroup();
 }
 
 void WidgetLaserControl::buildJogGroup()
 {
     m_jogGroup = new QGroupBox(tr("手动点动"), this);
-    this->layout()->addWidget(m_jogGroup);
+    m_controlLayout->addWidget(m_jogGroup);
     rebuildJogGroup();
 }
 
@@ -74,49 +109,109 @@ void WidgetLaserControl::buildProcessGroup()
 {
     auto* group = new QGroupBox(tr("加工控制"), this);
     auto* vlay  = new QVBoxLayout(group);
+    auto* row = new QHBoxLayout();
 
-    auto* row1 = new QHBoxLayout();
-    auto* btnStart = new QPushButton(QIcon(":/icons/start.svg"), tr("运行"), this);
-    auto* btnPause = new QPushButton(QIcon(":/icons/pause.svg"), tr("暂停"), this);
-    btnStart->setStyleSheet("background-color: #2E7D32; color: white;");
-    btnPause->setStyleSheet("background-color: #E65100; color: white;");
-    row1->addWidget(btnStart);
-    row1->addWidget(btnPause);
-    vlay->addLayout(row1);
+    m_btnRun = new QPushButton(QIcon(":/icons/start.svg"), tr("运行"), group);
+    m_btnPause = new QPushButton(QIcon(":/icons/pause.svg"), tr("暂停"), group);
+    m_btnResume = new QPushButton(QIcon(":/icons/start.svg"), tr("继续"), group);
+    m_btnStop = new QPushButton(QIcon(":/icons/stop.svg"), tr("停止"), group);
 
-    auto* btnStop  = new QPushButton(QIcon(":/icons/stop.svg"), tr("停止"), this);
-    vlay->addWidget(btnStop);
+    for (auto* button : {m_btnRun, m_btnPause, m_btnResume, m_btnStop})
+        button->setMinimumHeight(36);
 
-    auto* btnEStop = new QPushButton(tr("E-STOP"), this);
-    btnEStop->setMinimumHeight(50);
-    btnEStop->setStyleSheet(
-        "background-color: #B71C1C; color: white; "
-        "font-weight: bold; font-size: 16px; border-radius: 6px;");
-    vlay->addWidget(btnEStop);
+    m_btnRun->setStyleSheet("background-color: #1B8F4A; color: white; font-weight: 600;");
+    m_btnPause->setStyleSheet("background-color: #997a4b; color: white; font-weight: 600;");
+    m_btnResume->setStyleSheet("background-color: #2563EB; color: white; font-weight: 600;");
+    m_btnStop->setStyleSheet("background-color: #B91C1C; color: white; font-weight: 600;");
 
-    // Feed override slider
-    auto* feedRow = new QHBoxLayout();
-    feedRow->addWidget(new QLabel(tr("进给倍率:"), this));
-    auto* slider = new QSlider(Qt::Horizontal, this);
-    slider->setRange(0, 200);
-    slider->setValue(100);
-    auto* labelPct = new QLabel("100%", this);
-    labelPct->setMinimumWidth(35);
-    connect(slider, &QSlider::valueChanged, this,
-            [this, labelPct](int v) {
-            labelPct->setText(QString::number(v) + "%");
-            emit feedOverrideChanged(static_cast<double>(v) / 100.0);
-            });
-    feedRow->addWidget(slider);
-    feedRow->addWidget(labelPct);
-    vlay->addLayout(feedRow);
+    row->addWidget(m_btnRun);
+    row->addWidget(m_btnPause);
+    row->addWidget(m_btnResume);
+    row->addWidget(m_btnStop);
+    vlay->addLayout(row);
 
-    connect(btnStart, &QPushButton::clicked, this, &WidgetLaserControl::startRequested);
-    connect(btnPause, &QPushButton::clicked, this, &WidgetLaserControl::pauseRequested);
-    connect(btnStop,  &QPushButton::clicked, this, &WidgetLaserControl::stopRequested);
-    connect(btnEStop, &QPushButton::clicked, this, &WidgetLaserControl::eStopRequested);
+    connect(m_btnRun, &QPushButton::clicked, this, &WidgetLaserControl::startRequested);
+    connect(m_btnPause, &QPushButton::clicked, this, &WidgetLaserControl::pauseRequested);
+    connect(m_btnResume, &QPushButton::clicked, this, &WidgetLaserControl::resumeRequested);
+    connect(m_btnStop, &QPushButton::clicked, this, &WidgetLaserControl::stopRequested);
+    updateRunState(lcnc::ProcessRunState::Idle);
 
-    this->layout()->addWidget(group);
+    m_controlLayout->addWidget(group);
+}
+
+void WidgetLaserControl::buildIoGroup()
+{
+    m_ioGroup = new QGroupBox(tr("IO 状态"), this);
+    auto* grid = new QGridLayout(m_ioGroup);
+    const QStringList names = { tr("激光"), tr("吹气"), tr("夹头"), tr("水冷"), tr("气泵") };
+    for (int index = 0; index < names.size(); ++index) {
+        const QString name = names.at(index);
+        auto* button = new QPushButton(name, m_ioGroup);
+        button->setCheckable(true);
+        button->setMinimumHeight(30);
+        button->setToolTip(tr("点击切换 %1 输出").arg(name));
+        m_ioButtons.insert(name, button);
+        updateIoButtonStyle(name, false);
+        connect(button, &QPushButton::clicked, this, [this, name](bool checked) {
+            updateIoButtonStyle(name, checked);
+            emit digitalOutputToggled(name, checked);
+        });
+        grid->addWidget(button, index / 2, index % 2);
+    }
+    m_controlLayout->addWidget(m_ioGroup);
+}
+
+void WidgetLaserControl::buildDeviceGroup()
+{
+    m_deviceGroup = new QGroupBox(tr("设备状态"), m_monitorPage ? m_monitorPage : this);
+    auto* layout = new QVBoxLayout(m_deviceGroup);
+
+    m_deviceSummaryLabel = new QLabel(tr("等待设备状态刷新"), m_deviceGroup);
+    m_deviceSummaryLabel->setWordWrap(true);
+    layout->addWidget(m_deviceSummaryLabel);
+
+    m_deviceGrid = new QGridLayout();
+    m_deviceGrid->setColumnStretch(1, 1);
+    m_deviceGrid->setColumnStretch(2, 2);
+    layout->addLayout(m_deviceGrid);
+
+    if (m_monitorLayout)
+        m_monitorLayout->addWidget(m_deviceGroup);
+
+    refreshDeviceSummary();
+}
+
+void WidgetLaserControl::buildStatusGroup()
+{
+    auto* group = new QGroupBox(tr("状态显示"), this);
+    auto* layout = new QVBoxLayout(group);
+    m_statusLabel = new QLabel(group);
+    m_statusLabel->setAlignment(Qt::AlignCenter);
+    m_statusLabel->setWordWrap(true);
+    m_statusLabel->setMinimumHeight(36);
+    layout->addWidget(m_statusLabel);
+    m_controlLayout->addWidget(group);
+}
+
+void WidgetLaserControl::buildMonitorGroup()
+{
+    m_monitorGroup = new QGroupBox(tr("监控信息"), m_monitorPage ? m_monitorPage : this);
+    auto* layout = new QVBoxLayout(m_monitorGroup);
+    m_monitorActionLabel = new QLabel(tr("异常策略: 进入暂停"), m_monitorGroup);
+    m_monitorActionLabel->setStyleSheet("color: #475569; font-weight: 600;");
+    layout->addWidget(m_monitorActionLabel);
+
+    m_monitorSummaryLabel = new QLabel(tr("监控服务已启动，等待采样"), m_monitorGroup);
+    m_monitorSummaryLabel->setWordWrap(true);
+    m_monitorSummaryLabel->setStyleSheet("background: #E2E8F0; color: #0F172A; padding: 4px 6px; border-radius: 4px;");
+    layout->addWidget(m_monitorSummaryLabel);
+
+    m_monitorGrid = new QGridLayout();
+    m_monitorGrid->setColumnStretch(1, 1);
+    m_monitorGrid->setColumnStretch(2, 2);
+    layout->addLayout(m_monitorGrid);
+    if (m_monitorLayout)
+        m_monitorLayout->addWidget(m_monitorGroup);
 }
 
 void WidgetLaserControl::setAxisDefinitions(const QList<MachineAxisDef>& axes)
@@ -169,6 +264,7 @@ void WidgetLaserControl::rebuildJogGroup()
 
     clearLayout(m_jogGroup->layout());
     delete m_jogGroup->layout();
+    m_axisButtons.clear();
 
     auto* vlay = new QVBoxLayout(m_jogGroup);
 
@@ -199,26 +295,51 @@ void WidgetLaserControl::rebuildJogGroup()
     speedRow->addStretch();
     vlay->addLayout(speedRow);
 
+    auto* distanceRow = new QHBoxLayout();
+    distanceRow->addWidget(new QLabel(tr("距离:"), m_jogGroup));
+    m_jogDistanceSpin = new QDoubleSpinBox(m_jogGroup);
+    m_jogDistanceSpin->setRange(0.001, 1000.0);
+    m_jogDistanceSpin->setDecimals(3);
+    m_jogDistanceSpin->setSingleStep(0.1);
+    m_jogDistanceSpin->setValue(1.0);
+    m_jogDistanceSpin->setSuffix(QStringLiteral(" mm"));
+    distanceRow->addWidget(m_jogDistanceSpin);
+    vlay->addLayout(distanceRow);
+
     auto* jogGrid = new QGridLayout();
     int row = 0;
     for (const MachineAxisDef& axis : m_axisDefinitions) {
         if (axis.name == QStringLiteral("BASE"))
             continue;
 
-        auto* lblAx = new QLabel(axis.name, m_jogGroup);
-        lblAx->setAlignment(Qt::AlignCenter);
-        auto* btnPlus  = new QPushButton("▲ +", m_jogGroup);
-        auto* btnMinus = new QPushButton("▼ -", m_jogGroup);
-        btnPlus->setFixedWidth(55);
-        btnMinus->setFixedWidth(55);
+        auto* btnAxis = new QPushButton(axis.name, m_jogGroup);
+        btnAxis->setCheckable(true);
+        btnAxis->setChecked(true);
+        btnAxis->setMinimumWidth(46);
+        auto* btnPlus  = new QPushButton("+", m_jogGroup);
+        auto* btnMinus = new QPushButton("-", m_jogGroup);
+        btnPlus->setFixedWidth(46);
+        btnMinus->setFixedWidth(46);
+        btnPlus->setAutoRepeat(false);
+        btnMinus->setAutoRepeat(false);
 
-        const QString axisName = axis.name;
-        connect(btnPlus,  &QPushButton::clicked,
-                this, [this, axisName]{ emit jogRequested(axisName, +1, m_jogSpeedLevel); });
-        connect(btnMinus, &QPushButton::clicked,
-                this, [this, axisName]{ emit jogRequested(axisName, -1, m_jogSpeedLevel); });
+        const QString axisName = axis.name.trimmed().toUpper();
+        m_axisButtons.insert(axisName, btnAxis);
+        updateAxisButtonStyle(axisName, true);
+        connect(btnAxis, &QPushButton::toggled, this, [this, axisName](bool checked) {
+            updateAxisButtonStyle(axisName, checked);
+            emit axisEnableToggled(axisName, checked);
+        });
+        connect(btnPlus, &QPushButton::pressed,
+            this, [this, axisName]{ startJogHold(axisName, +1); });
+        connect(btnPlus, &QPushButton::released,
+            this, &WidgetLaserControl::stopJogHold);
+        connect(btnMinus, &QPushButton::pressed,
+            this, [this, axisName]{ startJogHold(axisName, -1); });
+        connect(btnMinus, &QPushButton::released,
+            this, &WidgetLaserControl::stopJogHold);
 
-        jogGrid->addWidget(lblAx,    row, 0);
+        jogGrid->addWidget(btnAxis,  row, 0);
         jogGrid->addWidget(btnPlus,  row, 1);
         jogGrid->addWidget(btnMinus, row, 2);
         ++row;
@@ -230,11 +351,6 @@ void WidgetLaserControl::rebuildJogGroup()
         vlay->addWidget(placeholder);
     } else {
         vlay->addLayout(jogGrid);
-
-        auto* btnHome = new QPushButton(tr("归零 (Home)"), m_jogGroup);
-        btnHome->setIcon(QIcon(":/icons/home.svg"));
-        connect(btnHome, &QPushButton::clicked, this, &WidgetLaserControl::homeRequested);
-        vlay->addWidget(btnHome);
     }
 }
 
@@ -249,38 +365,415 @@ void WidgetLaserControl::updateConnectionStatus(bool connected)
 {
     m_connected = connected;
     refreshStatusBanner();
+    refreshDeviceSummary();
 }
 
 void WidgetLaserControl::updateSimulationMode(bool enabled)
 {
     m_simulationMode = enabled;
     refreshStatusBanner();
+    refreshDeviceSummary();
 }
 
 void WidgetLaserControl::updateSystemStatus(const QString& status)
 {
     m_statusText = status;
     refreshStatusBanner();
+    refreshDeviceSummary();
+}
+
+void WidgetLaserControl::updateRunState(lcnc::ProcessRunState state)
+{
+    m_runState = state;
+    if (!m_btnRun || !m_btnPause || !m_btnResume)
+        return;
+
+    const bool running = state == lcnc::ProcessRunState::Running;
+    const bool paused = state == lcnc::ProcessRunState::Paused;
+    m_btnRun->setVisible(!running && !paused);
+    m_btnPause->setVisible(running);
+    m_btnResume->setVisible(paused);
+    if (m_btnStop)
+        m_btnStop->setVisible(true);
+    refreshStatusBanner();
+    refreshDeviceSummary();
+}
+
+void WidgetLaserControl::updateAxisEnabled(const QString& axis, bool enabled)
+{
+    const QString key = axis.trimmed().toUpper();
+    auto* button = m_axisButtons.value(key, nullptr);
+    if (!button)
+        return;
+    const QSignalBlocker blocker(button);
+    button->setChecked(enabled);
+    updateAxisButtonStyle(key, enabled);
+}
+
+void WidgetLaserControl::updateDigitalOutput(const QString& outputName, const QString& channel, bool value)
+{
+    auto* button = m_ioButtons.value(outputName, nullptr);
+    if (!button)
+        return;
+    const QSignalBlocker blocker(button);
+    button->setChecked(value);
+    if (!channel.trimmed().isEmpty())
+        button->setToolTip(tr("%1: %2").arg(outputName, channel));
+    updateIoButtonStyle(outputName, value);
+}
+
+void WidgetLaserControl::updateDeviceSessions(const QVector<lcnc::process::ProcessDeviceSession>& sessions)
+{
+    m_deviceSessions = sessions;
+
+    if (m_deviceGrid) {
+        clearLayout(m_deviceGrid);
+        m_deviceStateLabels.clear();
+        m_deviceDetailLabels.clear();
+        m_deviceRows.clear();
+
+        int row = 0;
+        for (const lcnc::process::ProcessDeviceSession& session : sessions) {
+            auto* nameLabel = new QLabel(deviceSessionTitle(session) + ":", m_deviceGroup);
+            auto* stateLabel = new QLabel(m_deviceGroup);
+            auto* detailLabel = new QLabel(m_deviceGroup);
+            detailLabel->setWordWrap(true);
+            detailLabel->setStyleSheet("color: #64748B; font-size: 11px;");
+
+            const QString key = session.instanceId;
+            m_deviceRows.insert(key, row);
+            m_deviceStateLabels.insert(key, stateLabel);
+            m_deviceDetailLabels.insert(key, detailLabel);
+
+            const QString stateText = session.enabled
+                ? deviceStateText(session.connectionState)
+                : tr("禁用");
+            const QString stateStyle = session.enabled
+                ? deviceStateStyle(session.connectionState)
+                : QStringLiteral("color: #64748B; font-weight: 600;");
+
+            QStringList detailParts;
+            detailParts.append(tr("实例: %1").arg(session.instanceId));
+            if (!session.enabled)
+                detailParts.append(tr("当前未启用"));
+            if (!session.lastError.trimmed().isEmpty())
+                detailParts.append(tr("异常: %1").arg(session.lastError.trimmed()));
+
+            stateLabel->setText(stateText);
+            stateLabel->setStyleSheet(stateStyle);
+            detailLabel->setText(detailParts.join(tr("；")));
+
+            m_deviceGrid->addWidget(nameLabel, row, 0);
+            m_deviceGrid->addWidget(stateLabel, row, 1);
+            m_deviceGrid->addWidget(detailLabel, row, 2);
+            ++row;
+        }
+
+        if (row == 0) {
+            auto* placeholder = new QLabel(tr("设备管理器尚未返回活动外设"), m_deviceGroup);
+            placeholder->setStyleSheet("color: #64748B; font-size: 11px;");
+            m_deviceGrid->addWidget(placeholder, 0, 0, 1, 3);
+        }
+    }
+
+    refreshDeviceSummary();
+}
+
+void WidgetLaserControl::updateMonitorSnapshot(const lcnc::process::ProcessMonitorSnapshot& snapshot)
+{
+    m_monitorSnapshot = snapshot;
+    if (m_monitorActionLabel)
+        m_monitorActionLabel->setText(tr("异常策略: %1").arg(monitorActionText(snapshot.faultAction)));
+
+    if (m_monitorSummaryLabel) {
+        const QString summary = snapshot.summary.trimmed().isEmpty()
+            ? tr("监控服务已启动，等待采样")
+            : snapshot.summary;
+        const QString style = snapshot.hasActiveAlarm()
+            ? QStringLiteral("background: #7F1D1D; color: white; padding: 4px 6px; border-radius: 4px;")
+            : QStringLiteral("background: #E2E8F0; color: #0F172A; padding: 4px 6px; border-radius: 4px;");
+        m_monitorSummaryLabel->setText(summary);
+        m_monitorSummaryLabel->setStyleSheet(style);
+    }
+
+    if (!m_monitorGrid)
+        return;
+
+    for (const lcnc::process::ProcessMonitorStateItem& state : snapshot.states) {
+        if (!m_monitorRows.contains(state.id)) {
+            const int row = m_monitorRows.size();
+            m_monitorRows.insert(state.id, row);
+
+            auto* nameLabel = new QLabel(state.title + ":", m_monitorGroup);
+            auto* valueLabel = new QLabel(m_monitorGroup);
+            auto* detailLabel = new QLabel(m_monitorGroup);
+            detailLabel->setWordWrap(true);
+            detailLabel->setStyleSheet("color: #64748B; font-size: 11px;");
+            m_monitorGrid->addWidget(nameLabel, row, 0);
+            m_monitorGrid->addWidget(valueLabel, row, 1);
+            m_monitorGrid->addWidget(detailLabel, row, 2);
+            m_monitorValueLabels.insert(state.id, valueLabel);
+            m_monitorDetailLabels.insert(state.id, detailLabel);
+        }
+
+        QLabel* valueLabel = m_monitorValueLabels.value(state.id, nullptr);
+        QLabel* detailLabel = m_monitorDetailLabels.value(state.id, nullptr);
+        if (!valueLabel || !detailLabel)
+            continue;
+
+        QString valueText;
+        QString valueStyle = QStringLiteral("color: #0F172A; font-weight: 600;");
+        if (!state.enabled) {
+            valueText = tr("关闭");
+            valueStyle = QStringLiteral("color: #64748B;");
+        } else if (!state.available) {
+            valueText = tr("不可用");
+            valueStyle = QStringLiteral("color: #B45309; font-weight: 600;");
+        } else if (state.digital) {
+            valueText = state.alarm ? tr("告警") : tr("正常");
+            valueStyle = state.alarm
+                ? QStringLiteral("color: #B91C1C; font-weight: 700;")
+                : QStringLiteral("color: #15803D; font-weight: 600;");
+        } else {
+            valueText = tr("%1 %2").arg(QString::number(state.displayValue, 'f', 3), state.unit);
+            valueStyle = state.alarm
+                ? QStringLiteral("color: #B91C1C; font-weight: 700;")
+                : QStringLiteral("color: #0F172A; font-weight: 600;");
+        }
+
+        valueLabel->setText(valueText);
+        valueLabel->setStyleSheet(valueStyle);
+        detailLabel->setText(state.detail);
+        detailLabel->setToolTip(tr("通道: %1").arg(state.channel));
+    }
+}
+
+void WidgetLaserControl::appendLogMessage(const QString& level, const QString& message)
+{
+    if (!m_logView || message.trimmed().isEmpty())
+        return;
+    const QString time = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
+    const QString normalizedLevel = level.trimmed().isEmpty() ? QStringLiteral("info") : level.trimmed().toLower();
+    const QString html = QStringLiteral("<div><span style='color:#94A3B8'>[%1]</span> "
+                                        "<span style='color:%2'>[%3]</span> %4</div>")
+        .arg(time,
+             logColor(normalizedLevel),
+             normalizedLevel.toUpper().toHtmlEscaped(),
+             message.toHtmlEscaped());
+    m_logView->append(html);
+}
+
+void WidgetLaserControl::startJogHold(const QString& axis, int direction)
+{
+    m_activeJogAxis = axis;
+    m_activeJogDirection = direction;
+    emitJogRequest(axis, direction);
+    if (m_jogHoldTimer)
+        m_jogHoldTimer->start();
+}
+
+void WidgetLaserControl::stopJogHold()
+{
+    if (m_jogHoldTimer)
+        m_jogHoldTimer->stop();
+    m_activeJogAxis.clear();
+    m_activeJogDirection = 0;
+}
+
+void WidgetLaserControl::emitJogRequest(const QString& axis, int direction)
+{
+    const double distance = m_jogDistanceSpin ? m_jogDistanceSpin->value() : 1.0;
+    emit jogRequested(axis, direction, m_jogSpeedLevel, distance);
+}
+
+void WidgetLaserControl::updateAxisButtonStyle(const QString& axis, bool enabled)
+{
+    auto* button = m_axisButtons.value(axis.trimmed().toUpper(), nullptr);
+    if (!button)
+        return;
+    button->setStyleSheet(enabled
+        ? QStringLiteral("background-color: #18864B; color: white; font-weight: 600;")
+        : QStringLiteral("background-color: #6B7280; color: white;"));
+}
+
+void WidgetLaserControl::updateIoButtonStyle(const QString& outputName, bool value)
+{
+    auto* button = m_ioButtons.value(outputName, nullptr);
+    if (!button)
+        return;
+    button->setStyleSheet(value
+        ? QStringLiteral("background-color: #16A34A; color: white; font-weight: 600;")
+        : QStringLiteral("background-color: #B91C1C; color: white;"));
 }
 
 void WidgetLaserControl::refreshStatusBanner()
 {
+    if (!m_statusLabel)
+        return;
     const QString fallback = m_simulationMode
         ? (m_connected ? tr("仿真模式 — 控制器已连接") : tr("仿真模式 — 未连接"))
         : (m_connected ? tr("控制器模式 — 已连接") : tr("控制器模式 — 未连接"));
-    const QString text = m_statusText.isEmpty() ? fallback : m_statusText;
+    const QString status = m_statusText.isEmpty() ? fallback : m_statusText;
+    const QString text = tr("状态机: %1\n%2").arg(stateText(m_runState), status);
 
     QString style = QStringLiteral("background: #333; color: #AAFFAA; padding: 2px 4px; border-radius: 3px;");
-    if (text.contains(tr("急停"))) {
+    if (m_runState == lcnc::ProcessRunState::EmergencyStop) {
         style = QStringLiteral("background: #7F1D1D; color: white; padding: 2px 4px; border-radius: 3px;");
-    } else if (text.contains(tr("错误")) || text.contains(tr("无法"))) {
+    } else if (m_runState == lcnc::ProcessRunState::Error) {
         style = QStringLiteral("background: #92400E; color: white; padding: 2px 4px; border-radius: 3px;");
-    } else if (text.contains(tr("暂停"))) {
+    } else if (m_runState == lcnc::ProcessRunState::Paused) {
         style = QStringLiteral("background: #B45309; color: white; padding: 2px 4px; border-radius: 3px;");
+    } else if (m_runState == lcnc::ProcessRunState::Running) {
+        style = QStringLiteral("background: #14532D; color: #A7F3D0; padding: 2px 4px; border-radius: 3px;");
     } else if (m_connected && !m_simulationMode) {
         style = QStringLiteral("background: #1B5E20; color: #00FF88; padding: 2px 4px; border-radius: 3px;");
     }
 
     m_statusLabel->setText(text);
     m_statusLabel->setStyleSheet(style);
+}
+
+QString WidgetLaserControl::stateText(lcnc::ProcessRunState state) const
+{
+    switch (state) {
+    case lcnc::ProcessRunState::Idle:
+        return tr("空闲");
+    case lcnc::ProcessRunState::Running:
+        return tr("运行中");
+    case lcnc::ProcessRunState::Paused:
+        return tr("暂停");
+    case lcnc::ProcessRunState::Error:
+        return tr("错误");
+    case lcnc::ProcessRunState::EmergencyStop:
+        return tr("急停");
+    }
+    return tr("未知");
+}
+
+QString WidgetLaserControl::monitorActionText(lcnc::ProcessMonitorFaultAction action) const
+{
+    switch (action) {
+    case lcnc::ProcessMonitorFaultAction::Continue:
+        return tr("继续加工");
+    case lcnc::ProcessMonitorFaultAction::Pause:
+        return tr("进入暂停");
+    case lcnc::ProcessMonitorFaultAction::Stop:
+        return tr("停止加工");
+    }
+    return tr("进入暂停");
+}
+
+QString WidgetLaserControl::deviceStateText(lcnc::process::ProcessDeviceConnectionState state) const
+{
+    switch (state) {
+    case lcnc::process::ProcessDeviceConnectionState::Disconnected:
+        return tr("未连接");
+    case lcnc::process::ProcessDeviceConnectionState::Connecting:
+        return tr("连接中");
+    case lcnc::process::ProcessDeviceConnectionState::Connected:
+        return tr("已连接");
+    case lcnc::process::ProcessDeviceConnectionState::Disconnecting:
+        return tr("断开中");
+    case lcnc::process::ProcessDeviceConnectionState::Error:
+        return tr("异常");
+    }
+    return tr("未知");
+}
+
+QString WidgetLaserControl::deviceStateStyle(lcnc::process::ProcessDeviceConnectionState state) const
+{
+    switch (state) {
+    case lcnc::process::ProcessDeviceConnectionState::Connected:
+        return QStringLiteral("color: #15803D; font-weight: 700;");
+    case lcnc::process::ProcessDeviceConnectionState::Connecting:
+    case lcnc::process::ProcessDeviceConnectionState::Disconnecting:
+        return QStringLiteral("color: #1D4ED8; font-weight: 600;");
+    case lcnc::process::ProcessDeviceConnectionState::Error:
+        return QStringLiteral("color: #B91C1C; font-weight: 700;");
+    case lcnc::process::ProcessDeviceConnectionState::Disconnected:
+        return QStringLiteral("color: #64748B; font-weight: 600;");
+    }
+    return QStringLiteral("color: #0F172A; font-weight: 600;");
+}
+
+QString WidgetLaserControl::deviceKindText(lcnc::process::ProcessDeviceKind kind) const
+{
+    switch (kind) {
+    case lcnc::process::ProcessDeviceKind::MotionController:
+        return tr("控制器");
+    case lcnc::process::ProcessDeviceKind::Laser:
+        return tr("激光器");
+    case lcnc::process::ProcessDeviceKind::Io:
+        return tr("IO外设");
+    case lcnc::process::ProcessDeviceKind::Aux:
+        return tr("辅助设备");
+    }
+    return tr("设备");
+}
+
+QString WidgetLaserControl::deviceSessionTitle(const lcnc::process::ProcessDeviceSession& session) const
+{
+    const QString name = session.displayName.trimmed().isEmpty()
+        ? session.descriptorName.trimmed()
+        : session.displayName.trimmed();
+    if (name.isEmpty())
+        return deviceKindText(session.kind);
+    return tr("%1 - %2").arg(deviceKindText(session.kind), name);
+}
+
+void WidgetLaserControl::refreshDeviceSummary()
+{
+    if (!m_deviceSummaryLabel)
+        return;
+
+    int enabledCount = 0;
+    int connectedCount = 0;
+    int errorCount = 0;
+    for (const lcnc::process::ProcessDeviceSession& session : std::as_const(m_deviceSessions)) {
+        if (!session.enabled)
+            continue;
+        ++enabledCount;
+        if (session.connectionState == lcnc::process::ProcessDeviceConnectionState::Connected)
+            ++connectedCount;
+        if (session.connectionState == lcnc::process::ProcessDeviceConnectionState::Error || !session.lastError.trimmed().isEmpty())
+            ++errorCount;
+    }
+
+    const QString modeText = m_simulationMode ? tr("纯仿真") : tr("控制器联机");
+    QString summary = tr("模式: %1  流程: %2").arg(modeText, stateText(m_runState));
+    if (enabledCount > 0)
+        summary += tr("  已连接设备: %1/%2").arg(connectedCount).arg(enabledCount);
+    else
+        summary += tr("  已连接: %1").arg(m_connected ? tr("是") : tr("否"));
+    if (errorCount > 0)
+        summary += tr("  异常设备: %1").arg(errorCount);
+    if (!m_statusText.trimmed().isEmpty())
+        summary += tr("\n%1").arg(m_statusText.trimmed());
+
+    QString style = QStringLiteral("background: #E2E8F0; color: #0F172A; padding: 4px 6px; border-radius: 4px;");
+    if (m_runState == lcnc::ProcessRunState::EmergencyStop || m_runState == lcnc::ProcessRunState::Error || errorCount > 0) {
+        style = QStringLiteral("background: #7F1D1D; color: white; padding: 4px 6px; border-radius: 4px;");
+    } else if (m_runState == lcnc::ProcessRunState::Paused) {
+        style = QStringLiteral("background: #B45309; color: white; padding: 4px 6px; border-radius: 4px;");
+    } else if (enabledCount > 0 && connectedCount == enabledCount) {
+        style = QStringLiteral("background: #14532D; color: #DCFCE7; padding: 4px 6px; border-radius: 4px;");
+    }
+
+    m_deviceSummaryLabel->setText(summary);
+    m_deviceSummaryLabel->setStyleSheet(style);
+}
+
+QString WidgetLaserControl::logColor(const QString& level) const
+{
+    if (level == QStringLiteral("error"))
+        return QStringLiteral("#F87171");
+    if (level == QStringLiteral("warn") || level == QStringLiteral("warning"))
+        return QStringLiteral("#FBBF24");
+    if (level == QStringLiteral("state"))
+        return QStringLiteral("#A78BFA");
+    if (level == QStringLiteral("operation"))
+        return QStringLiteral("#60A5FA");
+    if (level == QStringLiteral("process"))
+        return QStringLiteral("#34D399");
+    return QStringLiteral("#CBD5E1");
 }

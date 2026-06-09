@@ -10,6 +10,7 @@
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "modules/process/i_process_facade.h"
+#include "modules/process/monitor/process_monitor_types.h"
 #include "modules/process/settings/process_settings.h"
 #include "modules/process/workflow/process_flow_document.h"
 
@@ -19,6 +20,7 @@ namespace lcnc::process {
 class ProcessDeviceManager;
 class ProcessDeviceCoordinator;
 class ProcessExecutionService;
+class ProcessMonitorService;
 class ProcessRuntime;
 class ProcessToolpathService;
 class ProcessWorkflowService;
@@ -30,6 +32,7 @@ namespace lcnc::cam { class ICamToolpathProvider; }
 namespace lcnc {
 class IKernel;
 class IMotionController;
+class MachineConfigurationService;
 }
 
 /**
@@ -63,6 +66,8 @@ public:
 
     bool connectController(const QString& endpoint) override;
     void disconnectController() override;
+    bool connectDevices() override;
+    void disconnectDevices() override;
     bool isConnected() const override;
 
     void setSimulationMode(bool on) override;
@@ -70,7 +75,11 @@ public:
 
     void setAxisDefinitions(const QList<MachineAxisDef>& axes);
 
-    void jog(const QString& axisName, int direction, int speedLevel);
+    void jog(const QString& axisName, int direction, int speedLevel, double distance = 0.0);
+    void setAxisEnabled(const QString& axisName, bool enabled);
+    QMap<QString, bool> axisEnabledStates() const { return m_axisEnabled; }
+    void setDigitalOutput(const QString& outputName, bool value);
+    QMap<QString, bool> digitalOutputStates() const { return m_digitalOutputs; }
     void home() override;
 
     /// 启动加工运行（仿真或控制器）。
@@ -102,6 +111,7 @@ public:
 
     lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
     const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
+    lcnc::process::ProcessMonitorSnapshot monitorSnapshot() const { return m_monitorSnapshot; }
 
     lcnc::process::ProcessDeviceManager* deviceManager() const { return m_deviceManager.get(); }
     void reloadDeviceSettings();
@@ -113,17 +123,29 @@ signals:
     void simulationModeChanged(bool enabled);
     void stateChanged(State state);
     void axisPositionChanged(const QString& axisName, double value);
+    void axisEnabledChanged(const QString& axisName, bool enabled);
+    void digitalOutputChanged(const QString& outputName, const QString& channel, bool value);
     void feedOverrideChanged(double factor);
     void statusMessageChanged(const QString& message);
+    void processLogMessage(const QString& level, const QString& message);
     void processFlowChanged();
+    void monitorSnapshotChanged(const lcnc::process::ProcessMonitorSnapshot& snapshot);
 
 private slots:
     void onSimulationTick();
 
 private:
     void initializeAxisPositions();
+    void initializeAxisEnabledStates();
     bool switchMotionControllerFromSettings(QString* errorMessage = nullptr);
     void registerActiveMotionControllerService();
+    void startDeviceAcquisition();
+    void stopDeviceAcquisition();
+    void pollDeviceSnapshotAsync();
+    void safeStopProcessOutputs();
+    bool executeCuttingCommandBuffer(bool dryRun, QString* errorMessage = nullptr);
+    void applyMonitorSnapshot(const lcnc::process::ProcessMonitorSnapshot& snapshot);
+    void handleMonitorAlarmRaised(const lcnc::process::ProcessMonitorAlarm& alarm);
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
 
@@ -135,6 +157,9 @@ private:
     State m_state{State::Idle};
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, double> m_axisPositions;
+    QMap<QString, bool> m_axisEnabled;
+    QMap<QString, bool> m_digitalOutputs;
+    std::shared_ptr<lcnc::MachineConfigurationService> m_machineConfig;
     QTimer* m_simTimer{nullptr};
     double m_feedOverride{1.0};
     double m_simPhase{0.0};
@@ -145,10 +170,12 @@ private:
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_toolpathProvider;
     std::unique_ptr<lcnc::process::ProcessDeviceManager> m_deviceManager;
     std::unique_ptr<lcnc::process::ProcessDeviceCoordinator> m_deviceCoordinator;
+    std::unique_ptr<lcnc::process::ProcessMonitorService> m_monitorService;
     std::unique_ptr<lcnc::process::ProcessRuntime> m_runtime;
     std::unique_ptr<lcnc::process::ProcessToolpathService> m_toolpathService;
     std::unique_ptr<lcnc::process::ProcessWorkflowService> m_workflowService;
     std::unique_ptr<lcnc::process::ProcessExecutionService> m_executionService;
     std::unique_ptr<lcnc::IMotionController> m_motionController;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
+    lcnc::process::ProcessMonitorSnapshot m_monitorSnapshot;
 };

@@ -6,6 +6,7 @@
 #include "view/rendering_manager.h"
 
 #include <QApplication>
+#include <QAbstractItemView>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -15,11 +16,13 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QHeaderView>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include <QTableWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -30,6 +33,116 @@ namespace lcnc {
 
 namespace {
 constexpr const char* kAxes[] = {"BASE", "X", "Y", "Z", "A", "B", "C"};
+
+QStringList machinePresetNames()
+{
+    return {
+        QStringLiteral("XYZ"),
+        QStringLiteral("XYZA"),
+        QStringLiteral("VERTICAL_AC_TABLE"),
+        QStringLiteral("VERTICAL_BC_TABLE"),
+        QStringLiteral("AB_HEAD"),
+        QStringLiteral("AC_HEAD")
+    };
+}
+
+QString machinePresetText(const QString& preset)
+{
+    if (preset == QStringLiteral("XYZ"))
+        return QStringLiteral("三轴 XYZ");
+    if (preset == QStringLiteral("XYZA"))
+        return QStringLiteral("四轴 XYZA");
+    if (preset == QStringLiteral("VERTICAL_AC_TABLE"))
+        return QStringLiteral("立式 AC 转台");
+    if (preset == QStringLiteral("VERTICAL_BC_TABLE"))
+        return QStringLiteral("立式 BC 转台");
+    if (preset == QStringLiteral("AB_HEAD"))
+        return QStringLiteral("AB 摆头");
+    if (preset == QStringLiteral("AC_HEAD"))
+        return QStringLiteral("AC 摆头");
+    return preset;
+}
+
+gp_Dir defaultMachineAxisDirection(const QString& name, MachineAxisDef::MotionType type)
+{
+    const QString axisName = name.trimmed().toUpper();
+    if (type == MachineAxisDef::Rotary) {
+        if (axisName == QStringLiteral("A"))
+            return gp_Dir(1, 0, 0);
+        if (axisName == QStringLiteral("B"))
+            return gp_Dir(0, 1, 0);
+        return gp_Dir(0, 0, 1);
+    }
+    if (axisName == QStringLiteral("X"))
+        return gp_Dir(1, 0, 0);
+    if (axisName == QStringLiteral("Y"))
+        return gp_Dir(0, 1, 0);
+    return gp_Dir(0, 0, 1);
+}
+
+QVector<MachineAxisRuntimeConfig> machineConfigsForPreset(const QString& preset)
+{
+    MachineKinematics kinematics;
+    kinematics.loadPreset(preset);
+    QVector<MachineAxisRuntimeConfig> configs;
+    int index = 0;
+    for (const MachineAxisDef& axis : kinematics.axes()) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+        MachineAxisRuntimeConfig config;
+        config.axis = axis;
+        config.controllerIndex = index;
+        config.homeIndex = index;
+        configs.append(config);
+        ++index;
+    }
+    return configs;
+}
+
+QString algorithmTextForAxes(const QString& preset, const QList<MachineAxisDef>& axes)
+{
+    int rotaryCount = 0;
+    for (const MachineAxisDef& axis : axes) {
+        if (axis.motionType == MachineAxisDef::Rotary)
+            ++rotaryCount;
+    }
+    if (rotaryCount <= 0)
+        return machineToolpathAlgorithmName(MachineToolpathAlgorithm::ThreeAxis);
+    if (preset.toUpper().contains(QStringLiteral("HEAD")))
+        return machineToolpathAlgorithmName(MachineToolpathAlgorithm::FiveAxisHead);
+    return machineToolpathAlgorithmName(MachineToolpathAlgorithm::FiveAxisTable);
+}
+
+QTableWidgetItem* machineAxisTableItem(const QString& text, bool editable = true)
+{
+    auto* item = new QTableWidgetItem(text);
+    if (!editable)
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    return item;
+}
+
+bool sameMachineAxisDefinitions(const QVector<MachineAxisRuntimeConfig>& configs,
+                                const QList<MachineAxisDef>& axes)
+{
+    if (configs.size() != axes.size())
+        return false;
+    for (int i = 0; i < configs.size(); ++i) {
+        const MachineAxisDef& lhs = configs.at(i).axis;
+        const MachineAxisDef& rhs = axes.at(i);
+        if (lhs.name != rhs.name
+            || lhs.motionType != rhs.motionType
+            || lhs.parentAxis != rhs.parentAxis
+            || !qFuzzyCompare(lhs.direction.X(), rhs.direction.X())
+            || !qFuzzyCompare(lhs.direction.Y(), rhs.direction.Y())
+            || !qFuzzyCompare(lhs.direction.Z(), rhs.direction.Z())
+            || !qFuzzyCompare(lhs.origin.X(), rhs.origin.X())
+            || !qFuzzyCompare(lhs.origin.Y(), rhs.origin.Y())
+            || !qFuzzyCompare(lhs.origin.Z(), rhs.origin.Z())) {
+            return false;
+        }
+    }
+    return true;
+}
 
 void styleColorButton(QPushButton* btn, const QColor& color)
 {
@@ -145,6 +258,7 @@ DialogOptions::DialogOptions(QWidget* parent)
     LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions ctor");
     setWindowTitle(tr("应用程序选项"));
     resize(980, 680);
+    m_machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
     buildUi();
     loadFromSettings();
 }
@@ -175,10 +289,15 @@ void DialogOptions::buildUi()
     itemColors->setData(0, Qt::UserRole, 1);
     auto* itemApp = new QTreeWidgetItem(m_nav, QStringList(tr("应用程序")));
     itemApp->setData(0, Qt::UserRole, 2);
+    auto* itemMachine = new QTreeWidgetItem(m_nav, QStringList(tr("机台构型")));
+    itemMachine->setData(0, Qt::UserRole, 3);
 
     buildRenderPage(tr("视图渲染"), true, m_renderControls);
     buildColorPage();
     buildApplicationPage();
+    buildMachineConfigurationPage();
+    Q_UNUSED(itemApp);
+    Q_UNUSED(itemMachine);
 
     connect(m_nav, &QTreeWidget::currentItemChanged, this,
             [this](QTreeWidgetItem* current, QTreeWidgetItem*) {
@@ -444,6 +563,157 @@ void DialogOptions::buildApplicationPage()
     m_stack->addWidget(page);
 }
 
+void DialogOptions::buildMachineConfigurationPage()
+{
+    auto* page = new QWidget(this);
+    auto* root = new QVBoxLayout(page);
+
+    auto* group = new QGroupBox(tr("机台构型"), page);
+    auto* form = new QFormLayout(group);
+    m_cbMachinePreset = new QComboBox(group);
+    for (const QString& preset : machinePresetNames())
+        m_cbMachinePreset->addItem(machinePresetText(preset), preset);
+    form->addRow(tr("构型"), m_cbMachinePreset);
+
+    m_lblMachineAlgorithm = new QLabel(group);
+    m_lblMachineAlgorithm->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    form->addRow(tr("刀路算法"), m_lblMachineAlgorithm);
+    root->addWidget(group);
+
+    m_machineAxesTable = new QTableWidget(page);
+    m_machineAxesTable->setColumnCount(9);
+    m_machineAxesTable->setHorizontalHeaderLabels({
+        tr("轴名"), tr("类型"), tr("父轴"), tr("方向X"), tr("方向Y"), tr("方向Z"),
+        tr("原点X"), tr("原点Y"), tr("原点Z")
+    });
+    m_machineAxesTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_machineAxesTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_machineAxesTable->verticalHeader()->setVisible(false);
+    m_machineAxesTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_machineAxesTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_machineAxesTable->setAlternatingRowColors(true);
+    root->addWidget(m_machineAxesTable, 1);
+
+    connect(m_cbMachinePreset, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this] {
+                if (m_loadingUi || !m_cbMachinePreset)
+                    return;
+                populateMachineAxisTable(machineConfigsForPreset(m_cbMachinePreset->currentData().toString()));
+            });
+
+    m_stack->addWidget(page);
+}
+
+void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeConfig>& configs)
+{
+    if (!m_machineAxesTable)
+        return;
+    m_machineAxesTable->setRowCount(0);
+
+    QStringList parentCandidates{QStringLiteral("BASE")};
+    for (const MachineAxisRuntimeConfig& config : configs) {
+        const QString name = config.axis.name.trimmed().toUpper();
+        if (!name.isEmpty() && name != QStringLiteral("BASE") && !parentCandidates.contains(name))
+            parentCandidates.append(name);
+    }
+
+    for (const MachineAxisRuntimeConfig& config : configs) {
+        const QString name = config.axis.name.trimmed().toUpper();
+        if (name.isEmpty() || name == QStringLiteral("BASE"))
+            continue;
+        const int row = m_machineAxesTable->rowCount();
+        m_machineAxesTable->insertRow(row);
+        auto* nameItem = machineAxisTableItem(name, false);
+        nameItem->setData(Qt::UserRole, config.axis.minVal);
+        nameItem->setData(Qt::UserRole + 1, config.axis.maxVal);
+        m_machineAxesTable->setItem(row, 0, nameItem);
+
+        auto* typeCombo = new QComboBox(m_machineAxesTable);
+        typeCombo->addItem(tr("线性"), static_cast<int>(MachineAxisDef::Linear));
+        typeCombo->addItem(tr("旋转"), static_cast<int>(MachineAxisDef::Rotary));
+        typeCombo->setCurrentIndex(config.axis.motionType == MachineAxisDef::Rotary ? 1 : 0);
+        connect(typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this] {
+                    if (m_lblMachineAlgorithm && m_cbMachinePreset)
+                        m_lblMachineAlgorithm->setText(
+                            algorithmTextForAxes(m_cbMachinePreset->currentData().toString(),
+                                                 collectMachineAxisDefinitions()));
+                });
+        m_machineAxesTable->setCellWidget(row, 1, typeCombo);
+
+        auto* parentCombo = new QComboBox(m_machineAxesTable);
+        for (const QString& parent : parentCandidates) {
+            if (parent != name)
+                parentCombo->addItem(parent, parent);
+        }
+        QString parentAxis = config.axis.parentAxis.trimmed().toUpper();
+        if (parentAxis.isEmpty())
+            parentAxis = QStringLiteral("BASE");
+        const int parentIndex = parentCombo->findData(parentAxis);
+        parentCombo->setCurrentIndex(parentIndex >= 0 ? parentIndex : 0);
+        m_machineAxesTable->setCellWidget(row, 2, parentCombo);
+
+        m_machineAxesTable->setItem(row, 3, machineAxisTableItem(QString::number(config.axis.direction.X(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 4, machineAxisTableItem(QString::number(config.axis.direction.Y(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 5, machineAxisTableItem(QString::number(config.axis.direction.Z(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 6, machineAxisTableItem(QString::number(config.axis.origin.X(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 7, machineAxisTableItem(QString::number(config.axis.origin.Y(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 8, machineAxisTableItem(QString::number(config.axis.origin.Z(), 'g', 15)));
+    }
+
+    if (m_lblMachineAlgorithm && m_cbMachinePreset)
+        m_lblMachineAlgorithm->setText(
+            algorithmTextForAxes(m_cbMachinePreset->currentData().toString(), collectMachineAxisDefinitions()));
+}
+
+QList<MachineAxisDef> DialogOptions::collectMachineAxisDefinitions() const
+{
+    QList<MachineAxisDef> axes;
+    if (!m_machineAxesTable)
+        return axes;
+
+    auto itemText = [this](int row, int column) {
+        QTableWidgetItem* item = m_machineAxesTable->item(row, column);
+        return item ? item->text().trimmed() : QString();
+    };
+    auto itemDouble = [&](int row, int column, double fallback) {
+        bool ok = false;
+        const double value = itemText(row, column).toDouble(&ok);
+        return ok ? value : fallback;
+    };
+
+    for (int row = 0; row < m_machineAxesTable->rowCount(); ++row) {
+        const QString name = itemText(row, 0).toUpper();
+        if (name.isEmpty() || name == QStringLiteral("BASE"))
+            continue;
+        MachineAxisDef axis;
+        axis.name = name;
+        axis.motionType = MachineAxisDef::Linear;
+        if (auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 1)))
+            axis.motionType = static_cast<MachineAxisDef::MotionType>(combo->currentData().toInt());
+        if (auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 2)))
+            axis.parentAxis = combo->currentData().toString();
+        if (axis.parentAxis.trimmed().isEmpty())
+            axis.parentAxis = QStringLiteral("BASE");
+
+        const gp_Dir fallbackDirection = defaultMachineAxisDirection(name, axis.motionType);
+        const double dx = itemDouble(row, 3, fallbackDirection.X());
+        const double dy = itemDouble(row, 4, fallbackDirection.Y());
+        const double dz = itemDouble(row, 5, fallbackDirection.Z());
+        const double norm2 = dx * dx + dy * dy + dz * dz;
+        axis.direction = norm2 > 1e-12 ? gp_Dir(dx, dy, dz) : fallbackDirection;
+        axis.origin = gp_Pnt(itemDouble(row, 6, 0.0),
+                             itemDouble(row, 7, 0.0),
+                             itemDouble(row, 8, 0.0));
+        if (QTableWidgetItem* nameItem = m_machineAxesTable->item(row, 0)) {
+            axis.minVal = nameItem->data(Qt::UserRole).toDouble();
+            axis.maxVal = nameItem->data(Qt::UserRole + 1).toDouble();
+        }
+        axes.append(axis);
+    }
+    return axes;
+}
+
 void DialogOptions::loadFromSettings()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions::loadFromSettings begin");
@@ -490,6 +760,21 @@ void DialogOptions::loadFromSettings()
     setComboByData(m_cbTheme, settings->theme);
     setComboByData(m_cbUnits, settings->unitSystem);
     m_spRecentLimit->setValue(settings->recentLimit);
+    if (m_machineConfig) {
+        m_originalMachinePreset = m_machineConfig->presetName();
+        m_originalMachineConfigs = m_machineConfig->axisConfigurations();
+        setComboByData(m_cbMachinePreset, m_originalMachinePreset);
+        populateMachineAxisTable(m_originalMachineConfigs);
+    } else {
+        m_originalMachinePreset = QStringLiteral("VERTICAL_AC_TABLE");
+        m_originalMachineConfigs = machineConfigsForPreset(m_originalMachinePreset);
+        setComboByData(m_cbMachinePreset, m_originalMachinePreset);
+        populateMachineAxisTable(m_originalMachineConfigs);
+        if (m_machineAxesTable)
+            m_machineAxesTable->setEnabled(false);
+        if (m_cbMachinePreset)
+            m_cbMachinePreset->setEnabled(false);
+    }
     applyTreeSelectionColor(m_colorDraft.treeSelectionColor);
     m_loadingUi = false;
     LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions::loadFromSettings end");
@@ -651,6 +936,10 @@ bool DialogOptions::applyChanges()
     const QString newTheme = m_cbTheme->currentData().toString();
     const QString newUnits = m_cbUnits->currentData().toString();
     const int newRecentLimit = m_spRecentLimit->value();
+    const QString newMachinePreset = m_cbMachinePreset
+        ? m_cbMachinePreset->currentData().toString()
+        : m_originalMachinePreset;
+    const QList<MachineAxisDef> newMachineAxes = collectMachineAxisDefinitions();
 
     const bool cadRuntimeDirty = !profileRuntimeEqual(m_originalCad, m_renderDraft);
     const bool camRuntimeDirty = !profileRuntimeEqual(m_originalCam, m_renderDraft);
@@ -665,10 +954,13 @@ bool DialogOptions::applyChanges()
         || m_originalTheme != newTheme
         || m_originalUnitSystem != newUnits
         || m_originalRecentLimit != newRecentLimit;
+    const bool machineDirty = m_machineConfig
+        && (m_originalMachinePreset != newMachinePreset
+            || !sameMachineAxisDefinitions(m_originalMachineConfigs, newMachineAxes));
 
     if (!cadRuntimeDirty && !camRuntimeDirty && !cadDefaultDirty && !camDefaultDirty
         && !cadBackgroundDirty && !camBackgroundDirty && !modelColorDirty
-        && !highlightDirty && !treeDirty && !applicationDirty) {
+        && !highlightDirty && !treeDirty && !applicationDirty && !machineDirty) {
         LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions::applyChanges no changes");
         return true;
     }
@@ -724,6 +1016,13 @@ bool DialogOptions::applyChanges()
             tr("语言修改将在重启软件后生效。"));
     }
 
+    if (machineDirty) {
+        m_machineConfig->setMachineAxisDefinitions(newMachinePreset, newMachineAxes);
+        m_originalMachinePreset = m_machineConfig->presetName();
+        m_originalMachineConfigs = m_machineConfig->axisConfigurations();
+        populateMachineAxisTable(m_originalMachineConfigs);
+    }
+
     m_originalCad = m_renderDraft;
     m_originalCam = m_renderDraft;
     m_originalColors = m_colorDraft;
@@ -733,8 +1032,8 @@ bool DialogOptions::applyChanges()
     m_originalRecentLimit = newRecentLimit;
 
     LCNC_INFO(lcnc::LogCode::Generic,
-              "Application options applied: cadRuntime={} camRuntime={} colors={} highlight={} app={}",
-              cadRuntimeDirty, camRuntimeDirty, modelColorDirty, highlightDirty, applicationDirty);
+              "Application options applied: cadRuntime={} camRuntime={} colors={} highlight={} app={} machine={}",
+              cadRuntimeDirty, camRuntimeDirty, modelColorDirty, highlightDirty, applicationDirty, machineDirty);
     return true;
 }
 

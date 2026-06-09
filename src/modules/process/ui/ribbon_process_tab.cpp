@@ -23,6 +23,7 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdOpenProcessSettings>(CmdOpenProcessSettings::Name);
     container->addCommand<CmdOpenMotionSettings>(CmdOpenMotionSettings::Name);
     container->addCommand<CmdOpenLaserSettings>(CmdOpenLaserSettings::Name);
+    container->addCommand<CmdOpenDeviceManager>(CmdOpenDeviceManager::Name);
 
     container->addCommand<CmdConnectController>(CmdConnectController::Name);
     container->addCommand<CmdDisconnectController>(CmdDisconnectController::Name);
@@ -51,7 +52,9 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     // ── 连接 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelConn = cat->addPanel(QObject::tr("连接"));
+    panelConn->addLargeAction(container->findAction(CmdOpenDeviceManager::Name));
     panelConn->addLargeAction(container->findAction(CmdConnectController::Name));
+    panelConn->addLargeAction(container->findAction(CmdHome::Name));
     panelConn->addLargeAction(container->findAction(CmdToggleSimulationMode::Name));
     panelConn->addSmallAction(container->findAction(CmdDisconnectController::Name));
 
@@ -71,7 +74,6 @@ void buildRibbonTab(SARibbonCategory* cat,
     SARibbonPanel* panelSafe = cat->addPanel(QObject::tr("安全"));
     panelSafe->addLargeAction(container->findAction(CmdEmergencyStop::Name));
     panelSafe->addSmallAction(container->findAction(CmdResetEmergencyStop::Name));
-    panelSafe->addSmallAction(container->findAction(CmdHome::Name));
 
     // ── 参数（占位） ───────────────────────────────────────────────────────
     SARibbonPanel* panelParam = cat->addPanel(QObject::tr("参数"));

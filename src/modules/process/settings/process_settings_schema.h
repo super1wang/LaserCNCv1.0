@@ -1,10 +1,10 @@
 #pragma once
 
+#include "modules/process/settings/process_settings.h"
+
 #include <QList>
 #include <QString>
 #include <QVariant>
-
-namespace lcnc { class ProcessSettings; }
 
 namespace lcnc::process {
 
@@ -72,6 +72,7 @@ struct ProcessAuxSettings
     double waterMinFlow{0.0};
     bool monitorEnabled{false};
     int monitorIntervalMs{0};
+    lcnc::ProcessMonitorSettings monitor;
     double loadingX{0.0};
     double loadingY{0.0};
     double loadingZ{0.0};

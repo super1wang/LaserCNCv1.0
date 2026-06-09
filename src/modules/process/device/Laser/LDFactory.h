@@ -5,6 +5,7 @@
 #include "IPGLaserDevice.h"
 #include "PharosLaserDevice.h"
 #include "RaycusLaserDevice.h"
+#include "RaycusAirCoolLaserDevice.h"
 #include "RaycusQCWLaserDevice.h"
 #include "SimulatorLaserDevice.h"
 #include "ULTRONLaserDevice.h"
@@ -21,6 +22,7 @@ private:
 	static IPGLaserDevice		s_IPG;
 	static PharosLaserDevice	s_Pharos;
 	static RaycusLaserDevice	s_Raycus;
+	static RaycusAirCoolLaserDevice s_RaycusAirCool;
 	static ULTRONLaserDevice	s_ULTRON;
 	static RaycusQCWLaserDevice s_RaycusQCW;
 	static AnalogLaserDevice	s_Analog;

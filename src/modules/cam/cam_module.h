@@ -29,6 +29,7 @@ class MachineKinematics;
 class GraphicsScene;
 class QTimer;
 namespace lcnc { class MachinePose; }
+namespace lcnc { class MachineConfigurationService; }
 class QPoint;
 class WidgetOccView;
 class gp_Vec;
@@ -412,6 +413,7 @@ private:
     double                      m_smoothAngle{5.0};
     bool                        m_useFaceClassification{true};
     double                      m_deflection{0.1};
+    lcnc::MachineConfigurationService* m_machineConfig{nullptr};
 
     // ── Lead-in picking preview ────────────────────────────────────────
     int    m_previewLeadInContour{-1};

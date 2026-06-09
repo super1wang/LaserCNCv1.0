@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QHash>
+#include <QMap>
 #include <QString>
 
 #include "core/kernel/i_service.h"
@@ -47,6 +48,108 @@ public:
 
     /// 急停（立刻清状态，禁止后续运动直至 reset）。
     virtual void emergencyStop() = 0;
+
+    /// 可选采集接口：返回控制器当前轴位置；未实现时返回空表。
+    virtual QMap<QString, double> axisPositions() const { return {}; }
+
+    /// 可选轴使能接口；未实现的控制器默认认为轴已使能。
+    virtual bool setAxisEnabled(const QString& axis, bool enabled)
+    {
+        Q_UNUSED(axis);
+        Q_UNUSED(enabled);
+        return true;
+    }
+    virtual bool axisEnabled(const QString& axis) const
+    {
+        Q_UNUSED(axis);
+        return true;
+    }
+
+    /// 可选回零状态接口；未实现时调用方按自身状态判断。
+    virtual bool axisHomed(const QString& axis) const
+    {
+        Q_UNUSED(axis);
+        return false;
+    }
+
+    /// 可选控制器 IO 接口；未实现时返回 false，调用方可回退到独立 IO 设备。
+    virtual bool setDigitalOutput(const QString& channel, bool value, QString* errorMessage = nullptr)
+    {
+        Q_UNUSED(channel);
+        Q_UNUSED(value);
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller digital output is not supported");
+        return false;
+    }
+    virtual bool digitalInput(const QString& channel, bool* value, QString* errorMessage = nullptr) const
+    {
+        Q_UNUSED(channel);
+        if (value)
+            *value = false;
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller digital input is not supported");
+        return false;
+    }
+    virtual bool setAnalogOutput(const QString& channel, double value, QString* errorMessage = nullptr)
+    {
+        Q_UNUSED(channel);
+        Q_UNUSED(value);
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller analog output is not supported");
+        return false;
+    }
+    virtual bool analogInput(const QString& channel, double* value, QString* errorMessage = nullptr) const
+    {
+        Q_UNUSED(channel);
+        if (value)
+            *value = 0.0;
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller analog input is not supported");
+        return false;
+    }
+
+    /// 可选控制器程序接口；ACS/GTN 适配器可将已翻译程序装入缓冲区执行。
+    virtual bool executeProgram(const QString& program,
+                                int bufferIndex,
+                                bool waitForFinish,
+                                int timeoutMs,
+                                QString* errorMessage = nullptr)
+    {
+        Q_UNUSED(program);
+        Q_UNUSED(bufferIndex);
+        Q_UNUSED(waitForFinish);
+        Q_UNUSED(timeoutMs);
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller program execution is not supported");
+        return false;
+    }
+    virtual bool programRunning(int bufferIndex, bool* running, QString* errorMessage = nullptr) const
+    {
+        Q_UNUSED(bufferIndex);
+        if (running)
+            *running = false;
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller program state is not supported");
+        return false;
+    }
+    virtual bool supportsProgramPause() const
+    {
+        return false;
+    }
+    virtual bool pauseProgram(int bufferIndex, QString* errorMessage = nullptr)
+    {
+        Q_UNUSED(bufferIndex);
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller program pause is not supported");
+        return false;
+    }
+    virtual bool resumeProgram(int bufferIndex, QString* errorMessage = nullptr)
+    {
+        Q_UNUSED(bufferIndex);
+        if (errorMessage)
+            *errorMessage = QStringLiteral("motion controller program resume is not supported");
+        return false;
+    }
 };
 
 } // namespace lcnc

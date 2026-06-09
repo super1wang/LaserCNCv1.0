@@ -1,0 +1,994 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>QG_AxisWidgetClass</class>
+ <widget class="QWidget" name="QG_AxisWidgetClass">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>220</width>
+    <height>427</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>QG_AxisWidget</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true"/>
+  </property>
+  <layout class="QGridLayout" name="gridLayout_5">
+   <property name="leftMargin">
+    <number>4</number>
+   </property>
+   <property name="topMargin">
+    <number>4</number>
+   </property>
+   <property name="rightMargin">
+    <number>4</number>
+   </property>
+   <property name="bottomMargin">
+    <number>4</number>
+   </property>
+   <property name="spacing">
+    <number>4</number>
+   </property>
+   <item row="2" column="0">
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>15</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="1" column="0">
+    <widget class="QGroupBox" name="groupBox_AxisState">
+     <property name="styleSheet">
+      <string notr="true">QLCDNumber
+{
+	background-color: #529FF0;
+    color: #000000;
+    border-radius: 8px;
+    font-size: 50px;
+    padding: 5px;
+    border: 1px solid #ddd;
+    qproperty-segmentStyle: &quot;Flat&quot;;
+}
+
+QPushButton#pushButton_AxisState_XEnable
+{
+	border-image: url(:/Axis/Axis_X_False.png);
+}
+QPushButton#pushButton_AxisState_XEnable:checked
+{
+	border-image: url(:/Axis/Axis_X_True.png);
+}
+
+QPushButton#pushButton_AxisState_X1Enable
+{
+	border-image: url(:/Axis/Axis_X1_False.png);
+}
+QPushButton#pushButton_AxisState_X1Enable:checked
+{
+	border-image: url(:/Axis/Axis_X1_True.png);
+}
+
+QPushButton#pushButton_AxisState_YEnable
+{
+	border-image: url(:/Axis/Axis_Y_False.png);
+}
+QPushButton#pushButton_AxisState_YEnable:checked
+{
+	border-image: url(:/Axis/Axis_Y_True.png);
+}
+
+QPushButton#pushButton_AxisState_Y1Enable
+{
+	border-image: url(:/Axis/Axis_Y1_False.png);
+}
+QPushButton#pushButton_AxisState_Y1Enable:checked
+{
+	border-image: url(:/Axis/Axis_Y1_True.png);
+}
+
+QPushButton#pushButton_AxisState_ZEnable
+{
+	border-image: url(:/Axis/Axis_Z_False.png);
+}
+QPushButton#pushButton_AxisState_ZEnable:checked
+{
+	border-image: url(:/Axis/Axis_Z_True.png);
+}
+
+QPushButton#pushButton_AxisState_Z1Enable
+{
+	border-image: url(:/Axis/Axis_Z1_False.png);
+}
+QPushButton#pushButton_AxisState_Z1Enable:checked
+{
+	border-image: url(:/Axis/Axis_Z1_True.png);
+}
+
+QPushButton#pushButton_AxisState_AEnable
+{
+	border-image: url(:/Axis/Axis_A_False.png);
+}
+QPushButton#pushButton_AxisState_AEnable:checked
+{
+	border-image: url(:/Axis/Axis_A_True.png);
+}
+
+QPushButton#pushButton_AxisState_A1Enable
+{
+	border-image: url(:/Axis/Axis_A1_False.png);
+}
+QPushButton#pushButton_AxisState_A1Enable:checked
+{
+	border-image: url(:/Axis/Axis_A1_True.png);
+}</string>
+     </property>
+     <property name="title">
+      <string/>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_6">
+      <property name="leftMargin">
+       <number>4</number>
+      </property>
+      <property name="topMargin">
+       <number>4</number>
+      </property>
+      <property name="rightMargin">
+       <number>9</number>
+      </property>
+      <property name="bottomMargin">
+       <number>4</number>
+      </property>
+      <property name="spacing">
+       <number>4</number>
+      </property>
+      <item row="0" column="0">
+       <widget class="QPushButton" name="pushButton_AxisState_XEnable">
+        <property name="minimumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true"/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="3">
+       <widget class="QLCDNumber" name="lcdNumber_AxisState_Y1Pos">
+        <property name="minimumSize">
+         <size>
+          <width>67</width>
+          <height>25</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLCDNumber" name="lcdNumber_AxisState_XPos"/>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLCDNumber" name="lcdNumber_AxisState_ZPos"/>
+      </item>
+      <item row="1" column="2">
+       <widget class="QPushButton" name="pushButton_AxisState_Y1Enable">
+        <property name="minimumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QPushButton" name="pushButton_AxisState_ZEnable">
+        <property name="minimumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLCDNumber" name="lcdNumber_AxisState_YPos"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QPushButton" name="pushButton_AxisState_YEnable">
+        <property name="minimumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <widget class="QPushButton" name="pushButton_AxisState_X1Enable">
+        <property name="minimumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>25</width>
+          <height>25</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true"/>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="3">
+       <widget class="QLCDNumber" name="lcdNumber_AxisState_X1Pos">
+        <property name="minimumSize">
+         <size>
+          <width>67</width>
+          <height>0</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="0" column="0">
+    <widget class="QGroupBox" name="groupBox_AxisMove">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="font">
+      <font>
+       <pointsize>12</pointsize>
+      </font>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QPushButton 
+{
+     /*border-width: 1px;         
+    border-radius: 4px; 
+   background-color: transparent ;  */  
+   
+}
+
+QPushButton::hover
+{
+   /* border-width: 2px;
+	border-radius:4px;*/
+    background-color: rgb(255, 255, 255);
+}
+QPushButton::pressed
+{
+    border-width: 1px;
+	/*border-radius:4px;*/
+    padding-top: 3px;
+	padding-left: 3px;
+
+}
+
+QPushButton#pushButton_AxisMove_XNeg
+{
+	image: url(:/Axis/X-N.png);
+}
+QPushButton#pushButton_AxisMove_XPlus
+{
+	image: url(:/Axis/X-P.png);
+}
+
+QPushButton#pushButton_AxisMove_X1Neg
+{
+	image: url(:/Axis/X1-N.png);
+}
+QPushButton#pushButton_AxisMove_X1Plus
+{
+	image: url(:/Axis/X1-P.png);
+}
+
+QPushButton#pushButton_AxisMove_YNeg
+{
+	image: url(:/Axis/Y-N.png);
+}
+QPushButton#pushButton_AxisMove_YPlus
+{
+	image: url(:/Axis/Y-P.png);
+}
+
+QPushButton#pushButton_AxisMove_Y1Neg
+{
+	image: url(:/Axis/Y1-N.png);
+}
+QPushButton#pushButton_AxisMove_Y1Plus
+{
+	image: url(:/Axis/Y1-P.png);
+}
+
+QPushButton#pushButton_AxisMove_ANeg
+{
+	image: url(:/Axis/A-N.png);
+}
+QPushButton#pushButton_AxisMove_APlus
+{
+	image: url(:/Axis/A-P.png);
+}
+
+QPushButton#pushButton_AxisMove_A1Neg
+{
+	image: url(:/Axis/A1-N.png);
+}
+QPushButton#pushButton_AxisMove_A1Plus
+{
+	image: url(:/Axis/A1-P.png);
+}
+
+QPushButton#pushButton_AxisMove_ZNeg
+{
+	image: url(:/Axis/Z-N.png);
+}
+QPushButton#pushButton_AxisMove_ZPlus
+{
+    image: url(:/Axis/Z-P.png);
+}
+
+QPushButton#pushButton_AxisMove_Z1Neg
+{
+	image: url(:/Axis/Z1-N.png);
+}
+QPushButton#pushButton_AxisMove_Z1Plus
+{
+    image: url(:/Axis/Z1-P.png);
+
+}
+
+</string>
+     </property>
+     <property name="title">
+      <string/>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_3">
+      <property name="leftMargin">
+       <number>4</number>
+      </property>
+      <property name="topMargin">
+       <number>4</number>
+      </property>
+      <property name="rightMargin">
+       <number>9</number>
+      </property>
+      <property name="bottomMargin">
+       <number>4</number>
+      </property>
+      <property name="spacing">
+       <number>4</number>
+      </property>
+      <item row="2" column="0" colspan="2">
+       <layout class="QGridLayout" name="gridLayout_MoveModel">
+        <property name="topMargin">
+         <number>4</number>
+        </property>
+        <item row="0" column="1">
+         <widget class="QLineEdit" name="lineEdit_AxisMove_dPos">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>40</width>
+            <height>24</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>0</string>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="0">
+         <widget class="QLabel" name="label">
+          <property name="minimumSize">
+           <size>
+            <width>70</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>Move By</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="0" column="0" colspan="2">
+       <widget class="QGroupBox" name="groupBox">
+        <property name="maximumSize">
+         <size>
+          <width>202</width>
+          <height>202</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">QGroupBox
+{
+   background-color: transparent ;
+   border:none;
+}</string>
+        </property>
+        <property name="title">
+         <string/>
+        </property>
+        <layout class="QGridLayout" name="gridLayout_2">
+         <property name="leftMargin">
+          <number>1</number>
+         </property>
+         <property name="topMargin">
+          <number>1</number>
+         </property>
+         <property name="rightMargin">
+          <number>1</number>
+         </property>
+         <property name="bottomMargin">
+          <number>1</number>
+         </property>
+         <property name="spacing">
+          <number>1</number>
+         </property>
+         <item row="0" column="0">
+          <layout class="QGridLayout" name="gridLayout">
+           <item row="2" column="2">
+            <widget class="QPushButton" name="pushButton_AxisMove_YNeg">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">
+QPushButton 
+{   
+   border-width: 2px;
+   border-style: solid;
+   /*border-top-color:rgb(0, 0, 0);*/
+   border-right-color: qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-bottom-color: rgb(0, 85, 255);
+   border-left-color: qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="2">
+            <widget class="QPushButton" name="pushButton_AxisMove_XYZ">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="styleSheet">
+              <string notr="true"/>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="2">
+            <widget class="QPushButton" name="pushButton_AxisMove_YPlus">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton 
+{
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:rgb(0, 85, 255);
+   border-right-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-left-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+    
+   
+}
+</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="4">
+            <widget class="QPushButton" name="pushButton_AxisMove_ZPlus">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton 
+{   
+   border-width: 2px;
+   border-style: solid;
+   /*border-top-color:rgb(0, 0, 0);*/
+   border-right-color: qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-bottom-color: rgb(0, 85, 255);
+   border-left-color: qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-top-color:rgb(185, 213, 255);
+}s</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="4">
+            <widget class="QPushButton" name="pushButton_AxisMove_ZNeg">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton 
+{
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:rgb(0, 85, 255);
+   border-right-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-left-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+    border-bottom-color:rgb(185, 213, 255);
+   
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="4">
+            <widget class="QPushButton" name="pushButton_AxisMove_AimingBeam">
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>30</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="toolTip">
+              <string>AimingBeam</string>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton
+{
+   
+	border-image: url(:/IOAndAxis/IO_AimingBeam01.svg);
+}
+QPushButton:checked
+{
+	border-image: url(:/IOAndAxis/IO_AimingBeam.svg);
+}
+
+QPushButton::hover
+{
+    border-width: 2px;
+	border-radius:4px;
+
+}
+
+QPushButton::pressed
+{
+    border-width: 1px;
+	border-radius:4px;
+    padding-top: 3px;
+	padding-left: 3px;
+ 
+
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="3">
+            <widget class="QPushButton" name="pushButton_AxisMove_XPlus">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton 
+{
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-right-color:rgb(0, 85, 255);
+   border-bottom-color:qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   /*border-left-color: rgb(0, 0, 0);*/
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QPushButton" name="pushButton_AxisMove_XNeg">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton 
+{   
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   /*border-right-color: rgb(0, 0, 0);*/
+   border-bottom-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-left-color:rgb(0, 85, 255);
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="1">
+            <widget class="QPushButton" name="pushButton_AxisMove_X1Plus">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">
+QPushButton 
+{   
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   /*border-right-color: rgb(0, 0, 0);*/
+   border-right-color:rgb(185, 213, 255);
+   border-bottom-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-left-color:rgb(0, 85, 255);
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="2">
+            <widget class="QPushButton" name="pushButton_AxisMove_X1Neg">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton 
+{
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-right-color:rgb(0, 85, 255);
+   border-bottom-color:qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-left-color: rgb(185, 213, 255);
+
+}
+</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="3">
+            <widget class="QPushButton" name="pushButton_AxisMove_Y1Plus">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">
+QPushButton 
+{   
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:rgb(185, 213, 255);
+   border-right-color: qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-bottom-color: rgb(0, 85, 255);
+   border-left-color: qlineargradient(spread:pad, x1:1, y1:1, x2:0, y2:0, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="4">
+            <widget class="QPushButton" name="pushButton_AxisMove_Y1Neg">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>45</width>
+               <height>45</height>
+              </size>
+             </property>
+             <property name="focusPolicy">
+              <enum>Qt::NoFocus</enum>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">QPushButton 
+{
+   border-width: 2px;
+   border-style: solid;
+   border-top-color:rgb(0, 85, 255);
+   border-right-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+   border-left-color: qlineargradient(spread:pad, x1:0.0112273, y1:0.005, x2:1, y2:1, stop:0 rgba(0, 107, 248, 255), stop:1 rgba(255, 255, 255, 255));
+    border-bottom-color: rgb(185, 213, 255);
+   
+}</string>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="1" column="0" colspan="2">
+       <layout class="QGridLayout" name="gridLayout_SpeedModel">
+        <property name="topMargin">
+         <number>4</number>
+        </property>
+        <item row="0" column="0">
+         <widget class="QRadioButton" name="radioButton_AxisMove_LowSpeed">
+          <property name="text">
+           <string>Low</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QRadioButton" name="radioButton_AxisMove_MediumSpeed">
+          <property name="text">
+           <string>Medium</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="2">
+         <widget class="QRadioButton" name="radioButton_AxisMove_HighSpeed">
+          <property name="text">
+           <string>High</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <resources>
+  <include location="../../res/Cutting/Cutting.qrc"/>
+  <include location="../../res/icons/icons.qrc"/>
+ </resources>
+ <connections/>
+</ui>

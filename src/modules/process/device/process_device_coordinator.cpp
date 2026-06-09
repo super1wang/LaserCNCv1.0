@@ -62,8 +62,30 @@ bool ProcessDeviceCoordinator::setLaserEnergy(double value, QString* errorMessag
     return true;
 }
 
+bool ProcessDeviceCoordinator::setLaserOn(bool on, QString* errorMessage)
+{
+    auto* laser = m_deviceManager.laserDevice();
+    if (!laser) {
+        if (errorMessage)
+            *errorMessage = tr("未配置激光器");
+        return false;
+    }
+    const bool ok = on ? laser->startLaser(errorMessage) : laser->stopLaser(errorMessage);
+    if (!ok) {
+        emit deviceError(errorMessage ? *errorMessage : tr("切换激光状态失败"));
+        return false;
+    }
+    return true;
+}
+
 bool ProcessDeviceCoordinator::setDigitalOutput(const QString& channel, bool value, QString* errorMessage)
 {
+    if (m_motionController && m_motionController->setDigitalOutput(channel, value, errorMessage)) {
+        m_context.digitalOutputs.insert(channel, value);
+        emit digitalOutputUpdated(channel, value);
+        return true;
+    }
+
     auto* io = m_deviceManager.processIo();
     if (!io) {
         if (errorMessage)

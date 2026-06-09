@@ -170,7 +170,7 @@ CmdShowOptions::CmdShowOptions(IAppContext* ctx) : CommandBase(ctx)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CmdShowOptions ctor");
     auto* a = new QAction(QIcon(":/icons/options.svg"), tr("应用程序选项"), this);
-    a->setStatusTip(tr("打开应用程序选项对话框（图形渲染 / 选择高亮 / 应用程序）"));
+    a->setStatusTip(tr("打开应用程序选项对话框（图形渲染 / 选择高亮 / 应用程序 / 机台构型）"));
     setAction(a);
 }
 

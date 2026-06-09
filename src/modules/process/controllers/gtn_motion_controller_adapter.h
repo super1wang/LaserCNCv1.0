@@ -23,6 +23,7 @@ public:
     bool moveTo(const QString& axis, double absolutePos) override;
     bool home(const QString& axis = QString()) override;
     void emergencyStop() override;
+    bool supportsProgramPause() const override { return false; }
 
 private:
     short axisIndex(const QString& axis) const;

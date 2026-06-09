@@ -4,6 +4,7 @@ SimulatorLaserDevice	LDFactory::s_Simulator;
 IPGLaserDevice			LDFactory::s_IPG;
 PharosLaserDevice		LDFactory::s_Pharos;
 RaycusLaserDevice		LDFactory::s_Raycus;
+RaycusAirCoolLaserDevice LDFactory::s_RaycusAirCool;
 ULTRONLaserDevice		LDFactory::s_ULTRON;
 RaycusQCWLaserDevice	LDFactory::s_RaycusQCW;
 AnalogLaserDevice		LDFactory::s_Analog;
@@ -19,6 +20,8 @@ LaserDevice * LDFactory::GetLaserDevice(const std::string & sLaserDeviceName)
 		return &s_Pharos;
 	else if (sLaserDeviceName.compare("Raycus") == 0)
 		return &s_Raycus;
+	else if (sLaserDeviceName.compare("RaycusAirCool") == 0)
+		return &s_RaycusAirCool;
 	else if (sLaserDeviceName.compare("ULTRON") == 0)
 		return &s_ULTRON;	
 	else if (sLaserDeviceName.compare("RaycusQCW") == 0)
@@ -35,6 +38,7 @@ void LDFactory::GetAll_LDName(vector<string> &vecName)
 	vec.push_back(s_IPG.GetName());
 	vec.push_back(s_Pharos.GetName());
 	vec.push_back(s_Raycus.GetName());
+	vec.push_back(s_RaycusAirCool.GetName());
 	vec.push_back(s_RaycusQCW.GetName());
 	vecName.swap(vec);
 }

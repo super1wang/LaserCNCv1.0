@@ -99,6 +99,31 @@ void MachineKinematics::loadPreset(const QString& configType)
     removeInvalidAssignments();
 }
 
+void MachineKinematics::setAxes(const QList<MachineAxisDef>& axes, const QString& configType)
+{
+    if (!configType.trimmed().isEmpty())
+        m_configType = configType.trimmed();
+    m_axes = axes;
+    bool hasBase = false;
+    for (const MachineAxisDef& axis : std::as_const(m_axes)) {
+        if (axis.name == QStringLiteral("BASE")) {
+            hasBase = true;
+            break;
+        }
+    }
+    if (!hasBase) {
+        MachineAxisDef base;
+        base.name = QStringLiteral("BASE");
+        base.motionType = MachineAxisDef::Linear;
+        base.direction = gp_Dir(0, 0, 1);
+        base.minVal = 0.0;
+        base.maxVal = 0.0;
+        m_axes.prepend(base);
+    }
+    removeInvalidAssignments();
+    emit assignmentsChanged();
+}
+
 // ── Axis lookup ────────────────────────────────────────────────────────────────
 
 MachineAxisDef* MachineKinematics::findAxis(const QString& name)

@@ -15,6 +15,7 @@
 #include "modules/process/process_module.h"
 #include "modules/process/Setting/process_settings_dialog.h"
 #include "modules/process/device/process_device_manager.h"
+#include "modules/process/ui/device/process_device_manager_dialog.h"
 
 namespace lcnc::process {
 
@@ -55,6 +56,19 @@ void openSettingsDialog(ProcessSettingsDialog::InitialPage page)
         : QStringList{ QStringLiteral("Simulator") };
 
     ProcessSettingsDialog dialog(module->settings(), motionControllers, laserDevices, page);
+    if (dialog.exec() == QDialog::Accepted)
+        module->reloadDeviceSettings();
+}
+
+void openDeviceManagerDialog(ProcessDeviceKind initialKind = ProcessDeviceKind::MotionController)
+{
+    auto* module = processModule();
+    if (!module || !module->deviceManager())
+        return;
+
+    ProcessDeviceManagerDialog dialog(*module->deviceManager(), module->settings(), initialKind);
+    QObject::connect(&dialog, &ProcessDeviceManagerDialog::settingsApplied,
+                     module, &ProcessModule::reloadDeviceSettings);
     if (dialog.exec() == QDialog::Accepted)
         module->reloadDeviceSettings();
 }
@@ -159,7 +173,7 @@ bool CmdOpenMotionSettings::isEnabled() const
 }
 void CmdOpenMotionSettings::execute()
 {
-    openSettingsDialog(ProcessSettingsDialog::InitialPage::Motion);
+    openDeviceManagerDialog(ProcessDeviceKind::MotionController);
 }
 
 CmdOpenLaserSettings::CmdOpenLaserSettings(IAppContext* ctx) : CommandBase(ctx)
@@ -174,7 +188,23 @@ bool CmdOpenLaserSettings::isEnabled() const
 }
 void CmdOpenLaserSettings::execute()
 {
-    openSettingsDialog(ProcessSettingsDialog::InitialPage::Laser);
+    openDeviceManagerDialog(ProcessDeviceKind::Laser);
+}
+
+// ── CmdOpenDeviceManager ──────────────────────────────────────────────────
+CmdOpenDeviceManager::CmdOpenDeviceManager(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/connect.svg"), tr("外设管理"), this);
+    a->setStatusTip(tr("打开外设管理与调试界面"));
+    setAction(a);
+}
+bool CmdOpenDeviceManager::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+}
+void CmdOpenDeviceManager::execute()
+{
+    openDeviceManagerDialog();
 }
 
 // ── CmdRunStart ─────────────────────────────────────────────────────────────
@@ -270,7 +300,7 @@ void CmdResetEmergencyStop::execute()
 CmdHome::CmdHome(IAppContext* ctx) : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/home.svg"), tr("回零"), this);
-    a->setStatusTip(tr("各轴回零"));
+    a->setStatusTip(tr("按 Z 轴优先顺序异步回零"));
     setAction(a);
 }
 bool CmdHome::isEnabled() const
@@ -287,8 +317,8 @@ void CmdHome::execute()
 // ── CmdConnectController ────────────────────────────────────────────────────
 CmdConnectController::CmdConnectController(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/connect.svg"), tr("连接控制器"), this);
-    a->setStatusTip(tr("通过对话框输入控制器地址并连接"));
+    auto* a = new QAction(QIcon(":/icons/connect.svg"), tr("连接设备"), this);
+    a->setStatusTip(tr("异步连接当前已启用的全部外设"));
     setAction(a);
 }
 bool CmdConnectController::isEnabled() const
@@ -299,20 +329,14 @@ void CmdConnectController::execute()
 {
     auto* p = processFacade();
     if (!p) return;
-    bool ok = false;
-    const QString endpoint = QInputDialog::getText(
-        nullptr, tr("连接控制器"), tr("控制器地址:"),
-        QLineEdit::Normal,
-        QStringLiteral("tcp://127.0.0.1:5000"), &ok);
-    if (!ok) return;
-    p->connectController(endpoint);
+    p->connectDevices();
 }
 
 // ── CmdDisconnectController ─────────────────────────────────────────────────
 CmdDisconnectController::CmdDisconnectController(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/disconnect.svg"), tr("断开连接"), this);
-    a->setStatusTip(tr("断开当前控制器连接"));
+    auto* a = new QAction(QIcon(":/icons/disconnect.svg"), tr("断开设备"), this);
+    a->setStatusTip(tr("断开当前已连接的全部外设"));
     setAction(a);
 }
 bool CmdDisconnectController::isEnabled() const
@@ -321,7 +345,7 @@ bool CmdDisconnectController::isEnabled() const
 }
 void CmdDisconnectController::execute()
 {
-    if (auto* p = processFacade()) p->disconnectController();
+    if (auto* p = processFacade()) p->disconnectDevices();
 }
 
 // ── CmdToggleSimulationMode ─────────────────────────────────────────────────

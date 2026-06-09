@@ -35,6 +35,10 @@ public:
     virtual bool connectController(const QString& endpoint) = 0;
     /// 断开当前控制器连接。
     virtual void disconnectController() = 0;
+    /// 异步连接当前已启用的全部 Process 外设。
+    virtual bool connectDevices() = 0;
+    /// 断开当前已连接的全部 Process 外设。
+    virtual void disconnectDevices() = 0;
     virtual bool isConnected() const = 0;
 
     /// 仿真模式开关（true 表示纯软件仿真，不发送下位机指令）。

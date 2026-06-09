@@ -63,7 +63,6 @@ protected:
 const LegacyUiPage* legacyUiPages(int* count)
 {
     static const LegacyUiPage pages[] = {
-        {"Setting", QT_TR_NOOP("Setting 全量"), ":/process/setting/Setting.ui"},
         {"Setting_Tool", QT_TR_NOOP("Tool"), ":/process/setting/Setting_Tool.ui"},
         {"Setting_Laser", QT_TR_NOOP("Laser"), ":/process/setting/Setting_Laser.ui"},
         {"Setting_MotionControl", QT_TR_NOOP("Motion Control"), ":/process/setting/Setting_MotionControl.ui"},
@@ -78,16 +77,6 @@ const LegacyUiPage* legacyUiPages(int* count)
         {"Setting_Camera", QT_TR_NOOP("Camera"), ":/process/setting/Setting_Camera.ui"},
         {"Setting_Internet", QT_TR_NOOP("Internet"), ":/process/setting/Setting_Internet.ui"},
         {"qg_dlgsetting", QT_TR_NOOP("Process Setting Shell"), ":/process/setting/qg_dlgsetting.ui"},
-        {"qg_dlgpbasicsetting", QT_TR_NOOP("Process Basic"), ":/process/setting/qg_dlgpbasicsetting.ui"},
-        {"qg_dlgtbasicsetting", QT_TR_NOOP("Technology Basic"), ":/process/setting/qg_dlgtbasicsetting.ui"},
-        {"qg_dlgmotionsetting", QT_TR_NOOP("Motion Process"), ":/process/setting/qg_dlgmotionsetting.ui"},
-        {"qg_dlgcuttingprocesssetting", QT_TR_NOOP("Cutting Process"), ":/process/setting/qg_dlgcuttingprocesssetting.ui"},
-        {"qg_dlgautomationsetting", QT_TR_NOOP("Automation"), ":/process/setting/qg_dlgautomationsetting.ui"},
-        {"qg_dlgsensorsetting", QT_TR_NOOP("Sensor"), ":/process/setting/qg_dlgsensorsetting.ui"},
-        {"qg_dlgsignalsourcesetting", QT_TR_NOOP("Signal Source"), ":/process/setting/qg_dlgsignalsourcesetting.ui"},
-        {"qg_dlgjsonsetting", QT_TR_NOOP("JSON Signal"), ":/process/setting/qg_dlgjsonsetting.ui"},
-        {"qg_dlgsmcsetting", QT_TR_NOOP("SMC"), ":/process/setting/qg_dlgsmcsetting.ui"},
-        {"qg_dlgtcpsetting", QT_TR_NOOP("TCP"), ":/process/setting/qg_dlgtcpsetting.ui"},
     };
     if (count)
         *count = static_cast<int>(sizeof(pages) / sizeof(pages[0]));
@@ -107,16 +96,6 @@ bool isLegacyEditorClass(const QString& className)
 
 QString visibleNodePathForPage(const QString& pageId)
 {
-    if (pageId == QStringLiteral("Setting_MotionControl"))
-        return QStringLiteral("Settings/外设/运动控制器");
-    if (pageId == QStringLiteral("Setting_Axis"))
-        return QStringLiteral("Settings/外设/运动轴");
-    if (pageId == QStringLiteral("Setting_IOIndex")
-        || pageId == QStringLiteral("Setting_Digital")
-        || pageId == QStringLiteral("Setting_Analog"))
-        return QStringLiteral("Settings/外设/I/O索引");
-    if (pageId == QStringLiteral("Setting_Laser"))
-        return QStringLiteral("Settings/外设/激光器");
     if (pageId == QStringLiteral("Setting_Tool"))
         return QStringLiteral("Settings/加工设置/工具");
     if (pageId == QStringLiteral("Setting_Gas"))
@@ -390,10 +369,10 @@ ProcessSettingsDialog::ProcessSettingsDialog(lcnc::ProcessSettings& settings,
 
     switch (initialPage) {
     case InitialPage::Motion:
-        m_pages->setCurrentIndex(pageIndexFor(QStringLiteral("Setting_MotionControl"), motionPage));
+        m_pages->setCurrentIndex(pageIndexFor(QStringLiteral("Setting_Tool"), toolPage));
         break;
     case InitialPage::Laser:
-        m_pages->setCurrentIndex(pageIndexFor(QStringLiteral("Setting_Laser"), laserPage));
+        m_pages->setCurrentIndex(pageIndexFor(QStringLiteral("Setting_Tool"), toolPage));
         break;
     case InitialPage::Process:
     default:
@@ -738,24 +717,6 @@ void ProcessSettingsDialog::buildSettingsTree()
     m_pageTree->clear();
 
     auto* root = addGroupNode(nullptr, tr("Settings"));
-    auto* deviceRoot = addGroupNode(root, tr("外设"));
-    addPageNode(deviceRoot,
-                tr("运动控制器"),
-                pageIndexFor(QStringLiteral("Setting_MotionControl"), m_legacyPageIndexes.value(QStringLiteral("_motion"), 0)),
-                QStringLiteral("Setting_MotionControl"));
-    addPageNode(deviceRoot,
-                tr("运动轴"),
-                pageIndexFor(QStringLiteral("Setting_Axis"), m_legacyPageIndexes.value(QStringLiteral("_axis"), 0)),
-                QStringLiteral("Setting_Axis"));
-    addPageNode(deviceRoot,
-                tr("I/O索引"),
-                pageIndexFor(QStringLiteral("Setting_IOIndex"), m_legacyPageIndexes.value(QStringLiteral("_io"), 0)),
-                QStringLiteral("Setting_IOIndex"));
-    addPageNode(deviceRoot,
-                tr("激光器"),
-                pageIndexFor(QStringLiteral("Setting_Laser"), m_legacyPageIndexes.value(QStringLiteral("_laser"), 0)),
-                QStringLiteral("Setting_Laser"));
-
     auto* processRoot = addGroupNode(root, tr("加工设置"));
     auto* toolRoot = addPageNode(processRoot,
                                  tr("工具"),

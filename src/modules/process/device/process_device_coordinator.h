@@ -24,6 +24,7 @@ public:
 
     bool moveAxisTo(const QString& axisName, double position, QString* errorMessage = nullptr);
     bool setLaserEnergy(double value, QString* errorMessage = nullptr);
+    bool setLaserOn(bool on, QString* errorMessage = nullptr);
     bool setDigitalOutput(const QString& channel, bool value, QString* errorMessage = nullptr);
     void emergencyStop();
 

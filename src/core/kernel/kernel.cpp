@@ -1,6 +1,7 @@
 #include "core/kernel/kernel.h"
 
 #include "core/logging/logger.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
@@ -63,7 +64,12 @@ void Kernel::registerCoreServices()
     // 4) TaskManager — 独立
     m_taskMgr = std::make_unique<TaskManager>();
 
-    // 5) CommandContainer 由 MainWindow 后期通过 setCommandContainer 提供。
+    // 5) MachineConfigurationService — 系统级机台构型事实源。
+    m_machineConfig = std::make_shared<MachineConfigurationService>();
+    m_machineConfig->loadDefault();
+    m_services.registerService<MachineConfigurationService>(m_machineConfig);
+
+    // 6) CommandContainer 由 MainWindow 后期通过 setCommandContainer 提供。
 
     LCNC_INFO(LogCode::Generic,
               "Kernel: core objects ready (services={})", m_services.size());
@@ -90,6 +96,7 @@ void Kernel::shutdown()
     LCNC_INFO(LogCode::Generic, "Kernel::shutdown begin");
     m_modules.stopAll();
     m_services.clear();
+    m_machineConfig.reset();
     m_cmdContainer = nullptr;
     LCNC_INFO(LogCode::Generic, "Kernel::shutdown end");
 }

@@ -57,7 +57,6 @@
     <file alias="icons/laser_param.svg">icons/laser_param.svg</file>
     <file alias="icons/motion_param.svg">icons/motion_param.svg</file>
     <file alias="icons/process_param.svg">icons/process_param.svg</file>
-    <file alias="process/setting/Setting.ui">../src/modules/process/Setting/Setting.ui</file>
     <file alias="process/setting/Setting_Tool.ui">../src/modules/process/Setting/Setting_Tool.ui</file>
     <file alias="process/setting/Setting_Laser.ui">../src/modules/process/Setting/Setting_Laser.ui</file>
     <file alias="process/setting/Setting_MotionControl.ui">../src/modules/process/Setting/Setting_MotionControl.ui</file>
@@ -72,15 +71,5 @@
     <file alias="process/setting/Setting_Camera.ui">../src/modules/process/Setting/Setting_Camera.ui</file>
     <file alias="process/setting/Setting_Internet.ui">../src/modules/process/Setting/Setting_Internet.ui</file>
     <file alias="process/setting/qg_dlgsetting.ui">../src/modules/process/Setting/qg_dlgsetting.ui</file>
-    <file alias="process/setting/qg_dlgpbasicsetting.ui">../src/modules/process/Setting/qg_dlgpbasicsetting.ui</file>
-    <file alias="process/setting/qg_dlgtbasicsetting.ui">../src/modules/process/Setting/qg_dlgtbasicsetting.ui</file>
-    <file alias="process/setting/qg_dlgmotionsetting.ui">../src/modules/process/Setting/qg_dlgmotionsetting.ui</file>
-    <file alias="process/setting/qg_dlgcuttingprocesssetting.ui">../src/modules/process/Setting/qg_dlgcuttingprocesssetting.ui</file>
-    <file alias="process/setting/qg_dlgautomationsetting.ui">../src/modules/process/Setting/qg_dlgautomationsetting.ui</file>
-    <file alias="process/setting/qg_dlgsensorsetting.ui">../src/modules/process/Setting/qg_dlgsensorsetting.ui</file>
-    <file alias="process/setting/qg_dlgsignalsourcesetting.ui">../src/modules/process/Setting/qg_dlgsignalsourcesetting.ui</file>
-    <file alias="process/setting/qg_dlgjsonsetting.ui">../src/modules/process/Setting/qg_dlgjsonsetting.ui</file>
-    <file alias="process/setting/qg_dlgsmcsetting.ui">../src/modules/process/Setting/qg_dlgsmcsetting.ui</file>
-    <file alias="process/setting/qg_dlgtcpsetting.ui">../src/modules/process/Setting/qg_dlgtcpsetting.ui</file>
   </qresource>
 </RCC>

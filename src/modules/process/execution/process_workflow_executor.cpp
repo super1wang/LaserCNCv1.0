@@ -57,6 +57,11 @@ void ProcessWorkflowExecutor::setToolpathSnapshotProvider(std::function<ProcessT
     m_toolpathSnapshotProvider = std::move(provider);
 }
 
+void ProcessWorkflowExecutor::setCuttingExecutor(std::function<bool(bool dryRun, QString* errorMessage)> executor)
+{
+    m_cuttingExecutor = std::move(executor);
+}
+
 void ProcessWorkflowExecutor::pause()
 {
     if (m_state == State::Running) {
@@ -249,7 +254,12 @@ bool ProcessWorkflowExecutor::dispatchStepSideEffects(const ProcessExecutionStep
             return false;
         }
         emit laserEnergyRequested(laserEnergy);
-        emit messageLogged(tr("CAM dry-run: %1，轮廓=%2，点数=%3，feed=%4，energy=%5").arg(
+        if (m_cuttingExecutor && snapshot.available) {
+            if (!m_cuttingExecutor(dryRun, errorMessage))
+                return false;
+        }
+        emit messageLogged(tr("%1: %2，轮廓=%3，点数=%4，feed=%5，energy=%6").arg(
+            dryRun ? tr("CAM dry-run") : tr("CAM 切割"),
             snapshot.description.isEmpty() ? tr("无 CAM 刀路，按节点参数空跑") : snapshot.description,
             QString::number(snapshot.contourCount),
             QString::number(snapshot.totalPointCount),
