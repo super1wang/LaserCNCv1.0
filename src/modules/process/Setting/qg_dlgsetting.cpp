@@ -1,4 +1,4 @@
-#include "qg_dlgSetting.h"
+#include "qg_dlgsetting.h"
 #include <QSignalBlocker>
 #include <QDialogButtonBox>
 #include <QFileDialog>

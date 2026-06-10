@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Axis.h"
 
 Dialog_Setting_Axis::Dialog_Setting_Axis(QWidget* parent)
@@ -131,7 +132,7 @@ void Dialog_Setting_Axis::setupLineEditValidators(QWidget* dialog)
 		{
 			if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
 				m_qlLineEditF.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
@@ -165,3 +166,4 @@ void Dialog_Setting_Axis::comboBoxChanged()
 	string		strKey		= parts.at(parts.size() - 1).toStdString();
 
 	set_Changed.insert(make_pair(strTable, strKey));
+}

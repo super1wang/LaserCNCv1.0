@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Camera.h"
 
 Dialog_Setting_Camera::Dialog_Setting_Camera(QWidget *parent)
@@ -125,20 +126,20 @@ void Dialog_Setting_Camera::setupLineEditValidators(QWidget* dialog)
 			}
 			else if (parts[2].left(1) == "i")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Int(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Int(), nullptr));
 				m_qlLineEditI.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
 				m_qlLineEditF.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
 		}
 	}
 
-	ui.lineEdit_Connect_iPort	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
-	ui.lineEdit_Connect_iTimeOut->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
+	ui.lineEdit_Connect_iPort	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
+	ui.lineEdit_Connect_iTimeOut->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
 }
 
 void Dialog_Setting_Camera::SetCommandNameEnabled(bool bEnabled)
@@ -147,3 +148,4 @@ void Dialog_Setting_Camera::SetCommandNameEnabled(bool bEnabled)
 	ui.lineEdit_Commands_sCommand2Name->setEnabled(bEnabled);
 	ui.lineEdit_Commands_sCommand3Name->setEnabled(bEnabled);
 	ui.lineEdit_Commands_sCommand4Name->setEnabled(bEnabled);
+}

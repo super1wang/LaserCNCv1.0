@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Service.h"
 #include "DataType.h"
 

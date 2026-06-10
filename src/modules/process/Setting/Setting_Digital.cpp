@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Digital.h"
 
 #include <QLabel>
@@ -181,7 +182,7 @@ void Dialog_Setting_Digital::addRow(bool bIN)
 
 	QLineEdit* lineEditIndex = new QLineEdit();
 	lineEditIndex->setObjectName(qstrIndexName);
-	lineEditIndex->setValidator(new QRegularExpressionValidator(Regex_Digital_Index(, nullptr)));
+	lineEditIndex->setValidator(new QRegularExpressionValidator(Regex_Digital_Index(), nullptr));
 	connect(lineEditIndex, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
 
 	rowLayout->addWidget(label);
@@ -242,3 +243,4 @@ void Dialog_Setting_Digital::SetIndexEnabled(bool bEnabled)
 	for (QLineEdit* lineEdit : lineEdits) {
 		lineEdit->setEnabled(bEnabled);
 	}
+}

@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_IOIndex.h"
 
 Dialog_Setting_IOIndex::Dialog_Setting_IOIndex(QWidget* parent)
@@ -190,17 +191,17 @@ void Dialog_Setting_IOIndex::setupLineEditValidators(QWidget* dialog)
 			if (parts[1] == "DigitalIN" || parts[1] == "DigitalOUT")
 			{
 				if (typeIndicator == "a")
-					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Digital_Index(, nullptr)));
+					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Digital_Index(), nullptr));
 			}
 			else if(parts[1] == "AnalogIN" || parts[1] == "AnalogOUT")
 			{
 				if (typeIndicator == "a")
-					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Analog_Index, nullptr));
+					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Analog_Index(), nullptr));
 			}
 			else
 			{
 				if (typeIndicator == "a")
-					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Normal_String, nullptr));
+					lineEdit->setValidator(new QRegularExpressionValidator(Regex_Normal_String(), nullptr));
 			}
 		}
 		connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));

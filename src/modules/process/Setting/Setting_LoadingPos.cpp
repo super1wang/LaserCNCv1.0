@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_LoadingPos.h"
 
 Dialog_Setting_LoadingPos::Dialog_Setting_LoadingPos(QWidget *parent)
@@ -210,7 +211,7 @@ void Dialog_Setting_LoadingPos::setupLineEditValidators(QWidget* dialog)
 		{
 			if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Pos_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Pos_Double(), nullptr));
 				m_qlLineEditF.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
@@ -230,3 +231,4 @@ void Dialog_Setting_LoadingPos::setupCheckBoxValidators(QWidget* dialog)
 			m_qlCheckBoxB.append(checkBox);
 		}
 	}
+}

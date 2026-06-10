@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Gas.h"
 
 Dialog_Setting_Gas::Dialog_Setting_Gas(QWidget* parent)
@@ -95,12 +96,12 @@ void Dialog_Setting_Gas::setupLineEditValidators(QWidget* dialog)
 		{
 			if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
 				m_qlLineEditF.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "i")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
 				m_qlLineEditI.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
@@ -130,3 +131,4 @@ void Dialog_Setting_Gas::checkBoxChanged()
 	string		strKey		= parts.at(parts.size() - 1).toStdString();
 
 	set_Changed.insert(make_pair(strTable, strKey));
+}

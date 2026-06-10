@@ -3,7 +3,7 @@
 #include <QDialog>
 #include "ui_Setting_MotionControl.h"
 #include "Service.h"
-#include <qmessagebox.h>
+#include <QMessageBox>
 
 class Dialog_Setting_MotionControl : public QDialog
 {

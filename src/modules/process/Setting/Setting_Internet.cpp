@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Internet.h"
 
 Dialog_Setting_Internet::Dialog_Setting_Internet(QWidget* parent)
@@ -80,11 +81,11 @@ void Dialog_Setting_Internet::setupLineEditValidators(QWidget* dialog)
 		{
 			QString typeIndicator = parts[2].left(1);
 			if (parts[2] == "sIP")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Internet_IP(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Internet_IP(), nullptr));
 			else if (parts[2] == "sPort")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Internet_Port(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Internet_Port(), nullptr));
 			else if (typeIndicator == "s")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Normal_String(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Normal_String(), nullptr));
 		}
 	}
 }

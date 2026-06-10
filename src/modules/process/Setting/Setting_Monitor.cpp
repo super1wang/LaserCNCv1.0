@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Monitor.h"
 
 namespace
@@ -179,12 +180,12 @@ void Dialog_Setting_Monitor::setupLineEditValidators(QWidget* dialog)
 		{
 			if (parts[2].left(1) == "i")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
 				m_qlLineEditI.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
 				m_qlLineEditF.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "s")

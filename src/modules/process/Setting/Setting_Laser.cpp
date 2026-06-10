@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Laser.h"
 
 Dialog_Setting_Laser::Dialog_Setting_Laser(QWidget* parent)
@@ -240,12 +241,12 @@ void Dialog_Setting_Laser::setupLineEditValidators(QWidget* dialog)
 			}
 			else if (parts[2].left(1) == "i")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Int(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Int(), nullptr));
 				m_qlLineEditI.append(lineEdit);
 			}
 			else if (parts[2].left(1) == "f")
 			{
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
 				m_qlLineEditF.append(lineEdit);
 			}
 			connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
@@ -253,9 +254,9 @@ void Dialog_Setting_Laser::setupLineEditValidators(QWidget* dialog)
 	}
 
 	ui.lineEdit_HTTP_sHost		->setValidator(new QRegularExpressionValidator(Regex_HTTP_IP, nullptr));
-	ui.lineEdit_HTTP_iPort		->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
-	ui.lineEdit_HTTP_iTimeOut	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
-	ui.lineEdit_Laser_iDelay	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
+	ui.lineEdit_HTTP_iPort		->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
+	ui.lineEdit_HTTP_iTimeOut	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
+	ui.lineEdit_Laser_iDelay	->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
 }
 
 void Dialog_Setting_Laser::setupComboBoxValidators(QWidget* dialog)

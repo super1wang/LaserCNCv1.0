@@ -2,6 +2,7 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QStringConverter>
 #include <QTextStream>
 #include "spdlog/sinks/daily_file_sink.h"
 #include "spdlog/sinks/rotating_file_sink.h"
@@ -61,7 +62,7 @@ vector<CuttingLogSummary> parseCuttingLogFile(const QString& logFilePath)
 	}
 
 	QTextStream stream(&file);
-	stream.setCodec("UTF-8");
+	stream.setEncoding(QStringConverter::Utf8);
 	CuttingLogSummary currentSummary;
 	bool inSummary = false;
 	bool inTools = false;

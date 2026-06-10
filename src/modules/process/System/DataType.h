@@ -1,13 +1,8 @@
 #pragma once
-// Ensure consistent Windows header setup (MOC batch may include this
-// before Qt's own windows.h inclusion, breaking SDK types).
-#include <QtCore/QtGlobal>
 #include <map>
 #include <vector>
 #include <string>
 #include <QString>
-#include <QRegularExpression>
-#include <QValidator>
 #include "magic_enum.hpp"
 #include "MessageCode.h"
 
@@ -39,23 +34,6 @@ using std::string;
 using magic_enum::enum_cast;	//string -> enum		enum_cast<>().value()
 using magic_enum::enum_name;	//enum -> string		enum_name().data()
 using magic_enum::enum_names;	//enum -> auto			
-
-// ── Regex patterns (inline accessors to avoid static init in header) ──
-inline const QRegularExpression& Regex_All_Int()          { static QRegularExpression re("^-?\\d{1,15}$"); return re; }
-inline const QRegularExpression& Regex_Nonnegative_Int()  { static QRegularExpression re("^\\d{1,15}$"); return re; }
-inline const QRegularExpression& Regex_Positive_Int()     { static QRegularExpression re("^[1-9]\\d{0,7}$"); return re; }
-inline const QRegularExpression& Regex_All_Double()       { static QRegularExpression re("^-?(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
-inline const QRegularExpression& Regex_Nonnegative_Double(){ static QRegularExpression re("^(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
-inline const QRegularExpression& Regex_Pos_Double()       { static QRegularExpression re("^-?\\d{1,5}(\\.\\d{1,3})?$"); return re; }
-inline const QRegularExpression& Regex_Digital_Index()    { static QRegularExpression re("^-?N?\\d\\.\\d(\\d)?$"); return re; }
-inline const QRegularExpression& Regex_Digital_Out()      { static QRegularExpression re("^[01]$"); return re; }
-inline const QRegularExpression& Regex_Digital_IndexOut() { static QRegularExpression re("^-?N?\\d\\.\\d(\\d)?=[01]$"); return re; }
-inline const QRegularExpression& Regex_Analog_Index()     { static QRegularExpression re("^N?\\d(\\d)?$"); return re; }
-inline const QRegularExpression& Regex_Analog_Out()       { static QRegularExpression re("^(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
-inline const QRegularExpression& Regex_Analog_IndexOut()  { static QRegularExpression re("^N?\\d(\\d)?=(?=.{1,15}$)(?=\\d|\\.\\d)\\d*(\\.\\d+)?$"); return re; }
-inline const QRegularExpression& Regex_Internet_IP()      { static QRegularExpression re("^N?\\d\\.\\d(\\d)?$"); return re; }
-inline const QRegularExpression& Regex_Internet_Port()    { static QRegularExpression re("^N?\\d(\\d)?$"); return re; }
-inline const QRegularExpression& Regex_Normal_String()    { static QRegularExpression re("^[a-zA-Z0-9_\\-\\.]?$"); return re; }
 
 // 用户权限
 enum class PermissionLevel

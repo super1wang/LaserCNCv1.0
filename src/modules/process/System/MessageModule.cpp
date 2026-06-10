@@ -65,7 +65,7 @@ void MessageModule::ReportMessage(LogType eType, LogLevel eLevel, int iCode, con
 	m_condition.wakeOne();
 	if (eLevel == LogLevel::Error)
 	{
-		BUZZER_START(3000);
+		BuzzerControl::Beep(3000);
 	}
 }
 

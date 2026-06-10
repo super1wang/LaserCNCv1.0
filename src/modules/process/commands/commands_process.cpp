@@ -13,7 +13,7 @@
 #include "core/logging/logger.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/process_module.h"
-#include "modules/process/ui/settings/settings_dialog.h"
+#include "modules/process/Setting/setting_bridge.h"
 
 namespace lcnc::process {
 

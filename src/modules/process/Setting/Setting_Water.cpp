@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_Water.h"
 
 Dialog_Setting_Water::Dialog_Setting_Water(QWidget* parent)
@@ -84,7 +85,7 @@ void Dialog_Setting_Water::setupLineEditValidators(QWidget* dialog)
 		{
 			QString typeIndicator = parts[2].left(1);
 			if (typeIndicator == "f")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
 		}
 	}
 }

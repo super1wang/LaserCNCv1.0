@@ -167,7 +167,35 @@ set(SRCS_MODULES
     src/modules/cam/ui/ribbon_cam_tab.cpp
     src/modules/process/process_module.cpp
     src/modules/process/controllers/simulation_motion_controller.cpp
-    src/modules/process/ui/settings/settings_dialog.cpp
+    src/modules/process/System/Service.cpp
+    src/modules/process/System/LogModule.cpp
+    src/modules/process/System/MessageModule.cpp
+    src/modules/process/Setting/Settings.cpp
+    src/modules/process/Setting/setting_bridge.cpp
+    src/modules/process/Setting/qg_dlgsetting.cpp
+    src/modules/process/Setting/Setting_MotionControl.cpp
+    src/modules/process/Setting/Setting_Axis.cpp
+    src/modules/process/Setting/Setting_IOIndex.cpp
+    src/modules/process/Setting/Setting_Digital.cpp
+    src/modules/process/Setting/Setting_Analog.cpp
+    src/modules/process/Setting/Setting_Laser.cpp
+    src/modules/process/Setting/Setting_Internet.cpp
+    src/modules/process/Setting/Setting_Tool.cpp
+    src/modules/process/Setting/Setting_Gas.cpp
+    src/modules/process/Setting/Setting_Water.cpp
+    src/modules/process/Setting/Setting_Monitor.cpp
+    src/modules/process/Setting/Setting_LoadingPos.cpp
+    src/modules/process/Setting/Setting_Camera.cpp
+    src/modules/process/device/MotionControl/MCFactory.cpp
+    src/modules/process/device/MotionControl/MotionControl.cpp
+    src/modules/process/device/MotionControl/ACSMotionControl.cpp
+    src/modules/process/device/MotionControl/SimulateCMHPMotionControl.cpp
+    src/modules/process/device/Connect/SerialPort.cpp
+    src/modules/process/device/Laser/LDFactory.cpp
+    src/modules/process/device/Laser/AnalogLaserDevice.cpp
+    src/modules/process/device/Laser/LaserDevice.cpp
+    src/modules/process/device/Laser/SimulatorLaserDevice.cpp
+    src/modules/process/Tool/ToolFactory.cpp
     src/modules/process/communication/communication_types.h
     src/modules/process/communication/communication_types.cpp
     src/modules/process/communication/communication_endpoint.h
@@ -275,18 +303,6 @@ target_include_directories(LaserCNC PRIVATE
     ${OpenCASCADE_INCLUDE_DIR}
 )
 
-# Prevent AUTOMOC from batch-processing old Setting headers (use manual moc_*.cpp includes).
-foreach(hdr IN ITEMS
-    qg_dlgsetting Setting_Analog Setting_Axis Setting_Camera Setting_Digital
-    Setting_Gas Setting_IOIndex Setting_Internet Setting_Laser Setting_LoadingPos
-    Setting_Monitor Setting_MotionControl Setting_Tool Setting_Water
-)
-    set_source_files_properties(
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting/${hdr}.h"
-        PROPERTIES SKIP_AUTOMOC TRUE
-    )
-endforeach()
-
 # OCC modules needed for Phase 1
 set(OCC_LIBS
     # Foundation
@@ -356,10 +372,21 @@ if(TARGET Qt6::SerialPort)
     target_link_libraries(LaserCNC PRIVATE Qt6::SerialPort)
 endif()
 
+if(MSVC)
+    # /FS – serialise PDB writes; also embedded in CMAKE_CXX_FLAGS so AUTOMOC picks it up
+    string(APPEND CMAKE_CXX_FLAGS " /FS")
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " /FS")
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " /FS")
+    string(APPEND CMAKE_CXX_FLAGS_RELWITHDEBINFO " /FS")
+    # Force-include windows.h before any other header to prevent WIN32_LEAN_AND_MEAN
+    # (defined inside OpenCASCADE's OpenGl_glext.h) from excluding OLE/NLS headers
+    # that Qt6 and the Windows SDK need in the same translation unit.
+    target_compile_options(LaserCNC PRIVATE /FIwindows.h)
+endif()
+
 if(WIN32)
     target_compile_definitions(LaserCNC PRIVATE
         NOMINMAX
-        WIN32_LEAN_AND_MEAN
         _USE_MATH_DEFINES
         _CRT_SECURE_NO_WARNINGS
     )

@@ -1,3 +1,4 @@
+#include "RegexPatterns.h"
 #include "Setting_MotionControl.h"
 
 Dialog_Setting_MotionControl::Dialog_Setting_MotionControl(QWidget* parent)
@@ -194,11 +195,11 @@ void Dialog_Setting_MotionControl::setupLineEditValidators(QWidget* dialog)
 		{
 			QString typeIndicator = parts[2].left(1);
 			if (parts[2] == "fLeftLimit" || parts[2] == "fRightLimit")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Double(), nullptr));
 			else if (typeIndicator == "f")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
 			else if (typeIndicator == "i")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(, nullptr)));
+				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
 		}
 	}
 }
