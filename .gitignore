@@ -41,3 +41,11 @@ Makefile
 /logs/
 *.tmp
 *.bak
+.qoder/repowiki/knowledge/zh/_index.yaml
+.qoder/repowiki/zh/content/部署运维/构建配置.md
+.qoder/repowiki/zh/content/部署运维/构建配置/构建配置.md
+.qoder/repowiki/zh/content/部署运维/构建配置/构建系统Qt6支持.md
+.qoder/repowiki/zh/content/项目概述/模块设计/Process模块设计/设备控制.md
+.qoder/repowiki/zh/content/项目概述/模块设计/Process模块设计/设备控制/设备工厂条件编译.md
+.qoder/repowiki/zh/content/项目概述/模块设计/Process模块设计/设备控制/设备控制.md
+.qoder/repowiki/zh/meta/repowiki-metadata.json

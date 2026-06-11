@@ -8,6 +8,7 @@
 #include "core/task/task_progress.h"
 #include "modules/process/controllers/simulator_cmhp_motion_controller.h"
 #include "modules/process/execution/process_workflow_executor.h"
+#include "modules/process/System/Service.h"
 #include "modules/process/workflow/process_flow_store.h"
 
 #include <QList>
@@ -156,6 +157,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::init begin");
     m_kernel = &kernel;
+    m_service = std::make_unique<Service>();
     auto svc = std::shared_ptr<ProcessModule>(this, [](ProcessModule*) {});
     kernel.services().registerService<ProcessModule>(svc);
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));

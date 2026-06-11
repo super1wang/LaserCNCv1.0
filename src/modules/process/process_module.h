@@ -85,8 +85,7 @@ public:
 
     lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
     const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
-    void setService(Service* svc) { m_service = svc; }
-    Service* service() const { return m_service; }
+    Service* service() const { return m_service.get(); }
     QString statusMessage() const override;
 
 signals:
@@ -125,7 +124,7 @@ private:
     QString               m_statusMessage;
     lcnc::IKernel*        m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
-    Service* m_service{nullptr};
+    std::unique_ptr<Service> m_service;
     std::unique_ptr<lcnc::process::SimulationMotionController> m_motionController;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
 };

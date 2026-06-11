@@ -171,7 +171,6 @@ set(SRCS_MODULES
     src/modules/process/System/LogModule.cpp
     src/modules/process/System/MessageModule.cpp
     src/modules/process/Setting/Settings.cpp
-    src/modules/process/Setting/setting_bridge.cpp
     src/modules/process/Setting/qg_dlgsetting.cpp
     src/modules/process/Setting/Setting_MotionControl.cpp
     src/modules/process/Setting/Setting_Axis.cpp
@@ -421,6 +420,20 @@ if(EXISTS "${SARIBBON_BIN_DIR}")
     )
 else()
     message(WARNING "SARIBBON_BIN_DIR does not exist: ${SARIBBON_BIN_DIR}")
+endif()
+
+# Deploy Qt6 DLLs via windeployqt (ensures all Qt DLLs come from the same Qt installation)
+get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
+find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+if(WINDEPLOYQT_EXECUTABLE)
+    add_custom_command(TARGET LaserCNC POST_BUILD
+        COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-translations --no-system-d3d-compiler --no-opengl-sw
+            "$<TARGET_FILE:LaserCNC>"
+        COMMENT "Running windeployqt to deploy Qt6 runtime DLLs"
+    )
+else()
+    message(WARNING "windeployqt not found; Qt DLLs may not be deployed correctly")
 endif()
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")

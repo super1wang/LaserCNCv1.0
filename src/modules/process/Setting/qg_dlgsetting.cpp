@@ -2,6 +2,7 @@
 #include <QSignalBlocker>
 #include <QDialogButtonBox>
 #include <QFileDialog>
+#include <functional>
 
 QG_dlgSetting* QG_dlgSetting::uniqueInstance = nullptr;
 
@@ -359,43 +360,60 @@ void QG_dlgSetting::SwitchItem(QTreeWidgetItem* item, int column)
 
 void QG_dlgSetting::InitSetting()
 {
-	dlgMotionControlSetting	->InitSetting();
-	dlgMotionControlSetting->setUI();
-	dlgAxisSetting			->InitSetting();
-	dlgIOIndexSetting		->InitSetting();
-	dlgDigitalSetting		->InitSetting();
-	dlgAnalogSetting		->InitSetting();
-	dlgLaserSetting			->InitSetting();
-	dlgInternetSetting		->InitSetting();
-	SETTINGS->SetTable(true, SettingSection::Special, table{});
+	try {
+		dlgMotionControlSetting	->InitSetting();
+		dlgMotionControlSetting->setUI();
+		dlgAxisSetting			->InitSetting();
+		dlgIOIndexSetting		->InitSetting();
+		dlgDigitalSetting		->InitSetting();
+		dlgAnalogSetting		->InitSetting();
+		dlgLaserSetting			->InitSetting();
+		dlgInternetSetting		->InitSetting();
+		SETTINGS->SetTable(true, SettingSection::Special, table{});
 
-	dlgToolSetting			->InitSetting();
-	dlgToolSetting			->setUI();
-	dlgGasSetting			->InitSetting();
-	dlgWaterSetting			->InitSetting();
-	dlgMonitorSetting		->InitSetting();
-	dlgLoadingPosSetting	->InitSetting();
-	dlgCameraSetting		->InitSetting();
+		dlgToolSetting			->InitSetting();
+		dlgToolSetting			->setUI();
+		dlgGasSetting			->InitSetting();
+		dlgWaterSetting			->InitSetting();
+		dlgMonitorSetting		->InitSetting();
+		dlgLoadingPosSetting	->InitSetting();
+		dlgCameraSetting		->InitSetting();
+	}
+	catch (const std::exception& e)
+	{
+		LOG_SYS_INFO(tr("InitSetting exception: %1").arg(QString::fromLocal8Bit(e.what())).toUtf8().data());
+	}
+}
+
+// Helper: safely call a SetPage-like function, log and continue on toml errors
+static void SafeSetPage(const char* name, std::function<void()> fn)
+{
+	try { fn(); }
+	catch (const std::exception& e) {
+		LOG_SYS_INFO(QString("SetPage [%1] exception: %2")
+			.arg(QString::fromLatin1(name))
+			.arg(QString::fromLocal8Bit(e.what())).toUtf8().data());
+	}
 }
 
 void QG_dlgSetting::UpdatePage()
 {
-	dlgMotionControlSetting	->SetPage();
-	dlgAxisSetting			->SetPage();
-	dlgIOIndexSetting		->SetPage();
-	dlgDigitalSetting		->SetPage();
-	dlgAnalogSetting		->SetPage();
-	dlgLaserSetting			->SetPage();
-	dlgInternetSetting		->SetPage();
+	SafeSetPage("MotionControl",	[&]{ dlgMotionControlSetting	->SetPage(); });
+	SafeSetPage("Axis",				[&]{ dlgAxisSetting			->SetPage(); });
+	SafeSetPage("IOIndex",			[&]{ dlgIOIndexSetting		->SetPage(); });
+	SafeSetPage("Digital",			[&]{ dlgDigitalSetting		->SetPage(); });
+	SafeSetPage("Analog",			[&]{ dlgAnalogSetting		->SetPage(); });
+	SafeSetPage("Laser",			[&]{ dlgLaserSetting			->SetPage(); });
+	SafeSetPage("Internet",			[&]{ dlgInternetSetting		->SetPage(); });
 
-	dlgToolSetting			->RebuildToolIndex(true);
-	dlgToolSetting			->SetPage();
+	SafeSetPage("Tool.Rebuild",	[&]{ dlgToolSetting			->RebuildToolIndex(true); });
+	SafeSetPage("Tool",				[&]{ dlgToolSetting			->SetPage(); });
 
-	dlgGasSetting			->SetPage();
-	dlgWaterSetting			->SetPage();
-	dlgMonitorSetting		->SetPage();
-	dlgLoadingPosSetting	->SetPage();
-	dlgCameraSetting		->SetPage();
+	SafeSetPage("Gas",				[&]{ dlgGasSetting			->SetPage(); });
+	SafeSetPage("Water",			[&]{ dlgWaterSetting			->SetPage(); });
+	SafeSetPage("Monitor",			[&]{ dlgMonitorSetting		->SetPage(); });
+	SafeSetPage("LoadingPos",		[&]{ dlgLoadingPosSetting	->SetPage(); });
+	SafeSetPage("Camera",			[&]{ dlgCameraSetting		->SetPage(); });
 }
 
 void QG_dlgSetting::GetChanged()
@@ -732,15 +750,25 @@ void QG_dlgSetting::LoadToolConfig(string FilePath)
 
 void QG_dlgSetting::RebuildToolList()
 {
-	dlgToolSetting->ClearChange();
-	table t_temp = SETTINGS->GetTable(SettingSection::Tool, "ToolIndex");
-	for (int i = 0; i < t_temp.size() - 1; i++)
-	{
-		string strToolIndex = "sTool_" + std::to_string(i);
-		string strToolName = t_temp[strToolIndex].as_string();
-		dlgToolSetting->CreatTool(strToolName);
+	try {
+		dlgToolSetting->ClearChange();
+		table t_temp = SETTINGS->GetTable(SettingSection::Tool, "ToolIndex");
+		for (int i = 0; i < t_temp.size() - 1; i++)
+		{
+			string strToolIndex = "sTool_" + std::to_string(i);
+			if (!t_temp.count(strToolIndex))
+				break;
+			if (!t_temp[strToolIndex].is_string())
+				break;
+			string strToolName = t_temp[strToolIndex].as_string();
+			dlgToolSetting->CreatTool(strToolName);
+		}
+		dlgToolSetting->RebuildToolIndex(true);
 	}
-	dlgToolSetting->RebuildToolIndex(true);
+	catch (const std::exception& e)
+	{
+		LOG_SYS_INFO(tr("RebuildToolList exception: %1").arg(QString::fromLocal8Bit(e.what())).toUtf8().data());
+	}
 }
 
 void QG_dlgSetting::ChooseDialog(const QString& qstrTitle, map<string, bool>& mapObject)

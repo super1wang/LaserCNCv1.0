@@ -13,7 +13,7 @@
 #include "core/logging/logger.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/process_module.h"
-#include "modules/process/Setting/setting_bridge.h"
+#include "modules/process/Setting/qg_dlgsetting.h"
 
 namespace lcnc::process {
 
@@ -124,7 +124,23 @@ bool CmdOpenProcessSettings::isEnabled() const
 }
 void CmdOpenProcessSettings::execute()
 {
-    openSettingsDialog();
+    try {
+        auto* dlg = QG_dlgSetting::instance();
+        if (!dlg) {
+            dlg = new QG_dlgSetting(nullptr);
+            QG_dlgSetting::instance(dlg);
+        }
+
+        auto* mod = lcnc::Kernel::current().service<ProcessModule>();
+        if (mod && mod->service())
+            dlg->SetService(mod->service());
+
+        dlg->InitSetting();
+        dlg->exec();
+    }
+    catch (const std::exception& e) {
+        qWarning("CmdOpenProcessSettings::execute failed: %s", e.what());
+    }
 }
 
 // ── CmdRunStart ─────────────────────────────────────────────────────────────
