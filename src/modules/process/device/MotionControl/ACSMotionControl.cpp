@@ -167,9 +167,9 @@ bool ACSMotionControl::Reboot()
 bool ACSMotionControl::Home()
 {
 	// 顺序 Z -> Z1 -> Y1 -> X1 -> Y -> X -> A1 -> A
-	int arr[] = { 2, 6, 5, 4, 1, 0, 7, 3 };
+	int arr[] = { 2, 1, 0, 3 };
 
-	for (int i = 0; i < 8; ++i)
+	for (int i = 0; i < 4; ++i)
 	{
 		Axis eAxis = static_cast<Axis>(arr[i]);
 		if (!DT::IsAxisUse(eAxis))
@@ -1456,7 +1456,7 @@ void ACSMotionControl::JumpToSetAFPos(const Tool& curTool)
 	}
 	if (curTool.m_bA1Zero)
 	{
-		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[Axis::A1].AxisIndex);
+		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
 		string strA1Pos   = boost::lexical_cast<string>(curTool.m_dA1Pos / 360 * PI * m_dDiameter);
 		m_strCommand += "SET FPOS(" + strA1Index + ")=" + strA1Pos + "\n";
 	}
@@ -1476,9 +1476,9 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strXIndex + "," + strXPosition + "," + strXVel + "\n";
 	}
 	//X1 定位轴
-	if (curTool.m_bX1IsMove && eDirectionX != Axis::X1 && DT::IsAxisUse(Axis::X1))
+	if (curTool.m_bX1IsMove && DT::isExtensionAxis("X1"))
 	{
-		string strX1Index	 = boost::lexical_cast<string>(m_mapMotorValue[Axis::X1].AxisIndex);
+		string strX1Index	 = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("X").value_or(Axis::X)].AxisIndex);
 		string strX1Position = boost::lexical_cast<string>(curTool.m_dX1Position);
 		string strX1Vel		 = boost::lexical_cast<string>(curTool.m_dIdleX1Velocity);
 		m_strCommand += "PTP/EV " + strX1Index + "," + strX1Position + "," + strX1Vel + "\n";
@@ -1492,9 +1492,9 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strAIndex + "," + strAPosition + "," + strAVel + "\n";
 	}
 	//A1 定位轴
-	if (curTool.m_bA1IsMove && eDirectionY != Axis::A1 && DT::IsAxisUse(Axis::A1))
+	if (curTool.m_bA1IsMove && DT::isExtensionAxis("A1"))
 	{
-		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[Axis::A1].AxisIndex);
+		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
 		string strA1Position = boost::lexical_cast<string>(curTool.m_dA1Position / 360 * PI * m_dDiameter);
 		string strA1Vel = boost::lexical_cast<string>(curTool.m_dIdleA1Velocity);
 		m_strCommand += "PTP/EV " + strA1Index + "," + strA1Position + "," + strA1Vel + "\n";
@@ -1508,9 +1508,9 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strYIndex + "," + strYPosition + "," + strYVel + "\n";
 	}
 	//Y1 定位轴
-	if (curTool.m_bY1IsMove && eDirectionY != Axis::Y1 && DT::IsAxisUse(Axis::Y1))
+	if (curTool.m_bY1IsMove && DT::isExtensionAxis("Y1"))
 	{
-		string strY1Index	 = boost::lexical_cast<string>(m_mapMotorValue[Axis::Y1].AxisIndex);
+		string strY1Index	 = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("Y").value_or(Axis::Y)].AxisIndex);
 		string strY1Position = boost::lexical_cast<string>(curTool.m_dY1Position);
 		string strY1Vel		 = boost::lexical_cast<string>(curTool.m_dIdleY1Velocity);
 		m_strCommand += "PTP/EV " + strY1Index + "," + strY1Position + "," + strY1Vel + "\n";
@@ -1756,11 +1756,7 @@ double ACSMotionControl::GetAxisIdleVel(Axis eAxis, const Tool& curTool)
 	case Axis::Y:	return curTool.m_dIdleYVelocity;
 	case Axis::Z:	return curTool.m_dIdleZVelocity;
 	case Axis::A:	return curTool.m_dIdleAVelocity;	//临时
-	case Axis::X1:	return curTool.m_dIdleX1Velocity;
-	case Axis::Y1:	return curTool.m_dIdleY1Velocity;
-	case Axis::Z1:	return 0;
-	case Axis::A1:	return 0;
-	default:		return 0;
+	default:	return 0;
 	}
 }
 
@@ -1882,7 +1878,7 @@ void ACSMotionControl::JumpToSimple(double dEndX, double dEndY, const Tool& curT
 	}
 	if (curTool.m_bA1Zero)
 	{
-		string strthetaIndex = boost::lexical_cast<string>(m_mapMotorValue[Axis::A1].AxisIndex);
+		string strthetaIndex = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
 		m_strCommand += "SET FPOS(" + strthetaIndex + ")=" + strYPosition + "\n";
 	}
 

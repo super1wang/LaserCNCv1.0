@@ -11,7 +11,12 @@
 //#define	MAGIC_ENUM_RANGE_MAX 63;
 
 // 轴系组，临时定义，后改为使用注册表读写
-#define AXISGROUP		188
+// 机台轴系标识符说明，LSB-first 位掩码 (bit0=X, bit1=Y, bit2=Z, bit3=A, bit4=B, bit5=C)
+//			X	Y	Z	A	B	C	二进制		十进制
+// X Y Z		1	1	1	0	0	0	000111		7
+// X A Z		1	0	1	1	0	0	001101		13
+// X A Z C		1	0	1	1	0	1	101101		45	(5-axis AC table)
+// X Y Z A C	1	1	1	1	0	1	101111		47
 
 #define	MaxNestingNumber 1000		// 最大嵌套数
 #define PRECISION 1e-10
@@ -49,20 +54,8 @@ enum class PermissionLevel
 
 enum class Axis
 {
-	X  = 0,	Y  = 1,	Z  = 2,	A  = 3, 
-	X1 = 4,	Y1 = 5,	Z1 = 6,	A1 = 7
-
-// 机台轴系标识符说明，用轴所在位启用形式转二进制，再转十进制进行存储与判断条件
-//				X	Y	Z	A	X1	Y1	Z1	A1	二进制		十进制
-// X Y Z		1	1	1	0	0	0	0	0	11100000	224
-// X A Z		1	0	1	1	0	0	0	0	10110000	176
-// X A Z X1		1	0	1	1	1	0	0	0	10111000	184
-// X A Z Y1		1	0	1	1	0	1	0	0	10110100	180
-// X A Z Z1		1	0	1	1	0	0	1	0	10110010	178
-// X A Z A1		1	0	1	1	0	0	0	1	10110001	177
-// X A Z X1 Y1	1	0	1	1	1	1	0	0	10111100	188
-// X A Z A1  Y1	1	0	1	1	0	1	0	1	10110101	181
-// X Y Z A  A1	1	1	1	1	0	0	0	1	11110001	241
+	X  = 0,	Y  = 1,	Z  = 2,	A  = 3,
+	B  = 4,	C  = 5
 };
 
 // 系统状态
@@ -269,21 +262,35 @@ private:
 	static int			AxisGroup;
 	static QStringList	DirectionXList;
 	static QStringList	DirectionYList;
+	static QStringList	ExtensionAxes;		// 用户动态添加的扩展轴系
 public:
 	static void			setAxisGroup(int iAxisgroup)	
 	{ 
-		AxisGroup = iAxisgroup ; 
-		if (DT::IsAxisUse(Axis::X))		{ DirectionXList.append("X");	}
-		if (DT::IsAxisUse(Axis::X1))	{ DirectionXList.append("X1");	}
-		if (DT::IsAxisUse(Axis::Y))		{ DirectionYList.append("Y");	}
-		if (DT::IsAxisUse(Axis::A))		{ DirectionYList.append("A");	}
-		if (DT::IsAxisUse(Axis::Y1))	{ DirectionYList.append("Y1");	}
-		if (DT::IsAxisUse(Axis::A1))	{ DirectionYList.append("A1");	}
+		AxisGroup = iAxisgroup;
+		DirectionXList.clear();
+		DirectionYList.clear(); 
+		if (IsAxisUse(Axis::X))		{ DirectionXList.append("X");	}
+		if (IsAxisUse(Axis::B))		{ DirectionYList.append("B");	}
+		if (IsAxisUse(Axis::Y))		{ DirectionYList.append("Y");	}
+		if (IsAxisUse(Axis::A))		{ DirectionYList.append("A");	}
+		if (IsAxisUse(Axis::C))		{ DirectionYList.append("C");	}
+		for (const QString& ext : ExtensionAxes)
+		{
+			if (ext == QStringLiteral("U") || ext.endsWith(QStringLiteral("1")))
+				DirectionXList.append(ext);
+			else
+				DirectionYList.append(ext);
+		}
 	}
 	static int					getAxisGroup()					{ return AxisGroup; }
-	static bool					IsAxisUse(Axis eAxis)			{ return (AxisGroup & (1 << (7 - (int)eAxis))) != 0; }
+	static bool					IsAxisUse(Axis eAxis)			{ return (AxisGroup & (1 << static_cast<int>(eAxis))) != 0; }
 	static const QStringList&	getDirectionX()					{ return DirectionXList; };
 	static const QStringList&	getDirectionY()					{ return DirectionYList; };
+
+// 扩展轴系管理
+static void					setExtensionAxes(const QStringList& axes)	{ ExtensionAxes = axes; }
+static const QStringList&	getExtensionAxes()							{ return ExtensionAxes; }
+static bool					isExtensionAxis(const QString& name)		{ return ExtensionAxes.contains(name.toUpper()); }
 
 
 // IO索引
@@ -329,6 +336,7 @@ inline PermissionLevel	DT::Permission		= PermissionLevel::Operator;
 inline int				DT::AxisGroup = 0;
 inline QStringList		DT::DirectionXList  = {};
 inline QStringList		DT::DirectionYList  = {};
+inline QStringList		DT::ExtensionAxes   = {};
 
 inline QStringList		DT::DigitalINList	= {};
 inline QStringList		DT::DigitalOUTList	= {};

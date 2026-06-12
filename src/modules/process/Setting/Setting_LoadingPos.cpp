@@ -94,21 +94,21 @@ void Dialog_Setting_LoadingPos::InitSetting()
 		ui.checkBox_BlankingPos_bBlankingPosZIdle->setHidden(true);
 		ui.lineEdit_BlankingPos_fBlankingPosZIdle->setHidden(true);
 	}
-	if (!DT::IsAxisUse(Axis::X1))
+	if (!DT::isExtensionAxis("X1"))
 	{
 		ui.checkBox_LoadingPos_bLoadingPosX1->setHidden(true);
 		ui.lineEdit_LoadingPos_fLoadingPosX1->setHidden(true);
 		ui.checkBox_BlankingPos_bBlankingPosX1->setHidden(true);
 		ui.lineEdit_BlankingPos_fBlankingPosX1->setHidden(true);
 	}
-	if (!DT::IsAxisUse(Axis::A1))
+	if (!DT::isExtensionAxis("A1"))
 	{
 		ui.checkBox_LoadingPos_bLoadingPosA1->setHidden(true);
 		ui.lineEdit_LoadingPos_fLoadingPosA1->setHidden(true);
 		ui.checkBox_BlankingPos_bBlankingPosA1->setHidden(true);
 		ui.lineEdit_BlankingPos_fBlankingPosA1->setHidden(true);
 	}
-	if (!DT::IsAxisUse(Axis::Y1))
+	if (!DT::isExtensionAxis("Y1"))
 	{
 		ui.checkBox_LoadingPos_bLoadingPosY1->setHidden(true);
 		ui.lineEdit_LoadingPos_fLoadingPosY1->setHidden(true);
@@ -116,7 +116,7 @@ void Dialog_Setting_LoadingPos::InitSetting()
 		ui.lineEdit_BlankingPos_fBlankingPosY1->setHidden(true);
 	}
 
-	if (!DT::IsAxisUse(Axis::Z1))
+	if (!DT::isExtensionAxis("Z1"))
 	{
 		ui.checkBox_LoadingPos_bLoadingPosZ1->setHidden(true);
 		ui.lineEdit_LoadingPos_fLoadingPosZ1->setHidden(true);

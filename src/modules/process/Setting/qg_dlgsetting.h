@@ -4,7 +4,6 @@
 #include "ui_qg_dlgSetting.h"
 
 #include "Setting_MotionControl.h"
-#include "Setting_Axis.h"
 #include "Setting_IOIndex.h"
 #include "Setting_Digital.h"
 #include "Setting_Analog.h"
@@ -27,7 +26,7 @@ class QG_dlgSetting : public QDialog
 	{
 		EXTERNAL,
 			MOTION_CONTROLLER,
-			AXIS_SPEED,
+			AXIS_SPEED,   // 轴参数已合并至运动控制器页面，菜单项保留用于权限兼容
 			IO_INDEX,
 				DIGITAL_IO,
 				ANALOG_IO,
@@ -52,6 +51,7 @@ class QG_dlgSetting : public QDialog
 	{
 		//EXTERNAL,
 		MotionController,
+		// 轴参数已合并至运动控制器页面，Axis 页面号保留用于兼容
 		Axis,
 		IOIndex,
 		Digital,
@@ -102,7 +102,6 @@ private:
 
 private:
 	Dialog_Setting_MotionControl*	dlgMotionControlSetting;
-	Dialog_Setting_Axis*			dlgAxisSetting;
 	Dialog_Setting_IOIndex*			dlgIOIndexSetting;
 	Dialog_Setting_Digital*			dlgDigitalSetting;
 	Dialog_Setting_Analog*			dlgAnalogSetting;

@@ -326,7 +326,7 @@ void QG_AxisWidget::UpdateAxisState()
 void QG_AxisWidget::SetupUI()
 {
 	bool bIsAxis;
-	if (!DT::IsAxisUse(Axis::A1) && !DT::IsAxisUse(Axis::X1))
+	if (!DT::isExtensionAxis("A1") && !DT::isExtensionAxis("X1"))
 	{
 		delete ui.pushButton_AxisMove_X1Neg;
 		delete ui.pushButton_AxisMove_X1Plus;
@@ -338,7 +338,7 @@ void QG_AxisWidget::SetupUI()
 		ui.pushButton_AxisState_X1Enable	= nullptr;
 		ui.lcdNumber_AxisState_X1Pos		= nullptr;
 	}
-	if(!DT::IsAxisUse(Axis::Y1) && !DT::IsAxisUse(Axis::Z1) && !DT::IsAxisUse(Axis::A1))
+	if(!DT::isExtensionAxis("Y1") && !DT::isExtensionAxis("Z1") && !DT::isExtensionAxis("A1"))
 	{
 		delete ui.lcdNumber_AxisState_Y1Pos;
 		delete ui.pushButton_AxisMove_Y1Neg;
@@ -352,15 +352,14 @@ void QG_AxisWidget::SetupUI()
 	}
 
 
-	for (int i = 0; i < 8; i++)
+	for (const auto& eAxis : magic_enum::enum_values<Axis>())
 	{
-		if (DT::IsAxisUse((Axis)i))
+		if (DT::IsAxisUse(eAxis))
 		{
-			string sAxis = enum_name((Axis)i).data();
-			switch ((Axis)i)
+			string sAxis = enum_name(eAxis).data();
+			switch (eAxis)
 			{
 			case Axis::Y:
-
 				break;
 			case Axis::A:
 				if (!DT::IsAxisUse(Axis::Y))//判断是否存在Y轴
@@ -377,29 +376,6 @@ void QG_AxisWidget::SetupUI()
 					ui.pushButton_AxisState_Y1Enable->setObjectName("pushButton_AxisState_A1Enable");
 					ui.lcdNumber_AxisState_Y1Pos->setObjectName("lcdNumber_AxisState_A1Pos");
 				}
-				break;
-			case Axis::Z1:
-				ui.pushButton_AxisMove_Y1Plus->setObjectName("pushButton_AxisMove_Z1Plus");
-				ui.pushButton_AxisMove_Y1Neg->setObjectName("pushButton_AxisMove_Z1Neg");
-				ui.pushButton_AxisState_Y1Enable->setObjectName("pushButton_AxisState_Z1Enable");
-				ui.lcdNumber_AxisState_Y1Pos->setObjectName("lcdNumber_AxisState_Z1Pos");
-				break;
-			case Axis::A1:
-				if (!DT::IsAxisUse((Axis)1))
-				{
-					ui.pushButton_AxisMove_X1Plus->setObjectName("pushButton_AxisMove_A1Plus");
-					ui.pushButton_AxisMove_X1Neg->setObjectName("pushButton_AxisMove_A1Neg");
-					ui.pushButton_AxisState_X1Enable->setObjectName("pushButton_AxisState_A1Enable");
-					ui.lcdNumber_AxisState_X1Pos->setObjectName("lcdNumber_AxisState_A1Pos");
-				}
-				else
-				{
-					ui.pushButton_AxisMove_X1Plus->setObjectName("pushButton_AxisMove_APlus");
-					ui.pushButton_AxisMove_X1Neg->setObjectName("pushButton_AxisMove_ANeg");
-					ui.pushButton_AxisState_X1Enable->setObjectName("pushButton_AxisState_AEnable");
-					ui.lcdNumber_AxisState_X1Pos->setObjectName("lcdNumber_AxisState_APos");
-				}
-				
 				break;
 			default:
 				break;

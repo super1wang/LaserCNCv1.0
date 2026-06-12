@@ -958,7 +958,7 @@ void Dialog_Setting_Tool::setUI()
 		ui.label_Idel_XVel->hide();
 		ui.lineEdit_Idel_fXVel->hide();
 	}
-	if (!DT::IsAxisUse(Axis::X1))
+	if (!DT::isExtensionAxis("X1"))
 	{
 		ui.checkBox_MovePos_bMovePosX1->hide();
 		ui.lineEdit_MovePos_fMovePosX1->hide();
@@ -975,7 +975,7 @@ void Dialog_Setting_Tool::setUI()
 		// 置位
 		ui.groupBox_SetPos->hide();
 	}
-	if (!DT::IsAxisUse(Axis::A1))
+	if (!DT::isExtensionAxis("A1"))
 	{
 		ui.checkBox_MovePos_bMovePosA1->hide();
 		ui.lineEdit_MovePos_fMovePosA1->hide();
@@ -993,7 +993,7 @@ void Dialog_Setting_Tool::setUI()
 		ui.label_Idel_YVel->hide();
 		ui.lineEdit_Idel_fYVel->hide();
 	}
-	if (!DT::IsAxisUse(Axis::Y1))
+	if (!DT::isExtensionAxis("Y1"))
 	{
 		ui.checkBox_MovePos_bMovePosY1->hide();
 		ui.lineEdit_MovePos_fMovePosY1->hide();

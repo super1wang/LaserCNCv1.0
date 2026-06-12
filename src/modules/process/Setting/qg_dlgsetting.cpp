@@ -15,7 +15,6 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 
 	// 右侧设置页
 	dlgMotionControlSetting = new Dialog_Setting_MotionControl	(this);
-	dlgAxisSetting			= new Dialog_Setting_Axis			(this);
 	dlgIOIndexSetting		= new Dialog_Setting_IOIndex		(this);
 	dlgDigitalSetting		= new Dialog_Setting_Digital		(this);
 	dlgAnalogSetting		= new Dialog_Setting_Analog			(this);
@@ -30,7 +29,6 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 	dlgCameraSetting		= new Dialog_Setting_Camera			(this);
 	
 	ui.stackedWidget_Setting_Content->insertWidget(Page::MotionController,	dlgMotionControlSetting);
-	ui.stackedWidget_Setting_Content->insertWidget(Page::Axis,				dlgAxisSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::IOIndex,			dlgIOIndexSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Digital, 			dlgDigitalSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Analog,			dlgAnalogSetting);
@@ -44,7 +42,7 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 	ui.stackedWidget_Setting_Content->insertWidget(Page::LoadingPos,		dlgLoadingPosSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Camera,			dlgCameraSetting);
 
-	ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Axis);
+	ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);
 
 	connect(ui.pushButton_Setting_Apply,		SIGNAL(clicked()), this, SLOT(clickApply()));
 	connect(ui.pushButton_Setting_OK,			SIGNAL(clicked()), this, SLOT(clickOK()));
@@ -314,7 +312,7 @@ void QG_dlgSetting::UpdateMenu(int iPermissionLevel)
 	m_mapMenu[EXTERNAL]->setExpanded(true);
 	m_mapMenu[PROCESSING]->setExpanded(true);
 
-	ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Axis);
+	ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);
 }
 
 void QG_dlgSetting::SwitchItem(QTreeWidgetItem* item, int column)
@@ -331,7 +329,7 @@ void QG_dlgSetting::SwitchItem(QTreeWidgetItem* item, int column)
 		break;
 	}
 	case Menu::MOTION_CONTROLLER:	ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);	break;
-	case Menu::AXIS_SPEED:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Axis);				break;
+	case Menu::AXIS_SPEED:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);				break;
 	case Menu::IO_INDEX:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::IOIndex);			break;
 	case Menu::DIGITAL_IO:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Digital);			break;
 	case Menu::ANALOG_IO:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Analog);			break;
@@ -363,7 +361,6 @@ void QG_dlgSetting::InitSetting()
 	try {
 		dlgMotionControlSetting	->InitSetting();
 		dlgMotionControlSetting->setUI();
-		dlgAxisSetting			->InitSetting();
 		dlgIOIndexSetting		->InitSetting();
 		dlgDigitalSetting		->InitSetting();
 		dlgAnalogSetting		->InitSetting();
@@ -399,7 +396,6 @@ static void SafeSetPage(const char* name, std::function<void()> fn)
 void QG_dlgSetting::UpdatePage()
 {
 	SafeSetPage("MotionControl",	[&]{ dlgMotionControlSetting	->SetPage(); });
-	SafeSetPage("Axis",				[&]{ dlgAxisSetting			->SetPage(); });
 	SafeSetPage("IOIndex",			[&]{ dlgIOIndexSetting		->SetPage(); });
 	SafeSetPage("Digital",			[&]{ dlgDigitalSetting		->SetPage(); });
 	SafeSetPage("Analog",			[&]{ dlgAnalogSetting		->SetPage(); });
@@ -420,22 +416,40 @@ void QG_dlgSetting::GetChanged()
 {
 	bool bMotionControlChanged = false;
 	dlgMotionControlSetting->GetPage(m_tableSettings["MotionControl"].as_table());
-	if (dlgMotionControlSetting->GetChanged(m_tableSettings["MotionControl"].as_table(), m_tableChanged["MotionControl"].as_table()) && m_pService->GetMotionControl())
+	// MotionControl page now handles both MotionControl and Axis sections.
+	// GetChanged writes to both m_tableChanged["MotionControl"] and m_tableChanged["Axis"].
 	{
-		if (m_pService->GetMotionControl()->IsConnected())
+		table& mcChanged  = m_tableChanged["MotionControl"].as_table();
+		table& axisChanged = m_tableChanged["Axis"].as_table();
+		bool hasMCChanges = dlgMotionControlSetting->GetChanged(m_tableSettings["MotionControl"].as_table(), mcChanged);
+		// Axis section changes are already written to SETTINGS by GetChanged;
+		// collect them from mcChanged's "Axis" sub-table if present.
+		if (mcChanged.count("Axis"))
 		{
-			if (!m_tableChanged["MotionControl"]["sType"].is_empty())
+			table& axisSub = mcChanged.at("Axis").as_table();
+			for (const auto& kv : axisSub)
+				axisChanged[kv.first] = kv.second;
+			mcChanged.erase("Axis");
+		}
+
+		if (hasMCChanges && m_pService->GetMotionControl())
+		{
+			if (m_pService->GetMotionControl()->IsConnected())
 			{
-				bMotionControlChanged = true;
-				m_pService->SetMotionControlTable();
+				if (!mcChanged["sType"].is_empty())
+				{
+					bMotionControlChanged = true;
+					m_pService->SetMotionControlTable();
+				}
+				else
+					m_pService->SetMotionControlTable(mcChanged);
 			}
-			else
-				m_pService->SetMotionControlTable(m_tableChanged["MotionControl"].as_table());
 		}
 	}
 
-	dlgAxisSetting->GetPage(m_tableSettings["Axis"].as_table());
-	if (dlgAxisSetting->GetChanged(m_tableSettings["Axis"].as_table(), m_tableChanged["Axis"].as_table()) || bMotionControlChanged)
+	// PipeDiameter / axis speed changes are now written to SettingSection::Axis
+	// by the MotionControl page's GetChanged.
+	if (m_tableChanged["Axis"].as_table().size() || bMotionControlChanged)
 	{
 		if (m_pService->GetMotionControl() && m_pService->GetMotionControl()->IsConnected())
 		{
@@ -567,7 +581,6 @@ void QG_dlgSetting::clickCancel()
 
 	// 清除修改内容
 	dlgMotionControlSetting	->ClearChange();
-	dlgAxisSetting			->ClearChange();
 	dlgIOIndexSetting		->ClearChange();
 	dlgDigitalSetting		->ClearChange();
 	dlgAnalogSetting		->ClearChange();
@@ -596,9 +609,8 @@ void QG_dlgSetting::clickExportConfig()
 	MotionControl* pMC = m_pService->GetMotionControl();
 	if (pMC && pMC->GetName() == "GTN")
 	{
-		for (int i = 0; i < 8; i++)
+		for (const auto& eAxis : magic_enum::enum_values<::Axis>())
 		{
-			::Axis eAxis = static_cast<::Axis>(i);
 			if (DT::IsAxisUse(eAxis))
 			{
 				table tableHome;

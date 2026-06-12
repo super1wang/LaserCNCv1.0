@@ -11,25 +11,23 @@ void CuttingDevice::AxisBoundUpdate(const Tool& curTool)
 {
 	if (curTool.m_strDirectionX == "X")
 		m_eDirectionX = Axis::X;
-	else if (curTool.m_strDirectionX == "X1")
-		m_eDirectionX = Axis::X1;
+	else
+		m_eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX.toStdString()).value_or(Axis::X);
 
 	if (curTool.m_strDirectionY == "Y")
 		m_eDirectionY = Axis::Y;
 	else if (curTool.m_strDirectionY == "A")
 		m_eDirectionY = Axis::A;
-	else if (curTool.m_strDirectionY == "A1")
-		m_eDirectionY = Axis::A1;
-	else if (curTool.m_strDirectionY == "Y1")
-		m_eDirectionY = Axis::Y1;
+	else
+		m_eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY.toStdString()).value_or(Axis::Y);
 }
 
 void CuttingDevice::SetDirectionX(QString qstr)
 {
 	if (qstr == "X")
 		m_eDirectionX = Axis::X;
-	else if (qstr == "X1")
-		m_eDirectionX = Axis::X1;
+	else
+		m_eDirectionX = enum_cast<Axis>(qstr.toStdString()).value_or(Axis::X);
 }
 
 Axis CuttingDevice::GetDirectionX()
@@ -43,10 +41,8 @@ void CuttingDevice::SetDirectionY(QString qstr)
 		m_eDirectionY = Axis::A;
 	else if (qstr == "Y")
 		m_eDirectionY = Axis::Y;
-	else if (qstr == "Y1")
-		m_eDirectionY = Axis::Y1;
-	else if (qstr == "A1")
-		m_eDirectionY = Axis::A1;
+	else
+		m_eDirectionY = enum_cast<Axis>(qstr.toStdString()).value_or(Axis::Y);
 }
 
 Axis CuttingDevice::GetDirectionY()

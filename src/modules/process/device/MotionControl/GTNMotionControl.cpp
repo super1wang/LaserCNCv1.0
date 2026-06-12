@@ -237,7 +237,7 @@ bool GTNMotionControl::Home()
 	// 顺序 Z -> Z1 -> Y1 -> X1 -> Y -> X -> A1 -> A
 	int arr[] = { 2, 6, 5, 4, 1, 0, 7, 3 };
 
-	for (int i = 0; i < 8; ++i)
+	for (const auto& eAxis : magic_enum::enum_values<Axis>()) { if (!DT::IsAxisUse(eAxis)) continue;
 	{
 		Axis eAxis = static_cast<Axis>(arr[i]);
 		if (!DT::IsAxisUse(eAxis))
@@ -1588,7 +1588,7 @@ void GTNMotionControl::JumpToSetAFPos(const Tool& curTool)
 	if (curTool.m_bA1Zero)
 	{
 		MillimeterToPulse(Axis::A1, curTool.m_dA1Pos / 360 * PI * m_dDiameter, dNewPos);
-		sRtn = GTN_SetEncPos(m_iCore, m_mapMotorValue[Axis::A1].AxisIndex, dNewPos);
+		sRtn = GTN_SetEncPos(m_iCore, m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex, dNewPos);
 		if (sRtn)
 			LogError("JumpToSetAFPos", "GTN_SetEncPos_A1", "A1", sRtn);
 	}
@@ -1607,7 +1607,7 @@ void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		MovePostion(Axis::X, curTool.m_dIdleXVelocity, curTool.m_dXPosition);
 	}
 	//X1 定位轴
-	if (curTool.m_bX1IsMove && eDirectionX != Axis::X1 && DT::IsAxisUse(Axis::X1))
+	if (curTool.m_bX1IsMove && DT::isExtensionAxis("X1"))
 	{
 		MovePostion(Axis::X1, curTool.m_dIdleX1Velocity, curTool.m_dX1Position);
 	}
@@ -1618,7 +1618,7 @@ void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		
 	}
 	//A1 定位轴
-	if (curTool.m_bA1IsMove && eDirectionY != Axis::A1 && DT::IsAxisUse(Axis::A1))
+	if (curTool.m_bA1IsMove && DT::isExtensionAxis("A1"))
 	{
 		MovePostion(Axis::A1, curTool.m_dIdleA1Velocity, curTool.m_dA1Position / 360 * PI * m_dDiameter);
 	}
@@ -1629,7 +1629,7 @@ void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		
 	}
 	//Y1 定位轴
-	if (curTool.m_bY1IsMove && eDirectionY != Axis::Y1 && DT::IsAxisUse(Axis::Y1))
+	if (curTool.m_bY1IsMove && DT::isExtensionAxis("Y1"))
 	{
 		MovePostion(Axis::Y1, curTool.m_dIdleY1Velocity, curTool.m_dY1Position);
 	}
@@ -2062,11 +2062,7 @@ double GTNMotionControl::GetAxisIdleVel(Axis eAxis, const Tool& curTool)
 	case Axis::Y:	return curTool.m_dIdleYVelocity;
 	case Axis::Z:	return curTool.m_dIdleZVelocity;
 	case Axis::A:	return curTool.m_dIdleAVelocity;	//临时
-	case Axis::X1:	return curTool.m_dIdleX1Velocity;
-	case Axis::Y1:	return curTool.m_dIdleY1Velocity;
-	case Axis::Z1:	return 0;
-	case Axis::A1:	return 0;
-	default:		return 0;
+	default:	return curTool.m_dIdleX1Velocity;
 	}
 }
 

@@ -173,7 +173,6 @@ set(SRCS_MODULES
     src/modules/process/Setting/Settings.cpp
     src/modules/process/Setting/qg_dlgsetting.cpp
     src/modules/process/Setting/Setting_MotionControl.cpp
-    src/modules/process/Setting/Setting_Axis.cpp
     src/modules/process/Setting/Setting_IOIndex.cpp
     src/modules/process/Setting/Setting_Digital.cpp
     src/modules/process/Setting/Setting_Analog.cpp

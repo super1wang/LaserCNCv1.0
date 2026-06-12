@@ -1,27 +1,31 @@
 #include "RegexPatterns.h"
 #include "Setting_MotionControl.h"
 
+#include <QHeaderView>
+#include <QColor>
+
 Dialog_Setting_MotionControl::Dialog_Setting_MotionControl(QWidget* parent)
 	: QDialog(parent)
 	, set_Changed()
 {
 	ui.setupUi(this);
 	setWindowFlags(Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
-	setupLineEditValidators(this);
 
-	connect(ui.comboBox_MotionControl_sType,		SIGNAL(activated(int)),		this, SLOT(comboBoxChanged()));
-	connect(ui.comboBox_MotionControl_sType,		SIGNAL(activated(int)),		this, SLOT(TypeChanged()));
-	connect(ui.comboBox_MotionControl_sAxis,		SIGNAL(activated(int)),		this, SLOT(comboBoxChanged()));
-	connect(ui.comboBox_MotionControl_sAxis,		SIGNAL(activated(int)),		this, SLOT(UpdatePage()));
-	connect(ui.lineEdit_AxisSetting_iIndex,			SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
-	connect(ui.lineEdit_AxisSetting_iHomeIndex,		SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
-	connect(ui.comboBox_AxisSetting_bRotation,		SIGNAL(activated(int)),		this, SLOT(comboBoxChanged()));
-	connect(ui.lineEdit_AxisSetting_fResolution,	SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
-	connect(ui.lineEdit_AxisSetting_fVel,			SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
-	connect(ui.lineEdit_AxisSetting_fAcc,			SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
-	connect(ui.lineEdit_AxisSetting_fJerk,			SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
-	connect(ui.lineEdit_AxisSetting_fLeftLimit,		SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
-	connect(ui.lineEdit_AxisSetting_fRightLimit,	SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
+	// Setup table headers
+	QTableWidget* tw = ui.tableWidget_AxisConfig;
+	tw->setColumnCount(Col_Count);
+	QStringList headers;
+	headers << tr("Axis") << tr("Index") << tr("HomeIndex") << tr("Resolution")
+			<< tr("LowSpeed\n(mm/s)") << tr("MediumSpeed\n(mm/s)") << tr("HighSpeed\n(mm/s)")
+			<< tr("Acc\n(mm/s^2)") << tr("Jerk\n(mm/s^3)")
+			<< tr("LeftLimit\n(mm)") << tr("RightLimit\n(mm)");
+	tw->setHorizontalHeaderLabels(headers);
+	tw->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+	connect(ui.comboBox_MotionControl_sType, SIGNAL(activated(int)), this, SLOT(TypeChanged()));
+	connect(tw, &QTableWidget::cellChanged, this, &Dialog_Setting_MotionControl::onTableCellChanged);
+	connect(ui.pushButton_AddAxis, &QPushButton::clicked, this, &Dialog_Setting_MotionControl::onAddAxis);
+	connect(ui.pushButton_DeleteAxis, &QPushButton::clicked, this, &Dialog_Setting_MotionControl::onDeleteAxis);
 }
 
 Dialog_Setting_MotionControl::~Dialog_Setting_MotionControl()
@@ -30,73 +34,102 @@ Dialog_Setting_MotionControl::~Dialog_Setting_MotionControl()
 
 void Dialog_Setting_MotionControl::setUI()
 {
-	string strName;
-	SETTINGS->GetKeyValue("sType", strName, SettingSection::MotionControl, "MotionControl");
-	if (strName == "GTN")
-	{
-		ui.label_AxisSetting_HomeIndex->setHidden(true);
-		ui.lineEdit_AxisSetting_iHomeIndex->setHidden(true);
-		ui.label_AxisSetting_Jerk->setText(tr("smoothTime(ms)"));
-		//ui.label_AxisSetting_Resolution->setText(tr("Conversion(pulse)"));
-	}
-	else
-	{
-		ui.label_AxisSetting_HomeIndex->setHidden(false);
-		ui.lineEdit_AxisSetting_iHomeIndex->setHidden(false);
-		ui.label_AxisSetting_Jerk->setText(tr("Jerk(mm/s^3)"));
-		//ui.label_AxisSetting_Resolution->setText(tr("Resolution"));
-	}
-	//TypeChanged();
+	TypeChanged();
 }
 
-void Dialog_Setting_MotionControl::CreatAxis(string strAxis, int iIndex, table& t_Init)
+void Dialog_Setting_MotionControl::ClearChange()
 {
-	t_Init[strAxis]["iIndex"]		= iIndex;
-	t_Init[strAxis]["iHomeIndex"]	= iIndex;
-	t_Init[strAxis]["bRotation"]	= false;
-	t_Init[strAxis]["fResolution"]	= 2000.0;
-	t_Init[strAxis]["fVel"]			= 10.0;
-	t_Init[strAxis]["fAcc"]			= 1000.0;
-	t_Init[strAxis]["fJerk"]		= 10000.0;
-	t_Init[strAxis]["fLeftLimit"]	= 0.0;
-	t_Init[strAxis]["fRightLimit"]	= 50.0;
+	set_Changed.clear();
+	table_Temp.clear();
+}
 
-	// 回零参数（THomePrm），仅初始化默认值，不通过界面编辑
-	t_Init[strAxis]["Home"]["iMode"]				= 10;		// HOME_MODE_LIMIT
-	t_Init[strAxis]["Home"]["iMoveDir"]				= -1;		// 负方向搜索限位
-	t_Init[strAxis]["Home"]["iIndexDir"]			= -1;		// 负方向搜索Index
-	t_Init[strAxis]["Home"]["iEdge"]				= 0;		// 下降沿
-	t_Init[strAxis]["Home"]["iTriggerIndex"]		= -1;		// 使用本轴触发器
-	t_Init[strAxis]["Home"]["fVelHigh"]				= 5.0;		// 搜索Home速度(pulse/ms)
-	t_Init[strAxis]["Home"]["fVelLow"]				= 1.0;		// 搜索Index速度(pulse/ms)
-	t_Init[strAxis]["Home"]["fAcc"]					= 50.0;		// 加速度(pulse/ms^2)
-	t_Init[strAxis]["Home"]["fDec"]					= 50.0;		// 减速度(pulse/ms^2)
-	t_Init[strAxis]["Home"]["iSmoothTime"]			= 0;		// 平滑时间(ms)
-	t_Init[strAxis]["Home"]["iHomeOffset"]			= 0;		// 原点偏移(pulse)
-	t_Init[strAxis]["Home"]["iSearchHomeDistance"]	= 0;		// Home最大搜索距离，0不限制
-	t_Init[strAxis]["Home"]["iSearchIndexDistance"]	= 0;		// Index最大搜索距离，0不限制
-	t_Init[strAxis]["Home"]["iEscapeStep"]			= 20000;	// 脱离限位步长(pulse)
+void Dialog_Setting_MotionControl::rebuildAxisNames()
+{
+	m_machineAxisNames.clear();
+	for (const auto& eAxis : magic_enum::enum_values<Axis>())
+	{
+		if (DT::IsAxisUse(eAxis))
+			m_machineAxisNames.append(QString::fromStdString(enum_name(eAxis).data()));
+	}
+
+	// Load extension axes from settings
+	m_extensionAxisNames.clear();
+	string extStr;
+	SETTINGS->GetKeyValue("ExtensionAxes", extStr, SettingSection::MotionControl, "MotionControl");
+	if (!extStr.empty())
+	{
+		for (const QString& p : QString::fromStdString(extStr).split(',', Qt::SkipEmptyParts))
+		{
+			QString name = p.trimmed().toUpper();
+			if (!name.isEmpty() && !m_machineAxisNames.contains(name))
+				m_extensionAxisNames.append(name);
+		}
+	}
+
+	m_axisNames = m_machineAxisNames + m_extensionAxisNames;
+
+	// Also sync to DT
+	DT::setExtensionAxes(m_extensionAxisNames);
+}
+
+bool Dialog_Setting_MotionControl::isMachineAxis(const QString& name) const
+{
+	return m_machineAxisNames.contains(name);
 }
 
 void Dialog_Setting_MotionControl::InitSetting()
 {
-	table t_Init;
-	t_Init["MotionControl"]["sType"] = "SimulatorCMHP";
-	t_Init["MotionControl"]["sAxis"] = "X";
+	rebuildAxisNames();
 
-	ui.comboBox_MotionControl_sAxis->blockSignals(true);
-	for(int i = 0; i < 8; i++)
+	// Init MotionControl section defaults
+	table t_MC_Init;
+	t_MC_Init["MotionControl"]["sType"] = "SimulatorCMHP";
+	t_MC_Init["MotionControl"]["sAxis"] = m_axisNames.isEmpty() ? "X" : m_axisNames.first().toStdString();
+	t_MC_Init["MotionControl"]["ExtensionAxes"] = "";
+
+	for (const QString& axisName : m_axisNames)
 	{
-		if (DT::IsAxisUse((Axis)i))
-		{
-			string sAxis = enum_name((Axis)i).data();
-			CreatAxis(sAxis, i, t_Init);
-			ui.comboBox_MotionControl_sAxis->addItem(QString::fromStdString(sAxis));
-		}
-	}
-	ui.comboBox_MotionControl_sAxis->blockSignals(false);
+		string strAxis = axisName.toStdString();
+		t_MC_Init[strAxis]["iIndex"]      = static_cast<int>(m_axisNames.indexOf(axisName));
+		t_MC_Init[strAxis]["iHomeIndex"]  = static_cast<int>(m_axisNames.indexOf(axisName));
+		t_MC_Init[strAxis]["bRotation"]   = false;
+		t_MC_Init[strAxis]["fResolution"] = 2000.0;
+		t_MC_Init[strAxis]["fVel"]        = 10.0;
+		t_MC_Init[strAxis]["fAcc"]        = 1000.0;
+		t_MC_Init[strAxis]["fJerk"]       = 10000.0;
+		t_MC_Init[strAxis]["fLeftLimit"]  = 0.0;
+		t_MC_Init[strAxis]["fRightLimit"] = 50.0;
 
-	SETTINGS->SetTable(true, SettingSection::MotionControl, t_Init);
+		// Home parameters (not editable via UI, stored for controller use)
+		t_MC_Init[strAxis]["Home"]["iMode"]               = 10;
+		t_MC_Init[strAxis]["Home"]["iMoveDir"]            = -1;
+		t_MC_Init[strAxis]["Home"]["iIndexDir"]           = -1;
+		t_MC_Init[strAxis]["Home"]["iEdge"]               = 0;
+		t_MC_Init[strAxis]["Home"]["iTriggerIndex"]       = -1;
+		t_MC_Init[strAxis]["Home"]["fVelHigh"]            = 5.0;
+		t_MC_Init[strAxis]["Home"]["fVelLow"]             = 1.0;
+		t_MC_Init[strAxis]["Home"]["fAcc"]                = 50.0;
+		t_MC_Init[strAxis]["Home"]["fDec"]                = 50.0;
+		t_MC_Init[strAxis]["Home"]["iSmoothTime"]         = 0;
+		t_MC_Init[strAxis]["Home"]["iHomeOffset"]         = 0;
+		t_MC_Init[strAxis]["Home"]["iSearchHomeDistance"] = 0;
+		t_MC_Init[strAxis]["Home"]["iSearchIndexDistance"]= 0;
+		t_MC_Init[strAxis]["Home"]["iEscapeStep"]         = 20000;
+	}
+	SETTINGS->SetTable(true, SettingSection::MotionControl, t_MC_Init);
+
+	// Init Axis section defaults (speed tiers, kept in Axis section for backward compat)
+	table t_Axis_Init;
+	t_Axis_Init["Axis"]["sAxis"] = m_axisNames.isEmpty() ? "X" : m_axisNames.first().toStdString();
+	for (const QString& axisName : m_axisNames)
+	{
+		string strAxis = axisName.toStdString();
+		t_Axis_Init[strAxis]["fLowSpeed"]     = 3.0;
+		t_Axis_Init[strAxis]["fMediumSpeed"]  = 5.0;
+		t_Axis_Init[strAxis]["fHighSpeed"]    = 10.0;
+		t_Axis_Init[strAxis]["fPipeDiameter"] = 1.6;
+	}
+	SETTINGS->SetTable(true, SettingSection::Axis, t_Axis_Init);
 }
 
 void Dialog_Setting_MotionControl::SetPage(table table_Set)
@@ -104,49 +137,141 @@ void Dialog_Setting_MotionControl::SetPage(table table_Set)
 	if (!table_Set.size())
 		table_Set = SETTINGS->GetTable(SettingSection::MotionControl);
 
-	str_Axis = table_Set["MotionControl"]["sAxis"].as_string();
-	table_Temp["MotionControl"]["sAxis"] = str_Axis;
-	int iRotation = 0;
-	if (table_Set[str_Axis]["bRotation"].as_boolean())
-		iRotation = 1;
+	// Refresh axis names (extension axes may have been loaded from disk)
+	rebuildAxisNames();
 
-	ui.comboBox_MotionControl_sType		->setCurrentText	(QString::fromStdString(table_Set["MotionControl"]["sType"].as_string()));
-	ui.comboBox_MotionControl_sAxis		->setCurrentText	(QString::fromStdString(str_Axis));
-	
-	ui.groupBox_AxisSetting				->setTitle			(tr("Axis ") + QString::fromStdString(str_Axis));
-	ui.lineEdit_AxisSetting_iIndex		->setText			(QString::number(table_Set[str_Axis]["iIndex"]		.as_integer(), 'g', 16));
-	ui.lineEdit_AxisSetting_iHomeIndex	->setText			(QString::number(table_Set[str_Axis]["iHomeIndex"]	.as_integer(),  'g', 16));
-	ui.comboBox_AxisSetting_bRotation	->setCurrentIndex	(iRotation);
-	ui.lineEdit_AxisSetting_fResolution	->setText			(QString::number(table_Set[str_Axis]["fResolution"]	.as_floating(), 'g', 16));
-	ui.lineEdit_AxisSetting_fVel		->setText			(QString::number(table_Set[str_Axis]["fVel"]		.as_floating(), 'g', 16));
-	ui.lineEdit_AxisSetting_fAcc		->setText			(QString::number(table_Set[str_Axis]["fAcc"]		.as_floating(), 'g', 16));
-	ui.lineEdit_AxisSetting_fJerk		->setText			(QString::number(table_Set[str_Axis]["fJerk"]		.as_floating(), 'g', 16));
-	ui.lineEdit_AxisSetting_fLeftLimit	->setText			(QString::number(table_Set[str_Axis]["fLeftLimit"]	.as_floating(), 'g', 16));
-	ui.lineEdit_AxisSetting_fRightLimit	->setText			(QString::number(table_Set[str_Axis]["fRightLimit"]	.as_floating(), 'g', 16));
+	// Update controller type combo
+	string sType;
+	SETTINGS->GetKeyValue("sType", sType, SettingSection::MotionControl, "MotionControl");
+	ui.comboBox_MotionControl_sType->blockSignals(true);
+	ui.comboBox_MotionControl_sType->setCurrentText(QString::fromStdString(sType));
+	ui.comboBox_MotionControl_sType->blockSignals(false);
+
+	populateAxisTable(table_Set);
+}
+
+void Dialog_Setting_MotionControl::populateAxisTable(const table& table_Set)
+{
+	table table_Axis = SETTINGS->GetTable(SettingSection::Axis);
+
+	QTableWidget* tw = ui.tableWidget_AxisConfig;
+	tw->blockSignals(true);
+	tw->setRowCount(0);
+	tw->setRowCount(m_axisNames.size());
+
+	for (int row = 0; row < m_axisNames.size(); ++row)
+	{
+		string strAxis = m_axisNames[row].toStdString();
+		bool bIsMachine = isMachineAxis(m_axisNames[row]);
+
+		// Axis name (read-only for machine axes)
+		QTableWidgetItem* nameItem = new QTableWidgetItem(m_axisNames[row]);
+		if (bIsMachine)
+			nameItem->setFlags(nameItem->flags() & ~Qt::ItemIsEditable);
+		tw->setItem(row, Col_AxisName, nameItem);
+
+		// Highlight extension axis rows
+		if (!bIsMachine)
+		{
+			nameItem->setBackground(QColor(220, 240, 255));
+		}
+
+		// Helper: get value from table
+		auto getDouble = [&](const char* key, double def) -> double {
+			if (table_Set.count(strAxis) && table_Set.at(strAxis).contains(key))
+				return table_Set.at(strAxis).at(key).as_floating();
+			return def;
+		};
+		auto getInt = [&](const char* key, int def) -> int {
+			if (table_Set.count(strAxis) && table_Set.at(strAxis).contains(key))
+				return table_Set.at(strAxis).at(key).as_integer();
+			return def;
+		};
+
+		// Index (int)
+		tw->setItem(row, Col_Index, new QTableWidgetItem(QString::number(getInt("iIndex", row))));
+
+		// HomeIndex (int)
+		tw->setItem(row, Col_HomeIndex, new QTableWidgetItem(QString::number(getInt("iHomeIndex", row))));
+
+		// Resolution (double)
+		tw->setItem(row, Col_Resolution, new QTableWidgetItem(QString::number(getDouble("fResolution", 2000.0), 'g', 16)));
+
+		// LowSpeed (from Axis section)
+		double fLowSpeed = 3.0;
+		if (table_Axis.count(strAxis) && table_Axis.at(strAxis).contains("fLowSpeed"))
+			fLowSpeed = table_Axis.at(strAxis).at("fLowSpeed").as_floating();
+		tw->setItem(row, Col_LowSpeed, new QTableWidgetItem(QString::number(fLowSpeed, 'g', 16)));
+
+		// MediumSpeed (from Axis section)
+		double fMediumSpeed = 5.0;
+		if (table_Axis.count(strAxis) && table_Axis.at(strAxis).contains("fMediumSpeed"))
+			fMediumSpeed = table_Axis.at(strAxis).at("fMediumSpeed").as_floating();
+		tw->setItem(row, Col_MediumSpeed, new QTableWidgetItem(QString::number(fMediumSpeed, 'g', 16)));
+
+		// HighSpeed (from Axis section)
+		double fHighSpeed = 10.0;
+		if (table_Axis.count(strAxis) && table_Axis.at(strAxis).contains("fHighSpeed"))
+			fHighSpeed = table_Axis.at(strAxis).at("fHighSpeed").as_floating();
+		tw->setItem(row, Col_HighSpeed, new QTableWidgetItem(QString::number(fHighSpeed, 'g', 16)));
+
+		// Acceleration (from MotionControl section)
+		tw->setItem(row, Col_Acceleration, new QTableWidgetItem(QString::number(getDouble("fAcc", 1000.0), 'g', 16)));
+
+		// Jerk (from MotionControl section)
+		tw->setItem(row, Col_Jerk, new QTableWidgetItem(QString::number(getDouble("fJerk", 10000.0), 'g', 16)));
+
+		// LeftLimit (from MotionControl section)
+		tw->setItem(row, Col_LeftLimit, new QTableWidgetItem(QString::number(getDouble("fLeftLimit", 0.0), 'g', 16)));
+
+		// RightLimit (from MotionControl section)
+		tw->setItem(row, Col_RightLimit, new QTableWidgetItem(QString::number(getDouble("fRightLimit", 50.0), 'g', 16)));
+	}
+
+	tw->blockSignals(false);
+	TypeChanged();
 }
 
 void Dialog_Setting_MotionControl::GetPage(table& table_Page)
-{	
+{
+	QTableWidget* tw = ui.tableWidget_AxisConfig;
+
+	// Save controller type
 	table_Temp["MotionControl"]["sType"] = ui.comboBox_MotionControl_sType->currentText().toStdString();
+	table_Temp["MotionControl"]["sAxis"] = m_axisNames.isEmpty() ? "X" : m_axisNames.first().toStdString();
 
-	bool bRotation = false;
-	if (ui.comboBox_AxisSetting_bRotation->currentIndex())
-		bRotation = true;
+	// Save extension axis list
+	QStringList extNames;
+	for (const QString& name : m_axisNames)
+	{
+		if (!isMachineAxis(name))
+			extNames.append(name);
+	}
+	table_Temp["MotionControl"]["ExtensionAxes"] = extNames.join(",").toStdString();
 
-	// 保存修改前的值
-	table_Temp[str_Axis]["iIndex"]		= ui.lineEdit_AxisSetting_iIndex		->text().toInt();
-	table_Temp[str_Axis]["iHomeIndex"]	= ui.lineEdit_AxisSetting_iHomeIndex	->text().toInt();
-	table_Temp[str_Axis]["bRotation"]	= bRotation;
-	table_Temp[str_Axis]["fResolution"] = ui.lineEdit_AxisSetting_fResolution	->text().toDouble();
-	table_Temp[str_Axis]["fVel"]		= ui.lineEdit_AxisSetting_fVel			->text().toDouble();
-	table_Temp[str_Axis]["fAcc"]		= ui.lineEdit_AxisSetting_fAcc			->text().toDouble();
-	table_Temp[str_Axis]["fJerk"]		= ui.lineEdit_AxisSetting_fJerk			->text().toDouble();
-	table_Temp[str_Axis]["fLeftLimit"]	= ui.lineEdit_AxisSetting_fLeftLimit	->text().toDouble();
-	table_Temp[str_Axis]["fRightLimit"]	= ui.lineEdit_AxisSetting_fRightLimit	->text().toDouble();
+	for (int row = 0; row < m_axisNames.size(); ++row)
+	{
+		string strAxis = m_axisNames[row].toStdString();
 
-	string str_AxisNew = ui.comboBox_MotionControl_sAxis->currentText().toStdString();
-	if (str_Axis != str_AxisNew)
-		table_Temp["MotionControl"]["sAxis"] = str_AxisNew;
+		auto cellText = [&](int col) -> QString {
+			QTableWidgetItem* item = tw->item(row, col);
+			return item ? item->text() : QString();
+		};
+
+		// MotionControl section params
+		table_Temp[strAxis]["iIndex"]      = cellText(Col_Index).toInt();
+		table_Temp[strAxis]["iHomeIndex"]  = cellText(Col_HomeIndex).toInt();
+		table_Temp[strAxis]["fResolution"] = cellText(Col_Resolution).toDouble();
+		table_Temp[strAxis]["fAcc"]        = cellText(Col_Acceleration).toDouble();
+		table_Temp[strAxis]["fJerk"]       = cellText(Col_Jerk).toDouble();
+		table_Temp[strAxis]["fLeftLimit"]  = cellText(Col_LeftLimit).toDouble();
+		table_Temp[strAxis]["fRightLimit"] = cellText(Col_RightLimit).toDouble();
+
+		// Axis section params (speed tiers)
+		table_Temp["Axis_Speed"][strAxis]["fLowSpeed"]    = cellText(Col_LowSpeed).toDouble();
+		table_Temp["Axis_Speed"][strAxis]["fMediumSpeed"]  = cellText(Col_MediumSpeed).toDouble();
+		table_Temp["Axis_Speed"][strAxis]["fHighSpeed"]    = cellText(Col_HighSpeed).toDouble();
+	}
 
 	table_Page = table_Temp;
 }
@@ -159,96 +284,231 @@ bool Dialog_Setting_MotionControl::GetChanged(table table_Page, table& table_Cha
 	for (auto it = set_Changed.begin(); it != set_Changed.end(); ++it)
 	{
 		string	strTable = it->first;
-		string	strKey = it->second;
-		value	Value = table_Page[strTable][strKey];
-		table_Changed[strTable][strKey] = Value;
-		SETTINGS->SetKeyValue(strKey, Value, SettingSection::MotionControl, strTable);
-		LOG_OPER_INFO(tr("Setting [MotionControl][%1][%2] %3").arg(tr(strTable.c_str()))
-			.arg(tr(strKey.c_str())).arg(toml::format(Value).c_str()).toUtf8().data());
+		string	strKey   = it->second;
+
+		bool bAxisSection = (strTable.size() > 5 && strTable.compare(0, 5, "Axis:") == 0);
+		if (bAxisSection)
+		{
+			string axisName = strTable.substr(5);
+			value Value = table_Page["Axis_Speed"][axisName][strKey];
+			table_Changed["Axis"][axisName][strKey] = Value;
+			SETTINGS->SetKeyValue(strKey, Value, SettingSection::Axis, axisName);
+			LOG_OPER_INFO(tr("Setting [Axis][%1][%2] %3").arg(tr(axisName.c_str()))
+				.arg(tr(strKey.c_str())).arg(toml::format(Value).c_str()).toUtf8().data());
+		}
+		else
+		{
+			value Value;
+			if (table_Page.count(strTable) && table_Page.at(strTable).contains(strKey))
+				Value = table_Page[strTable][strKey];
+			else if (strTable == "MotionControl" && table_Page.count("MotionControl") && table_Page.at("MotionControl").contains(strKey))
+				Value = table_Page["MotionControl"][strKey];
+
+			if (!Value.is_empty())
+			{
+				table_Changed[strTable][strKey] = Value;
+				SETTINGS->SetKeyValue(strKey, Value, SettingSection::MotionControl, strTable);
+				LOG_OPER_INFO(tr("Setting [MotionControl][%1][%2] %3").arg(tr(strTable.c_str()))
+					.arg(tr(strKey.c_str())).arg(toml::format(Value).c_str()).toUtf8().data());
+			}
+		}
 	}
+
 	set<pair<string, string>> set_null;
 	set_Changed.swap(set_null);
 	return true;
 }
 
-void Dialog_Setting_MotionControl::UpdatePage()
+void Dialog_Setting_MotionControl::onTableCellChanged(int row, int column)
 {
-	// 获取切换前轴的参数
-	GetPage(table_Temp);
-	// 更新当前选择轴系
-	str_Axis = ui.comboBox_MotionControl_sAxis->currentText().toStdString();
-	table_Temp["MotionControl"]["sAxis"] = str_Axis;
-	if (table_Temp[str_Axis].is_empty())
-		table_Temp[str_Axis] = SETTINGS->GetTable(SettingSection::MotionControl, str_Axis);
-	// 设置选择轴系参数
-	SetPage(table_Temp);
+	if (row < 0 || row >= m_axisNames.size())
+		return;
+	if (column <= Col_AxisName)
+		return;
+
+	string strAxis = m_axisNames[row].toStdString();
+
+	static const char* mcKeys[] = {
+		nullptr,        // Col_AxisName
+		"iIndex",       // Col_Index
+		"iHomeIndex",   // Col_HomeIndex
+		"fResolution",  // Col_Resolution
+		nullptr,        // Col_LowSpeed → Axis section
+		nullptr,        // Col_MediumSpeed → Axis section
+		nullptr,        // Col_HighSpeed → Axis section
+		"fAcc",         // Col_Acceleration
+		"fJerk",        // Col_Jerk
+		"fLeftLimit",   // Col_LeftLimit
+		"fRightLimit",  // Col_RightLimit
+	};
+
+	static const char* axisKeys[] = {
+		nullptr, nullptr, nullptr, nullptr,
+		"fLowSpeed", "fMediumSpeed", "fHighSpeed",
+		nullptr, nullptr, nullptr, nullptr,
+	};
+
+	if (column >= 0 && column < Col_Count)
+	{
+		if (axisKeys[column])
+			set_Changed.insert(make_pair("Axis:" + strAxis, string(axisKeys[column])));
+		else if (mcKeys[column])
+			set_Changed.insert(make_pair(strAxis, string(mcKeys[column])));
+	}
 }
 
-void Dialog_Setting_MotionControl::setupLineEditValidators(QWidget* dialog)
+void Dialog_Setting_MotionControl::onAddAxis()
 {
-	const QList<QLineEdit*> lineEdits = dialog->findChildren<QLineEdit*>();
-	for (QLineEdit* lineEdit : lineEdits)
+	bool ok = false;
+	QString name = QInputDialog::getText(this, tr("Add Extension Axis"),
+		tr("Axis name (single letter A-Z):"), QLineEdit::Normal, QString(), &ok);
+
+	if (!ok || name.isEmpty())
+		return;
+
+	name = name.trimmed().toUpper();
+
+	// Validate: single uppercase letter
+	if (name.size() != 1 || name[0] < 'A' || name[0] > 'Z')
 	{
-		QString objectName = lineEdit->objectName();
-		QStringList parts = objectName.split('_');
-		if (parts.size() >= 3)
-		{
-			QString typeIndicator = parts[2].left(1);
-			if (parts[2] == "fLeftLimit" || parts[2] == "fRightLimit")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_All_Double(), nullptr));
-			else if (typeIndicator == "f")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), nullptr));
-			else if (typeIndicator == "i")
-				lineEdit->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Int(), nullptr));
-		}
+		QMessageBox::warning(this, tr("Invalid Name"),
+			tr("Axis name must be a single uppercase letter (A-Z)."));
+		return;
 	}
+
+	// Validate: not "BASE"
+	if (name == QStringLiteral("BASE"))
+	{
+		QMessageBox::warning(this, tr("Invalid Name"),
+			tr("\"BASE\" is reserved and cannot be used as an axis name."));
+		return;
+	}
+
+	// Validate: not already a machine axis
+	if (isMachineAxis(name))
+	{
+		QMessageBox::warning(this, tr("Already Exists"),
+			tr("Axis \"%1\" is already defined in the machine configuration.").arg(name));
+		return;
+	}
+
+	// Validate: not already an extension axis
+	if (m_extensionAxisNames.contains(name))
+	{
+		QMessageBox::warning(this, tr("Already Exists"),
+			tr("Extension axis \"%1\" already exists.").arg(name));
+		return;
+	}
+
+	// Add the extension axis
+	m_extensionAxisNames.append(name);
+	m_axisNames = m_machineAxisNames + m_extensionAxisNames;
+
+	// Initialize defaults in settings
+	string strAxis = name.toStdString();
+	int idx = m_axisNames.size() - 1;
+
+	SETTINGS->SetKeyValue("iIndex", idx, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("iHomeIndex", idx, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("bRotation", false, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("fResolution", 2000.0, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("fVel", 10.0, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("fAcc", 1000.0, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("fJerk", 10000.0, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("fLeftLimit", 0.0, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("fRightLimit", 50.0, SettingSection::MotionControl, strAxis);
+	SETTINGS->SetKeyValue("fLowSpeed", 3.0, SettingSection::Axis, strAxis);
+	SETTINGS->SetKeyValue("fMediumSpeed", 5.0, SettingSection::Axis, strAxis);
+	SETTINGS->SetKeyValue("fHighSpeed", 10.0, SettingSection::Axis, strAxis);
+	SETTINGS->SetKeyValue("fPipeDiameter", 1.6, SettingSection::Axis, strAxis);
+
+	DT::setExtensionAxes(m_extensionAxisNames);
+
+	// Record the extension axis list change
+	set_Changed.insert(make_pair("MotionControl", "ExtensionAxes"));
+
+	// Rebuild table
+	table table_Set = SETTINGS->GetTable(SettingSection::MotionControl);
+	populateAxisTable(table_Set);
+
+	LOG_OPER_INFO(tr("Added extension axis: %1").arg(name).toUtf8().data());
+}
+
+void Dialog_Setting_MotionControl::onDeleteAxis()
+{
+	QTableWidget* tw = ui.tableWidget_AxisConfig;
+	int row = tw->currentRow();
+	if (row < 0)
+	{
+		QMessageBox::information(this, tr("No Selection"),
+			tr("Please select an axis row to delete."));
+		return;
+	}
+
+	QString axisName = m_axisNames[row];
+
+	if (isMachineAxis(axisName))
+	{
+		QMessageBox::warning(this, tr("Cannot Delete"),
+			tr("Machine axis \"%1\" cannot be deleted. Only extension axes can be removed.").arg(axisName));
+		return;
+	}
+
+	int ret = QMessageBox::question(this, tr("Confirm Delete"),
+		tr("Delete extension axis \"%1\"? This will remove all its configuration data.").arg(axisName),
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+
+	if (ret != QMessageBox::Yes)
+		return;
+
+	// Remove from extension list
+	m_extensionAxisNames.removeAll(axisName);
+	m_axisNames = m_machineAxisNames + m_extensionAxisNames;
+
+	// Remove settings data
+	string strAxis = axisName.toStdString();
+	SETTINGS->DelTable(SettingSection::MotionControl, strAxis);
+	SETTINGS->DelTable(SettingSection::Axis, strAxis);
+
+	DT::setExtensionAxes(m_extensionAxisNames);
+
+	// Record the extension axis list change
+	set_Changed.insert(make_pair("MotionControl", "ExtensionAxes"));
+
+	// Rebuild table
+	table table_Set = SETTINGS->GetTable(SettingSection::MotionControl);
+	populateAxisTable(table_Set);
+
+	LOG_OPER_INFO(tr("Deleted extension axis: %1").arg(axisName).toUtf8().data());
 }
 
 void Dialog_Setting_MotionControl::TypeChanged()
 {
 	string strType = ui.comboBox_MotionControl_sType->currentText().toStdString();
-	string strName;
-	SETTINGS->GetKeyValue("sType", strName, SettingSection::MotionControl, "MotionControl");
-	if (strType == "GTN")
+	m_bGTN = (strType == "GTN");
+
+	QTableWidget* tw = ui.tableWidget_AxisConfig;
+	if (!tw || tw->columnCount() < Col_Count)
+		return;
+
+	tw->setColumnHidden(Col_HomeIndex, m_bGTN);
+
+	if (tw->horizontalHeaderItem(Col_Jerk))
 	{
-		ui.label_AxisSetting_HomeIndex->setHidden(true);
-		ui.lineEdit_AxisSetting_iHomeIndex->setHidden(true);
-		ui.label_AxisSetting_Jerk->setText(tr("smoothTime(ms)"));
-		ui.label_AxisSetting_Resolution->setText(tr("Conversion(pulse)"));
+		if (m_bGTN)
+			tw->horizontalHeaderItem(Col_Jerk)->setText(tr("smoothTime\n(ms)"));
+		else
+			tw->horizontalHeaderItem(Col_Jerk)->setText(tr("Jerk\n(mm/s^3)"));
 	}
-	else
+
+	if (tw->horizontalHeaderItem(Col_Resolution))
 	{
-		ui.label_AxisSetting_HomeIndex->setHidden(false);
-		ui.lineEdit_AxisSetting_iHomeIndex->setHidden(false);
-		ui.label_AxisSetting_Jerk->setText(tr("Jerk(mm/s^3)"));
-		ui.label_AxisSetting_Resolution->setText(tr("Resolution"));
+		if (m_bGTN)
+			tw->horizontalHeaderItem(Col_Resolution)->setText(tr("Conversion\n(pulse)"));
+		else
+			tw->horizontalHeaderItem(Col_Resolution)->setText(tr("Resolution"));
 	}
-}
 
-void Dialog_Setting_MotionControl::lineEditChanged()
-{
-	QLineEdit*	lineEdit	= qobject_cast<QLineEdit*>(sender());
-	QString		qstChanged	= lineEdit->objectName();
-
-	QStringList parts		= qstChanged.split("_");
-	string		strTable	= parts.at(parts.size() - 2).toStdString();
-	if (strTable != "MotionControl")
-		strTable = str_Axis;
-	string		strKey		= parts.at(parts.size() - 1).toStdString();
-
-	set_Changed.insert(make_pair(strTable, strKey));
-}
-
-void Dialog_Setting_MotionControl::comboBoxChanged()
-{
-	QComboBox*	ComboBox	= qobject_cast<QComboBox*>(sender());
-	QString		qstChanged	= ComboBox->objectName();
-
-	QStringList parts		= qstChanged.split("_");
-	string		strTable	= parts.at(parts.size() - 2).toStdString();
-	if (strTable != "MotionControl")
-		strTable = str_Axis;
-	string		strKey		= parts.at(parts.size() - 1).toStdString();
-
-	set_Changed.insert(make_pair(strTable, strKey));
+	// Record the type change
+	set_Changed.insert(make_pair("MotionControl", "sType"));
 }

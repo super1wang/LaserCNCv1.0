@@ -3,14 +3,14 @@
 const std::regex MotionControl::regex_DigitalIO("^(-)?(N)?\\d\\.\\d(\\d)?$");	// 匹配格式：(-) （N） 数字 . 数字 (数字)	，如N0.1、N1.23、-N0.1
 const std::regex MotionControl::regex_AnalogIO("^(-)?(N)?\\d(\\d)?$");		// 匹配格式：(-) （N） 数字 (数字)		，如N1、N12、-N1
 
+
 void MotionControl::rebuildAxes()
 {
-	for (int i = 0; i < 8; i++)
+	for (const auto& eAxis : magic_enum::enum_values<Axis>())
 	{
-		Axis eAxis = static_cast<Axis>(i);
 		if (!DT::IsAxisUse(eAxis))
 			continue;
-		
+
 		if (!IsMotorCreated(eAxis))
 		{
 			string strAxis = enum_name(eAxis).data();
@@ -19,7 +19,6 @@ void MotionControl::rebuildAxes()
 		}
 	}
 }
-
 bool MotionControl::IsMotorCreated(Axis eAxis)
 {
 	for (Axis axis : m_vecMotors)

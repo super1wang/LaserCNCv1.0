@@ -4,6 +4,7 @@
 #include "ui_Setting_MotionControl.h"
 #include "Service.h"
 #include <QMessageBox>
+#include <QInputDialog>
 
 class Dialog_Setting_MotionControl : public QDialog
 {
@@ -13,29 +14,51 @@ public:
 	Dialog_Setting_MotionControl(QWidget* parent = nullptr);
 	~Dialog_Setting_MotionControl();
 
-public: 
+public:
 	void setUI();
-	void ClearChange() { set_Changed.clear(); table_Temp.clear(); };
+	void ClearChange();
 	void InitSetting();
 	void SetPage(table table_Set = {});
 	void GetPage(table& table_Page);
 	bool GetChanged(table table_Page, table& table_Changed);
 
 private:
-	void CreatAxis(string strAxis, int iIndex, table& table);
-	void setupLineEditValidators(QWidget* dialog);
+	void populateAxisTable(const table& table_Set);
+	void setupTableValidators(int row, int col, const QString& key);
+	void rebuildAxisNames();
+	bool isMachineAxis(const QString& name) const;
 
 private slots:
-	void UpdatePage();
-	void lineEditChanged();
-	void comboBoxChanged();
+	void onTableCellChanged(int row, int column);
+	void onAddAxis();
+	void onDeleteAxis();
 	void TypeChanged();
 
 public:
 	Ui::Dialog_Setting_MotionControl	ui;
 
 private:
-	set<pair<string, string>>			set_Changed;		// 记录修改值的Tabale及Key
-	string								str_Axis;			// 记录变化前的轴系选择
-	table								table_Temp;			// 临时记录修改内容
+	// Column index constants
+	enum Column
+	{
+		Col_AxisName = 0,
+		Col_Index,
+		Col_HomeIndex,
+		Col_Resolution,
+		Col_LowSpeed,
+		Col_MediumSpeed,
+		Col_HighSpeed,
+		Col_Acceleration,
+		Col_Jerk,
+		Col_LeftLimit,
+		Col_RightLimit,
+		Col_Count
+	};
+
+	set<pair<string, string>>			set_Changed;
+	table								table_Temp;
+	QStringList							m_axisNames;		// merged: machine + extension
+	QStringList							m_machineAxisNames;	// axes from DT::IsAxisUse (machine config)
+	QStringList							m_extensionAxisNames;// user-added extension axes
+	bool								m_bGTN{false};
 };

@@ -316,6 +316,17 @@ void ProcessModule::setAxisDefinitions(const QList<MachineAxisDef>& axes)
     m_simPhase = 0.0;
     initializeAxisPositions();
     initializeAxisEnabledStates();
+
+	// 桥接机台构型到 DT::AxisGroup
+	int axisGroup = 0;
+	for (const MachineAxisDef& axis : axes) {
+		if (axis.name == QStringLiteral("BASE"))
+			continue;
+		auto eAxis = enum_cast<Axis>(axis.name.toStdString());
+		if (eAxis.has_value())
+			axisGroup |= (1 << static_cast<int>(eAxis.value()));
+	}
+	DT::setAxisGroup(axisGroup);
 }
 
 void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, double distance)
