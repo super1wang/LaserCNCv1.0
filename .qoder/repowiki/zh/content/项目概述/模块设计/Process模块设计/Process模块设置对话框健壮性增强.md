@@ -8,9 +8,20 @@
 - [communication_settings_page.h](file://src/modules/process/communication/ui/communication_settings_page.h)
 - [qg_dlgsetting.cpp](file://src/modules/process/Setting/qg_dlgsetting.cpp)
 - [qg_dlgsetting.h](file://src/modules/process/Setting/qg_dlgsetting.h)
+- [Setting_MotionControl.cpp](file://src/modules/process/Setting/Setting_MotionControl.cpp)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
+- [Setting_MotionControl.ui](file://src/modules/process/Setting/Setting_MotionControl.ui)
 - [resources.qrc](file://resources/resources.qrc)
 - [CMakeLists.txt](file://CMakeLists.txt)
 </cite>
+
+## 更新摘要
+**已进行的更改**
+- 新增MotionControl设置对话框重大重构章节，反映从分离轴设置页面整合到统一MotionControl页面的架构变更
+- 更新核心组件分析，增加表格化轴配置界面和扩展轴支持功能的详细说明
+- 新增MotionControl设置对话框架构图和表格化界面示意图
+- 扩展依赖关系分析，包含新的MotionControl设置组件
+- 更新故障排除指南，增加MotionControl设置相关的常见问题解决方案
 
 ## 目录
 1. [项目概述](#项目概述)
@@ -29,9 +40,10 @@
 
 - **Process节点编辑对话框**：用于配置各种Process节点的参数
 - **通信设置页面**：管理设备通信参数和连接状态
+- **MotionControl设置对话框**：**新增** 统一的运动控制配置界面，整合轴设置功能
 - **通用设置对话框**：提供统一的设置界面管理
 
-该系统采用Qt框架构建，实现了模块化的Process处理流程，支持多种激光雕刻工艺和设备配置。
+该系统采用Qt框架构建，实现了模块化的Process处理流程，支持多种激光雕刻工艺和设备配置。**最新重构**将原本分散的轴设置页面整合到统一的MotionControl页面中，提供更加直观和高效的配置体验。
 
 ## 项目结构
 
@@ -48,6 +60,7 @@ end
 subgraph "UI层细分"
 NodeEdit[节点编辑对话框]
 CommSettings[通信设置页面]
+MotionControl[运动控制设置对话框]
 GeneralDlg[通用设置对话框]
 end
 subgraph "核心层细分"
@@ -57,6 +70,7 @@ Monitor[监控服务]
 end
 UI --> NodeEdit
 UI --> CommSettings
+UI --> MotionControl
 UI --> GeneralDlg
 Core --> Workflow
 Core --> Execution
@@ -67,10 +81,12 @@ Device --> Hardware
 **图表来源**
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
+- [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
 
 **章节来源**
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
+- [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
 
 ## 核心组件
 
@@ -159,6 +175,61 @@ CommunicationSettingsPage --> CommunicationManager : "管理"
 **图表来源**
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 
+### **新增** MotionControl设置对话框
+
+**更新** MotionControl设置对话框是Process模块中统一的运动控制配置中心，实现了从分离轴设置页面到统一界面的重大重构：
+
+- **表格化轴配置界面**：使用QTableWidget提供直观的轴参数配置界面
+- **扩展轴支持**：动态添加和删除扩展轴，支持多轴配置
+- **控制器类型适配**：根据不同的运动控制器类型调整界面显示
+- **参数分类管理**：将轴参数分为MotionControl和Axis两个配置区域
+- **实时参数验证**：提供参数输入的实时验证和错误提示
+
+```mermaid
+classDiagram
+class Dialog_Setting_MotionControl {
+-Ui : : Dialog_Setting_MotionControl ui
+-set~pair~string,string~~ set_Changed
+-table table_Temp
+-QStringList m_axisNames
+-QStringList m_machineAxisNames
+-QStringList m_extensionAxisNames
+-bool m_bGTN
++Dialog_Setting_MotionControl(parent)
++~Dialog_Setting_MotionControl()
++setUI()
++ClearChange()
++InitSetting()
++SetPage(table_Set)
++GetPage(table_Page)
++populateAxisTable(table_Set)
++rebuildAxisNames()
++isMachineAxis(name)
++onTableCellChanged(row, column)
++onAddAxis()
++onDeleteAxis()
++TypeChanged()
+}
+class AxisConfiguration {
+-QString axisName
+-int index
+-int homeIndex
+-double resolution
+-double lowSpeed
+-double mediumSpeed
+-double highSpeed
+-double acceleration
+-double jerk
+-double leftLimit
+-double rightLimit
+}
+Dialog_Setting_MotionControl --> AxisConfiguration : "管理多个轴配置"
+```
+
+**图表来源**
+- [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
+- [Setting_MotionControl.h:1-65](file://src/modules/process/Setting/Setting_MotionControl.h#L1-L65)
+
 ### 通用设置对话框
 
 通用设置对话框提供Process模块的统一配置入口：
@@ -171,6 +242,7 @@ CommunicationSettingsPage --> CommunicationManager : "管理"
 **章节来源**
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
+- [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
 - [qg_dlgsetting.cpp](file://src/modules/process/Setting/qg_dlgsetting.cpp)
 - [resources.qrc:63-75](file://resources/resources.qrc#L63-L75)
 
@@ -198,6 +270,7 @@ Dialog-->>User : 显示配置状态
 **图表来源**
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
+- [Setting_MotionControl.cpp:322-358](file://src/modules/process/Setting/Setting_MotionControl.cpp#L322-L358)
 
 ## 详细组件分析
 
@@ -246,6 +319,54 @@ Dialog-->>User : 显示配置状态
 **章节来源**
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 
+### **新增** MotionControl设置对话框组件
+
+**更新** MotionControl设置对话框实现了从分离轴设置到统一配置界面的重大重构：
+
+#### 表格化轴配置界面
+- **统一参数展示**：将所有轴参数整合到一个表格中
+- **动态列显示**：根据控制器类型动态调整显示的列
+- **颜色标识**：使用不同背景色区分机器轴和扩展轴
+- **单元格验证**：提供参数输入的实时验证
+
+#### 扩展轴支持功能
+- **动态轴管理**：支持运行时添加和删除扩展轴
+- **轴名称验证**：确保扩展轴名称的唯一性和合法性
+- **配置数据分离**：将扩展轴配置数据独立存储
+- **向后兼容**：保持与现有机器轴配置的兼容性
+
+#### 控制器类型适配
+- **类型检测**：自动识别当前使用的运动控制器类型
+- **界面动态调整**：根据控制器类型调整显示参数
+- **参数映射**：将不同控制器的参数进行对应转换
+- **特殊处理**：为特定控制器提供专门的参数处理
+
+```mermaid
+flowchart TD
+A[MotionControl设置对话框] --> B[表格化轴配置界面]
+A --> C[扩展轴管理功能]
+A --> D[控制器类型适配]
+B --> B1[统一参数展示]
+B --> B2[动态列显示]
+B --> B3[颜色标识区分]
+C --> C1[动态轴添加]
+C --> C2[轴名称验证]
+C --> C3[配置数据分离]
+D --> D1[类型检测]
+D --> D2[界面动态调整]
+D --> D3[参数映射转换]
+```
+
+**图表来源**
+- [Setting_MotionControl.cpp:153-233](file://src/modules/process/Setting/Setting_MotionControl.cpp#L153-L233)
+- [Setting_MotionControl.cpp:360-435](file://src/modules/process/Setting/Setting_MotionControl.cpp#L360-L435)
+- [Setting_MotionControl.cpp:485-514](file://src/modules/process/Setting/Setting_MotionControl.cpp#L485-L514)
+
+**章节来源**
+- [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
+- [Setting_MotionControl.h:1-65](file://src/modules/process/Setting/Setting_MotionControl.h#L1-L65)
+- [Setting_MotionControl.ui:1-129](file://src/modules/process/Setting/Setting_MotionControl.ui#L1-L129)
+
 ### 设置持久化机制
 
 系统实现了多层次的设置持久化机制：
@@ -260,8 +381,15 @@ Dialog-->>User : 显示配置状态
 - **序列化机制**：支持复杂数据结构的序列化
 - **版本兼容**：保证配置文件的向后兼容性
 
+#### **新增** 分区存储机制
+- **MotionControl分区**：存储运动控制相关的轴参数
+- **Axis分区**：存储轴速度等级等参数
+- **扩展轴数据**：独立存储扩展轴的配置信息
+- **变更跟踪**：精确跟踪每个参数的变更情况
+
 **章节来源**
 - [qg_dlgsetting.cpp](file://src/modules/process/Setting/qg_dlgsetting.cpp)
+- [Setting_MotionControl.cpp:279-320](file://src/modules/process/Setting/Setting_MotionControl.cpp#L279-L320)
 
 ## 依赖关系分析
 
@@ -273,16 +401,19 @@ subgraph "外部依赖"
 Qt[Qt框架]
 CMake[CMake构建系统]
 spdlog[日志库]
+magic_enum[magic_enum库]
 end
 subgraph "内部模块依赖"
 UI[用户界面模块]
 Core[核心业务模块]
 Device[设备抽象模块]
 Settings[设置管理模块]
+DT[设备配置模块]
 end
 subgraph "Process模块"
 NodeEdit[节点编辑对话框]
 CommSettings[通信设置页面]
+MotionControl[运动控制设置对话框]
 GeneralDlg[通用设置对话框]
 Workflow[工作流引擎]
 Execution[执行服务]
@@ -291,19 +422,24 @@ end
 Qt --> UI
 CMake --> Build[构建系统]
 spdlog --> Core
+magic_enum --> MotionControl
 UI --> NodeEdit
 UI --> CommSettings
+UI --> MotionControl
 UI --> GeneralDlg
 Core --> Workflow
 Core --> Execution
 Core --> Monitor
 Device --> Hardware[硬件接口]
 Settings --> Config[配置管理]
+DT --> AxisConfig[轴配置]
+MotionControl --> DT
 ```
 
 **图表来源**
 - [CMakeLists.txt](file://CMakeLists.txt#L173)
 - [CMakeLists.txt:218-219](file://CMakeLists.txt#L218-L219)
+- [Setting_MotionControl.cpp:49-53](file://src/modules/process/Setting/Setting_MotionControl.cpp#L49-L53)
 
 **章节来源**
 - [CMakeLists.txt](file://CMakeLists.txt#L173)
@@ -320,11 +456,19 @@ Settings --> Config[配置管理]
 - **异步操作**：将耗时的设置操作放到后台线程执行
 - **进度反馈**：为长时间操作提供进度指示
 - **防抖处理**：避免频繁的UI更新操作
+- **表格优化**：使用QTableWidget的批量更新功能减少界面刷新
 
 ### 数据处理优化
 - **增量更新**：只更新发生变化的数据部分
 - **缓存策略**：对计算结果进行缓存以提高重复访问速度
 - **批量操作**：支持多个设置的批量应用
+- **分区存储**：将不同类型的设置数据分区存储，提高查询效率
+
+### **新增** 表格化界面优化
+- **行高动态调整**：根据内容自动调整表格行高
+- **列宽智能分配**：使用QHeaderView::Stretch自动分配列宽
+- **单元格编辑优化**：仅在必要时触发参数验证
+- **扩展轴列表缓存**：避免频繁读取扩展轴配置
 
 ## 故障排除指南
 
@@ -350,9 +494,24 @@ Settings --> Config[配置管理]
 - **验证配置格式**：确保配置文件格式正确
 - **恢复默认设置**：必要时恢复到初始配置状态
 
+#### **新增** MotionControl设置问题
+- **检查轴配置**：确认扩展轴名称的合法性和唯一性
+- **验证参数范围**：确保输入的轴参数在有效范围内
+- **检查控制器兼容性**：确认所选控制器类型与硬件匹配
+- **清理缓存数据**：重启应用程序以清除可能的缓存问题
+- **查看扩展轴列表**：确认扩展轴列表的正确加载和保存
+
+#### **新增** 表格化界面问题
+- **检查表格完整性**：确认表格列数和行数正确
+- **验证单元格编辑**：确保单元格编辑功能正常
+- **检查颜色标识**：确认机器轴和扩展轴的颜色区分正常
+- **重置表格布局**：尝试重新设置表格的列宽和行高
+
 **章节来源**
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
+- [Setting_MotionControl.cpp:360-435](file://src/modules/process/Setting/Setting_MotionControl.cpp#L360-L435)
+- [Setting_MotionControl.cpp:437-483](file://src/modules/process/Setting/Setting_MotionControl.cpp#L437-L483)
 
 ## 结论
 
@@ -362,5 +521,8 @@ Process模块设置对话框的健壮性增强项目成功实现了以下目标�
 2. **提升了系统的可靠性**：通过多层次的错误处理和异常捕获，减少了系统崩溃的可能性
 3. **改善了配置管理的效率**：通过优化的数据结构和算法，提高了配置操作的响应速度
 4. **加强了系统的可维护性**：通过清晰的代码结构和文档，降低了后续维护的难度
+5. **实现了重大架构重构**：**新增** 将分散的轴设置页面整合到统一的MotionControl界面，提供更加直观和高效的配置体验
+
+**最新重构**特别体现在MotionControl设置对话框的设计上，通过表格化界面和扩展轴支持功能，显著提升了多轴配置的易用性和可维护性。这一重构不仅简化了用户的操作流程，还为未来的功能扩展奠定了良好的基础。
 
 这些改进为激光雕刻控制系统的稳定运行奠定了坚实的基础，为用户提供了更加可靠和高效的使用体验。未来可以进一步考虑添加更多的自动化测试用例和性能监控功能，以持续提升系统的质量。

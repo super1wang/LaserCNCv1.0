@@ -46,7 +46,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     SARibbonPanel* panelConn = cat->addPanel(QObject::tr("连接"));
     panelConn->addLargeAction(container->findAction(CmdConnectController::Name));
     panelConn->addLargeAction(container->findAction(CmdHome::Name));
-    panelConn->addSmallAction(container->findAction(CmdDisconnectController::Name));
+    panelConn->addLargeAction(container->findAction(CmdDisconnectController::Name));
 
     // ── 流程 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelProc = cat->addPanel(QObject::tr("流程"));

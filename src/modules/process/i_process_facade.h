@@ -32,10 +32,18 @@ public:
 
     /// 连接到指定控制器端点（形如 "tcp://127.0.0.1:5000"）。
     /// 返回是否连接成功。
+    /// @deprecated 请使用 connectAllDevices() 异步连接全部外设。
     virtual bool connectController(const QString& endpoint) = 0;
     /// 断开当前控制器连接。
+    /// @deprecated 请使用 disconnectAllDevices() 异步断开全部外设。
     virtual void disconnectController() = 0;
     virtual bool isConnected() const = 0;
+
+    /// 异步连接全部已配置的外设（运动控制器、激光器等）。
+    /// 通过 TaskManager 在线程池中执行，进度通过 ProcessModule 信号上报。
+    virtual void connectAllDevices() = 0;
+    /// 异步断开全部已连接的外设。
+    virtual void disconnectAllDevices() = 0;
 
     /// 仿真模式开关（true 表示纯软件仿真，不发送下位机指令）。
     virtual bool simulationMode() const = 0;

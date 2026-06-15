@@ -112,7 +112,7 @@ public:
     bool isEnabled() const override;
 };
 
-/// 异步连接当前已启用的全部外设。
+/// 异步连接当前已启用的全部外设（运动控制器、激光器等）。
 class CmdConnectController : public CommandBase {
     Q_OBJECT
 public:
@@ -122,7 +122,7 @@ public:
     bool isEnabled() const override;
 };
 
-/// 断开当前已连接的全部外设。
+/// 异步断开当前已连接的全部外设。
 class CmdDisconnectController : public CommandBase {
     Q_OBJECT
 public:

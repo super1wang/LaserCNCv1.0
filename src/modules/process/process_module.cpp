@@ -22,6 +22,22 @@
 
 namespace {
 
+/// 一次性监听 TaskManager::taskFinished，匹配到指定 taskId 后自动断开。
+void watchTask(QObject* owner, TaskId taskId, std::function<void(bool)> onFinished)
+{
+    auto connection = std::make_shared<QMetaObject::Connection>();
+    *connection = QObject::connect(
+        lcnc::Kernel::current().taskManager(),
+        &TaskManager::taskFinished,
+        owner,
+        [taskId, onFinished = std::move(onFinished), connection](TaskId finishedId, bool success) mutable {
+            if (finishedId != taskId)
+                return;
+            QObject::disconnect(*connection);
+            onFinished(success);
+        });
+}
+
 QString defaultStatusText(bool simulationMode, bool connected)
 {
     if (simulationMode) {
@@ -286,6 +302,174 @@ bool ProcessModule::isConnected() const
     return m_connected;
 }
 
+void ProcessModule::connectAllDevices()
+{
+    if (m_connected) {
+        setStatusMessage(tr("设备已连接，无需重复连接"));
+        return;
+    }
+
+    auto* taskMgr = lcnc::Kernel::current().taskManager();
+    if (!taskMgr) {
+        setState(State::Error, tr("TaskManager 不可用"));
+        return;
+    }
+
+    // 捕获 Service 裸指针（Service 生命周期由 ProcessModule::m_service 保证）
+    auto* service = m_service.get();
+    const bool simMode = m_simulationMode;
+
+    const TaskId taskId = taskMgr->run(tr("连接设备"),
+        [service, simMode](TaskProgress* progress) {
+            progress->setRange(0, 100);
+
+            // ── Step 1: 创建并连接运动控制器 ──
+            progress->setStepName(QObject::tr("正在连接运动控制器..."));
+            progress->setValue(0);
+            {
+                service->SetMotionControl();  // 空字符串 → 从 settings 读取 sType
+                auto* mc = service->GetMotionControl();
+                if (!mc) {
+                    throw std::runtime_error(
+                        QObject::tr("运动控制器实例化失败").toStdString());
+                }
+                if (!mc->Connect()) {
+                    throw std::runtime_error(
+                        QObject::tr("运动控制器连接失败").toStdString());
+                }
+            }
+            progress->setValue(30);
+
+            // ── Step 2: 创建并连接激光器 ──
+            progress->setStepName(QObject::tr("正在连接激光器..."));
+            {
+                service->SetLaserDevice();  // 空字符串 → 从 settings 读取 sType
+                auto* ld = service->GetLaserDevice();
+                if (ld && !ld->Connect()) {
+                    // 激光器连接失败不阻断整体流程，但记录错误
+                    throw std::runtime_error(
+                        QObject::tr("激光器连接失败").toStdString());
+                }
+            }
+            progress->setValue(60);
+
+            // ── Step 3: 下发参数表 ──
+            progress->setStepName(QObject::tr("正在下发运动控制器参数..."));
+            service->SetMotionControlTable();
+            service->SetDigitalTable();
+            service->SetAnalogTable();
+            progress->setValue(80);
+
+            progress->setStepName(QObject::tr("正在下发激光器参数..."));
+            service->SetLaserTable();
+            progress->setValue(100);
+        });
+
+    watchTask(this, taskId, [this, simMode](bool success) {
+        m_connected = success;
+        emit connectionChanged(success);
+
+        if (success) {
+            // 非仿真模式下关闭仿真标志
+            if (simMode) {
+                m_simulationMode = false;
+                emit simulationModeChanged(false);
+            }
+            setStatusMessage(tr("设备已连接"));
+        } else {
+            setStatusMessage(tr("设备连接失败"));
+        }
+
+        emit deviceConnectFinished(success,
+            success ? tr("所有设备连接成功") : tr("设备连接失败，请检查设置"));
+    });
+}
+
+void ProcessModule::disconnectAllDevices()
+{
+    if (!m_connected) {
+        setStatusMessage(tr("设备未连接"));
+        return;
+    }
+    if (m_state == State::Running) {
+        setStatusMessage(tr("加工运行中，请先停止再断开设备"));
+        return;
+    }
+    if (m_homing) {
+        setStatusMessage(tr("回零进行中，请等待完成后再断开设备"));
+        return;
+    }
+
+    auto* taskMgr = lcnc::Kernel::current().taskManager();
+    if (!taskMgr) {
+        setState(State::Error, tr("TaskManager 不可用"));
+        return;
+    }
+
+    // 进入断开流程前，先把上层运行/工作流/仿真等状态收尾，避免在硬件
+    // 已断开的情况下还有定时器/工作流继续触发指令。
+    if (m_simTimer)
+        m_simTimer->stop();
+    if (m_workflowExecutor)
+        m_workflowExecutor->stop();
+    if (m_motionController)
+        m_motionController->stop();
+    safeStopProcessOutputs();
+
+    setStatusMessage(tr("正在断开设备..."));
+
+    auto* service = m_service.get();
+
+    const TaskId taskId = taskMgr->run(tr("断开设备"),
+        [service](TaskProgress* progress) {
+            progress->setRange(0, 100);
+
+            // ── Step 1: 断开激光器 ──
+            progress->setStepName(QObject::tr("正在断开激光器..."));
+            progress->setValue(0);
+            {
+                auto* ld = service->GetLaserDevice();
+                if (ld) {
+                    ld->Disconnect();
+                }
+            }
+            progress->setValue(40);
+
+            // ── Step 2: 断开运动控制器 ──
+            progress->setStepName(QObject::tr("正在断开运动控制器..."));
+            {
+                auto* mc = service->GetMotionControl();
+                if (mc) {
+                    mc->Disconnect();
+                }
+            }
+            progress->setValue(100);
+        });
+
+    watchTask(this, taskId, [this](bool success) {
+        m_connected = false;
+        if (m_simTimer)
+            m_simTimer->stop();
+        m_state = State::Idle;
+        emit connectionChanged(false);
+        emit stateChanged(m_state);
+        setStatusMessage(success
+            ? tr("所有设备已断开")
+            : tr("设备断开过程中出现异常，请检查日志"));
+
+        if (success) {
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "ProcessModule::disconnectAllDevices: completed");
+        } else {
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "ProcessModule::disconnectAllDevices: encountered errors");
+        }
+
+        emit deviceConnectFinished(success,
+            success ? tr("所有设备已断开") : tr("设备断开过程中出现异常"));
+    });
+}
+
 void ProcessModule::setSimulationMode(bool on)
 {
     if (m_simulationMode == on)
@@ -359,25 +543,109 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
 
 void ProcessModule::home()
 {
-    if (m_state == State::EmergencyStop)
+    if (m_state == State::EmergencyStop) {
+        setStatusMessage(tr("急停状态，无法回零"));
         return;
+    }
+    if (m_state == State::Running) {
+        setStatusMessage(tr("加工运行中，无法回零"));
+        return;
+    }
+    if (m_homing) {
+        setStatusMessage(tr("回零正在进行中"));
+        return;
+    }
 
-    const QStringList axes = homeOrderForAxes(m_axisDefinitions);
+    // 合并预设轴系（按 Z 优先顺序）+ 用户扩展轴系；扩展轴系无对应 Axis 枚举，
+    // 实控阶段只能跳过硬件回零，但仍参与位姿清零，与仿真保持一致。
+    QStringList axes = homeOrderForAxes(m_axisDefinitions);
+    for (const QString& ext : DT::getExtensionAxes()) {
+        const QString key = ext.trimmed().toUpper();
+        if (!key.isEmpty() && key != QStringLiteral("BASE") && !axes.contains(key))
+            axes.append(key);
+    }
     if (axes.isEmpty()) {
         setStatusMessage(tr("没有可回零的轴系"));
         return;
     }
 
-    if (m_motionController) {
-        for (const QString& axis : axes)
-            m_motionController->home(axis);
+    auto* taskMgr = lcnc::Kernel::current().taskManager();
+    if (!taskMgr) {
+        setState(State::Error, tr("TaskManager 不可用"));
+        return;
     }
 
-    for (const QString& axis : axes)
-        setAxisPosition(axis, 0.0);
+    m_homing = true;
+    setStatusMessage(tr("开始回零（共 %1 个轴）").arg(axes.size()));
 
-    m_simPhase = 0.0;
-    setStatusMessage(tr("回零完成"));
+    const bool          simulationMode = m_simulationMode;
+    const bool          connected      = m_connected;
+    auto*               service        = m_service.get();
+    auto*               simController  = m_motionController.get();
+
+    // 在后台线程依次回零；失败不再继续后续轴，但已成功的轴保持回零状态。
+    const TaskId taskId = taskMgr->run(tr("回零"),
+        [axes, simulationMode, connected, service, simController]
+        (TaskProgress* progress) {
+            progress->setRange(0, axes.size());
+            progress->setValue(0);
+
+            // 实控模式优先调用硬件回零；缺少硬件实例则降级到仿真路径。
+            MotionControl* hwMc = (!simulationMode && connected && service)
+                ? service->GetMotionControl()
+                : nullptr;
+
+            for (int i = 0; i < axes.size(); ++i) {
+                const QString& axis = axes.at(i);
+                progress->setStepName(QObject::tr("正在回零 %1 轴").arg(axis));
+
+                bool ok = true;
+                if (hwMc) {
+                    auto eAxis = enum_cast<Axis>(axis.toStdString());
+                    if (eAxis.has_value() && hwMc->IsMotorCreated(eAxis.value())) {
+                        // 已注册的预设轴：调用控制器硬件回零，阻塞直至完成。
+                        if (!hwMc->Home(eAxis.value())) {
+                            ok = false;
+                            LCNC_ERR(lcnc::LogCode::Generic,
+                                     "ProcessModule::home: hardware Home failed for axis {}",
+                                     axis.toStdString());
+                        }
+                    } else {
+                        // 扩展轴或未注册轴：硬件无法回零，仅记录并继续。
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "ProcessModule::home: skip hardware home for axis {} "
+                                  "(extension or not registered)",
+                                  axis.toStdString());
+                    }
+                } else if (simController) {
+                    // 仿真模式：把仿真姿态对应轴清零。
+                    simController->home(axis);
+                }
+
+                progress->setValue(i + 1);
+                if (!ok) {
+                    throw std::runtime_error(
+                        QObject::tr("%1 轴回零失败").arg(axis).toStdString());
+                }
+            }
+        });
+
+    watchTask(this, taskId, [this, axes](bool success) {
+        m_homing = false;
+        // 无论成功失败，都把 GUI 端的轴位置归零（仿真姿态在任务里已经被
+        // SimulationMotionController 写入 MachinePose；这里同步逻辑位置缓存）。
+        for (const QString& axis : axes)
+            setAxisPosition(axis, 0.0);
+        m_simPhase = 0.0;
+
+        if (success) {
+            setStatusMessage(tr("回零完成 — 共 %1 个轴").arg(axes.size()));
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "ProcessModule::home: completed for {} axes", axes.size());
+        } else {
+            setState(State::Error, tr("回零失败，请检查日志"));
+        }
+    });
 }
 
 void ProcessModule::runStart()

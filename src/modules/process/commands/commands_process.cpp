@@ -3,9 +3,7 @@
 #include <QAction>
 #include <QFileDialog>
 #include <QIcon>
-#include <QInputDialog>
 #include <QKeySequence>
-#include <QLineEdit>
 #include <QObject>
 #include <QStandardPaths>
 
@@ -254,44 +252,36 @@ void CmdHome::execute()
 CmdConnectController::CmdConnectController(IAppContext* ctx) : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/connect.svg"), tr("连接设备"), this);
-    a->setStatusTip(tr("连接到运动控制器"));
+    a->setStatusTip(tr("异步连接全部已配置外设（运动控制器、激光器等）"));
     setAction(a);
 }
 bool CmdConnectController::isEnabled() const
 {
-    return lcnc::Kernel::current().service<lcnc::IProcessFacade>() != nullptr;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && !p->isConnected();
 }
 void CmdConnectController::execute()
 {
     auto* p = processFacade();
     if (!p) return;
-
-    bool ok = false;
-    const QString endpoint = QInputDialog::getText(
-        nullptr,
-        tr("连接控制器"),
-        tr("控制器端点 (如 tcp://127.0.0.1:5000):"),
-        QLineEdit::Normal,
-        QString(),
-        &ok);
-    if (ok && !endpoint.trimmed().isEmpty())
-        p->connectController(endpoint);
+    p->connectAllDevices();
 }
 
 // ── CmdDisconnectController ─────────────────────────────────────────────────
 CmdDisconnectController::CmdDisconnectController(IAppContext* ctx) : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/disconnect.svg"), tr("断开设备"), this);
-    a->setStatusTip(tr("断开当前控制器连接"));
+    a->setStatusTip(tr("异步断开全部已连接外设"));
     setAction(a);
 }
 bool CmdDisconnectController::isEnabled() const
 {
-    return lcnc::Kernel::current().service<lcnc::IProcessFacade>() != nullptr;
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->isConnected();
 }
 void CmdDisconnectController::execute()
 {
-    if (auto* p = processFacade()) p->disconnectController();
+    if (auto* p = processFacade()) p->disconnectAllDevices();
 }
 
 } // namespace lcnc::process

@@ -53,6 +53,9 @@ public:
     void disconnectController() override;
     bool isConnected() const override;
 
+    void connectAllDevices() override;
+    void disconnectAllDevices() override;
+
     void setSimulationMode(bool on) override;
     bool simulationMode() const override;
 
@@ -99,6 +102,10 @@ signals:
     void statusMessageChanged(const QString& message);
     void processLogMessage(const QString& level, const QString& message);
     void processFlowChanged();
+    /// 单个外设连接进度（设备名、百分比、当前步骤描述）。
+    void deviceConnectProgress(const QString& deviceName, int percent, const QString& step);
+    /// 全部外设连接/断开完成（是否全部成功、汇总消息）。
+    void deviceConnectFinished(bool allSuccess, const QString& summary);
 
 private slots:
     void onSimulationTick();
@@ -113,6 +120,7 @@ private:
     bool                  m_initialized{false};
     bool                  m_connected{false};
     bool                  m_simulationMode{true};
+    bool                  m_homing{false};
     State                 m_state{State::Idle};
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, double> m_axisPositions;
