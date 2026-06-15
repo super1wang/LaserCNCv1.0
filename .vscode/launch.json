@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // F5 会跑这个 — VS Code 当前 build 目录是 build/(Debug)。
+      // ${command:cmake.launchTargetPath} 让 CMake Tools 自动指向当前 variant 的 LaserCNC.exe。
+      "name": "Debug LaserCNC",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${command:cmake.launchTargetDirectory}",
+      "environment": [],
+      "console": "integratedTerminal",
+      "preLaunchTask": "CMake: build"
+    }
+  ]
+}

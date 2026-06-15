@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // 给 launch.json 的 preLaunchTask 用，标签必须叫 "CMake: build"。
+      // 内部跑 ninja，跟状态栏 ▶ Build 按钮等价。
+      "label": "CMake: build",
+      "type": "shell",
+      "command": "D:/CMake/bin/cmake.exe",
+      "args": [
+        "--build",
+        "${workspaceFolder}/build",
+        "--target",
+        "all",
+        "-j",
+        "16"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    }
+  ]
+}

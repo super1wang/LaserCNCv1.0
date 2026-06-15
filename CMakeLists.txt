@@ -4,10 +4,9 @@ project(LaserCNC VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting")
-set(CMAKE_AUTORCC ON)
+# AUTOMOC/AUTOUIC/AUTORCC are configured per-target below (not globally) so
+# that each static library only scans its own sources. AUTOUIC in particular
+# is enabled only on the process library, which is the sole owner of .ui files.
 
 # ─── Qt ───────────────────────────────────────────────────────────────────────
 set(LCNC_QT6_ROOT "E:/Qt6.9.1/6.9.1/msvc2022_64" CACHE PATH "Qt6 installation root")
@@ -56,6 +55,14 @@ set(LCNC_BDAQ_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "BDAQ SDK
 set(LCNC_BDAQ_LIB "" CACHE FILEPATH "BDAQ import library")
 set(LCNC_REAL_LASER_SDK_ROOT "${LCNC_PROCESS_SDK_ROOT}" CACHE PATH "Real laser SDK root or protocol support root")
 
+# ─── Boost (consumed by process module: ToolFactory, SerialPort, ACSMotionControl) ──
+# Header includes: <boost/lexical_cast.hpp>, <boost/thread.hpp>, <boost/chrono.hpp>
+# Compiled libs needed by SerialPort.cpp (boost::this_thread, boost::chrono): boost_thread, boost_chrono, boost_system
+set(LCNC_BOOST_ROOT "G:/environment/vcpkg-master/vcpkg/installed/x64-windows" CACHE PATH "Boost installation root (vcpkg layout: include/ + lib/ + debug/lib/)")
+set(LCNC_BOOST_INCLUDE_DIR "${LCNC_BOOST_ROOT}/include" CACHE PATH "Boost include directory")
+set(LCNC_BOOST_LIB_DIR_RELEASE "${LCNC_BOOST_ROOT}/lib" CACHE PATH "Boost release library directory")
+set(LCNC_BOOST_LIB_DIR_DEBUG "${LCNC_BOOST_ROOT}/debug/lib" CACHE PATH "Boost debug library directory")
+
 function(lcnc_require_existing path label)
     if(NOT EXISTS "${path}")
         message(FATAL_ERROR "${label} does not exist: ${path}")
@@ -77,6 +84,76 @@ endif()
 if(LCNC_WITH_REAL_LASER)
     lcnc_require_existing("${LCNC_REAL_LASER_SDK_ROOT}" "LCNC_WITH_REAL_LASER requires LCNC_REAL_LASER_SDK_ROOT")
 endif()
+
+# ─── Shared INTERFACE targets ─────────────────────────────────────────────────
+# lcnc_common: include paths, defines, and compile options shared by every
+# library and the executable. Linked PUBLIC by lcnc_core so that everything
+# downstream inherits it transitively.
+add_library(lcnc_common INTERFACE)
+target_include_directories(lcnc_common INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rd
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rd/include_3rd
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rd/magic_enum
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rd/toml11
+    ${OpenCASCADE_INCLUDE_DIR}
+)
+target_compile_definitions(lcnc_common INTERFACE
+    LCNC_PROCESS_HAS_ACS=$<BOOL:${LCNC_WITH_ACS}>
+    LCNC_PROCESS_HAS_GTN=$<BOOL:${LCNC_WITH_GTN}>
+    LCNC_PROCESS_HAS_BDAQ=$<BOOL:${LCNC_WITH_BDAQ}>
+    LCNC_PROCESS_HAS_REAL_LASER=$<BOOL:${LCNC_WITH_REAL_LASER}>
+    LCNC_PROCESS_HAS_SERIAL_COMM=$<BOOL:${LCNC_PROCESS_HAS_SERIAL_COMM}>
+)
+if(WIN32)
+    target_compile_definitions(lcnc_common INTERFACE
+        NOMINMAX
+        _USE_MATH_DEFINES
+        _CRT_SECURE_NO_WARNINGS
+    )
+endif()
+if(MSVC)
+    # /FS – serialise PDB writes (parallel cl.exe within the same target)
+    # /FIwindows.h – force-include windows.h before any other header to prevent
+    # WIN32_LEAN_AND_MEAN (defined inside OpenCASCADE's OpenGl_glext.h) from
+    # excluding OLE/NLS headers that Qt6 and the Windows SDK need in the same
+    # translation unit.
+    target_compile_options(lcnc_common INTERFACE /FS /FIwindows.h)
+endif()
+
+# lcnc_occ: OCC link libraries + 3rd-party search paths required by OCCT.
+add_library(lcnc_occ INTERFACE)
+
+set(OCC_LIBS
+    # Foundation
+    TKernel TKMath
+    # Modeling Data
+    TKG2d TKG3d TKGeomBase TKBRep
+    # Modeling Algorithms
+    TKGeomAlgo TKTopAlgo TKPrim TKBO TKShHealing TKBool TKOffset TKHLR TKMesh
+    # Visualization
+    TKService TKV3d TKOpenGl TKMeshVS
+    # Application Framework (XDE/XCAF)
+    TKCDF TKLCAF TKCAF TKBinL TKXmlL TKBin TKXml TKStdL TKStd TKVCAF
+    # Data Exchange
+    TKDE TKXSBase TKDESTEP TKXCAF TKDEIGES TKDESTL TKRWMesh TKDECascade TKBinXCAF TKXmlXCAF TKDEGLTF
+)
+
+set(LCNC_OCCT_3RDPARTY_DIR "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64" CACHE PATH "OpenCASCADE third-party library root")
+
+target_link_libraries(lcnc_occ INTERFACE ${OCC_LIBS})
+target_link_directories(lcnc_occ INTERFACE
+    "${LCNC_OCCT_3RDPARTY_DIR}/openvr-1.14.15-64/lib/win64"
+    "${LCNC_OCCT_3RDPARTY_DIR}/freeimage-3.18.0-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/freetype-2.13.3-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/gl2ps-1.3.8-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/tbb-2021.13.0-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/draco-1.4.1-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/tcltk-8.6.15-x64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/zlib-1.2.8-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/lzma-5.2.2-vc14-64/lib"
+    "${LCNC_OCCT_3RDPARTY_DIR}/ffmpeg-3.3.4-64/lib"
+)
 
 # ─── Sources ──────────────────────────────────────────────────────────────────
 set(SRCS_CORE
@@ -126,7 +203,7 @@ set(SRCS_VIEW
     src/view/transform_gizmo_renderer.cpp
 )
 
-set(SRCS_MODULES
+set(SRCS_MODULE_CAD
     src/modules/cad/cad_module.cpp
     src/modules/cad/document/cad_document_state.cpp
     src/modules/cad/document/cad_document_registry.cpp
@@ -151,6 +228,9 @@ set(SRCS_MODULES
     src/modules/cad/commands/commands_cad_delete.cpp
     src/modules/cad/ui/widget_cad_task_panel.cpp
     src/modules/cad/ui/ribbon_cad_tab.cpp
+)
+
+set(SRCS_MODULE_CAM
     src/modules/cam/cam_module.cpp
     src/modules/cam/contracts/toolpath_export_dto.cpp
     src/modules/cam/settings/cam_config.cpp
@@ -165,6 +245,9 @@ set(SRCS_MODULES
     src/modules/cam/ui/dialog_mark_axes.cpp
     src/modules/cam/ui/dialog_axis_calibration_wizard.cpp
     src/modules/cam/ui/ribbon_cam_tab.cpp
+)
+
+set(SRCS_MODULE_PROCESS
     src/modules/process/process_module.cpp
     src/modules/process/controllers/simulation_motion_controller.cpp
     src/modules/process/System/Service.cpp
@@ -245,6 +328,25 @@ set(SRCS_MODULES
     src/modules/process/controllers/simulator_cmhp_motion_controller.h
 )
 
+if(LCNC_WITH_ACS)
+    list(APPEND SRCS_MODULE_PROCESS
+        src/modules/process/controllers/acs_motion_controller_adapter.h
+        src/modules/process/controllers/acs_motion_controller_adapter.cpp
+    )
+endif()
+if(LCNC_WITH_GTN)
+    list(APPEND SRCS_MODULE_PROCESS
+        src/modules/process/controllers/gtn_motion_controller_adapter.h
+        src/modules/process/controllers/gtn_motion_controller_adapter.cpp
+    )
+endif()
+if(TARGET Qt6::SerialPort)
+    list(APPEND SRCS_MODULE_PROCESS
+        src/modules/process/communication/protocols/serial_channel.h
+        src/modules/process/communication/protocols/serial_channel.cpp
+    )
+endif()
+
 set(SRCS_APP
     src/app/app_context.cpp
     src/app/command_registry.cpp
@@ -256,184 +358,152 @@ set(SRCS_APP
     src/app/main_window.cpp
 )
 
-if(LCNC_WITH_ACS)
-    list(APPEND SRCS_MODULES
-        src/modules/process/controllers/acs_motion_controller_adapter.h
-        src/modules/process/controllers/acs_motion_controller_adapter.cpp
-    )
-endif()
-if(LCNC_WITH_GTN)
-    list(APPEND SRCS_MODULES
-        src/modules/process/controllers/gtn_motion_controller_adapter.h
-        src/modules/process/controllers/gtn_motion_controller_adapter.cpp
-    )
-endif()
-if(TARGET Qt6::SerialPort)
-    list(APPEND SRCS_MODULES
-        src/modules/process/communication/protocols/serial_channel.h
-        src/modules/process/communication/protocols/serial_channel.cpp
-    )
-endif()
-
-add_executable(LaserCNC WIN32
-    src/main.cpp
-    ${SRCS_CORE}
-    ${SRCS_VIEW}
-    ${SRCS_MODULES}
-    ${SRCS_APP}
-    resources/resources.qrc
-)
-
-target_include_directories(LaserCNC PRIVATE
-    src
-    3rd
-    3rd/include_3rd
-    3rd/magic_enum
-    3rd/toml11
-    src/modules/process/System
-    src/modules/process/Setting
-    src/modules/process/Tool
-    src/modules/process/CuttingCommand
-    src/modules/process/device/MotionControl
-    src/modules/process/device/Laser
-    src/modules/process/device/Compensation
-    src/modules/process/device/Connect
-    ${OpenCASCADE_INCLUDE_DIR}
-)
-
-# OCC modules needed for Phase 1
-set(OCC_LIBS
-    # Foundation
-    TKernel TKMath
-    # Modeling Data
-    TKG2d TKG3d TKGeomBase TKBRep
-    # Modeling Algorithms
-    TKGeomAlgo TKTopAlgo TKPrim TKBO TKShHealing TKBool TKOffset TKHLR TKMesh
-    # Visualization
-    TKService TKV3d TKOpenGl TKMeshVS
-    # Application Framework (XDE/XCAF)
-    TKCDF TKLCAF TKCAF TKBinL TKXmlL TKBin TKXml TKStdL TKStd TKVCAF
-    # Data Exchange
-    TKDE TKXSBase TKDESTEP TKXCAF TKDEIGES TKDESTL TKRWMesh TKDECascade TKBinXCAF TKXmlXCAF TKDEGLTF
-)
-
-set(LCNC_OCCT_3RDPARTY_DIR "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64" CACHE PATH "OpenCASCADE third-party library root")
-
-# Add 3rd-party lib paths required by OCCT (openvr, etc.)
-target_link_directories(LaserCNC PRIVATE
-    "${LCNC_OCCT_3RDPARTY_DIR}/openvr-1.14.15-64/lib/win64"
-    "${LCNC_OCCT_3RDPARTY_DIR}/freeimage-3.18.0-x64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/freetype-2.13.3-x64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/gl2ps-1.3.8-vc14-64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/tbb-2021.13.0-x64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/draco-1.4.1-vc14-64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/tcltk-8.6.15-x64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/zlib-1.2.8-vc14-64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/lzma-5.2.2-vc14-64/lib"
-    "${LCNC_OCCT_3RDPARTY_DIR}/ffmpeg-3.3.4-64/lib"
-)
-
-target_link_libraries(LaserCNC PRIVATE
+# ─── Static libraries (one per layer) ─────────────────────────────────────────
+# core ────────────────────────────────────────────────────────────────────────
+add_library(lcnc_core STATIC ${SRCS_CORE})
+set_target_properties(lcnc_core PROPERTIES AUTOMOC ON)
+target_link_libraries(lcnc_core PUBLIC
+    lcnc_common
+    lcnc_occ
     Qt6::Core
     Qt6::Gui
+    Qt6::Concurrent
+)
+
+# view ────────────────────────────────────────────────────────────────────────
+add_library(lcnc_view STATIC ${SRCS_VIEW})
+set_target_properties(lcnc_view PROPERTIES AUTOMOC ON)
+target_link_libraries(lcnc_view PUBLIC
+    lcnc_core
     Qt6::Widgets
     Qt6::OpenGL
     Qt6::OpenGLWidgets
-    Qt6::Concurrent
+)
+
+# cad module ──────────────────────────────────────────────────────────────────
+add_library(lcnc_module_cad STATIC ${SRCS_MODULE_CAD})
+set_target_properties(lcnc_module_cad PROPERTIES AUTOMOC ON)
+target_link_libraries(lcnc_module_cad PUBLIC
+    lcnc_view
+    SARibbonBar::SARibbonBar
+    Qt6::UiTools
+)
+
+# cam module (depends on cad — see cam_module.cpp pulling cad/services) ───────
+add_library(lcnc_module_cam STATIC ${SRCS_MODULE_CAM})
+set_target_properties(lcnc_module_cam PROPERTIES AUTOMOC ON)
+target_link_libraries(lcnc_module_cam PUBLIC
+    lcnc_view
+    lcnc_module_cad
+    SARibbonBar::SARibbonBar
+)
+
+# process module — only target with .ui files, hence the only one with AUTOUIC.
+add_library(lcnc_module_process STATIC ${SRCS_MODULE_PROCESS})
+set_target_properties(lcnc_module_process PROPERTIES
+    AUTOMOC ON
+    AUTOUIC ON
+    AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting;${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/ui/legacy"
+)
+target_include_directories(lcnc_module_process PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/System
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Tool
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/CuttingCommand
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/MotionControl
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Laser
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Compensation
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Connect
+)
+# Boost: ToolFactory.cpp, SerialPort.cpp, ACSMotionControl.cpp pull in
+# <boost/lexical_cast.hpp>, <boost/thread.hpp>, <boost/chrono.hpp>. The first
+# is header-only; the latter two need compiled libs. We link them by absolute
+# path (PRIVATE — only this library's TUs reference these symbols, the
+# auto-link pragmas in our .obj files would also work but are unreliable
+# across boost versions).
+target_include_directories(lcnc_module_process PRIVATE "${LCNC_BOOST_INCLUDE_DIR}")
+set(_lcnc_boost_lib_dir "$<IF:$<CONFIG:Debug>,${LCNC_BOOST_LIB_DIR_DEBUG},${LCNC_BOOST_LIB_DIR_RELEASE}>")
+set(_lcnc_boost_lib_suffix "$<IF:$<CONFIG:Debug>,vc143-mt-gd-x64-1_88,vc143-mt-x64-1_88>")
+target_link_libraries(lcnc_module_process PRIVATE
+    "${_lcnc_boost_lib_dir}/boost_thread-${_lcnc_boost_lib_suffix}.lib"
+    "${_lcnc_boost_lib_dir}/boost_chrono-${_lcnc_boost_lib_suffix}.lib"
+    "${_lcnc_boost_lib_dir}/boost_system-${_lcnc_boost_lib_suffix}.lib"
+)
+target_link_libraries(lcnc_module_process PUBLIC
+    lcnc_view
+    lcnc_module_cam
+    SARibbonBar::SARibbonBar
     Qt6::Network
     Qt6::UiTools
-    SARibbonBar::SARibbonBar
-    ${OCC_LIBS}
 )
-
-target_compile_definitions(LaserCNC PRIVATE
-    LCNC_PROCESS_HAS_ACS=$<BOOL:${LCNC_WITH_ACS}>
-    LCNC_PROCESS_HAS_GTN=$<BOOL:${LCNC_WITH_GTN}>
-    LCNC_PROCESS_HAS_BDAQ=$<BOOL:${LCNC_WITH_BDAQ}>
-    LCNC_PROCESS_HAS_REAL_LASER=$<BOOL:${LCNC_WITH_REAL_LASER}>
-    LCNC_PROCESS_HAS_SERIAL_COMM=$<BOOL:${LCNC_PROCESS_HAS_SERIAL_COMM}>
-)
-
+# ACSMotionControl.cpp / SimulateCMHPMotionControl.cpp pull in the ACS SDK
+# unconditionally (they are not gated by LCNC_WITH_ACS the way the optional
+# adapter is), so link ACSCL_x64.LIB into the process library by default.
+# LCNC_WITH_ACS still controls the additional acs_motion_controller_adapter.{h,cpp}.
+if(EXISTS "${LCNC_ACS_LIB}")
+    target_link_libraries(lcnc_module_process PRIVATE "${LCNC_ACS_LIB}")
+endif()
 if(LCNC_WITH_ACS)
-    target_include_directories(LaserCNC PRIVATE "${LCNC_ACS_INCLUDE_DIR}")
-    target_link_libraries(LaserCNC PRIVATE "${LCNC_ACS_LIB}")
+    target_include_directories(lcnc_module_process PRIVATE "${LCNC_ACS_INCLUDE_DIR}")
+    target_link_libraries(lcnc_module_process PRIVATE "${LCNC_ACS_LIB}")
 endif()
 if(LCNC_WITH_GTN)
-    target_include_directories(LaserCNC PRIVATE "${LCNC_GTN_INCLUDE_DIR}")
-    target_link_libraries(LaserCNC PRIVATE "${LCNC_GTN_LIB}")
+    target_include_directories(lcnc_module_process PRIVATE "${LCNC_GTN_INCLUDE_DIR}")
+    target_link_libraries(lcnc_module_process PRIVATE "${LCNC_GTN_LIB}")
 endif()
 if(LCNC_WITH_BDAQ)
-    target_include_directories(LaserCNC PRIVATE "${LCNC_BDAQ_INCLUDE_DIR}")
-    target_link_libraries(LaserCNC PRIVATE "${LCNC_BDAQ_LIB}")
+    target_include_directories(lcnc_module_process PRIVATE "${LCNC_BDAQ_INCLUDE_DIR}")
+    target_link_libraries(lcnc_module_process PRIVATE "${LCNC_BDAQ_LIB}")
 endif()
 if(TARGET Qt6::SerialPort)
-    target_link_libraries(LaserCNC PRIVATE Qt6::SerialPort)
+    target_link_libraries(lcnc_module_process PUBLIC Qt6::SerialPort)
 endif()
 
-if(MSVC)
-    # /FS – serialise PDB writes; also embedded in CMAKE_CXX_FLAGS so AUTOMOC picks it up
-    string(APPEND CMAKE_CXX_FLAGS " /FS")
-    string(APPEND CMAKE_CXX_FLAGS_DEBUG " /FS")
-    string(APPEND CMAKE_CXX_FLAGS_RELEASE " /FS")
-    string(APPEND CMAKE_CXX_FLAGS_RELWITHDEBINFO " /FS")
-    # Force-include windows.h before any other header to prevent WIN32_LEAN_AND_MEAN
-    # (defined inside OpenCASCADE's OpenGl_glext.h) from excluding OLE/NLS headers
-    # that Qt6 and the Windows SDK need in the same translation unit.
-    target_compile_options(LaserCNC PRIVATE /FIwindows.h)
-endif()
+# app — bundles the three modules so the exe only needs to link lcnc_app ──────
+add_library(lcnc_app STATIC ${SRCS_APP})
+set_target_properties(lcnc_app PROPERTIES AUTOMOC ON)
+target_link_libraries(lcnc_app PUBLIC
+    lcnc_module_cad
+    lcnc_module_cam
+    lcnc_module_process
+    SARibbonBar::SARibbonBar
+)
+
+# ─── Executable ───────────────────────────────────────────────────────────────
+add_executable(LaserCNC WIN32
+    src/main.cpp
+    resources/resources.qrc
+)
+set_target_properties(LaserCNC PROPERTIES
+    AUTOMOC ON
+    AUTORCC ON
+)
+target_link_libraries(LaserCNC PRIVATE lcnc_app)
 
 if(WIN32)
-    target_compile_definitions(LaserCNC PRIVATE
-        NOMINMAX
-        _USE_MATH_DEFINES
-        _CRT_SECURE_NO_WARNINGS
-    )
-    # Set subsystem and entry point
     set_target_properties(LaserCNC PROPERTIES
         WIN32_EXECUTABLE TRUE
         LINK_FLAGS "/ENTRY:mainCRTStartup"
     )
 endif()
 
-# ─── Deploy OCC DLLs ──────────────────────────────────────────────────────────
-set(OCC_BIN_DIR "${LCNC_OCCT_ROOT}/win64/vc14/bin" CACHE PATH "OpenCASCADE runtime DLL directory")
-if(EXISTS "${OCC_BIN_DIR}")
-    add_custom_command(TARGET LaserCNC POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${OCC_BIN_DIR}"
-            "$<TARGET_FILE_DIR:LaserCNC>"
-        COMMENT "Copying OCC DLLs to output directory"
-    )
-else()
-    message(WARNING "OCC_BIN_DIR does not exist: ${OCC_BIN_DIR}")
-endif()
+# ─── Deploy runtime DLLs ──────────────────────────────────────────────────────
+# All runtime DLLs (OCC, Qt6 + plugins, SARibbon, boost, ACS, etc.) live as a
+# self-contained snapshot in 3rd/runtime/bin_<debug|release>/. POST_BUILD copies
+# the matching variant into the exe directory, so running LaserCNC.exe needs no
+# external Qt / OCC install. To refresh this snapshot after updating an SDK,
+# re-run scripts/refresh_runtime_dlls.* (or windeployqt manually) and commit
+# the changed DLLs.
+set(LCNC_RUNTIME_BIN_DIR_DEBUG   "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_debug"   CACHE PATH "Runtime DLL directory (Debug)")
+set(LCNC_RUNTIME_BIN_DIR_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_release" CACHE PATH "Runtime DLL directory (Release)")
 
-# Deploy SARibbon DLLs
-set(SARIBBON_BIN_DIR "${LCNC_SARIBBON_ROOT}/bin" CACHE PATH "SARibbon runtime DLL directory")
-if(EXISTS "${SARIBBON_BIN_DIR}")
-    add_custom_command(TARGET LaserCNC POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${SARIBBON_BIN_DIR}"
-            "$<TARGET_FILE_DIR:LaserCNC>"
-        COMMENT "Copying SARibbon DLLs to output directory"
-    )
-else()
-    message(WARNING "SARIBBON_BIN_DIR does not exist: ${SARIBBON_BIN_DIR}")
-endif()
-
-# Deploy Qt6 DLLs via windeployqt (ensures all Qt DLLs come from the same Qt installation)
-get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
-get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
-find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
-if(WINDEPLOYQT_EXECUTABLE)
-    add_custom_command(TARGET LaserCNC POST_BUILD
-        COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-translations --no-system-d3d-compiler --no-opengl-sw
-            "$<TARGET_FILE:LaserCNC>"
-        COMMENT "Running windeployqt to deploy Qt6 runtime DLLs"
-    )
-else()
-    message(WARNING "windeployqt not found; Qt DLLs may not be deployed correctly")
-endif()
+set(_lcnc_runtime_bin "$<IF:$<CONFIG:Debug>,${LCNC_RUNTIME_BIN_DIR_DEBUG},${LCNC_RUNTIME_BIN_DIR_RELEASE}>")
+add_custom_command(TARGET LaserCNC POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${_lcnc_runtime_bin}"
+        "$<TARGET_FILE_DIR:LaserCNC>"
+    COMMENT "Copying runtime DLLs from 3rd/runtime/bin_<config> to output directory"
+)
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")
 message(STATUS "OpenCASCADE version: ${OpenCASCADE_MAJOR_VERSION}.${OpenCASCADE_MINOR_VERSION}.${OpenCASCADE_MAINTENANCE_VERSION}")

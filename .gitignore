@@ -1,5 +1,7 @@
 # CMake and Visual Studio build output
 /build/
+/build_debug/
+/build_release/
 /out/
 /cmake-build-*/
 CMakeCache.txt

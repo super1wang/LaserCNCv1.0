@@ -1,0 +1,11 @@
+[
+  {
+    "name": "VS 2026 Insiders x64",
+    "visualStudio": "ed5f41e6",
+    "visualStudioArchitecture": "x64",
+    "preferredGenerator": {
+      "name": "Ninja"
+    },
+    "isTrusted": true
+  }
+]

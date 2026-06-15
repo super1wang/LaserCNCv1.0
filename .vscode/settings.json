@@ -1,0 +1,22 @@
+{
+  // CMake Tools defaults to Visual Studio generator + ALL_BUILD target. We
+  // overrode that to Ninja, but it must be paired with a kit that loads the
+  // VS Developer environment (cl.exe / rc.exe / mt.exe / Windows SDK INCLUDE
+  // and LIB env vars), otherwise configure fails with "rc not found" or
+  // links 64-bit project obj files against x86 SDK libs.
+  //
+  // The local cmake-kits.json defines a single x64 kit pointing at the same
+  // VS install we use from the command line. cmake.defaultKit pre-selects it
+  // so first-time `CMake: Configure` does not fall back to a global kit
+  // (which on this machine would be VS 2017 x86, the highest-priority match
+  // in the user-level kit list).
+  "cmake.generator": "Ninja",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.parallelJobs": 16,
+  "cmake.defaultKit": "VS 2026 Insiders x64",
+  "cmake.buildBeforeRun": true,
+  "cmake.debugConfig": {
+    "console": "integratedTerminal",
+    "cwd": "${workspaceFolder}/build"
+  }
+}
