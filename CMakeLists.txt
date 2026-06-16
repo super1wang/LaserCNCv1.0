@@ -249,7 +249,6 @@ set(SRCS_MODULE_CAM
 
 set(SRCS_MODULE_PROCESS
     src/modules/process/process_module.cpp
-    src/modules/process/controllers/simulation_motion_controller.cpp
     src/modules/process/System/Service.cpp
     src/modules/process/System/LogModule.cpp
     src/modules/process/System/MessageModule.cpp
@@ -325,7 +324,6 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/execution/process_workflow_executor.cpp
     src/modules/process/execution/process_execution_service.cpp
     src/modules/process/execution/process_node_executor_registry.cpp
-    src/modules/process/controllers/simulator_cmhp_motion_controller.h
 )
 
 if(LCNC_WITH_ACS)

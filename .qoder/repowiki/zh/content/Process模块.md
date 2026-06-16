@@ -114,7 +114,7 @@
 本文件为 LaserCNC 的 Process 模块技术文档，聚焦设备控制、工艺执行与实时监控系统。文档围绕工作流执行器、执行服务、通信管理器、运动控制器等核心组件展开，解释设备通信协议、运动控制算法、激光功率控制与传感器数据采集机制，并覆盖工艺参数配置、异常处理、状态监控与性能优化策略，同时提供设备集成与工艺调试的实用指南。
 
 ## 项目结构
-Process 模块位于 src/modules/process 下，采用“功能域+层次化”组织方式，包含运行时、设置、设备、刀路、指令、工作流、执行、通信、监控、UI、命令等子域。模块遵循微内核架构，通过 ProcessModule 作为装配层，对外提供 IProcessFacade 接口，内部以 ProcessRuntime 协调状态机与上下文，驱动各子系统协同工作。
+Process 模块位于 src/modules/process 下，采用"功能域+层次化"组织方式，包含运行时、设置、设备、刀路、指令、工作流、执行、通信、监控、UI、命令等子域。模块遵循微内核架构，通过 ProcessModule 作为装配层，对外提供 IProcessFacade 接口，内部以 ProcessRuntime 协调状态机与上下文，驱动各子系统协同工作。
 
 ```mermaid
 graph TB
@@ -181,48 +181,8 @@ ES --> EXE["节点执行器<br/>Node Executors"]
   - ProcessMonitorService：采集与回传运行状态、报警与诊断信息。
   - ProcessSettings/Schema：参数配置与类型化校验，支持单位、范围提示。
 
-章节来源
-- [process_runtime.h](file://src/modules/process/runtime/process_runtime.h)
-- [process_runtime.cpp](file://src/modules/process/runtime/process_runtime.cpp)
-- [process_state_machine.h](file://src/modules/process/runtime/process_state_machine.h)
-- [process_state_machine.cpp](file://src/modules/process/runtime/process_state_machine.cpp)
-- [process_execution_context.h](file://src/modules/process/runtime/process_execution_context.h)
-- [process_execution_context.cpp](file://src/modules/process/runtime/process_execution_context.cpp)
-- [process_workflow_service.h](file://src/modules/process/workflow/process_workflow_service.h)
-- [process_workflow_service.cpp](file://src/modules/process/workflow/process_workflow_service.cpp)
-- [process_execution_service.h](file://src/modules/process/execution/process_execution_service.h)
-- [process_execution_service.cpp](file://src/modules/process/execution/process_execution_service.cpp)
-- [process_node_executor_registry.h](file://src/modules/process/execution/process_node_executor_registry.h)
-- [process_node_executor_registry.cpp](file://src/modules/process/execution/process_node_executor_registry.cpp)
-- [communication_manager.h](file://src/modules/process/communication/communication_manager.h)
-- [communication_manager.cpp](file://src/modules/process/communication/communication_manager.cpp)
-- [motion_control.h](file://src/modules/process/device/MotionControl/motion_control.h)
-- [motion_control.cpp](file://src/modules/process/device/MotionControl/motion_control.cpp)
-- [laser_device.h](file://src/modules/process/device/Laser/laser_device.h)
-- [laser_device.cpp](file://src/modules/process/device/Laser/laser_device.cpp)
-- [process_toolpath_service.h](file://src/modules/process/toolpath/process_toolpath_service.h)
-- [process_toolpath_service.cpp](file://src/modules/process/toolpath/process_toolpath_service.cpp)
-- [process_toolpath_sorter.h](file://src/modules/process/toolpath/process_toolpath_sorter.h)
-- [process_toolpath_sorter.cpp](file://src/modules/process/toolpath/process_toolpath_sorter.cpp)
-- [process_tool_matcher.h](file://src/modules/process/toolpath/process_tool_matcher.h)
-- [process_tool_matcher.cpp](file://src/modules/process/toolpath/process_tool_matcher.cpp)
-- [process_instruction_planner.h](file://src/modules/process/instructions/process_instruction_planner.h)
-- [process_instruction_planner.cpp](file://src/modules/process/instructions/process_instruction_planner.cpp)
-- [acs_translator.h](file://src/modules/process/instructions/acs_translator.h)
-- [acs_translator.cpp](file://src/modules/process/instructions/acs_translator.cpp)
-- [gtn_translator.h](file://src/modules/process/instructions/gtn_translator.h)
-- [gtn_translator.cpp](file://src/modules/process/instructions/gtn_translator.cpp)
-- [pure_simulation_translator.h](file://src/modules/process/instructions/pure_simulation_translator.h)
-- [pure_simulation_translator.cpp](file://src/modules/process/instructions/pure_simulation_translator.cpp)
-- [process_monitor_service.h](file://src/modules/process/monitor/process_monitor_service.h)
-- [process_monitor_service.cpp](file://src/modules/process/monitor/process_monitor_service.cpp)
-- [process_settings.h](file://src/modules/process/settings/process_settings.h)
-- [process_settings.cpp](file://src/modules/process/settings/process_settings.cpp)
-- [process_settings_schema.h](file://src/modules/process/settings/process_settings_schema.h)
-- [process_settings_schema.cpp](file://src/modules/process/settings/process_settings_schema.cpp)
-
 ## 架构总览
-Process 模块采用“装配层-运行时-子系统”的分层架构。装配层负责模块生命周期与服务注册；运行时负责状态与上下文；子系统按功能域划分，彼此通过接口解耦协作。
+Process 模块采用"装配层-运行时-子系统"的分层架构。装配层负责模块生命周期与服务注册；运行时负责状态与上下文；子系统按功能域划分，彼此通过接口解耦协作。
 
 ```mermaid
 graph TB
@@ -467,6 +427,47 @@ ICommunicationChannel <|.. MockChannel
 - [mock_channel.h](file://src/modules/process/communication/protocols/mock_channel.h)
 - [mock_channel.cpp](file://src/modules/process/communication/protocols/mock_channel.cpp)
 
+### 硬件状态轮询系统
+**新增** Process 模块现已集成基于 QTimer 的硬件状态轮询系统，提供高频率的异步硬件状态采集能力。
+
+- 硬件状态轮询机制
+  - 定时器配置：使用 150ms 间隔的 QTimer 进行周期性轮询，确保实时性与系统负载平衡。
+  - 异步采集：通过 QtConcurrent::run 和 QFutureWatcher 实现非阻塞的状态采集，避免 UI 卡顿。
+  - 状态结构：HardwareAxisSample 结构体封装轴名称、位置、使能状态和有效性标记。
+  - 防重复机制：m_hwPollInFlight 标志防止轮询任务堆积，确保系统稳定性。
+
+- 轮询流程
+  - 条件检查：验证连接状态、仿真模式和设备可用性，确保轮询只在有效状态下执行。
+  - 数据采集：批量获取预设轴的状态信息，包括位置和使能状态。
+  - 状态更新：通过 setAxisPosition 应用去抖处理并发射位置变化信号。
+  - 使能同步：以硬件状态为权威来源，同步轴使能状态到本地缓存。
+
+```mermaid
+sequenceDiagram
+participant Timer as "QTimer(150ms)"
+participant PM as "ProcessModule"
+participant Watcher as "QFutureWatcher"
+participant HW as "MotionControl"
+participant UI as "UI层"
+Timer->>PM : "timeout()"
+PM->>PM : "检查轮询条件"
+PM->>HW : "获取轴状态"
+PM->>Watcher : "QtConcurrent : : run()"
+Watcher->>PM : "finished()"
+PM->>PM : "setAxisPosition()"
+PM->>UI : "axisPositionChanged()"
+PM->>PM : "同步轴使能状态"
+PM->>UI : "axisEnabledChanged()"
+```
+
+图表来源
+- [process_module.h](file://src/modules/process/process_module.h)
+- [process_module.cpp](file://src/modules/process/process_module.cpp)
+
+章节来源
+- [process_module.h](file://src/modules/process/process_module.h)
+- [process_module.cpp](file://src/modules/process/process_module.cpp)
+
 ### 运动控制器与激光器设备
 - MotionControl
   - 抽象接口：统一运动控制命令与状态查询。
@@ -652,6 +653,7 @@ Send --> End(["结束"])
   - ProcessRuntime 与 ProcessStateMachine 强耦合，但通过 ProcessExecutionContext 解耦其他子系统。
   - 执行服务与节点执行器通过注册表解耦，便于扩展新节点类型。
   - 通信管理器与协议通道通过接口解耦，便于替换与扩展。
+  - **新增** 硬件状态轮询系统通过定时器与异步任务实现，与主执行流程解耦。
 - 外部依赖
   - 与 CAM 模块通过 ToolpathExportSnapshot 交互，保持无 OCC 依赖。
   - 与 UI 层通过模型与对话框交互，避免直接访问底层实现。
@@ -674,6 +676,11 @@ WFS --> DOC["ProcessFlowDocument"]
 WFS --> NREG["ProcessNodeRegistry"]
 TPS["ToolpathService"] --> IPL["InstructionPlanner"]
 IPL --> TR["翻译器(ACS/GTN/PureSimulation)"]
+subgraph "硬件状态轮询"
+PM --> TIMER["QTimer(150ms)"]
+PM --> FUTURE["QtConcurrent::run()"]
+PM --> WATCHER["QFutureWatcher"]
+end
 ```
 
 图表来源
@@ -714,6 +721,7 @@ IPL --> TR["翻译器(ACS/GTN/PureSimulation)"]
 - 执行解耦与异步化
   - 通过节点执行器注册表与执行服务，将节点副作用解耦，减少主线程阻塞。
   - 通信通道采用异步收发与队列缓冲，降低 I/O 阻塞风险。
+  - **新增** 硬件状态轮询使用 QtConcurrent::run 实现异步采集，避免阻塞 UI 线程。
 - 指令规划与批处理
   - InstructionPlanner 将连续运动合并，减少指令数量与控制器开销。
   - 刀路排序与过滤减少无效移动，提升执行效率。
@@ -722,6 +730,7 @@ IPL --> TR["翻译器(ACS/GTN/PureSimulation)"]
   - ProcessExecutionContext 作为轻量上下文，避免频繁拷贝与深拷贝。
 - 监控与诊断
   - ProcessMonitorService 采集关键指标，结合日志系统进行性能分析与瓶颈定位。
+  - **新增** 硬件状态轮询提供高频状态采样，支持更精确的实时监控。
 
 ## 故障排查指南
 - 异常处理
@@ -734,6 +743,11 @@ IPL --> TR["翻译器(ACS/GTN/PureSimulation)"]
   - 检查 MotionControl/LaserDevice 的连接状态与握手协议；确认设备固件版本与驱动安装正确。
 - 参数校验
   - 使用 ProcessSettings/Schema 的类型化校验，确保单位与范围符合设备要求。
+- **新增** 硬件状态轮询故障排查
+  - 检查 m_hwStatusTimer 是否正常启动（150ms 间隔）。
+  - 验证 m_hwPollInFlight 标志是否正确管理轮询任务。
+  - 确认 HardwareAxisSample 结构体的数据完整性与有效性标记。
+  - 监控 QtConcurrent 任务的执行状态与结果处理。
 
 章节来源
 - [process_execution_service.h](file://src/modules/process/execution/process_execution_service.h)
@@ -748,16 +762,20 @@ IPL --> TR["翻译器(ACS/GTN/PureSimulation)"]
 - [process_settings.cpp](file://src/modules/process/settings/process_settings.cpp)
 - [process_settings_schema.h](file://src/modules/process/settings/process_settings_schema.h)
 - [process_settings_schema.cpp](file://src/modules/process/settings/process_settings_schema.cpp)
+- [process_module.h](file://src/modules/process/process_module.h)
+- [process_module.cpp](file://src/modules/process/process_module.cpp)
 
 ## 结论
-Process 模块通过清晰的分层与解耦设计，实现了从工作流编辑到执行、从设备控制到实时监控的完整闭环。运行时与状态机确保了执行过程的可控与可观测，执行服务与节点执行器提供了良好的扩展性，通信管理器与多协议通道满足多样化的设备接入需求。配合完善的参数配置、异常处理与性能优化策略，模块能够稳定支撑激光加工的复杂场景。
+Process 模块通过清晰的分层与解耦设计，实现了从工作流编辑到执行、从设备控制到实时监控的完整闭环。运行时与状态机确保了执行过程的可控与可观测，执行服务与节点执行器提供了良好的扩展性，通信管理器与多协议通道满足多样化的设备接入需求。**新增的硬件状态轮询系统进一步增强了实时监控能力，通过 150ms 高频采样和异步处理机制，为激光加工提供了更精确的状态反馈。** 配合完善的参数配置、异常处理与性能优化策略，模块能够稳定支撑激光加工的复杂场景。
 
 ## 附录
 - 设备集成步骤
   - 在设置页选择设备类型与控制器型号，配置通信参数（IP/端口、串口号、波特率等）。
   - 通过 ProcessDeviceService 建立设备会话，验证连接与握手。
   - 在工作流中添加节点并配置参数，使用仿真运行验证逻辑正确性。
+  - **新增** 硬件状态轮询系统自动启用，无需额外配置即可获得高频状态监控。
 - 工艺调试建议
   - 先进行低功率与低速测试，逐步提升至目标参数。
   - 使用 ProcessMonitorService 观察温度、电流、功率等关键指标。
   - 通过 UI 的节点编辑对话框调整参数，实时预览效果。
+  - **新增** 利用硬件状态轮询提供的高频采样数据，进行更精细的工艺参数优化。

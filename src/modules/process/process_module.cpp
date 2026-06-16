@@ -6,8 +6,8 @@
 #include "core/logging/logger.h"
 #include "core/task/task_manager.h"
 #include "core/task/task_progress.h"
-#include "modules/process/controllers/simulator_cmhp_motion_controller.h"
 #include "modules/process/execution/process_workflow_executor.h"
+#include "modules/process/Setting/Settings.h"
 #include "modules/process/System/Service.h"
 #include "modules/process/workflow/process_flow_store.h"
 
@@ -182,8 +182,10 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
     kernel.services().registerService<lcnc::IProcessFacade>(facade);
 
-    // 创建 SimulatorCmhpMotionController 作为仿真运动控制器。
-    m_motionController = std::make_unique<lcnc::process::SimulatorCmhpMotionController>(this);
+    // 加载外设/工艺参数（连接控制器与构造轴系/IO 表都依赖这些 toml）。
+    // qg_dlgsetting 在打开时会再次加载，幂等。
+    SETTINGS->LoadSettings("./Peripheral.toml");
+    SETTINGS->LoadSettings("./config.toml");
 
     // 设置机台构型（从 MachineConfigurationService）。
     auto machineConfig = kernel.services().getService<lcnc::MachineConfigurationService>();
@@ -214,8 +216,10 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
             this, &ProcessModule::setAxisPosition);
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::digitalOutputRequested,
             this, [this](const QString& channel, bool value) {
-                if (m_motionController)
-                    m_motionController->setDigitalOutput(channel, value);
+                if (m_service) {
+                    if (auto* mc = m_service->GetMotionControl())
+                        mc->DigitalOutputSet(channel, value ? 1 : 0);
+                }
             });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::workflowFinished,
             this, [this] {
@@ -245,8 +249,6 @@ void ProcessModule::stop()
     if (m_hwStatusTimer)
         m_hwStatusTimer->stop();
     m_hwPollInFlight = false;
-    if (m_motionController)
-        m_motionController->stop();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
     m_initialized = false;
@@ -282,15 +284,27 @@ bool ProcessModule::connectController(const QString& endpoint)
         emit simulationModeChanged(false);
     }
 
-    if (m_motionController && !m_motionController->isRunning()) {
-        if (!m_motionController->start()) {
-            setState(State::Error, tr("运动控制器启动失败"));
+    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+    if (!mc) {
+        m_service->SetMotionControl();
+        mc = m_service->GetMotionControl();
+    }
+    if (!mc || !mc->IsConnected()) {
+        if (!mc || !mc->Connect()) {
+            setState(State::Error, tr("运动控制器连接失败"));
             return false;
         }
+        // 连接后构建轴系（同 connectAllDevices 路径）。
+        mc->rebuildAxes();
+        mc->SetMotionControlTable();
+        mc->SetDigitalTable();
+        mc->SetAnalogTable();
     }
 
     m_connected = true;
     emit connectionChanged(true);
+    if (m_hwStatusTimer && !m_hwStatusTimer->isActive())
+        m_hwStatusTimer->start();
     setStatusMessage(tr("控制器已连接: %1").arg(endpoint));
     return true;
 }
@@ -300,8 +314,10 @@ void ProcessModule::disconnectController()
     if (m_hwStatusTimer)
         m_hwStatusTimer->stop();
     m_hwPollInFlight = false;
-    if (m_motionController)
-        m_motionController->stop();
+    if (m_service) {
+        if (auto* mc = m_service->GetMotionControl())
+            mc->Disconnect();
+    }
 
     m_simTimer->stop();
     m_connected = false;
@@ -333,6 +349,20 @@ void ProcessModule::connectAllDevices()
     auto* service = m_service.get();
     const bool simMode = m_simulationMode;
 
+    // 兜底：若 setAxisDefinitions 还未把 AxisGroup 写入 DT（如启动早期连接），
+    // 这里依据当前轴定义重算一次，确保 mc->rebuildAxes() 能拿到正确的 IsAxisUse。
+    if (DT::getAxisGroup() == 0 && !m_axisDefinitions.isEmpty()) {
+        int axisGroup = 0;
+        for (const MachineAxisDef& axis : m_axisDefinitions) {
+            if (axis.name == QStringLiteral("BASE"))
+                continue;
+            auto eAxis = enum_cast<Axis>(axis.name.toStdString());
+            if (eAxis.has_value())
+                axisGroup |= (1 << static_cast<int>(eAxis.value()));
+        }
+        DT::setAxisGroup(axisGroup);
+    }
+
     const TaskId taskId = taskMgr->run(tr("连接设备"),
         [service, simMode](TaskProgress* progress) {
             progress->setRange(0, 100);
@@ -351,6 +381,10 @@ void ProcessModule::connectAllDevices()
                     throw std::runtime_error(
                         QObject::tr("运动控制器连接失败").toStdString());
                 }
+                // 连接成功后构建轴系：根据 DT::AxisGroup 从 settings 读取每个轴的
+                // 参数表，调用 CreateMotor 填充 m_vecMotors / m_mapMotorValue，
+                // 此后 IsMotorCreated/MoveRelative/Home 才有数据可用。
+                mc->rebuildAxes();
             }
             progress->setValue(30);
 
@@ -432,8 +466,6 @@ void ProcessModule::disconnectAllDevices()
     m_hwPollInFlight = false;
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
-    if (m_motionController)
-        m_motionController->stop();
     safeStopProcessOutputs();
 
     setStatusMessage(tr("正在断开设备..."));
@@ -544,18 +576,26 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
         return;
     }
 
-    if (!m_simulationMode && !m_connected) {
-        setStatusMessage(tr("设备未连接，点动已忽略"));
+    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+    if (!mc || !mc->IsConnected()) {
+        setStatusMessage(tr("未连接控制器，请先连接设备"));
+        return;
+    }
+
+    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
+    if (!eAxis.has_value() || !mc->IsMotorCreated(eAxis.value())) {
+        setStatusMessage(tr("%1 轴未注册，无法点动").arg(normalizedAxis));
         return;
     }
 
     const double step = distance > 1e-9 ? distance : jogStepForLevel(speedLevel);
     const double delta = step * (direction > 0 ? 1.0 : -1.0);
-    if (m_motionController && !m_motionController->jog(normalizedAxis, delta)) {
+    // 速度按档位选取（mm/s），仿真器接受任意正值；实控时由参数表 + soft limit 兜底。
+    const double vel = (speedLevel == 0) ? 1.0 : (speedLevel == 2 ? 20.0 : 5.0);
+    if (!mc->MoveRelative(eAxis.value(), delta, vel)) {
         setStatusMessage(tr("%1 轴点动失败").arg(normalizedAxis));
         return;
     }
-    setAxisPosition(normalizedAxis, m_axisPositions.value(normalizedAxis) + delta);
     setStatusMessage(tr("点动 %1 轴 %2").arg(
         normalizedAxis,
         direction > 0 ? tr("正向") : tr("负向")));
@@ -598,20 +638,18 @@ void ProcessModule::home()
     m_homing = true;
     setStatusMessage(tr("开始回零（共 %1 个轴）").arg(axes.size()));
 
-    const bool          simulationMode = m_simulationMode;
     const bool          connected      = m_connected;
     auto*               service        = m_service.get();
-    auto*               simController  = m_motionController.get();
 
     // 在后台线程依次回零；失败不再继续后续轴，但已成功的轴保持回零状态。
     const TaskId taskId = taskMgr->run(tr("回零"),
-        [axes, simulationMode, connected, service, simController]
+        [axes, connected, service]
         (TaskProgress* progress) {
             progress->setRange(0, axes.size());
             progress->setValue(0);
 
-            // 实控模式优先调用硬件回零；缺少硬件实例则降级到仿真路径。
-            MotionControl* hwMc = (!simulationMode && connected && service)
+            // 已连接（含仿真器）时调用控制器硬件回零；未连接则仅做 GUI 归零。
+            MotionControl* hwMc = (connected && service)
                 ? service->GetMotionControl()
                 : nullptr;
 
@@ -637,9 +675,6 @@ void ProcessModule::home()
                                   "(extension or not registered)",
                                   axis.toStdString());
                     }
-                } else if (simController) {
-                    // 仿真模式：把仿真姿态对应轴清零。
-                    simController->home(axis);
                 }
 
                 progress->setValue(i + 1);
@@ -652,8 +687,8 @@ void ProcessModule::home()
 
     watchTask(this, taskId, [this, axes](bool success) {
         m_homing = false;
-        // 无论成功失败，都把 GUI 端的轴位置归零（仿真姿态在任务里已经被
-        // SimulationMotionController 写入 MachinePose；这里同步逻辑位置缓存）。
+        // 无论成功失败，都把 GUI 端的轴位置归零（硬件状态轮询会很快用控制器
+        // 实际位置覆盖回来；这里仅同步逻辑缓存避免短暂残留旧值）。
         for (const QString& axis : axes)
             setAxisPosition(axis, 0.0);
         m_simPhase = 0.0;
@@ -715,18 +750,10 @@ void ProcessModule::runPause()
     if (m_state != State::Running)
         return;
 
-    if (!m_simulationMode && m_motionController && !m_motionController->supportsProgramPause()) {
-        if (m_workflowExecutor)
-            m_workflowExecutor->stop();
-        if (m_motionController)
-            m_motionController->emergencyStop();
-        safeStopProcessOutputs();
-        setState(State::Error, tr("当前控制器不支持暂停，已降级为安全停止"));
-        return;
+    if (!m_simulationMode && m_service) {
+        if (auto* mc = m_service->GetMotionControl())
+            mc->PauseBuffer(9);
     }
-
-    if (!m_simulationMode && m_motionController)
-        m_motionController->pauseProgram(9);
 
     m_simTimer->stop();
     if (m_workflowExecutor)
@@ -739,10 +766,11 @@ void ProcessModule::runStop()
     m_simTimer->stop();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
-    if (m_motionController) {
-        m_motionController->emergencyStop();
-        if (m_connected || m_simulationMode)
-            m_motionController->start();
+    if (m_service) {
+        if (auto* mc = m_service->GetMotionControl()) {
+            mc->StopMotion();
+            mc->StopAllBuffer();
+        }
     }
     safeStopProcessOutputs();
     setState(State::Idle,
@@ -754,8 +782,12 @@ void ProcessModule::emergencyStop()
     m_simTimer->stop();
     if (m_workflowExecutor)
         m_workflowExecutor->emergencyStop();
-    if (m_motionController)
-        m_motionController->emergencyStop();
+    if (m_service) {
+        if (auto* mc = m_service->GetMotionControl()) {
+            mc->StopMotion();
+            mc->StopAllBuffer();
+        }
+    }
     safeStopProcessOutputs();
     setState(State::EmergencyStop, tr("急停已触发"));
 }
@@ -830,9 +862,15 @@ void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
     if (normalizedAxis.isEmpty())
         return;
 
-    if (m_motionController && !m_motionController->setAxisEnabled(normalizedAxis, enabled)) {
-        setStatusMessage(tr("%1 轴使能切换失败").arg(normalizedAxis));
-        return;
+    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+    if (mc && mc->IsConnected()) {
+        auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
+        if (eAxis.has_value() && mc->IsMotorCreated(eAxis.value())) {
+            if (!mc->SetAxisEnable(eAxis.value(), enabled)) {
+                setStatusMessage(tr("%1 轴使能切换失败").arg(normalizedAxis));
+                return;
+            }
+        }
     }
 
     if (m_axisEnabled.value(normalizedAxis, true) == enabled && m_axisEnabled.contains(normalizedAxis))
@@ -852,13 +890,14 @@ void ProcessModule::setDigitalOutput(const QString& outputName, bool value)
         return;
 
     QString channel = outputName.trimmed();
-    QString errorMessage;
     bool ok = false;
-    if (m_motionController)
-        ok = m_motionController->setDigitalOutput(channel, value, &errorMessage);
+    if (m_service) {
+        if (auto* mc = m_service->GetMotionControl())
+            ok = mc->DigitalOutputSet(channel, value ? 1 : 0);
+    }
 
     if (!ok) {
-        setStatusMessage(tr("IO 输出 %1 切换失败: %2").arg(name, errorMessage));
+        setStatusMessage(tr("IO 输出 %1 切换失败").arg(name));
         return;
     }
 
@@ -964,8 +1003,8 @@ void ProcessModule::initializeAxisEnabledStates()
             continue;
         const bool enabled = m_axisEnabled.value(name, true);
         nextStates.insert(name, enabled);
-        if (m_motionController)
-            m_motionController->setAxisEnabled(name, enabled);
+        // 控制器 SetAxisEnable 由 setAxisEnabled() 在用户操作时下发，并由
+        // 硬件状态轮询回灌真实值；这里只维护本地缓存。
     }
 
     m_axisEnabled = nextStates;

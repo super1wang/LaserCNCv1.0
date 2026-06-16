@@ -2,7 +2,7 @@
 schema_version: 1
 locale: zh-CN
 branch: main
-exported_at: "2026-06-15T09:07:04Z"
+exported_at: "2026-06-16T01:39:10Z"
 modules:
     "":
         dir_name: 五轴激光加工微内核平台

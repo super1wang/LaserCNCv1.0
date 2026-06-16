@@ -16,7 +16,6 @@ class QTimer;
 class Service;
 
 namespace lcnc::process {
-class SimulationMotionController;
 class ProcessWorkflowExecutor;
 }
 
@@ -30,7 +29,8 @@ class MachineConfigurationService;
  *
  * 使用旧 System/Service 类作为外设和参数统一管理器，
  * 通过唯一的 qg_dlgsetting 对话框提供共同参数界面。
- * 运动仿真依赖 SimulatorCmhpMotionController。
+ * 运动指令统一走 service->GetMotionControl()（仿真模式下由 MCFactory
+ * 返回 SimulatorCMHP / ACS 仿真器）。
  */
 class ProcessModule : public QObject, public lcnc::IModule, public lcnc::IProcessFacade
 {
@@ -136,6 +136,5 @@ private:
     lcnc::IKernel*        m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
     std::unique_ptr<Service> m_service;
-    std::unique_ptr<lcnc::process::SimulationMotionController> m_motionController;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
 };

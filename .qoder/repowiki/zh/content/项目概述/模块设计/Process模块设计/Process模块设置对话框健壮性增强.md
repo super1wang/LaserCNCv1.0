@@ -11,6 +11,9 @@
 - [Setting_MotionControl.cpp](file://src/modules/process/Setting/Setting_MotionControl.cpp)
 - [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
 - [Setting_MotionControl.ui](file://src/modules/process/Setting/Setting_MotionControl.ui)
+- [Setting_Axis.cpp](file://src/modules/process/Setting/Setting_Axis.cpp)
+- [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
+- [Setting_Axis.ui](file://src/modules/process/Setting/Setting_Axis.ui)
 - [resources.qrc](file://resources/resources.qrc)
 - [CMakeLists.txt](file://CMakeLists.txt)
 </cite>
@@ -22,6 +25,7 @@
 - 新增MotionControl设置对话框架构图和表格化界面示意图
 - 扩展依赖关系分析，包含新的MotionControl设置组件
 - 更新故障排除指南，增加MotionControl设置相关的常见问题解决方案
+- 移除原有的Axis页面枚举项引用，反映页面整合到MotionControl的架构变更
 
 ## 目录
 1. [项目概述](#项目概述)
