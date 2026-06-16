@@ -10,6 +10,19 @@ SimulatorLaserDevice::SimulatorLaserDevice() : m_strName("Simulator"), m_bIsInit
 	m_iStopBits		= 1;
 }
 
+bool SimulatorLaserDevice::Connect()
+{
+	// 仿真激光器：不打开物理串口，仅置位连接标志
+	m_bConnected = true;
+	return m_bConnected;
+}
+
+void SimulatorLaserDevice::Disconnect()
+{
+	// 仿真激光器：未持有串口资源，仅清除连接标志
+	m_bConnected = false;
+}
+
 ErrorCode SimulatorLaserDevice::SetLaserTable(const table& tableLaser)
 {
 	// 参数

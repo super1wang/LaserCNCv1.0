@@ -109,6 +109,7 @@ signals:
 
 private slots:
     void onSimulationTick();
+    void pollHardwareStatus();          // 联机后周期性采集硬件轴位/使能
 
 private:
     void initializeAxisPositions();
@@ -127,6 +128,8 @@ private:
     QMap<QString, bool>   m_axisEnabled;
     QMap<QString, bool>   m_digitalOutputs;
     QTimer*               m_simTimer{nullptr};
+    QTimer*               m_hwStatusTimer{nullptr};   ///< 硬件状态轮询（联机模式下生效）
+    bool                  m_hwPollInFlight{false};    ///< 防止后台采集任务堆积
     double                m_feedOverride{1.0};
     double                m_simPhase{0.0};
     QString               m_statusMessage;

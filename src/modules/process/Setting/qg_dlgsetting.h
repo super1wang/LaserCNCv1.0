@@ -47,12 +47,14 @@ class QG_dlgSetting : public QDialog
 	};
 
 	// 页面的枚举，名称同类名
+	// 注意：枚举值直接用作 stackedWidget_Setting_Content 的索引，
+	// 必须与 QG_dlgSetting 构造函数中 insertWidget 的顺序严格对应，
+	// 不允许出现"占位但不插入"的项，否则后续页面索引会整体错位。
 	enum Page
 	{
 		//EXTERNAL,
 		MotionController,
-		// 轴参数已合并至运动控制器页面，Axis 页面号保留用于兼容
-		Axis,
+		// 轴参数已合并至运动控制器页面，原 Axis 页面项已移除
 		IOIndex,
 		Digital,
 		Analog,

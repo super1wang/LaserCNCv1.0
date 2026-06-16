@@ -7,6 +7,10 @@ class   SimulatorLaserDevice : public LaserDevice
 public:
 	SimulatorLaserDevice();
 
+	// 仿真激光器不打开真实串口，仅维护连接标志
+	virtual bool			Connect() override;
+	virtual void			Disconnect() override;
+
 	virtual ErrorCode		SetLaserTable(const table& tableLaser = table{});
 
 	virtual const string&	GetName();

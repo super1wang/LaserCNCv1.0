@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: third_party
-title: 第三方依赖库管理
+title: 第三方依赖与硬件接口集成
 scope:
     - 3rd/
 source_files: []

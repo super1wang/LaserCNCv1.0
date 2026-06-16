@@ -2,36 +2,267 @@
 schema_version: 1
 locale: zh-CN
 branch: main
-exported_at: "2026-06-15T05:03:54Z"
+exported_at: "2026-06-15T09:07:04Z"
 modules:
     "":
         dir_name: 五轴激光加工微内核平台
         title: 五轴激光加工微内核平台
         scope:
-            - CLAUDE.md
-            - todo.md
-            - 代码规范.md
-            - 实施进度.md
-            - 微内核框架结构.md
-            - 文件结构.md
-            - process模块框架.md
-            - process模块重构计划.md
-            - build_log.txt
-            - build_log2.txt
-            - build_log3.txt
-            - .gitignore
-            - CMakeLists.txt
             - .claude\settings.local.json
+            - .gitignore
+            - .qoder\repowiki\knowledge\zh\_index.yaml
+            - .qoder\repowiki\knowledge\zh\五轴激光加工微内核平台\_module.yaml
+            - .qoder\repowiki\knowledge\zh\五轴激光加工微内核平台\技术栈.md
+            - .qoder\repowiki\knowledge\zh\五轴激光加工微内核平台\架构设计.md
+            - .qoder\repowiki\knowledge\zh\五轴激光加工微内核平台\概述.md
+            - .qoder\repowiki\knowledge\zh\五轴激光加工微内核平台\编码规范.md
+            - .qoder\repowiki\knowledge\zh\第三方依赖库管理\_module.yaml
+            - .qoder\repowiki\knowledge\zh\第三方依赖库管理\技术栈.md
+            - .qoder\repowiki\knowledge\zh\第三方依赖库管理\架构设计.md
+            - .qoder\repowiki\knowledge\zh\第三方依赖库管理\概述.md
+            - .qoder\repowiki\knowledge\zh\第三方依赖库管理\编码规范.md
+            - .qoder\repowiki\zh\content\API参考\API参考.md
+            - .qoder\repowiki\zh\content\API参考\扩展点接口.md
+            - .qoder\repowiki\zh\content\API参考\数据契约.md
+            - .qoder\repowiki\zh\content\API参考\服务接口.md
+            - .qoder\repowiki\zh\content\API参考\核心接口.md
+            - .qoder\repowiki\zh\content\API参考\模块接口.md
+            - .qoder\repowiki\zh\content\CAD模块\CAD模块.md
+            - .qoder\repowiki\zh\content\CAD模块\几何建模.md
+            - .qoder\repowiki\zh\content\CAD模块\变换操作.md
+            - .qoder\repowiki\zh\content\CAD模块\命令系统.md
+            - .qoder\repowiki\zh\content\CAD模块\布尔运算.md
+            - .qoder\repowiki\zh\content\CAD模块\草图绘制.md
+            - .qoder\repowiki\zh\content\CAD模块\选择系统.md
+            - .qoder\repowiki\zh\content\CAM模块\CAM数据管理.md
+            - .qoder\repowiki\zh\content\CAM模块\CAM模块.md
+            - .qoder\repowiki\zh\content\CAM模块\刀具路径生成.md
+            - .qoder\repowiki\zh\content\CAM模块\工作流集成与调度.md
+            - .qoder\repowiki\zh\content\CAM模块\轴检测与配置.md
+            - .qoder\repowiki\zh\content\CAM模块\面分类与识别.md
+            - .qoder\repowiki\zh\content\Process模块.md
+            - .qoder\repowiki\zh\content\开发指南\代码规范.md
+            - .qoder\repowiki\zh\content\开发指南\开发指南.md
+            - .qoder\repowiki\zh\content\开发指南\开发流程.md
+            - .qoder\repowiki\zh\content\开发指南\扩展开发.md
+            - .qoder\repowiki\zh\content\开发指南\调试与故障排除.md
+            - .qoder\repowiki\zh\content\快速开始.md
+            - .qoder\repowiki\zh\content\架构设计\事件总线系统.md
+            - .qoder\repowiki\zh\content\架构设计\微内核架构.md
+            - .qoder\repowiki\zh\content\架构设计\数据流设计.md
+            - .qoder\repowiki\zh\content\架构设计\服务注册机制.md
+            - .qoder\repowiki\zh\content\架构设计\架构设计.md
+            - .qoder\repowiki\zh\content\架构设计\模块系统.md
+            - .qoder\repowiki\zh\content\核心框架\Kernel核心系统.md
+            - .qoder\repowiki\zh\content\核心框架\事件系统.md
+            - .qoder\repowiki\zh\content\核心框架\任务管理.md
+            - .qoder\repowiki\zh\content\核心框架\文档系统.md
+            - .qoder\repowiki\zh\content\核心框架\核心框架.md
+            - .qoder\repowiki\zh\content\核心框架\项目管理\项目会话.md
+            - .qoder\repowiki\zh\content\核心框架\项目管理\项目包.md
+            - .qoder\repowiki\zh\content\核心框架\项目管理\项目清单.md
+            - .qoder\repowiki\zh\content\核心框架\项目管理\项目管理.md
+            - .qoder\repowiki\zh\content\核心框架\项目管理\项目管理器.md
+            - .qoder\repowiki\zh\content\视图系统\GUI应用程序框架.md
+            - .qoder\repowiki\zh\content\视图系统\OCC视图组件.md
+            - .qoder\repowiki\zh\content\视图系统\交互控件系统.md
+            - .qoder\repowiki\zh\content\视图系统\图形场景管理.md
+            - .qoder\repowiki\zh\content\视图系统\机器导轨渲染器.md
+            - .qoder\repowiki\zh\content\视图系统\渲染管理器.md
+            - .qoder\repowiki\zh\content\视图系统\视图系统.md
+            - .qoder\repowiki\zh\content\部署运维\打包发布.md
+            - .qoder\repowiki\zh\content\部署运维\故障排除与维护.md
+            - .qoder\repowiki\zh\content\部署运维\构建配置\构建系统Qt6支持.md
+            - .qoder\repowiki\zh\content\部署运维\构建配置\构建配置.md
+            - .qoder\repowiki\zh\content\部署运维\部署运维.md
+            - .qoder\repowiki\zh\content\配置管理.md
+            - .qoder\repowiki\zh\content\项目概述\开发环境.md
+            - .qoder\repowiki\zh\content\项目概述\快速开始.md
+            - .qoder\repowiki\zh\content\项目概述\技术栈.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAD模块设计\CAD文档状态管理.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAD模块设计\CAD模块设计.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAD模块设计\几何建模算法.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAD模块设计\布尔运算系统.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAD模块设计\草图管理系统.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAM模块设计\CAM外观接口设计.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAM模块设计\CAM数据管理服务.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAM模块设计\CAM模块设计.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAM模块设计\参考点检测服务.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAM模块设计\机床轴检测系统.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAM模块设计\激光刀具路径生成.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\CAM模块设计\面分类系统.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\Process模块服务管理架构改进.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\Process模块设置对话框健壮性增强.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\Process模块设计.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\工作流引擎.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\执行系统.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\监控系统.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\设备控制\设备工厂条件编译.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\设备控制\设备控制.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\Process模块设计\通信系统.md
+            - .qoder\repowiki\zh\content\项目概述\模块设计\模块设计.md
+            - .qoder\repowiki\zh\content\项目概述\系统架构\三层文档架构.md
+            - .qoder\repowiki\zh\content\项目概述\系统架构\分层依赖规则.md
+            - .qoder\repowiki\zh\content\项目概述\系统架构\启动初始化序列.md
+            - .qoder\repowiki\zh\content\项目概述\系统架构\微内核架构设计.md
+            - .qoder\repowiki\zh\content\项目概述\系统架构\模块生命周期管理.md
+            - .qoder\repowiki\zh\content\项目概述\系统架构\系统架构.md
+            - .qoder\repowiki\zh\content\项目概述\项目介绍.md
+            - .qoder\repowiki\zh\content\项目概述\项目概述.md
+            - .qoder\repowiki\zh\meta\repowiki-metadata.json
+            - .vscode\cmake-kits.json
+            - .vscode\launch.json
+            - .vscode\settings.json
+            - .vscode\tasks.json
             - 3rd\include_3rd\ACSC.h
             - 3rd\include_3rd\BuzzerControl.h
             - 3rd\include_3rd\LockValidator.h
             - 3rd\include_3rd\gts.h
-            - 3rd\include_3rd\qc_applicationwindow.h
-            - 3rd\include_3rd\qc_mdiwindow.h
-            - 3rd\include_3rd\qg_graphicview.h
-            - 3rd\include_3rd\rs_document.h
-            - 3rd\include_3rd\rs_layerlist.h
             - 3rd\magic_enum\magic_enum.hpp
+            - 3rd\runtime\bin_debug\ACSCL_x64.dll
+            - 3rd\runtime\bin_debug\FreeImage.dll
+            - 3rd\runtime\bin_debug\QWKCored.dll
+            - 3rd\runtime\bin_debug\QWKWidgetsd.dll
+            - 3rd\runtime\bin_debug\Qt6Concurrentd.dll
+            - 3rd\runtime\bin_debug\Qt6Cored.dll
+            - 3rd\runtime\bin_debug\Qt6Guid.dll
+            - 3rd\runtime\bin_debug\Qt6Networkd.dll
+            - 3rd\runtime\bin_debug\Qt6OpenGLWidgetsd.dll
+            - 3rd\runtime\bin_debug\Qt6OpenGLd.dll
+            - 3rd\runtime\bin_debug\Qt6SerialPortd.dll
+            - 3rd\runtime\bin_debug\Qt6UiToolsd.dll
+            - 3rd\runtime\bin_debug\Qt6Widgetsd.dll
+            - 3rd\runtime\bin_debug\SARibbonBard.dll
+            - 3rd\runtime\bin_debug\TKBO.dll
+            - 3rd\runtime\bin_debug\TKBRep.dll
+            - 3rd\runtime\bin_debug\TKBin.dll
+            - 3rd\runtime\bin_debug\TKBinL.dll
+            - 3rd\runtime\bin_debug\TKBinXCAF.dll
+            - 3rd\runtime\bin_debug\TKBool.dll
+            - 3rd\runtime\bin_debug\TKCAF.dll
+            - 3rd\runtime\bin_debug\TKCDF.dll
+            - 3rd\runtime\bin_debug\TKDE.dll
+            - 3rd\runtime\bin_debug\TKDEIGES.dll
+            - 3rd\runtime\bin_debug\TKDESTEP.dll
+            - 3rd\runtime\bin_debug\TKDESTL.dll
+            - 3rd\runtime\bin_debug\TKFillet.dll
+            - 3rd\runtime\bin_debug\TKG2d.dll
+            - 3rd\runtime\bin_debug\TKG3d.dll
+            - 3rd\runtime\bin_debug\TKGeomAlgo.dll
+            - 3rd\runtime\bin_debug\TKGeomBase.dll
+            - 3rd\runtime\bin_debug\TKHLR.dll
+            - 3rd\runtime\bin_debug\TKLCAF.dll
+            - 3rd\runtime\bin_debug\TKMath.dll
+            - 3rd\runtime\bin_debug\TKMesh.dll
+            - 3rd\runtime\bin_debug\TKOffset.dll
+            - 3rd\runtime\bin_debug\TKOpenGl.dll
+            - 3rd\runtime\bin_debug\TKPrim.dll
+            - 3rd\runtime\bin_debug\TKService.dll
+            - 3rd\runtime\bin_debug\TKShHealing.dll
+            - 3rd\runtime\bin_debug\TKTopAlgo.dll
+            - 3rd\runtime\bin_debug\TKV3d.dll
+            - 3rd\runtime\bin_debug\TKVCAF.dll
+            - 3rd\runtime\bin_debug\TKXCAF.dll
+            - 3rd\runtime\bin_debug\TKXSBase.dll
+            - 3rd\runtime\bin_debug\TKXml.dll
+            - 3rd\runtime\bin_debug\TKXmlL.dll
+            - 3rd\runtime\bin_debug\TKXmlXCAF.dll
+            - 3rd\runtime\bin_debug\TKernel.dll
+            - 3rd\runtime\bin_debug\avcodec-57.dll
+            - 3rd\runtime\bin_debug\avformat-57.dll
+            - 3rd\runtime\bin_debug\avutil-55.dll
+            - 3rd\runtime\bin_debug\boost_chrono-vc143-mt-gd-x64-1_88.dll
+            - 3rd\runtime\bin_debug\boost_system-vc143-mt-gd-x64-1_88.dll
+            - 3rd\runtime\bin_debug\boost_thread-vc143-mt-gd-x64-1_88.dll
+            - 3rd\runtime\bin_debug\freetype.dll
+            - 3rd\runtime\bin_debug\generic\qtuiotouchplugind.dll
+            - 3rd\runtime\bin_debug\iconengines\qsvgicond.dll
+            - 3rd\runtime\bin_debug\imageformats\qgifd.dll
+            - 3rd\runtime\bin_debug\imageformats\qicod.dll
+            - 3rd\runtime\bin_debug\imageformats\qjpegd.dll
+            - 3rd\runtime\bin_debug\imageformats\qsvgd.dll
+            - 3rd\runtime\bin_debug\imageformats\qtgad.dll
+            - 3rd\runtime\bin_debug\imageformats\qtiffd.dll
+            - 3rd\runtime\bin_debug\imageformats\qwebpd.dll
+            - 3rd\runtime\bin_debug\jemalloc.dll
+            - 3rd\runtime\bin_debug\networkinformation\qnetworklistmanagerd.dll
+            - 3rd\runtime\bin_debug\openvr_api.dll
+            - 3rd\runtime\bin_debug\platforms\qwindowsd.dll
+            - 3rd\runtime\bin_debug\styles\qmodernwindowsstyled.dll
+            - 3rd\runtime\bin_debug\swscale-4.dll
+            - 3rd\runtime\bin_debug\tls\qcertonlybackendd.dll
+            - 3rd\runtime\bin_debug\tls\qschannelbackendd.dll
+            - 3rd\runtime\bin_release\ACSCL_x64.dll
+            - 3rd\runtime\bin_release\FreeImage.dll
+            - 3rd\runtime\bin_release\Qt6Concurrent.dll
+            - 3rd\runtime\bin_release\Qt6Core.dll
+            - 3rd\runtime\bin_release\Qt6Gui.dll
+            - 3rd\runtime\bin_release\Qt6Network.dll
+            - 3rd\runtime\bin_release\Qt6OpenGL.dll
+            - 3rd\runtime\bin_release\Qt6OpenGLWidgets.dll
+            - 3rd\runtime\bin_release\Qt6SerialPort.dll
+            - 3rd\runtime\bin_release\Qt6UiTools.dll
+            - 3rd\runtime\bin_release\Qt6Widgets.dll
+            - 3rd\runtime\bin_release\SARibbonBar.dll
+            - 3rd\runtime\bin_release\TKBO.dll
+            - 3rd\runtime\bin_release\TKBRep.dll
+            - 3rd\runtime\bin_release\TKBin.dll
+            - 3rd\runtime\bin_release\TKBinL.dll
+            - 3rd\runtime\bin_release\TKBinXCAF.dll
+            - 3rd\runtime\bin_release\TKBool.dll
+            - 3rd\runtime\bin_release\TKCAF.dll
+            - 3rd\runtime\bin_release\TKCDF.dll
+            - 3rd\runtime\bin_release\TKDE.dll
+            - 3rd\runtime\bin_release\TKDEIGES.dll
+            - 3rd\runtime\bin_release\TKDESTEP.dll
+            - 3rd\runtime\bin_release\TKDESTL.dll
+            - 3rd\runtime\bin_release\TKFillet.dll
+            - 3rd\runtime\bin_release\TKG2d.dll
+            - 3rd\runtime\bin_release\TKG3d.dll
+            - 3rd\runtime\bin_release\TKGeomAlgo.dll
+            - 3rd\runtime\bin_release\TKGeomBase.dll
+            - 3rd\runtime\bin_release\TKHLR.dll
+            - 3rd\runtime\bin_release\TKLCAF.dll
+            - 3rd\runtime\bin_release\TKMath.dll
+            - 3rd\runtime\bin_release\TKMesh.dll
+            - 3rd\runtime\bin_release\TKOffset.dll
+            - 3rd\runtime\bin_release\TKOpenGl.dll
+            - 3rd\runtime\bin_release\TKPrim.dll
+            - 3rd\runtime\bin_release\TKService.dll
+            - 3rd\runtime\bin_release\TKShHealing.dll
+            - 3rd\runtime\bin_release\TKTopAlgo.dll
+            - 3rd\runtime\bin_release\TKV3d.dll
+            - 3rd\runtime\bin_release\TKVCAF.dll
+            - 3rd\runtime\bin_release\TKXCAF.dll
+            - 3rd\runtime\bin_release\TKXSBase.dll
+            - 3rd\runtime\bin_release\TKXml.dll
+            - 3rd\runtime\bin_release\TKXmlL.dll
+            - 3rd\runtime\bin_release\TKXmlXCAF.dll
+            - 3rd\runtime\bin_release\TKernel.dll
+            - 3rd\runtime\bin_release\avcodec-57.dll
+            - 3rd\runtime\bin_release\avformat-57.dll
+            - 3rd\runtime\bin_release\avutil-55.dll
+            - 3rd\runtime\bin_release\boost_chrono-vc143-mt-x64-1_88.dll
+            - 3rd\runtime\bin_release\boost_system-vc143-mt-x64-1_88.dll
+            - 3rd\runtime\bin_release\boost_thread-vc143-mt-x64-1_88.dll
+            - 3rd\runtime\bin_release\freetype.dll
+            - 3rd\runtime\bin_release\generic\qtuiotouchplugin.dll
+            - 3rd\runtime\bin_release\iconengines\qsvgicon.dll
+            - 3rd\runtime\bin_release\imageformats\qgif.dll
+            - 3rd\runtime\bin_release\imageformats\qico.dll
+            - 3rd\runtime\bin_release\imageformats\qjpeg.dll
+            - 3rd\runtime\bin_release\imageformats\qsvg.dll
+            - 3rd\runtime\bin_release\imageformats\qtga.dll
+            - 3rd\runtime\bin_release\imageformats\qtiff.dll
+            - 3rd\runtime\bin_release\imageformats\qwebp.dll
+            - 3rd\runtime\bin_release\jemalloc.dll
+            - 3rd\runtime\bin_release\networkinformation\qnetworklistmanager.dll
+            - 3rd\runtime\bin_release\openvr_api.dll
+            - 3rd\runtime\bin_release\platforms\qwindows.dll
+            - 3rd\runtime\bin_release\styles\qmodernwindowsstyle.dll
+            - 3rd\runtime\bin_release\swscale-4.dll
+            - 3rd\runtime\bin_release\tls\qcertonlybackend.dll
+            - 3rd\runtime\bin_release\tls\qschannelbackend.dll
             - 3rd\spdlog\async.h
             - 3rd\spdlog\async_logger-inl.h
             - 3rd\spdlog\async_logger.h
@@ -196,7 +427,14 @@ modules:
             - 3rd\toml11\toml11\version.hpp
             - 3rd\toml11\toml11\visit.hpp
             - 3rd\toml11\toml_fwd.hpp
+            - AGENTS.md
+            - CLAUDE.md
+            - CMakeLists.txt
             - Readme.md
+            - build_error.log
+            - build_log.txt
+            - build_output.log
+            - build_output2.log
             - cmake-build-sdkcheck\.qt\QtDeploySupport-Debug.cmake
             - cmake-build-sdkcheck\.qt\QtDeploySupport-MinSizeRel.cmake
             - cmake-build-sdkcheck\.qt\QtDeploySupport-RelWithDebInfo.cmake
@@ -305,6 +543,8 @@ modules:
             - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\PVJOGQZJXF\moc_lcnc_project_manager.cpp.d
             - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\QN6EFH5WBL\moc_toolpath_simulator.cpp
             - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\QN6EFH5WBL\moc_toolpath_simulator.cpp.d
+            - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\R3IJF4TPEV\moc_SerialPort.cpp
+            - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\R3IJF4TPEV\moc_SerialPort.cpp.d
             - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\S4QU5GKP2A\moc_Setting_Analog.cpp
             - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\S4QU5GKP2A\moc_Setting_Analog.cpp.d
             - cmake-build-sdkcheck\LaserCNC_autogen\include_Debug\S4QU5GKP2A\moc_Setting_Axis.cpp
@@ -369,6 +609,8 @@ modules:
             - cmake-build-sdkcheck\ZERO_CHECK.vcxproj
             - cmake-build-sdkcheck\ZERO_CHECK.vcxproj.filters
             - cmake-build-sdkcheck\cmake_install.cmake
+            - process模块框架.md
+            - process模块重构计划.md
             - resources\icons\app_icon.svg
             - resources\icons\arc.svg
             - resources\icons\bool_common.svg
@@ -427,6 +669,7 @@ modules:
             - resources\icons\wireframe.svg
             - resources\icons\workpiece.svg
             - resources\resources.qrc
+            - scripts\refresh_runtime_dlls.ps1
             - src\app\app_command_context.h
             - src\app\app_context.cpp
             - src\app\app_context.h
@@ -647,8 +890,6 @@ modules:
             - src\modules\process\Setting\qg_dlgsetting.cpp
             - src\modules\process\Setting\qg_dlgsetting.h
             - src\modules\process\Setting\qg_dlgsetting.ui
-            - src\modules\process\Setting\setting_bridge.cpp
-            - src\modules\process\Setting\setting_bridge.h
             - src\modules\process\System\DataType.h
             - src\modules\process\System\Expression.cpp
             - src\modules\process\System\Expression.h
@@ -804,8 +1045,6 @@ modules:
             - src\modules\process\ui\process_node_edit_dialog.h
             - src\modules\process\ui\ribbon_process_tab.cpp
             - src\modules\process\ui\ribbon_process_tab.h
-            - src\modules\process\ui\settings\settings_dialog.cpp
-            - src\modules\process\ui\settings\settings_dialog.h
             - src\modules\process\ui\widget_laser_control.cpp
             - src\modules\process\ui\widget_laser_control.h
             - src\modules\process\workflow\process_flow_document.cpp
@@ -841,13 +1080,18 @@ modules:
             - src\view\widget_occ_view.h
             - src\view\world_axes_renderer.cpp
             - src\view\world_axes_renderer.h
+            - todo.md
+            - 代码规范.md
+            - 实施进度.md
+            - 微内核框架结构.md
+            - 文件结构.md
         source_files: []
         children: []
         depends_on: []
         related_to: []
     third_party:
-        dir_name: 第三方依赖库管理
-        title: 第三方依赖库管理
+        dir_name: 第三方依赖与硬件接口集成
+        title: 第三方依赖与硬件接口集成
         scope:
             - 3rd/
         source_files: []

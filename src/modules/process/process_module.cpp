@@ -14,6 +14,9 @@
 #include <QList>
 #include <QPointer>
 #include <QTimer>
+#include <QVector>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 
 #include <algorithm>
 #include <cmath>
@@ -239,6 +242,9 @@ void ProcessModule::stop()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::stop begin");
     if (!m_initialized) return;
+    if (m_hwStatusTimer)
+        m_hwStatusTimer->stop();
+    m_hwPollInFlight = false;
     if (m_motionController)
         m_motionController->stop();
     if (m_workflowExecutor)
@@ -255,6 +261,11 @@ ProcessModule::ProcessModule(QObject* parent)
     m_simTimer = new QTimer(this);
     m_simTimer->setInterval(100);
     connect(m_simTimer, &QTimer::timeout, this, &ProcessModule::onSimulationTick);
+
+    // 硬件状态轮询定时器：联机后启动，断开/停机时停止。
+    m_hwStatusTimer = new QTimer(this);
+    m_hwStatusTimer->setInterval(150);
+    connect(m_hwStatusTimer, &QTimer::timeout, this, &ProcessModule::pollHardwareStatus);
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 }
@@ -286,6 +297,9 @@ bool ProcessModule::connectController(const QString& endpoint)
 
 void ProcessModule::disconnectController()
 {
+    if (m_hwStatusTimer)
+        m_hwStatusTimer->stop();
+    m_hwPollInFlight = false;
     if (m_motionController)
         m_motionController->stop();
 
@@ -376,6 +390,9 @@ void ProcessModule::connectAllDevices()
                 emit simulationModeChanged(false);
             }
             setStatusMessage(tr("设备已连接"));
+            // 启动硬件状态轮询：将控制器实际轴位/使能实时刷新到 UI。
+            if (m_hwStatusTimer && !m_hwStatusTimer->isActive())
+                m_hwStatusTimer->start();
         } else {
             setStatusMessage(tr("设备连接失败"));
         }
@@ -410,6 +427,9 @@ void ProcessModule::disconnectAllDevices()
     // 已断开的情况下还有定时器/工作流继续触发指令。
     if (m_simTimer)
         m_simTimer->stop();
+    if (m_hwStatusTimer)
+        m_hwStatusTimer->stop();
+    m_hwPollInFlight = false;
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
     if (m_motionController)
@@ -951,6 +971,88 @@ void ProcessModule::initializeAxisEnabledStates()
     m_axisEnabled = nextStates;
     for (auto it = m_axisEnabled.cbegin(); it != m_axisEnabled.cend(); ++it)
         emit axisEnabledChanged(it.key(), it.value());
+}
+
+namespace {
+
+struct HardwareAxisSample
+{
+    QString name;
+    double  pos{0.0};
+    bool    enabled{true};
+    bool    valid{false};
+};
+
+} // namespace
+
+void ProcessModule::pollHardwareStatus()
+{
+    if (m_hwPollInFlight)
+        return;
+    if (!m_connected || m_simulationMode)
+        return;
+    if (!m_service)
+        return;
+
+    MotionControl* hwMc = m_service->GetMotionControl();
+    if (!hwMc || !hwMc->IsConnected())
+        return;
+
+    // 仅采集已注册的预设轴；BASE 与扩展轴在硬件层无对应 Axis 枚举，跳过。
+    QStringList axisNames;
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+        axisNames.append(axis.name.trimmed().toUpper());
+    }
+    if (axisNames.isEmpty())
+        return;
+
+    m_hwPollInFlight = true;
+    QPointer<ProcessModule> self(this);
+    auto* watcher = new QFutureWatcher<QVector<HardwareAxisSample>>(this);
+    connect(watcher, &QFutureWatcher<QVector<HardwareAxisSample>>::finished, this,
+            [this, self, watcher]() {
+        const QVector<HardwareAxisSample> samples = watcher->result();
+        watcher->deleteLater();
+        m_hwPollInFlight = false;
+        if (!self)
+            return;
+
+        for (const HardwareAxisSample& s : samples) {
+            if (!s.valid)
+                continue;
+            // setAxisPosition 已带 1e-9 去抖与 axisPositionChanged 信号发射。
+            setAxisPosition(s.name, s.pos);
+            // 硬件使能状态作为权威来源，覆盖本地缓存。
+            const bool present = m_axisEnabled.contains(s.name);
+            const bool prev = m_axisEnabled.value(s.name, true);
+            if (!present || prev != s.enabled) {
+                m_axisEnabled.insert(s.name, s.enabled);
+                emit axisEnabledChanged(s.name, s.enabled);
+            }
+        }
+    });
+
+    watcher->setFuture(QtConcurrent::run([axisNames, hwMc]() {
+        QVector<HardwareAxisSample> out;
+        out.reserve(axisNames.size());
+        for (const QString& name : axisNames) {
+            HardwareAxisSample sample;
+            sample.name = name;
+            auto eAxis = enum_cast<Axis>(name.toStdString());
+            if (eAxis.has_value() && hwMc->IsMotorCreated(eAxis.value())) {
+                double pos = 0.0;
+                if (hwMc->GetActualPos(eAxis.value(), pos)) {
+                    sample.pos = pos;
+                    sample.enabled = hwMc->IsEnabled(eAxis.value());
+                    sample.valid = true;
+                }
+            }
+            out.push_back(sample);
+        }
+        return out;
+    }));
 }
 
 void ProcessModule::safeStopProcessOutputs()
