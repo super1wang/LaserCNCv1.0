@@ -38,17 +38,22 @@
 - [ribbon_process_tab.h](file://src/modules/process/ui/ribbon_process_tab.h)
 - [DataType.h](file://src/modules/process/System/DataType.h)
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
 - [qg_AxisWidget.h](file://src/modules/process/ui/legacy/qg_AxisWidget.h)
 - [machine_configuration_service.h](file://src/core/kinematics/machine_configuration_service.h)
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
+- [ACSMotionControl.h](file://src/modules/process/device/MotionControl/ACSMotionControl.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [acs_motion_controller_adapter.h](file://src/modules/process/controllers/acs_motion_controller_adapter.h)
+- [gtn_motion_controller_adapter.h](file://src/modules/process/controllers/gtn_motion_controller_adapter.h)
 </cite>
 
 ## 更新摘要
 **所做更改**
-- 新增轴配置系统和扩展轴功能章节，详细说明新的轴配置架构
-- 更新DataType系统章节，反映轴配置相关的系统状态和权限管理
-- 新增轴配置设置界面和UI组件章节
-- 更新核心组件分析，增加轴配置相关的运行时协调机制
-- 新增轴配置扩展开发指导
+- 更新了MotionControl接口和Service层架构的分析，反映从直接控制器管理向Service层架构的转变
+- 移除了SimulationMotionController相关内容，更新了控制器适配器的设计
+- 新增了MCFactory工厂模式和控制器实例管理机制
+- 更新了设备控制架构，强调Service层的统一接口设计
 
 ## 目录
 1. [引言](#引言)
@@ -59,14 +64,15 @@
 6. [轴配置系统与扩展轴功能](#轴配置系统与扩展轴功能)
 7. [DataType系统更新](#datatype系统更新)
 8. [轴配置设置界面](#轴配置设置界面)
-9. [依赖关系分析](#依赖关系分析)
-10. [性能考虑](#性能考虑)
-11. [故障排查指南](#故障排查指南)
-12. [结论](#结论)
-13. [附录](#附录)
+9. [设备控制架构升级](#设备控制架构升级)
+10. [依赖关系分析](#依赖关系分析)
+11. [性能考虑](#性能考虑)
+12. [故障排查指南](#故障排查指南)
+13. [结论](#结论)
+14. [附录](#附录)
 
 ## 引言
-本设计文档面向LaserCNC的Process模块，系统化阐述其核心职责、对外接口、内部执行与状态机、工作流引擎、设备通信与实时控制接口，并提供扩展开发指导（新设备适配、新通信协议集成、监控算法开发）。本次更新重点反映了Process模块整体架构的最新变化，特别是新的轴配置系统和扩展轴功能的支持，以及DataType系统的相应调整。目标是帮助开发者快速理解模块边界、协作关系与实现要点，支撑后续迭代与维护。
+本设计文档面向LaserCNC的Process模块，系统化阐述其核心职责、对外接口、内部执行与状态机、工作流引擎、设备通信与实时控制接口，并提供扩展开发指导（新设备适配、新通信协议集成、监控算法开发）。本次更新重点反映了Process模块整体架构的重大变化，特别是从直接控制器管理转向Service层架构的设计理念，以及新的MotionControl接口和MCFactory工厂模式的应用。目标是帮助开发者快速理解模块边界、协作关系与实现要点，支撑后续迭代与维护。
 
 ## 项目结构
 Process模块位于src/modules/process目录下，采用"功能域+层次化"的组织方式，包含运行时(runtime)、设置(settings)、设备(device)、刀路(toolpath)、指令(instructions)、工作流(workflow)、执行(execution)、监控(monitor)、通信(communication)、UI(ui)、命令(commands)等子域。模块通过IModule与IProcessFacade装配与对外暴露，内部以ProcessRuntime为核心协调器，承载状态机与上下文。
@@ -86,12 +92,15 @@ subgraph "设置(settings)"
 PS["ProcessSettings"]
 PSS["ProcessSettingsSchema"]
 SA["Setting_Axis"]
+SMC["Setting_MotionControl"]
 MC["MachineConfigurationService"]
 end
 subgraph "设备(device)"
 PD["ProcessDeviceService"]
 PL["LaserDevice(多实现)"]
 PMC["MotionControl(多实现)"]
+MCFactory["MCFactory工厂"]
+PMCAdapter["控制器适配器"]
 PIO["IO/Aux Devices"]
 end
 subgraph "刀路(toolpath)"
@@ -143,9 +152,12 @@ PR --> PES
 PR --> PMS
 PR --> PCM
 PR --> SA
+PR --> SMC
 PR --> MC
 PD --> PL
 PD --> PMC
+PD --> MCFactory
+PD --> PMCAdapter
 PD --> PIO
 PTS --> PTM
 PTS --> STS
@@ -171,8 +183,12 @@ IF --> QAW
 - [process_module.h](file://src/modules/process/process_module.h)
 - [i_process_facade.h](file://src/modules/process/i_process_facade.h)
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
 - [qg_AxisWidget.h](file://src/modules/process/ui/legacy/qg_AxisWidget.h)
 - [machine_configuration_service.h](file://src/core/kinematics/machine_configuration_service.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [acs_motion_controller_adapter.h](file://src/modules/process/controllers/acs_motion_controller_adapter.h)
+- [gtn_motion_controller_adapter.h](file://src/modules/process/controllers/gtn_motion_controller_adapter.h)
 
 **章节来源**
 - [process模块框架.md:6-17](file://process模块框架.md#L6-L17)
@@ -189,8 +205,9 @@ IF --> QAW
 - ProcessToolpathService/ProcessToolMatcher/ProcessToolpathSorter：刀路服务，负责从CAM读取OCC-free点集快照、匹配工具与图层、排序生成有序轮廓。
 - ProcessInstructionPlanner + IControllerTranslator家族：指令规划与翻译，先生成控制器无关的命令缓冲，再由翻译器适配到不同控制器（如ACS、GTN）。
 - ProcessFlowDocument + ProcessNodeRegistry：工作流文档与节点注册，定义流程节点类型、验证规则与编译执行。
-- **新增** Setting_Axis：轴配置设置界面，提供轴配置参数的可视化编辑功能。
-- **新增** MachineConfigurationService：机器配置服务，管理轴配置、扩展轴和机器参数的配置与验证。
+- **新增** MCFactory：控制器工厂类，提供统一的控制器实例创建和管理接口，支持多种控制器类型的动态选择。
+- **新增** Setting_MotionControl：运动控制设置界面，提供运动控制参数的可视化编辑功能。
+- **更新** MotionControl接口：统一的运动控制抽象接口，定义了完整的运动控制API，支持多轴控制、IO控制、参数设置等功能。
 
 **章节来源**
 - [process模块框架.md:18-22](file://process模块框架.md#L18-L22)
@@ -199,10 +216,13 @@ IF --> QAW
 - [i_process_facade.h](file://src/modules/process/i_process_facade.h)
 - [process_runtime.h:10-37](file://src/modules/process/runtime/process_runtime.h#L10-L37)
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
 - [machine_configuration_service.h](file://src/core/kinematics/machine_configuration_service.h)
 
 ## 架构总览
-Process模块遵循"运行时编排 + 多服务解耦 + 控制器无关指令 + 通道抽象通信"的设计。对外通过IProcessFacade暴露稳定接口；对内以ProcessRuntime为协调中心，串联设置、设备、刀路、指令、工作流、执行、监控、通信等子系统；执行链路先生成控制器无关指令，再由翻译器适配到具体控制器；通信链路通过通道抽象屏蔽底层协议差异。**新增的轴配置系统通过MachineConfigurationService统一管理轴配置参数，DataType系统提供轴配置相关的系统状态和权限管理支持。**
+Process模块遵循"运行时编排 + 多服务解耦 + 控制器无关指令 + 通道抽象通信"的设计。对外通过IProcessFacade暴露稳定接口；对内以ProcessRuntime为协调中心，串联设置、设备、刀路、指令、工作流、执行、监控、通信等子系统；执行链路先生成控制器无关指令，再由翻译器适配到具体控制器；通信链路通过通道抽象屏蔽底层协议差异。**新的设备控制架构通过MCFactory工厂模式统一管理控制器实例，MotionControl接口提供统一的服务层抽象，移除了直接的控制器管理方式，提升了系统的可扩展性和可维护性。**
 
 ```mermaid
 graph LR
@@ -217,6 +237,7 @@ PR --> PES["ProcessExecutionService"]
 PR --> PMS["ProcessMonitorService"]
 PR --> PCM["CommunicationManager"]
 PR --> SA["Setting_Axis"]
+PR --> SMC["Setting_MotionControl"]
 PR --> MC["MachineConfigurationService"]
 PTS --> PTM["ProcessToolMatcher"]
 PTS --> STS["ProcessToolpathSorter"]
@@ -229,6 +250,10 @@ PCM --> ICC["ICommunicationChannel"]
 ICC --> TCP["TCPChannel"]
 ICC --> SRL["SerialChannel"]
 ICC --> HTTP["HTTPChannel"]
+PD --> MCFactory["MCFactory"]
+MCFactory --> PMC["MotionControl接口"]
+PMC --> ACS["ACSMotionControl实现"]
+PMC --> GTN["GTNMotionControl实现"]
 ```
 
 **图表来源**
@@ -237,7 +262,11 @@ ICC --> HTTP["HTTPChannel"]
 - [i_process_facade.h](file://src/modules/process/i_process_facade.h)
 - [process_runtime.h:10-37](file://src/modules/process/runtime/process_runtime.h#L10-L37)
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
 - [machine_configuration_service.h](file://src/core/kinematics/machine_configuration_service.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
+- [ACSMotionControl.h](file://src/modules/process/device/MotionControl/ACSMotionControl.h)
 
 ## 详细组件分析
 
@@ -418,6 +447,7 @@ CommunicationEndpoint --> CommunicationDeviceBase : "配置"
 - ProcessSettings：集中管理设备profile、轴参数、工具参数、图层/工具绑定、工艺参数、外设参数等typed参数。
 - ProcessSettingsSchema：参数schema定义与校验，保障设置一致性与可迁移性。
 - 应用：Runtime在启动前读取设置快照，执行期间根据变更刷新设备会话与UI。
+- **新增** Setting_MotionControl：专门的运动控制设置界面，提供运动控制参数的可视化编辑功能。
 - **新增** Setting_Axis：专门的轴配置设置界面，提供轴配置参数的可视化编辑功能。
 
 **章节来源**
@@ -425,12 +455,14 @@ CommunicationEndpoint --> CommunicationDeviceBase : "配置"
 - [process_settings_schema.h](file://src/modules/process/settings/process_settings_schema.h)
 - [process_module.h](file://src/modules/process/process_module.h)
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
 
 ### UI与交互
 - ProcessFlowModel/ProcessFlowTreeView：流程树视图与模型，支持编辑、拖拽、验证。
 - ProcessNodeEditDialog：节点属性编辑对话框。
 - RibbonProcessTab：过程标签页，提供运行控制与状态展示。
 - **新增** QG_AxisWidget：轴控制界面组件，提供轴状态显示和控制功能。
+- **新增** Setting_MotionControl：运动控制设置界面，提供运动控制参数的可视化编辑功能。
 - 作用：UI通过IProcessFacade与模块交互，不直接操作内部服务，降低耦合。
 
 **章节来源**
@@ -439,6 +471,7 @@ CommunicationEndpoint --> CommunicationDeviceBase : "配置"
 - [process_node_edit_dialog.h](file://src/modules/process/ui/process_node_edit_dialog.h)
 - [ribbon_process_tab.h](file://src/modules/process/ui/ribbon_process_tab.h)
 - [qg_AxisWidget.h](file://src/modules/process/ui/legacy/qg_AxisWidget.h)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
 
 ## 轴配置系统与扩展轴功能
 
@@ -629,12 +662,180 @@ Setting_Axis界面具有以下核心功能：
 **章节来源**
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
 
+## 设备控制架构升级
+
+### MotionControl接口设计
+Process模块的设备控制架构经历了重大升级，从直接控制器管理转向Service层架构。新的MotionControl接口提供了统一的运动控制抽象：
+
+```mermaid
+classDiagram
+class MotionControl {
+<<abstract>>
++CreateMotor(Axis, table)
++Connect() bool
++Disconnect() bool
++IsConnected() bool
++Reboot() bool
++Home() bool
++Home(Axis) bool
++IsHomed() bool
++IsHomed(Axis) bool
++StopHome() bool
++Enable() bool
++Enable(Axis) bool
++Disable() bool
++Disable(Axis) bool
++IsEnabled() bool
++IsEnabled(Axis) bool
++Jog(Axis, bool, double) bool
++MoveRelative(Axis, double, double) bool
++MoveAbsolute(Axis, double, double) bool
++MoveMRelative(vector, vector, double) bool
++MoveMAbsolute(vector, vector, double) bool
++StopMotion() bool
++StopMotion(Axis) bool
++IsAxisMoving() bool
++IsAxisMoving(Axis) bool
++GetActualPos(Axis, double&) bool
++GetFeedbackPos(Axis, double&) bool
++SetAxisTable(Axis, table)
++SetAxisHomePrm(Axis, table) bool
++SetDigitalTable() void
++SetAnalogTable() void
++SetLaserParameterTable() ErrorCode
++DigitalOutputSet(IOData, int, bool) bool
++DigitalInputGet(IOData, int&, bool) bool
++AnalogOutputSet(IOData, double, bool) bool
++AnalogInputGet(IOData, double&, bool) bool
++LogError() void
++GetName() string
+}
+class ACSMotionControl {
++GetName() string
++Connect() bool
++Disconnect() bool
++IsConnected() bool
++Reboot() bool
++Home() bool
++Home(Axis) bool
++IsHomed() bool
++IsHomed(Axis) bool
++StopHome() bool
++Enable() bool
++Enable(Axis) bool
++Disable() bool
++Disable(Axis) bool
++IsEnabled() bool
++IsEnabled(Axis) bool
++Jog(Axis, bool, double) bool
++MoveRelative(Axis, double, double) bool
++MoveAbsolute(Axis, double, double) bool
++MoveMRelative(vector, vector, double) bool
++MoveMAbsolute(vector, vector, double) bool
++StopMotion() bool
++StopMotion(Axis) bool
++IsAxisMoving() bool
++IsAxisMoving(Axis) bool
++GetActualPos(Axis, double&) bool
++GetFeedbackPos(Axis, double&) bool
++SetAxisIndex(Axis, int) bool
++SetAxisVel(Axis, double) bool
++SetAxisAcc(Axis, double) bool
++SetAxisDec(Axis, double) bool
++SetAxisJerk(Axis, double) bool
++SetAxisSoftLimit(Axis, double, double) bool
++DigitalOutputSet(IOData, int, bool) bool
++DigitalInputGet(IOData, int&, bool) bool
++AnalogOutputSet(IOData, double, bool) bool
++AnalogInputGet(IOData, double&, bool) bool
++SetShutterOnOffWaitTime(double, double, double, double, double) bool
++BeginACSSegment(Tool) void
++EndProgramCommand(Tool) void
++OffsetLineTo(double, double, Tool) void
++OffsetArcTo(double, double, double, double, bool, Tool, double, double) void
++SendCommand() bool
++ResetProgramCommand() void
++StopQueue() bool
++StopMovingCuttingHead() bool
++StartMovingCuttingHead(Tool) bool
++MoveZCutting(double) bool
++GetCuttingCommand() string
++LoadCommandAndRunBuffer(int, string, int) bool
++RunBuffer(int) bool
++PauseBuffer(int) bool
++StopBuffer(int) bool
++StopAllBuffer() bool
++CheckBuffer(int, string&) bool
++IsBufferRunning(int) bool
++IsOffsetCutting() bool
++IsAxisStatusNormal(int&) bool
++SetFPos(Axis, double) bool
++GetFPos(Axis, double&) bool
++HaltMotor(Axis) bool
++AcscReadReal(string, double&) bool
++AcscWriteReal(string, double) bool
++AcscReadInt(string, int&) bool
++AcscWriteInt(string, int) bool
++IsReachPos(Axis, bool, double) bool
++SetAxisEnable(Axis, bool) bool
++InitCrd(Tool) bool
++PrfTrapAxis() bool
++GSN_SetLaserParameterApplication(double, double, double) bool
++GSN_SetLaserEnablePro(bool) bool
++GSN_LaserOnStatus(int&) bool
+}
+class MCFactory {
+<<singleton>>
++GetMotionController(string) MotionControl*
++GetAllMCName(vector~string~) void
+}
+MotionControl <|-- ACSMotionControl
+MCFactory --> MotionControl : "创建/管理"
+```
+
+**图表来源**
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
+- [ACSMotionControl.h](file://src/modules/process/device/MotionControl/ACSMotionControl.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+
+### MCFactory工厂模式
+MCFactory类提供了统一的控制器实例创建和管理机制：
+
+- **控制器实例化**：根据控制器名称动态创建相应的MotionControl实现
+- **控制器管理**：维护内置的控制器实例（如ACSCMHP、GTN等）
+- **控制器查询**：提供所有可用控制器名称的查询接口
+- **配置支持**：通过预处理器宏控制不同控制器的编译支持
+
+### 控制器适配器设计
+Process模块还包含了控制器适配器，用于将不同的控制器接口适配到统一的服务层：
+
+- **ACSMotionControllerAdapter**：适配ACS控制器到MotionControl接口
+- **GTNMotionControllerAdapter**：适配GTN控制器到MotionControl接口
+- **接口适配**：通过适配器模式实现不同控制器的统一接口
+
+### Service层架构优势
+新的Service层架构带来了以下优势：
+
+- **统一接口**：MotionControl接口提供统一的控制API
+- **可扩展性**：通过工厂模式轻松添加新的控制器实现
+- **松耦合**：上层代码只依赖抽象接口，不依赖具体实现
+- **测试友好**：可以轻松创建模拟控制器进行单元测试
+- **配置灵活**：通过配置文件选择不同的控制器实现
+
+**章节来源**
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
+- [ACSMotionControl.h](file://src/modules/process/device/MotionControl/ACSMotionControl.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [acs_motion_controller_adapter.h](file://src/modules/process/controllers/acs_motion_controller_adapter.h)
+- [gtn_motion_controller_adapter.h](file://src/modules/process/controllers/gtn_motion_controller_adapter.h)
+
 ## 依赖关系分析
 - 松耦合：IProcessFacade隔离UI与内部服务；ProcessRuntime作为协调器，避免全局单例；各子服务独立可替换。
 - 控制器无关：指令规划与翻译解耦，便于新增控制器适配。
 - 通道抽象：通信通道统一接口，便于新增协议与设备。
 - 可观测性：监控服务与状态机联动，日志与通信日志模型提供可观测性。
 - **新增** 轴配置依赖：Setting_Axis与DataType系统紧密耦合，确保轴配置参数的一致性和有效性。
+- **新增** 控制器工厂依赖：ProcessDeviceService依赖MCFactory进行控制器实例管理。
 
 ```mermaid
 graph TB
@@ -648,13 +849,17 @@ PR --> PES["ProcessExecutionService"]
 PR --> PMS["ProcessMonitorService"]
 PR --> PCM["CommunicationManager"]
 PR --> SA["Setting_Axis"]
+PR --> SMC["Setting_MotionControl"]
 PR --> MC["MachineConfigurationService"]
 PD --> PL["LaserDevice"]
-PD --> PMC["MotionControl"]
+PD --> PMC["MotionControl接口"]
+PD --> MCFactory["MCFactory"]
+PD --> PMCAdapter["控制器适配器"]
 PD --> PIO["IO/Aux"]
 PTS --> PTM["ToolMatcher"]
 PTS --> STS["ToolpathSorter"]
 PWS --> PNR["ProcessNodeRegistry"]
+PWS --> PNER["ProcessNodeExecutorRegistry"]
 PES --> PNER["ProcessNodeExecutorRegistry"]
 PIP["InstructionPlanner"] --> ICT["IControllerTranslator"]
 ICT --> ACT["ACSTranslator"]
@@ -664,9 +869,11 @@ ICC --> TCP["TCPChannel"]
 ICC --> SRL["SerialChannel"]
 ICC --> HTTP["HTTPChannel"]
 SA --> DT["DataType系统"]
+SMC --> DT
 MC --> DT
-DT --> AG["AxisGroup"]
-DT --> EA["ExtensionAxes"]
+MCFactory --> PMC
+PMC --> ACS["ACSMotionControl"]
+PMC --> GTN["GTNMotionControl"]
 ```
 
 **图表来源**
@@ -674,8 +881,12 @@ DT --> EA["ExtensionAxes"]
 - [i_process_facade.h](file://src/modules/process/i_process_facade.h)
 - [process_runtime.h:10-37](file://src/modules/process/runtime/process_runtime.h#L10-L37)
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
 - [machine_configuration_service.h](file://src/core/kinematics/machine_configuration_service.h)
 - [DataType.h](file://src/modules/process/System/DataType.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
+- [ACSMotionControl.h](file://src/modules/process/device/MotionControl/ACSMotionControl.h)
 
 **章节来源**
 - [process_module.h](file://src/modules/process/process_module.h)
@@ -689,6 +900,7 @@ DT --> EA["ExtensionAxes"]
 - 监控采样：按需采样与降采样，避免阻塞主执行线程。
 - UI响应：异步执行与进度回调，避免阻塞主线程。
 - **新增** 轴配置缓存：轴配置参数应进行缓存，避免频繁的配置读取和验证操作。
+- **新增** 控制器实例池：通过MCFactory管理控制器实例，避免频繁创建销毁带来的性能损耗。
 
 ## 故障排查指南
 - 急停/异常状态：检查状态机是否进入EmergencyStop/Error；查看Runtime消息与Communication日志。
@@ -697,15 +909,19 @@ DT --> EA["ExtensionAxes"]
 - 监控告警：核查监控阈值、算法实现、与状态机联动逻辑。
 - 设置不生效：确认设置快照读取时机、刷新流程、设备会话重建。
 - **新增** 轴配置问题：检查轴配置参数的有效性、扩展轴的正确性、权限级别的限制。
+- **新增** 控制器连接问题：检查MCFactory是否正确创建控制器实例、控制器连接状态、控制器适配器配置。
+- **新增** 运动控制异常：检查MotionControl接口调用参数、轴配置与控制器配置的匹配性、IO配置的正确性。
 
 **章节来源**
 - [process_runtime.h:25-31](file://src/modules/process/runtime/process_runtime.h#L25-L31)
 - [communication_manager.h](file://src/modules/process/communication/communication_manager.h)
 - [process_execution_service.h](file://src/modules/process/execution/process_execution_service.h)
 - [process_monitor_service.h](file://src/modules/process/monitor/process_monitor_service.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
 
 ## 结论
-Process模块通过"运行时编排 + 多服务解耦 + 控制器无关指令 + 通道抽象通信"的架构，实现了设备控制、工艺监控、工作流执行与通信管理的统一。IProcessFacade提供稳定对外接口，ProcessRuntime作为协调器承载状态与上下文，工作流与执行服务确保流程可控，监控与通信提供可观测性。**最新的轴配置系统和扩展轴功能进一步增强了模块的灵活性和可扩展性，通过MachineConfigurationService和DataType系统的协同工作，为复杂的多轴配置提供了强大的支持。**该设计具备良好的扩展性与可维护性，适合持续演进与新设备/协议接入。
+Process模块通过"运行时编排 + 多服务解耦 + 控制器无关指令 + 通道抽象通信"的架构，实现了设备控制、工艺监控、工作流执行与通信管理的统一。IProcessFacade提供稳定对外接口，ProcessRuntime作为协调器承载状态与上下文，工作流与执行服务确保流程可控，监控与通信提供可观测性。**最新的架构升级通过MCFactory工厂模式和MotionControl接口，实现了从直接控制器管理到Service层架构的转变，提供了更好的可扩展性和可维护性。轴配置系统和扩展轴功能进一步增强了模块的灵活性，通过MachineConfigurationService和DataType系统的协同工作，为复杂的多轴配置提供了强大的支持。**该设计具备良好的扩展性与可维护性，适合持续演进与新设备/协议接入。
 
 ## 附录
 
@@ -715,6 +931,7 @@ Process模块通过"运行时编排 + 多服务解耦 + 控制器无关指令 + 
   - 设备抽象：实现ProcessDeviceService接口族（激光、运动控制、IO/Aux），在ProcessRuntime中注册与会话管理。
   - 通道对接：若设备通过通信通道接入，确保ICommunicationChannel实现满足需求；否则直接在设备层封装。
   - 翻译器适配：若控制器SDK需要，新增翻译器实现并接入ProcessInstructionPlanner。
+  - **新增** 控制器适配：通过控制器适配器将新控制器适配到MotionControl接口。
 
 - 新通信协议集成
   - 在communication/protocols目录新增协议通道实现，遵循ICommunicationChannel接口。
@@ -744,6 +961,13 @@ Process模块通过"运行时编排 + 多服务解耦 + 控制器无关指令 + 
   - **UI集成**：在QG_AxisWidget中添加扩展轴的显示和控制功能。
   - **权限管理**：通过DataType系统实现扩展轴配置的权限控制。
 
+- **新增** 控制器工厂扩展开发
+  - **新控制器实现**：实现MotionControl接口，提供完整的控制器功能。
+  - **工厂注册**：在MCFactory中注册新的控制器实现。
+  - **适配器开发**：如有需要，开发控制器适配器将现有控制器适配到新接口。
+  - **配置支持**：通过预处理器宏控制新控制器的编译支持。
+  - **测试验证**：提供单元测试和集成测试，确保控制器实现的正确性。
+
 **章节来源**
 - [process_module.h](file://src/modules/process/process_module.h)
 - [process_runtime.h:10-37](file://src/modules/process/runtime/process_runtime.h#L10-L37)
@@ -758,3 +982,8 @@ Process模块通过"运行时编排 + 多服务解耦 + 控制器无关指令 + 
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
 - [qg_AxisWidget.h](file://src/modules/process/ui/legacy/qg_AxisWidget.h)
 - [machine_configuration_service.h](file://src/core/kinematics/machine_configuration_service.h)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
+- [ACSMotionControl.h](file://src/modules/process/device/MotionControl/ACSMotionControl.h)
+- [acs_motion_controller_adapter.h](file://src/modules/process/controllers/acs_motion_controller_adapter.h)
+- [gtn_motion_controller_adapter.h](file://src/modules/process/controllers/gtn_motion_controller_adapter.h)

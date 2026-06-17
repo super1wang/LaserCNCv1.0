@@ -32,6 +32,20 @@ class MachineConfigurationService;
  * 运动指令统一走 service->GetMotionControl()（仿真模式下由 MCFactory
  * 返回 SimulatorCMHP / ACS 仿真器）。
  */
+/**
+ * @brief 主界面 IO 栏一条数字量输出按钮的描述符。
+ *
+ * 由 ProcessModule 从 settings 的 `[Setting.Digital.DigitalOUT]` 子表中筛
+ * 选出 `enabled && showInMain` 的项构造，并通过
+ * digitalOutputDescriptorsChanged 信号广播给 UI 动态重建按钮。
+ */
+struct DigitalOutputDescriptor
+{
+    QString name;     ///< 显示文本（中文名）
+    QString channel;  ///< toml key（如 "aLaser"），用于 setDigitalOutput 调用
+    bool    active{true};    ///< 高/低电平有效；UI 仅展示，写入逻辑由 MotionControl 解析时处理
+};
+
 class ProcessModule : public QObject, public lcnc::IModule, public lcnc::IProcessFacade
 {
     Q_OBJECT
@@ -91,6 +105,11 @@ public:
     Service* service() const { return m_service.get(); }
     QString statusMessage() const override;
 
+    /// 主界面 IO 栏要显示的数字量输出列表（来自 settings + 当前缓存值）。
+    QList<DigitalOutputDescriptor> mainPanelDigitalOutputs() const;
+    /// 在 settings 变更（设置对话框 Apply/OK）后调用，重新发射 IO 描述符 + 启动期反馈。
+    void refreshIOFromSettings();
+
 signals:
     void connectionChanged(bool connected);
     void simulationModeChanged(bool enabled);
@@ -106,6 +125,8 @@ signals:
     void deviceConnectProgress(const QString& deviceName, int percent, const QString& step);
     /// 全部外设连接/断开完成（是否全部成功、汇总消息）。
     void deviceConnectFinished(bool allSuccess, const QString& summary);
+    /// 主界面 IO 栏的数字量输出按钮列表已变更（settings 修改、初次加载等）。
+    void digitalOutputDescriptorsChanged(const QList<DigitalOutputDescriptor>& descriptors);
 
 private slots:
     void onSimulationTick();
@@ -117,6 +138,7 @@ private:
     void safeStopProcessOutputs();
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
+    void seedDefaultIOTables();
 
     bool                  m_initialized{false};
     bool                  m_connected{false};
@@ -138,3 +160,6 @@ private:
     std::unique_ptr<Service> m_service;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
 };
+
+Q_DECLARE_METATYPE(DigitalOutputDescriptor)
+Q_DECLARE_METATYPE(QList<DigitalOutputDescriptor>)

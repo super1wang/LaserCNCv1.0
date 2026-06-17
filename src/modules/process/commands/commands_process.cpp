@@ -135,6 +135,10 @@ void CmdOpenProcessSettings::execute()
 
         dlg->InitSetting();
         dlg->exec();
+
+        // 设置对话框关闭后刷新主界面 IO 栏（showInMain 列可能改过）。
+        if (mod)
+            mod->refreshIOFromSettings();
     }
     catch (const std::exception& e) {
         qWarning("CmdOpenProcessSettings::execute failed: %s", e.what());

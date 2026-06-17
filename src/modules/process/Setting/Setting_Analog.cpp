@@ -1,246 +1,308 @@
 #include "RegexPatterns.h"
 #include "Setting_Analog.h"
 
-#include <QLabel>
-#include <QLineEdit>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QRegularExpressionValidator>
+#include <QSet>
+#include <QSignalBlocker>
+#include <QToolButton>
+#include <QWidget>
 
-Dialog_Setting_Analog::Dialog_Setting_Analog(QWidget* parent)
-	: QDialog(parent)
-	, set_Changed()
+namespace {
+
+constexpr int kColName    = 0;
+constexpr int kColIndex   = 1;
+constexpr int kColType    = 2;
+constexpr int kColEnabled = 3;
+constexpr int kColOp      = 4;
+constexpr int kColCount   = 5;
+
+QWidget* makeCenteredCheckHost(QCheckBox* check)
 {
-	ui.setupUi(this);
-	setWindowFlags(Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
-
-	// 此处与枚举值定义对应上限，便于代码层编写，临时定义为64
-	m_iINRowCount = 64;
-	m_iOUTRowCount = 64;
-
-	setRows(true, m_iINRowCount);
-	setRows(false, m_iOUTRowCount);
+    auto* host = new QWidget();
+    auto* lay = new QHBoxLayout(host);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->addStretch();
+    lay->addWidget(check);
+    lay->addStretch();
+    return host;
 }
 
-Dialog_Setting_Analog::~Dialog_Setting_Analog()
+QCheckBox* checkInCell(QTableWidget* table, int row, int col)
 {
+    QWidget* host = table->cellWidget(row, col);
+    if (!host)
+        return nullptr;
+    return host->findChild<QCheckBox*>();
+}
+
+}
+
+Dialog_Setting_Analog::Dialog_Setting_Analog(QWidget* parent)
+    : QDialog(parent)
+{
+    ui.setupUi(this);
+    setWindowFlags(Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
+    setupTable();
+    connect(ui.btnAddIN,  &QPushButton::clicked, this, &Dialog_Setting_Analog::onAddIN);
+    connect(ui.btnAddOUT, &QPushButton::clicked, this, &Dialog_Setting_Analog::onAddOUT);
+}
+
+Dialog_Setting_Analog::~Dialog_Setting_Analog() = default;
+
+void Dialog_Setting_Analog::setupTable()
+{
+    QTableWidget* t = ui.tableIO;
+    t->setColumnCount(kColCount);
+    t->setHorizontalHeaderLabels({
+        tr("名称"), tr("索引"), tr("类型"), tr("启用"), tr("操作")
+    });
+    t->horizontalHeader()->setSectionResizeMode(kColName,    QHeaderView::Stretch);
+    t->horizontalHeader()->setSectionResizeMode(kColIndex,   QHeaderView::ResizeToContents);
+    t->horizontalHeader()->setSectionResizeMode(kColType,    QHeaderView::ResizeToContents);
+    t->horizontalHeader()->setSectionResizeMode(kColEnabled, QHeaderView::ResizeToContents);
+    t->horizontalHeader()->setSectionResizeMode(kColOp,      QHeaderView::ResizeToContents);
+    t->verticalHeader()->setVisible(false);
+    connect(t, &QTableWidget::itemChanged, this, &Dialog_Setting_Analog::markDirty);
 }
 
 void Dialog_Setting_Analog::InitSetting()
 {
-	table t_Init = SETTINGS->GetTable(SettingSection::Analog);
-	string strID, strNull;
-	for (int i = 1; i < m_iINRowCount + 1; i++)
-	{
-		strID = "aIN" + std::to_string(i);
-		t_Init["AnalogIN"][strID] = std::array<string, 2>{ strNull, strNull };
-	}
-
-	for (int i = 1; i < m_iOUTRowCount + 1; i++)
-	{
-		strID = "aOUT" + std::to_string(i);
-		t_Init["AnalogOUT"][strID] = std::array<string, 2>{ strNull, strNull };
-	}
-
-	SETTINGS->SetTable(true, SettingSection::Analog, t_Init);
+    // 预设种子由 ProcessModule::seedDefaultIOTables 写入；这里不再做静态注入。
 }
 
 void Dialog_Setting_Analog::SetPage(table table_Set)
 {
-	if (!table_Set.size())
-		table_Set = SETTINGS->GetTable(SettingSection::Analog);
+    if (!table_Set.size())
+        table_Set = SETTINGS->GetTable(SettingSection::Analog);
 
-	QRegularExpression regex("^rowWidget.*");
-	const QList<QWidget*> widgetsIN = ui.groupBox_AnalogIN->findChildren<QWidget*>(regex);
-	for (QWidget* widgetIN : widgetsIN)
-	{
-		QStringList parts		= widgetIN->objectName().split('_');
-		string		key			= "a" + parts.at(parts.size() - 1).toStdString();
-		QString		qstrID		= QString::fromStdString(table_Set["AnalogIN"][key][0].as_string());
-		QString		qstrIndex	= QString::fromStdString(table_Set["AnalogIN"][key][1].as_string());
+    auto readBucket = [](const table& bucket, bool isInput) {
+        QList<RowDescriptor> rows;
+        for (const auto& kv : bucket) {
+            const std::string& key = kv.first.data();
+            RowDescriptor r;
+            r.tomlKey = QString::fromStdString(key);
+            r.isInput = isInput;
+            const value& v = kv.second;
+            if (v.is_table()) {
+                const auto& t = v.as_table();
+                if (t.count("name"))    r.name    = QString::fromStdString(t.at("name").as_string());
+                if (t.count("index"))   r.index   = QString::fromStdString(t.at("index").as_string());
+                if (t.count("enabled")) r.enabled = t.at("enabled").as_boolean();
+                if (t.count("builtin")) r.builtin = t.at("builtin").as_boolean();
+            } else if (v.is_array()) {
+                const auto& a = v.as_array();
+                if (a.size() >= 1 && a.at(0).is_string()) r.name  = QString::fromStdString(a.at(0).as_string());
+                if (a.size() >= 2 && a.at(1).is_string()) r.index = QString::fromStdString(a.at(1).as_string());
+            }
+            rows.push_back(r);
+        }
+        return rows;
+    };
 
-		const QList<QLineEdit*> lineEdits = widgetIN->findChildren<QLineEdit*>();
-		for (QLineEdit* lineEdit : lineEdits)
-		{
-			QString type = lineEdit->objectName().right(1);
-			if (type == "D")
-				lineEdit->setText(qstrID);
-			else
-				lineEdit->setText(qstrIndex);
-		}
-	}
+    QList<RowDescriptor> rows;
+    if (table_Set.count("AnalogIN") && table_Set.at("AnalogIN").is_table())
+        rows.append(readBucket(table_Set.at("AnalogIN").as_table(), true));
+    if (table_Set.count("AnalogOUT") && table_Set.at("AnalogOUT").is_table())
+        rows.append(readBucket(table_Set.at("AnalogOUT").as_table(), false));
+    rebuildRows(rows);
+    m_dirty = false;
+}
 
-	const QList<QWidget*> widgetsOUT = ui.groupBox_AnalogOUT->findChildren<QWidget*>(regex);
-	for (QWidget* widgetOUT : widgetsOUT)
-	{
-		QStringList parts		= widgetOUT->objectName().split('_');
-		string		key			= "a" + parts.at(parts.size() - 1).toStdString();
-		QString		qstrID		= QString::fromStdString(table_Set["AnalogOUT"][key][0].as_string());
-		QString		qstrIndex	= QString::fromStdString(table_Set["AnalogOUT"][key][1].as_string());
+void Dialog_Setting_Analog::rebuildRows(const QList<RowDescriptor>& rows)
+{
+    QTableWidget* t = ui.tableIO;
+    QSignalBlocker blocker(t);
+    t->setRowCount(0);
+    for (const RowDescriptor& r : rows)
+        appendRow(r);
+}
 
-		const QList<QLineEdit*> lineEdits = widgetOUT->findChildren<QLineEdit*>();
-		for (QLineEdit* lineEdit : lineEdits)
-		{
-			QString type = lineEdit->objectName().right(1);
-			if (type == "D")
-				lineEdit->setText(qstrID);
-			else
-				lineEdit->setText(qstrIndex);
-		}
-	}
+void Dialog_Setting_Analog::appendRow(const RowDescriptor& row)
+{
+    QTableWidget* t = ui.tableIO;
+    int r = t->rowCount();
+    t->insertRow(r);
+
+    auto* nameItem = new QTableWidgetItem(row.name);
+    if (row.builtin)
+        nameItem->setFlags(nameItem->flags() & ~Qt::ItemIsEditable);
+    nameItem->setData(Qt::UserRole, row.tomlKey);
+    nameItem->setData(Qt::UserRole + 1, row.builtin);
+    t->setItem(r, kColName, nameItem);
+
+    auto* indexEdit = new QLineEdit(row.index);
+    indexEdit->setValidator(new QRegularExpressionValidator(Regex_Analog_Index(), indexEdit));
+    connect(indexEdit, &QLineEdit::textEdited, this, [this](const QString&) { markDirty(); });
+    t->setCellWidget(r, kColIndex, indexEdit);
+
+    auto* typeBox = new QComboBox();
+    typeBox->addItem(tr("输入"), QStringLiteral("IN"));
+    typeBox->addItem(tr("输出"), QStringLiteral("OUT"));
+    typeBox->setCurrentIndex(row.isInput ? 0 : 1);
+    typeBox->setEnabled(!row.builtin);
+    connect(typeBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { markDirty(); });
+    t->setCellWidget(r, kColType, typeBox);
+
+    auto* enabledCheck = new QCheckBox();
+    enabledCheck->setChecked(row.enabled);
+    connect(enabledCheck, &QCheckBox::toggled, this, [this](bool) { markDirty(); });
+    t->setCellWidget(r, kColEnabled, makeCenteredCheckHost(enabledCheck));
+
+    if (!row.builtin) {
+        auto* delBtn = new QToolButton();
+        delBtn->setText(tr("删除"));
+        connect(delBtn, &QToolButton::clicked, this, [this, indexEdit]() {
+            QTableWidget* tw = ui.tableIO;
+            for (int i = 0; i < tw->rowCount(); ++i) {
+                if (tw->cellWidget(i, kColIndex) == indexEdit) {
+                    onDeleteRow(i);
+                    break;
+                }
+            }
+        });
+        t->setCellWidget(r, kColOp, delBtn);
+    } else {
+        auto* lbl = new QTableWidgetItem(tr("预设"));
+        lbl->setFlags(lbl->flags() & ~Qt::ItemIsEditable);
+        lbl->setForeground(Qt::gray);
+        t->setItem(r, kColOp, lbl);
+    }
+}
+
+QList<Dialog_Setting_Analog::RowDescriptor> Dialog_Setting_Analog::readRowsFromUi() const
+{
+    QList<RowDescriptor> rows;
+    QTableWidget* t = ui.tableIO;
+    for (int i = 0; i < t->rowCount(); ++i) {
+        RowDescriptor r;
+        QTableWidgetItem* nameItem = t->item(i, kColName);
+        if (!nameItem) continue;
+        r.tomlKey = nameItem->data(Qt::UserRole).toString();
+        r.builtin = nameItem->data(Qt::UserRole + 1).toBool();
+        r.name    = nameItem->text();
+
+        if (auto* le = qobject_cast<QLineEdit*>(t->cellWidget(i, kColIndex)))
+            r.index = le->text();
+        if (auto* cb = qobject_cast<QComboBox*>(t->cellWidget(i, kColType)))
+            r.isInput = cb->currentData().toString() == QStringLiteral("IN");
+        if (auto* ck = checkInCell(t, i, kColEnabled))
+            r.enabled = ck->isChecked();
+        rows.push_back(r);
+    }
+    return rows;
 }
 
 void Dialog_Setting_Analog::GetPage(table& table_Page)
 {
-	QRegularExpression regex("^rowWidget.*");
-	const QList<QWidget*> widgetsIN = ui.groupBox_AnalogIN->findChildren<QWidget*>(regex);
-	for (QWidget* widgetIN : widgetsIN)
-	{
-		QStringList parts = widgetIN->objectName().split('_');
-		string key = "a" + parts.at(parts.size() - 1).toStdString();
-		string strID, strIndex;
-
-		const QList<QLineEdit*> lineEdits = widgetIN->findChildren<QLineEdit*>();
-		for (QLineEdit* lineEdit : lineEdits)
-		{
-			QString type = lineEdit->objectName().right(1);
-			if (type == "D")
-				strID = lineEdit->text().toStdString();
-			else
-				strIndex = lineEdit->text().toStdString();
-		}
-		table_Page["AnalogIN"][key] = std::array<string, 2>{ strID, strIndex };
-	}
-
-	const QList<QWidget*> widgetsOUT = ui.groupBox_AnalogOUT->findChildren<QWidget*>(regex);
-	for (QWidget* widgetOUT : widgetsOUT)
-	{
-		QStringList parts = widgetOUT->objectName().split('_');
-		string key = "a" + parts.at(parts.size() - 1).toStdString();
-		string strID, strIndex;
-
-		const QList<QLineEdit*> lineEdits = widgetOUT->findChildren<QLineEdit*>();
-		for (QLineEdit* lineEdit : lineEdits)
-		{
-			QString type = lineEdit->objectName().right(1);
-			if (type == "D")
-				strID = lineEdit->text().toStdString();
-			else
-				strIndex = lineEdit->text().toStdString();
-		}
-		table_Page["AnalogOUT"][key] = std::array<string, 2>{ strID, strIndex };
-	}
+    table aIN, aOUT;
+    const auto rows = readRowsFromUi();
+    for (const auto& r : rows) {
+        table entry;
+        entry["name"]    = r.name.toStdString();
+        entry["index"]   = r.index.toStdString();
+        entry["enabled"] = r.enabled;
+        entry["builtin"] = r.builtin;
+        const std::string key = r.tomlKey.toStdString();
+        if (r.isInput)
+            aIN[key] = entry;
+        else
+            aOUT[key] = entry;
+    }
+    table_Page["AnalogIN"]  = aIN;
+    table_Page["AnalogOUT"] = aOUT;
 }
 
 bool Dialog_Setting_Analog::GetChanged(table table_Page, table& table_Changed)
 {
-	if (set_Changed.empty())
-		return false;
-
-	for (auto it = set_Changed.begin(); it != set_Changed.end(); ++it)
-	{
-		string	strTable = it->first;
-		string	strKey = it->second;
-		value	Value = table_Page[strTable][strKey];
-		table_Changed[strTable][strKey] = Value;
-		SETTINGS->SetKeyValue(strKey, Value, SettingSection::Analog, strTable);
-		LOG_OPER_INFO(tr("Setting [Analog][%1][%2] %3").arg(tr(strTable.c_str()))
-			.arg(tr(strKey.c_str())).arg(toml::format(Value).c_str()).toUtf8().data());
-	}
-	set<pair<string, string>> set_null;
-	set_Changed.swap(set_null);
-	return true;
+    if (!m_dirty)
+        return false;
+    table_Changed["AnalogIN"]  = table_Page["AnalogIN"];
+    table_Changed["AnalogOUT"] = table_Page["AnalogOUT"];
+    SETTINGS->SetTable(true, SettingSection::Analog, table_Page);
+    LOG_OPER_INFO(tr("Setting [Analog] full table rewritten").toUtf8().data());
+    m_dirty = false;
+    return true;
 }
 
-void Dialog_Setting_Analog::lineEditChanged()
+void Dialog_Setting_Analog::markDirty()
 {
-	// 特殊获取，从控件所在的widget获取
-	QLineEdit*  lineEdit = qobject_cast<QLineEdit*>(sender());
-	QStringList parts	 = lineEdit->parentWidget()->objectName().split('_');
-	string		strTable = parts.at(parts.size() - 2).toStdString();
-	string		strKey	 = "a" + parts.at(parts.size() - 1).toStdString();	// 每组的索引，即key值，如IN1 OUT12
-	set_Changed.insert(make_pair(strTable, strKey));
+    m_dirty = true;
 }
 
-void Dialog_Setting_Analog::addRow(bool bIN)
+QString Dialog_Setting_Analog::allocateNewKey(bool isInput) const
 {
-	int rowNumber = bIN ? m_iINRowCount + 1 : m_iOUTRowCount + 1;
-
-	QWidget* rowWidget = new QWidget();
-	QHBoxLayout* rowLayout = new QHBoxLayout(rowWidget);
-	rowLayout->setContentsMargins(2, 2, 2, 2);
-
-	QString qstrLabelName	= QString("label_%1%2").arg(bIN ? "AnalogIN_IN" : "AnalogOUT_OUT").arg(rowNumber);
-	QString qstrIDName		= QString("lineEdit_%1%2ID").arg(bIN ? "AnalogIN_sIN" : "AnalogOUT_sOUT").arg(rowNumber);
-	QString qstrIndexName	= QString("lineEdit_%1%2Index").arg(bIN ? "AnalogIN_sIN" : "AnalogOUT_sOUT").arg(rowNumber);
-
-	QLabel* label = new QLabel(QString("%1 %2").arg(bIN ? tr("IN") : tr("OUT")).arg(rowNumber));
-	label->setObjectName(qstrLabelName);
-	label->setFixedWidth(80);
-
-	QLineEdit* lineEditID = new QLineEdit();
-	lineEditID->setObjectName(qstrIDName);
-	connect(lineEditID, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
-
-	QLineEdit* lineEditIndex = new QLineEdit();
-	lineEditIndex->setObjectName(qstrIndexName);
-	lineEditIndex->setValidator(new QRegularExpressionValidator(Regex_Analog_Index(), nullptr));
-	connect(lineEditIndex, SIGNAL(editingFinished()), this, SLOT(lineEditChanged()));
-
-	rowLayout->addWidget(label);
-	rowLayout->addWidget(lineEditID);
-	rowLayout->addWidget(lineEditIndex);
-
-	rowWidget->setObjectName(QString("rowWidget_%1%2").arg(bIN ? "AnalogIN_IN" : "AnalogOUT_OUT").arg(rowNumber));
-
-	if (bIN) {
-		ui.verticalLayout_AnalogIN->addWidget(rowWidget);
-		m_iINRowCount = rowNumber;
-	}
-	else {
-		ui.verticalLayout_AnalogOUT->addWidget(rowWidget);
-		m_iOUTRowCount = rowNumber;
-	}
+    const QString prefix = isInput ? QStringLiteral("aIN") : QStringLiteral("aOUT");
+    QSet<QString> used;
+    for (int i = 0; i < ui.tableIO->rowCount(); ++i) {
+        if (auto* item = ui.tableIO->item(i, kColName))
+            used.insert(item->data(Qt::UserRole).toString());
+    }
+    for (int n = 1; n < 1000; ++n) {
+        QString candidate = prefix + QString::number(n);
+        if (!used.contains(candidate))
+            return candidate;
+    }
+    return prefix + QStringLiteral("X");
 }
 
-void Dialog_Setting_Analog::setRows(bool bIN, int totalRows)
+void Dialog_Setting_Analog::onAddIN()
 {
-	// 重置行计数
-	QVBoxLayout* scrollLayout;
-	if (bIN) {
-		scrollLayout = ui.verticalLayout_AnalogIN;
-		m_iINRowCount = 0;
-	}
-	else {
-		scrollLayout = ui.verticalLayout_AnalogOUT;
-		m_iOUTRowCount = 0;
-	}
+    RowDescriptor r;
+    r.tomlKey = allocateNewKey(true);
+    r.name    = tr("新输入 %1").arg(r.tomlKey.mid(3));
+    r.isInput = true;
+    appendRow(r);
+    markDirty();
+}
 
-	// 清空现有内容
-	QLayoutItem* item;
-	while ((item = scrollLayout->takeAt(0)) != nullptr) {
-		delete item->widget();
-		delete item;
-	}
+void Dialog_Setting_Analog::onAddOUT()
+{
+    RowDescriptor r;
+    r.tomlKey = allocateNewKey(false);
+    r.name    = tr("新输出 %1").arg(r.tomlKey.mid(4));
+    r.isInput = false;
+    appendRow(r);
+    markDirty();
+}
 
-	// 添加指定数量的行
-	for (int i = 1; i <= totalRows; ++i) {
-		addRow(bIN);
-	}
+void Dialog_Setting_Analog::onDeleteRow(int row)
+{
+    if (row < 0 || row >= ui.tableIO->rowCount())
+        return;
+    auto* nameItem = ui.tableIO->item(row, kColName);
+    if (nameItem && nameItem->data(Qt::UserRole + 1).toBool())
+        return;
+    ui.tableIO->removeRow(row);
+    markDirty();
 }
 
 void Dialog_Setting_Analog::SetIDEnabled(bool bEnabled)
 {
-	QRegularExpression regex(".*D$");
-	const QList<QLineEdit*> lineEdits = this->findChildren<QLineEdit*>(regex);
-	for (QLineEdit* lineEdit : lineEdits) {
-		lineEdit->setEnabled(bEnabled);
-	}
+    QTableWidget* t = ui.tableIO;
+    for (int i = 0; i < t->rowCount(); ++i) {
+        if (auto* item = t->item(i, kColName)) {
+            const bool isBuiltin = item->data(Qt::UserRole + 1).toBool();
+            if (isBuiltin) continue;
+            Qt::ItemFlags f = item->flags();
+            if (bEnabled) f |= Qt::ItemIsEditable;
+            else          f &= ~Qt::ItemIsEditable;
+            item->setFlags(f);
+        }
+    }
 }
 
 void Dialog_Setting_Analog::SetIndexEnabled(bool bEnabled)
 {
-	QRegularExpression regex(".*x$");
-	const QList<QLineEdit*> lineEdits = this->findChildren<QLineEdit*>(regex);
-	for (QLineEdit* lineEdit : lineEdits) {
-		lineEdit->setEnabled(bEnabled);
-	}
+    QTableWidget* t = ui.tableIO;
+    for (int i = 0; i < t->rowCount(); ++i) {
+        if (auto* le = qobject_cast<QLineEdit*>(t->cellWidget(i, kColIndex)))
+            le->setEnabled(bEnabled);
+    }
 }

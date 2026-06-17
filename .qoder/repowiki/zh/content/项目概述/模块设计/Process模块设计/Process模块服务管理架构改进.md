@@ -95,15 +95,30 @@
 - [app_command_context.h](file://src/app/app_command_context.h)
 - [app_context.h](file://src/app/app_context.h)
 - [main_window.h](file://src/app/main_window.h)
+- [toml_config.cpp](file://src/core/settings/toml_config.cpp)
+- [toml_config.h](file://src/core/settings/toml_config.h)
+- [Setting_MotionControl.cpp](file://src/modules/process/Setting/Setting_MotionControl.cpp)
+- [Setting_MotionControl.h](file://src/modules/process/Setting/Setting_MotionControl.h)
+- [Setting_MotionControl.ui](file://src/modules/process/Setting/Setting_MotionControl.ui)
+- [MCFactory.cpp](file://src/modules/process/device/MotionControl/MCFactory.cpp)
+- [MCFactory.h](file://src/modules/process/device/MotionControl/MCFactory.h)
+- [MotionControl.cpp](file://src/modules/process/device/MotionControl/MotionControl.cpp)
+- [MotionControl.h](file://src/modules/process/device/MotionControl/MotionControl.h)
+- [ACSMotionControl.cpp](file://src/modules/process/device/MotionControl/ACSMotionControl.cpp)
+- [ACSMotionControl.h](file://src/modules/process/device/MotionControl/ACSMotionControl.h)
+- [GTNMotionControl.cpp](file://src/modules/process/device/MotionControl/GTNMotionControl.cpp)
+- [GTNMotionControl.h](file://src/modules/process/device/MotionControl/GTNMotionControl.h)
+- [SimulateCMHPMotionControl.cpp](file://src/modules/process/device/MotionControl/SimulateCMHPMotionControl.cpp)
+- [SimulateCMHPMotionControl.h](file://src/modules/process/device/MotionControl/SimulateCMHPMotionControl.h)
 </cite>
 
 ## 更新摘要
 **所做更改**
-- 新增TaskManager集成章节，详细说明异步任务管理和进度跟踪机制
-- 更新错误报告机制章节，增加TaskManager的异常处理和日志记录
-- 增强设备连接控制章节，添加TaskManager在设备管理中的应用
-- 更新架构概览图，展示TaskManager在整个系统中的位置
-- 新增TaskManager与Process模块的集成示例
+- 新增Service层MotionControl接口管理章节，详细介绍GetMotionControl()和SetMotionControl()方法的使用
+- 更新配置文件加载机制章节，增加TOML配置格式的支持和错误处理
+- 新增MCFactory工厂模式章节，展示运动控制器的创建和管理机制
+- 更新设备管理架构图，反映新的MotionControl接口管理结构
+- 新增配置驱动的运动控制器选择机制
 
 ## 目录
 1. [引言](#引言)
@@ -111,17 +126,19 @@
 3. [核心组件](#核心组件)
 4. [架构概览](#架构概览)
 5. [详细组件分析](#详细组件分析)
-6. [TaskManager集成](#taskmanager集成)
-7. [依赖关系分析](#依赖关系分析)
-8. [性能考虑](#性能考虑)
-9. [故障排除指南](#故障排除指南)
-10. [结论](#结论)
+6. [Service层MotionControl接口管理](#servicelayermotioncontrol接口管理)
+7. [配置文件加载机制](#配置文件加载机制)
+8. [MCFactory工厂模式](#mcfactory工厂模式)
+9. [依赖关系分析](#依赖关系分析)
+10. [性能考虑](#性能考虑)
+11. [故障排除指南](#故障排除指南)
+12. [结论](#结论)
 
 ## 引言
 
 Process模块是LaserCNC激光切割控制系统的核心服务管理模块，负责协调各种加工设备、监控执行状态、管理工艺流程和处理通信协议。该模块采用微内核架构设计，通过服务注册表、事件总线和模块化组件实现高度解耦的服务管理。
 
-**更新** 本版本引入了TaskManager集成，提供了统一的异步任务管理和进度跟踪机制，增强了系统的并发处理能力和用户体验。
+**更新** 本版本引入了Service层的MotionControl接口管理，新增了GetMotionControl()和SetMotionControl()方法，以及基于配置文件的运动控制器选择机制。这些改进显著增强了系统的灵活性和可扩展性。
 
 本模块主要包含以下核心功能：
 - 工艺流程管理和执行控制
@@ -130,10 +147,12 @@ Process模块是LaserCNC激光切割控制系统的核心服务管理模块，�
 - 运行时状态管理和指令规划
 - 工具路径生成和优化
 - **新增** 统一的任务调度和进度跟踪
+- **新增** Service层的MotionControl接口管理
+- **新增** 配置驱动的设备选择机制
 
 ## 项目结构
 
-Process模块采用分层架构设计，按照功能域进行模块化组织。**更新** 新增TaskManager作为核心服务管理组件，提供异步任务执行和进度跟踪功能。
+Process模块采用分层架构设计，按照功能域进行模块化组织。**更新** 新增了Service层的MotionControl接口管理和配置文件加载机制。
 
 ```mermaid
 graph TB
@@ -155,6 +174,7 @@ subgraph "设备管理层"
 DeviceMgr[设备管理器]
 DeviceCoord[设备协调器]
 CommMgr[通信管理器]
+MotionCtl[运动控制器管理]
 end
 subgraph "工具路径层"
 ToolpathSvc[工具路径服务]
@@ -166,6 +186,7 @@ SysSvc[系统服务]
 License[许可证模块]
 LogMod[日志模块]
 MsgMod[消息模块]
+CfgMgr[配置管理器]
 end
 end
 Kernel --> ModuleReg
@@ -185,26 +206,31 @@ CommMgr --> ToolSorter
 SysSvc --> License
 SysSvc --> LogMod
 SysSvc --> MsgMod
+SysSvc --> CfgMgr
 TaskMgr --> ExecSvc
 TaskMgr --> MonitorSvc
 TaskMgr --> WorkflowSvc
+MotionCtl --> DeviceMgr
+MotionCtl --> DeviceCoord
 ```
 
 **图表来源**
 - [process_module.cpp:1-150](file://src/modules/process/process_module.cpp#L1-L150)
 - [kernel.cpp:1-200](file://src/core/kernel/kernel.cpp#L1-L200)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
+- [toml_config.cpp:1-76](file://src/core/settings/toml_config.cpp#L1-L76)
 
 **章节来源**
 - [process_module.cpp:1-200](file://src/modules/process/process_module.cpp#L1-L200)
 - [process_module.h:1-100](file://src/modules/process/process_module.h#L1-L100)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
+- [toml_config.cpp:1-76](file://src/core/settings/toml_config.cpp#L1-L76)
 
 ## 核心组件
 
 ### 微内核架构
 
-Process模块基于微内核架构设计，提供轻量级的基础设施服务。**更新** TaskManager作为核心容器的一部分，提供统一的任务管理服务。
+Process模块基于微内核架构设计，提供轻量级的基础设施服务。**更新** TaskManager作为核心容器的一部分，提供统一的任务管理服务，同时新增了MotionControl接口管理机制。
 
 ```mermaid
 classDiagram
@@ -243,6 +269,13 @@ class TaskManager {
 +isRunning(id) bool
 +percent(id) int
 }
+class MotionControlManager {
++motionControllers : map[string, MotionControl]
++activeController : MotionControl*
++getMotionControl(name) MotionControl*
++setMotionControl(name) bool
++createController(name) MotionControl*
+}
 Kernel --> ModuleRegistry : "管理"
 Kernel --> ServiceRegistry : "管理"
 Kernel --> EventBus : "管理"
@@ -250,6 +283,7 @@ Kernel --> TaskManager : "管理"
 ModuleRegistry --> ServiceRegistry : "依赖"
 ServiceRegistry --> EventBus : "依赖"
 TaskManager --> EventBus : "发布进度"
+MotionControlManager --> ServiceRegistry : "注册服务"
 ```
 
 **图表来源**
@@ -258,10 +292,11 @@ TaskManager --> EventBus : "发布进度"
 - [service_registry.h:1-120](file://src/core/kernel/service_registry.h#L1-L120)
 - [event_bus.h:1-120](file://src/core/kernel/event_bus.h#L1-L120)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
 
 ### 服务管理机制
 
-服务注册表实现了动态服务发现和生命周期管理。**更新** TaskManager集成了统一的任务调度机制，为所有异步操作提供进度跟踪。
+服务注册表实现了动态服务发现和生命周期管理。**更新** TaskManager集成了统一的任务调度机制，为所有异步操作提供进度跟踪。同时新增了MotionControl接口管理服务。
 
 ```mermaid
 sequenceDiagram
@@ -269,6 +304,7 @@ participant Client as 客户端
 participant Kernel as 内核
 participant Registry as 服务注册表
 participant TaskMgr as TaskManager
+participant MotionCtlMgr as MotionControlManager
 participant Service as 服务实例
 Client->>Kernel : 请求服务
 Kernel->>Registry : getService(服务类型)
@@ -287,21 +323,29 @@ TaskMgr->>TaskMgr : 启动后台任务
 TaskMgr-->>Client : 返回TaskId
 TaskMgr->>TaskMgr : 定期更新进度
 TaskMgr->>Client : 发布进度事件
+Client->>MotionCtlMgr : GetMotionControl()
+MotionCtlMgr->>MotionCtlMgr : 查找或创建控制器
+MotionCtlMgr-->>Client : 返回运动控制器
+Client->>MotionCtlMgr : SetMotionControl()
+MotionCtlMgr->>MotionCtlMgr : 切换活动控制器
+MotionCtlMgr-->>Client : 返回切换结果
 ```
 
 **图表来源**
 - [service_registry.cpp:1-200](file://src/core/kernel/service_registry.cpp#L1-L200)
 - [kernel.cpp:1-250](file://src/core/kernel/kernel.cpp#L1-L250)
 - [task_manager.cpp:35-125](file://src/core/task/task_manager.cpp#L35-L125)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
 
 **章节来源**
 - [kernel.cpp:1-300](file://src/core/kernel/kernel.cpp#L1-L300)
 - [service_registry.cpp:1-250](file://src/core/kernel/service_registry.cpp#L1-L250)
 - [task_manager.cpp:35-125](file://src/core/task/task_manager.cpp#L35-L125)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
 
 ## 架构概览
 
-Process模块的整体架构采用分层设计，从底层硬件抽象到上层业务逻辑形成清晰的层次结构。**更新** TaskManager作为横切关注点集成到各个服务层中，提供统一的异步任务管理。
+Process模块的整体架构采用分层设计，从底层硬件抽象到上层业务逻辑形成清晰的层次结构。**更新** TaskManager作为横切关注点集成到各个服务层中，提供统一的异步任务管理。同时新增了MotionControl接口管理服务。
 
 ```mermaid
 graph TD
@@ -320,6 +364,7 @@ subgraph "设备管理层"
 DM[设备管理器]
 DC[设备协调器]
 CM[通信管理器]
+MC[运动控制器管理]
 TM[TaskManager]
 end
 subgraph "业务逻辑层"
@@ -334,6 +379,7 @@ UI1[流程树视图]
 UI2[节点编辑器]
 UI3[设备管理器对话框]
 UI4[任务管理器对话框]
+UI5[MotionControl设置]
 end
 HW1 --> DA1
 HW2 --> DA2
@@ -353,6 +399,7 @@ WS --> UI2
 DM --> UI3
 TM --> TS
 TS --> UI4
+MC --> UI5
 ```
 
 **图表来源**
@@ -360,12 +407,13 @@ TS --> UI4
 - [process_device_coordinator.cpp:1-200](file://src/modules/process/device/MotionControl/process_device_coordinator.cpp#L1-L200)
 - [process_execution_service.cpp:1-200](file://src/modules/process/execution/process_execution_service.cpp#L1-L200)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
+- [Setting_MotionControl.ui:1-49](file://src/modules/process/Setting/Setting_MotionControl.ui#L1-L49)
 
 ## 详细组件分析
 
 ### 执行服务组件
 
-执行服务是Process模块的核心协调器，负责管理整个加工流程的执行。**更新** 集成了TaskManager用于异步任务执行和进度跟踪。
+执行服务是Process模块的核心协调器，负责管理整个加工流程的执行。**更新** 集成了TaskManager用于异步任务执行和进度跟踪，并新增了MotionControl接口管理。
 
 ```mermaid
 classDiagram
@@ -374,6 +422,7 @@ class ProcessExecutionService {
 +nodeExecutorRegistry : ProcessNodeExecutorRegistry
 +executionContext : ProcessExecutionContext
 +taskManager : TaskManager
++motionControlManager : MotionControlManager
 +executeWorkflow(workflow) ExecutionResult
 +pauseExecution() void
 +resumeExecution() void
@@ -406,13 +455,22 @@ class TaskManager {
 +isRunning(id) bool
 +percent(id) int
 }
+class MotionControlManager {
++motionControllers : map[string, MotionControl]
++activeController : MotionControl*
++getMotionControl(name) MotionControl*
++setMotionControl(name) bool
++createController(name) MotionControl*
+}
 ProcessExecutionService --> ProcessWorkflowExecutor : "使用"
 ProcessExecutionService --> ProcessNodeExecutorRegistry : "管理"
 ProcessExecutionService --> ProcessExecutionContext : "维护"
 ProcessExecutionService --> TaskManager : "集成"
+ProcessExecutionService --> MotionControlManager : "集成"
 ProcessWorkflowExecutor --> ProcessNodeExecutorRegistry : "调用"
 ProcessNodeExecutorRegistry --> ProcessExecutionContext : "访问"
 TaskManager --> EventBus : "发布进度"
+MotionControlManager --> ServiceRegistry : "注册服务"
 ```
 
 **图表来源**
@@ -420,21 +478,25 @@ TaskManager --> EventBus : "发布进度"
 - [process_workflow_executor.cpp:1-200](file://src/modules/process/execution/process_workflow_executor.cpp#L1-L200)
 - [process_node_executor_registry.h:1-150](file://src/modules/process/execution/process_node_executor_registry.h#L1-L150)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
 
 ### 监控服务组件
 
-监控服务负责实时跟踪设备状态和执行进度。**更新** 集成了TaskManager的进度跟踪功能，提供更细粒度的状态监控。
+监控服务负责实时跟踪设备状态和执行进度。**更新** 集成了TaskManager的进度跟踪功能，提供更细粒度的状态监控，并集成了MotionControl接口管理。
 
 ```mermaid
 sequenceDiagram
 participant Monitor as 监控服务
 participant Device as 设备管理器
 participant TaskMgr as TaskManager
+participant MotionCtlMgr as MotionControlManager
 participant Event as 事件总线
 participant UI as 用户界面
 loop 实时监控循环
 Monitor->>Device : 获取设备状态
 Device-->>Monitor : 返回状态信息
+Monitor->>MotionCtlMgr : 获取活动控制器
+MotionCtlMgr-->>Monitor : 返回控制器状态
 Monitor->>Monitor : 分析状态变化
 alt 状态异常
 Monitor->>Event : 发布错误事件
@@ -453,10 +515,11 @@ end
 - [process_monitor_service.cpp:1-250](file://src/modules/process/monitor/process_monitor_service.cpp#L1-L250)
 - [event_bus.cpp:1-200](file://src/core/kernel/event_bus.cpp#L1-L200)
 - [task_manager.cpp:85-110](file://src/core/task/task_manager.cpp#L85-L110)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
 
 ### 工作流服务组件
 
-工作流服务管理复杂的加工流程定义和执行。**更新** 集成了TaskManager用于异步工作流执行，支持长时间运行的任务进度跟踪。
+工作流服务管理复杂的加工流程定义和执行。**更新** 集成了TaskManager用于异步工作流执行，支持长时间运行的任务进度跟踪，并集成了MotionControl接口管理。
 
 ```mermaid
 flowchart TD
@@ -475,6 +538,8 @@ NodeType --> |等待节点| WaitNode["等待条件满足"]
 NodeType --> |跳转节点| JumpNode["跳转到指定节点"]
 NodeType --> |结束节点| EndNode["结束工作流"]
 ExecuteOp --> UpdateProgress["更新执行进度"]
+ExecuteOp --> GetMotionCtl["获取运动控制器"]
+GetMotionCtl --> ExecuteOp
 WaitNode --> CheckCondition["检查等待条件"]
 CheckCondition --> ConditionMet{"条件满足?"}
 ConditionMet --> |否| WaitNode
@@ -489,16 +554,18 @@ Error --> Complete
 - [process_workflow_service.cpp:1-300](file://src/modules/process/workflow/process_workflow_service.cpp#L1-L300)
 - [process_flow_document.cpp:1-200](file://src/modules/process/workflow/process_flow_document.cpp#L1-L200)
 - [task_manager.h:28-38](file://src/core/task/task_manager.h#L28-L38)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
 
 **章节来源**
 - [process_execution_service.cpp:1-300](file://src/modules/process/execution/process_execution_service.cpp#L1-L300)
 - [process_monitor_service.cpp:1-300](file://src/modules/process/monitor/process_monitor_service.cpp#L1-L300)
 - [process_workflow_service.cpp:1-350](file://src/modules/process/workflow/process_workflow_service.cpp#L1-L350)
 - [task_manager.h:28-38](file://src/core/task/task_manager.h#L28-L38)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
 
 ### 设备管理组件
 
-设备管理器负责协调多个设备的同步操作。**更新** 集成了TaskManager用于设备连接和断开的异步管理，提供进度反馈和错误处理。
+设备管理器负责协调多个设备的同步操作。**更新** 集成了TaskManager用于设备连接和断开的异步管理，提供进度反馈和错误处理，并集成了MotionControl接口管理。
 
 ```mermaid
 classDiagram
@@ -507,6 +574,7 @@ class ProcessDeviceManager {
 +deviceStates : map~string, DeviceState~
 +communicationManager : CommunicationManager
 +taskManager : TaskManager
++motionControlManager : MotionControlManager
 +registerDevice(device) void
 +unregisterDevice(deviceId) void
 +getDevice(deviceId) ProcessDevice
@@ -537,10 +605,19 @@ class TaskManager {
 +isRunning(id) bool
 +percent(id) int
 }
+class MotionControlManager {
++motionControllers : map[string, MotionControl]
++activeController : MotionControl*
++getMotionControl(name) MotionControl*
++setMotionControl(name) bool
++createController(name) MotionControl*
+}
 ProcessDeviceManager --> CommunicationManager : "通信"
 ProcessDeviceManager --> TaskManager : "异步管理"
+ProcessDeviceManager --> MotionControlManager : "接口管理"
 ProcessDeviceCoordinator --> ProcessDeviceManager : "协调"
 ProcessDeviceCoordinator --> CommunicationManager : "广播"
+MotionControlManager --> ServiceRegistry : "注册服务"
 ```
 
 **图表来源**
@@ -548,10 +625,11 @@ ProcessDeviceCoordinator --> CommunicationManager : "广播"
 - [process_device_coordinator.h:1-200](file://src/modules/process/device/MotionControl/process_device_coordinator.h#L1-L200)
 - [communication_manager.h:1-200](file://src/modules/process/communication/communication_manager.h#L1-L200)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
 
 ### 工具路径服务组件
 
-工具路径服务负责生成和优化加工轨迹。**更新** 集成了TaskManager用于长时间路径计算任务的异步执行和进度跟踪。
+工具路径服务负责生成和优化加工轨迹。**更新** 集成了TaskManager用于长时间路径计算任务的异步执行和进度跟踪，并集成了MotionControl接口管理。
 
 ```mermaid
 flowchart LR
@@ -587,6 +665,14 @@ PathGen -.-> TM_TASK
 Optimize -.-> TM_TASK
 TM_TASK -.-> TM_PROGRESS
 TM_TASK -.-> TM_ABORT
+subgraph "MotionControl集成"
+MC_GET[获取控制器]
+MC_SET[设置控制器]
+MC_CREATE[创建控制器]
+end
+ToolMatch -.-> MC_GET
+PathGen -.-> MC_SET
+Optimize -.-> MC_CREATE
 ```
 
 **图表来源**
@@ -594,16 +680,18 @@ TM_TASK -.-> TM_ABORT
 - [process_tool_matcher.cpp:1-200](file://src/modules/process/toolpath/process_tool_matcher.cpp#L1-L200)
 - [process_toolpath_sorter.cpp:1-200](file://src/modules/process/toolpath/process_toolpath_sorter.cpp#L1-L200)
 - [task_manager.h:28-38](file://src/core/task/task_manager.h#L28-L38)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
 
 **章节来源**
 - [process_device_manager.cpp:1-300](file://src/modules/process/device/MotionControl/process_device_manager.cpp#L1-L300)
 - [process_device_coordinator.cpp:1-300](file://src/modules/process/device/MotionControl/process_device_coordinator.cpp#L1-L300)
 - [process_toolpath_service.cpp:1-300](file://src/modules/process/toolpath/process_toolpath_service.cpp#L1-L300)
 - [task_manager.h:28-38](file://src/core/task/task_manager.h#L28-L38)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
 
 ### 运行时服务组件
 
-运行时服务管理执行过程中的状态转换。**更新** 集成了TaskManager用于长时间运行任务的异步执行和状态管理。
+运行时服务管理执行过程中的状态转换。**更新** 集成了TaskManager用于长时间运行任务的异步执行和状态管理，并集成了MotionControl接口管理。
 
 ```mermaid
 stateDiagram-v2
@@ -643,121 +731,341 @@ WaitingResume --> [*]
 - [process_runtime.cpp:1-300](file://src/modules/process/runtime/process_runtime.cpp#L1-L300)
 - [process_state_machine.cpp:1-250](file://src/modules/process/runtime/process_state_machine.cpp#L1-L250)
 
-## TaskManager集成
+## Service层MotionControl接口管理
 
-### TaskManager架构设计
+### 接口设计原理
 
-TaskManager作为统一的任务管理器，为Process模块提供异步任务执行和进度跟踪功能：
+Service层的MotionControl接口管理提供了统一的运动控制器访问接口，通过GetMotionControl()和SetMotionControl()方法实现控制器的动态选择和管理。
 
 ```mermaid
 classDiagram
-class TaskManager {
-+tasks : QMap[TaskId, TaskEntity]
-+run(label, job) TaskId
-+requestAbort(id) void
-+isRunning(id) bool
-+percent(id) int
-+waitForDone(id, timeoutMs) bool
-+taskStarted(TaskId, QString) signal
-+taskProgressChanged(TaskId, int) signal
-+taskStepChanged(TaskId, QString) signal
-+taskFinished(TaskId, bool) signal
+class MotionControlInterface {
++GetMotionControl(name) MotionControl*
++SetMotionControl(name) bool
++GetAllMotionControllers() vector<string>
++GetCurrentController() MotionControl*
 }
-class TaskProgress {
-+callback : ProgressCallback
-+abortRequested : atomic<bool>
-+percent : atomic<int>
-+stepName : QString
-+setRange(min, max) void
-+setValue(value) void
-+setStepName(name) void
-+isAbortRequested() bool
-+requestAbort() void
-+percent() int
-+stepName() QString
-+setCallback(callback) void
+class MotionControlManager {
++motionControllers : map[string, MotionControl]
++activeController : MotionControl*
++getMotionControl(name) MotionControl*
++setMotionControl(name) bool
++createController(name) MotionControl*
++getAllControllers() vector<string>
 }
-class TaskEntity {
-+progress : TaskProgress
-+watcher : QFutureWatcher
-+success : bool
+class MotionControl {
++Connect() bool
++Disconnect() bool
++IsConnected() bool
++GetName() string
++GetType() MotionControlType
 }
-TaskManager --> TaskEntity : "管理"
-TaskEntity --> TaskProgress : "包含"
-TaskProgress --> TaskManager : "回调"
+class MCFactory {
++GetMotionController(name) MotionControl*
++GetAllMCName(vecName) void
+}
+MotionControlInterface --> MotionControlManager : "实现"
+MotionControlManager --> MotionControl : "管理"
+MotionControlManager --> MCFactory : "创建"
+MCFactory --> MotionControl : "实例化"
 ```
 
 **图表来源**
-- [task_manager.h:21-46](file://src/core/task/task_manager.h#L21-L46)
-- [task_progress.h:14-33](file://src/core/task/task_progress.h#L14-L33)
-- [task_manager.cpp:35-77](file://src/core/task/task_manager.cpp#L35-L77)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
+- [MCFactory.cpp:11-37](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L37)
+- [MotionControl.cpp:544-586](file://src/modules/process/device/MotionControl/MotionControl.cpp#L544-L586)
 
-### 异步任务执行流程
+### GetMotionControl()方法实现
 
-TaskManager提供了完整的异步任务执行生命周期管理：
+GetMotionControl()方法提供了运动控制器的获取功能，支持动态控制器选择和缓存管理：
 
 ```mermaid
 sequenceDiagram
 participant Client as 客户端
-participant TaskMgr as TaskManager
-participant Worker as 工作线程
-participant Watcher as QFutureWatcher
-participant Callback as 进度回调
-Client->>TaskMgr : run(label, job)
-TaskMgr->>TaskMgr : 创建TaskProgress
-TaskMgr->>TaskMgr : 创建TaskEntity
-TaskMgr->>Watcher : 创建QFutureWatcher
-TaskMgr->>Worker : QtConcurrent : : run(job)
-Worker->>Callback : 设置进度回调
-Worker->>Worker : 执行任务逻辑
-Worker->>Callback : setValue(百分比)
-Callback->>TaskMgr : taskProgressChanged信号
-TaskMgr->>Client : 进度更新
-Worker->>Worker : 可能抛出异常
-Worker->>TaskMgr : 捕获异常并标记失败
-TaskMgr->>Client : taskFinished信号
-TaskMgr->>TaskMgr : 清理TaskEntity
+participant Manager as MotionControlManager
+participant Factory as MCFactory
+participant Controller as MotionControl
+Client->>Manager : GetMotionControl(name)
+Manager->>Manager : 检查缓存
+alt 控制器已缓存
+Manager-->>Client : 返回缓存的控制器
+else 控制器未缓存
+Manager->>Factory : GetMotionController(name)
+Factory->>Factory : 创建新控制器
+Factory-->>Manager : 返回新控制器
+Manager->>Manager : 存储到缓存
+Manager-->>Client : 返回控制器
+end
+Client->>Controller : 使用控制器接口
+Controller-->>Client : 返回操作结果
 ```
 
 **图表来源**
-- [task_manager.cpp:35-77](file://src/core/task/task_manager.cpp#L35-L77)
-- [task_manager.cpp:112-125](file://src/core/task/task_manager.cpp#L112-L125)
-- [task_progress.h:17-33](file://src/core/task/task_progress.h#L17-L33)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
+- [MCFactory.h:16](file://src/modules/process/device/MotionControl/MCFactory.h#L16)
 
-### 任务进度跟踪机制
+### SetMotionControl()方法实现
 
-TaskManager提供了细粒度的进度跟踪和用户中断功能：
+SetMotionControl()方法实现了活动控制器的切换功能，支持运行时控制器替换：
 
 ```mermaid
 flowchart TD
-TaskStart[任务开始] --> CreateProgress["创建TaskProgress"]
-CreateProgress --> SetCallback["设置进度回调"]
-SetCallback --> ExecuteJob["执行任务作业"]
-ExecuteJob --> CheckAbort{"检查中断请求"}
-CheckAbort --> |否| UpdateProgress["更新进度值"]
-CheckAbort --> |是| AbortTask["标记任务中断"]
-UpdateProgress --> CheckAbort
-AbortTask --> MarkFailed["标记任务失败"]
-UpdateProgress --> JobComplete["任务完成"]
-JobComplete --> MarkSuccess["标记任务成功"]
-MarkSuccess --> Cleanup["清理资源"]
-MarkFailed --> Cleanup
-Cleanup --> TaskEnd[任务结束]
+Start([SetMotionControl调用]) --> CheckActive{"检查当前控制器"}
+CheckActive --> |相同名称| ReturnTrue["返回true"]
+CheckActive --> |不同名称| GetController["获取目标控制器"]
+GetController --> ConnectController["连接目标控制器"]
+ConnectController --> ConnectSuccess{"连接成功?"}
+ConnectSuccess --> |否| ReturnFalse["返回false"]
+ConnectSuccess --> |是| DisconnectOld["断开旧控制器"]
+DisconnectOld --> SwitchActive["切换活动控制器"]
+SwitchActive --> ReturnTrue
+ReturnFalse --> End([结束])
+ReturnTrue --> End
 ```
 
 **图表来源**
-- [task_manager.cpp:38-48](file://src/core/task/task_manager.cpp#L38-L48)
-- [task_progress.h:21-28](file://src/core/task/task_progress.h#L21-L28)
-- [task_manager.cpp:79-83](file://src/core/task/task_manager.cpp#L79-L83)
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
+- [MCFactory.h:16](file://src/modules/process/device/MotionControl/MCFactory.h#L16)
+
+### 配置驱动的控制器选择
+
+系统支持通过配置文件动态选择运动控制器类型，提供灵活的设备兼容性：
+
+```mermaid
+flowchart LR
+Config[配置文件] --> Parser[TOML解析器]
+Parser --> Settings[设置管理器]
+Settings --> ControllerSelector[控制器选择器]
+ControllerSelector --> MCFactory[MCFactory]
+MCFactory --> Controller[运动控制器]
+Controller --> DeviceManager[设备管理器]
+```
+
+**图表来源**
+- [Setting_MotionControl.cpp:80-88](file://src/modules/process/Setting/Setting_MotionControl.cpp#L80-L88)
+- [toml_config.cpp:15-46](file://src/core/settings/toml_config.cpp#L15-L46)
 
 **章节来源**
-- [task_manager.h:14-46](file://src/core/task/task_manager.h#L14-L46)
-- [task_manager.cpp:35-125](file://src/core/task/task_manager.cpp#L35-L125)
-- [task_progress.h:14-33](file://src/core/task/task_progress.h#L14-L33)
+- [MCFactory.cpp:11-37](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L37)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
+- [MotionControl.cpp:544-586](file://src/modules/process/device/MotionControl/MotionControl.cpp#L544-L586)
+- [Setting_MotionControl.cpp:80-88](file://src/modules/process/Setting/Setting_MotionControl.cpp#L80-L88)
+
+## 配置文件加载机制
+
+### TOML配置格式支持
+
+系统采用了现代化的TOML配置格式，提供了更好的可读性和维护性。**更新** 新增了完整的TOML配置加载和保存机制。
+
+```mermaid
+classDiagram
+class TomlConfig {
++filePath : QString
++load(path) bool
++save(path) bool
++readFrom(root) void
++writeTo(root) void
++configName() string
+}
+class ConfigLoader {
++loadConfig(path) ConfigData
++saveConfig(data, path) bool
++validateConfig(data) bool
+}
+class ConfigManager {
++configs : map[string, TomlConfig]
++loadAllConfigs() bool
++saveAllConfigs() bool
++getConfig(name) TomlConfig*
+}
+TomlConfig --> ConfigLoader : "实现"
+ConfigManager --> TomlConfig : "管理"
+ConfigLoader --> ConfigManager : "使用"
+```
+
+**图表来源**
+- [toml_config.cpp:15-76](file://src/core/settings/toml_config.cpp#L15-L76)
+- [toml_config.h:1-100](file://src/core/settings/toml_config.h#L1-L100)
+
+### 配置文件加载流程
+
+配置文件加载机制提供了完整的错误处理和回退策略：
+
+```mermaid
+sequenceDiagram
+participant App as 应用程序
+participant ConfigMgr as 配置管理器
+participant FileSys as 文件系统
+participant Parser as TOML解析器
+App->>ConfigMgr : loadConfig(path)
+ConfigMgr->>FileSys : 检查文件存在
+FileSys-->>ConfigMgr : 文件状态
+alt 文件不存在
+ConfigMgr->>ConfigMgr : 使用默认配置
+ConfigMgr-->>App : 返回true
+else 文件存在
+ConfigMgr->>Parser : 解析TOML内容
+Parser-->>ConfigMgr : 解析结果
+alt 解析成功
+ConfigMgr->>ConfigMgr : 应用配置值
+ConfigMgr-->>App : 返回true
+else 解析失败
+ConfigMgr->>ConfigMgr : 记录错误日志
+ConfigMgr-->>App : 返回false
+end
+end
+```
+
+**图表来源**
+- [toml_config.cpp:15-46](file://src/core/settings/toml_config.cpp#L15-L46)
+
+### 配置验证和错误处理
+
+系统实现了严格的配置验证机制，确保配置数据的完整性和有效性：
+
+```mermaid
+flowchart TD
+LoadConfig[加载配置] --> ParseTOML[解析TOML]
+ParseTOML --> ValidateSchema[验证模式]
+ValidateSchema --> SchemaValid{"模式有效?"}
+SchemaValid --> |否| LogError[记录解析错误]
+SchemaValid --> |是| ValidateValues[验证数值范围]
+ValidateValues --> ValuesValid{"数值有效?"}
+ValuesValid --> |否| LogWarning[记录配置警告]
+ValuesValid --> |是| ApplyConfig[应用配置]
+LogError --> ReturnFalse[返回false]
+LogWarning --> ApplyConfig
+ApplyConfig --> ReturnTrue[返回true]
+```
+
+**图表来源**
+- [toml_config.cpp:35-45](file://src/core/settings/toml_config.cpp#L35-L45)
+
+**章节来源**
+- [toml_config.cpp:15-76](file://src/core/settings/toml_config.cpp#L15-L76)
+- [toml_config.h:1-100](file://src/core/settings/toml_config.h#L1-L100)
+
+## MCFactory工厂模式
+
+### 工厂设计模式
+
+MCFactory实现了标准的工厂设计模式，提供了运动控制器的统一创建和管理接口。
+
+```mermaid
+classDiagram
+class MCFactory {
++GetMotionController(name) MotionControl*
++GetAllMCName(vecName) void
+-m_ACSCMHP : ACSMotionControl
+-m_GTN : GTNMotionControl
+-m_SimulatorCMHP : SimulateCMHPMotionControl
+}
+class MotionControl {
++virtual Connect() bool
++virtual Disconnect() bool
++virtual IsConnected() bool
++virtual GetName() string
++virtual GetType() MotionControlType
+}
+class ACSMotionControl {
++Connect() bool override
++Disconnect() bool override
++GetName() string override
+}
+class GTNMotionControl {
++Connect() bool override
++Disconnect() bool override
++GetName() string override
+}
+class SimulateCMHPMotionControl {
++Connect() bool override
++Disconnect() bool override
++GetName() string override
+}
+MCFactory --> MotionControl : "创建"
+MCFactory --> ACSMotionControl : "静态实例"
+MCFactory --> GTNMotionControl : "静态实例"
+MCFactory --> SimulateCMHPMotionControl : "静态实例"
+MotionControl <|-- ACSMotionControl
+MotionControl <|-- GTNMotionControl
+MotionControl <|-- SimulateCMHPMotionControl
+```
+
+**图表来源**
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
+- [MCFactory.cpp:1-37](file://src/modules/process/device/MotionControl/MCFactory.cpp#L1-37)
+- [MotionControl.h:1-200](file://src/modules/process/device/MotionControl/MotionControl.h#L1-L200)
+
+### 动态控制器创建
+
+MCFactory支持根据名称动态创建不同的运动控制器实例：
+
+```mermaid
+flowchart TD
+CreateRequest[创建控制器请求] --> CheckName{检查控制器名称}
+CheckName --> |ACSCMHP| CreateACS[创建ACSCMHP控制器]
+CheckName --> |GTN| CreateGTN[创建GTN控制器]
+CheckName --> |SimulatorCMHP| CreateSim[创建仿真控制器]
+CheckName --> |其他| CreateDefault[创建默认仿真控制器]
+CreateACS --> ReturnACS[返回ACSCMHP实例]
+CreateGTN --> ReturnGTN[返回GTN实例]
+CreateSim --> ReturnSim[返回仿真实例]
+CreateDefault --> ReturnSim
+ReturnACS --> End([结束])
+ReturnGTN --> End
+ReturnSim --> End
+```
+
+**图表来源**
+- [MCFactory.cpp:11-24](file://src/modules/process/device/MotionControl/MCFactory.cpp#L11-L24)
+
+### 静态实例管理
+
+MCFactory使用静态成员变量管理不同类型的运动控制器实例，确保全局唯一性：
+
+```mermaid
+classDiagram
+class MCFactory {
++static m_ACSCMHP : ACSMotionControl
++static m_GTN : GTNMotionControl
++static m_SimulatorCMHP : SimulateCMHPMotionControl
++GetMotionController(name) MotionControl*
++GetAllMCName(vecName) void
+}
+class ACSMotionControl {
++ACSMotionControl()
++~ACSMotionControl()
++Connect() bool
++Disconnect() bool
+}
+class GTNMotionControl {
++GTNMotionControl()
++~GTNMotionControl()
++Connect() bool
++Disconnect() bool
+}
+class SimulateCMHPMotionControl {
++SimulateCMHPMotionControl()
++~SimulateCMHPMotionControl()
++Connect() bool
++Disconnect() bool
+}
+MCFactory --> ACSMotionControl : "静态管理"
+MCFactory --> GTNMotionControl : "静态管理"
+MCFactory --> SimulateCMHPMotionControl : "静态管理"
+```
+
+**图表来源**
+- [MCFactory.cpp:3-9](file://src/modules/process/device/MotionControl/MCFactory.cpp#L3-L9)
+- [MCFactory.h:19-25](file://src/modules/process/device/MotionControl/MCFactory.h#L19-L25)
+
+**章节来源**
+- [MCFactory.cpp:1-37](file://src/modules/process/device/MotionControl/MCFactory.cpp#L1-L37)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
 
 ## 依赖关系分析
 
-Process模块内部的依赖关系呈现清晰的层次结构。**更新** TaskManager作为核心依赖被集成到各个服务层中。
+Process模块内部的依赖关系呈现清晰的层次结构。**更新** TaskManager作为核心依赖被集成到各个服务层中，MCFactory作为运动控制器创建的核心组件。
 
 ```mermaid
 graph TB
@@ -767,6 +1075,8 @@ Spdlog[日志库]
 Toml[TOML配置]
 TaskMgr[TaskManager]
 DialogTask[DialogTaskManager]
+MCFactory[MCFactory]
+MotionCtl[MotionControl]
 end
 subgraph "核心内核"
 Kernel[Kernel]
@@ -789,6 +1099,7 @@ SysSvc[系统服务]
 License[许可证]
 LogMod[日志模块]
 MsgMod[消息模块]
+CfgMgr[配置管理器]
 end
 Qt --> Kernel
 Spdlog --> SysSvc
@@ -809,11 +1120,15 @@ WorkflowSvc --> CommMgr
 WorkflowSvc --> TaskMgr
 DeviceMgr --> ToolpathSvc
 DeviceMgr --> TaskMgr
+DeviceMgr --> MCFactory
 SysSvc --> License
 SysSvc --> LogMod
 SysSvc --> MsgMod
+SysSvc --> CfgMgr
 TaskMgr --> DialogTask
 DialogTask --> TaskMgr
+MCFactory --> MotionCtl
+MotionCtl --> DeviceMgr
 ```
 
 **图表来源**
@@ -821,18 +1136,20 @@ DialogTask --> TaskMgr
 - [kernel.cpp:1-200](file://src/core/kernel/kernel.cpp#L1-L200)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
 - [dialog_task_manager.h:18-44](file://src/app/dialog/dialog_task_manager.h#L18-L44)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
 
 **章节来源**
 - [process_module.cpp:1-250](file://src/modules/process/process_module.cpp#L1-L250)
 - [module_registry.cpp:1-200](file://src/core/kernel/module_registry.cpp#L1-L200)
 - [task_manager.h:1-46](file://src/core/task/task_manager.h#L1-L46)
 - [dialog_task_manager.h:18-44](file://src/app/dialog/dialog_task_manager.h#L18-L44)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
 
 ## 性能考虑
 
 ### 并发处理机制
 
-Process模块采用了多线程并发设计来提高执行效率。**更新** TaskManager集成了异步任务执行，提供了更好的并发性能和用户体验。
+Process模块采用了多线程并发设计来提高执行效率。**更新** TaskManager集成了异步任务执行，提供了更好的并发性能和用户体验。同时新增了MotionControl接口的线程安全性考虑。
 
 ```mermaid
 sequenceDiagram
@@ -841,41 +1158,50 @@ participant TaskMgr as TaskManager
 participant ExecThread as 执行线程
 participant MonitorThread as 监控线程
 participant IOThread as IO线程
+participant MotionCtlMgr as MotionControlManager
 Main->>TaskMgr : 提交异步任务
 TaskMgr->>ExecThread : 启动执行任务
 Main->>MonitorThread : 启动监控任务
 Main->>IOThread : 启动IO任务
+Main->>MotionCtlMgr : 获取运动控制器
+MotionCtlMgr->>MotionCtlMgr : 线程安全检查
+MotionCtlMgr-->>Main : 返回控制器
 par 并发执行
 ExecThread->>ExecThread : 执行加工指令
 ExecThread->>TaskMgr : 更新任务进度
 TaskMgr->>Main : 异步进度通知
 MonitorThread->>MonitorThread : 监控设备状态
 IOThread->>IOThread : 处理通信数据
+MotionCtlMgr->>MotionCtlMgr : 更新控制器状态
 end
 ExecThread->>TaskMgr : 任务完成
 TaskMgr->>Main : 任务完成通知
 MonitorThread->>Main : 状态更新通知
 IOThread->>Main : 数据传输完成
+MotionCtlMgr->>Main : 控制器状态更新
 ```
 
 ### 内存管理策略
 
-模块采用了智能指针和RAII技术确保内存安全。**更新** TaskManager集成了自动资源清理机制，确保任务完成后的正确资源释放。
+模块采用了智能指针和RAII技术确保内存安全。**更新** TaskManager集成了自动资源清理机制，确保任务完成后的正确资源释放。同时新增了MotionControl对象的生命周期管理。
 
 - 使用std::shared_ptr管理服务对象生命周期
 - 使用std::unique_ptr管理临时资源
 - 实现自定义删除器处理复杂对象释放
 - 采用对象池减少频繁内存分配
-- **新增** TaskManager自动清理已完成任务的资源
+- **新增** MotionControl对象缓存和复用机制
+- **新增** 静态工厂实例的内存管理
 
 ### 缓存机制
 
-为了提高性能，模块实现了多层次缓存。**更新** TaskManager集成了任务结果缓存和进度状态缓存。
+为了提高性能，模块实现了多层次缓存。**更新** TaskManager集成了任务结果缓存和进度状态缓存，同时新增了MotionControl控制器的缓存机制。
 
 - 服务实例缓存：避免重复创建昂贵的服务对象
 - 设备状态缓存：减少设备查询开销
 - 工具路径缓存：重用已计算的加工轨迹
 - 配置参数缓存：快速访问常用设置
+- **新增** 运动控制器缓存：重用已创建的控制器实例
+- **新增** 配置文件缓存：避免重复解析配置
 - **新增** 任务进度缓存：避免重复计算进度状态
 
 ## 故障排除指南
@@ -904,7 +1230,7 @@ ContactSupport --> Escalate["升级处理"]
 
 ### 错误处理机制
 
-模块实现了完善的错误处理和恢复机制。**更新** TaskManager增强了异常处理和日志记录功能。
+模块实现了完善的错误处理和恢复机制。**更新** TaskManager增强了异常处理和日志记录功能，同时新增了MotionControl接口的错误处理。
 
 ```mermaid
 classDiagram
@@ -944,21 +1270,31 @@ class TaskException {
 +exceptionType : string
 +handleException() void
 }
+class MotionControlException {
++extends ProcessException
++controllerName : string
++operation : string
++errorCode : MotionControlErrorCode
++handleException() void
+}
 ProcessException <|-- ServiceException
 ProcessException <|-- DeviceException
 ProcessException <|-- WorkflowException
 ProcessException <|-- TaskException
+ProcessException <|-- MotionControlException
 ```
 
 **图表来源**
 - [process_system_message.cpp:1-200](file://src/modules/process/System/MessageModule.cpp#L1-L200)
 - [process_system_log.cpp:1-200](file://src/modules/process/System/LogModule.cpp#L1-L200)
 - [task_manager.cpp:62-72](file://src/core/task/task_manager.cpp#L62-L72)
+- [MotionControl.cpp:544-586](file://src/modules/process/device/MotionControl/MotionControl.cpp#L544-L586)
 
 **章节来源**
 - [process_system_message.cpp:1-250](file://src/modules/process/System/MessageModule.cpp#L1-L250)
 - [process_system_log.cpp:1-250](file://src/modules/process/System/LogModule.cpp#L1-L250)
 - [task_manager.cpp:62-72](file://src/core/task/task_manager.cpp#L62-L72)
+- [MotionControl.cpp:544-586](file://src/modules/process/device/MotionControl/MotionControl.cpp#L544-L586)
 
 ### TaskManager错误处理
 
@@ -982,13 +1318,39 @@ Cleanup --> TaskEnd[任务结束]
 - [task_manager.cpp:58-77](file://src/core/task/task_manager.cpp#L58-L77)
 - [task_manager.cpp:112-125](file://src/core/task/task_manager.cpp#L112-L125)
 
+### MotionControl接口错误处理
+
+MotionControl接口提供了完善的错误处理和状态管理：
+
+```mermaid
+flowchart TD
+OperationStart[操作开始] --> ValidateInput["验证输入参数"]
+ValidateInput --> InputValid{"输入有效?"}
+InputValid --> |否| LogInvalidInput["记录无效输入"]
+InputValid --> |是| CheckConnection["检查控制器连接"]
+CheckConnection --> Connected{"控制器已连接?"}
+Connected --> |否| LogNotConnected["记录未连接错误"]
+Connected --> |是| ExecuteOperation["执行操作"]
+ExecuteOperation --> OperationSuccess{"操作成功?"}
+OperationSuccess --> |否| LogOperationError["记录操作错误"]
+OperationSuccess --> |是| UpdateState["更新控制器状态"]
+LogInvalidInput --> ReturnError[返回错误]
+LogNotConnected --> ReturnError
+LogOperationError --> ReturnError
+UpdateState --> ReturnSuccess[返回成功]
+```
+
+**图表来源**
+- [MotionControl.cpp:544-586](file://src/modules/process/device/MotionControl/MotionControl.cpp#L544-L586)
+
 **章节来源**
 - [task_manager.cpp:58-77](file://src/core/task/task_manager.cpp#L58-L77)
 - [task_manager.cpp:112-125](file://src/core/task/task_manager.cpp#L112-L125)
+- [MotionControl.cpp:544-586](file://src/modules/process/device/MotionControl/MotionControl.cpp#L544-L586)
 
 ## 结论
 
-Process模块通过采用微内核架构和模块化设计，成功实现了激光切割控制系统中复杂服务管理的需求。**更新** 新增的TaskManager集成为系统带来了显著的改进：
+Process模块通过采用微内核架构和模块化设计，成功实现了激光切割控制系统中复杂服务管理的需求。**更新** 新增的Service层MotionControl接口管理和配置文件加载机制带来了显著的改进：
 
 ### 主要改进
 
@@ -996,7 +1358,10 @@ Process模块通过采用微内核架构和模块化设计，成功实现了激�
 2. **增强用户体验**：DialogTaskManager提供实时进度显示和用户中断功能
 3. **更好的错误处理**：TaskManager集成了完善的异常处理和日志记录
 4. **精细的设备控制**：TaskManager支持设备连接和断开的异步管理
-5. **性能优化**：多线程并发和缓存优化策略得到进一步增强
+5. ****新增** 统一的运动控制器接口**：通过GetMotionControl()和SetMotionControl()方法实现控制器的动态管理
+6. ****新增** 配置驱动的设备选择**：支持基于TOML配置文件的运动控制器类型选择
+7. ****新增** 工厂模式设计**：MCFactory提供标准化的运动控制器创建和管理机制
+8. ****新增** 线程安全的接口设计**：确保多线程环境下的控制器访问安全
 
 ### 架构优势
 
@@ -1006,6 +1371,8 @@ Process模块通过采用微内核架构和模块化设计，成功实现了激�
 4. **性能优异**：多线程并发和缓存优化策略
 5. **易于维护**：清晰的代码结构和文档支持
 6. **用户体验佳**：实时进度反馈和用户交互支持
+7. **配置灵活**：支持运行时设备类型切换
+8. **开发友好**：标准化的接口设计和工厂模式
 
 ### 未来发展方向
 
@@ -1016,6 +1383,8 @@ Process模块通过采用微内核架构和模块化设计，成功实现了激�
 - 改进用户界面交互体验
 - **新增** TaskManager的性能监控和优化
 - **新增** 更精细的任务优先级管理
+- **新增** 运动控制器的热插拔支持
+- **新增** 配置文件的实时重载机制
 
 **章节来源**
 - [task_manager.h:14-46](file://src/core/task/task_manager.h#L14-L46)
@@ -1023,3 +1392,5 @@ Process模块通过采用微内核架构和模块化设计，成功实现了激�
 - [app_command_context.h:7-28](file://src/app/app_command_context.h#L7-L28)
 - [app_context.h:24](file://src/app/app_context.h#L24)
 - [main_window.h:12](file://src/app/main_window.h#L12)
+- [MCFactory.h:13-28](file://src/modules/process/device/MotionControl/MCFactory.h#L13-L28)
+- [toml_config.cpp:15-76](file://src/core/settings/toml_config.cpp#L15-L76)

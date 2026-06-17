@@ -8,6 +8,7 @@
 
 #include "core/kinematics/machine_kinematics.h"
 #include "modules/process/i_process_facade.h"
+#include "modules/process/process_module.h"
 
 /**
  * @brief Right-panel widget shown when the "执行" tab is active.
@@ -30,6 +31,8 @@ public:
     void updateRunState(lcnc::ProcessRunState state);
     void updateAxisEnabled(const QString& axis, bool enabled);
     void updateDigitalOutput(const QString& outputName, const QString& channel, bool value);
+    /// 根据 ProcessModule 推送的描述符列表重建 IO 栏按钮。
+    void setDigitalOutputDescriptors(const QList<DigitalOutputDescriptor>& descriptors);
     void appendLogMessage(const QString& level, const QString& message);
 
 signals:

@@ -136,22 +136,60 @@ void WidgetLaserControl::buildIoGroup()
 {
     m_ioGroup = new QGroupBox(tr("IO 状态"), this);
     auto* grid = new QGridLayout(m_ioGroup);
-    const QStringList names = { tr("激光"), tr("吹气"), tr("夹头"), tr("水冷"), tr("气泵") };
-    for (int index = 0; index < names.size(); ++index) {
-        const QString name = names.at(index);
-        auto* button = new QPushButton(name, m_ioGroup);
+    grid->setContentsMargins(4, 4, 4, 4);
+    // 初始为空 — 由 ProcessModule::digitalOutputDescriptorsChanged 通过
+    // setDigitalOutputDescriptors 注入按钮（依据 settings 中 showInMain 字段）。
+    m_controlLayout->addWidget(m_ioGroup);
+}
+
+void WidgetLaserControl::setDigitalOutputDescriptors(const QList<DigitalOutputDescriptor>& descriptors)
+{
+    if (!m_ioGroup)
+        return;
+    auto* layout = m_ioGroup->layout();
+    if (!layout) {
+        layout = new QGridLayout(m_ioGroup);
+        layout->setContentsMargins(4, 4, 4, 4);
+    }
+    auto* grid = qobject_cast<QGridLayout*>(layout);
+
+    // 清空旧按钮 / 占位 label。
+    while (QLayoutItem* item = layout->takeAt(0)) {
+        if (QWidget* w = item->widget())
+            delete w;
+        delete item;
+    }
+    m_ioButtons.clear();
+
+    if (descriptors.isEmpty()) {
+        auto* placeholder = new QLabel(tr("未配置主界面 IO"), m_ioGroup);
+        placeholder->setStyleSheet("color: gray; font-size: 11px;");
+        if (grid)
+            grid->addWidget(placeholder, 0, 0, 1, 2);
+        else
+            layout->addWidget(placeholder);
+        return;
+    }
+
+    for (int index = 0; index < descriptors.size(); ++index) {
+        const DigitalOutputDescriptor& desc = descriptors.at(index);
+        const QString display = desc.name.isEmpty() ? desc.channel : desc.name;
+        auto* button = new QPushButton(display, m_ioGroup);
         button->setCheckable(true);
         button->setMinimumHeight(30);
-        button->setToolTip(tr("点击切换 %1 输出").arg(name));
-        m_ioButtons.insert(name, button);
-        updateIoButtonStyle(name, false);
-        connect(button, &QPushButton::clicked, this, [this, name](bool checked) {
-            updateIoButtonStyle(name, checked);
-            emit digitalOutputToggled(name, checked);
+        button->setProperty("channel", desc.channel);
+        button->setToolTip(tr("点击切换 %1 输出 (channel=%2)").arg(display, desc.channel));
+        m_ioButtons.insert(display, button);
+        updateIoButtonStyle(display, false);
+        connect(button, &QPushButton::clicked, this, [this, display](bool checked) {
+            updateIoButtonStyle(display, checked);
+            emit digitalOutputToggled(display, checked);
         });
-        grid->addWidget(button, index / 2, index % 2);
+        if (grid)
+            grid->addWidget(button, index / 2, index % 2);
+        else
+            layout->addWidget(button);
     }
-    m_controlLayout->addWidget(m_ioGroup);
 }
 
 void WidgetLaserControl::buildDeviceGroup()

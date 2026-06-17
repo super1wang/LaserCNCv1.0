@@ -63,7 +63,6 @@
     <file alias="process/setting/Setting_Axis.ui">../src/modules/process/Setting/Setting_Axis.ui</file>
     <file alias="process/setting/Setting_Analog.ui">../src/modules/process/Setting/Setting_Analog.ui</file>
     <file alias="process/setting/Setting_Digital.ui">../src/modules/process/Setting/Setting_Digital.ui</file>
-    <file alias="process/setting/Setting_IOIndex.ui">../src/modules/process/Setting/Setting_IOIndex.ui</file>
     <file alias="process/setting/Setting_Gas.ui">../src/modules/process/Setting/Setting_Gas.ui</file>
     <file alias="process/setting/Setting_Water.ui">../src/modules/process/Setting/Setting_Water.ui</file>
     <file alias="process/setting/Setting_Monitor.ui">../src/modules/process/Setting/Setting_Monitor.ui</file>

@@ -889,6 +889,11 @@ void MainWindow::createRightPanel()
             m_laserControl, &WidgetLaserControl::updateAxisEnabled);
         connect(process, &ProcessModule::digitalOutputChanged,
             m_laserControl, &WidgetLaserControl::updateDigitalOutput);
+        connect(process, &ProcessModule::digitalOutputDescriptorsChanged,
+            m_laserControl, &WidgetLaserControl::setDigitalOutputDescriptors);
+        // 同步当前已知的描述符（init 期间已 emit 一次，但此 connect 可能晚于
+        // 那次 emit —— 这里补一次推送，保证视图初始化）。
+        m_laserControl->setDigitalOutputDescriptors(process->mainPanelDigitalOutputs());
         connect(process, &ProcessModule::axisPositionChanged, this,
             [this](const QString& axis, double value) {
             m_laserControl->updateAxisPosition(axis, value);

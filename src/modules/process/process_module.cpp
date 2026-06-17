@@ -7,6 +7,7 @@
 #include "core/task/task_manager.h"
 #include "core/task/task_progress.h"
 #include "modules/process/execution/process_workflow_executor.h"
+#include "modules/process/Setting/BuiltinIODefs.h"
 #include "modules/process/Setting/Settings.h"
 #include "modules/process/System/Service.h"
 #include "modules/process/workflow/process_flow_store.h"
@@ -187,6 +188,14 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     SETTINGS->LoadSettings("./Peripheral.toml");
     SETTINGS->LoadSettings("./config.toml");
 
+    // 用静态预设清单填充 settings 中缺失的 IO 子表（已存在的不动），保证
+    // 即使旧 toml 没有新字段也能开箱即用。
+    seedDefaultIOTables();
+
+    // 注册自定义信号类型，跨线程发射 / Qt::QueuedConnection 时需要。
+    qRegisterMetaType<DigitalOutputDescriptor>("DigitalOutputDescriptor");
+    qRegisterMetaType<QList<DigitalOutputDescriptor>>("QList<DigitalOutputDescriptor>");
+
     // 设置机台构型（从 MachineConfigurationService）。
     auto machineConfig = kernel.services().getService<lcnc::MachineConfigurationService>();
     if (machineConfig) {
@@ -232,6 +241,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 
     m_initialized = true;
+    // 首次发射主界面 IO 描述符，让 WidgetLaserControl 据此搭建 IO 栏。
+    emit digitalOutputDescriptorsChanged(mainPanelDigitalOutputs());
     LCNC_INFO(lcnc::LogCode::Generic, "ProcessModule init done");
     return true;
 }
@@ -1092,6 +1103,105 @@ void ProcessModule::pollHardwareStatus()
         }
         return out;
     }));
+}
+
+namespace {
+
+// 从 settings 一条 IO 子表里读取四个用得着的字段；兼容旧版 array 写法。
+struct IOEntry
+{
+    QString channel;       // toml key
+    QString name;
+    QString index;
+    bool    active{true};
+    bool    enabled{true};
+    bool    showInMain{false};
+};
+
+bool extractIOEntry(const std::string& tomlKey, const value& v, IOEntry& out)
+{
+    out.channel = QString::fromStdString(tomlKey);
+    if (v.is_table()) {
+        const auto& t = v.as_table();
+        if (t.count("name"))       out.name       = QString::fromStdString(t.at("name").as_string());
+        if (t.count("index"))      out.index      = QString::fromStdString(t.at("index").as_string());
+        if (t.count("active"))     out.active     = t.at("active").as_boolean();
+        if (t.count("enabled"))    out.enabled    = t.at("enabled").as_boolean();
+        if (t.count("showInMain")) out.showInMain = t.at("showInMain").as_boolean();
+        return true;
+    }
+    if (v.is_array()) {
+        const auto& a = v.as_array();
+        if (a.size() >= 1 && a.at(0).is_string()) out.name  = QString::fromStdString(a.at(0).as_string());
+        if (a.size() >= 2 && a.at(1).is_string()) out.index = QString::fromStdString(a.at(1).as_string());
+        return true;
+    }
+    return false;
+}
+
+} // namespace
+
+void ProcessModule::seedDefaultIOTables()
+{
+    using lcnc::process::BuiltinIODefList;
+
+    auto seed = [](SettingSection section, const BuiltinIODefList& list) {
+        table sectionTable = SETTINGS->GetTable(section);
+        bool changed = false;
+        for (int i = 0; i < list.count; ++i) {
+            const auto& def = list.items[i];
+            const std::string sub = def.sectionKey;
+            if (!sectionTable.count(sub))
+                sectionTable[sub] = table{};
+            table& bucket = sectionTable[sub].as_table();
+            // 已有该 key（不论 array 还是 sub-table）就保留用户值。
+            if (bucket.count(def.tomlKey))
+                continue;
+            table entry;
+            entry["name"]        = std::string(def.nameZh);
+            entry["index"]       = std::string(def.defaultIndex);
+            entry["active"]      = def.defaultActive;
+            entry["enabled"]     = def.defaultEnabled;
+            entry["showInMain"]  = def.defaultShowInMain;
+            entry["builtin"]     = true;
+            bucket[def.tomlKey] = entry;
+            changed = true;
+        }
+        if (changed)
+            SETTINGS->SetTable(true, section, sectionTable);
+    };
+
+    seed(SettingSection::Digital, lcnc::process::builtinDigitalOUT());
+    seed(SettingSection::Digital, lcnc::process::builtinDigitalIN());
+    seed(SettingSection::Analog,  lcnc::process::builtinAnalogOUT());
+    seed(SettingSection::Analog,  lcnc::process::builtinAnalogIN());
+}
+
+QList<DigitalOutputDescriptor> ProcessModule::mainPanelDigitalOutputs() const
+{
+    QList<DigitalOutputDescriptor> out;
+    table tableDigital = SETTINGS->GetTable(SettingSection::Digital);
+    if (!tableDigital.count("DigitalOUT"))
+        return out;
+    const auto& bucket = tableDigital.at("DigitalOUT").as_table();
+    for (const auto& kv : bucket) {
+        IOEntry entry;
+        if (!extractIOEntry(kv.first.data(), kv.second, entry))
+            continue;
+        if (!entry.enabled || !entry.showInMain || entry.name.isEmpty())
+            continue;
+        DigitalOutputDescriptor d;
+        d.channel = entry.channel;
+        d.name    = entry.name;
+        d.active  = entry.active;
+        out.push_back(d);
+    }
+    return out;
+}
+
+void ProcessModule::refreshIOFromSettings()
+{
+    emit digitalOutputDescriptorsChanged(mainPanelDigitalOutputs());
 }
 
 void ProcessModule::safeStopProcessOutputs()

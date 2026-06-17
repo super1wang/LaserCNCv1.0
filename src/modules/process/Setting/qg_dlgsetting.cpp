@@ -15,7 +15,6 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 
 	// 右侧设置页
 	dlgMotionControlSetting = new Dialog_Setting_MotionControl	(this);
-	dlgIOIndexSetting		= new Dialog_Setting_IOIndex		(this);
 	dlgDigitalSetting		= new Dialog_Setting_Digital		(this);
 	dlgAnalogSetting		= new Dialog_Setting_Analog			(this);
 	dlgLaserSetting			= new Dialog_Setting_Laser			(this);
@@ -27,9 +26,8 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 	dlgMonitorSetting		= new Dialog_Setting_Monitor		(this);
 	dlgLoadingPosSetting	= new Dialog_Setting_LoadingPos		(this);
 	dlgCameraSetting		= new Dialog_Setting_Camera			(this);
-	
+
 	ui.stackedWidget_Setting_Content->insertWidget(Page::MotionController,	dlgMotionControlSetting);
-	ui.stackedWidget_Setting_Content->insertWidget(Page::IOIndex,			dlgIOIndexSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Digital, 			dlgDigitalSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Analog,			dlgAnalogSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Laser,				dlgLaserSetting);
@@ -101,21 +99,18 @@ void QG_dlgSetting::CreateMenu()
 	AxisSpeedItem->setData(0, Qt::UserRole, AXIS_SPEED);
 	m_mapMenu[AXIS_SPEED] = AxisSpeedItem;
 
-	// I/O Index
-	QTreeWidgetItem* IOIndexItem = new QTreeWidgetItem(ExternalItem);
-	IOIndexItem->setText(0, tr("I/O Index"));
-	IOIndexItem->setData(0, Qt::UserRole, IO_INDEX);
-	m_mapMenu[IO_INDEX] = IOIndexItem;
+	// I/O 父节点已合并为两个独立顶层项 DIGITAL_IO / ANALOG_IO，无需 IO_INDEX 容器。
+	// （IO_INDEX 枚举仍保留以兼容老权限脚本，但不再创建 QTreeWidgetItem。）
 
 	// Digital IN/OUT
-	QTreeWidgetItem* DigitalIOItem = new QTreeWidgetItem(IOIndexItem);
-	DigitalIOItem->setText(0, tr("Digital IN/OUT"));
+	QTreeWidgetItem* DigitalIOItem = new QTreeWidgetItem(ExternalItem);
+	DigitalIOItem->setText(0, tr("Digital IO"));
 	DigitalIOItem->setData(0, Qt::UserRole, DIGITAL_IO);
 	m_mapMenu[DIGITAL_IO] = DigitalIOItem;
 
 	// Analog IN/OUT
-	QTreeWidgetItem* AnalogIOItem = new QTreeWidgetItem(IOIndexItem);
-	AnalogIOItem->setText(0, tr("Analog IN/OUT"));
+	QTreeWidgetItem* AnalogIOItem = new QTreeWidgetItem(ExternalItem);
+	AnalogIOItem->setText(0, tr("Analog IO"));
 	AnalogIOItem->setData(0, Qt::UserRole, ANALOG_IO);
 	m_mapMenu[ANALOG_IO] = AnalogIOItem;
 
@@ -211,7 +206,6 @@ void QG_dlgSetting::UpdateMenu(int iPermissionLevel)
 	dlgDigitalSetting->SetIDEnabled(false);
 	dlgAnalogSetting->SetIDEnabled(false);
 
-	dlgIOIndexSetting->SetIndexEnabled(false);
 	dlgDigitalSetting->SetIndexEnabled(false);
 	dlgAnalogSetting->SetIndexEnabled(false);
 
@@ -256,8 +250,8 @@ void QG_dlgSetting::UpdateMenu(int iPermissionLevel)
 		// 管理员
 		if (iPermissionLevel > (int)PermissionLevel::Technician)
 		{
-			m_mapMenu[IO_INDEX]->setHidden(false);
-			m_mapMenu[IO_INDEX]->setExpanded(false);
+			m_mapMenu[DIGITAL_IO]->setHidden(false);
+			m_mapMenu[ANALOG_IO]->setHidden(false);
 		}
 	}
 
@@ -280,7 +274,6 @@ void QG_dlgSetting::UpdateMenu(int iPermissionLevel)
 		dlgLaserSetting->ui.checkBox_SignalSource_bSignal->setEnabled(true);
 		dlgLaserSetting->ui.lineEdit_Laser_fResolution->setEnabled(true);
 
-		dlgIOIndexSetting->SetIndexEnabled(true);
 		dlgDigitalSetting->SetIndexEnabled(true);
 		dlgAnalogSetting->SetIndexEnabled(true);
 
@@ -330,7 +323,7 @@ void QG_dlgSetting::SwitchItem(QTreeWidgetItem* item, int column)
 	}
 	case Menu::MOTION_CONTROLLER:	ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);	break;
 	case Menu::AXIS_SPEED:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);				break;
-	case Menu::IO_INDEX:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::IOIndex);			break;
+	case Menu::IO_INDEX:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Digital);			break;	// 兼容旧菜单
 	case Menu::DIGITAL_IO:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Digital);			break;
 	case Menu::ANALOG_IO:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Analog);			break;
 	case Menu::LASER:				ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Laser);				break;
@@ -361,7 +354,6 @@ void QG_dlgSetting::InitSetting()
 	try {
 		dlgMotionControlSetting	->InitSetting();
 		dlgMotionControlSetting->setUI();
-		dlgIOIndexSetting		->InitSetting();
 		dlgDigitalSetting		->InitSetting();
 		dlgAnalogSetting		->InitSetting();
 		dlgLaserSetting			->InitSetting();
@@ -396,7 +388,6 @@ static void SafeSetPage(const char* name, std::function<void()> fn)
 void QG_dlgSetting::UpdatePage()
 {
 	SafeSetPage("MotionControl",	[&]{ dlgMotionControlSetting	->SetPage(); });
-	SafeSetPage("IOIndex",			[&]{ dlgIOIndexSetting		->SetPage(); });
 	SafeSetPage("Digital",			[&]{ dlgDigitalSetting		->SetPage(); });
 	SafeSetPage("Analog",			[&]{ dlgAnalogSetting		->SetPage(); });
 	SafeSetPage("Laser",			[&]{ dlgLaserSetting			->SetPage(); });
@@ -465,9 +456,6 @@ void QG_dlgSetting::GetChanged()
 
 	dlgAnalogSetting->GetPage(m_tableSettings["Analog"].as_table());
 	dlgAnalogSetting->GetChanged(m_tableSettings["Analog"].as_table(), m_tableChanged["Analog"].as_table());
-	
-	dlgIOIndexSetting->GetPage(m_tableSettings["Digital"].as_table(), m_tableSettings["Analog"].as_table());
-	dlgIOIndexSetting->GetChanged(m_tableSettings["Digital"].as_table(), m_tableSettings["Analog"].as_table(), m_tableChanged["Digital"].as_table(), m_tableChanged["Analog"].as_table());
 
 
 	if (m_pService->GetMotionControl() && m_pService->GetMotionControl()->IsConnected())
@@ -581,7 +569,6 @@ void QG_dlgSetting::clickCancel()
 
 	// 清除修改内容
 	dlgMotionControlSetting	->ClearChange();
-	dlgIOIndexSetting		->ClearChange();
 	dlgDigitalSetting		->ClearChange();
 	dlgAnalogSetting		->ClearChange();
 	dlgLaserSetting			->ClearChange();
@@ -931,8 +918,6 @@ bool QG_dlgSetting::CustomerMenu(int iPermissionLevel)
 			dlgGasSetting->ui.groupBox_GasSetting->setHidden(true);
 			m_mapMenu[LOADINGPOS]->setHidden(false);
 
-			m_mapMenu[IO_INDEX]->setHidden(false);
-			m_mapMenu[IO_INDEX]->setExpanded(false);
 			m_mapMenu[DIGITAL_IO]->setHidden(false);
 			m_mapMenu[ANALOG_IO]->setHidden(false);
 

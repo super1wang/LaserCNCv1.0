@@ -231,6 +231,46 @@ void MotionControl::SetDigitalTable()
 
 
 // IO解析层，由array转map<enum, IOData>
+namespace
+{
+	// 从一条 IO 记录里抽取 (name, index, active, enabled)。支持两种 schema：
+	//   1. 新版 sub-table：{ name=..., index=..., active=true/false, enabled=true/false, ... }
+	//   2. 旧版 array：[name, index]
+	// 解析失败（既不是 table 也不是 array）时返回 false。
+	struct IORecordFields
+	{
+		string sID;
+		string sIndex;
+		bool   bActive  { true };
+		bool   bEnabled { true };
+	};
+
+	bool extractIORecord(const value& v, IORecordFields& out)
+	{
+		if (v.is_table())
+		{
+			const auto& t = v.as_table();
+			if (t.count("name"))
+				out.sID = t.at("name").as_string();
+			if (t.count("index"))
+				out.sIndex = t.at("index").as_string();
+			if (t.count("active"))
+				out.bActive = t.at("active").as_boolean();
+			if (t.count("enabled"))
+				out.bEnabled = t.at("enabled").as_boolean();
+			return true;
+		}
+		if (v.is_array())
+		{
+			const auto& a = v.as_array();
+			if (a.size() >= 1 && a.at(0).is_string()) out.sID    = a.at(0).as_string();
+			if (a.size() >= 2 && a.at(1).is_string()) out.sIndex = a.at(1).as_string();
+			return true;
+		}
+		return false;
+	}
+}
+
 void MotionControl::SetDigitalTable(const table& tableDigital)
 {
 	table t_maps;
@@ -241,16 +281,25 @@ void MotionControl::SetDigitalTable(const table& tableDigital)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			DigitalIN eIndex = enum_cast<DigitalIN>(key.substr(1, key.size() - 1)).value();
+			auto eIndexOpt = enum_cast<DigitalIN>(key.substr(1, key.size() - 1));
+			if (!eIndexOpt.has_value())
+				continue;	// 未知扩展键，跳过
+			DigitalIN eIndex = eIndexOpt.value();
 
-			string sID = pair.second[0].as_string();
-			string sIndex = pair.second[1].as_string();
+			IORecordFields rec;
+			if (!extractIORecord(pair.second, rec))
+				continue;
+			string sID    = rec.sID;
+			string sIndex = rec.sIndex;
+			// active=false 等价旧版索引前缀 '-'（取反）。
+			if (!rec.bActive && !sIndex.empty() && sIndex.front() != '-')
+				sIndex = "-" + sIndex;
 
-			// 昵称及索引必须均有，索引结构同理
-			bool bInvalid = !std::regex_match(sIndex, regex_DigitalIO);
+			// enabled=false 当作记录无效，从 map 中移除。
+			bool bInvalid = !rec.bEnabled || !std::regex_match(sIndex, regex_DigitalIO);
 			if (!(sID.size() && sIndex.size()) || bInvalid)
 			{
-				if (bInvalid && sIndex.size())
+				if (rec.bEnabled && bInvalid && sIndex.size())
 					LOG_OPER_ERROR(fmt::format("DigitalIN {} ID {} index {} is invalid", key, sID, sIndex));
 				auto ei = m_mapDigitalIN.find(eIndex);
 				if (ei != m_mapDigitalIN.end())
@@ -306,16 +355,23 @@ void MotionControl::SetDigitalTable(const table& tableDigital)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			DigitalOUT eIndex = enum_cast<DigitalOUT>(key.substr(1, key.size() - 1)).value();
+			auto eIndexOpt = enum_cast<DigitalOUT>(key.substr(1, key.size() - 1));
+			if (!eIndexOpt.has_value())
+				continue;
+			DigitalOUT eIndex = eIndexOpt.value();
 
-			string sID = pair.second[0].as_string();
-			string sIndex = pair.second[1].as_string();
+			IORecordFields rec;
+			if (!extractIORecord(pair.second, rec))
+				continue;
+			string sID    = rec.sID;
+			string sIndex = rec.sIndex;
+			if (!rec.bActive && !sIndex.empty() && sIndex.front() != '-')
+				sIndex = "-" + sIndex;
 
-			// 昵称及索引必须均有，索引结构同理
-			bool bInvalid = !std::regex_match(sIndex, regex_DigitalIO);
+			bool bInvalid = !rec.bEnabled || !std::regex_match(sIndex, regex_DigitalIO);
 			if (!(sID.size() && sIndex.size()) || bInvalid)
 			{
-				if (bInvalid && sIndex.size())
+				if (rec.bEnabled && bInvalid && sIndex.size())
 					LOG_OPER_ERROR(fmt::format("DigitalOUT {} ID {} index {} is invalid", key, sID, sIndex));
 				auto ei = m_mapDigitalOUT.find(eIndex);
 				if (ei != m_mapDigitalOUT.end())
@@ -383,16 +439,21 @@ void MotionControl::SetAnalogTable(const table& tableAnalog)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			AnalogIN eIndex = enum_cast<AnalogIN>(key.substr(1, key.size() - 1)).value();
+			auto eIndexOpt = enum_cast<AnalogIN>(key.substr(1, key.size() - 1));
+			if (!eIndexOpt.has_value())
+				continue;
+			AnalogIN eIndex = eIndexOpt.value();
 
-			string sID = pair.second[0].as_string();
-			string sIndex = pair.second[1].as_string();
+			IORecordFields rec;
+			if (!extractIORecord(pair.second, rec))
+				continue;
+			string sID    = rec.sID;
+			string sIndex = rec.sIndex;
 
-			// 昵称及索引必须均有，索引结构同理
-			bool bInvalid = !std::regex_match(sIndex, regex_AnalogIO);
+			bool bInvalid = !rec.bEnabled || !std::regex_match(sIndex, regex_AnalogIO);
 			if (!(sID.size() && sIndex.size()) || bInvalid)
 			{
-				if (bInvalid && sIndex.size())
+				if (rec.bEnabled && bInvalid && sIndex.size())
 					LOG_OPER_ERROR(fmt::format("AnalogIN {} ID {} index {} is invalid", key, sID, sIndex));
 				auto ei = m_mapAnalogIN.find(eIndex);
 				if (ei != m_mapAnalogIN.end())
@@ -440,16 +501,21 @@ void MotionControl::SetAnalogTable(const table& tableAnalog)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			AnalogOUT eIndex = enum_cast<AnalogOUT>(key.substr(1, key.size() - 1)).value();
+			auto eIndexOpt = enum_cast<AnalogOUT>(key.substr(1, key.size() - 1));
+			if (!eIndexOpt.has_value())
+				continue;
+			AnalogOUT eIndex = eIndexOpt.value();
 
-			string sID = pair.second[0].as_string();
-			string sIndex = pair.second[1].as_string();
+			IORecordFields rec;
+			if (!extractIORecord(pair.second, rec))
+				continue;
+			string sID    = rec.sID;
+			string sIndex = rec.sIndex;
 
-			// 昵称及索引缺一则无效，同时需要删除已有的
-			bool bInvalid = !std::regex_match(sIndex, regex_AnalogIO);
+			bool bInvalid = !rec.bEnabled || !std::regex_match(sIndex, regex_AnalogIO);
 			if (!(sID.size() && sIndex.size()) || bInvalid)
 			{
-				if (bInvalid && sIndex.size())
+				if (rec.bEnabled && bInvalid && sIndex.size())
 					LOG_OPER_ERROR(fmt::format("AnalogOUT {} ID {} index {} is invalid", key, sID, sIndex));
 				auto ei = m_mapAnalogOUT.find(eIndex);
 				if (ei != m_mapAnalogOUT.end())
