@@ -8,6 +8,7 @@
 #include "Setting_Analog.h"
 #include "Setting_Laser.h"
 #include "Setting_Internet.h"
+#include "Setting_ProcessPlugins.h"
 
 #include "Setting_Tool.h"
 #include "Setting_Gas.h"
@@ -31,6 +32,7 @@ class QG_dlgSetting : public QDialog
 				ANALOG_IO,
 			LASER,
 			INTERNET,
+			PROCESS_PLUGINS,
 
 		PROCESSING,
 			TOOL,
@@ -59,6 +61,7 @@ class QG_dlgSetting : public QDialog
 		Analog,
 		Laser,
 		Internet,
+		ProcessPlugins,
 		//PROCESSING,
 		Tool,
 		//MOTION_LASER,
@@ -107,6 +110,7 @@ private:
 	Dialog_Setting_Analog*			dlgAnalogSetting;
 	Dialog_Setting_Laser*			dlgLaserSetting;
 	Dialog_Setting_Internet*		dlgInternetSetting;
+	lcnc::process::Dialog_Setting_ProcessPlugins* dlgProcessPluginsSetting;
 
 	Dialog_Setting_Tool*			dlgToolSetting;
 	Dialog_Setting_Gas*				dlgGasSetting;

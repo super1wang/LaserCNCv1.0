@@ -19,6 +19,7 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 	dlgAnalogSetting		= new Dialog_Setting_Analog			(this);
 	dlgLaserSetting			= new Dialog_Setting_Laser			(this);
 	dlgInternetSetting		= new Dialog_Setting_Internet		(this);
+	dlgProcessPluginsSetting = new lcnc::process::Dialog_Setting_ProcessPlugins(this);
 
 	dlgToolSetting			= new Dialog_Setting_Tool			(this);
 	dlgGasSetting			= new Dialog_Setting_Gas			(this);
@@ -32,6 +33,7 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Analog,			dlgAnalogSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Laser,				dlgLaserSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Internet,			dlgInternetSetting);
+	ui.stackedWidget_Setting_Content->insertWidget(Page::ProcessPlugins,	dlgProcessPluginsSetting);
 
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Tool,				dlgToolSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Gas,				dlgGasSetting);
@@ -125,6 +127,11 @@ void QG_dlgSetting::CreateMenu()
 	InternetItem->setText(0, tr("Internet"));
 	InternetItem->setData(0, Qt::UserRole, INTERNET);
 	m_mapMenu[INTERNET] = InternetItem;
+
+	QTreeWidgetItem* ProcessPluginsItem = new QTreeWidgetItem(ExternalItem);
+	ProcessPluginsItem->setText(0, tr("流程插件"));
+	ProcessPluginsItem->setData(0, Qt::UserRole, PROCESS_PLUGINS);
+	m_mapMenu[PROCESS_PLUGINS] = ProcessPluginsItem;
 
 
 	// Processing
@@ -284,6 +291,7 @@ void QG_dlgSetting::UpdateMenu(int iPermissionLevel)
 	if (iPermissionLevel > (int)PermissionLevel::Factory)
 	{
 		m_mapMenu[INTERNET]->setHidden(false);
+		m_mapMenu[PROCESS_PLUGINS]->setHidden(false);
 		m_mapMenu[SERVO]->setHidden(false);
 		m_mapMenu[SPECIAL]->setHidden(false);
 
@@ -328,6 +336,7 @@ void QG_dlgSetting::SwitchItem(QTreeWidgetItem* item, int column)
 	case Menu::ANALOG_IO:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Analog);			break;
 	case Menu::LASER:				ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Laser);				break;
 	case Menu::INTERNET:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Internet);			break;
+	case Menu::PROCESS_PLUGINS:		ui.stackedWidget_Setting_Content->setCurrentIndex(Page::ProcessPlugins);	break;
 	case Menu::MOTION_LASER: {
 		dlgToolSetting->ui.stackedWidget->setCurrentIndex(0);
 		ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Tool);
@@ -392,6 +401,7 @@ void QG_dlgSetting::UpdatePage()
 	SafeSetPage("Analog",			[&]{ dlgAnalogSetting		->SetPage(); });
 	SafeSetPage("Laser",			[&]{ dlgLaserSetting			->SetPage(); });
 	SafeSetPage("Internet",			[&]{ dlgInternetSetting		->SetPage(); });
+	SafeSetPage("ProcessPlugins",	[&]{ dlgProcessPluginsSetting->SetPage(); });
 
 	SafeSetPage("Tool.Rebuild",	[&]{ dlgToolSetting			->RebuildToolIndex(true); });
 	SafeSetPage("Tool",				[&]{ dlgToolSetting			->SetPage(); });
@@ -480,6 +490,8 @@ void QG_dlgSetting::GetChanged()
 
 	dlgInternetSetting->GetPage(m_tableSettings["Internet"].as_table());
 	dlgInternetSetting->GetChanged(m_tableSettings["Internet"].as_table(), m_tableChanged["Internet"].as_table());
+
+	dlgProcessPluginsSetting->GetChanged();
 
 	dlgToolSetting->GetPage(m_tableSettings["Tool"].as_table());
 	if (dlgToolSetting->GetChanged(m_tableSettings["Tool"].as_table(), m_tableChanged["Tool"].as_table()))

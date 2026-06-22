@@ -14,18 +14,22 @@
 - [Setting_Axis.cpp](file://src/modules/process/Setting/Setting_Axis.cpp)
 - [Setting_Axis.h](file://src/modules/process/Setting/Setting_Axis.h)
 - [Setting_Axis.ui](file://src/modules/process/Setting/Setting_Axis.ui)
+- [BuiltinIODefs.cpp](file://src/modules/process/Setting/BuiltinIODefs.cpp)
+- [BuiltinIODefs.h](file://src/modules/process/Setting/BuiltinIODefs.h)
+- [process_module.cpp](file://src/modules/process/process_module.cpp)
+- [MotionControl.cpp](file://src/modules/process/device/MotionControl/MotionControl.cpp)
 - [resources.qrc](file://resources/resources.qrc)
 - [CMakeLists.txt](file://CMakeLists.txt)
 </cite>
 
 ## 更新摘要
 **已进行的更改**
-- 新增MotionControl设置对话框重大重构章节，反映从分离轴设置页面整合到统一MotionControl页面的架构变更
-- 更新核心组件分析，增加表格化轴配置界面和扩展轴支持功能的详细说明
-- 新增MotionControl设置对话框架构图和表格化界面示意图
-- 扩展依赖关系分析，包含新的MotionControl设置组件
-- 更新故障排除指南，增加MotionControl设置相关的常见问题解决方案
-- 移除原有的Axis页面枚举项引用，反映页面整合到MotionControl的架构变更
+- 新增统一的IO设置表格驱动界面章节，反映从复杂行式布局到表格化管理的重大架构变更
+- 新增BuiltinIODefs预定义IO配置系统章节，介绍新的预设IO描述符管理机制
+- 更新Process模块增强章节，说明新的IO描述符管理和兼容性处理
+- 新增IO设置对话框架构图和预定义IO配置系统示意图
+- 扩展依赖关系分析，包含新的IO设置组件和预定义IO系统
+- 更新故障排除指南，增加IO设置相关的常见问题解决方案
 
 ## 目录
 1. [项目概述](#项目概述)
@@ -44,10 +48,12 @@
 
 - **Process节点编辑对话框**：用于配置各种Process节点的参数
 - **通信设置页面**：管理设备通信参数和连接状态
-- **MotionControl设置对话框**：**新增** 统一的运动控制配置界面，整合轴设置功能
+- **MotionControl设置对话框**：统一的运动控制配置界面，整合轴设置功能
+- **IO设置对话框**：**新增** 统一的IO设置表格驱动界面，替代原有的复杂行式布局
+- **BuiltinIODefs预定义IO配置系统**：**新增** 提供标准化的IO描述符管理和预设配置
 - **通用设置对话框**：提供统一的设置界面管理
 
-该系统采用Qt框架构建，实现了模块化的Process处理流程，支持多种激光雕刻工艺和设备配置。**最新重构**将原本分散的轴设置页面整合到统一的MotionControl页面中，提供更加直观和高效的配置体验。
+该系统采用Qt框架构建，实现了模块化的Process处理流程，支持多种激光雕刻工艺和设备配置。**最新重构**将原本分散的轴设置页面整合到统一的MotionControl页面中，并引入了全新的IO设置管理系统，提供更加直观和高效的配置体验。
 
 ## 项目结构
 
@@ -65,20 +71,24 @@ subgraph "UI层细分"
 NodeEdit[节点编辑对话框]
 CommSettings[通信设置页面]
 MotionControl[运动控制设置对话框]
+IOSetting[IO设置对话框]
 GeneralDlg[通用设置对话框]
 end
 subgraph "核心层细分"
 Workflow[工作流引擎]
 Execution[执行服务]
 Monitor[监控服务]
+IODefs[BuiltinIODefs系统]
 end
 UI --> NodeEdit
 UI --> CommSettings
 UI --> MotionControl
+UI --> IOSetting
 UI --> GeneralDlg
 Core --> Workflow
 Core --> Execution
 Core --> Monitor
+Core --> IODefs
 Device --> Hardware
 ```
 
@@ -86,11 +96,13 @@ Device --> Hardware
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 - [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
+- [BuiltinIODefs.cpp:1-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L1-L24)
 
 **章节来源**
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 - [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
+- [BuiltinIODefs.cpp:1-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L1-L24)
 
 ## 核心组件
 
@@ -179,60 +191,95 @@ CommunicationSettingsPage --> CommunicationManager : "管理"
 **图表来源**
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 
-### **新增** MotionControl设置对话框
+### **新增** IO设置对话框
 
-**更新** MotionControl设置对话框是Process模块中统一的运动控制配置中心，实现了从分离轴设置页面到统一界面的重大重构：
+**更新** IO设置对话框是Process模块中统一的IO配置管理中心，实现了从复杂行式布局到表格化管理的重大重构：
 
-- **表格化轴配置界面**：使用QTableWidget提供直观的轴参数配置界面
-- **扩展轴支持**：动态添加和删除扩展轴，支持多轴配置
-- **控制器类型适配**：根据不同的运动控制器类型调整界面显示
-- **参数分类管理**：将轴参数分为MotionControl和Axis两个配置区域
+- **表格化IO配置界面**：使用QTableWidget提供直观的IO参数配置界面
+- **预定义IO描述符管理**：支持BuiltinIODefs系统提供的标准IO配置
+- **兼容性处理**：自动处理新旧两种IO配置格式（table和array）
+- **参数分类管理**：将IO参数分为DigitalIN、DigitalOUT、AnalogIN、AnalogOUT四个配置区域
 - **实时参数验证**：提供参数输入的实时验证和错误提示
+- **主界面集成**：支持将常用IO项显示在主界面IO栏
 
 ```mermaid
 classDiagram
-class Dialog_Setting_MotionControl {
--Ui : : Dialog_Setting_MotionControl ui
+class IOSettingDialog {
+-Ui : : IOSettingDialog ui
 -set~pair~string,string~~ set_Changed
 -table table_Temp
--QStringList m_axisNames
--QStringList m_machineAxisNames
--QStringList m_extensionAxisNames
+-QStringList m_ioNames
+-QStringList m_builtinIOs
 -bool m_bGTN
-+Dialog_Setting_MotionControl(parent)
-+~Dialog_Setting_MotionControl()
++BuiltinIODefList m_builtinDefs
++IOSettingDialog(parent)
++~IOSettingDialog()
 +setUI()
 +ClearChange()
 +InitSetting()
 +SetPage(table_Set)
 +GetPage(table_Page)
-+populateAxisTable(table_Set)
-+rebuildAxisNames()
-+isMachineAxis(name)
++populateIOTable(table_Set)
++rebuildIONames()
++isBuiltinIO(name)
++extractIOEntry(tomlKey, v, out)
 +onTableCellChanged(row, column)
-+onAddAxis()
-+onDeleteAxis()
++onAddIO()
++onDeleteIO()
 +TypeChanged()
 }
-class AxisConfiguration {
--QString axisName
--int index
--int homeIndex
--double resolution
--double lowSpeed
--double mediumSpeed
--double highSpeed
--double acceleration
--double jerk
--double leftLimit
--double rightLimit
+class BuiltinIODef {
+-const char* sectionKey
+-const char* tomlKey
+-const char* nameZh
+-const char* defaultIndex
+-bool defaultActive
+-bool defaultEnabled
+-bool defaultShowInMain
 }
-Dialog_Setting_MotionControl --> AxisConfiguration : "管理多个轴配置"
+IOSettingDialog --> BuiltinIODef : "管理预定义IO"
 ```
 
 **图表来源**
-- [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
-- [Setting_MotionControl.h:1-65](file://src/modules/process/Setting/Setting_MotionControl.h#L1-L65)
+- [BuiltinIODefs.cpp:12-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L12-L24)
+- [BuiltinIODefs.h:12-21](file://src/modules/process/Setting/BuiltinIODefs.h#L12-L21)
+
+### **新增** BuiltinIODefs预定义IO配置系统
+
+**更新** BuiltinIODefs系统是Process模块中标准化的IO描述符管理机制：
+
+- **预设IO描述符**：提供标准的IO配置模板，包括DigitalOUT、DigitalIN、AnalogOUT、AnalogIN四类
+- **默认值管理**：为每种IO类型提供合理的默认配置值
+- **兼容性保障**：确保新旧配置格式的平滑过渡
+- **UI集成支持**：支持在主界面自动生成常用的IO控制按钮
+- **配置种子值**：作为系统启动时的配置模板，自动填充缺失的IO设置
+
+```mermaid
+classDiagram
+class BuiltinIODefList {
+-const BuiltinIODef* items
+-int count
++BuiltinIODefList(items, count)
+}
+class BuiltinIODef {
+-const char* sectionKey
+-const char* tomlKey
+-const char* nameZh
+-const char* defaultIndex
+-bool defaultActive
+-bool defaultEnabled
+-bool defaultShowInMain
++builtinDigitalOUT()
++builtinDigitalIN()
++builtinAnalogOUT()
++builtinAnalogIN()
+}
+BuiltinIODefList --> BuiltinIODef : "包含多个描述符"
+```
+
+**图表来源**
+- [BuiltinIODefs.h:23-37](file://src/modules/process/Setting/BuiltinIODefs.h#L23-L37)
+- [BuiltinIODefs.cpp:12-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L12-L24)
 
 ### 通用设置对话框
 
@@ -247,6 +294,7 @@ Dialog_Setting_MotionControl --> AxisConfiguration : "管理多个轴配置"
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 - [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
+- [BuiltinIODefs.cpp:1-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L1-L24)
 - [qg_dlgsetting.cpp](file://src/modules/process/Setting/qg_dlgsetting.cpp)
 - [resources.qrc:63-75](file://resources/resources.qrc#L63-L75)
 
@@ -323,53 +371,76 @@ Dialog-->>User : 显示配置状态
 **章节来源**
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 
-### **新增** MotionControl设置对话框组件
+### **新增** IO设置对话框组件
 
-**更新** MotionControl设置对话框实现了从分离轴设置到统一配置界面的重大重构：
+**更新** IO设置对话框实现了从复杂行式布局到表格化管理的重大重构：
 
-#### 表格化轴配置界面
-- **统一参数展示**：将所有轴参数整合到一个表格中
-- **动态列显示**：根据控制器类型动态调整显示的列
-- **颜色标识**：使用不同背景色区分机器轴和扩展轴
+#### 表格化IO配置界面
+- **统一参数展示**：将所有IO参数整合到一个表格中
+- **动态列显示**：根据IO类型动态调整显示的列
+- **颜色标识**：使用不同背景色区分不同类型的IO
 - **单元格验证**：提供参数输入的实时验证
 
-#### 扩展轴支持功能
-- **动态轴管理**：支持运行时添加和删除扩展轴
-- **轴名称验证**：确保扩展轴名称的唯一性和合法性
-- **配置数据分离**：将扩展轴配置数据独立存储
-- **向后兼容**：保持与现有机器轴配置的兼容性
+#### 预定义IO描述符管理
+- **标准模板支持**：支持BuiltinIODefs系统提供的标准IO配置
+- **默认值自动填充**：为新添加的IO项提供合理的默认配置
+- **配置种子值**：作为系统启动时的配置模板
+- **预设配置保护**：防止用户误删或修改预设的IO配置
 
-#### 控制器类型适配
-- **类型检测**：自动识别当前使用的运动控制器类型
-- **界面动态调整**：根据控制器类型调整显示参数
-- **参数映射**：将不同控制器的参数进行对应转换
-- **特殊处理**：为特定控制器提供专门的参数处理
+#### 兼容性处理机制
+- **格式检测**：自动识别IO配置的新旧两种格式
+- **数据转换**：将旧格式的array转换为新格式的table
+- **向后兼容**：确保现有配置的正常工作
+- **渐进式迁移**：支持逐步迁移到新的配置格式
 
 ```mermaid
 flowchart TD
-A[MotionControl设置对话框] --> B[表格化轴配置界面]
-A --> C[扩展轴管理功能]
-A --> D[控制器类型适配]
+A[IO设置对话框] --> B[表格化IO配置界面]
+A --> C[预定义IO描述符管理]
+A --> D[兼容性处理机制]
 B --> B1[统一参数展示]
 B --> B2[动态列显示]
 B --> B3[颜色标识区分]
-C --> C1[动态轴添加]
-C --> C2[轴名称验证]
-C --> C3[配置数据分离]
-D --> D1[类型检测]
-D --> D2[界面动态调整]
-D --> D3[参数映射转换]
+C --> C1[标准模板支持]
+C --> C2[默认值自动填充]
+C --> C3[配置种子值]
+D --> D1[格式检测]
+D --> D2[数据转换]
+D --> D3[向后兼容]
 ```
 
 **图表来源**
-- [Setting_MotionControl.cpp:153-233](file://src/modules/process/Setting/Setting_MotionControl.cpp#L153-L233)
-- [Setting_MotionControl.cpp:360-435](file://src/modules/process/Setting/Setting_MotionControl.cpp#L360-L435)
-- [Setting_MotionControl.cpp:485-514](file://src/modules/process/Setting/Setting_MotionControl.cpp#L485-L514)
+- [BuiltinIODefs.cpp:12-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L12-L24)
+- [BuiltinIODefs.h:12-21](file://src/modules/process/Setting/BuiltinIODefs.h#L12-L21)
+- [process_module.cpp:1121-1140](file://src/modules/process/process_module.cpp#L1121-L1140)
 
 **章节来源**
-- [Setting_MotionControl.cpp:1-515](file://src/modules/process/Setting/Setting_MotionControl.cpp#L1-L515)
-- [Setting_MotionControl.h:1-65](file://src/modules/process/Setting/Setting_MotionControl.h#L1-L65)
-- [Setting_MotionControl.ui:1-129](file://src/modules/process/Setting/Setting_MotionControl.ui#L1-L129)
+- [BuiltinIODefs.cpp:1-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L1-L24)
+- [BuiltinIODefs.h:1-38](file://src/modules/process/Setting/BuiltinIODefs.h#L1-L38)
+- [process_module.cpp:1144-1172](file://src/modules/process/process_module.cpp#L1144-L1172)
+
+### **新增** Process模块增强组件
+
+**更新** Process模块在IO设置方面进行了重要增强：
+
+#### IO描述符管理
+- **统一管理接口**：提供统一的IO描述符访问和管理接口
+- **类型安全**：确保不同类型的IO描述符得到正确的处理
+- **配置持久化**：支持IO配置的长期保存和恢复
+
+#### 兼容性处理
+- **多格式支持**：同时支持新旧两种IO配置格式
+- **自动迁移**：提供自动的配置格式迁移功能
+- **错误恢复**：在配置损坏时提供恢复机制
+
+#### 预定义配置集成
+- **种子值注入**：在系统启动时自动注入预定义的IO配置
+- **配置覆盖**：允许用户在预定义基础上进行个性化配置
+- **版本管理**：支持预定义IO配置的版本升级和维护
+
+**章节来源**
+- [process_module.cpp:1108-1172](file://src/modules/process/process_module.cpp#L1108-L1172)
+- [MotionControl.cpp:233-272](file://src/modules/process/device/MotionControl/MotionControl.cpp#L233-L272)
 
 ### 设置持久化机制
 
@@ -388,6 +459,7 @@ D --> D3[参数映射转换]
 #### **新增** 分区存储机制
 - **MotionControl分区**：存储运动控制相关的轴参数
 - **Axis分区**：存储轴速度等级等参数
+- **IO配置分区**：**新增** 独立存储IO设置配置信息
 - **扩展轴数据**：独立存储扩展轴的配置信息
 - **变更跟踪**：精确跟踪每个参数的变更情况
 
@@ -413,16 +485,20 @@ Core[核心业务模块]
 Device[设备抽象模块]
 Settings[设置管理模块]
 DT[设备配置模块]
+IODefs[BuiltinIODefs系统]
 end
 subgraph "Process模块"
 NodeEdit[节点编辑对话框]
 CommSettings[通信设置页面]
 MotionControl[运动控制设置对话框]
+IOSetting[IO设置对话框]
 GeneralDlg[通用设置对话框]
 Workflow[工作流引擎]
 Execution[执行服务]
 Monitor[监控服务]
-end
+SeedDefaultIOTables[IO配置种子值]
+ExtractIOEntry[IO条目提取]
+End
 Qt --> UI
 CMake --> Build[构建系统]
 spdlog --> Core
@@ -430,20 +506,25 @@ magic_enum --> MotionControl
 UI --> NodeEdit
 UI --> CommSettings
 UI --> MotionControl
+UI --> IOSetting
 UI --> GeneralDlg
 Core --> Workflow
 Core --> Execution
 Core --> Monitor
+Core --> IODefs
 Device --> Hardware[硬件接口]
 Settings --> Config[配置管理]
 DT --> AxisConfig[轴配置]
-MotionControl --> DT
+IODefs --> SeedDefaultIOTables
+SeedDefaultIOTables --> ExtractIOEntry
+IOSetting --> IODefs
 ```
 
 **图表来源**
 - [CMakeLists.txt](file://CMakeLists.txt#L173)
 - [CMakeLists.txt:218-219](file://CMakeLists.txt#L218-L219)
 - [Setting_MotionControl.cpp:49-53](file://src/modules/process/Setting/Setting_MotionControl.cpp#L49-L53)
+- [process_module.cpp:1144-1172](file://src/modules/process/process_module.cpp#L1144-L1172)
 
 **章节来源**
 - [CMakeLists.txt](file://CMakeLists.txt#L173)
@@ -473,6 +554,12 @@ MotionControl --> DT
 - **列宽智能分配**：使用QHeaderView::Stretch自动分配列宽
 - **单元格编辑优化**：仅在必要时触发参数验证
 - **扩展轴列表缓存**：避免频繁读取扩展轴配置
+- **IO配置缓存**：**新增** 缓存预定义IO配置以提高加载速度
+
+### **新增** IO设置系统优化
+- **预定义配置缓存**：缓存BuiltinIODefs系统生成的配置模板
+- **格式转换优化**：优化新旧格式之间的转换性能
+- **配置种子值处理**：批量处理IO配置种子值以提高启动速度
 
 ## 故障排除指南
 
@@ -498,24 +585,32 @@ MotionControl --> DT
 - **验证配置格式**：确保配置文件格式正确
 - **恢复默认设置**：必要时恢复到初始配置状态
 
-#### **新增** MotionControl设置问题
-- **检查轴配置**：确认扩展轴名称的合法性和唯一性
-- **验证参数范围**：确保输入的轴参数在有效范围内
-- **检查控制器兼容性**：确认所选控制器类型与硬件匹配
-- **清理缓存数据**：重启应用程序以清除可能的缓存问题
-- **查看扩展轴列表**：确认扩展轴列表的正确加载和保存
+#### **新增** IO设置问题
+- **检查IO配置格式**：确认IO配置符合新格式要求
+- **验证预定义配置**：确保BuiltinIODefs系统正常工作
+- **检查兼容性处理**：确认新旧格式转换正常
+- **清理配置缓存**：重启应用程序以清除可能的缓存问题
+- **查看IO配置列表**：确认IO配置列表的正确加载和保存
 
 #### **新增** 表格化界面问题
 - **检查表格完整性**：确认表格列数和行数正确
 - **验证单元格编辑**：确保单元格编辑功能正常
-- **检查颜色标识**：确认机器轴和扩展轴的颜色区分正常
+- **检查颜色标识**：确认不同类型的IO颜色区分正常
 - **重置表格布局**：尝试重新设置表格的列宽和行高
+
+#### **新增** 预定义IO配置问题
+- **检查预定义配置加载**：确认BuiltinIODefs系统正确加载
+- **验证配置种子值**：确保系统启动时正确注入预定义配置
+- **检查配置覆盖**：确认用户配置能够正确覆盖预定义配置
+- **查看配置版本**：确认预定义IO配置的版本兼容性
 
 **章节来源**
 - [process_node_edit_dialog.cpp:187-339](file://src/modules/process/ui/process_node_edit_dialog.cpp#L187-L339)
 - [communication_settings_page.cpp:1-124](file://src/modules/process/communication/ui/communication_settings_page.cpp#L1-L124)
 - [Setting_MotionControl.cpp:360-435](file://src/modules/process/Setting/Setting_MotionControl.cpp#L360-L435)
 - [Setting_MotionControl.cpp:437-483](file://src/modules/process/Setting/Setting_MotionControl.cpp#L437-L483)
+- [BuiltinIODefs.cpp:1-24](file://src/modules/process/Setting/BuiltinIODefs.cpp#L1-L24)
+- [process_module.cpp:1144-1172](file://src/modules/process/process_module.cpp#L1144-L1172)
 
 ## 结论
 
@@ -526,7 +621,8 @@ Process模块设置对话框的健壮性增强项目成功实现了以下目标�
 3. **改善了配置管理的效率**：通过优化的数据结构和算法，提高了配置操作的响应速度
 4. **加强了系统的可维护性**：通过清晰的代码结构和文档，降低了后续维护的难度
 5. **实现了重大架构重构**：**新增** 将分散的轴设置页面整合到统一的MotionControl界面，提供更加直观和高效的配置体验
+6. **引入了全新的IO管理系统**：**新增** 通过表格化界面和BuiltinIODefs系统，显著提升了IO配置的易用性和可维护性
 
-**最新重构**特别体现在MotionControl设置对话框的设计上，通过表格化界面和扩展轴支持功能，显著提升了多轴配置的易用性和可维护性。这一重构不仅简化了用户的操作流程，还为未来的功能扩展奠定了良好的基础。
+**最新重构**特别体现在IO设置对话框和BuiltinIODefs系统的引入上，通过表格化界面、预定义IO配置管理和兼容性处理机制，显著提升了IO配置的效率和可靠性。这一重构不仅简化了用户的操作流程，还为未来的功能扩展奠定了良好的基础。
 
 这些改进为激光雕刻控制系统的稳定运行奠定了坚实的基础，为用户提供了更加可靠和高效的使用体验。未来可以进一步考虑添加更多的自动化测试用例和性能监控功能，以持续提升系统的质量。

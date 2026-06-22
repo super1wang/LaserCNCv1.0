@@ -1,5 +1,7 @@
 #include "modules/process/workflow/process_node_registry.h"
 
+#include "modules/process/steps/process_step_registry.h"
+
 namespace lcnc::process {
 
 namespace {
@@ -27,6 +29,14 @@ const ProcessNodeRegistry& ProcessNodeRegistry::instance()
 
 const ProcessNodeDescriptor* ProcessNodeRegistry::descriptor(ProcessNodeType type) const
 {
+    static ProcessNodeDescriptor pluginDescriptor;
+    const auto& stepRegistry = ProcessStepRegistry::instance();
+    for (const auto& d : stepRegistry.descriptorsAll()) {
+        if (d.type == type) {
+            pluginDescriptor = d;
+            return &pluginDescriptor;
+        }
+    }
     for (const auto& descriptor : m_descriptors) {
         if (descriptor.type == type)
             return &descriptor;
@@ -38,7 +48,7 @@ QVector<ProcessNodeType> ProcessNodeRegistry::addableTypes() const
 {
     QVector<ProcessNodeType> result;
     for (const auto& descriptor : m_descriptors) {
-        if (descriptor.type != ProcessNodeType::Base)
+        if (descriptor.type != ProcessNodeType::Base && descriptor.addable)
             result.append(descriptor.type);
     }
     return result;
@@ -58,67 +68,40 @@ QString ProcessNodeRegistry::summary(const ProcessNode& node) const
 {
     if (!node.enabled)
         return QStringLiteral("Disabled");
+    if (auto step = ProcessStepRegistry::instance().step(node.type))
+        return step->summary(node);
     if (node.parameters.contains(QStringLiteral("info")))
         return node.parameters.value(QStringLiteral("info")).toString();
 
     const QVariantMap& p = node.parameters;
     switch (node.type) {
     case ProcessNodeType::Start:
-        return QStringLiteral("Entry");
+        return QStringLiteral("入口 / 全局变量 %1 项").arg(p.value(QStringLiteral("variables"), QVariantList{}).toList().size());
     case ProcessNodeType::Stop:
-        return QStringLiteral("Exit");
-    case ProcessNodeType::Wait:
-        return QStringLiteral("%1 ms").arg(p.value(QStringLiteral("durationMs"), 1000).toInt());
+        return valueText(p, QStringLiteral("message"), QStringLiteral("流程结束"));
     case ProcessNodeType::Axis:
-        return QStringLiteral("%1 -> %2").arg(
+        return QStringLiteral("%1 %2 %3 F%4").arg(
             valueText(p, QStringLiteral("axis"), QStringLiteral("X")),
-            valueText(p, QStringLiteral("position"), 0.0));
+            valueText(p, QStringLiteral("mode"), QStringLiteral("absolute")),
+            valueText(p, QStringLiteral("target"), 0.0),
+            valueText(p, QStringLiteral("velocity"), 5.0));
     case ProcessNodeType::AxesMove:
-        return QStringLiteral("XYZ %1,%2,%3 F%4").arg(
-            valueText(p, QStringLiteral("x"), 0.0),
-            valueText(p, QStringLiteral("y"), 0.0),
-            valueText(p, QStringLiteral("z"), 0.0),
-            valueText(p, QStringLiteral("feedRate"), 100.0));
-    case ProcessNodeType::Feeding:
-        return QStringLiteral("F%1").arg(valueText(p, QStringLiteral("feedRate"), 100.0));
-    case ProcessNodeType::Cutting:
-        return QStringLiteral("Contour %1 F%2 E%3").arg(
-            valueText(p, QStringLiteral("contourId"), QStringLiteral("<unset>")),
-            valueText(p, QStringLiteral("feedRate"), 100.0),
-            valueText(p, QStringLiteral("laserEnergy"), 10.0));
-    case ProcessNodeType::OverCutting:
-        return QStringLiteral("Length %1").arg(valueText(p, QStringLiteral("length"), 0.0));
+        return QStringLiteral("%1，多轴 %2 项").arg(
+            valueText(p, QStringLiteral("multiMode"), QStringLiteral("sequential")),
+            QString::number(p.value(QStringLiteral("axes"), QVariantList{}).toList().size()));
     case ProcessNodeType::IO:
         return QStringLiteral("%1 %2=%3").arg(
-            valueText(p, QStringLiteral("channel"), QStringLiteral("DO0")),
-            valueText(p, QStringLiteral("action"), QStringLiteral("set")),
+            valueText(p, QStringLiteral("signalType"), QStringLiteral("digital")),
+            valueText(p, QStringLiteral("ioName"), QStringLiteral("aLaser")),
             valueText(p, QStringLiteral("value"), 1));
-    case ProcessNodeType::EnergySwitch:
-        return QStringLiteral("Energy %1").arg(valueText(p, QStringLiteral("laserEnergy"), 10.0));
-    case ProcessNodeType::Loop:
-        return QStringLiteral("%1 loops").arg(valueText(p, QStringLiteral("count"), 1));
-    case ProcessNodeType::If:
-    case ProcessNodeType::Compare:
-        return valueText(p, QStringLiteral("expression"), QStringLiteral("true"));
-    case ProcessNodeType::Commands:
-        return valueText(p, QStringLiteral("command"), QStringLiteral("noop"));
-    case ProcessNodeType::Camera:
-        return valueText(p, QStringLiteral("cameraId"), QStringLiteral("default"));
-    case ProcessNodeType::Measurement:
-        return valueText(p, QStringLiteral("target"), QStringLiteral("feature"));
-    case ProcessNodeType::MarkAcquire:
-        return valueText(p, QStringLiteral("markId"), QStringLiteral("mark"));
-    case ProcessNodeType::Alignment:
-        return valueText(p, QStringLiteral("method"), QStringLiteral("two-point"));
-    case ProcessNodeType::AutoFocus:
-        return QStringLiteral("Range %1").arg(valueText(p, QStringLiteral("range"), 5.0));
     case ProcessNodeType::Monitor:
-        return valueText(p, QStringLiteral("signal"), QStringLiteral("ready"));
-    case ProcessNodeType::RunGroup:
-    case ProcessNodeType::RunGroupCheck:
-        return valueText(p, QStringLiteral("groupName"), QStringLiteral("default"));
-    case ProcessNodeType::Group:
-        return QStringLiteral("Children %1").arg(node.children.size());
+        return QStringLiteral("等待 %1=%2 timeout=%3ms").arg(
+            valueText(p, QStringLiteral("ioName"), QStringLiteral("aStart")),
+            valueText(p, QStringLiteral("targetValue"), true),
+            valueText(p, QStringLiteral("timeoutMs"), 5000));
+    case ProcessNodeType::Cutting:
+        return QStringLiteral("普通切割 %1").arg(
+            p.value(QStringLiteral("dryRun"), true).toBool() ? QStringLiteral("dry-run") : QStringLiteral("production"));
     default:
         return QStringLiteral("Ready");
     }
@@ -143,6 +126,34 @@ bool ProcessNodeRegistry::canHaveChildren(ProcessNodeType type) const
     return false;
 }
 
+bool ProcessNodeRegistry::isRequired(ProcessNodeType type) const
+{
+    if (const auto* item = descriptor(type))
+        return item->required;
+    return false;
+}
+
+bool ProcessNodeRegistry::isDeletable(ProcessNodeType type) const
+{
+    if (const auto* item = descriptor(type))
+        return item->deletable;
+    return true;
+}
+
+bool ProcessNodeRegistry::isDisableable(ProcessNodeType type) const
+{
+    if (const auto* item = descriptor(type))
+        return item->disableable;
+    return true;
+}
+
+bool ProcessNodeRegistry::isMovable(ProcessNodeType type) const
+{
+    if (const auto* item = descriptor(type))
+        return item->movable;
+    return true;
+}
+
 ProcessNodeRegistry::ProcessNodeRegistry()
 {
     registerBuiltIns();
@@ -150,54 +161,39 @@ ProcessNodeRegistry::ProcessNodeRegistry()
 
 void ProcessNodeRegistry::registerBuiltIns()
 {
-    add(ProcessNodeType::Start, QStringLiteral("Structure"), false, true, {}, QStringLiteral("start"));
-    add(ProcessNodeType::Stop, QStringLiteral("Structure"), false, true, {}, QStringLiteral("stop"));
-    add(ProcessNodeType::Wait, QStringLiteral("Structure"), false, false,
-        map({ { QStringLiteral("durationMs"), 1000 } }), QStringLiteral("wait"));
-    add(ProcessNodeType::Group, QStringLiteral("Structure"), true, false, {}, QStringLiteral("group"));
-    add(ProcessNodeType::RunGroup, QStringLiteral("Structure"), true, false,
-        map({ { QStringLiteral("groupName"), QStringLiteral("default") } }), QStringLiteral("runGroup"));
-    add(ProcessNodeType::RunGroupCheck, QStringLiteral("Structure"), false, false,
-        map({ { QStringLiteral("groupName"), QStringLiteral("default") } }), QStringLiteral("runGroupCheck"));
-    add(ProcessNodeType::If, QStringLiteral("Structure"), true, false,
-        map({ { QStringLiteral("expression"), QStringLiteral("true") } }), QStringLiteral("if"));
-    add(ProcessNodeType::Loop, QStringLiteral("Structure"), true, false,
-        map({ { QStringLiteral("count"), 1 } }), QStringLiteral("loop"));
+    add(ProcessNodeType::Start, QStringLiteral("Structure"), false, true,
+        map({ { QStringLiteral("variables"), QVariantList{} } }), QStringLiteral("start"), true, false);
+    add(ProcessNodeType::Stop, QStringLiteral("Structure"), false, true,
+        map({ { QStringLiteral("message"), QStringLiteral("流程结束") }, { QStringLiteral("safeStopOutputs"), true }, { QStringLiteral("stopMotion"), false } }), QStringLiteral("stop"), true, false);
 
-    add(ProcessNodeType::Axis, QStringLiteral("Motion"), false, false,
-        map({ { QStringLiteral("axis"), QStringLiteral("X") }, { QStringLiteral("position"), 0.0 } }), QStringLiteral("axis"));
-    add(ProcessNodeType::AxesMove, QStringLiteral("Motion"), false, false,
-        map({ { QStringLiteral("x"), 0.0 }, { QStringLiteral("y"), 0.0 }, { QStringLiteral("z"), 0.0 }, { QStringLiteral("feedRate"), 100.0 } }), QStringLiteral("axesMove"));
-    add(ProcessNodeType::Feeding, QStringLiteral("Motion"), false, false,
-        map({ { QStringLiteral("feedRate"), 100.0 } }), QStringLiteral("feeding"));
-    add(ProcessNodeType::AutoFocus, QStringLiteral("Motion"), false, false,
-        map({ { QStringLiteral("range"), 5.0 }, { QStringLiteral("speed"), 1.0 } }), QStringLiteral("autoFocus"));
+    add(ProcessNodeType::SingleAxisMove, QStringLiteral("Motion"), false, false,
+        map({ { QStringLiteral("axis"), QStringLiteral("X") },
+              { QStringLiteral("velocity"), 5.0 },
+              { QStringLiteral("mode"), QStringLiteral("absolute") },
+              { QStringLiteral("target"), 0.0 },
+              { QStringLiteral("timeoutMs"), 30000 } }), QStringLiteral("singleAxisMove"));
+    add(ProcessNodeType::MultiAxisMove, QStringLiteral("Motion"), false, false,
+        map({ { QStringLiteral("multiMode"), QStringLiteral("sequential") },
+              { QStringLiteral("axes"), QVariantList{} },
+              { QStringLiteral("timeoutMs"), 30000 } }), QStringLiteral("multiAxisMove"));
 
-    add(ProcessNodeType::Cutting, QStringLiteral("Process"), false, false,
-        map({ { QStringLiteral("contourId"), QString() }, { QStringLiteral("feedRate"), 100.0 }, { QStringLiteral("laserEnergy"), 10.0 }, { QStringLiteral("dryRun"), true } }), QStringLiteral("cutting"));
-    add(ProcessNodeType::OverCutting, QStringLiteral("Process"), false, false,
-        map({ { QStringLiteral("length"), 0.0 }, { QStringLiteral("feedRate"), 100.0 } }), QStringLiteral("overCutting"));
-    add(ProcessNodeType::EnergySwitch, QStringLiteral("Process"), false, false,
-        map({ { QStringLiteral("laserEnergy"), 10.0 } }), QStringLiteral("energySwitch"));
+    add(ProcessNodeType::OutputSignal, QStringLiteral("IO"), false, false,
+        map({ { QStringLiteral("signalType"), QStringLiteral("digital") },
+              { QStringLiteral("ioName"), QStringLiteral("aLaser") },
+              { QStringLiteral("value"), true } }), QStringLiteral("outputSignal"));
+    add(ProcessNodeType::InputSignalWait, QStringLiteral("IO"), false, false,
+        map({ { QStringLiteral("signalType"), QStringLiteral("digital") },
+              { QStringLiteral("ioName"), QStringLiteral("aStart") },
+              { QStringLiteral("targetValue"), true },
+              { QStringLiteral("timeoutMs"), 5000 },
+              { QStringLiteral("pollIntervalMs"), 100 } }), QStringLiteral("inputSignalWait"));
 
-    add(ProcessNodeType::IO, QStringLiteral("Device"), false, false,
-        map({ { QStringLiteral("channel"), QStringLiteral("DO0") }, { QStringLiteral("action"), QStringLiteral("set") }, { QStringLiteral("value"), 1 } }), QStringLiteral("io"));
-    add(ProcessNodeType::Commands, QStringLiteral("Device"), false, false,
-        map({ { QStringLiteral("command"), QStringLiteral("noop") } }), QStringLiteral("commands"));
-    add(ProcessNodeType::Monitor, QStringLiteral("Device"), false, false,
-        map({ { QStringLiteral("signal"), QStringLiteral("ready") }, { QStringLiteral("expected"), true } }), QStringLiteral("monitor"));
-    add(ProcessNodeType::Camera, QStringLiteral("Vision"), false, false,
-        map({ { QStringLiteral("cameraId"), QStringLiteral("default") }, { QStringLiteral("exposureMs"), 10 } }), QStringLiteral("camera"));
-    add(ProcessNodeType::Measurement, QStringLiteral("Vision"), false, false,
-        map({ { QStringLiteral("target"), QStringLiteral("feature") }, { QStringLiteral("tolerance"), 0.01 } }), QStringLiteral("measurement"));
-    add(ProcessNodeType::MarkAcquire, QStringLiteral("Vision"), false, false,
-        map({ { QStringLiteral("markId"), QStringLiteral("mark") } }), QStringLiteral("markAcquire"));
-    add(ProcessNodeType::Alignment, QStringLiteral("Vision"), false, false,
-        map({ { QStringLiteral("method"), QStringLiteral("two-point") } }), QStringLiteral("alignment"));
-    add(ProcessNodeType::Calculation, QStringLiteral("Logic"), false, false,
-        map({ { QStringLiteral("expression"), QStringLiteral("0") }, { QStringLiteral("output"), QStringLiteral("result") } }), QStringLiteral("calculation"));
-    add(ProcessNodeType::Compare, QStringLiteral("Logic"), false, false,
-        map({ { QStringLiteral("expression"), QStringLiteral("left == right") } }), QStringLiteral("compare"));
+    add(ProcessNodeType::NormalCutting, QStringLiteral("Process"), false, false,
+        map({ { QStringLiteral("dryRun"), true },
+              { QStringLiteral("selectionMode"), QStringLiteral("allEnabled") },
+              { QStringLiteral("startNumber"), 1 },
+              { QStringLiteral("endNumber"), 0 },
+              { QStringLiteral("compensationIndex"), QString() } }), QStringLiteral("normalCutting"));
 }
 
 void ProcessNodeRegistry::add(ProcessNodeType type,
@@ -205,7 +201,9 @@ void ProcessNodeRegistry::add(ProcessNodeType type,
                               bool canHaveChildren,
                               bool topLevelOnly,
                               QVariantMap defaults,
-                              const QString& executorKey)
+                              const QString& executorKey,
+                              bool required,
+                              bool addable)
 {
     ProcessNodeDescriptor descriptor;
     descriptor.type = type;
@@ -213,6 +211,11 @@ void ProcessNodeRegistry::add(ProcessNodeType type,
     descriptor.category = category;
     descriptor.canHaveChildren = canHaveChildren;
     descriptor.topLevelOnly = topLevelOnly;
+    descriptor.required = required;
+    descriptor.addable = addable;
+    descriptor.deletable = !required;
+    descriptor.disableable = !required;
+    descriptor.movable = !required;
     descriptor.defaultParameters = std::move(defaults);
     descriptor.executorKey = executorKey.isEmpty() ? processNodeTypeToString(type) : executorKey;
     m_descriptors.append(std::move(descriptor));

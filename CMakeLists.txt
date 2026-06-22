@@ -260,6 +260,7 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/Setting/Setting_Analog.cpp
     src/modules/process/Setting/Setting_Laser.cpp
     src/modules/process/Setting/Setting_Internet.cpp
+    src/modules/process/Setting/Setting_ProcessPlugins.cpp
     src/modules/process/Setting/Setting_Tool.cpp
     src/modules/process/Setting/Setting_Gas.cpp
     src/modules/process/Setting/Setting_Water.cpp
@@ -314,6 +315,16 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/workflow/process_node_registry.cpp
     src/modules/process/workflow/process_flow_document.cpp
     src/modules/process/workflow/process_flow_store.cpp
+    src/modules/process/steps/process_step_registry.cpp
+    src/modules/process/steps/process_step_builtin_registration.cpp
+    src/modules/process/steps/services/legacy_process_services.cpp
+    src/modules/process/steps/start/start_step.cpp
+    src/modules/process/steps/stop/stop_step.cpp
+    src/modules/process/steps/single_axis_move/single_axis_move_step.cpp
+    src/modules/process/steps/multi_axis_move/multi_axis_move_step.cpp
+    src/modules/process/steps/output_signal/output_signal_step.cpp
+    src/modules/process/steps/input_signal_wait/input_signal_wait_step.cpp
+    src/modules/process/steps/normal_cutting/normal_cutting_step.cpp
     src/modules/process/ui/process_flow_model.cpp
     src/modules/process/ui/process_flow_tree_view.cpp
     src/modules/process/ui/process_node_edit_dialog.cpp

@@ -28,14 +28,6 @@ signals:
 
 private slots:
     void showContextMenu(const QPoint& pos);
-    void addStartNode();
-    void addStopNode();
-    void addWaitNode();
-    void addAxisNode();
-    void addCuttingNode();
-    void addGroupNode();
-    void addIfNode();
-    void addLoopNode();
     void deleteCurrentNode();
     void enableCurrentNode();
     void disableCurrentNode();

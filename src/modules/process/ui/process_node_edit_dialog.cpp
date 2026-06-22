@@ -1,6 +1,7 @@
 #include "modules/process/ui/process_node_edit_dialog.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -15,7 +16,51 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 
+#include "modules/process/Setting/Settings.h"
+#include "modules/process/steps/process_step_registry.h"
+#include "modules/process/workflow/process_node_registry.h"
+
 namespace lcnc::process {
+
+namespace {
+
+QStringList ioNames(SettingSection section, const QString& bucketName)
+{
+    QStringList result;
+    const table root = SETTINGS->GetTable(section);
+    const std::string bucketKey = bucketName.toStdString();
+    if (!root.count(bucketKey) || !root.at(bucketKey).is_table())
+        return result;
+    const table& bucket = root.at(bucketKey).as_table();
+    for (const auto& kv : bucket) {
+        const QString key = QString::fromStdString(kv.first.data());
+        QString label = key;
+        if (kv.second.is_table()) {
+            const table& entry = kv.second.as_table();
+            if (entry.count("name") && entry.at("name").is_string())
+                label = QString::fromStdString(entry.at("name").as_string());
+            if (entry.count("enabled") && entry.at("enabled").is_boolean() && !entry.at("enabled").as_boolean())
+                continue;
+        } else if (kv.second.is_array()) {
+            const auto& arr = kv.second.as_array();
+            if (!arr.empty() && arr.at(0).is_string())
+                label = QString::fromStdString(arr.at(0).as_string());
+        }
+        result.append(QStringLiteral("%1 (%2)").arg(label, key));
+    }
+    return result;
+}
+
+QString ioKeyFromDisplay(const QString& display)
+{
+    const int l = display.lastIndexOf('(');
+    const int r = display.lastIndexOf(')');
+    if (l >= 0 && r > l)
+        return display.mid(l + 1, r - l - 1);
+    return display;
+}
+
+} // namespace
 
 ProcessNodeEditDialog::ProcessNodeEditDialog(ProcessNode node, QWidget* parent)
     : QDialog(parent)
@@ -29,9 +74,11 @@ ProcessNodeEditDialog::ProcessNodeEditDialog(ProcessNode node, QWidget* parent)
 
     m_detailStack = new QStackedWidget(this);
     m_detailStack->addWidget(buildParameterPage());
+    m_detailStack->addWidget(buildPluginParameterPage());
     m_detailStack->addWidget(buildWaitPage());
     m_detailStack->addWidget(buildAxisPage());
     m_detailStack->addWidget(buildTypedParameterPage());
+    m_detailStack->addWidget(buildMultiAxisPage());
     layout->addWidget(m_detailStack);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -101,6 +148,19 @@ QWidget* ProcessNodeEditDialog::buildParameterPage()
     return page;
 }
 
+QWidget* ProcessNodeEditDialog::buildPluginParameterPage()
+{
+    if (auto step = ProcessStepRegistry::instance().step(m_node.type)) {
+        m_pluginEditor = step->createParameterEditor(m_node, this);
+        if (m_pluginEditor)
+            return m_pluginEditor;
+    }
+    auto* page = new QWidget(this);
+    auto* layout = new QVBoxLayout(page);
+    layout->addWidget(new QLabel(tr("该步骤暂无插件参数页，使用兼容参数表。"), page));
+    return page;
+}
+
 QWidget* ProcessNodeEditDialog::buildWaitPage()
 {
     auto* page = new QWidget(this);
@@ -146,74 +206,65 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
         form->addRow(QString(), editor);
         m_boolEditors.insert(key, editor);
     };
+    auto addCombo = [this, form, page](const QString& key, const QString& label, const QStringList& values) {
+        auto* editor = new QComboBox(page);
+        editor->addItems(values);
+        form->addRow(label, editor);
+        m_comboEditors.insert(key, editor);
+        return editor;
+    };
 
     switch (m_node.type) {
+    case ProcessNodeType::Start:
+        addText(QStringLiteral("variables"), tr("全局变量(JSON)"), QStringLiteral("[]"));
+        break;
+    case ProcessNodeType::Stop:
+        addText(QStringLiteral("message"), tr("停止消息"), QStringLiteral("流程结束"));
+        addBool(QStringLiteral("safeStopOutputs"), tr("停止时复位安全输出"));
+        addBool(QStringLiteral("stopMotion"), tr("停止时停止运动"));
+        break;
+    case ProcessNodeType::Axis:
+        addText(QStringLiteral("axis"), tr("轴"), QStringLiteral("X"));
+        addText(QStringLiteral("mode"), tr("模式 absolute/relative"), QStringLiteral("absolute"));
+        addDouble(QStringLiteral("target"), tr("目标位置"), -1000000.0, 1000000.0, QStringLiteral(" mm"));
+        addDouble(QStringLiteral("velocity"), tr("速度"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
+        addInt(QStringLiteral("timeoutMs"), tr("超时"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));
+        break;
     case ProcessNodeType::AxesMove:
-        addDouble(QStringLiteral("x"), tr("X 位置"), -1000000.0, 1000000.0, QStringLiteral(" mm"));
-        addDouble(QStringLiteral("y"), tr("Y 位置"), -1000000.0, 1000000.0, QStringLiteral(" mm"));
-        addDouble(QStringLiteral("z"), tr("Z 位置"), -1000000.0, 1000000.0, QStringLiteral(" mm"));
-        addDouble(QStringLiteral("feedRate"), tr("进给速度"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
+        // 多轴运动使用独立表格页 buildMultiAxisPage()。
         break;
-    case ProcessNodeType::Feeding:
-        addDouble(QStringLiteral("feedRate"), tr("进给速度"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
+    case ProcessNodeType::IO: {
+        auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("输出类型"), { QStringLiteral("digital"), QStringLiteral("analog") });
+        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("IO 名"), ioNames(SettingSection::Digital, QStringLiteral("DigitalOUT")));
+        connect(typeCombo, &QComboBox::currentTextChanged, this, [ioCombo](const QString& text) {
+            ioCombo->clear();
+            ioCombo->addItems(text == QStringLiteral("analog")
+                ? ioNames(SettingSection::Analog, QStringLiteral("AnalogOUT"))
+                : ioNames(SettingSection::Digital, QStringLiteral("DigitalOUT")));
+        });
+        addText(QStringLiteral("value"), tr("值"), QStringLiteral("true"));
         break;
-    case ProcessNodeType::AutoFocus:
-        addDouble(QStringLiteral("range"), tr("搜索范围"), 0.0, 1000000.0, QStringLiteral(" mm"));
-        addDouble(QStringLiteral("speed"), tr("速度"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
+    }
+    case ProcessNodeType::Monitor: {
+        auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("输入类型"), { QStringLiteral("digital"), QStringLiteral("analog") });
+        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("输入 IO"), ioNames(SettingSection::Digital, QStringLiteral("DigitalIN")));
+        connect(typeCombo, &QComboBox::currentTextChanged, this, [ioCombo](const QString& text) {
+            ioCombo->clear();
+            ioCombo->addItems(text == QStringLiteral("analog")
+                ? ioNames(SettingSection::Analog, QStringLiteral("AnalogIN"))
+                : ioNames(SettingSection::Digital, QStringLiteral("DigitalIN")));
+        });
+        addBool(QStringLiteral("targetValue"), tr("目标为 true"));
+        addInt(QStringLiteral("timeoutMs"), tr("超时"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));
+        addInt(QStringLiteral("pollIntervalMs"), tr("刷新间隔"), 10, 60000, QStringLiteral(" ms"));
         break;
+    }
     case ProcessNodeType::Cutting:
-        addText(QStringLiteral("contourId"), tr("轮廓 ID"));
-        addDouble(QStringLiteral("feedRate"), tr("进给速度"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
-        addDouble(QStringLiteral("laserEnergy"), tr("激光能量"), 0.0, 1000000.0, QStringLiteral(" uJ"));
         addBool(QStringLiteral("dryRun"), tr("Dry-run"));
-        break;
-    case ProcessNodeType::OverCutting:
-        addDouble(QStringLiteral("length"), tr("过切长度"), 0.0, 1000000.0, QStringLiteral(" mm"));
-        addDouble(QStringLiteral("feedRate"), tr("进给速度"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
-        break;
-    case ProcessNodeType::EnergySwitch:
-        addDouble(QStringLiteral("laserEnergy"), tr("激光能量"), 0.0, 1000000.0, QStringLiteral(" uJ"));
-        break;
-    case ProcessNodeType::IO:
-        addText(QStringLiteral("channel"), tr("通道"), QStringLiteral("DO0"));
-        addText(QStringLiteral("action"), tr("动作"), QStringLiteral("set"));
-        addBool(QStringLiteral("value"), tr("输出高电平"));
-        break;
-    case ProcessNodeType::Commands:
-        addText(QStringLiteral("command"), tr("命令"), QStringLiteral("noop"));
-        break;
-    case ProcessNodeType::Monitor:
-        addText(QStringLiteral("signal"), tr("信号"), QStringLiteral("ready"));
-        addBool(QStringLiteral("expected"), tr("期望为 true"));
-        break;
-    case ProcessNodeType::Camera:
-        addText(QStringLiteral("cameraId"), tr("相机 ID"), QStringLiteral("default"));
-        addInt(QStringLiteral("exposureMs"), tr("曝光"), 0, 3600000, QStringLiteral(" ms"));
-        break;
-    case ProcessNodeType::Measurement:
-        addText(QStringLiteral("target"), tr("测量目标"), QStringLiteral("feature"));
-        addDouble(QStringLiteral("tolerance"), tr("容差"), 0.0, 1000000.0, QStringLiteral(" mm"));
-        break;
-    case ProcessNodeType::MarkAcquire:
-        addText(QStringLiteral("markId"), tr("标记 ID"), QStringLiteral("mark"));
-        break;
-    case ProcessNodeType::Alignment:
-        addText(QStringLiteral("method"), tr("对位方法"), QStringLiteral("two-point"));
-        break;
-    case ProcessNodeType::Loop:
-        addInt(QStringLiteral("count"), tr("循环次数"), 1, 1000000);
-        break;
-    case ProcessNodeType::RunGroup:
-    case ProcessNodeType::RunGroupCheck:
-        addText(QStringLiteral("groupName"), tr("组名"), QStringLiteral("default"));
-        break;
-    case ProcessNodeType::If:
-    case ProcessNodeType::Compare:
-        addText(QStringLiteral("expression"), tr("表达式"));
-        break;
-    case ProcessNodeType::Calculation:
-        addText(QStringLiteral("expression"), tr("表达式"));
-        addText(QStringLiteral("output"), tr("输出变量"), QStringLiteral("result"));
+        addText(QStringLiteral("selectionMode"), tr("选择模式"), QStringLiteral("allEnabled"));
+        addInt(QStringLiteral("startNumber"), tr("起始序号"), 1, 1000000);
+        addInt(QStringLiteral("endNumber"), tr("结束序号(0=不限)"), 0, 1000000);
+        addText(QStringLiteral("compensationIndex"), tr("补偿索引"));
         break;
     default:
         break;
@@ -237,30 +288,133 @@ QWidget* ProcessNodeEditDialog::buildAxisPage()
     return page;
 }
 
+QWidget* ProcessNodeEditDialog::buildMultiAxisPage()
+{
+    auto* page = new QWidget(this);
+    auto* layout = new QVBoxLayout(page);
+    auto* form = new QFormLayout();
+    m_multiModeCombo = new QComboBox(page);
+    m_multiModeCombo->addItem(tr("顺序执行"), QStringLiteral("sequential"));
+    m_multiModeCombo->addItem(tr("同步执行"), QStringLiteral("sync"));
+    form->addRow(tr("多轴模式"), m_multiModeCombo);
+    layout->addLayout(form);
+
+    m_axesTable = new QTableWidget(page);
+    m_axesTable->setColumnCount(5);
+    m_axesTable->setHorizontalHeaderLabels({ tr("轴"), tr("模式"), tr("目标位置"), tr("速度"), tr("操作") });
+    m_axesTable->horizontalHeader()->setStretchLastSection(true);
+    layout->addWidget(m_axesTable);
+
+    auto* row = new QHBoxLayout();
+    auto* addButton = new QPushButton(tr("添加轴"), page);
+    row->addWidget(addButton);
+    row->addStretch();
+    layout->addLayout(row);
+    connect(addButton, &QPushButton::clicked, this, [this] { addAxisRow(); });
+    return page;
+}
+
+void ProcessNodeEditDialog::addAxisRow(const QVariantMap& row)
+{
+    if (!m_axesTable)
+        return;
+    const int r = m_axesTable->rowCount();
+    m_axesTable->insertRow(r);
+
+    auto* axis = new QLineEdit(row.value(QStringLiteral("axis"), QStringLiteral("X")).toString(), m_axesTable);
+    m_axesTable->setCellWidget(r, 0, axis);
+
+    auto* mode = new QComboBox(m_axesTable);
+    mode->addItem(tr("绝对"), QStringLiteral("absolute"));
+    mode->addItem(tr("相对"), QStringLiteral("relative"));
+    const int modeIndex = mode->findData(row.value(QStringLiteral("mode"), QStringLiteral("absolute")).toString());
+    mode->setCurrentIndex(modeIndex < 0 ? 0 : modeIndex);
+    m_axesTable->setCellWidget(r, 1, mode);
+
+    auto* target = new QDoubleSpinBox(m_axesTable);
+    target->setRange(-1000000.0, 1000000.0);
+    target->setDecimals(3);
+    target->setValue(row.value(QStringLiteral("target"), 0.0).toDouble());
+    m_axesTable->setCellWidget(r, 2, target);
+
+    auto* velocity = new QDoubleSpinBox(m_axesTable);
+    velocity->setRange(0.0, 1000000.0);
+    velocity->setDecimals(3);
+    velocity->setValue(row.value(QStringLiteral("velocity"), 5.0).toDouble());
+    m_axesTable->setCellWidget(r, 3, velocity);
+
+    auto* del = new QPushButton(tr("删除"), m_axesTable);
+    connect(del, &QPushButton::clicked, this, [this, del] {
+        for (int i = 0; i < m_axesTable->rowCount(); ++i) {
+            if (m_axesTable->cellWidget(i, 4) == del) {
+                m_axesTable->removeRow(i);
+                break;
+            }
+        }
+    });
+    m_axesTable->setCellWidget(r, 4, del);
+}
+
+QVariantList ProcessNodeEditDialog::axesFromTable() const
+{
+    QVariantList result;
+    if (!m_axesTable)
+        return result;
+    for (int r = 0; r < m_axesTable->rowCount(); ++r) {
+        QVariantMap item;
+        if (auto* axis = qobject_cast<QLineEdit*>(m_axesTable->cellWidget(r, 0)))
+            item.insert(QStringLiteral("axis"), axis->text().trimmed().toUpper());
+        if (auto* mode = qobject_cast<QComboBox*>(m_axesTable->cellWidget(r, 1)))
+            item.insert(QStringLiteral("mode"), mode->currentData().toString());
+        if (auto* target = qobject_cast<QDoubleSpinBox*>(m_axesTable->cellWidget(r, 2)))
+            item.insert(QStringLiteral("target"), target->value());
+        if (auto* velocity = qobject_cast<QDoubleSpinBox*>(m_axesTable->cellWidget(r, 3)))
+            item.insert(QStringLiteral("velocity"), velocity->value());
+        if (!item.value(QStringLiteral("axis")).toString().isEmpty())
+            result.append(item);
+    }
+    return result;
+}
+
+void ProcessNodeEditDialog::loadMultiAxisPage()
+{
+    if (!m_axesTable)
+        return;
+    m_axesTable->setRowCount(0);
+    const QString mode = m_node.parameters.value(QStringLiteral("multiMode"), QStringLiteral("sequential")).toString();
+    if (m_multiModeCombo) {
+        const int index = m_multiModeCombo->findData(mode);
+        m_multiModeCombo->setCurrentIndex(index < 0 ? 0 : index);
+    }
+    const QVariantList rows = m_node.parameters.value(QStringLiteral("axes"), QVariantList{}).toList();
+    for (const QVariant& value : rows)
+        addAxisRow(value.toMap());
+}
+
+void ProcessNodeEditDialog::applyMultiAxisPage()
+{
+    m_node.parameters.insert(QStringLiteral("multiMode"), m_multiModeCombo ? m_multiModeCombo->currentData().toString() : QStringLiteral("sequential"));
+    m_node.parameters.insert(QStringLiteral("axes"), axesFromTable());
+}
+
 void ProcessNodeEditDialog::loadNode()
 {
     m_nameEdit->setText(m_node.name);
-    m_enabledCheck->setChecked(m_node.enabled);
+    const bool canDisable = ProcessNodeRegistry::instance().isDisableable(m_node.type);
+    m_enabledCheck->setChecked(canDisable ? m_node.enabled : true);
+    m_enabledCheck->setEnabled(canDisable);
     loadParameterTable();
 
-    switch (m_node.type) {
-    case ProcessNodeType::Wait:
+    if (m_pluginEditor && ProcessStepRegistry::instance().step(m_node.type)) {
         m_detailStack->setCurrentIndex(1);
-        m_waitDurationSpin->setValue(m_node.parameters.value(QStringLiteral("durationMs"), 1000).toInt());
-        break;
-    case ProcessNodeType::Axis:
-        m_detailStack->setCurrentIndex(2);
-        m_axisNameEdit->setText(m_node.parameters.value(QStringLiteral("axis"), QStringLiteral("X")).toString());
-        m_axisPositionSpin->setValue(m_node.parameters.value(QStringLiteral("position"), 0.0).toDouble());
-        break;
-    default:
-        if (!m_textEditors.isEmpty() || !m_doubleEditors.isEmpty() || !m_intEditors.isEmpty() || !m_boolEditors.isEmpty()) {
-            m_detailStack->setCurrentIndex(3);
-            loadTypedParameterEditors();
-        } else {
-            m_detailStack->setCurrentIndex(0);
-        }
-        break;
+    } else if (m_node.type == ProcessNodeType::AxesMove) {
+        m_detailStack->setCurrentIndex(5);
+        loadMultiAxisPage();
+    } else if (!m_textEditors.isEmpty() || !m_doubleEditors.isEmpty() || !m_intEditors.isEmpty() || !m_boolEditors.isEmpty() || !m_comboEditors.isEmpty()) {
+        m_detailStack->setCurrentIndex(4);
+        loadTypedParameterEditors();
+    } else {
+        m_detailStack->setCurrentIndex(0);
     }
 }
 
@@ -273,12 +427,15 @@ void ProcessNodeEditDialog::applyNode()
     m_node.enabled = m_enabledCheck->isChecked();
     m_node.state = m_node.enabled ? ProcessNodeState::Enabled : ProcessNodeState::Disabled;
 
-    if (m_node.type == ProcessNodeType::Wait) {
-        m_node.parameters.insert(QStringLiteral("durationMs"), m_waitDurationSpin->value());
-    } else if (m_node.type == ProcessNodeType::Axis) {
-        m_node.parameters.insert(QStringLiteral("axis"), m_axisNameEdit->text().trimmed());
-        m_node.parameters.insert(QStringLiteral("position"), m_axisPositionSpin->value());
-    } else if (!m_textEditors.isEmpty() || !m_doubleEditors.isEmpty() || !m_intEditors.isEmpty() || !m_boolEditors.isEmpty()) {
+    if (m_pluginEditor) {
+        if (auto step = ProcessStepRegistry::instance().step(m_node.type)) {
+            QString error;
+            if (!step->applyParameterEditor(m_pluginEditor, m_node, &error))
+                return;
+        }
+    } else if (m_node.type == ProcessNodeType::AxesMove) {
+        applyMultiAxisPage();
+    } else if (!m_textEditors.isEmpty() || !m_doubleEditors.isEmpty() || !m_intEditors.isEmpty() || !m_boolEditors.isEmpty() || !m_comboEditors.isEmpty()) {
         applyTypedParameterEditors();
     } else {
         applyParameterTable();
@@ -289,6 +446,28 @@ void ProcessNodeEditDialog::loadTypedParameterEditors()
 {
     for (auto it = m_textEditors.cbegin(); it != m_textEditors.cend(); ++it)
         it.value()->setText(m_node.parameters.value(it.key()).toString());
+    if (auto* signalType = m_comboEditors.value(QStringLiteral("signalType"), nullptr)) {
+        const QString value = m_node.parameters.value(QStringLiteral("signalType"), signalType->currentText()).toString();
+        const int index = signalType->findText(value);
+        if (index >= 0)
+            signalType->setCurrentIndex(index);
+    }
+    for (auto it = m_comboEditors.cbegin(); it != m_comboEditors.cend(); ++it) {
+        if (it.key() == QStringLiteral("signalType"))
+            continue;
+        const QString value = m_node.parameters.value(it.key()).toString();
+        int index = it.value()->findText(value);
+        if (it.key() == QStringLiteral("ioName") && index < 0) {
+            for (int i = 0; i < it.value()->count(); ++i) {
+                if (ioKeyFromDisplay(it.value()->itemText(i)) == value) {
+                    index = i;
+                    break;
+                }
+            }
+        }
+        if (index >= 0)
+            it.value()->setCurrentIndex(index);
+    }
     for (auto it = m_doubleEditors.cbegin(); it != m_doubleEditors.cend(); ++it)
         it.value()->setValue(m_node.parameters.value(it.key(), it.value()->minimum()).toDouble());
     for (auto it = m_intEditors.cbegin(); it != m_intEditors.cend(); ++it)
@@ -302,6 +481,10 @@ void ProcessNodeEditDialog::applyTypedParameterEditors()
     QVariantMap parameters = m_node.parameters;
     for (auto it = m_textEditors.cbegin(); it != m_textEditors.cend(); ++it)
         parameters.insert(it.key(), it.value()->text().trimmed());
+    for (auto it = m_comboEditors.cbegin(); it != m_comboEditors.cend(); ++it) {
+        const QString text = it.value()->currentText();
+        parameters.insert(it.key(), it.key() == QStringLiteral("ioName") ? ioKeyFromDisplay(text) : text);
+    }
     for (auto it = m_doubleEditors.cbegin(); it != m_doubleEditors.cend(); ++it)
         parameters.insert(it.key(), it.value()->value());
     for (auto it = m_intEditors.cbegin(); it != m_intEditors.cend(); ++it)

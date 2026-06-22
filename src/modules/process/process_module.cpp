@@ -6,9 +6,13 @@
 #include "core/logging/logger.h"
 #include "core/task/task_manager.h"
 #include "core/task/task_progress.h"
+#include "modules/cam/i_cam_toolpath_provider.h"
 #include "modules/process/execution/process_workflow_executor.h"
 #include "modules/process/Setting/BuiltinIODefs.h"
 #include "modules/process/Setting/Settings.h"
+#include "modules/process/steps/process_step_builtin_registration.h"
+#include "modules/process/steps/process_step_registry.h"
+#include "modules/process/steps/services/legacy_process_services.h"
 #include "modules/process/System/Service.h"
 #include "modules/process/workflow/process_flow_store.h"
 
@@ -16,6 +20,8 @@
 #include <QPointer>
 #include <QTimer>
 #include <QVector>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QFutureWatcher>
 #include <QtConcurrent>
 
@@ -178,6 +184,9 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::init begin");
     m_kernel = &kernel;
     m_service = std::make_unique<Service>();
+    m_motionStepService = std::make_unique<lcnc::process::LegacyProcessMotionService>(m_service.get());
+    m_ioStepService = std::make_unique<lcnc::process::LegacyProcessIoService>(m_service.get());
+    m_cuttingStepService = std::make_unique<lcnc::process::CallbackProcessCuttingService>();
     auto svc = std::shared_ptr<ProcessModule>(this, [](ProcessModule*) {});
     kernel.services().registerService<ProcessModule>(svc);
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
@@ -196,6 +205,42 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     qRegisterMetaType<DigitalOutputDescriptor>("DigitalOutputDescriptor");
     qRegisterMetaType<QList<DigitalOutputDescriptor>>("QList<DigitalOutputDescriptor>");
 
+    // 注册内置流程步骤插件（执行器只通过插件分发，不再有业务 fallback）。
+    auto& stepRegistry = lcnc::process::ProcessStepRegistry::instance();
+    registerBuiltinProcessSteps(stepRegistry);
+
+    // 从 settings 恢复插件启用/禁用状态。
+    {
+        const table specialTable = SETTINGS->GetTable(SettingSection::Special);
+        if (specialTable.count("ProcessPlugins") && specialTable.at("ProcessPlugins").is_table()) {
+            const auto& plugins = specialTable.at("ProcessPlugins").as_table();
+            for (const auto& kv : plugins) {
+                if (kv.second.is_boolean())
+                    stepRegistry.setPluginEnabled(QString::fromStdString(kv.first.data()), kv.second.as_boolean());
+            }
+        }
+    }
+
+    // 接入 CAM 工具路径快照，供 NormalCutting 等步骤查询。
+    auto camProvider = kernel.services().getService<lcnc::cam::ICamToolpathProvider>();
+    m_cuttingStepService->setSnapshotProvider([camProvider]() {
+        lcnc::process::ProcessToolpathSnapshot s;
+        if (camProvider && camProvider->hasToolpath()) {
+            const auto exp = camProvider->exportToolpathSnapshot();
+            s.available = exp.hasEnabledContours();
+            s.contourCount = exp.contours.size();
+            s.totalPointCount = exp.totalPointCount();
+            s.description = exp.description;
+        }
+        return s;
+    });
+    m_cuttingStepService->setExecutor([](bool dryRun, QString* errorMessage) {
+        Q_UNUSED(dryRun);
+        Q_UNUSED(errorMessage);
+        // 真正切割管线后续接 NormalCuttingManager；当前占位返回成功。
+        return true;
+    });
+
     // 设置机台构型（从 MachineConfigurationService）。
     auto machineConfig = kernel.services().getService<lcnc::MachineConfigurationService>();
     if (machineConfig) {
@@ -208,6 +253,14 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 
     // 工作流执行器。
     m_workflowExecutor = std::make_unique<lcnc::process::ProcessWorkflowExecutor>(this);
+    m_stepContext.motion = m_motionStepService.get();
+    m_stepContext.io = m_ioStepService.get();
+    m_stepContext.cutting = m_cuttingStepService.get();
+    m_stepContext.logMessage = [this](const QString& message) { setStatusMessage(message); };
+    m_stepContext.requestAxisPosition = [this](const QString& axis, double value) { setAxisPosition(axis, value); };
+    m_stepContext.requestDigitalOutput = [this](const QString& channel, bool value) { setDigitalOutput(channel, value); };
+    m_workflowExecutor->setStepRegistry(&stepRegistry);
+    m_workflowExecutor->setStepContext(&m_stepContext);
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::messageLogged,
             this, &ProcessModule::setStatusMessage);
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeStateChanged,
@@ -225,10 +278,18 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
             this, &ProcessModule::setAxisPosition);
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::digitalOutputRequested,
             this, [this](const QString& channel, bool value) {
-                if (m_service) {
-                    if (auto* mc = m_service->GetMotionControl())
-                        mc->DigitalOutputSet(channel, value ? 1 : 0);
-                }
+                // 兼容信号路径；正常流程通过 OutputSignalStep + LegacyProcessIoService 走枚举接口。
+                if (!m_service)
+                    return;
+                auto* mc = m_service->GetMotionControl();
+                if (!mc || !mc->IsConnected())
+                    return;
+                QString enumName = channel.trimmed();
+                if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
+                    enumName = enumName.mid(1);
+                auto eOut = enum_cast<DigitalOUT>(enumName.toStdString());
+                if (eOut.has_value() && mc->m_mapDigitalOUT.count(eOut.value()))
+                    mc->DigitalOutputSet(eOut.value(), value ? 1 : 0);
             });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::workflowFinished,
             this, [this] {
@@ -237,6 +298,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 setState(State::Idle, tr("流程运行完成"));
                 emit processFlowChanged();
             });
+
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 
@@ -269,6 +331,8 @@ void ProcessModule::stop()
 ProcessModule::ProcessModule(QObject* parent)
     : QObject(parent)
 {
+    m_processFlowDocument.resetToDefault();
+    m_processFlowDocument.markClean();
     initializeAxisPositions();
 
     m_simTimer = new QTimer(this);
@@ -322,6 +386,7 @@ bool ProcessModule::connectController(const QString& endpoint)
 
 void ProcessModule::disconnectController()
 {
+    triggerSafeStopOutputs();
     if (m_hwStatusTimer)
         m_hwStatusTimer->stop();
     m_hwPollInFlight = false;
@@ -812,7 +877,7 @@ void ProcessModule::resetEmergencyStop()
 
 void ProcessModule::newProcess()
 {
-    m_processFlowDocument.clear();
+    m_processFlowDocument.resetToDefault();
     m_processFlowDocument.markClean();
     emit processFlowChanged();
     setStatusMessage(tr("已新建流程"));
@@ -1033,79 +1098,19 @@ struct HardwareAxisSample
     bool    valid{false};
 };
 
-} // namespace
-
-void ProcessModule::pollHardwareStatus()
+struct HardwareDigitalOutputSample
 {
-    if (m_hwPollInFlight)
-        return;
-    if (!m_connected || m_simulationMode)
-        return;
-    if (!m_service)
-        return;
+    QString channel;
+    QString displayName;
+    bool    value{false};
+    bool    valid{false};
+};
 
-    MotionControl* hwMc = m_service->GetMotionControl();
-    if (!hwMc || !hwMc->IsConnected())
-        return;
-
-    // 仅采集已注册的预设轴；BASE 与扩展轴在硬件层无对应 Axis 枚举，跳过。
-    QStringList axisNames;
-    for (const MachineAxisDef& axis : m_axisDefinitions) {
-        if (axis.name == QStringLiteral("BASE"))
-            continue;
-        axisNames.append(axis.name.trimmed().toUpper());
-    }
-    if (axisNames.isEmpty())
-        return;
-
-    m_hwPollInFlight = true;
-    QPointer<ProcessModule> self(this);
-    auto* watcher = new QFutureWatcher<QVector<HardwareAxisSample>>(this);
-    connect(watcher, &QFutureWatcher<QVector<HardwareAxisSample>>::finished, this,
-            [this, self, watcher]() {
-        const QVector<HardwareAxisSample> samples = watcher->result();
-        watcher->deleteLater();
-        m_hwPollInFlight = false;
-        if (!self)
-            return;
-
-        for (const HardwareAxisSample& s : samples) {
-            if (!s.valid)
-                continue;
-            // setAxisPosition 已带 1e-9 去抖与 axisPositionChanged 信号发射。
-            setAxisPosition(s.name, s.pos);
-            // 硬件使能状态作为权威来源，覆盖本地缓存。
-            const bool present = m_axisEnabled.contains(s.name);
-            const bool prev = m_axisEnabled.value(s.name, true);
-            if (!present || prev != s.enabled) {
-                m_axisEnabled.insert(s.name, s.enabled);
-                emit axisEnabledChanged(s.name, s.enabled);
-            }
-        }
-    });
-
-    watcher->setFuture(QtConcurrent::run([axisNames, hwMc]() {
-        QVector<HardwareAxisSample> out;
-        out.reserve(axisNames.size());
-        for (const QString& name : axisNames) {
-            HardwareAxisSample sample;
-            sample.name = name;
-            auto eAxis = enum_cast<Axis>(name.toStdString());
-            if (eAxis.has_value() && hwMc->IsMotorCreated(eAxis.value())) {
-                double pos = 0.0;
-                if (hwMc->GetActualPos(eAxis.value(), pos)) {
-                    sample.pos = pos;
-                    sample.enabled = hwMc->IsEnabled(eAxis.value());
-                    sample.valid = true;
-                }
-            }
-            out.push_back(sample);
-        }
-        return out;
-    }));
-}
-
-namespace {
+struct HardwareIoBatch
+{
+    QVector<HardwareAxisSample> axes;
+    QVector<HardwareDigitalOutputSample> digitalOutputs;
+};
 
 // 从 settings 一条 IO 子表里读取四个用得着的字段；兼容旧版 array 写法。
 struct IOEntry
@@ -1139,6 +1144,127 @@ bool extractIOEntry(const std::string& tomlKey, const value& v, IOEntry& out)
     return false;
 }
 
+} // namespace
+
+void ProcessModule::pollHardwareStatus()
+{
+    if (m_hwPollInFlight)
+        return;
+    if (!m_connected || m_simulationMode)
+        return;
+    if (!m_service)
+        return;
+
+    MotionControl* hwMc = m_service->GetMotionControl();
+    if (!hwMc || !hwMc->IsConnected())
+        return;
+
+    // 仅采集已注册的预设轴；BASE 与扩展轴在硬件层无对应 Axis 枚举，跳过。
+    QStringList axisNames;
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+        axisNames.append(axis.name.trimmed().toUpper());
+    }
+
+    // 数字量输出：所有 enabled 的 DigitalOUT 通道，全部扫描，便于硬件端
+    // 直接驱动输出时界面也能同步刷新。
+    QVector<QPair<QString, QString>> digitalOutputs; // <channel, display>
+    {
+        const table digital = SETTINGS->GetTable(SettingSection::Digital);
+        if (digital.count("DigitalOUT") && digital.at("DigitalOUT").is_table()) {
+            for (const auto& kv : digital.at("DigitalOUT").as_table()) {
+                IOEntry entry;
+                if (!extractIOEntry(kv.first.data(), kv.second, entry))
+                    continue;
+                if (!entry.enabled || entry.name.isEmpty())
+                    continue;
+                digitalOutputs.append(qMakePair(entry.channel, entry.name));
+            }
+        }
+    }
+
+    if (axisNames.isEmpty() && digitalOutputs.isEmpty())
+        return;
+
+    m_hwPollInFlight = true;
+    QPointer<ProcessModule> self(this);
+    auto* watcher = new QFutureWatcher<HardwareIoBatch>(this);
+    connect(watcher, &QFutureWatcher<HardwareIoBatch>::finished, this,
+            [this, self, watcher]() {
+        const HardwareIoBatch batch = watcher->result();
+        watcher->deleteLater();
+        m_hwPollInFlight = false;
+        if (!self)
+            return;
+
+        for (const HardwareAxisSample& s : batch.axes) {
+            if (!s.valid)
+                continue;
+            setAxisPosition(s.name, s.pos);
+            const bool present = m_axisEnabled.contains(s.name);
+            const bool prev = m_axisEnabled.value(s.name, true);
+            if (!present || prev != s.enabled) {
+                m_axisEnabled.insert(s.name, s.enabled);
+                emit axisEnabledChanged(s.name, s.enabled);
+            }
+        }
+
+        for (const HardwareDigitalOutputSample& s : batch.digitalOutputs) {
+            if (!s.valid)
+                continue;
+            // 缓存按显示名（与 setDigitalOutput / WidgetLaserControl 一致）。
+            const bool present = m_digitalOutputs.contains(s.displayName);
+            const bool prev = m_digitalOutputs.value(s.displayName, false);
+            if (!present || prev != s.value) {
+                m_digitalOutputs.insert(s.displayName, s.value);
+                emit digitalOutputChanged(s.displayName, s.channel, s.value);
+            }
+        }
+    });
+
+    watcher->setFuture(QtConcurrent::run([axisNames, digitalOutputs, hwMc]() {
+        HardwareIoBatch batch;
+        batch.axes.reserve(axisNames.size());
+        for (const QString& name : axisNames) {
+            HardwareAxisSample sample;
+            sample.name = name;
+            auto eAxis = enum_cast<Axis>(name.toStdString());
+            if (eAxis.has_value() && hwMc->IsMotorCreated(eAxis.value())) {
+                double pos = 0.0;
+                if (hwMc->GetActualPos(eAxis.value(), pos)) {
+                    sample.pos = pos;
+                    sample.enabled = hwMc->IsEnabled(eAxis.value());
+                    sample.valid = true;
+                }
+            }
+            batch.axes.push_back(sample);
+        }
+        batch.digitalOutputs.reserve(digitalOutputs.size());
+        for (const auto& pair : digitalOutputs) {
+            HardwareDigitalOutputSample sample;
+            sample.channel = pair.first;
+            sample.displayName = pair.second;
+            // 通过 toml key（如 "aLaser"）映射到 DigitalOUT 枚举值，避免触发
+            // QString 重载里基于显示名查找失败时的 WARN_MC_NONEINDEX 弹窗。
+            QString enumName = pair.first;
+            if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
+                enumName = enumName.mid(1);
+            auto eOut = enum_cast<DigitalOUT>(enumName.toStdString());
+            if (eOut.has_value() && hwMc->m_mapDigitalOUT.count(eOut.value())) {
+                int value = 0;
+                if (hwMc->DigitalOutputGet(eOut.value(), value)) {
+                    sample.value = value != 0;
+                    sample.valid = true;
+                }
+            }
+            batch.digitalOutputs.push_back(sample);
+        }
+        return batch;
+    }));
+}
+
+namespace {
 } // namespace
 
 void ProcessModule::seedDefaultIOTables()
@@ -1201,12 +1327,24 @@ QList<DigitalOutputDescriptor> ProcessModule::mainPanelDigitalOutputs() const
 
 void ProcessModule::refreshIOFromSettings()
 {
+    // 设置对话框关闭后：
+    //   1. 把最新 settings 中的 IO 表重新下发到运动控制器（连接状态下立即生效）。
+    //   2. 重新发射主界面 IO 描述符列表，让按钮按新 showInMain 重建。
+    //   3. 重置 UI 缓存中的输出值，等待下一次轮询从硬件回填实际状态。
+    if (m_service) {
+        if (auto* mc = m_service->GetMotionControl()) {
+            mc->SetDigitalTable();
+            mc->SetAnalogTable();
+        }
+    }
+    m_digitalOutputs.clear();
     emit digitalOutputDescriptorsChanged(mainPanelDigitalOutputs());
 }
 
 void ProcessModule::safeStopProcessOutputs()
 {
-    // 重置常用数字输出。
+    // 兼容旧调用：除了清 UI 缓存外，强制写硬件 0。
+    triggerSafeStopOutputs();
     const QStringList commonOutputs = {
         QStringLiteral("激光"), QStringLiteral("吹气"),
         QStringLiteral("夹头"), QStringLiteral("水冷"), QStringLiteral("气泵")
@@ -1219,12 +1357,46 @@ void ProcessModule::safeStopProcessOutputs()
     }
 }
 
+void ProcessModule::triggerSafeStopOutputs()
+{
+    // 任何中断流程的路径都必须强制关闭激光与吹气。
+    struct SafeChannel { QString channel; DigitalOUT eIndex; };
+    static const QVector<SafeChannel> kSafeChannels = {
+        { QStringLiteral("aLaser"), DigitalOUT::Laser },
+        { QStringLiteral("aBlow"),  DigitalOUT::Blow  }
+    };
+    if (m_service) {
+        if (auto* mc = m_service->GetMotionControl()) {
+            if (mc->IsConnected()) {
+                for (const SafeChannel& sc : kSafeChannels) {
+                    // 先 guard 是否已注册，避免触发 WARN_MC_NONEINDEX 弹窗。
+                    if (mc->m_mapDigitalOUT.count(sc.eIndex))
+                        mc->DigitalOutputSet(sc.eIndex, 0);
+                }
+            }
+        }
+    }
+    // 同步刷 UI 缓存。
+    for (const SafeChannel& sc : kSafeChannels) {
+        if (m_digitalOutputs.value(sc.channel, false)) {
+            m_digitalOutputs.insert(sc.channel, false);
+            emit digitalOutputChanged(sc.channel, sc.channel, false);
+        }
+    }
+}
+
 void ProcessModule::setState(State state, const QString& statusMessage)
 {
     if (m_state != state) {
         m_state = state;
         emit stateChanged(m_state);
         emit processLogMessage(QStringLiteral("state"), tr("状态机切换为 %1").arg(processStateText(m_state)));
+        // 任何流程被打断/异常的状态都强制关闭激光和吹气。
+        if (m_state == State::Paused
+            || m_state == State::Error
+            || m_state == State::EmergencyStop) {
+            triggerSafeStopOutputs();
+        }
     }
 
     setStatusMessage(statusMessage);

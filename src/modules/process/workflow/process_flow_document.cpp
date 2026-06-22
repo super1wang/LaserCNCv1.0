@@ -12,13 +12,21 @@ struct ProcessFlowDocument::NodeLocation
 
 void ProcessFlowDocument::clear()
 {
+    resetToDefault();
+}
+
+void ProcessFlowDocument::resetToDefault()
+{
     m_rootNodes.clear();
+    m_rootNodes.append(ProcessNodeRegistry::instance().createDefaultNode(ProcessNodeType::Start));
+    m_rootNodes.append(ProcessNodeRegistry::instance().createDefaultNode(ProcessNodeType::Stop));
     markDirty();
 }
 
 void ProcessFlowDocument::setRootNodes(QVector<ProcessNode> nodes)
 {
     m_rootNodes = std::move(nodes);
+    ensureRequiredNodes();
     markDirty();
 }
 
@@ -42,6 +50,19 @@ ProcessNode* ProcessFlowDocument::appendNode(const QString& parentId, ProcessNod
     if (!children)
         return nullptr;
 
+    if (parentId.isEmpty()) {
+        int insertRow = children->size();
+        for (int i = 0; i < children->size(); ++i) {
+            if (children->at(i).type == ProcessNodeType::Stop) {
+                insertRow = i;
+                break;
+            }
+        }
+        children->insert(insertRow, std::move(node));
+        markDirty();
+        return &(*children)[insertRow];
+    }
+
     children->append(std::move(node));
     markDirty();
     return &children->last();
@@ -51,6 +72,8 @@ bool ProcessFlowDocument::removeNode(const QString& id)
 {
     NodeLocation location = locateNode(id);
     if (!location.siblings || location.row < 0)
+        return false;
+    if (ProcessNodeRegistry::instance().isRequired(location.siblings->at(location.row).type))
         return false;
 
     location.siblings->removeAt(location.row);
@@ -68,6 +91,8 @@ bool ProcessFlowDocument::moveNode(const QString& id, const QString& targetParen
         return false;
 
     ProcessNode movingNode = source.siblings->at(source.row);
+    if (ProcessNodeRegistry::instance().isRequired(movingNode.type))
+        return false;
     if (containsNodeRecursive(movingNode, targetParentId))
         return false;
 
@@ -92,6 +117,57 @@ bool ProcessFlowDocument::moveNode(const QString& id, const QString& targetParen
     targetSiblings->insert(targetRow, std::move(movingNode));
     markDirty();
     return true;
+}
+
+void ProcessFlowDocument::ensureRequiredNodes()
+{
+    bool hasStart = false;
+    bool hasStop = false;
+    QVector<ProcessNode> normalized;
+    normalized.reserve(m_rootNodes.size() + 2);
+
+    for (ProcessNode& node : m_rootNodes) {
+        if (node.type == ProcessNodeType::Start) {
+            if (hasStart)
+                continue;
+            hasStart = true;
+            node.enabled = true;
+            node.state = ProcessNodeState::Enabled;
+            node.children.clear();
+            normalized.prepend(std::move(node));
+            continue;
+        }
+        if (node.type == ProcessNodeType::Stop) {
+            if (hasStop)
+                continue;
+            hasStop = true;
+            node.enabled = true;
+            node.state = ProcessNodeState::Enabled;
+            node.children.clear();
+            // Stop 稍后统一放到末尾。
+            normalized.append(std::move(node));
+            continue;
+        }
+        normalized.append(std::move(node));
+    }
+
+    if (!hasStart)
+        normalized.prepend(ProcessNodeRegistry::instance().createDefaultNode(ProcessNodeType::Start));
+
+    ProcessNode stopNode;
+    bool haveStopInNormalized = false;
+    for (int i = 0; i < normalized.size(); ++i) {
+        if (normalized.at(i).type == ProcessNodeType::Stop) {
+            stopNode = std::move(normalized[i]);
+            normalized.removeAt(i);
+            haveStopInNormalized = true;
+            break;
+        }
+    }
+    if (!haveStopInNormalized)
+        stopNode = ProcessNodeRegistry::instance().createDefaultNode(ProcessNodeType::Stop);
+    normalized.append(std::move(stopNode));
+    m_rootNodes = std::move(normalized);
 }
 
 ProcessNode* ProcessFlowDocument::nodeById(const QString& id)

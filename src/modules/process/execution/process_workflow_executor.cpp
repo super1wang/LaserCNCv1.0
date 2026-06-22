@@ -1,7 +1,10 @@
 #include "modules/process/execution/process_workflow_executor.h"
 
 #include "core/logging/logger.h"
+#include "modules/process/steps/process_step_context.h"
+#include "modules/process/steps/process_step_registry.h"
 #include "modules/process/workflow/process_flow_document.h"
+#include "modules/process/workflow/process_node_registry.h"
 
 #include <QTimer>
 
@@ -52,14 +55,14 @@ bool ProcessWorkflowExecutor::start(ProcessFlowDocument& document, QString* erro
     return true;
 }
 
-void ProcessWorkflowExecutor::setToolpathSnapshotProvider(std::function<ProcessToolpathSnapshot()> provider)
+void ProcessWorkflowExecutor::setStepRegistry(ProcessStepRegistry* registry)
 {
-    m_toolpathSnapshotProvider = std::move(provider);
+    m_stepRegistry = registry;
 }
 
-void ProcessWorkflowExecutor::setCuttingExecutor(std::function<bool(bool dryRun, QString* errorMessage)> executor)
+void ProcessWorkflowExecutor::setStepContext(ProcessStepContext* context)
 {
-    m_cuttingExecutor = std::move(executor);
+    m_stepContext = context;
 }
 
 void ProcessWorkflowExecutor::pause()
@@ -118,6 +121,10 @@ void ProcessWorkflowExecutor::collectNode(const ProcessNode& node, int depth)
     step.type = node.type;
     step.name = node.name;
     step.parameters = node.parameters;
+    if (const auto* descriptor = ProcessNodeRegistry::instance().descriptor(node.type))
+        step.executorKey = descriptor->executorKey;
+    else
+        step.executorKey = processNodeTypeToString(node.type);
     step.depth = depth;
     m_plan.append(step);
 
@@ -206,85 +213,39 @@ void ProcessWorkflowExecutor::setNodeState(const QString& nodeId, ProcessNodeSta
 
 int ProcessWorkflowExecutor::durationForStep(const ProcessExecutionStep& step) const
 {
-    switch (step.type) {
-    case ProcessNodeType::Wait:
-        return qBound(0, step.parameters.value(QStringLiteral("durationMs"), 1000).toInt(), 24 * 60 * 60 * 1000);
-    case ProcessNodeType::Axis:
-    case ProcessNodeType::AxesMove:
-        return 200;
-    case ProcessNodeType::Cutting:
-    case ProcessNodeType::OverCutting:
-        return step.parameters.value(QStringLiteral("dryRun"), true).toBool() ? 300 : 100;
-    default:
-        return 1;
+    if (m_stepRegistry) {
+        if (auto plugin = m_stepRegistry->stepByExecutorKey(step.executorKey)) {
+            ProcessNodeExecutionRequest request;
+            request.nodeId = step.nodeId;
+            request.executorKey = step.executorKey;
+            request.displayName = step.name;
+            request.parameters = step.parameters;
+            return plugin->completionDelayMs(request);
+        }
     }
+    return 1;
 }
 
 bool ProcessWorkflowExecutor::dispatchStepSideEffects(const ProcessExecutionStep& step, QString* errorMessage)
 {
-    if (step.type == ProcessNodeType::Axis) {
-        emit axisPositionRequested(
-            step.parameters.value(QStringLiteral("axis"), QStringLiteral("X")).toString(),
-            step.parameters.value(QStringLiteral("position"), 0.0).toDouble());
-    } else if (step.type == ProcessNodeType::AxesMove) {
-        emit axisPositionRequested(QStringLiteral("X"), step.parameters.value(QStringLiteral("x"), 0.0).toDouble());
-        emit axisPositionRequested(QStringLiteral("Y"), step.parameters.value(QStringLiteral("y"), 0.0).toDouble());
-        emit axisPositionRequested(QStringLiteral("Z"), step.parameters.value(QStringLiteral("z"), 0.0).toDouble());
-    } else if (step.type == ProcessNodeType::Cutting) {
-        const double feedRate = step.parameters.value(QStringLiteral("feedRate"), 100.0).toDouble();
-        const double laserEnergy = step.parameters.value(QStringLiteral("laserEnergy"), 10.0).toDouble();
-        const bool dryRun = step.parameters.value(QStringLiteral("dryRun"), true).toBool();
-        if (feedRate <= 0.0) {
-            if (errorMessage)
-                *errorMessage = tr("切割进给速度必须大于 0");
-            return false;
-        }
-        if (laserEnergy < 0.0) {
-            if (errorMessage)
-                *errorMessage = tr("激光能量不能小于 0");
-            return false;
-        }
-
-        const ProcessToolpathSnapshot snapshot = m_toolpathSnapshotProvider
-            ? m_toolpathSnapshotProvider()
-            : ProcessToolpathSnapshot{};
-        if (!dryRun && !snapshot.available) {
-            if (errorMessage)
-                *errorMessage = tr("非 dry-run 切割需要可用 CAM 刀路");
-            return false;
-        }
-        emit laserEnergyRequested(laserEnergy);
-        if (m_cuttingExecutor && snapshot.available) {
-            if (!m_cuttingExecutor(dryRun, errorMessage))
-                return false;
-        }
-        emit messageLogged(tr("%1: %2，轮廓=%3，点数=%4，feed=%5，energy=%6").arg(
-            dryRun ? tr("CAM dry-run") : tr("CAM 切割"),
-            snapshot.description.isEmpty() ? tr("无 CAM 刀路，按节点参数空跑") : snapshot.description,
-            QString::number(snapshot.contourCount),
-            QString::number(snapshot.totalPointCount),
-            QString::number(feedRate),
-            QString::number(laserEnergy)));
-    } else if (step.type == ProcessNodeType::OverCutting) {
-        const double length = step.parameters.value(QStringLiteral("length"), 0.0).toDouble();
-        const double feedRate = step.parameters.value(QStringLiteral("feedRate"), 100.0).toDouble();
-        if (length < 0.0 || feedRate <= 0.0) {
-            if (errorMessage)
-                *errorMessage = tr("过切长度不能小于 0，进给速度必须大于 0");
-            return false;
-        }
-        emit messageLogged(tr("过切 dry-run: length=%1, feed=%2").arg(QString::number(length), QString::number(feedRate)));
-    } else if (step.type == ProcessNodeType::EnergySwitch) {
-        emit laserEnergyRequested(step.parameters.value(QStringLiteral("laserEnergy"), 10.0).toDouble());
-    } else if (step.type == ProcessNodeType::IO) {
-        const QString action = step.parameters.value(QStringLiteral("action"), QStringLiteral("set")).toString();
-        if (action.compare(QStringLiteral("set"), Qt::CaseInsensitive) == 0) {
-            emit digitalOutputRequested(
-                step.parameters.value(QStringLiteral("channel"), QStringLiteral("DO0")).toString(),
-                step.parameters.value(QStringLiteral("value"), 1).toBool());
-        }
+    if (!m_stepRegistry || !m_stepContext) {
+        if (errorMessage)
+            *errorMessage = tr("流程步骤运行环境未初始化");
+        return false;
     }
-    return true;
+    auto plugin = m_stepRegistry->stepByExecutorKey(step.executorKey);
+    if (!plugin) {
+        if (errorMessage)
+            *errorMessage = tr("未注册或已禁用的流程步骤插件: %1").arg(step.executorKey);
+        return false;
+    }
+
+    ProcessNodeExecutionRequest request;
+    request.nodeId = step.nodeId;
+    request.executorKey = step.executorKey;
+    request.displayName = step.name;
+    request.parameters = step.parameters;
+    return plugin->execute(request, *m_stepContext, errorMessage);
 }
 
 void ProcessWorkflowExecutor::setState(State state)

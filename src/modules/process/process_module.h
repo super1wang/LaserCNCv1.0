@@ -10,12 +10,16 @@
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "modules/process/i_process_facade.h"
+#include "modules/process/steps/process_step_context.h"
 #include "modules/process/workflow/process_flow_document.h"
 
 class QTimer;
 class Service;
 
 namespace lcnc::process {
+class CallbackProcessCuttingService;
+class LegacyProcessIoService;
+class LegacyProcessMotionService;
 class ProcessWorkflowExecutor;
 }
 
@@ -136,6 +140,7 @@ private:
     void initializeAxisPositions();
     void initializeAxisEnabledStates();
     void safeStopProcessOutputs();
+    void triggerSafeStopOutputs();
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
     void seedDefaultIOTables();
@@ -157,7 +162,11 @@ private:
     QString               m_statusMessage;
     lcnc::IKernel*        m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
+    lcnc::process::ProcessStepContext m_stepContext;
     std::unique_ptr<Service> m_service;
+    std::unique_ptr<lcnc::process::LegacyProcessMotionService> m_motionStepService;
+    std::unique_ptr<lcnc::process::LegacyProcessIoService> m_ioStepService;
+    std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
 };
 

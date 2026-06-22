@@ -110,8 +110,13 @@ QVariant ProcessFlowModel::headerData(int section, Qt::Orientation orientation, 
 Qt::ItemFlags ProcessFlowModel::flags(const QModelIndex& index) const
 {
     Qt::ItemFlags itemFlags = QAbstractItemModel::flags(index) | Qt::ItemIsDropEnabled;
-    if (index.isValid())
-        itemFlags |= Qt::ItemIsDragEnabled | Qt::ItemIsSelectable | Qt::ItemIsEnabled;
+    if (index.isValid()) {
+        itemFlags |= Qt::ItemIsSelectable | Qt::ItemIsEnabled;
+        if (const ProcessNode* node = nodeFromIndex(index)) {
+            if (ProcessNodeRegistry::instance().isMovable(node->type))
+                itemFlags |= Qt::ItemIsDragEnabled;
+        }
+    }
     return itemFlags;
 }
 
@@ -210,6 +215,8 @@ bool ProcessFlowModel::setNodeEnabled(const QString& id, bool enabled)
     ProcessNode* node = m_document->nodeById(id);
     if (!node)
         return false;
+    if (!ProcessNodeRegistry::instance().isDisableable(node->type))
+        return false;
 
     node->enabled = enabled;
     node->state = enabled ? ProcessNodeState::Enabled : ProcessNodeState::Disabled;
@@ -239,7 +246,7 @@ bool ProcessFlowModel::clear()
         return false;
 
     beginResetModel();
-    m_document->clear();
+    m_document->resetToDefault();
     endResetModel();
     return true;
 }

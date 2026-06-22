@@ -7,6 +7,7 @@
 
 class QCheckBox;
 class QDoubleSpinBox;
+class QComboBox;
 class QLineEdit;
 class QSpinBox;
 class QStackedWidget;
@@ -28,6 +29,7 @@ public:
 private:
     QWidget* buildGeneralPage();
     QWidget* buildParameterPage();
+    QWidget* buildPluginParameterPage();
     QWidget* buildTypedParameterPage();
     QWidget* buildWaitPage();
     QWidget* buildAxisPage();
@@ -37,16 +39,25 @@ private:
     void applyParameterTable();
     void loadTypedParameterEditors();
     void applyTypedParameterEditors();
+    QWidget* buildMultiAxisPage();
+    void addAxisRow(const QVariantMap& row = {});
+    QVariantList axesFromTable() const;
+    void loadMultiAxisPage();
+    void applyMultiAxisPage();
 
     ProcessNode m_node;
     QLineEdit* m_nameEdit{nullptr};
     QCheckBox* m_enabledCheck{nullptr};
     QStackedWidget* m_detailStack{nullptr};
+    QWidget* m_pluginEditor{nullptr};
     QTableWidget* m_parameterTable{nullptr};
     QSpinBox* m_waitDurationSpin{nullptr};
     QLineEdit* m_axisNameEdit{nullptr};
     QDoubleSpinBox* m_axisPositionSpin{nullptr};
+    QTableWidget* m_axesTable{nullptr};
+    QComboBox* m_multiModeCombo{nullptr};
     QMap<QString, QLineEdit*> m_textEditors;
+    QMap<QString, QComboBox*> m_comboEditors;
     QMap<QString, QDoubleSpinBox*> m_doubleEditors;
     QMap<QString, QSpinBox*> m_intEditors;
     QMap<QString, QCheckBox*> m_boolEditors;

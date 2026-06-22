@@ -14,11 +14,13 @@ public:
     const QVector<ProcessNode>& rootNodes() const { return m_rootNodes; }
 
     void clear();
+    void resetToDefault();
     void setRootNodes(QVector<ProcessNode> nodes);
     ProcessNode& appendRootNode(ProcessNode node);
     ProcessNode* appendNode(const QString& parentId, ProcessNode node);
     bool removeNode(const QString& id);
     bool moveNode(const QString& id, const QString& targetParentId, int targetRow);
+    void ensureRequiredNodes();
 
     bool isEmpty() const { return m_rootNodes.isEmpty(); }
     bool isDirty() const { return m_dirty; }

@@ -11,6 +11,8 @@ class QTimer;
 namespace lcnc::process {
 
 class ProcessFlowDocument;
+class ProcessStepRegistry;
+struct ProcessStepContext;
 
 struct ProcessExecutionStep
 {
@@ -18,6 +20,7 @@ struct ProcessExecutionStep
     ProcessNodeType type{ProcessNodeType::Base};
     QString name;
     QVariantMap parameters;
+    QString executorKey;
     int depth{0};
 };
 
@@ -53,8 +56,8 @@ public:
 
     State state() const { return m_state; }
     const QVector<ProcessExecutionStep>& plan() const { return m_plan; }
-    void setToolpathSnapshotProvider(std::function<ProcessToolpathSnapshot()> provider);
-    void setCuttingExecutor(std::function<bool(bool dryRun, QString* errorMessage)> executor);
+    void setStepRegistry(ProcessStepRegistry* registry);
+    void setStepContext(ProcessStepContext* context);
 
 signals:
     void messageLogged(const QString& message);
@@ -81,10 +84,10 @@ private:
     State m_state{State::Idle};
     QVector<ProcessExecutionStep> m_plan;
     ProcessFlowDocument* m_document{nullptr};
+    ProcessStepRegistry* m_stepRegistry{nullptr};
+    ProcessStepContext* m_stepContext{nullptr};
     QTimer* m_stepTimer{nullptr};
     int m_currentIndex{-1};
-    std::function<ProcessToolpathSnapshot()> m_toolpathSnapshotProvider;
-    std::function<bool(bool dryRun, QString* errorMessage)> m_cuttingExecutor;
 };
 
 } // namespace lcnc::process

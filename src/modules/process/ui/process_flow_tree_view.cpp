@@ -2,6 +2,7 @@
 
 #include "modules/process/ui/process_flow_model.h"
 #include "modules/process/ui/process_node_edit_dialog.h"
+#include "modules/process/steps/process_step_registry.h"
 #include "modules/process/workflow/process_flow_store.h"
 #include "modules/process/workflow/process_node_registry.h"
 
@@ -42,17 +43,7 @@ ProcessFlowTreeView::ProcessFlowTreeView(QWidget* parent)
     m_contextMenu->addAction(tr("Clear"), this, &ProcessFlowTreeView::clearNodes);
 
     QMap<QString, QMenu*> categoryMenus;
-    for (const auto& descriptor : ProcessNodeRegistry::instance().descriptors()) {
-        if (descriptor.type == ProcessNodeType::Base)
-            continue;
-        QMenu* categoryMenu = categoryMenus.value(descriptor.category, nullptr);
-        if (!categoryMenu) {
-            categoryMenu = m_addMenu->addMenu(descriptor.category);
-            categoryMenus.insert(descriptor.category, categoryMenu);
-        }
-        categoryMenu->addAction(descriptor.displayName, this,
-                                [this, type = descriptor.type] { addNode(type); });
-    }
+    Q_UNUSED(categoryMenus);
 
     connect(this, &QTreeView::customContextMenuRequested,
             this, &ProcessFlowTreeView::showContextMenu);
@@ -71,51 +62,38 @@ void ProcessFlowTreeView::setFlowModel(ProcessFlowModel* model)
 
 void ProcessFlowTreeView::showContextMenu(const QPoint& pos)
 {
-    const bool hasNode = indexAt(pos).isValid();
-    m_deleteAction->setEnabled(hasNode);
-    m_enableAction->setEnabled(hasNode);
-    m_disableAction->setEnabled(hasNode);
+    // 每次弹出菜单时按当前 step registry 状态重建 Add 子菜单，确保
+    // 启用/禁用插件后立即生效。
+    m_addMenu->clear();
+    QMap<QString, QMenu*> categoryMenus;
+    for (const auto& descriptor : ProcessStepRegistry::instance().descriptors()) {
+        if (descriptor.type == ProcessNodeType::Base || !descriptor.addable)
+            continue;
+        QMenu* categoryMenu = categoryMenus.value(descriptor.category, nullptr);
+        if (!categoryMenu) {
+            categoryMenu = m_addMenu->addMenu(descriptor.category);
+            categoryMenus.insert(descriptor.category, categoryMenu);
+        }
+        categoryMenu->addAction(descriptor.displayName, this,
+                                [this, type = descriptor.type] { addNode(type); });
+    }
+    if (m_addMenu->isEmpty())
+        m_addMenu->addAction(tr("无可用步骤"))->setEnabled(false);
+
+    const QModelIndex idx = indexAt(pos);
+    const bool hasNode = idx.isValid();
+    bool canDelete = hasNode;
+    bool canDisable = hasNode;
+    if (hasNode && m_model) {
+        if (ProcessNode* node = m_model->nodeFromIndex(idx)) {
+            canDelete = ProcessNodeRegistry::instance().isDeletable(node->type);
+            canDisable = ProcessNodeRegistry::instance().isDisableable(node->type);
+        }
+    }
+    m_deleteAction->setEnabled(canDelete);
+    m_enableAction->setEnabled(canDisable);
+    m_disableAction->setEnabled(canDisable);
     m_contextMenu->exec(viewport()->mapToGlobal(pos));
-}
-
-void ProcessFlowTreeView::addStartNode()
-{
-    addNode(ProcessNodeType::Start);
-}
-
-void ProcessFlowTreeView::addStopNode()
-{
-    addNode(ProcessNodeType::Stop);
-}
-
-void ProcessFlowTreeView::addWaitNode()
-{
-    addNode(ProcessNodeType::Wait);
-}
-
-void ProcessFlowTreeView::addAxisNode()
-{
-    addNode(ProcessNodeType::Axis);
-}
-
-void ProcessFlowTreeView::addCuttingNode()
-{
-    addNode(ProcessNodeType::Cutting);
-}
-
-void ProcessFlowTreeView::addGroupNode()
-{
-    addNode(ProcessNodeType::Group);
-}
-
-void ProcessFlowTreeView::addIfNode()
-{
-    addNode(ProcessNodeType::If);
-}
-
-void ProcessFlowTreeView::addLoopNode()
-{
-    addNode(ProcessNodeType::Loop);
 }
 
 void ProcessFlowTreeView::deleteCurrentNode()

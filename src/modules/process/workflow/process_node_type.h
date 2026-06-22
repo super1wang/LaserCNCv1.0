@@ -34,6 +34,14 @@ enum class ProcessNodeType
     EnergySwitch,
     Cutting,
     OverCutting,
+
+    // New retained workflow vocabulary. Values alias legacy types where possible
+    // so existing serialized flows keep loading while UI exposes only these names.
+    OutputSignal = IO,
+    InputSignalWait = Monitor,
+    SingleAxisMove = Axis,
+    MultiAxisMove = AxesMove,
+    NormalCutting = Cutting,
 };
 
 /**
