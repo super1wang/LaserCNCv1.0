@@ -365,15 +365,7 @@ bool GTNMotionControl::IsHomed(Axis eAxis)
 	return true;
 }
 
-// bool GTNMotionControl::IsHomeBufferRunning()
-// {
-// 	for (Axis axis : m_vecMotors)
-// 	{
-// 		if (IsBufferRunning(m_mapMotorValue[axis].HomeBufferIndex))
-// 			return true;
-// 	}
-// 	return false;
-// }
+// [P3 removed] GTNMotionControl::IsHomeBufferRunning
 
 bool GTNMotionControl::Enable()
 {
@@ -1484,11 +1476,7 @@ bool GTNMotionControl::StopAllBuffer()
 	return true;
 }
 
-bool GTNMotionControl::IsOffsetCutting()
-{
-
-	return IsBufferRunning(9);
-}
+// [P3 removed] GTNMotionControl::IsOffsetCutting
 
 bool GTNMotionControl::IsBufferRunning(int iBufferIndex)
 {
@@ -1537,62 +1525,10 @@ void GTNMotionControl::OffsetLineTo(double dEndX, double dEndY, const Tool& tool
 	m_dPreY = dEndY;
 }
 
-void GTNMotionControl::OffsetArcTo(double dEndX, double dEndY, double dCenterX, double dCenterY,
-	bool bClockwise, const Tool& tool, double dIncX, double dIncY)
-{
-	double dVelocity = tool.m_dArcVelocity;
-	double dArcAcc = tool.m_dArcAcc;
-
-	int iArcDir = bClockwise ? 0 : 1;
-
-	double xCenter, yCenter;//终点到圆心的偏移量
-	xCenter = (dCenterX - m_dPreX);
-	yCenter = (dCenterY - m_dPreY);
-
-	short sRtn;
-	const int MAX_RETRY = 10;
-	for (int retry = 0; retry < MAX_RETRY; retry++)
-	{
-		sRtn = GTN_ArcXYCEx(m_iCore,
-			1, // 坐标系是坐标系1
-			dEndX, dEndY, // 该圆弧的终点坐标(mm, mm)
-			xCenter, yCenter, // 圆弧插补的圆心相对于起点位置的偏移量(mm, mm)
-			iArcDir, // 该圆弧是顺时针圆弧
-			dVelocity, // 该插补段的目标速度：mm/s
-			dArcAcc, // 该插补段的加速度：mm/s^2
-			0,
-			0, // 终点速度为0
-			m_iWriteBuf); // 向坐标系1的FIFO0缓存区传递该圆弧插补数据
-		if (!sRtn) break;
-		// 软件前瞻缓冲区已满：将已有数据刷入硬件FIFO后重试
-		FlushToFifo();
-	}
-	if (sRtn)
-		LogError("OffsetArcTo", "GTN_ArcXYCEx", "", sRtn);
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
+// [P3 removed] GTNMotionControl::OffsetArcTo
 
 // 改设置界面为旋转轴置位
-void GTNMotionControl::JumpToSetAFPos(const Tool& curTool)
-{
-	short sRtn;
-	double dNewPos;
-	if (curTool.m_bAZero) 
-	{
-		MillimeterToPulse(Axis::A, curTool.m_dAPos / 360 * PI * m_dDiameter, dNewPos);
-		sRtn = GTN_SetEncPos(m_iCore, m_mapMotorValue[Axis::A].AxisIndex, dNewPos);
-		if (sRtn)
-			LogError("JumpToSetAFPos", "GTN_SetEncPos_A", "A", sRtn);
-	}
-	if (curTool.m_bA1Zero)
-	{
-		MillimeterToPulse(Axis::A1, curTool.m_dA1Pos / 360 * PI * m_dDiameter, dNewPos);
-		sRtn = GTN_SetEncPos(m_iCore, m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex, dNewPos);
-		if (sRtn)
-			LogError("JumpToSetAFPos", "GTN_SetEncPos_A1", "A1", sRtn);
-	}
-}
+// [P3 removed] GTNMotionControl::JumpToSetAFPos
 
 void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const Tool& curTool)
 {
@@ -2066,26 +2002,9 @@ double GTNMotionControl::GetAxisIdleVel(Axis eAxis, const Tool& curTool)
 	}
 }
 
-bool GTNMotionControl::SetFPos(Axis eAxis, double dPos)
-{
-	short sRtn;
-	double dNewPos;
-	MillimeterToPulse(eAxis, dPos, dNewPos);
-	sRtn = GTN_SetEncPos(m_iCore, m_mapMotorValue[eAxis].AxisIndex, dNewPos);
-	if(sRtn) return LogError("SetFPos", "GTN_SetEncPos", enum_name(eAxis).data(), sRtn),false;
-	
-	return true;
-}
+// [P3 removed] GTNMotionControl::SetFPos
 
-bool GTNMotionControl::GetFPos(Axis eAxis, double& dNewPos)
-{
-	short sRtn;
-	double dvalue = 0;
-	sRtn = GTN_GetEncPos(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &dvalue);
-	if (sRtn) return LogError("GetFPos", "GTN_GetEncPos", enum_name(eAxis).data(), sRtn), false;
-	PulseToMillimeter(eAxis, dvalue, dNewPos);
-	return true;
-}
+// [P3 removed] GTNMotionControl::GetFPos
 
 
 bool GTNMotionControl::MovePostion(Axis aAxis, double dVel, double dPos)
@@ -2138,156 +2057,19 @@ bool GTNMotionControl::MillimeterToPulse(Axis aAxis, double dValue, double& dNew
 	return true;
 }
 
-string GTNMotionControl::GetCuttingCommand()
-{
-	return "m_strCommand";
-}
+// [P3 removed] GTNMotionControl::GetCuttingCommand
 
-bool GTNMotionControl::SetMFLAGSValue(Axis eAxis, int iValue)
-{
-	return true;
-}
+// [P3 removed] GTNMotionControl::SetMFLAGSValue
 
-bool GTNMotionControl::GSN_SetLaserParameterApplication(double dFrequence, double dPulse, double dDelay)
-{
-	//立即指令，调用后立即生效
-	//设置激光PWM信号输出参数
-	short sRtn;
-	TLaserPwmPrmPro* pPrm = new TLaserPwmPrmPro();
-	pPrm->minDuty = 0.0;
-	pPrm->maxDuty = 100.0;
-	pPrm->minFrequency = 0.0;
-	pPrm->maxFrequency = 1562.0;
-	pPrm->minPulseWidth = 0.0;
-	pPrm->maxPulseWidth = 65535.0;
-	sRtn = GTN_SetLaserPwmPrmPro(1, 0, pPrm);
-	if (sRtn != 0)
-	{
-		LogError("GSN_SetLaserParameterApplication", "GTN_SetLaserPwmPrmPro", "", sRtn);
-		delete pPrm;
-		pPrm = nullptr;
-		return false;
-	}
-	//设置激光能量输出方式和能量最大最小限制值。  
-	//0：占空比输出模式。
-	//1：频率输出模式。
-	//	2：模拟量输出模式。
-	//	4：并口激光输出模式。
-	sRtn = GTN_LaserPowerMode(1, 1, 96, 0, 0);
-	if (sRtn != 0)
-	{
-		LogError("GSN_SetLaserParameterApplication", "GTN_LaserPowerMode", "", sRtn);
-		delete pPrm;
-		pPrm = nullptr;
-		return false;
-	}
-	sRtn = GTN_SetLaserPwmPulseWidthPro(1, 0, dPulse);
-	if (sRtn != 0)
-	{
-		LogError("GSN_SetLaserParameterApplication", "GTN_SetLaserPwmPulseWidthPro", "", sRtn);
-		delete pPrm;
-		pPrm = nullptr;
-		return false;
-	}
-	sRtn = GTN_SetLaserPwmFrequencyPro(1, 0, dFrequence/1000);
-	if (sRtn != 0)
-	{
-		LogError("GSN_SetLaserParameterApplication", "GTN_SetLaserPwmFrequencyPro", "", sRtn);
-		delete pPrm;
-		pPrm = nullptr;
-		return false;
-	}
-	delete pPrm;
-	pPrm = nullptr;
-	return true;
-}
+// [P3 removed] GTNMotionControl::GSN_SetLaserParameterApplication
 
-bool GTNMotionControl::GSN_SetLaserEnablePro(bool bState)
-{
-	//立即指令，调用后立即生效
-	//设置激光开关光信号输出使能
-	short sRtn;
-	short enable;
-	if (bState)
-		enable = 1;
-	else
-		enable = 0;
-	sRtn = GTN_SetLaserEnablePro(1, 0, enable, 0);
-	if (sRtn != 0)
-	{
-		LogError("GSN_SetLaserEnablePro", "GTN_SetLaserEnablePro", "", sRtn);
-		return false;
-	}
-	return true;
-}
+// [P3 removed] GTNMotionControl::GSN_SetLaserEnablePro
 
-bool GTNMotionControl::GSN_LaserOnStatus(int& iState)
-{
-	iState = 0;
-	unsigned short value = 0;
-	short sRtn = GTN_LaserOnStatus(1, &value, 0);
-	if (sRtn != 0)
-	{
-		//LogError("GSN_LaserOnStatus", "GTN_LaserOnStatus", "", sRtn);
-		return false;
-	}
-	iState = value;
-	return true;
-}
+// [P3 removed] GTNMotionControl::GSN_LaserOnStatus
 
-bool GTNMotionControl::CheckBuffer(int iclean, string& strCommand)
-{
-	short sRtn;
-	long space;
-	const int MAX_RETRY = 500;   // 最大重试次数
-	int nRetryCount = 0;         // 当前重试次数
-	sRtn = GTN_CrdClear(m_iCore, 1, m_iWriteBuf);
-	if (sRtn) return LogError("CheckBuffer", "GTN_CrdClear","", sRtn), false;
-	// 将前瞻缓存区中的数据压入控制器
-	while (1)
-	{
-		if (m_bStop)
-		{
-			return true;
-		}
-		sRtn = GTN_CrdSpace(m_iCore, 1, &space, m_iWriteBuf);
-		if (space <= 0)
-		{
-			LogError("CheckBuffer", "GTN_CrdSpace","", sRtn);
-			continue;
-		}
-		sRtn = GTN_CrdDataEx(m_iCore, 1, NULL, m_iWriteBuf);//压入运动缓存区
-		if (!sRtn)
-		{
-			LogError("CheckBuffer", "GTN_CrdDataEx","", sRtn);
-			break; //确认GTN_CrdDataEx指令返回值为，表示所有数据都压入控制器
-		}
-		else
-		{
-			nRetryCount++;
-			// 失败次数超过上限 → 判定为压入失败
-			if (nRetryCount >= MAX_RETRY)
-			{
-				LogError("CheckBuffer", "nRetryCount","", nRetryCount);
-				return false; // 返回失败
-			}
-			// 延时1ms再试（防止CPU占满）
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
-			continue;
-		}
-	}
-	//GTN_CrdClear(m_iCore, 1, m_iWriteBuf);
-	return true;
-}
+// [P3 removed] GTNMotionControl::CheckBuffer
 
-bool GTNMotionControl::RunBuffer(int iBufferIndex)
-{
-	short sRtn;
-	sRtn = GTN_CrdStart(m_iCore, m_iCrd, m_iWriteBuf);
-	if (sRtn) return LogError("StartCommand", "GTN_CrdStart","", sRtn), false;
-	
-	return true;
-}
+// [P3 removed] GTNMotionControl::RunBuffer
 
 bool GTNMotionControl::PauseBuffer(int iBufferIndex)
 {
@@ -2297,31 +2079,9 @@ bool GTNMotionControl::PauseBuffer(int iBufferIndex)
 	return true;
 }
 
-bool GTNMotionControl::GetBufferState(int iBufferIndex, int& iState)
-{
-// 	if (!acsc_GetProgramState(m_hHandle, iBufferIndex, &iState, ACSC_SYNCHRONOUS))
-// 	{
-// 		LogError();
-// 		return false;
-// 	}
-	return true;
-}
+// [P3 removed] GTNMotionControl::GetBufferState
 
-bool GTNMotionControl::LoadCommandAndRunBuffer(int iBufferIndex, string strCommand, int iTimeout)
-{
-// 	if (!CheckBuffer(iBufferIndex, strCommand))
-// 		return false;
-// 
-// 	if (!RunBuffer(iBufferIndex))
-// 		return false;
-// 
-// 	if (!acsc_WaitProgramEnd(m_hHandle, iBufferIndex, iTimeout))
-// 	{
-// 		LogError();
-// 		return false;
-// 	}
-	return true;
-}
+// [P3 removed] GTNMotionControl::LoadCommandAndRunBuffer
 
 bool GTNMotionControl::IsReachPos(Axis eAxis, bool bRelative, double dPos)
 {
@@ -2359,4 +2119,18 @@ void GTNMotionControl::StartCommand()
 	short sRtn = GTN_CrdStart(m_iCore, 1, m_iWriteBuf);
 	if (sRtn)
 		LogError("StartCommand", "GTN_CrdStart", "", sRtn);
+}
+
+// Sink 入口：GTN 路径上 ResetProgramCommand 是 no-op，因为缓冲区的清空通过
+// CrdClear/CrdData 在 InitCrd / SendCommand 中天然发生（详见 SendCommand 实现）。
+void GTNMotionControl::ResetProgramCommand()
+{
+}
+
+// Sink 入口：把工具的切割加速度/Jerk 推到坐标系前瞻 —— GTN 通过 GTN_SetCrdJerkTime
+// 已在 InitCrd 里设置一次，每段刀路本身的 ACC/JERK 由 GTN_LnXYEx 内部按已建立的轨迹规划处理，
+// 这里保留方法签名以匹配 IMotionCommandSink::applyToolMotionParams 调用入口，no-op 即可。
+void GTNMotionControl::SetCuttingAccJerk(const Tool& tool)
+{
+	Q_UNUSED(tool);
 }

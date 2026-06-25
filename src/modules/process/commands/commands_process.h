@@ -132,4 +132,44 @@ public:
     bool isEnabled() const override;
 };
 
+/// 切换"加工链表"面板可见性（Process Ribbon → 流程面板）。
+class CmdToggleCuttingPlanPanel : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.toggleCuttingPlanPanel";
+    explicit CmdToggleCuttingPlanPanel(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 把当前选中的轮廓按选择顺序追加到切割链表（手动设置加工顺序）。
+class CmdManualAppendSelectedToCuttingOrder : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.manualAppendSelected";
+    explicit CmdManualAppendSelectedToCuttingOrder(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 按 ProcessModule::autoSortAxis 当前选项做"主方向 + 最近邻"自动排序。
+class CmdAutoSortCuttingOrder : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.autoSortCutting";
+    explicit CmdAutoSortCuttingOrder(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 切换"切割路径显示"——在 OCC 视图中用虚线绘制空程路径。
+class CmdToggleTravelPath : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.toggleTravelPath";
+    explicit CmdToggleTravelPath(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
 } // namespace lcnc::process

@@ -35,3 +35,14 @@ void ToolFactory::ToolClear()
 	m_mapTools.clear();
 }
 
+QStringList ToolFactory::toolNames()
+{
+	QStringList names;
+	for (const auto& kv : m_mapTools) {
+		const QString name = QString::fromStdString(kv.second.m_strName);
+		if (!name.trimmed().isEmpty() && !names.contains(name))
+			names.append(name);
+	}
+	return names;
+}
+

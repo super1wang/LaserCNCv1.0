@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <QString>
+#include <QStringList>
 #include "Tool.h"
 using std::map;
 using std::vector;
@@ -25,5 +26,6 @@ public:
 
 	void ToolClear();
 
-
+	/// 枚举当前注册过的工具名（按 map 索引升序），用于 UI 下拉。
+	static QStringList toolNames();
 };

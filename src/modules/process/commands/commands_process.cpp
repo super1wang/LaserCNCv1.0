@@ -4,13 +4,18 @@
 #include <QFileDialog>
 #include <QIcon>
 #include <QKeySequence>
+#include <QMessageBox>
 #include <QObject>
 #include <QStandardPaths>
 
+#include "core/kernel/event_bus.h"
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
+#include "core/services/selection_service.h"
+#include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/process_module.h"
+#include "modules/process/runtime/process_events.h"
 #include "modules/process/Setting/qg_dlgsetting.h"
 
 namespace lcnc::process {
@@ -286,6 +291,135 @@ bool CmdDisconnectController::isEnabled() const
 void CmdDisconnectController::execute()
 {
     if (auto* p = processFacade()) p->disconnectAllDevices();
+}
+
+// ── CmdToggleCuttingPlanPanel ───────────────────────────────────────────────
+CmdToggleCuttingPlanPanel::CmdToggleCuttingPlanPanel(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("加工链表"), this);
+    a->setStatusTip(tr("打开/关闭 图层 → 工具映射 与 切割顺序 面板"));
+    setAction(a);
+}
+bool CmdToggleCuttingPlanPanel::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+}
+void CmdToggleCuttingPlanPanel::execute()
+{
+    if (auto* m = processModule()) m->toggleCuttingPlanPanel();
+}
+
+// ── CmdManualAppendSelectedToCuttingOrder ───────────────────────────────────
+CmdManualAppendSelectedToCuttingOrder::CmdManualAppendSelectedToCuttingOrder(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("手动设置加工顺序"), this);
+    a->setStatusTip(tr("将当前选中的轮廓按选择顺序追加到切割链表"));
+    setAction(a);
+}
+bool CmdManualAppendSelectedToCuttingOrder::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessCuttingPlanService>() != nullptr;
+}
+void CmdManualAppendSelectedToCuttingOrder::execute()
+{
+    auto selSvc = lcnc::Kernel::current()
+                      .services()
+                      .getService<lcnc::core::SelectionService>();
+    auto plan = lcnc::Kernel::current()
+                    .services()
+                    .getService<ProcessCuttingPlanService>();
+    if (!plan) return;
+
+    QVector<lcnc::cam::ContourId> ids;
+    if (selSvc) ids = selSvc->contoursInSelectionOrder();
+    if (ids.isEmpty()) {
+        QMessageBox::information(
+            nullptr,
+            QObject::tr("提示"),
+            QObject::tr("请先在项目树或视图中选中至少一个轮廓。"));
+        return;
+    }
+    // 已有手动顺序时弹覆盖确认
+    if (!plan->manualContourOrder().isEmpty()) {
+        const auto choice = QMessageBox::question(
+            nullptr,
+            QObject::tr("覆盖切割链表"),
+            QObject::tr("当前切割链表已有 %1 条轮廓，是否清空并以当前选中（%2 条）重新设置？")
+                .arg(plan->manualContourOrder().size())
+                .arg(ids.size()),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (choice != QMessageBox::Yes) return;
+        plan->clearManualOrder();
+    }
+    const int added = plan->appendToManualOrder(ids);
+    plan->setSortStrategy(CuttingPlanSortStrategy::Manual);
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "process.cmd: manualAppend added {} of {} selected contours",
+              added, ids.size());
+}
+
+// ── CmdAutoSortCuttingOrder ────────────────────────────────────────────────
+CmdAutoSortCuttingOrder::CmdAutoSortCuttingOrder(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("自动设置加工顺序"), this);
+    a->setStatusTip(tr("按当前轴模式 + 最近邻贪心，自动规划加工顺序"));
+    setAction(a);
+}
+bool CmdAutoSortCuttingOrder::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessCuttingPlanService>() != nullptr;
+}
+void CmdAutoSortCuttingOrder::execute()
+{
+    auto plan = lcnc::Kernel::current()
+                    .services()
+                    .getService<ProcessCuttingPlanService>();
+    auto* mod = processModule();
+    if (!plan || !mod) return;
+
+    // 已有手动顺序时弹覆盖确认（自动排序内部本就会全覆盖 m_manualContourOrder）
+    if (!plan->manualContourOrder().isEmpty()) {
+        const auto choice = QMessageBox::question(
+            nullptr,
+            QObject::tr("覆盖切割链表"),
+            QObject::tr("当前切割链表已有 %1 条轮廓，是否清空并按所选方向重新自动排序？")
+                .arg(plan->manualContourOrder().size()),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (choice != QMessageBox::Yes) return;
+    }
+
+    QString err;
+    if (!plan->applyAutoSort(mod->autoSortAxis(), &err)) {
+        QMessageBox::warning(nullptr, QObject::tr("自动排序失败"),
+                             err.isEmpty() ? QObject::tr("未知错误") : err);
+    }
+}
+
+// ── CmdToggleTravelPath ────────────────────────────────────────────────────
+CmdToggleTravelPath::CmdToggleTravelPath(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("切割路径显示"), this);
+    a->setStatusTip(tr("在 3D 视图中用虚线显示相邻轮廓间的空程路径"));
+    a->setCheckable(true);
+    setAction(a);
+}
+bool CmdToggleTravelPath::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+}
+void CmdToggleTravelPath::execute()
+{
+    auto* mod = processModule();
+    if (!mod) return;
+    const bool next = !mod->isTravelPathVisible();
+    mod->setTravelPathVisible(next);
+    if (action()) action()->setChecked(next);
+    // 通过 EventBus 通知 CAM 侧的 TravelPathRenderer。
+    lcnc::Kernel::current().events().publish(
+        lcnc::process::events::TravelPathVisibilityToggled{next});
 }
 
 } // namespace lcnc::process

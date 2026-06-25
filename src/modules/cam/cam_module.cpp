@@ -1,6 +1,7 @@
 
 #include "modules/cam/cam_module.h"
 #include "view/toolpath_renderer.h"
+#include "view/travel_path_renderer.h"
 #include "view/machine_guide_renderer.h"
 #include "modules/cam/services/cam_data_manager.h"
 #include "modules/cam/services/machine_axis_detector.h"
@@ -19,6 +20,9 @@
 #include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/service_registry.h"
+#include "core/services/selection_service.h"
+#include "modules/process/cutting/i_process_cutting_plan_provider.h"
+#include "modules/process/runtime/process_events.h"
 #include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/task/task_manager.h"
@@ -232,8 +236,49 @@ bool CamModule::init(lcnc::IKernel& kernel)
         auto poseSvc = std::shared_ptr<lcnc::MachinePose>(m_pose.get(), [](lcnc::MachinePose*) {});
         kernel.services().registerService<lcnc::MachinePose>(poseSvc);
     }
+
+    // 项目持久化：刀路（含点 + 图层 + signature 表）随 .lcnc 包同生命周期。
+    if (auto* pm = lcnc::Kernel::current().projectManager()) {
+        connect(pm, &lcnc::LcncProjectManager::projectOpened,
+                this, [this](const QString& packagePath) {
+                    const QString dir = QFileInfo(packagePath).isDir()
+                                            ? packagePath
+                                            : QFileInfo(packagePath).absolutePath();
+                    QString err;
+                    if (!loadToolpathFromDir(dir, &err)) {
+                        LCNC_INFO(lcnc::LogCode::Generic,
+                                  "cam.toolpath load: skipped/missing ({})",
+                                  err.toStdString());
+                    }
+                });
+        connect(pm, &lcnc::LcncProjectManager::projectSaved,
+                this, [this](const QString& packagePath) {
+                    const QString dir = QFileInfo(packagePath).isDir()
+                                            ? packagePath
+                                            : QFileInfo(packagePath).absolutePath();
+                    QString err;
+                    if (!saveToolpathToDir(dir, &err))
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "cam.toolpath save: {}", err.toStdString());
+                });
+        connect(pm, &lcnc::LcncProjectManager::projectReset,
+                this, [this]() { clearToolpath(); });
+    }
+
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "CamModule init done");
+
+    // 订阅 Process 模块的"切割路径显示"开关与切割链表变化，驱动 TravelPathRenderer。
+    kernel.events().subscribe<lcnc::process::events::TravelPathVisibilityToggled>(
+        [this](const lcnc::process::events::TravelPathVisibilityToggled& e) {
+            setTravelPathVisible(e.visible);
+        });
+    kernel.events().subscribe<lcnc::process::events::CuttingPlanChanged>(
+        [this](const lcnc::process::events::CuttingPlanChanged&) {
+            if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
+                refreshTravelPath();
+        });
+
     return true;
 }
 
@@ -255,6 +300,7 @@ CamModule::CamModule(QObject* parent)
     : QObject(parent)
     , m_toolpathRenderer(std::make_unique<lcnc::view::ToolpathRenderer>())
     , m_guideRenderer(std::make_unique<lcnc::view::MachineGuideRenderer>())
+    , m_travelPathRenderer(std::make_unique<lcnc::view::TravelPathRenderer>())
     , m_camData(std::make_unique<lcnc::cam::CamDataManager>())
     , m_toolpath(m_camData->toolpath())
 {
@@ -1973,7 +2019,12 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     if (workpieceSources.isEmpty())
         return false;
 
-    clearToolpath();
+    // 用 resetIds=false 清理：保留 signature → id 映射，使重新生成的 id 与原项目对齐。
+    eraseToolpathDisplay();
+    m_camData->clearToolpath(/*resetIds=*/false);
+    if (LcncDocument* doc = camDocument()) {
+        doc->clearEntityKind(LcncDocument::EntityKind::Cam);
+    }
     m_workpieceShape = collectWorkpieceShape();
     bool effectiveUseFaceClassification = useFaceClassification;
     if (m_machineConfig) {
@@ -2033,12 +2084,14 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     m_toolpath.contours() = std::move(allContours);
     m_camData->ensureContourIds();
     m_camData->ensureToolpathLayers();
+    m_camData->commitToolpathStates();    // 把 signature → id 映射固化下来，跨次稳定
     syncCamDocumentContours();
     m_toolpathRenderer->setVisible(workspaceGuiDocument(), true);
 
     refreshToolpathDisplay();
     emit toolpathGenerated();
     emit toolpathLayersChanged();
+    refreshTravelPath();
     return true;
 }
 
@@ -2196,6 +2249,10 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshot() const
         return nullptr;
     };
 
+    MachineKinematics* kin = kinematics();
+    const double leadInLen = m_toolpath.globalLeadInLength();
+    const double leadInNormalAng = m_toolpath.globalNormalAngle();
+
     for (const LaserContour& contour : m_toolpath.contours()) {
         const ToolpathLayer* layer = layerForId(contour.layerId);
         lcnc::cam::ToolpathExportContour exportedContour;
@@ -2208,6 +2265,52 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshot() const
         exportedContour.enabled = contour.enabled;
         exportedContour.layerEnabled = layer ? layer->enabled : true;
         exportedContour.pointCount = static_cast<int>(contour.points.size());
+
+        // 计算世界坐标系下的几何端点：cut start = points.front()；end = points.back()；
+        // start = leadIn 起点（若 leadIn.valid）否则等于 cut start。
+        if (!contour.points.empty()) {
+            const gp_Pnt cutStartLocal = contour.points.front().position;
+            const gp_Pnt endLocal      = contour.points.back().position;
+            gp_Pnt cutStartWorld = cutStartLocal;
+            gp_Pnt endWorld      = endLocal;
+            gp_Pnt startWorld    = cutStartLocal;
+            bool   hasLeadIn = false;
+
+            gp_Trsf wpc;
+            if (kin && !contour.workpieceEntry.isEmpty())
+                wpc = kin->computeWpcTransform(contour.workpieceEntry);
+
+            cutStartWorld.Transform(wpc);
+            endWorld.Transform(wpc);
+
+            if (contour.leadIn.valid) {
+                bool ok = false;
+                gp_Pnt leadStartLocal = LaserToolpathBuilder::computeLeadInStartPoint(
+                    contour, leadInLen, leadInNormalAng, &ok);
+                if (ok) {
+                    leadStartLocal.Transform(wpc);
+                    startWorld = leadStartLocal;
+                    hasLeadIn = true;
+                } else {
+                    startWorld = cutStartWorld;
+                }
+            } else {
+                startWorld = cutStartWorld;
+            }
+
+            exportedContour.cutStartX = cutStartWorld.X();
+            exportedContour.cutStartY = cutStartWorld.Y();
+            exportedContour.cutStartZ = cutStartWorld.Z();
+            exportedContour.endX      = endWorld.X();
+            exportedContour.endY      = endWorld.Y();
+            exportedContour.endZ      = endWorld.Z();
+            exportedContour.startX    = startWorld.X();
+            exportedContour.startY    = startWorld.Y();
+            exportedContour.startZ    = startWorld.Z();
+            exportedContour.hasLeadIn = hasLeadIn;
+            exportedContour.endpointsValid = true;
+        }
+
         snapshot.contours.append(exportedContour);
 
         QVector<lcnc::cam::ToolpathExportPoint> points;
@@ -2494,6 +2597,19 @@ bool CamModule::updateToolpathLayer(std::uint64_t layerId,
     return true;
 }
 
+bool CamModule::updateToolpathLayer(std::uint64_t layerId,
+                                    const QString& name,
+                                    const QColor& color)
+{
+    // 不动 toolName 字段：透传当前值（兼容老项目读写）。
+    const ToolpathLayer* layer = nullptr;
+    if (m_camData) {
+        layer = m_camData->toolpathLayer(layerId);
+    }
+    const QString preservedToolName = layer ? layer->toolName : QString();
+    return updateToolpathLayer(layerId, name, color, preservedToolName);
+}
+
 bool CamModule::setToolpathLayerEnabled(std::uint64_t layerId, bool enabled)
 {
     if (!m_camData || !m_camData->setToolpathLayerEnabled(layerId, enabled))
@@ -2735,6 +2851,34 @@ void CamModule::syncSelectionFromView()
         if (contourIndexes.size() == 1)
             emit toolpathContourSelected(contourIndexes.first());
     }
+
+    // ── 推送选择顺序到 SelectionService（差分式）─────────────────────────
+    auto selSvc = lcnc::Kernel::current()
+                      .services()
+                      .getService<lcnc::core::SelectionService>();
+    if (selSvc) {
+        QSet<std::uint64_t> nowSelected;
+        QVector<lcnc::core::SelectionEntry> newlyAdded;
+        for (int idx : contourIndexes) {
+            if (idx < 0 || idx >= m_toolpath.contourCount()) continue;
+            const std::uint64_t cid = m_toolpath.contour(idx).contourId;
+            if (cid == 0) continue;
+            nowSelected.insert(cid);
+            if (!m_lastCamSelectionContourIds.contains(cid)) {
+                lcnc::core::SelectionEntry e;
+                e.contourId = cid;
+                e.source    = lcnc::core::SelectionEntry::OccView;
+                newlyAdded.append(e);
+            }
+        }
+        if (!newlyAdded.isEmpty())
+            selSvc->recordSelectedBatch(newlyAdded);
+        for (auto cid : m_lastCamSelectionContourIds) {
+            if (!nowSelected.contains(cid))
+                selSvc->removeContour(cid);
+        }
+        m_lastCamSelectionContourIds = nowSelected;
+    }
 }
 
 void CamModule::refreshMachineTransforms()
@@ -2962,5 +3106,441 @@ void CamModule::applyToolpathLayerColors(bool updateView)
         gd->context()->UpdateCurrentViewer();
     if (gd->hasView())
         gd->view()->Redraw();
+}
+
+// ============================================================================
+// 刀路持久化（cam_toolpath.toml + cam_toolpath_points.bin）
+// ============================================================================
+
+#include <QDataStream>
+#include <QDir>
+#include <QFile>
+#include <toml.hpp>
+#include <fstream>
+
+namespace {
+
+constexpr char kCamToolpathTomlFile[]  = "cam_toolpath.toml";
+constexpr char kCamToolpathPointsFile[] = "cam_toolpath_points.bin";
+constexpr int  kCamToolpathSchemaVersion = 1;
+
+// 二进制点集 magic 头（"LCNCTPT1"）。
+constexpr quint64 kPointsBinMagic = 0x315450434E434C00ull;
+constexpr quint32 kPointsBinVersion = 1;
+
+QString camToolpathTomlPath(const QString& packageDir)
+{
+    return QDir(packageDir).filePath(QString::fromLatin1(kCamToolpathTomlFile));
+}
+
+QString camToolpathPointsPath(const QString& packageDir)
+{
+    return QDir(packageDir).filePath(QString::fromLatin1(kCamToolpathPointsFile));
+}
+
+// ---- 二进制点集 IO ----------------------------------------------------------
+
+bool writePointsBin(const QString& filePath,
+                    const std::vector<LaserContour>& contours,
+                    QString* errorMsg)
+{
+    QFile f(filePath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (errorMsg) *errorMsg = QStringLiteral("无法写入: %1").arg(filePath);
+        return false;
+    }
+    QDataStream ds(&f);
+    ds.setByteOrder(QDataStream::LittleEndian);
+    ds.setFloatingPointPrecision(QDataStream::DoublePrecision);
+    ds.setVersion(QDataStream::Qt_6_5);
+
+    ds << kPointsBinMagic << kPointsBinVersion;
+    const quint32 contourCount = static_cast<quint32>(contours.size());
+    ds << contourCount;
+
+    for (const LaserContour& c : contours) {
+        ds << static_cast<quint64>(c.contourId);
+        ds << static_cast<quint32>(c.points.size());
+        for (const ToolpathPoint& p : c.points) {
+            ds << p.position.X() << p.position.Y() << p.position.Z();
+            ds << p.normal.X()   << p.normal.Y()   << p.normal.Z();
+            ds << p.tangent.X()  << p.tangent.Y()  << p.tangent.Z();
+            ds << p.param;
+            ds << p.machineCoord.x << p.machineCoord.y << p.machineCoord.z;
+            ds << p.machineCoord.r1 << p.machineCoord.r2;
+            ds << p.machineCoord.r1Name << p.machineCoord.r2Name;
+            ds << static_cast<quint8>(p.machineCoord.valid ? 1 : 0);
+        }
+    }
+    return ds.status() == QDataStream::Ok;
+}
+
+bool readPointsBin(const QString& filePath,
+                   QHash<std::uint64_t, std::vector<ToolpathPoint>>& pointsByContourId,
+                   QString* errorMsg)
+{
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (errorMsg) *errorMsg = QStringLiteral("无法读取: %1").arg(filePath);
+        return false;
+    }
+    QDataStream ds(&f);
+    ds.setByteOrder(QDataStream::LittleEndian);
+    ds.setFloatingPointPrecision(QDataStream::DoublePrecision);
+    ds.setVersion(QDataStream::Qt_6_5);
+
+    quint64 magic = 0;
+    quint32 version = 0, contourCount = 0;
+    ds >> magic >> version >> contourCount;
+    if (magic != kPointsBinMagic) {
+        if (errorMsg) *errorMsg = QStringLiteral("点集文件 magic 不匹配");
+        return false;
+    }
+    if (version != kPointsBinVersion) {
+        if (errorMsg) *errorMsg = QStringLiteral("点集文件版本 %1 不支持").arg(version);
+        return false;
+    }
+
+    for (quint32 i = 0; i < contourCount; ++i) {
+        quint64 contourId = 0;
+        quint32 pointCount = 0;
+        ds >> contourId >> pointCount;
+        std::vector<ToolpathPoint> pts;
+        pts.reserve(pointCount);
+        for (quint32 k = 0; k < pointCount; ++k) {
+            double px, py, pz, nx, ny, nz, tx, ty, tz, par;
+            double mx, my, mz, r1, r2;
+            QString r1Name, r2Name;
+            quint8 valid = 0;
+            ds >> px >> py >> pz >> nx >> ny >> nz >> tx >> ty >> tz >> par;
+            ds >> mx >> my >> mz >> r1 >> r2 >> r1Name >> r2Name >> valid;
+            ToolpathPoint tp;
+            tp.position = gp_Pnt(px, py, pz);
+            tp.normal   = gp_Dir(nx, ny, nz);
+            tp.tangent  = gp_Dir(tx, ty, tz);
+            tp.param    = par;
+            tp.machineCoord.x = mx;
+            tp.machineCoord.y = my;
+            tp.machineCoord.z = mz;
+            tp.machineCoord.r1 = r1;
+            tp.machineCoord.r2 = r2;
+            tp.machineCoord.r1Name = r1Name;
+            tp.machineCoord.r2Name = r2Name;
+            tp.machineCoord.valid  = (valid != 0);
+            pts.push_back(std::move(tp));
+        }
+        pointsByContourId.insert(static_cast<std::uint64_t>(contourId), std::move(pts));
+    }
+    return ds.status() == QDataStream::Ok;
+}
+
+} // namespace
+
+bool CamModule::hasCachedToolpath(const QString& packageDir) const
+{
+    return QFileInfo::exists(camToolpathTomlPath(packageDir))
+        && QFileInfo::exists(camToolpathPointsPath(packageDir));
+}
+
+bool CamModule::saveToolpathToDir(const QString& packageDir, QString* errorMsg) const
+{
+    if (!m_camData || !m_camData->hasToolpath()) {
+        // 无刀路 → 不写文件，让旧文件保持（或在 clearToolpath 时显式删除）。
+        return true;
+    }
+    if (!QDir().mkpath(packageDir)) {
+        if (errorMsg) *errorMsg = QStringLiteral("无法创建目录: %1").arg(packageDir);
+        return false;
+    }
+
+    // 1. 写 toml 元数据
+    toml::value root(toml::table{});
+    root["schemaVersion"] = kCamToolpathSchemaVersion;
+    root["nextContourId"] = static_cast<std::int64_t>(
+        m_camData->signatureToContourId().isEmpty() ? 1 : 0); // 计算见下
+    // 实际的 next id 我们通过 m_toolpath 找到最大值后 +1（避免暴露内部计数器）。
+    std::uint64_t maxContour = 0, maxLayer = 0;
+    for (const LaserContour& c : m_toolpath.contours())
+        maxContour = std::max<std::uint64_t>(maxContour, c.contourId);
+    for (const ToolpathLayer& l : m_toolpath.layers())
+        maxLayer = std::max<std::uint64_t>(maxLayer, l.layerId);
+    root["nextContourId"] = static_cast<std::int64_t>(maxContour + 1);
+    root["nextLayerId"]   = static_cast<std::int64_t>(maxLayer + 1);
+
+    // signature → id 映射
+    toml::array sigContourArr;
+    auto sigContourMap = m_camData->signatureToContourId();
+    for (auto it = sigContourMap.constBegin(); it != sigContourMap.constEnd(); ++it) {
+        toml::value e(toml::table{});
+        e["sig"] = static_cast<std::int64_t>(it.key());
+        e["id"]  = static_cast<std::int64_t>(it.value());
+        sigContourArr.push_back(e);
+    }
+    root["signatureContours"] = sigContourArr;
+
+    toml::array sigLayerArr;
+    auto sigLayerMap = m_camData->signatureToLayerId();
+    for (auto it = sigLayerMap.constBegin(); it != sigLayerMap.constEnd(); ++it) {
+        toml::value e(toml::table{});
+        e["sig"] = static_cast<std::int64_t>(it.key());
+        e["id"]  = static_cast<std::int64_t>(it.value());
+        sigLayerArr.push_back(e);
+    }
+    root["signatureLayers"] = sigLayerArr;
+
+    toml::array layersArr;
+    for (const ToolpathLayer& l : m_toolpath.layers()) {
+        toml::value entry(toml::table{});
+        entry["layerId"]   = static_cast<std::int64_t>(l.layerId);
+        entry["signature"] = static_cast<std::int64_t>(l.signature);
+        entry["name"]      = l.name.toStdString();
+        entry["color"]     = l.color.name(QColor::HexRgb).toStdString();
+        entry["enabled"]   = l.enabled;
+        entry["toolName"]  = l.toolName.toStdString(); // 兼容旧字段，可空
+        toml::array contourIds;
+        for (auto id : l.contourIds)
+            contourIds.push_back(static_cast<std::int64_t>(id));
+        entry["contourIds"] = contourIds;
+        layersArr.push_back(entry);
+    }
+    root["layers"] = layersArr;
+
+    toml::array contoursArr;
+    for (const LaserContour& c : m_toolpath.contours()) {
+        toml::value entry(toml::table{});
+        entry["contourId"]      = static_cast<std::int64_t>(c.contourId);
+        entry["layerId"]        = static_cast<std::int64_t>(c.layerId);
+        entry["signature"]      = static_cast<std::int64_t>(c.signature);
+        entry["name"]           = c.name.toStdString();
+        entry["enabled"]        = c.enabled;
+        entry["workpieceEntry"] = c.workpieceEntry.toStdString();
+        entry["sourceInfo"]     = c.sourceInfo.toStdString();
+        entry["contourType"]    = static_cast<std::int64_t>(c.contourType);
+        // leadIn 简要保存
+        entry["leadInLength"]      = c.leadIn.length;
+        entry["leadInNormalAngle"] = c.leadIn.normalAngle;
+        entry["leadInValid"]       = c.leadIn.valid;
+        if (c.leadIn.valid) {
+            entry["leadInEntryX"]    = c.leadIn.entryPoint.X();
+            entry["leadInEntryY"]    = c.leadIn.entryPoint.Y();
+            entry["leadInEntryZ"]    = c.leadIn.entryPoint.Z();
+            entry["leadInEntryParam"]= c.leadIn.entryParam;
+            entry["leadInEntryEdge"] = static_cast<std::int64_t>(c.leadIn.entryEdgeIndex);
+        }
+        contoursArr.push_back(entry);
+    }
+    root["contours"] = contoursArr;
+
+    std::ofstream out(camToolpathTomlPath(packageDir).toStdString(), std::ios::binary);
+    if (!out.is_open()) {
+        if (errorMsg) *errorMsg = QStringLiteral("无法写入 cam_toolpath.toml");
+        return false;
+    }
+    out << toml::format(root);
+    out.close();
+
+    // 2. 写二进制点集
+    if (!writePointsBin(camToolpathPointsPath(packageDir), m_toolpath.contours(), errorMsg))
+        return false;
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "cam.toolpath: saved {} layers, {} contours",
+              m_toolpath.layers().size(),
+              m_toolpath.contourCount());
+    return true;
+}
+
+bool CamModule::loadToolpathFromDir(const QString& packageDir, QString* errorMsg)
+{
+    const QString tomlPath  = camToolpathTomlPath(packageDir);
+    const QString pointsPath = camToolpathPointsPath(packageDir);
+    if (!QFileInfo::exists(tomlPath) || !QFileInfo::exists(pointsPath)) {
+        if (errorMsg) *errorMsg = QStringLiteral("项目无刀路缓存");
+        return false;
+    }
+
+    // 1. 解析 toml
+    toml::value root;
+    try {
+        root = toml::parse(tomlPath.toStdString());
+    } catch (const std::exception& e) {
+        if (errorMsg) *errorMsg = QStringLiteral("解析 cam_toolpath.toml 失败: %1")
+                                       .arg(QString::fromLocal8Bit(e.what()));
+        return false;
+    }
+    if (!root.is_table()) {
+        if (errorMsg) *errorMsg = QStringLiteral("cam_toolpath.toml 根节点错误");
+        return false;
+    }
+
+    // 2. 读点集（先于 LaserContour，确保按 contourId 关联）。
+    QHash<std::uint64_t, std::vector<ToolpathPoint>> pointsByContourId;
+    if (!readPointsBin(pointsPath, pointsByContourId, errorMsg))
+        return false;
+
+    // 3. 装配 LaserToolpath
+    LaserToolpath toolpath;
+
+    // 图层
+    if (root.contains("layers") && root.at("layers").is_array()) {
+        for (const toml::value& e : root.at("layers").as_array()) {
+            if (!e.is_table()) continue;
+            ToolpathLayer l;
+            if (e.contains("layerId"))   l.layerId   = static_cast<std::uint64_t>(e.at("layerId").as_integer());
+            if (e.contains("signature")) l.signature = static_cast<std::uint64_t>(e.at("signature").as_integer());
+            if (e.contains("name"))      l.name      = QString::fromStdString(e.at("name").as_string());
+            if (e.contains("color"))     l.color     = QColor(QString::fromStdString(e.at("color").as_string()));
+            if (e.contains("enabled"))   l.enabled   = e.at("enabled").as_boolean();
+            if (e.contains("toolName"))  l.toolName  = QString::fromStdString(e.at("toolName").as_string());
+            if (e.contains("contourIds") && e.at("contourIds").is_array()) {
+                for (const toml::value& id : e.at("contourIds").as_array())
+                    if (id.is_integer())
+                        l.contourIds.push_back(static_cast<std::uint64_t>(id.as_integer()));
+            }
+            toolpath.layers().push_back(l);
+        }
+    }
+
+    // 轮廓
+    if (root.contains("contours") && root.at("contours").is_array()) {
+        for (const toml::value& e : root.at("contours").as_array()) {
+            if (!e.is_table()) continue;
+            LaserContour c;
+            if (e.contains("contourId"))      c.contourId      = static_cast<std::uint64_t>(e.at("contourId").as_integer());
+            if (e.contains("layerId"))        c.layerId        = static_cast<std::uint64_t>(e.at("layerId").as_integer());
+            if (e.contains("signature"))      c.signature      = static_cast<std::uint64_t>(e.at("signature").as_integer());
+            if (e.contains("name"))           c.name           = QString::fromStdString(e.at("name").as_string());
+            if (e.contains("enabled"))        c.enabled        = e.at("enabled").as_boolean();
+            if (e.contains("workpieceEntry")) c.workpieceEntry = QString::fromStdString(e.at("workpieceEntry").as_string());
+            if (e.contains("sourceInfo"))     c.sourceInfo     = QString::fromStdString(e.at("sourceInfo").as_string());
+            if (e.contains("contourType"))    c.contourType    = static_cast<int>(e.at("contourType").as_integer());
+            if (e.contains("leadInLength"))   c.leadIn.length      = e.at("leadInLength").as_floating();
+            if (e.contains("leadInNormalAngle")) c.leadIn.normalAngle = e.at("leadInNormalAngle").as_floating();
+            if (e.contains("leadInValid"))    c.leadIn.valid       = e.at("leadInValid").as_boolean();
+            if (c.leadIn.valid) {
+                if (e.contains("leadInEntryX") && e.contains("leadInEntryY") && e.contains("leadInEntryZ")) {
+                    c.leadIn.entryPoint = gp_Pnt(
+                        e.at("leadInEntryX").as_floating(),
+                        e.at("leadInEntryY").as_floating(),
+                        e.at("leadInEntryZ").as_floating());
+                }
+                if (e.contains("leadInEntryParam")) c.leadIn.entryParam = e.at("leadInEntryParam").as_floating();
+                if (e.contains("leadInEntryEdge"))  c.leadIn.entryEdgeIndex = static_cast<int>(e.at("leadInEntryEdge").as_integer());
+            }
+
+            auto it = pointsByContourId.find(c.contourId);
+            if (it != pointsByContourId.end())
+                c.points = std::move(it.value());
+            toolpath.contours().push_back(std::move(c));
+        }
+    }
+
+    // 4. 读 next id + signature 映射
+    lcnc::cam::ContourId nextContour = 1;
+    std::uint64_t nextLayer = 1;
+    if (root.contains("nextContourId") && root.at("nextContourId").is_integer())
+        nextContour = static_cast<lcnc::cam::ContourId>(root.at("nextContourId").as_integer());
+    if (root.contains("nextLayerId") && root.at("nextLayerId").is_integer())
+        nextLayer = static_cast<std::uint64_t>(root.at("nextLayerId").as_integer());
+
+    QHash<std::uint64_t, std::uint64_t> sigContour;
+    if (root.contains("signatureContours") && root.at("signatureContours").is_array()) {
+        for (const toml::value& e : root.at("signatureContours").as_array()) {
+            if (!e.is_table()) continue;
+            if (!e.contains("sig") || !e.contains("id")) continue;
+            sigContour.insert(static_cast<std::uint64_t>(e.at("sig").as_integer()),
+                              static_cast<std::uint64_t>(e.at("id").as_integer()));
+        }
+    }
+    QHash<std::uint64_t, std::uint64_t> sigLayer;
+    if (root.contains("signatureLayers") && root.at("signatureLayers").is_array()) {
+        for (const toml::value& e : root.at("signatureLayers").as_array()) {
+            if (!e.is_table()) continue;
+            if (!e.contains("sig") || !e.contains("id")) continue;
+            sigLayer.insert(static_cast<std::uint64_t>(e.at("sig").as_integer()),
+                            static_cast<std::uint64_t>(e.at("id").as_integer()));
+        }
+    }
+
+    // 5. 灌进 CamDataManager + 刷新展示
+    m_camData->restoreSignatureTables(sigContour, sigLayer, nextContour, nextLayer);
+    m_camData->replaceToolpath(std::move(toolpath), nextContour, nextLayer);
+
+    syncCamDocumentContours();
+    refreshToolpathDisplay();
+    emit toolpathGenerated();
+    emit toolpathLayersChanged();
+    refreshTravelPath();
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "cam.toolpath: restored {} layers, {} contours from cache",
+              m_toolpath.layers().size(),
+              m_toolpath.contourCount());
+    return true;
+}
+
+// ── Travel path 虚线显示 ─────────────────────────────────────────────────────
+
+void CamModule::setTravelPathVisible(bool on)
+{
+    if (!m_travelPathRenderer) return;
+    if (m_travelPathRenderer->isVisible() == on) return;
+    m_travelPathRenderer->setVisible(on);
+    if (on) {
+        refreshTravelPath();
+    } else {
+        m_travelPathRenderer->erase(workspaceGuiDocument());
+        if (auto* gd = workspaceGuiDocument()) {
+            if (gd->hasView()) gd->view()->Redraw();
+        }
+    }
+}
+
+bool CamModule::isTravelPathVisible() const
+{
+    return m_travelPathRenderer && m_travelPathRenderer->isVisible();
+}
+
+void CamModule::refreshTravelPath()
+{
+    if (!m_travelPathRenderer || !m_travelPathRenderer->isVisible()) return;
+    GuiDocument* gd = workspaceGuiDocument();
+    if (!gd) return;
+
+    // 从 Process 端只读视图取顺序，再到 snapshot 取端点。
+    auto provider = lcnc::Kernel::current()
+                        .services()
+                        .getService<lcnc::process::IProcessCuttingPlanProvider>();
+    if (!provider) {
+        m_travelPathRenderer->refresh(gd, {});
+        return;
+    }
+    const auto orderedIds = provider->orderedContourIds();
+    if (orderedIds.size() < 2) {
+        m_travelPathRenderer->refresh(gd, {});
+        if (gd->hasView()) gd->view()->Redraw();
+        return;
+    }
+
+    const auto snapshot = exportToolpathSnapshot();
+    QHash<std::uint64_t, const lcnc::cam::ToolpathExportContour*> byId;
+    byId.reserve(snapshot.contours.size());
+    for (const auto& c : snapshot.contours) byId.insert(c.contourId, &c);
+
+    QVector<lcnc::view::TravelPathRenderer::Segment> segments;
+    segments.reserve(orderedIds.size());
+    for (auto id : orderedIds) {
+        auto it = byId.find(id);
+        if (it == byId.end()) continue;
+        const auto* c = it.value();
+        if (!c->endpointsValid) continue;
+        lcnc::view::TravelPathRenderer::Segment s;
+        s.contourId = id;
+        s.sx = c->startX; s.sy = c->startY; s.sz = c->startZ;
+        s.ex = c->endX;   s.ey = c->endY;   s.ez = c->endZ;
+        segments.append(s);
+    }
+    m_travelPathRenderer->refresh(gd, segments);
+    if (gd->hasView()) gd->view()->Redraw();
 }
 

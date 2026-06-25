@@ -197,48 +197,24 @@ public:
 	virtual bool SetShutterOnOffWaitTime(double dBeforeOn, double dAfterOn,
 		double dBeforeOff, double dAfterOff, double dBlowDelay);
 
-	virtual bool SetFPos(Axis eAxis, double dPos);
-	virtual bool GetFPos(Axis eAxis, double& dPos);
-
-	//切割流程
-	string  GetCuttingCommand();
+	// IMotionCommandSink 切割管线入口（仅 GtnBufferedCommandSink 调用）
 	virtual bool SetJumpAccJerk(const Tool&);
-	virtual void JumpToSetAFPos(const Tool& curTool);
-	
 	virtual void JumpToIdleHeight(const Tool& curTool, double dCompensate = 0);
 	virtual void JumpToCuttingHeight(const Tool& curTool, double dCompensate = 0);
 	virtual void JumpToIdleXYPosition(double dEndX, double dEndY, const Tool& curTool);
 	virtual void ProLaserControl(bool, bool, const Tool&, bool);
-	
 	virtual bool InitCrd(const Tool& curTool);
-	bool FlushToFifo();       // 将软件前瞻缓冲区刷入硬件FIFO，若硬件FIFO满则提前启动插补
+	bool FlushToFifo();
 	virtual bool PrfTrapAxis();
 	virtual void OffsetLineTo(double dEndX, double dEndY, const Tool& tool);
-	virtual void OffsetArcTo(double dEndX, double dEndY, double dCenterX, double dCenterY, bool bClockwise, const Tool& tool, double dIncX, double dIncY);
 	virtual void EndProgramCommand(const Tool&) {};
 	virtual bool SendCommand();
-	virtual bool IsOffsetCutting();
 	virtual bool IsBufferRunning(int iBufferIndex);
-	
-
-	virtual bool CheckBuffer(int iBufferIndex, string& strCommand);
-	virtual bool RunBuffer(int iBufferIndex);
 	virtual bool PauseBuffer(int iBufferIndex);
-	virtual bool GetBufferState(int iBufferIndex, int& iState);
-	virtual bool LoadCommandAndRunBuffer(int iBufferIndex, string strCommand, int iTimeout);
-	
 	virtual bool StopAllBuffer();
-	virtual bool SetMFLAGSValue(Axis, int);
-	//随动
 	virtual bool StopMovingCuttingHead() { return true; };
 	virtual bool StartMovingCuttingHead(const Tool&) { return true; };
-	virtual bool MoveZCutting(double dAbsolutePos) { return true; };//未用到内容为空
 
-	//GSN PWM
-	virtual bool GSN_SetLaserParameterApplication(double dFrequence, double dPulse, double dDelay);
-	virtual bool GSN_SetLaserEnablePro(bool bState);
-	virtual bool GSN_LaserOnStatus(int& iState);
-	
 	virtual void ClearAxisState();
 	virtual void StartCommand();
 
@@ -259,64 +235,26 @@ private:
 	long AxisMaskByIndex(int iAxisIndex) const;
 	void ReleaseHomeParameters();
 
-protected:
-#pragma region FlightCutting
-	virtual void BeginACSSegmentForFlightCutting(const Tool& tool) {};
-	virtual void OffsetFlightLineTo(double dEndX, double dEndY, const Tool& tool, bool bPolyGuide) {};
-	virtual void OffsetFlightArcTo(double dEndX, double dEndY, double dCenterX, double dCenterY, bool bClockwise, const Tool& tool, double dIncX, double dIncY, bool bPolyGuide) {};
-	virtual void OffsetFlightArc2To(double dCenterX, double dCenterY, double dAngle, const Tool& tool, bool bPolyGuide) {};
-	virtual void EndProgramCommandForFlightCutting(const Tool& tool) {};
-	virtual bool LoadAndCompileBuffer(int) { return true; };		//导入指令到指定的Buffer，并编译（NOT RUN）
-	virtual bool RunBufferForFlightCutting(int) { return true; };    //直接Run指定的Buffer，请确保其已编译过
-#pragma endregion FlightCutting
+public:
+	// 指令汇所需的"切割管线"方法 —— 仅 GtnBufferedCommandSink 调用。
+	// 这些方法把 GTN_BufXxx / GTN_LnXYEx / GTN_CrdDataEx 等写入 FIFO；mid-stream 不触发执行。
+	void ResetProgramCommand() {}
+	void SetCuttingAccJerk(const Tool&) {}
 
-	//数据导出
-	virtual bool ErrorOccurred() const { return true; };//无调用
-	virtual bool Punch(double fdDwellTime) { return true; };//暂时没用到，返回true
-	virtual void ResetProgramCommand() {};
-	virtual void BeginACSSegment(const Tool&) {};	// ACS中，SEGMENT运动必须在之前设置加速度和加加速度
-	virtual void BeginACSSegmentSimple(const Tool& tool) {};//界面导出有用到
-	virtual void EndProgramCommandSimple(const Tool& tool) {};//界面导出有用到
-	virtual void OffsetLineToSimple(double dEndX, double dEndY, const Tool& tool) {};//界面导出有用到
-	virtual void OffsetArcToSimple(double dEndX, double dEndY,double dCenterX, double dCenterY,bool bClockwise, const Tool& tool,double dIncX, double dIncY){};//界面导出有用到
-	virtual void JumpToSimple(double, double, const Tool&, double, double) {};//界面导出有用到
-	virtual void ProLaserControlSimple(bool, bool, const Tool&) {};//界面导出有用到
-
-	//没有被调用
-	virtual int GetPressureState() { return 0; };       //气压监控接口   没有被调用
-	virtual bool GetIsPressureState() { return true; };                      //获取是否需要气压监控标识   没有被调用
-	virtual void SetIsPressureState(bool) {};                  //设置是否需要气压监控标识   没有被调用
-	virtual void JumpToTrough(const Tool& curTool, double time) {};//未用到，内用为空
-	virtual bool IsQueueFull() { return true; };//无调用
-	virtual bool IsQueueEmpty() { return true; };//无调用
-	virtual bool IsQueueActive() { return true; };//待筛查
-	virtual bool ClearQueue() { return true; };//无调用
-	//virtual bool CanCutting(CUTTING_CODE &);
-	//ACS适用
-	virtual void LogError() {};
-	virtual bool StopHome() { return true; };
-	virtual bool SetAxisHomeBufferIndex(Axis eAxis, int iHomeIndex) { return true; };
-	virtual bool GetAxisHomeBufferIndex(Axis eAxis, int& iIndex) { return true; };
-	bool RunBufferTillEnd(int iBufferIndex, int iTimeout) { return true; };
-	virtual bool StopBuffer(int iBufferIndex) { return true; };
-	virtual bool StopQueue() { return true; };//停止buffer9
-	bool AfterOpenComm() { return true; };
-	virtual bool SetCuttingAccJerk(const Tool&) { return true; };
-
-	virtual bool IsAxisStatusNormal(int& iFault);//监控控制器状态
-	virtual bool HaltMotor(Axis eMotor) { return true; };
-	bool LoadApplication(string) { return true; };//SPI导入调用，但是SPI已经禁用
-
-	bool ControllerSaveToFlash(Axis eAxis) { return true; };
-	bool AcscReadReal(const string, double&) { return true; };
-	bool AcscWriteReal(const string, double) { return true; };
-	bool AcscReadInt(const string, int&) { return true; };
-	bool AcscWriteInt(const string, int) { return true; };
-
-	virtual void OffsetArc2To(double dEndX, double dEndY,
-		double dCenterX, double dCenterY,
-		double dAngle, const Tool& tool) {};//没有检索到有调用
-	
+	// 实现在父类的"无调用"/"未用到"槽（保留以满足旧基类语义，但都是 no-op）。
+	bool IsAxisStatusNormal(int& iFault);
+	bool HaltMotor(Axis eMotor) { return true; }
+	int  GetPressureState() override { return 0; }
+	bool GetIsPressureState() override { return true; }
+	void SetIsPressureState(bool) override {}
+	bool IsQueueActive() override { return true; }
+	void LogError() override {}
+	bool StopHome() override { return true; }
+	bool SetAxisHomeBufferIndex(Axis eAxis, int iHomeIndex) override { return true; }
+	bool GetAxisHomeBufferIndex(Axis eAxis, int& iIndex) override { return true; }
+	bool StopBuffer(int iBufferIndex) override { return true; }
+	bool AfterOpenComm() { return true; }
+	bool ErrorOccurred() const override { return true; }
 };
 
 #endif

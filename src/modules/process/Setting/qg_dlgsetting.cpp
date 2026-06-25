@@ -772,7 +772,13 @@ void QG_dlgSetting::RebuildToolList()
 			if (!t_temp[strToolIndex].is_string())
 				break;
 			string strToolName = t_temp[strToolIndex].as_string();
-			dlgToolSetting->CreatTool(strToolName);
+			// 跳过 InitSetting 已创建过的工具，避免 CreatTool 重名警告
+			if (std::find(dlgToolSetting->vec_ToolNames.begin(),
+			              dlgToolSetting->vec_ToolNames.end(),
+			              strToolName) == dlgToolSetting->vec_ToolNames.end())
+			{
+				dlgToolSetting->CreatTool(strToolName);
+			}
 		}
 		dlgToolSetting->RebuildToolIndex(true);
 	}

@@ -4,9 +4,14 @@
 #include "core/kernel/kernel.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/logging/logger.h"
+#include "core/project/lcnc_project_manager.h"
+#include "core/project/lcnc_project_package.h"
 #include "core/task/task_manager.h"
 #include "core/task/task_progress.h"
+#include "modules/cam/cam_module.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/process/cutting/normal_cutting_manager.h"
+#include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/execution/process_workflow_executor.h"
 #include "modules/process/Setting/BuiltinIODefs.h"
 #include "modules/process/Setting/Settings.h"
@@ -14,7 +19,11 @@
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/steps/services/legacy_process_services.h"
 #include "modules/process/System/Service.h"
+#include "modules/process/ui/widget_cutting_plan_panel.h"
 #include "modules/process/workflow/process_flow_store.h"
+
+#include <QDialog>
+#include <QVBoxLayout>
 
 #include <QList>
 #include <QPointer>
@@ -234,12 +243,80 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
         }
         return s;
     });
-    m_cuttingStepService->setExecutor([](bool dryRun, QString* errorMessage) {
-        Q_UNUSED(dryRun);
-        Q_UNUSED(errorMessage);
-        // 真正切割管线后续接 NormalCuttingManager；当前占位返回成功。
-        return true;
-    });
+
+    // 普通切割管线：CAM 顺序链表 → MotionControl 指令序列；PureSim 由 ticker 驱动模型。
+    m_normalCuttingManager = std::make_unique<lcnc::process::NormalCuttingManager>(
+        m_service.get(), camProvider, this, this);
+    connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::logMessage,
+            this, &ProcessModule::setStatusMessage);
+    connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::contourStarted,
+            this, [this](int index, int total, const QString& desc) {
+                setStatusMessage(tr("切割中 %1/%2: %3").arg(index).arg(total).arg(desc));
+            });
+
+    // 加工链表服务：项目级图层 → 工具映射、切割顺序、补偿索引等工艺数据。
+    m_cuttingPlanService = std::make_unique<lcnc::process::ProcessCuttingPlanService>(this);
+    m_cuttingPlanService->setToolpathProvider(camProvider);
+    {
+        auto planService = std::shared_ptr<lcnc::process::ProcessCuttingPlanService>(
+            m_cuttingPlanService.get(), [](lcnc::process::ProcessCuttingPlanService*) {});
+        kernel.services().registerService<lcnc::process::ProcessCuttingPlanService>(planService);
+        // 同一实例额外注册为只读 provider 接口，给 CAM 的 TravelPathRenderer 消费。
+        auto providerView = std::static_pointer_cast<lcnc::process::IProcessCuttingPlanProvider>(planService);
+        kernel.services().registerService<lcnc::process::IProcessCuttingPlanProvider>(providerView);
+    }
+    // CAM 图层变更（新增/删除/重命名）时自动同步映射表。
+    if (auto cam = kernel.services().getService<CamModule>()) {
+        connect(cam.get(), &CamModule::toolpathLayersChanged,
+                this, [this]() {
+                    if (m_cuttingPlanService)
+                        m_cuttingPlanService->syncFromCam();
+                });
+    }
+    // 项目 open/save 联动：load 时从 packageDir 读 process_cutting_plan.toml；
+    // save 时写回到当前项目目录（manager 在 save 后已 emit projectSaved）。
+    if (auto* pm = lcnc::Kernel::current().projectManager()) {
+        connect(pm, &lcnc::LcncProjectManager::projectOpened,
+                this, [this](const QString& packagePath) {
+                    if (!m_cuttingPlanService) return;
+                    const QString dir = lcnc::LcncProjectPackage::packageDirectory(packagePath);
+                    QString err;
+                    if (!m_cuttingPlanService->loadFromProjectDir(dir, &err))
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "process.cuttingPlan load: {}", err.toStdString());
+                });
+        connect(pm, &lcnc::LcncProjectManager::projectSaved,
+                this, [this](const QString& packagePath) {
+                    if (!m_cuttingPlanService) return;
+                    const QString dir = lcnc::LcncProjectPackage::packageDirectory(packagePath);
+                    QString err;
+                    if (!m_cuttingPlanService->saveToProjectDir(dir, &err))
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "process.cuttingPlan save: {}", err.toStdString());
+                });
+        connect(pm, &lcnc::LcncProjectManager::projectReset,
+                this, [this]() {
+                    if (m_cuttingPlanService)
+                        m_cuttingPlanService->clearAll();
+                });
+    }
+    // 启动时先同步一次（CAM 当前已有的图层入表）。
+    m_cuttingPlanService->syncFromCam();
+
+    // 把工艺数据服务注入 NormalCuttingManager（buildCuttingList 改走 plan service）。
+    m_normalCuttingManager->setCuttingPlanService(m_cuttingPlanService.get());
+
+    m_cuttingStepService->setExecutor(
+        [this](const QString& nodeId,
+               const QVariantMap& parameters,
+               lcnc::process::ProcessInterruptContext* interrupt,
+               QString* errorMessage) -> bool {
+            if (!m_normalCuttingManager) {
+                if (errorMessage) *errorMessage = tr("普通切割管理器未初始化");
+                return false;
+            }
+            return m_normalCuttingManager->run(nodeId, parameters, interrupt, errorMessage);
+        });
 
     // 设置机台构型（从 MachineConfigurationService）。
     auto machineConfig = kernel.services().getService<lcnc::MachineConfigurationService>();
@@ -261,6 +338,9 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_stepContext.requestDigitalOutput = [this](const QString& channel, bool value) { setDigitalOutput(channel, value); };
     m_workflowExecutor->setStepRegistry(&stepRegistry);
     m_workflowExecutor->setStepContext(&m_stepContext);
+    m_workflowExecutor->setControllerAccessor([this]() -> MotionControl* {
+        return m_service ? m_service->GetMotionControl() : nullptr;
+    });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::messageLogged,
             this, &ProcessModule::setStatusMessage);
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeStateChanged,
@@ -1032,6 +1112,10 @@ void ProcessModule::onSimulationTick()
 {
     if (m_state != State::Running || !m_simulationMode)
         return;
+    // 普通切割管线运行期间由 PureSimulationToolpathTicker 直接驱动轴位，
+    // 这里跳过 Lissajous 正弦波，避免两个驱动源互相覆盖。
+    if (m_normalCuttingActive.load())
+        return;
 
     m_simPhase += 0.08 * std::max(0.1, m_feedOverride);
 
@@ -1068,6 +1152,37 @@ void ProcessModule::initializeAxisPositions()
     m_axisPositions = nextPositions;
     for (auto it = m_axisPositions.cbegin(); it != m_axisPositions.cend(); ++it)
         emit axisPositionChanged(it.key(), it.value());
+}
+
+void ProcessModule::setNormalCuttingActive(bool active)
+{
+    m_normalCuttingActive.store(active);
+}
+
+void ProcessModule::toggleCuttingPlanPanel()
+{
+    if (!m_cuttingPlanService)
+        return;
+    if (m_cuttingPlanDialog) {
+        if (m_cuttingPlanDialog->isVisible()) {
+            m_cuttingPlanDialog->hide();
+        } else {
+            m_cuttingPlanDialog->show();
+            m_cuttingPlanDialog->raise();
+            m_cuttingPlanDialog->activateWindow();
+        }
+        return;
+    }
+    auto* dlg = new QDialog(nullptr);
+    dlg->setWindowTitle(tr("加工链表配置"));
+    dlg->setAttribute(Qt::WA_DeleteOnClose, false); // 重复打开复用
+    dlg->resize(900, 640);
+    auto* layout = new QVBoxLayout(dlg);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto* panel = new lcnc::process::WidgetCuttingPlanPanel(m_cuttingPlanService.get(), dlg);
+    layout->addWidget(panel);
+    m_cuttingPlanDialog = dlg;
+    dlg->show();
 }
 
 void ProcessModule::initializeAxisEnabledStates()
@@ -1410,4 +1525,24 @@ void ProcessModule::setStatusMessage(const QString& message)
     m_statusMessage = message;
     emit statusMessageChanged(m_statusMessage);
     emit processLogMessage(logLevelForMessage(m_statusMessage), m_statusMessage);
+}
+
+// ── Ribbon「加工顺序」状态 ────────────────────────────────────────────────
+
+void ProcessModule::setAutoSortAxis(lcnc::process::AutoSortAxis a)
+{
+    if (m_autoSortAxis == a) return;
+    m_autoSortAxis = a;
+    if (m_cuttingPlanService)
+        m_cuttingPlanService->setLastAutoSortAxis(a);
+}
+
+void ProcessModule::setAutoSortAxisFromText(const QString& text)
+{
+    setAutoSortAxis(lcnc::process::autoSortAxisFromString(text, m_autoSortAxis));
+}
+
+void ProcessModule::setTravelPathVisible(bool on)
+{
+    m_travelPathVisible = on;
 }

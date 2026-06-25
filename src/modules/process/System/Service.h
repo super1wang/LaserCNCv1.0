@@ -1,12 +1,13 @@
 #pragma once
 
 #include "Settings.h"
-#include "MCFactory.h"
 #include "LDFactory.h"
 #include "ToolFactory.h"
 
 #include <QTimer>
 #include <QElapsedTimer>
+
+#include "modules/process/device/MotionControl/MotionControl.h"
 
 struct ButtonState
 {
@@ -68,7 +69,6 @@ public:
 private:
     Settings        m_Settings;
 
-    MCFactory       m_MCFactory;
     MotionControl*  m_pMotionControl{nullptr};
 
     LDFactory       m_LDFactory;

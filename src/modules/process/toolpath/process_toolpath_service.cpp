@@ -38,7 +38,8 @@ ProcessJobPlan ProcessToolpathService::buildJobPlan() const
 {
     ProcessJobPlan plan;
     plan.revision = m_snapshot.revision;
-    // Simplified: no schema snapshot
+    // 工具参数的真实解析在 NormalCuttingManager::resolveTool() 中按 layer/toolName 落地；
+    // 这里只填默认占位，保证 ProcessJobContour 字段一致。
 
     for (const auto& contour : m_snapshot.contours) {
         if (!contour.enabled || !contour.layerEnabled)
@@ -47,7 +48,7 @@ ProcessJobPlan ProcessToolpathService::buildJobPlan() const
         ProcessJobContour jobContour;
         jobContour.contour = contour;
         jobContour.points = m_snapshot.pointsByContourId.value(contour.contourId);
-        jobContour.toolSettings = typed.tool;
+        jobContour.toolSettings = ProcessToolSettings{};
         if (jobContour.points.isEmpty())
             jobContour.warnings.append(QObject::tr("轮廓 %1 没有刀路点").arg(QString::number(contour.contourId)));
 

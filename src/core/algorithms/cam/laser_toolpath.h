@@ -62,6 +62,8 @@ struct LaserContour
 {
     std::uint64_t              contourId{0}; ///< Runtime-stable id, preserved across reordering.
     std::uint64_t              layerId{0};   ///< Runtime-stable layer id used by CAM layer management.
+    std::uint64_t              signature{0}; ///< Deterministic geometry fingerprint, used by CamDataManager
+                                             ///< to keep contourId stable across regeneration & sessions.
     TopoDS_Wire                wire;     ///< The original topological wire
     TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
@@ -78,9 +80,10 @@ struct LaserContour
 struct ToolpathLayer
 {
     std::uint64_t layerId{0};
+    std::uint64_t signature{0};   ///< Deterministic key fingerprint (mirrors LaserContour::signature)
     QString name;
     QColor color{QColor(80, 190, 150)};
-    QString toolName;
+    QString toolName;   ///< @deprecated Tool mapping moved to ProcessCuttingPlanService; kept for legacy projects.
     bool enabled{true};
     std::vector<std::uint64_t> contourIds;
 };
@@ -166,6 +169,15 @@ public:
     static TopoDS_Edge computeLeadInEdge(const LaserContour& contour,
                                          double length,
                                          double normalAngleDeg);
+
+    /// Compute the lead-in approach start point for one contour, without building an Edge.
+    /// Same semantics as the first vertex of computeLeadInEdge().
+    /// @param success Optional output flag: true when the result is meaningful, false when
+    ///                the contour has no valid lead-in or the geometry degenerates.
+    static gp_Pnt computeLeadInStartPoint(const LaserContour& contour,
+                                          double length,
+                                          double normalAngleDeg,
+                                          bool* success = nullptr);
 
     /// Find the surface normal at a point on the workpiece.
     /// Iterates all faces and finds the one closest to the query point.

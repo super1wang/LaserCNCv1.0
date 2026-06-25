@@ -1,6 +1,7 @@
 #include "ACSMotionControl.h"
 //#include <boost/thread.hpp>
 #include <boost/lexical_cast.hpp>
+#include <cmath>
 #include <fstream>
 //#include "CoreUtils.h"
 #include "bdaqctrl.h"
@@ -10,7 +11,31 @@ using namespace Automation::BDaq;
 
 using std::ofstream;
 using std::ios;
-#define DEBUG_MODE 
+#define DEBUG_MODE
+
+namespace {
+
+// 安全地查表：避免 std::map::operator[] 在键缺失时插入默认 DigitalIOData{strIndex=""}。
+// 该默认对象后续会被拼成形如 "=1;" 的残缺指令（参见 ProLaserControl / EndProgramCommand），
+// 是切割文本中出现裸 "=0;" / "=1;" 的根因（Fix #3）。
+// 返回 true 表示命中且 strIndex 非空。
+template <class K>
+bool resolveDigital(const std::map<K, DigitalIOData>& m, K key,
+					DigitalIOData& out, const char* contextLabel)
+{
+	auto it = m.find(key);
+	if (it == m.end() || it->second.strIndex.empty())
+	{
+		LOG_SYS_WARN(std::string("ACS digital IO missing or unconfigured: ") + contextLabel
+					+ " (key=" + std::string(enum_name(key)) + "); generated command skipped.");
+		out = DigitalIOData{};
+		return false;
+	}
+	out = it->second;
+	return true;
+}
+
+} // namespace
 
 ACSMotionControl::ACSMotionControl(void)
 	: m_bConnectFlag(false)
@@ -1031,63 +1056,16 @@ bool ACSMotionControl::AnalogInputGet(AnalogIOData& IOData, double& dValue, bool
 }
 
 
-bool ACSMotionControl::IsQueueFull()
-{
-	int FullStatus;
-	if (!acsc_ReadInteger(m_hHandle, ACSC_NONE, (char*)"gbFifoFull",
-		ACSC_NONE, ACSC_NONE, ACSC_NONE, ACSC_NONE, &FullStatus, NULL))
-	{
-		LogError();
-	}
-	return FullStatus;
-}
+// [P3 removed] ACSMotionControl::IsQueueFull
 
-bool ACSMotionControl::IsQueueEmpty()
-{
-	int EmptyStatus;
-	if (!acsc_ReadInteger(m_hHandle, ACSC_NONE, (char*)"gbFifoEmpty",
-		ACSC_NONE, ACSC_NONE, ACSC_NONE, ACSC_NONE, &EmptyStatus, NULL))
-	{
-		LogError();
-		return false;
-	}
-	return EmptyStatus;
-}
+// [P3 removed] ACSMotionControl::IsQueueEmpty
 
 bool ACSMotionControl::IsQueueActive()
 {
 	return true;
 }
 
-bool ACSMotionControl::ClearQueue()
-{
-	char* cmd = (char*)"#6SR\r";
-	if (!acsc_Command(m_hHandle, cmd, strlen(cmd), NULL))
-	{
-		LogError();
-		return false;
-	}
-
-	cmd = (char*)"#6X\r";
-	if (!acsc_Command(m_hHandle, cmd, strlen(cmd), NULL))
-	{
-		LogError();
-		return false;
-	}
-	cmd = (char*)"#7SR\r";
-	if (!acsc_Command(m_hHandle, cmd, strlen(cmd), NULL))
-	{
-		LogError();
-		return false;
-	}
-	cmd = (char*)"#7X\r";
-	if (!acsc_Command(m_hHandle, cmd, strlen(cmd), NULL))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::ClearQueue
 
 bool ACSMotionControl::SetShutterOnOffWaitTime(double dBeforeOn, double dAfterOn, double dBeforeOff, double dAfterOff, double dBlowDelay)
 {
@@ -1141,15 +1119,9 @@ bool ACSMotionControl::ErrorOccurred() const
 	return m_bErrorOccurred;
 }
 
-bool ACSMotionControl::StopQueue()
-{
-	return StopBuffer(m_iProgramBufferIndex);
-}
+// [P3 removed] ACSMotionControl::StopQueue
 
-bool ACSMotionControl::IsOffsetCutting()
-{
-	return IsBufferRunning(m_iProgramBufferIndex);
-}
+// [P3 removed] ACSMotionControl::IsOffsetCutting
 
 bool ACSMotionControl::IsBufferRunning(int iBufferIndex)
 {
@@ -1261,69 +1233,14 @@ bool ACSMotionControl::SetDiamaterXVEL(Axis eAxis, double dValue)
 	return true;
 }
 
-bool ACSMotionControl::Punch(double fdDwellTime)
-{
-	return true;
-}
+// [P3 removed] ACSMotionControl::Punch
 
 void ACSMotionControl::ResetProgramCommand()
 {
 	m_strCommand = "";
 }
 
-void ACSMotionControl::BeginACSSegment(const Tool& tool)
-{
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	int iZIndex = m_mapMotorValue[Axis::Z].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-	string strZIndex = boost::lexical_cast<string>(iZIndex);
-	string strDVel = boost::lexical_cast<string>(tool.m_dLineVelocity);
-	string strFVel = boost::lexical_cast<string>(tool.m_dXsegEndVelocity);
-	string strJVel = boost::lexical_cast<string>(tool.m_dJunctionVelocity);
-	string strAngle = boost::lexical_cast<string>(tool.m_dJunctionAngle * 3.1415926 / 180);
-	SetCuttingAccJerk(tool);
-	string strEnd = "\n";
-	string strZ0 = boost::lexical_cast<string>(tool.m_dCuttingHeight);
-
-	string strLinkedIndex;
-	if (tool.m_sLinkedDirection == "X")
-		strLinkedIndex = strXIndex;
-	else
-		strLinkedIndex = strYIndex;
-
-	string strLinkageA = boost::lexical_cast<string>(tool.m_dLinkageParameterA);// 坐标
-	if (tool.m_bAxisZLinkage)
-	{ 
-		if (tool.m_iLinkedMode == 0)
-		{
-			string strLinkageB = boost::lexical_cast<string>(tool.m_dLinkageParameterB);	// tub/斜率
-			m_strCommand += "MASTER MPOS(" + strZIndex + ")=" + "(" + strLinkageA + "-RPOS(" + strLinkedIndex + "))*" + "(" + strLinkageB + ")+" + strZ0 + strEnd;
-			m_strCommand += "SLAVE/pt " + strZIndex + "," + "0" + "," + "50" + strEnd;
-		}
-		else if (tool.m_iLinkedMode == 1)
-		{
-			string strR0	= boost::lexical_cast<string>(tool.m_dLinkageParameterB / 2);
-			string strR00	= boost::lexical_cast<string>((tool.m_dLinkageParameterB / 2) * (tool.m_dLinkageParameterB / 2));
-			string strZMax	= boost::lexical_cast<string>(tool.m_dCuttingHeight + tool.m_dLinkageParameterB / 2);
-			m_strCommand += "MASTER MPOS(" + strZIndex + ")=" + strZ0 + "+" + strR0 + "-SQRT(" + strR00 + "-POW((RPOS(" + strLinkedIndex + ")-" + strLinkageA + "),2))" + strEnd;
-			m_strCommand += "SLAVE/pt " + strZIndex + "," + strZ0 + "," + strZMax + strEnd;
-		}
-		else
-		{
-			m_strCommand += tool.m_sLinkedFormula + strEnd;
-		}
-
-		double dDelay = tool.m_dLinkedDelay;
-		string strDelay = boost::lexical_cast<string>(dDelay);
-		m_strCommand += "WAIT " + strDelay + strEnd;
-	}
-
-	m_strCommand += "XSEG/VFJA (" + strXIndex + ", " + strYIndex + "), APOS" + strXIndex
-		+ ", APOS" + strYIndex + ", " + strDVel + ", " + strFVel + ","
-		+ strJVel + "," + strAngle + "\n";
-}
+// [P3 removed] ACSMotionControl::BeginACSSegment
 
 void ACSMotionControl::EndProgramCommand(const Tool& tool)
 {
@@ -1332,10 +1249,10 @@ void ACSMotionControl::EndProgramCommand(const Tool& tool)
 
 	if (tool.m_bStopBlow)
 	{
-		if (tool.m_bBlow2)
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow2].strIndex + "=0;\n";
-		else
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow].strIndex + "=0;\n";
+		DigitalIOData io;
+		const DigitalOUT key = tool.m_bBlow2 ? DigitalOUT::Blow2 : DigitalOUT::Blow;
+		if (resolveDigital(m_mapDigitalOUT, key, io, "EndProgramCommand Blow OFF"))
+			m_strCommand += io.strIndex + "=0;\n";
 	}
 	bool bEnergySwitchUse = DT::getCustomerID() == "MaiTong"
 		|| int(DT::getPermission()) > (int)PermissionLevel::Factory;
@@ -1344,123 +1261,18 @@ void ACSMotionControl::EndProgramCommand(const Tool& tool)
 	m_strCommand += "STOP\n";
 }
 
-bool ACSMotionControl::MoveZCutting(double dPos)
-{
-	string strPos = boost::lexical_cast<string>(dPos);
-	string strZIndex = boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-	string strVel = boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].Velocity);
-	m_strCommand += "PTP/EV (" + strZIndex + "), " + strPos + "," + strVel + "\n";
-	return true;
-}
+// [P3 removed] ACSMotionControl::MoveZCutting
 
-void ACSMotionControl::OffsetLineTo(double dEndX, double dEndY, const Tool& tool)
-{
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strEndX = boost::lexical_cast<string>(dEndX);
-	string strEndY = boost::lexical_cast<string>(dEndY);
-	string strVel = boost::lexical_cast<string>(tool.m_dLineVelocity);
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
+// [P3 removed] ACSMotionControl::OffsetLineTo
 
-	m_strCommand += "LINE/V (" + strXIndex + ", " + strYIndex + "), " + strEndX + ", " + strEndY + ", " + strVel + "\n";
-	m_strCommand += "IF GSFREE" + strXIndex + "<2; GO (" + strXIndex + ", " + strYIndex + "); END\n";
+// [P3 removed] ACSMotionControl::OffsetArcTo
 
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
+// [P3 removed] ACSMotionControl::OffsetArc2To
 
-void ACSMotionControl::OffsetArcTo(double dEndX, double dEndY, double dCenterX, double dCenterY,
-	bool bClockwise, const Tool& tool, double dIncX, double dIncY)
-{
-// 	if ((m_dPreX == dEndX) && (m_dPreY == dEndY))
-// 		return;
-
-	if (m_dPreY == dEndY)	// 在同一水平线上
-	{
-		dCenterX = (m_dPreX + dEndX) / 2;
-	}
-	else if (m_dPreX == dEndX)
-	{
-		dCenterY = (m_dPreY + dEndY) / 2;
-	}
-	else if ((fabs(m_dPreX + dEndX - 2 * dCenterX) <= 0.001 && fabs(m_dPreY + dEndY - 2 * dCenterY) <= 0.001))
-	{
-		dCenterX = (m_dPreX + dEndX) / 2;
-		dCenterY = (m_dPreY + dEndY) / 2;
-	}
-	else
-	{
-		double B = 1;
-		double A = (dEndX - m_dPreX) / (dEndY - m_dPreY);
-		double C = -A * (m_dPreX + dEndX) / 2 - (m_dPreY + dEndY) / 2;
-		double dTempCenterX = dCenterX;
-		dCenterX = (B * B * dCenterX - A * B * dCenterY - A * C) / (A * A + B * B);
-		dCenterY = (-A * B * dTempCenterX + A * A * dCenterY - B * C) / (A * A + B * B);
-	}
-
-	string strCenterX = boost::lexical_cast<string>(dCenterX);
-	string strCenterY = boost::lexical_cast<string>(dCenterY);
-	string strEndX = boost::lexical_cast<string>(dEndX);
-	string strEndY = boost::lexical_cast<string>(dEndY);
-	string strVel = boost::lexical_cast<string>(tool.m_dArcVelocity);
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-	string strArcDir = bClockwise ? "-" : "+";
-
-	m_strCommand += "ARC1/V (" + strXIndex + ", " + strYIndex + "), " + strCenterX + ", " + strCenterY + ", "
-		+ strEndX + ", " + strEndY + ", " + strArcDir + ", " + strVel + "\n";
-	m_strCommand += "IF GSFREE" + strXIndex + "<2; GO (" + strXIndex + ", " + strYIndex + "); END\n";
-	
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
-
-void ACSMotionControl::OffsetArc2To(double dEndX, double dEndY, double dCenterX, double dCenterY, double dAngle, const Tool& tool)
-{
-	string strCenterX = boost::lexical_cast<string>(dCenterX);
-	string strCenterY = boost::lexical_cast<string>(dCenterY);
-	string strVel = boost::lexical_cast<string>(tool.m_dArcVelocity);
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-	string strAngle = boost::lexical_cast<string>(dAngle);
-	m_strCommand += "ARC2/V (" + strXIndex + ", " + strYIndex + "), " + strCenterX + ", " + strCenterY + ", "
-		+ strAngle + ", " + strVel + "\n";
-	m_strCommand += "IF GSFREE" + strXIndex + "<2; GO (" + strXIndex + ", " + strYIndex + "); END\n";
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
-
-void ACSMotionControl::JumpToTrough(const Tool& curTool, double time)
-{
-	string strWaitFirst = boost::lexical_cast<string>(curTool.m_dWaitFirst);
-	string strWaitSecond = boost::lexical_cast<string>((int)(time * 1000));
-	m_strCommand += "GLOBAL REAL waitFirst;\n";
-	m_strCommand += "waitFirst = " + strWaitFirst + "\n";
-	m_strCommand += "GLOBAL REAL waitSecond;\n";
-	m_strCommand += "waitSecond = " + strWaitSecond + "\n";
-}
+// [P3 removed] ACSMotionControl::JumpToTrough
 
 // 改设置界面为旋转轴置位
-void ACSMotionControl::JumpToSetAFPos(const Tool& curTool)
-{
-	if (curTool.m_bAZero) 
-	{
-		string strAIndex = boost::lexical_cast<string>(m_mapMotorValue[Axis::A].AxisIndex);
-		string strAPos	 = boost::lexical_cast<string>(curTool.m_dAPos / 360 * PI * m_dDiameter);
-		m_strCommand += "SET FPOS(" + strAIndex + ")=" + strAPos + "\n";
-	}
-	if (curTool.m_bA1Zero)
-	{
-		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
-		string strA1Pos   = boost::lexical_cast<string>(curTool.m_dA1Pos / 360 * PI * m_dDiameter);
-		m_strCommand += "SET FPOS(" + strA1Index + ")=" + strA1Pos + "\n";
-	}
-}
+// [P3 removed] ACSMotionControl::JumpToSetAFPos
 
 void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const Tool& curTool)
 {
@@ -1588,41 +1400,75 @@ bool ACSMotionControl::SendCommand()
 
 bool ACSMotionControl::SetCuttingAccJerk(const Tool& curTool)
 {
-	string strAcc = boost::lexical_cast<string>(curTool.m_dLineAcc);
-	string strJerk = boost::lexical_cast<string>(curTool.m_dLineJerk);
+	// 切割段 ACC/JERK：优先取 Tool 工艺参数；若工艺参数无效（未配置、≤0、非有限值），
+	// 退回每轴在 TOML 配置的 fAcc / fJerk（CreateMotor 时已读入 m_mapMotorValue[axis]）。
+	const bool bToolAccValid  = std::isfinite(curTool.m_dLineAcc)  && curTool.m_dLineAcc  > 0.0;
+	const bool bToolJerkValid = std::isfinite(curTool.m_dLineJerk) && curTool.m_dLineJerk > 0.0;
 
 	for (Axis axis : m_vecMotors)
 	{
-		string strIndex = boost::lexical_cast<string>(m_mapMotorValue[axis].AxisIndex);
-		m_strCommand += "ACC" + strIndex + " = " + strAcc + ";";
-		m_strCommand += "DEC" + strIndex + " = " + strAcc + ";";
+		const auto& mv = m_mapMotorValue[axis];
+		double dAcc  = bToolAccValid  ? curTool.m_dLineAcc  : mv.Acceleration;
+		double dJerk = bToolJerkValid ? curTool.m_dLineJerk : mv.Jerk;
+		if (!std::isfinite(dAcc)  || dAcc  <= 0.0) dAcc  = mv.Acceleration;
+		if (!std::isfinite(dJerk) || dJerk <= 0.0) dJerk = mv.Jerk;
+
+		string strIndex = boost::lexical_cast<string>(mv.AxisIndex);
+		string strAcc   = boost::lexical_cast<string>(dAcc);
+		string strJerk  = boost::lexical_cast<string>(dJerk);
+		m_strCommand += "ACC"  + strIndex + " = " + strAcc  + ";";
+		m_strCommand += "DEC"  + strIndex + " = " + strAcc  + ";";
 		m_strCommand += "JERK" + strIndex + " = " + strJerk + ";\n";
 	}
+
+	if (!bToolAccValid || !bToolJerkValid)
+		LOG_SYS_WARN("ACS SetCuttingAccJerk: tool m_dLineAcc/m_dLineJerk invalid, fell back to per-axis defaults.");
 
 	return true;
 }
 
 bool ACSMotionControl::SetJumpAccJerk(const Tool& curTool)
 {
-	string strAcc = boost::lexical_cast<string>(curTool.m_dIdleXYAccDec);
-	string strJerk = boost::lexical_cast<string>(curTool.m_dIdleXYJerk);
+	// 空程 ACC/JERK：同样回退到每轴默认。
+	const bool bToolAccValid  = std::isfinite(curTool.m_dIdleXYAccDec) && curTool.m_dIdleXYAccDec > 0.0;
+	const bool bToolJerkValid = std::isfinite(curTool.m_dIdleXYJerk)   && curTool.m_dIdleXYJerk   > 0.0;
 
 	for (Axis axis : m_vecMotors)
 	{
-		string strIndex = boost::lexical_cast<string>(m_mapMotorValue[axis].AxisIndex);
-		m_strCommand += "ACC" + strIndex + " = " + strAcc + ";";
-		m_strCommand += "DEC" + strIndex + " = " + strAcc + ";";
+		const auto& mv = m_mapMotorValue[axis];
+		double dAcc  = bToolAccValid  ? curTool.m_dIdleXYAccDec : mv.Acceleration;
+		double dJerk = bToolJerkValid ? curTool.m_dIdleXYJerk   : mv.Jerk;
+		if (!std::isfinite(dAcc)  || dAcc  <= 0.0) dAcc  = mv.Acceleration;
+		if (!std::isfinite(dJerk) || dJerk <= 0.0) dJerk = mv.Jerk;
+
+		string strIndex = boost::lexical_cast<string>(mv.AxisIndex);
+		string strAcc   = boost::lexical_cast<string>(dAcc);
+		string strJerk  = boost::lexical_cast<string>(dJerk);
+		m_strCommand += "ACC"  + strIndex + " = " + strAcc  + ";";
+		m_strCommand += "DEC"  + strIndex + " = " + strAcc  + ";";
 		m_strCommand += "JERK" + strIndex + " = " + strJerk + ";\n";
 	}
+
+	if (!bToolAccValid || !bToolJerkValid)
+		LOG_SYS_WARN("ACS SetJumpAccJerk: tool m_dIdleXYAccDec/m_dIdleXYJerk invalid, fell back to per-axis defaults.");
 
 	return true;
 }
 
 void ACSMotionControl::ProLaserControl(bool bLaser, bool bPso, const Tool& curTool, bool bAOUTFlag)
 {
-	string strLaserNum	= m_mapDigitalOUT[DigitalOUT::Laser].strIndex;
-	string strAnalogNum = m_mapAnalogOUT[AnalogOUT::Laser].strIndex;
-	string strEnd = "\n";
+	// 解析关键数字 IO，找不到时跳过对应分支（Fix #3）：避免拼出 "=1;" / "=0;" 之类残缺指令。
+	DigitalIOData ioLaser, ioBlow;
+	const bool bHasLaser = resolveDigital(m_mapDigitalOUT, DigitalOUT::Laser,
+										ioLaser, "ProLaserControl Laser");
+	const DigitalOUT blowKey = curTool.m_bBlow2 ? DigitalOUT::Blow2 : DigitalOUT::Blow;
+	const char* blowLabel = curTool.m_bBlow2 ? "ProLaserControl Blow2" : "ProLaserControl Blow";
+	const bool bHasBlow = resolveDigital(m_mapDigitalOUT, blowKey, ioBlow, blowLabel);
+
+	const string strLaserNum  = ioLaser.strIndex;
+	const string strAnalogNum = m_mapAnalogOUT.count(AnalogOUT::Laser)
+		? m_mapAnalogOUT[AnalogOUT::Laser].strIndex : std::string();
+	const string strEnd = "\n";
 
 	if (bLaser)
 	{
@@ -1630,15 +1476,10 @@ void ACSMotionControl::ProLaserControl(bool bLaser, bool bPso, const Tool& curTo
 		string strLaserOnAWait = boost::lexical_cast<string>(m_dLaserOnAWait);
 		string strBlowDelay = boost::lexical_cast<string>(m_dBlowDelay);
 
-		if (curTool.m_bBlow2)
+		if (bHasBlow)
 		{
-			string strValue = m_mapDigitalOUT[DigitalOUT::Blow2].bInversion ? "0" : "1";
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow2].strIndex + "=" + strValue + ";";
-		}
-		else
-		{
-			string strValue = m_mapDigitalOUT[DigitalOUT::Blow].bInversion ? "0" : "1";
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow].strIndex + "=" + strValue + ";";
+			string strValue = ioBlow.bInversion ? "0" : "1";
+			m_strCommand += ioBlow.strIndex + "=" + strValue + ";";
 		}
 
 		m_strCommand += strEnd + "WAIT " + strBlowDelay + strEnd;
@@ -1654,16 +1495,26 @@ void ACSMotionControl::ProLaserControl(bool bLaser, bool bPso, const Tool& curTo
 			m_strCommand += "WAIT " + strLaserOnBWait + strEnd;
 			if (bAOUTFlag)
 			{
-				string strAnalogValue = boost::lexical_cast<string>(curTool.m_dAnalogLaserValue / 2.0);
-				m_strCommand += strAnalogNum + "=" + strAnalogValue + ";";
-				m_strCommand += "TILL " + strAnalogNum + ";";
+				if (!strAnalogNum.empty())
+				{
+					string strAnalogValue = boost::lexical_cast<string>(curTool.m_dAnalogLaserValue / 2.0);
+					m_strCommand += strAnalogNum + "=" + strAnalogValue + ";";
+					m_strCommand += "TILL " + strAnalogNum + ";";
+				}
+				else
+				{
+					LOG_SYS_WARN("ACS ProLaserControl: Analog Laser OUT not configured, skipped.");
+				}
 			}
 			else
 			{
-				string strLaserValue = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "0" : "1";
-				string strTill		 = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "TILL ^" : "TILL ";
-				m_strCommand += strLaserNum + "=" + strLaserValue + ";";
-				m_strCommand += strTill + strLaserNum + ";";
+				if (bHasLaser)
+				{
+					string strLaserValue = ioLaser.bInversion ? "0" : "1";
+					string strTill       = ioLaser.bInversion ? "TILL ^" : "TILL ";
+					m_strCommand += strLaserNum + "=" + strLaserValue + ";";
+					m_strCommand += strTill + strLaserNum + ";";
+				}
 			}
 			m_strCommand += strEnd + "WAIT " + strLaserOnAWait + strEnd;
 		}
@@ -1678,7 +1529,7 @@ void ACSMotionControl::ProLaserControl(bool bLaser, bool bPso, const Tool& curTo
 			string strYIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
 
 			m_strCommand += "ENDS (" + strXIndex + ", " + strYIndex + ")" + strEnd;
-			SetGO(curTool);
+			m_strCommand += "GO (" + strXIndex + ", " + strYIndex + ")\n";
 			m_strCommand += "SPLIT (" + strXIndex + ", " + strYIndex + ")" + strEnd;
 		}
 		else if (curTool.m_bTroughFlag)
@@ -1689,15 +1540,21 @@ void ACSMotionControl::ProLaserControl(bool bLaser, bool bPso, const Tool& curTo
 		m_strCommand += "WAIT " + strLaserOffBWait + strEnd;
 		if (bAOUTFlag)
 		{
-			m_strCommand += strAnalogNum + "=0;";
-			m_strCommand += "TILL ^" + strAnalogNum + ";";
+			if (!strAnalogNum.empty())
+			{
+				m_strCommand += strAnalogNum + "=0;";
+				m_strCommand += "TILL ^" + strAnalogNum + ";";
+			}
 		}
 		else
 		{
-			string strLaserValue = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "1" : "0";
-			string strTill		 = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "TILL " : "TILL ^";
-			m_strCommand += strLaserNum + "=" + strLaserValue + ";";
-			m_strCommand += strTill + strLaserNum + ";";
+			if (bHasLaser)
+			{
+				string strLaserValue = ioLaser.bInversion ? "1" : "0";
+				string strTill       = ioLaser.bInversion ? "TILL " : "TILL ^";
+				m_strCommand += strLaserNum + "=" + strLaserValue + ";";
+				m_strCommand += strTill + strLaserNum + ";";
+			}
 		}
 		m_strCommand += strEnd + "WAIT " + strLaserOffAWait + strEnd;
 	}
@@ -1770,51 +1627,13 @@ bool ACSMotionControl::HaltMotor(Axis eMotor)
 	return true;
 }
 
-void ACSMotionControl::SetGO(const Tool& curTool)
-{
-	Axis eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
-	string strXIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
-	string strYIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
-	
-	m_strCommand += "GO (" + strXIndex + ", " + strYIndex + ")\n";
-}
+// [P3 removed] ACSMotionControl::SetGO
 
-bool ACSMotionControl::SetFPos(Axis eAxis, double dPos)
-{
-	if (!acsc_SetFPosition(m_hHandle, m_mapMotorValue[eAxis].AxisIndex, dPos, ACSC_SYNCHRONOUS))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::SetFPos
 
-bool ACSMotionControl::GetFPos(Axis eAxis, double& dPos)
-{
-	if (!acsc_GetFPosition(m_hHandle, m_mapMotorValue[eAxis].AxisIndex, &dPos, NULL))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::GetFPos
 
-bool ACSMotionControl::LoadApplication(string strStress)
-{
-	ACSC_APPSL_INFO* ainfo = NULL;
-	if (!acsc_AnalyzeApplication(m_hHandle, strStress.c_str(), &ainfo, NULL))
-	{
-		LogError();
-		return false;
-	}
-	if (!acsc_LoadApplication(m_hHandle, strStress.c_str(), ainfo, NULL))
-	{
-		LogError();
-		return false;
-	}
-	return Reboot();
-}
+// [P3 removed] ACSMotionControl::LoadApplication
 
 bool ACSMotionControl::ControllerSaveToFlash(Axis eAxis)
 {
@@ -1827,231 +1646,19 @@ bool ACSMotionControl::ControllerSaveToFlash(Axis eAxis)
 	return true;
 }
 
-void ACSMotionControl::BeginACSSegmentSimple(const Tool& curTool)
-{
-	Axis	eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis	eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
-	string	strXIndex	= boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
-	string	strYIndex	= boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
-	string	strZIndex	= boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-	string	strDVel		= boost::lexical_cast<string>(curTool.m_dLineVelocity);
-	string	strFVel		= boost::lexical_cast<string>(curTool.m_dXsegEndVelocity);
-	string	strJVel		= boost::lexical_cast<string>(curTool.m_dJunctionVelocity);
-	string	strAngle	= boost::lexical_cast<string>(curTool.m_dJunctionAngle * 3.1415926 / 180);
-	SetCuttingAccJerk(curTool);
+// [P3 removed] ACSMotionControl::BeginACSSegmentSimple
 
-	m_strCommand += "XSEG/VFJA (" + strXIndex + ", " + strYIndex + "," + strZIndex + "), APOS" + strXIndex
-		+ ", APOS" + strYIndex + ", " + strZIndex + "," + strDVel + ", " + strFVel + ","
-		+ strJVel + "," + strAngle + "\n";
-}
+// [P3 removed] ACSMotionControl::JumpToSimple
 
-void ACSMotionControl::JumpToSimple(double dEndX, double dEndY, const Tool& curTool, double dFindTelos, double time)
-{
-	// 米制单位，精度到um
-	double Precision = 1000;
-	int iEndX = dEndX * Precision;
-	dEndX = iEndX / Precision;
-	int iEndY = dEndY * Precision;
-	dEndY = iEndY / Precision;
+// [P3 removed] ACSMotionControl::GetCuttingCommand
 
-	string strEndX = boost::lexical_cast<string>(dEndX);
-	string strEndY = boost::lexical_cast<string>(dEndY);
-	string strXVel = boost::lexical_cast<string>(curTool.m_dIdleXVelocity);
-	string strYVel = boost::lexical_cast<string>(curTool.m_dIdleYVelocity);
-	string strZVel = boost::lexical_cast<string>(curTool.m_dIdleZVelocity);
-	string strX1Vel = boost::lexical_cast<string>(curTool.m_dIdleX1Velocity);
-	string strY1Vel = boost::lexical_cast<string>(curTool.m_dIdleY1Velocity);
+// [P3 removed] ACSMotionControl::OffsetArcToSimple
 
-	Axis eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
-	string strXIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
-	string strYIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
-	string strZIndex = boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-	string strZPosition = boost::lexical_cast<string>(curTool.m_dCuttingHeight + curTool.m_dCuttingHeightCompensate);
-	string strIdleZHeight = boost::lexical_cast<string>(curTool.m_dIdleZHeight/*-m_dStandard+curTool.m_dCuttingHeightCompensate*/);
-	string strYPosition = boost::lexical_cast<string>(curTool.m_dYPosition / 360 * PI * m_dDiameter);
+// [P3 removed] ACSMotionControl::OffsetLineToSimple
 
-	if (curTool.m_bAZero)
-	{
-		string strthetaIndex = boost::lexical_cast<string>(m_mapMotorValue[Axis::A].AxisIndex);
-		m_strCommand += "SET FPOS(" + strthetaIndex + ")=" + strYPosition + "\n";
-	}
-	if (curTool.m_bA1Zero)
-	{
-		string strthetaIndex = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
-		m_strCommand += "SET FPOS(" + strthetaIndex + ")=" + strYPosition + "\n";
-	}
+// [P3 removed] ACSMotionControl::ProLaserControlSimple
 
-	m_strCommand += "LINE/V (" + strXIndex + "," + strYIndex + "," + strZIndex + ")," + "APOS" + strXIndex + ",APOS" + strYIndex + "," + strIdleZHeight + "," + strZVel + "\n";
-	m_strCommand += "LINE/V (" + strXIndex + "," + strYIndex + "," + strZIndex + ")," + strEndX + ", " + strEndY + ",APOS" + strZIndex + "," + strXVel + "\n";
-	m_strCommand += "LINE/V (" + strXIndex + "," + strYIndex + "," + strZIndex + ")," + "APOS" + strXIndex + ",APOS" + strYIndex + "," + strZPosition + "," + strZVel + "\n";
-
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
-
-string ACSMotionControl::GetCuttingCommand()
-{
-	return m_strCommand;
-}
-
-void ACSMotionControl::OffsetArcToSimple(double dEndX, double dEndY, double dCenterX, double dCenterY, bool bClockwise, const Tool& curTool, double dIncX, double dIncY)
-{
-	double Precision = 1000;
-	int iEndX = dEndX * Precision;
-	dEndX = iEndX / Precision;
-	int iEndY = dEndY * Precision;
-	dEndY = iEndY / Precision;
-
-	if ((m_dPreX == dEndX) && (m_dPreY == dEndY))
-		return;
-
-	if (m_dPreY == dEndY)	// 在同一水平线上
-	{
-		dCenterX = (m_dPreX + dEndX) / 2;
-	}
-	else if (m_dPreX == dEndX)
-	{
-		dCenterY = (m_dPreY + dEndY) / 2;
-	}
-	else if ((fabs(m_dPreX + dEndX - 2 * dCenterX) <= 0.001 && fabs(m_dPreY + dEndY - 2 * dCenterY) <= 0.001))
-	{
-		dCenterX = (m_dPreX + dEndX) / 2;
-		dCenterY = (m_dPreY + dEndY) / 2;
-	}
-	else
-	{
-		double B = 1;
-		double A = (dEndX - m_dPreX) / (dEndY - m_dPreY);
-		double C = -A * (m_dPreX + dEndX) / 2 - (m_dPreY + dEndY) / 2;
-		double dTempCenterX = dCenterX;
-		dCenterX = (B * B * dCenterX - A * B * dCenterY - A * C) / (A * A + B * B);
-		dCenterY = (-A * B * dTempCenterX + A * A * dCenterY - B * C) / (A * A + B * B);
-	}
-
-	string strCenterX	= boost::lexical_cast<string>(dCenterX);
-	string strCenterY	= boost::lexical_cast<string>(dCenterY);
-	string strEndX		= boost::lexical_cast<string>(dEndX);
-	string strEndY		= boost::lexical_cast<string>(dEndY);
-	string strVel		= boost::lexical_cast<string>(curTool.m_dArcVelocity);
-	Axis   eDirectionX	= enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis   eDirectionY	= enum_cast<Axis>(curTool.m_strDirectionY).value();
-	string strXIndex	= boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
-	string strYIndex	= boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
-	string strZIndex	= boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-	string strArcDir	= bClockwise ? "-": "+";
-
-	m_strCommand += "ARC1/V (" + strXIndex + ", " + strYIndex + "," + strZIndex + "), " + strCenterX + ", " + strCenterY + ","
-		+ strEndX + ", " + strEndY + ", " + "APOS" + strZIndex + "," + strArcDir + ", " + strVel + "\n";
-	m_strCommand += "STOPPER (" + strXIndex + ", " + strYIndex + "," + strZIndex + ")" + "\n";
-	
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
-
-void ACSMotionControl::OffsetLineToSimple(double dEndX, double dEndY, const Tool& curTool)
-{
-	double Precision = 1000;
-	int iEndX = dEndX * Precision;
-	dEndX = iEndX / Precision;
-	int iEndY = dEndY * Precision;
-	dEndY = iEndY / Precision;
-
-	if ((m_dPreX == dEndX) && (m_dPreY == dEndY))
-		return;
-
-	string strEndX = boost::lexical_cast<string>(dEndX);
-	string strEndY = boost::lexical_cast<string>(dEndY);
-	string strVel = boost::lexical_cast<string>(curTool.m_dLineVelocity);
-	Axis   eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis   eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
-	string strXIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
-	string strYIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
-	string strZIndex = boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-
-	m_strCommand += "LINE/V (" + strXIndex + ", " + strYIndex + "," + strZIndex + "), " + strEndX + ", " + strEndY + ", " + "APOS" + strZIndex + "," + strVel + "\n";
-	m_strCommand += "STOPPER (" + strXIndex + ", " + strYIndex + "," + strZIndex + ")" + "\n";
-
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
-
-void ACSMotionControl::ProLaserControlSimple(bool bLaser, bool bPso, const Tool& curTool)
-{
-	string strLaserNum	= m_mapDigitalOUT[DigitalOUT::Laser].strIndex;
-	Axis   eDirectionX	= enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis   eDirectionY	= enum_cast<Axis>(curTool.m_strDirectionY).value();
-	string strXIndex	= boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
-	string strYIndex	= boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
-	
-	string strLaserOnBWait  = boost::lexical_cast<string>(m_dLaserOnBWait);
-	string strLaserOnAWait  = boost::lexical_cast<string>(m_dLaserOnAWait);
-	string strLaserOffBWait = boost::lexical_cast<string>(m_dLaserOffBWait);
-	string strLaserOffAWait = boost::lexical_cast<string>(m_dLaserOffAWait);
-	string strEnd = "\n";
-	if (bLaser)
-	{
-		if (curTool.m_bBlow2)
-		{
-			string strValue = m_mapDigitalOUT[DigitalOUT::Blow2].bInversion ? "0" : "1";
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow2].strIndex + "=" + strValue + ";";
-		}
-		else
-		{
-			string strValue = m_mapDigitalOUT[DigitalOUT::Blow].bInversion ? "0" : "1";
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow].strIndex + "=" + strValue + ";";
-		}
-
-		string strBlowDelay	 = boost::lexical_cast<string>(m_dBlowDelay);
-		string strLaserValue = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "0" : "1";
-		string strTill		 = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "TILL ^" : "TILL ";
-	
-		m_strCommand += strEnd + "WAIT " + strBlowDelay + ";";
-		m_strCommand += "WAIT " + strLaserOnBWait + strEnd;
-		m_strCommand += strLaserNum + "=" + strLaserValue + ";";
-		m_strCommand += strTill + strLaserNum + ";";
-		m_strCommand += "WAIT " + strLaserOnAWait + strEnd;
-	}
-	else
-	{
-		string strLaserValue = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "1" : "0";
-		string strTill		 = m_mapDigitalOUT[DigitalOUT::Laser].bInversion ? "TILL " : "TILL ^";
-		
-		m_strCommand += "WAIT " + strLaserOffBWait + strEnd;
-		m_strCommand += strLaserNum + "=" + strLaserValue + ";";
-		m_strCommand += strTill + strLaserNum + ";";
-		m_strCommand += "WAIT " + strLaserOffAWait + strEnd;
-	}
-}
-
-void ACSMotionControl::EndProgramCommandSimple(const Tool& curTool)
-{
-	Axis   eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis   eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
-	string strXIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
-	string strYIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
-	string strZIndex = boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-	string strEnd = "\n";
-
-	m_strCommand += "ENDS ("  + strXIndex + ", " + strYIndex + "," + strZIndex + ")" + strEnd;
-	m_strCommand += "GO ("	  + strXIndex + ", " + strYIndex + "," + strZIndex + ")" + strEnd;
-	m_strCommand += "SPLIT (" + strXIndex + ", " + strYIndex + "," + strZIndex + ")" + strEnd;
-
-	if (curTool.m_bStopBlow)
-	{
-		if (curTool.m_bBlow2)
-		{
-			string strValue = m_mapDigitalOUT[DigitalOUT::Blow2].bInversion ? "1" : "0";
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow2].strIndex + "=" + strValue + ";\n";
-		}
-		else
-		{
-			string strValue = m_mapDigitalOUT[DigitalOUT::Blow].bInversion ? "0" : "1";
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow].strIndex + "=" + strValue + ";\n";
-		}
-	}
-	m_strCommand += "STOP\n";
-}
+// [P3 removed] ACSMotionControl::EndProgramCommandSimple
 
 bool ACSMotionControl::StopMovingCuttingHead()
 {
@@ -2075,32 +1682,7 @@ bool ACSMotionControl::StartMovingCuttingHead(const Tool& curTool)
 	return true;
 }
 
-bool ACSMotionControl::SetMFLAGSValue(Axis eAxis, int iValue)
-{
-	int iMFLAGS;
-	string strIndex = boost::lexical_cast<string>(m_mapMotorValue[eAxis].AxisIndex);
-	string strMFLAGS = "MFLAGS" + strIndex;
-	if (!acsc_ReadInteger(m_hHandle, ACSC_NONE, strMFLAGS.data(),
-		ACSC_NONE, ACSC_NONE, ACSC_NONE, ACSC_NONE, &iMFLAGS, NULL))
-	{
-		LogError();
-		return false;
-	}
-
-	int bit = 131072;		//第17位
-	if (iValue)
-		iMFLAGS = iMFLAGS | bit;
-	else
-		iMFLAGS = iMFLAGS & (~bit);
-
-	if (!acsc_WriteInteger(m_hHandle, ACSC_NONE, strMFLAGS.data(),
-		ACSC_NONE, ACSC_NONE, ACSC_NONE, ACSC_NONE, &iMFLAGS, NULL))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::SetMFLAGSValue
 
 bool ACSMotionControl::AcscReadReal(const string strCommand, double& dValue)
 {
@@ -2150,35 +1732,9 @@ bool ACSMotionControl::AcscWriteInt(const string strCommand, int iValue)
 	return true;
 }
 
-bool ACSMotionControl::CheckBuffer(int iBufferIndex, string& strCommand)
-{
-	if (!acsc_StopBuffer(m_hHandle, iBufferIndex, ACSC_SYNCHRONOUS))
-	{
-		LogError();
-		return false;
-	}
-	if (!acsc_LoadBuffer(m_hHandle, iBufferIndex, strCommand.data(), strCommand.length(), ACSC_SYNCHRONOUS))
-	{
-		LogError();
-		return false;
-	}
-	if (!acsc_CompileBuffer(m_hHandle, iBufferIndex, ACSC_SYNCHRONOUS))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::CheckBuffer
 
-bool ACSMotionControl::RunBuffer(int iBufferIndex)
-{
-	if (!acsc_RunBuffer(m_hHandle, iBufferIndex, NULL, ACSC_SYNCHRONOUS))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::RunBuffer
 
 bool ACSMotionControl::PauseBuffer(int iBufferIndex)
 {
@@ -2190,31 +1746,9 @@ bool ACSMotionControl::PauseBuffer(int iBufferIndex)
 	return true;
 }
 
-bool ACSMotionControl::GetBufferState(int iBufferIndex, int& iState)
-{
-	if (!acsc_GetProgramState(m_hHandle, iBufferIndex, &iState, ACSC_SYNCHRONOUS))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::GetBufferState
 
-bool ACSMotionControl::LoadCommandAndRunBuffer(int iBufferIndex, string strCommand, int iTimeout)
-{
-	if (!CheckBuffer(iBufferIndex, strCommand))
-		return false;
-
-	if (!RunBuffer(iBufferIndex))
-		return false;
-
-	if (!acsc_WaitProgramEnd(m_hHandle, iBufferIndex, iTimeout))
-	{
-		LogError();
-		return false;
-	}
-	return true;
-}
+// [P3 removed] ACSMotionControl::LoadCommandAndRunBuffer
 
 bool ACSMotionControl::IsReachPos(Axis eAxis, bool bRelative, double dPos)
 {
@@ -2235,250 +1769,17 @@ bool ACSMotionControl::IsReachPos(Axis eAxis, bool bRelative, double dPos)
 }
 
 #pragma region FlightCutting
-void ACSMotionControl::BeginACSSegmentForFlightCutting(const Tool& tool)
-{
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-	string strDVel = boost::lexical_cast<string>(tool.m_dLineVelocity);
-	string strFVel = boost::lexical_cast<string>(tool.m_dXsegEndVelocity);
-	string strJVel = boost::lexical_cast<string>(tool.m_dJunctionVelocity);
-	string strAngle = boost::lexical_cast<string>(tool.m_dJunctionAngle * 3.1415926 / 180);
-	SetCuttingAccJerk(tool);
-	string strEnd = "\n";
+// [P3 removed] ACSMotionControl::BeginACSSegmentForFlightCutting
 
-	string strLaserNum = m_mapDigitalOUT[DigitalOUT::Laser].strIndex;
-	string strIO;
-	if (strLaserNum.find(".") != string::npos)
-		strIO = strLaserNum.substr(strLaserNum.find(".") + 1, strLaserNum.length());
-	else
-		strIO = "ERROR";
-	int iIO = atoi(strIO.c_str());
-	int iMask = 1 << iIO;
-	string strDate = boost::lexical_cast<string>(iMask);
+// [P3 removed] ACSMotionControl::OffsetFlightLineTo
 
-	m_strCommand += "GLOBAL INT VAL_ON(1)" + strEnd;
-	m_strCommand += "GLOBAL INT VAL_OFF(1)" + strEnd;
-	m_strCommand += "GLOBAL INT MASK(1)" + strEnd;
+// [P3 removed] ACSMotionControl::OffsetFlightArcTo
 
-	m_strCommand += "VAL_ON(0) = " + strDate + strEnd;
-	m_strCommand += "VAL_OFF(0) = 0" + strEnd;
-	m_strCommand += "MASK(0) = " + strDate + strEnd;
+// [P3 removed] ACSMotionControl::OffsetFlightArc2To
 
-	double dDelay = tool.m_dFlightCutting_MotorDelay;
-	string strDelay = boost::lexical_cast<string>(dDelay);
+// [P3 removed] ACSMotionControl::EndProgramCommandForFlightCutting
 
-	m_strCommand += "XSEG/VFJAQ (" + strXIndex + ", " + strYIndex + "), APOS" + strXIndex
-		+ ", APOS" + strYIndex + ", " + strDVel + ", " + strFVel + ", "
-		+ strJVel + ", " + strAngle + ", " + strDelay + strEnd;
-}
+// [P3 removed] ACSMotionControl::LoadAndCompileBuffer
 
-void ACSMotionControl::OffsetFlightLineTo(double dEndX, double dEndY, const Tool& tool, bool bPolyGuide)
-{
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-
-	string strLaserNum = m_mapDigitalOUT[DigitalOUT::Laser].strIndex;
-	char prevCharAxis = '\0'; // 初始化为空字符
-	size_t dotPos = strLaserNum.find(".");
-
-	// 安全判断：确保字符串不为空，包含小数点，且小数点不是第一个字符
-	if (!strLaserNum.empty() && dotPos != string::npos && dotPos > 0) {
-		prevCharAxis = strLaserNum[dotPos - 1]; // 获取小数点前一位字符
-	}
-
-	double dVelocity = tool.m_dLineVelocity;
-
-	if ((m_dPreX == dEndX) && (m_dPreY == dEndY))
-	{
-		return;
-	}
-
-	string strEndX = boost::lexical_cast<string>(dEndX);
-	string strEndY = boost::lexical_cast<string>(dEndY);
-	string strVel = boost::lexical_cast<string>(dVelocity);
-
-
-	if (bPolyGuide)
-	{
-		m_strCommand += "LINE/vo (" + strXIndex + ", " + strYIndex + "), " + strEndX + ", " + strEndY + ", " + strVel + ", VAL_OFF, OUT, " + prevCharAxis + ", MASK" + "\n";
-	}
-	else
-	{
-		m_strCommand += "LINE/vo (" + strXIndex + ", " + strYIndex + "), " + strEndX + ", " + strEndY + ", " + strVel + ", VAL_ON, OUT, " + prevCharAxis + ", MASK" + "\n";
-	}
-
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
-
-void ACSMotionControl::OffsetFlightArcTo(double dEndX, double dEndY, double dCenterX, double dCenterY, bool bClockwise, const Tool& tool, double dIncX, double dIncY, bool bPolyGuide)
-{
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-
-	string strLaserNum = m_mapDigitalOUT[DigitalOUT::Laser].strIndex;
-	char prevCharAxis = '\0'; // 初始化为空字符
-	size_t dotPos = strLaserNum.find(".");
-	// 安全判断：确保字符串不为空，包含小数点，且小数点不是第一个字符
-	if (!strLaserNum.empty() && dotPos != string::npos && dotPos > 0) {
-		prevCharAxis = strLaserNum[dotPos - 1]; // 获取小数点前一位字符
-	}
-
-	double dVelocity = tool.m_dLineVelocity;
-
-	if ((m_dPreX == dEndX) && (m_dPreY == dEndY))
-	{
-		return;
-	}
-
-
-	if (m_dPreY == dEndY)	// 在同一水平线上
-	{
-		dCenterX = (m_dPreX + dEndX) / 2;
-	}
-	else if (m_dPreX == dEndX)
-	{
-		dCenterY = (m_dPreY + dEndY) / 2;
-	}
-	else if ((fabs(m_dPreX + dEndX - 2 * dCenterX) <= 0.001 && fabs(m_dPreY + dEndY - 2 * dCenterY) <= 0.001))
-	{
-		dCenterX = (m_dPreX + dEndX) / 2;
-		dCenterY = (m_dPreY + dEndY) / 2;
-	}
-	else
-	{
-		double B = 1;
-		double A = (dEndX - m_dPreX) / (dEndY - m_dPreY);
-		double C = -A * (m_dPreX + dEndX) / 2 - (m_dPreY + dEndY) / 2;
-		double dTempCenterX = dCenterX;
-		dCenterX = (B * B * dCenterX - A * B * dCenterY - A * C) / (A * A + B * B);
-		dCenterY = (-A * B * dTempCenterX + A * A * dCenterY - B * C) / (A * A + B * B);
-	}
-
-	string strCenterX = boost::lexical_cast<string>(dCenterX);
-	string strCenterY = boost::lexical_cast<string>(dCenterY);
-	string strEndX = boost::lexical_cast<string>(dEndX);
-	string strEndY = boost::lexical_cast<string>(dEndY);
-	string strVel = boost::lexical_cast<string>(dVelocity);
-	string strArcDir;
-	if (bClockwise)
-	{
-		strArcDir = "-";
-	}
-	else
-	{
-		strArcDir = "+";
-	}
-	if (bPolyGuide)
-	{
-		m_strCommand += "ARC1/vo (" + strXIndex + ", " + strYIndex + "), " + strCenterX + ", " + strCenterY + ", "
-			+ strEndX + ", " + strEndY + ", " + strArcDir + ", " + strVel + ", VAL_OFF, OUT, " + prevCharAxis + ", MASK" + "\n";
-	}
-	else
-	{
-		m_strCommand += "ARC1/vo (" + strXIndex + ", " + strYIndex + "), " + strCenterX + ", " + strCenterY + ", "
-			+ strEndX + ", " + strEndY + ", " + strArcDir + ", " + strVel + ", VAL_ON, OUT, " + prevCharAxis + ", MASK" + "\n";
-	}
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-}
-
-void ACSMotionControl::OffsetFlightArc2To(double dCenterX, double dCenterY, double dAngle, const Tool& tool, bool bPolyGuide)
-{
-	string strCenterX = boost::lexical_cast<string>(dCenterX);
-	string strCenterY = boost::lexical_cast<string>(dCenterY);
-	string strVel = boost::lexical_cast<string>(tool.m_dArcVelocity);
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-	string strAngle = boost::lexical_cast<string>(dAngle);
-
-	string strLaserNum = m_mapDigitalOUT[DigitalOUT::Laser].strIndex;
-	char prevCharAxis = '\0'; // 初始化为空字符
-	size_t dotPos = strLaserNum.find(".");
-	// 安全判断：确保字符串不为空，包含小数点，且小数点不是第一个字符
-	if (!strLaserNum.empty() && dotPos != string::npos && dotPos > 0) {
-		prevCharAxis = strLaserNum[dotPos - 1]; // 获取小数点前一位字符
-	}
-
-	if (bPolyGuide)
-	{
-		m_strCommand += "ARC2/vo (" + strXIndex + ", " + strYIndex + "), " + strCenterX + ", " + strCenterY + ", "
-			+ strAngle + ", " + strVel + ", VAL_OFF, OUT, " + prevCharAxis + ", MASK" + "\n";
-	}
-	else
-	{
-		m_strCommand += "ARC2/vo (" + strXIndex + ", " + strYIndex + "), " + strCenterX + ", " + strCenterY + ", "
-			+ strAngle + ", " + strVel + ", VAL_ON, OUT, " + prevCharAxis + ", MASK" + "\n";
-	}
-}
-
-void ACSMotionControl::EndProgramCommandForFlightCutting(const Tool& tool)
-{
-	int iXIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionX).value()].AxisIndex;
-	int iYIndex = m_mapMotorValue[enum_cast<Axis>(tool.m_strDirectionY).value()].AxisIndex;
-	string strXIndex = boost::lexical_cast<string>(iXIndex);
-	string strYIndex = boost::lexical_cast<string>(iYIndex);
-	string strEnd = "\n";
-
-	
-	m_strCommand += "ENDS (" + strXIndex + ", " + strYIndex + ")" + strEnd;
-	m_strCommand += "SPLIT (" + strXIndex + ", " + strYIndex + ")" + strEnd;
-	m_strCommand += m_mapDigitalOUT[DigitalOUT::Laser].strIndex + "=0;\n";
-	if (tool.m_bStopBlow)
-	{
-		if (tool.m_bBlow2)
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow2].strIndex + "=0;\n";
-		else
-			m_strCommand += m_mapDigitalOUT[DigitalOUT::Blow].strIndex + "=0;\n";
-	}
-	bool bEnergySwitchUse = DT::getCustomerID() == "MaiTong"
-		|| int(DT::getPermission()) > (int)PermissionLevel::Factory;
-	if (bEnergySwitchUse && tool.m_bEnergySwitch)
-		m_strCommand += "EnergySwitch=0\n";
-	m_strCommand += "STOP\n";
-}
-
-bool ACSMotionControl::LoadAndCompileBuffer(int iBufferID)
-{
-	char* pcCommand = new char[m_strCommand.length() + 1];
-	strcpy(pcCommand, m_strCommand.c_str());
-
-	bool success = true;
-	acsc_StopBuffer(m_hHandle, iBufferID, ACSC_SYNCHRONOUS);
-	int length = strlen(pcCommand);
-	int iReturn = acsc_LoadBuffer(m_hHandle, iBufferID, pcCommand, strlen(pcCommand), ACSC_SYNCHRONOUS);
-	if (!iReturn)
-	{
-		success = false;
-		iReturn = acsc_GetLastError();
-	}
-	iReturn = acsc_CompileBuffer(m_hHandle, iBufferID, ACSC_SYNCHRONOUS);
-	if (!iReturn)
-	{
-		success = false;
-		iReturn = acsc_GetLastError();
-	}
-	delete[]pcCommand;
-	return success;
-}
-
-bool ACSMotionControl::RunBufferForFlightCutting(int iBufferID)
-{
-	bool success = true;
-	int iReturn = acsc_RunBuffer(m_hHandle, iBufferID, NULL, ACSC_SYNCHRONOUS);
-	if (!iReturn)
-	{
-		success = false;
-		iReturn = acsc_GetLastError();
-	}
-	return success;
-}
+// [P3 removed] ACSMotionControl::RunBufferForFlightCutting
 #pragma endregion FlightCutting

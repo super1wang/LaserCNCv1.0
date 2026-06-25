@@ -236,7 +236,7 @@ void CallbackProcessCuttingService::setSnapshotProvider(std::function<ProcessToo
     m_snapshotProvider = std::move(provider);
 }
 
-void CallbackProcessCuttingService::setExecutor(std::function<bool(bool dryRun, QString* errorMessage)> executor)
+void CallbackProcessCuttingService::setExecutor(ExecutorFn executor)
 {
     m_executor = std::move(executor);
 }
@@ -246,12 +246,14 @@ ProcessToolpathSnapshot CallbackProcessCuttingService::toolpathSnapshot() const
     return m_snapshotProvider ? m_snapshotProvider() : ProcessToolpathSnapshot{};
 }
 
-bool CallbackProcessCuttingService::executeNormalCutting(const QVariantMap& parameters, QString* errorMessage)
+bool CallbackProcessCuttingService::executeNormalCutting(const QString& nodeId,
+                                                          const QVariantMap& parameters,
+                                                          ProcessInterruptContext* interrupt,
+                                                          QString* errorMessage)
 {
-    const bool dryRun = parameters.value(QStringLiteral("dryRun"), true).toBool();
     if (!m_executor)
         return true;
-    return m_executor(dryRun, errorMessage);
+    return m_executor(nodeId, parameters, interrupt, errorMessage);
 }
 
 } // namespace lcnc::process

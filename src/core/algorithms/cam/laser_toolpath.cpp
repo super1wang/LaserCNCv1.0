@@ -168,6 +168,34 @@ gp_Dir avoidCrossSectionDirection(const gp_Pnt& point,
     return enforceOutwardDirection(point, result, center);
 }
 
+// ── Deterministic signature ────────────────────────────────────────────────
+// FNV-1a-like 64-bit hash mixer used to fingerprint a contour wire so that
+// re-running extractContours() on identical geometry produces identical IDs.
+inline void mixHash(std::uint64_t& h, std::uint64_t v) noexcept
+{
+    h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+}
+
+inline void mixQString(std::uint64_t& h, const QString& s) noexcept
+{
+    for (QChar ch : s)
+        mixHash(h, static_cast<std::uint64_t>(ch.unicode()));
+}
+
+void computeContourSignature(LaserContour& contour)
+{
+    std::uint64_t h = 1469598103934665603ull; // FNV-1a 64-bit offset basis
+    for (TopExp_Explorer exp(contour.wire, TopAbs_VERTEX); exp.More(); exp.Next()) {
+        const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(exp.Current()));
+        mixHash(h, static_cast<std::uint64_t>(std::llround(p.X() * 1000.0)));
+        mixHash(h, static_cast<std::uint64_t>(std::llround(p.Y() * 1000.0)));
+        mixHash(h, static_cast<std::uint64_t>(std::llround(p.Z() * 1000.0)));
+    }
+    mixQString(h, contour.workpieceEntry);
+    mixQString(h, contour.sourceInfo);
+    contour.signature = h;
+}
+
 } // namespace
 
 // =============================================================================
@@ -226,6 +254,10 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(const TopoDS_Sha
         }
     }
 
+    // Assign deterministic signature to each contour.
+    for (auto& c : result)
+        computeContourSignature(c);
+
     return result;
 }
 
@@ -280,6 +312,8 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
             c.name = QString::fromUtf8("外轮廓 %1").arg(++wireIdx);
             result.push_back(std::move(c));
         }
+        for (auto& c : result)
+            computeContourSignature(c);
         return result;
     }
 
@@ -331,6 +365,8 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
         c.contourType = static_cast<int>(FaceGroupKind::CrossSection);
         c.sourceInfo  = QString::fromUtf8("外表面(%1面) ∩ 截面(%2面)")
                             .arg(outerFaces.size()).arg(crossFaces.size());
+
+        computeContourSignature(c);
 
         // Discretise with face-classification-aware normals
         discretizeContourWithClassification(c, outerFaces, crossFaces,
@@ -563,8 +599,26 @@ TopoDS_Edge LaserToolpathBuilder::computeLeadInEdge(const LaserContour& contour,
                                                     double length,
                                                     double normalAngleDeg)
 {
-    if (!contour.leadIn.valid || length <= 0.0)
+    bool ok = false;
+    const gp_Pnt startPt = computeLeadInStartPoint(contour, length, normalAngleDeg, &ok);
+    if (!ok)
         return TopoDS_Edge();
+
+    BRepBuilderAPI_MakeEdge edgeMaker(startPt, contour.leadIn.entryPoint);
+    if (!edgeMaker.IsDone())
+        return TopoDS_Edge();
+
+    return edgeMaker.Edge();
+}
+
+gp_Pnt LaserToolpathBuilder::computeLeadInStartPoint(const LaserContour& contour,
+                                                     double length,
+                                                     double normalAngleDeg,
+                                                     bool* success)
+{
+    if (success) *success = false;
+    if (!contour.leadIn.valid || length <= 0.0)
+        return gp_Pnt();
 
     const gp_Pnt& entryPt = contour.leadIn.entryPoint;
 
@@ -606,18 +660,12 @@ TopoDS_Edge LaserToolpathBuilder::computeLeadInEdge(const LaserContour& contour,
             approachVec.Normalize();
     }
 
-    gp_Pnt startPt(
+    if (success) *success = true;
+    return gp_Pnt(
         entryPt.X() + approachVec.X() * length,
         entryPt.Y() + approachVec.Y() * length,
         leadStartZ
     );
-
-    // Build the lead-in edge
-    BRepBuilderAPI_MakeEdge edgeMaker(startPt, entryPt);
-    if (!edgeMaker.IsDone())
-        return TopoDS_Edge();
-
-    return edgeMaker.Edge();
 }
 
 // =============================================================================

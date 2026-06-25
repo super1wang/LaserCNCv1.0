@@ -180,6 +180,7 @@ set(SRCS_CORE
     src/core/algorithms/cam/face_classifier.cpp
     src/core/algorithms/cam/laser_toolpath.cpp
     src/core/algorithms/cam/machine_model_compressor.cpp
+    src/core/algorithms/cam/contour_order_planner.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp
     src/core/command/commands_api.cpp
@@ -187,6 +188,7 @@ set(SRCS_CORE
     src/core/kernel/event_bus.cpp
     src/core/kernel/module_registry.cpp
     src/core/kernel/kernel.cpp
+    src/core/services/selection_service.cpp
 )
 
 set(SRCS_VIEW
@@ -197,6 +199,7 @@ set(SRCS_VIEW
     src/view/gui_document.cpp
     src/view/widget_occ_view.cpp
     src/view/toolpath_renderer.cpp
+    src/view/travel_path_renderer.cpp
     src/view/machine_guide_renderer.cpp
     src/view/world_axes_renderer.cpp
     src/view/sketch_overlay_renderer.cpp
@@ -267,7 +270,6 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/Setting/Setting_Monitor.cpp
     src/modules/process/Setting/Setting_LoadingPos.cpp
     src/modules/process/Setting/Setting_Camera.cpp
-    src/modules/process/device/MotionControl/MCFactory.cpp
     src/modules/process/device/MotionControl/MotionControl.cpp
     src/modules/process/device/MotionControl/ACSMotionControl.cpp
     src/modules/process/device/MotionControl/SimulateCMHPMotionControl.cpp
@@ -276,6 +278,7 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/device/Laser/AnalogLaserDevice.cpp
     src/modules/process/device/Laser/LaserDevice.cpp
     src/modules/process/device/Laser/SimulatorLaserDevice.cpp
+    src/modules/process/Tool/Tool.cpp
     src/modules/process/Tool/ToolFactory.cpp
     src/modules/process/communication/communication_types.h
     src/modules/process/communication/communication_types.cpp
@@ -305,12 +308,31 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/monitor/process_monitor_service.cpp
     src/modules/process/runtime/process_runtime.cpp
     src/modules/process/runtime/process_state_machine.cpp
+    src/modules/process/runtime/process_cancellation_token.h
+    src/modules/process/runtime/process_interrupt_context.h
+    src/modules/process/runtime/process_interrupt_context.cpp
+    src/modules/process/runtime/machine_pose5.h
+    src/modules/process/runtime/motion_params.h
+    src/modules/process/runtime/axis_map.h
+    src/modules/process/runtime/axis_map.cpp
+    src/modules/process/runtime/i_motion_command_sink.h
+    src/modules/process/runtime/acs_text_command_sink.h
+    src/modules/process/runtime/acs_text_command_sink.cpp
+    src/modules/process/runtime/gtn_buffered_command_sink.h
+    src/modules/process/runtime/pure_simulation_sink.h
+    src/modules/process/runtime/pure_simulation_sink.cpp
+    src/modules/process/runtime/motion_sink_factory.cpp
     src/modules/process/toolpath/process_toolpath_sorter.cpp
-    src/modules/process/instructions/process_command.cpp
-    src/modules/process/instructions/process_instruction_planner.cpp
-    src/modules/process/instructions/acs_translator.cpp
-    src/modules/process/instructions/gtn_translator.cpp
-    src/modules/process/instructions/pure_simulation_translator.cpp
+    src/modules/process/toolpath/process_toolpath_service.cpp
+    src/modules/process/toolpath/process_tool_matcher.cpp
+    src/modules/process/cutting/normal_cutting_manager.h
+    src/modules/process/cutting/normal_cutting_manager.cpp
+    src/modules/process/cutting/pure_simulation_toolpath_ticker.h
+    src/modules/process/cutting/pure_simulation_toolpath_ticker.cpp
+    src/modules/process/cutting/process_cutting_plan_service.h
+    src/modules/process/cutting/process_cutting_plan_service.cpp
+    src/modules/process/ui/widget_cutting_plan_panel.h
+    src/modules/process/ui/widget_cutting_plan_panel.cpp
     src/modules/process/workflow/process_node.cpp
     src/modules/process/workflow/process_node_registry.cpp
     src/modules/process/workflow/process_flow_document.cpp
@@ -333,7 +355,6 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/ui/widget_laser_control.cpp
     src/modules/process/ui/ribbon_process_tab.cpp
     src/modules/process/execution/process_workflow_executor.cpp
-    src/modules/process/execution/process_execution_service.cpp
     src/modules/process/execution/process_node_executor_registry.cpp
 )
 
@@ -347,6 +368,8 @@ if(LCNC_WITH_GTN)
     list(APPEND SRCS_MODULE_PROCESS
         src/modules/process/controllers/gtn_motion_controller_adapter.h
         src/modules/process/controllers/gtn_motion_controller_adapter.cpp
+        src/modules/process/device/MotionControl/GTNMotionControl.cpp
+        src/modules/process/runtime/gtn_buffered_command_sink.cpp
     )
 endif()
 if(TARGET Qt6::SerialPort)
@@ -418,10 +441,8 @@ target_include_directories(lcnc_module_process PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/System
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Tool
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/CuttingCommand
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/MotionControl
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Laser
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Compensation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Connect
 )
 # Boost: ToolFactory.cpp, SerialPort.cpp, ACSMotionControl.cpp pull in
@@ -445,7 +466,7 @@ target_link_libraries(lcnc_module_process PUBLIC
     Qt6::Network
     Qt6::UiTools
 )
-# ACSMotionControl.cpp / SimulateCMHPMotionControl.cpp pull in the ACS SDK
+# ACSMotionControl.cpp pulls in the ACS SDK
 # unconditionally (they are not gated by LCNC_WITH_ACS the way the optional
 # adapter is), so link ACSCL_x64.LIB into the process library by default.
 # LCNC_WITH_ACS still controls the additional acs_motion_controller_adapter.{h,cpp}.

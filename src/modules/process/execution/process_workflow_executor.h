@@ -1,11 +1,13 @@
 #pragma once
 
+#include "modules/process/runtime/process_cancellation_token.h"
 #include "modules/process/workflow/process_node.h"
 
 #include <QObject>
 #include <QVector>
 #include <functional>
 
+class MotionControl;
 class QTimer;
 
 namespace lcnc::process {
@@ -46,6 +48,8 @@ public:
         Error
     };
 
+    using ControllerAccessor = std::function<MotionControl*()>;
+
     explicit ProcessWorkflowExecutor(QObject* parent = nullptr);
 
     bool start(ProcessFlowDocument& document, QString* errorMessage = nullptr);
@@ -58,6 +62,9 @@ public:
     const QVector<ProcessExecutionStep>& plan() const { return m_plan; }
     void setStepRegistry(ProcessStepRegistry* registry);
     void setStepContext(ProcessStepContext* context);
+    void setControllerAccessor(ControllerAccessor accessor);
+
+    ProcessCancellationToken* cancellationToken() { return &m_token; }
 
 signals:
     void messageLogged(const QString& message);
@@ -88,6 +95,9 @@ private:
     ProcessStepContext* m_stepContext{nullptr};
     QTimer* m_stepTimer{nullptr};
     int m_currentIndex{-1};
+    bool m_dispatching{false};   ///< true: 当前正同步运行 plugin->execute()，pause 在 checkpoint 内生效
+    ProcessCancellationToken m_token;
+    ControllerAccessor m_controllerAccessor;
 };
 
 } // namespace lcnc::process

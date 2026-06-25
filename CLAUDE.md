@@ -110,7 +110,7 @@ Save/load goes through `LcncProjectManager` → `LcncProjectPackage`.
 
 ## Pre-Commit Verification
 
-1. Build passes: `cmake --build build --config Debug -- /m /nologo`
+1. Build passes: `cmake --build build --config Debug --target all -j 16 --`
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
 3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)

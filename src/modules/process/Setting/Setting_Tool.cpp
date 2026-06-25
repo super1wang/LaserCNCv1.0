@@ -117,11 +117,21 @@ void Dialog_Setting_Tool::SetService(Service* pService)
 
 void Dialog_Setting_Tool::InitSetting()
 {
+	// TOML 已有工具表时说明之前已初始化过，不再创建默认工具。
+	// 否则在 RebuildToolList 之后 CreatTool 将因 vec_ToolNames 已含 "Default"
+	// 而触发重名警告。
+	const table tIdx = SETTINGS->GetTable(SettingSection::Tool, "ToolIndex");
+	if (tIdx.count("sTool_0"))
+		return;
+
 	// 构建默认的工具及索引
 	str_ToolName = "Default";
 	SETTINGS->SetKeyValue("sToolIndex", str_ToolName, SettingSection::Tool, "ToolIndex");
 	CreatTool(str_ToolName);
 	RebuildToolIndex(false);
+	// 新工具写入 TOML 后刷新 Service 内的 ToolFactory，否则切割面板下拉框将保持为空。
+	if (m_pService)
+		m_pService->SetToolTable();
 }
 
 void Dialog_Setting_Tool::SetPage(table table_Set)
@@ -557,19 +567,16 @@ void Dialog_Setting_Tool::CreatTool(string strToolName)
 	if (strToolName == "")
 	{
 		strToolName = QInputDialog::getText(this, tr("Create Tool"), tr("Enter Tool name:"), QLineEdit::Normal, "", &bCreat).toUtf8().data();
-		if (bCreat && !strToolName.empty())
-		{
-			// 已存在相同名称
-			if (std::find(vec_ToolNames.begin(), vec_ToolNames.end(), strToolName) != vec_ToolNames.end())
-			{
-				SHOW_OPER_WARN(WarnCode::WARN_SETTING_SAMETOOLNAME);
-				return;
-			}
-			else
-				LOG_OPER_INFO(tr("Click Setting creat tool %1.").arg(strToolName.c_str()).toUtf8().data());
-		}
-		else
+		if (!bCreat || strToolName.empty())
 			return;
+		LOG_OPER_INFO(tr("Click Setting creat tool %1.").arg(strToolName.c_str()).toUtf8().data());
+	}
+
+	// 已存在相同名称 —— 无论是否来自 InitSetting 还是 UI 按钮
+	if (std::find(vec_ToolNames.begin(), vec_ToolNames.end(), strToolName) != vec_ToolNames.end())
+	{
+		SHOW_OPER_WARN(WarnCode::WARN_SETTING_SAMETOOLNAME);
+		return;
 	}
 
 	table t_Init;

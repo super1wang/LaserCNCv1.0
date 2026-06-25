@@ -182,101 +182,42 @@ public:
 	virtual bool SetShutterOnOffWaitTime(double dBeforeOn, double dAfterOn,
 		double dBeforeOff, double dAfterOff, double dBlowDelay);
 
-	virtual bool StopQueue();//停止buffer9
+	/// @brief 由 AcsTextCommandSink 调用，把外部生成的 ACSPL+ 文本追加到当前程序缓冲。
+	void AppendRawProgramText(const std::string& fragment) { m_strCommand += fragment; }
+	/// @brief 提供给 sink 用于读取每轴默认 acc/vel/jerk（来自 TOML），以便在工具参数
+	///        无效时回退到合理默认（Fix #2 的归一化入口）。
+	const map<Axis, AcsAxisData>& MotorMap() const { return m_mapMotorValue; }
 
-	virtual bool SetFPos(Axis eAxis, double dPos);
-	virtual bool GetFPos(Axis eAxis, double& dPos);
-	//编写buffer9
-	string  GetCuttingCommand();
+	// IMotionCommandSink 切割管线入口（仅 AcsTextCommandSink 调用）
 	virtual void ResetProgramCommand();
 	virtual bool SetJumpAccJerk(const Tool&);
-	virtual void JumpToSetAFPos(const Tool& curTool);
-	virtual void JumpToTrough(const Tool& curTool, double time);
 	virtual void JumpToIdleHeight(const Tool& curTool, double dCompensate = 0);
 	virtual void JumpToCuttingHeight(const Tool& curTool, double dCompensate = 0);
 	virtual void JumpToIdleXYPosition(double dEndX, double dEndY, const Tool& curTool);
 	virtual void ProLaserControl(bool, bool, const Tool&, bool);
-	virtual void SetGO(const Tool&);
 	virtual bool SetCuttingAccJerk(const Tool&);
-	
-	virtual void OffsetLineTo(double dEndX, double dEndY, const Tool& tool);
-	virtual void OffsetArcTo(double dEndX, double dEndY, double dCenterX, double dCenterY, bool bClockwise,
-		const Tool& tool, double dIncX, double dIncY);
 	virtual void EndProgramCommand(const Tool&);
 	virtual bool SendCommand();
-	virtual bool IsOffsetCutting();
 	virtual bool IsBufferRunning(int iBufferIndex);
-
-	virtual bool HaltMotor(Axis eMotor);
-
-	virtual bool CheckBuffer(int iBufferIndex, string& strCommand);
-	virtual bool RunBuffer(int iBufferIndex);
 	virtual bool PauseBuffer(int iBufferIndex);
-	virtual bool GetBufferState(int iBufferIndex, int& iState);
-	virtual bool LoadCommandAndRunBuffer(int iBufferIndex, string strCommand, int iTimeout);
 	virtual bool StopBuffer(int iBufferIndex);
 	virtual bool StopAllBuffer();
-	virtual bool SetMFLAGSValue(Axis, int);
-	//随动
 	virtual bool StopMovingCuttingHead();
 	virtual bool StartMovingCuttingHead(const Tool&);
-	virtual bool MoveZCutting(double dAbsolutePos);
 
-	//GSN PWM
-	virtual bool GSN_SetLaserParameterApplication(double dFrequence, double dPulse, double dDelay) { return true; };
-	virtual bool GSN_SetLaserEnablePro(bool bState) { return true; };
-	virtual bool GSN_LaserOnStatus(int& iState) { return true; };
-
-	//监控控制器状态
+	virtual bool HaltMotor(Axis eMotor);
 	virtual bool IsAxisStatusNormal(int& iFault);
+	virtual bool IsQueueActive();
+	virtual bool ErrorOccurred() const;
+	virtual int  GetPressureState();
+	virtual bool GetIsPressureState();
+	virtual void SetIsPressureState(bool);
 
-	virtual bool IsQueueFull();//无调用
-	virtual bool IsQueueEmpty();//无调用
-	virtual bool IsQueueActive();//待筛查
-	virtual bool ClearQueue();//无调用
-	//virtual bool CanCutting(CUTTING_CODE &);
-	virtual bool ErrorOccurred() const;//无调用
-	virtual bool Punch(double fdDwellTime);//暂时没用到，返回true
-	
-	virtual void BeginACSSegment(const Tool&);	// ACS中，SEGMENT运动必须在之前设置加速度和加加速度
-	virtual void BeginACSSegmentSimple(const Tool& tool);//界面导出有用到
-	virtual void EndProgramCommandSimple(const Tool& tool);//界面导出有用到
-	virtual void OffsetLineToSimple(double dEndX, double dEndY, 
-		const Tool& tool);//界面导出有用到
-	virtual void OffsetArcToSimple(double dEndX, double dEndY, 
-		double dCenterX, double dCenterY, 
-		bool bClockwise, const Tool& tool,
-		double dIncX, double dIncY);//界面导出有用到
-	virtual void OffsetArc2To(double dEndX, double dEndY, 
-		double dCenterX, double dCenterY,
-		double dAngle,const Tool& tool);//没有检索到有调用
-	virtual void JumpToSimple(double,double, const Tool&, double, double);//界面导出有用到
-	virtual void ProLaserControlSimple(bool, bool , const Tool&);//界面导出有用到
-
-	//virtual bool StartMovingCuttingHead(const Tool&);
-	virtual int GetPressureState();       //气压监控接口   没有被调用
-    virtual bool GetIsPressureState();                      //获取是否需要气压监控标识   没有被调用
-	virtual void SetIsPressureState(bool);                  //设置是否需要气压监控标识   没有被调用
-
-#pragma region FlightCutting
-	virtual void BeginACSSegmentForFlightCutting(const Tool& tool);
-	virtual void OffsetFlightLineTo(double dEndX, double dEndY, const Tool& tool, bool bPolyGuide);
-	virtual void OffsetFlightArcTo(double dEndX, double dEndY, double dCenterX, double dCenterY, bool bClockwise, const Tool& tool, double dIncX, double dIncY, bool bPolyGuide);
-	virtual void OffsetFlightArc2To(double dCenterX, double dCenterY, double dAngle, const Tool& tool, bool bPolyGuide);
-	virtual void EndProgramCommandForFlightCutting(const Tool& tool);
-	virtual bool LoadAndCompileBuffer(int);		//导入指令到指定的Buffer，并编译（NOT RUN）
-	virtual bool RunBufferForFlightCutting(int);    //直接Run指定的Buffer，请确保其已编译过
-#pragma endregion FlightCutting
-
-	
-	bool LoadApplication(string);//SPI导入调用，但是SPI已经禁用
 protected:
-	bool SetDiamaterXVEL(Axis eAxis, double dValue);	// 设置管径后设置限速
-
-	bool RunBufferTillEnd(int iBufferIndex,int iTimeout);
+	bool SetDiamaterXVEL(Axis eAxis, double dValue);
+	bool RunBufferTillEnd(int iBufferIndex, int iTimeout);
 	bool AfterOpenComm();
 	void DeleteOtherConnections();
-    
 	bool WriteEFAC(Axis eAxis, int iEfac);
 	bool ReadEFAC(Axis eAxis, int &iEfac);
 	bool ControllerSaveToFlash(Axis eAxis);
@@ -284,18 +225,14 @@ protected:
 	bool AcscWriteReal(const string, double);
 	bool AcscReadInt(const string, int&);
 	bool AcscWriteInt(const string, int);
-
 	bool IsReachPos(Axis eAxis, bool bRelative, double dPos);
 
 private:
 	bool GetFault(int iAxis, int &Fault);
-	//获取当前工具轴索引的空程速度
 	double GetAxisIdleVel(Axis eAxis, const Tool& tool);
 	bool IsHomeBufferRunning();
-
-	//固高控制卡使用
-	virtual bool InitCrd(const Tool& curTool) { return true; };
-	virtual bool PrfTrapAxis() { return true; };
+	bool InitCrd(const Tool& curTool) { return true; };
+	bool PrfTrapAxis() { return true; };
 };
 
 #endif

@@ -1,6 +1,7 @@
 #include "modules/process/execution/process_workflow_executor.h"
 
 #include "core/logging/logger.h"
+#include "modules/process/device/MotionControl/MotionControl.h"
 #include "modules/process/steps/process_step_context.h"
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/workflow/process_flow_document.h"
@@ -50,6 +51,7 @@ bool ProcessWorkflowExecutor::start(ProcessFlowDocument& document, QString* erro
 
     Q_UNUSED(errorMessage);
     m_currentIndex = -1;
+    m_token.reset();
     setState(State::Running);
     runNextStep();
     return true;
@@ -63,11 +65,27 @@ void ProcessWorkflowExecutor::setStepRegistry(ProcessStepRegistry* registry)
 void ProcessWorkflowExecutor::setStepContext(ProcessStepContext* context)
 {
     m_stepContext = context;
+    if (m_stepContext) {
+        m_stepContext->interrupt = &m_token;
+        m_stepContext->cancellationToken = &m_token;
+    }
+}
+
+void ProcessWorkflowExecutor::setControllerAccessor(ControllerAccessor accessor)
+{
+    m_controllerAccessor = std::move(accessor);
 }
 
 void ProcessWorkflowExecutor::pause()
 {
     if (m_state == State::Running) {
+        m_token.requestPause();
+        if (m_controllerAccessor) {
+            if (auto* mc = m_controllerAccessor()) {
+                if (mc->IsConnected())
+                    mc->PauseBuffer(9);
+            }
+        }
         m_stepTimer->stop();
         if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
             setNodeState(m_plan.at(m_currentIndex).nodeId, ProcessNodeState::Paused);
@@ -79,10 +97,19 @@ void ProcessWorkflowExecutor::pause()
 void ProcessWorkflowExecutor::resume()
 {
     if (m_state == State::Paused) {
+        m_token.requestResume();
         setState(State::Running);
         if (m_currentIndex >= 0 && m_currentIndex < m_plan.size()) {
             setNodeState(m_plan.at(m_currentIndex).nodeId, ProcessNodeState::Running);
-            m_stepTimer->start(durationForStep(m_plan.at(m_currentIndex)));
+            // 三种情况：
+            //  (a) 长流程当前还卡在 plugin->execute() 内的 checkpoint() 抽水循环 —
+            //      m_dispatching=true。token.paused 已经清零，checkpoint 自然返回，
+            //      execute 自动续跑。这里不要再 start step timer，会和 dispatch 撞。
+            //  (b) 长流程已经退出 execute()，正等 stepTimer 调 completeCurrentStep —
+            //      m_dispatching=false 且 stepTimer 没 active。重启 timer。
+            //  (c) 正等 timer 触发的瞬态 — m_dispatching=false 且 timer active。不动。
+            if (!m_dispatching && !m_stepTimer->isActive())
+                m_stepTimer->start(durationForStep(m_plan.at(m_currentIndex)));
         } else {
             runNextStep();
         }
@@ -94,6 +121,15 @@ void ProcessWorkflowExecutor::stop()
 {
     if (m_state == State::Idle)
         return;
+    m_token.requestStop();
+    if (m_controllerAccessor) {
+        if (auto* mc = m_controllerAccessor()) {
+            if (mc->IsConnected()) {
+                mc->StopMotion();
+                mc->StopAllBuffer();
+            }
+        }
+    }
     m_stepTimer->stop();
     setState(State::Stopped);
     if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
@@ -104,6 +140,15 @@ void ProcessWorkflowExecutor::stop()
 
 void ProcessWorkflowExecutor::emergencyStop()
 {
+    m_token.requestEmergencyStop();
+    if (m_controllerAccessor) {
+        if (auto* mc = m_controllerAccessor()) {
+            if (mc->IsConnected()) {
+                mc->StopMotion();
+                mc->StopAllBuffer();
+            }
+        }
+    }
     m_stepTimer->stop();
     if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
         failCurrentStep(tr("急停中断"));
@@ -160,8 +205,23 @@ void ProcessWorkflowExecutor::runNextStep()
         emit nodeStarted(step.nodeId);
         QString errorMessage;
         if (!dispatchStepSideEffects(step, &errorMessage)) {
+            // 步骤可能因 stop/急停在 checkpoint 返回 false 而正常退出。这种情况下
+            // pause/stop/emergencyStop 已经把状态切到对应终态，这里不再降级为 Error。
+            if (m_token.isStopping()) {
+                LCNC_INFO(lcnc::LogCode::Generic,
+                          "process.executor: step '{}' interrupted by stop/emergency",
+                          step.nodeId.toStdString());
+                return;
+            }
             failCurrentStep(errorMessage);
             return;
+        }
+        // dispatch 返回 true 但途中可能被暂停过——若仍处 Paused 不能立刻进入下一步，
+        // 等 resume 时由 resume() 走 stepTimer 续跑。
+        if (m_state == State::Paused) {
+            // 长流程已退出 execute() 而 GUI 当下还停留在 Paused，最常见原因是用户在
+            // checkpoint 抽水期间 pause 又 resume 紧接着 plugin 完成。这种情况下
+            // resume() 会负责重启 stepTimer，下面的 start 是兜底——保持幂等。
         }
         m_stepTimer->start(durationForStep(step));
     } catch (const std::exception& ex) {
@@ -245,7 +305,13 @@ bool ProcessWorkflowExecutor::dispatchStepSideEffects(const ProcessExecutionStep
     request.executorKey = step.executorKey;
     request.displayName = step.name;
     request.parameters = step.parameters;
-    return plugin->execute(request, *m_stepContext, errorMessage);
+
+    // 标记"正在同步派发"——pause 期间 resume 不去重启 step timer，让 plugin 内部的
+    // checkpoint() 自然返回；plugin 正常结束后由调用方 runNextStep 切到 stepTimer 路径。
+    m_dispatching = true;
+    const bool ok = plugin->execute(request, *m_stepContext, errorMessage);
+    m_dispatching = false;
+    return ok;
 }
 
 void ProcessWorkflowExecutor::setState(State state)

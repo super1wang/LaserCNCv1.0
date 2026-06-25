@@ -3,6 +3,7 @@
 #include "core/logging/logger.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/project/lcnc_project_manager.h"
+#include "core/services/selection_service.h"
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
 
@@ -68,6 +69,10 @@ void Kernel::registerCoreServices()
     m_machineConfig = std::make_shared<MachineConfigurationService>();
     m_machineConfig->loadDefault();
     m_services.registerService<MachineConfigurationService>(m_machineConfig);
+
+    // 5b) SelectionService — 跨 app/cam/process 的轮廓选择顺序记录器。
+    auto selSvc = std::make_shared<core::SelectionService>();
+    m_services.registerService<core::SelectionService>(selSvc);
 
     // 6) CommandContainer 由 MainWindow 后期通过 setCommandContainer 提供。
 

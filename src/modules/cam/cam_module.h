@@ -39,6 +39,7 @@ class gp_Pnt;
 namespace lcnc::view {
 class ToolpathRenderer;
 class MachineGuideRenderer;
+class TravelPathRenderer;
 } // namespace lcnc::view
 
 namespace lcnc::cam {
@@ -227,6 +228,17 @@ public:
     // ── Toolpath ─────────────────────────────────────────────────────────
     bool generateToolpath(double smoothAngle, bool useFaceClassification, double deflection = 0.1);
     void clearToolpath();
+
+    /// 把当前刀路（轮廓 + 图层 + 离散点 + signature 表）保存到指定项目目录。
+    /// 会写入 packageDir/cam_toolpath.toml 和 packageDir/cam_toolpath_points.bin。
+    bool saveToolpathToDir(const QString& packageDir, QString* errorMsg = nullptr) const;
+
+    /// 从指定项目目录恢复刀路。若两个文件都不存在则返回 false（视为"未持久化"，
+    /// 走传统的"用户手动生成刀路"流程）。
+    bool loadToolpathFromDir(const QString& packageDir, QString* errorMsg = nullptr);
+
+    /// 探测指定项目目录是否包含可加载的刀路缓存（不实际加载）。
+    bool hasCachedToolpath(const QString& packageDir) const;
     const LaserToolpath& toolpath() const;
     LaserToolpath& toolpathRef();
     bool hasToolpath() const override;
@@ -251,6 +263,11 @@ public:
     void reorderContours(const QList<int>& order);
     const std::vector<ToolpathLayer>& toolpathLayers() const;
     QList<int> contourIndexesInLayer(std::uint64_t layerId) const;
+    /// 仅更新图层的外观/名称（工具映射已迁移到 Process 模块的 ProcessCuttingPlanService）。
+    bool updateToolpathLayer(std::uint64_t layerId,
+                             const QString& name,
+                             const QColor& color);
+    /// @deprecated 工具名将在后续版本完全脱离 CAM；当前保留以兼容旧项目读写。
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,
                              const QColor& color,
@@ -302,6 +319,13 @@ public:
     void setSelectedEntries(const QStringList& entries);
     QStringList selectedEntries() const;
     void syncSelectionFromView();
+
+    // ── Travel path 虚线显示 ────────────────────────────────────────────
+    /// 切换"切割路径显示"。OFF 时立即擦除；ON 时立刻按当前 plan 重绘。
+    void setTravelPathVisible(bool on);
+    bool isTravelPathVisible() const;
+    /// 按当前 IProcessCuttingPlanProvider 提供的顺序刷新虚线（仅 visible=true 时）。
+    void refreshTravelPath();
 
 signals:
     void machineViewRequested();
@@ -376,6 +400,7 @@ private:
     // ── Renderers (v2.2: AIS state moved to view/ layer) ──────────────
     std::unique_ptr<lcnc::view::ToolpathRenderer>      m_toolpathRenderer;
     std::unique_ptr<lcnc::view::MachineGuideRenderer>  m_guideRenderer;
+    std::unique_ptr<lcnc::view::TravelPathRenderer>    m_travelPathRenderer;
 
     // ── CAM data managers ─────────────────────────────────────────────
     std::unique_ptr<lcnc::cam::CamDataManager>          m_camData;
@@ -418,4 +443,7 @@ private:
     /// pose→cam 自更新过程中的 reentry 防护。
     bool m_inPoseSelfUpdate{false};
     bool    m_machineCompressionRunning{false};
+
+    /// 上一帧 OCC 视图中已选的 CAM contourId 集合，用于把"新增/移除"差分推给 SelectionService。
+    QSet<std::uint64_t> m_lastCamSelectionContourIds;
 };

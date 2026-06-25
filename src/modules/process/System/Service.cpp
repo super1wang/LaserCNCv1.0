@@ -1,6 +1,11 @@
 #include "RegexPatterns.h"
 #include "Service.h"
 #include "DataType.h"
+#include "modules/process/device/MotionControl/ACSMotionControl.h"
+#include "modules/process/device/MotionControl/SimulateCMHPMotionControl.h"
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+#include "modules/process/device/MotionControl/GTNMotionControl.h"
+#endif
 
 Service::Service(void):
     m_bCuttingHeadShow(false)
@@ -26,7 +31,29 @@ void Service::SetMotionControl(string strName)
     {
         SETTINGS->GetKeyValue("sType", strDevice, SettingSection::MotionControl, "MotionControl");
     }
-    m_pMotionControl = m_MCFactory.GetMotionController(strDevice);
+
+    // 直接构造控制器实例（P3：MCFactory 已删除）。
+    // ACSMotionControl → 真实控制器 TCP 连接；SimulateCMHPMotionControl → 本地模拟器。
+    static ACSMotionControl          s_AcsMotion;          // ACS / 兜底
+    static SimulateCMHPMotionControl s_SimMotion;          // 仿真器
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    static GTNMotionControl          s_GtnMotion;
+#endif
+
+    if (strDevice == "Simulator" || strDevice == "SimulatorCMHP") {
+        m_pMotionControl = &s_SimMotion;
+    }
+    else if (strDevice == "ACS") {
+        m_pMotionControl = &s_AcsMotion;
+    }
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    else if (strDevice == "GTN") {
+        m_pMotionControl = &s_GtnMotion;
+    }
+#endif
+    else {
+        m_pMotionControl = &s_SimMotion;    // 兜底：未知控制器名落到仿真器，避免 null
+    }
     m_strMotionControl = strDevice;
 }
 
@@ -50,19 +77,50 @@ void Service::SetLaserDevice(string strName)
 void Service::SetToolTable()
 {
     ClearToolDate();
-    table tabToolIndex = SETTINGS->GetTable(SettingSection::Tool, "ToolIndex");
-    string strToolIndex, strToolName;
-    for (int i = 0; i < (int)tabToolIndex.size() - 1; i++)
-    {
-        strToolIndex  = "sTool_" + std::to_string(i);
-        strToolName   = tabToolIndex[strToolIndex].as_string();
-        table tabTool = SETTINGS->GetTable(SettingSection::Tool, strToolName);
 
-        Tool* curtool = new Tool();
-        // Tool::SetFromTable stub;
-        m_ToolFactory.SetTool(i, *curtool);
-        delete curtool;
-        curtool = nullptr;
+    // 从 TOOL 的 "ToolIndex" 子表中按 sTool_0, sTool_1, ... 键依次读取工具名，
+    // 然后加载对应子表。规避 GetTable 返回表的大小受 sToolIndex / 其他杂键干扰。
+    const table tabToolIndex = SETTINGS->GetTable(SettingSection::Tool, "ToolIndex");
+    int i = 0;
+    while (true)
+    {
+        const std::string key = "sTool_" + std::to_string(i);
+        auto it = tabToolIndex.find(key);
+        if (it == tabToolIndex.end())
+            break;
+
+        const std::string strToolName = it->second.as_string();
+        ++i;
+        if (strToolName.empty())
+            continue;
+
+        const table tabTool = SETTINGS->GetTable(SettingSection::Tool, strToolName);
+        Tool curtool;
+        curtool.m_strName = strToolName;
+        curtool.SetFromTable(tabTool);
+        m_ToolFactory.SetTool(i - 1, curtool);
+    }
+
+    // 首次启动时 Settings UI 尚未打开，TOML 里一个工具都没有。
+    // 以最保守的参数创建一个内置 Default，确保 ToolFactory 非空。
+    if (i == 0)
+    {
+        Tool fallback;
+        fallback.m_strName       = "Default";
+        fallback.m_dLineVelocity  = 600.0;   // 10 mm/s — 与 sanitizedDefaultTool 一致
+        fallback.m_dLineAcc       = 100.0;
+        fallback.m_dLineJerk      = 1000.0;
+        fallback.m_dIdleXYAccDec  = 100.0;
+        fallback.m_dIdleXYJerk    = 1000.0;
+        fallback.m_dLaserEnergy   = 20.0;
+        fallback.m_dJunctionVelocity = 1.0;
+        fallback.m_dJunctionAngle    = 1.0;
+        fallback.m_dXsegEndVelocity  = 1.0;
+        fallback.m_dIdleZHeight   = 0.0;
+        fallback.m_dCuttingHeight = 0.0;
+        fallback.m_strDirectionX  = "X";
+        fallback.m_strDirectionY  = "Y";
+        m_ToolFactory.SetTool(0, fallback);
     }
 }
 

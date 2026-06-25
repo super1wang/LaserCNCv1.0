@@ -1,5 +1,6 @@
 #include "app/main_window.h"
 #include "core/kernel/kernel.h"
+#include "core/services/selection_service.h"
 #include "app/app_context.h"
 #include "app/command_registry.h"
 #include "app/project_explorer_tree_utils.h"
@@ -439,6 +440,40 @@ void MainWindow::createLeftPanel()
                 if (m_blockProjectExplorerSignals || !m_projectExplorerTree)
                     return;
                 const auto currentKind = projectNodeKind(m_projectExplorerTree->currentItem());
+
+                // ── 推送到 SelectionService（轮廓选择顺序记录）─────────────────
+                // 这一段独立于下方的 MachineShape 短路返回：无论当前焦点节点是什么，
+                // 只要选中集合里有 Contour 节点，就要把"新增/移除"差分推给服务。
+                auto selSvc = lcnc::Kernel::current()
+                                  .services()
+                                  .getService<lcnc::core::SelectionService>();
+                if (selSvc) {
+                    QSet<std::uint64_t> nowSelected;
+                    QVector<lcnc::core::SelectionEntry> newlyAdded;
+                    const auto selectedItems = m_projectExplorerTree->selectedItems();
+                    for (QTreeWidgetItem* item : selectedItems) {
+                        const auto id = static_cast<std::uint64_t>(
+                            item->data(0, kRoleContourId).toULongLong());
+                        if (id == 0) continue;
+                        nowSelected.insert(id);
+                        if (!m_lastExplorerContourSelection.contains(id)) {
+                            lcnc::core::SelectionEntry e;
+                            e.contourId = id;
+                            e.entry     = item->data(0, kRoleEntry).toString();
+                            e.source    = lcnc::core::SelectionEntry::ProjectExplorer;
+                            newlyAdded.append(e);
+                        }
+                    }
+                    if (!newlyAdded.isEmpty())
+                        selSvc->recordSelectedBatch(newlyAdded);
+                    // 取消选中差分
+                    for (auto id : m_lastExplorerContourSelection) {
+                        if (!nowSelected.contains(id))
+                            selSvc->removeContour(id);
+                    }
+                    m_lastExplorerContourSelection = nowSelected;
+                }
+
                 if (!lcnc::app::isMachineProjectNode(currentKind))
                     return;
 
@@ -1508,7 +1543,6 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
     auto* layout = new QVBoxLayout(&dialog);
     auto* form = new QFormLayout();
     auto* nameEdit = new QLineEdit(sourceLayer->name, &dialog);
-    auto* toolEdit = new QLineEdit(sourceLayer->toolName, &dialog);
     auto* colorButton = new QPushButton(&dialog);
     QColor selectedColor = sourceLayer->color.isValid() ? sourceLayer->color : QColor(80, 190, 150);
 
@@ -1529,7 +1563,7 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
 
     form->addRow(tr("名称"), nameEdit);
     form->addRow(tr("颜色"), colorButton);
-    form->addRow(tr("工具"), toolEdit);
+    // 工具映射已迁移到 Process 模块的 "加工链表" 面板，CAM 这里只保留外观属性。
     layout->addLayout(form);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -1540,7 +1574,7 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
     if (dialog.exec() != QDialog::Accepted)
         return;
 
-    if (cam->updateToolpathLayer(layerId, nameEdit->text(), selectedColor, toolEdit->text()))
+    if (cam->updateToolpathLayer(layerId, nameEdit->text(), selectedColor))
         rebuildProjectExplorer();
 }
 

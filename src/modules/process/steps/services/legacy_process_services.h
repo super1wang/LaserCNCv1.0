@@ -52,15 +52,23 @@ private:
 class CallbackProcessCuttingService final : public IProcessCuttingService
 {
 public:
+    using ExecutorFn = std::function<bool(const QString& nodeId,
+                                          const QVariantMap& parameters,
+                                          ProcessInterruptContext* interrupt,
+                                          QString* errorMessage)>;
+
     void setSnapshotProvider(std::function<ProcessToolpathSnapshot()> provider);
-    void setExecutor(std::function<bool(bool dryRun, QString* errorMessage)> executor);
+    void setExecutor(ExecutorFn executor);
 
     ProcessToolpathSnapshot toolpathSnapshot() const override;
-    bool executeNormalCutting(const QVariantMap& parameters, QString* errorMessage) override;
+    bool executeNormalCutting(const QString& nodeId,
+                              const QVariantMap& parameters,
+                              ProcessInterruptContext* interrupt,
+                              QString* errorMessage) override;
 
 private:
     std::function<ProcessToolpathSnapshot()> m_snapshotProvider;
-    std::function<bool(bool dryRun, QString* errorMessage)> m_executor;
+    ExecutorFn m_executor;
 };
 
 } // namespace lcnc::process

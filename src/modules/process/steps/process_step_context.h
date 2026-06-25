@@ -1,7 +1,9 @@
 #pragma once
 
 #include "modules/process/execution/process_workflow_executor.h"
+#include "modules/process/runtime/process_cancellation_token.h"
 #include "modules/process/runtime/process_execution_context.h"
+#include "modules/process/runtime/process_interrupt_context.h"
 
 #include <QVariant>
 #include <functional>
@@ -46,7 +48,9 @@ class IProcessCuttingService
 public:
     virtual ~IProcessCuttingService() = default;
     virtual ProcessToolpathSnapshot toolpathSnapshot() const = 0;
-    virtual bool executeNormalCutting(const QVariantMap& parameters,
+    virtual bool executeNormalCutting(const QString& nodeId,
+                                      const QVariantMap& parameters,
+                                      ProcessInterruptContext* interrupt,
                                       QString* errorMessage) = 0;
 };
 
@@ -56,6 +60,11 @@ struct ProcessStepContext
     IProcessMotionService* motion{nullptr};
     IProcessIoService* io{nullptr};
     IProcessCuttingService* cutting{nullptr};
+    // 统一中断上下文：所有步骤通过 interrupt->checkpoint(nodeId, label, env)
+    // 注册可暂停/可停止位置；同时支持按 nodeId 取回最后一次断点环境用于断点续跑。
+    // `cancellationToken` 是历史命名，与 interrupt 指向同一对象，保留以兼容旧代码。
+    ProcessInterruptContext* interrupt{nullptr};
+    ProcessCancellationToken* cancellationToken{nullptr};
     std::function<void(const QString&)> logMessage;
     std::function<void(const QString&, double)> requestAxisPosition;
     std::function<void(const QString&, bool)> requestDigitalOutput;

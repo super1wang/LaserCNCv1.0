@@ -1,6 +1,8 @@
 #pragma once
 
 #include <SARibbonMainWindow.h>
+#include <QSet>
+#include <cstdint>
 #include "core/project/project_types.h"
 #include "app/project_explorer_model.h"
 
@@ -143,4 +145,5 @@ private:
     lcnc::app::ProjectExplorerSnapshot m_projectExplorerSnapshot;
     bool m_machineWorkspaceActive{false};
     bool m_blockProjectExplorerSignals{false};
+    QSet<std::uint64_t> m_lastExplorerContourSelection; ///< 上一帧 Explorer 选中的 contourId，用于差分推 SelectionService
 };

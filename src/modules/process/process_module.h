@@ -3,12 +3,15 @@
 #include <QObject>
 #include <QList>
 #include <QMap>
+#include <QPointer>
 #include <QString>
+#include <atomic>
 #include <memory>
 
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
+#include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/steps/process_step_context.h"
 #include "modules/process/workflow/process_flow_document.h"
@@ -20,7 +23,10 @@ namespace lcnc::process {
 class CallbackProcessCuttingService;
 class LegacyProcessIoService;
 class LegacyProcessMotionService;
+class NormalCuttingManager;
+class ProcessCuttingPlanService;
 class ProcessWorkflowExecutor;
+class WidgetCuttingPlanPanel;
 }
 
 namespace lcnc {
@@ -114,6 +120,27 @@ public:
     /// 在 settings 变更（设置对话框 Apply/OK）后调用，重新发射 IO 描述符 + 启动期反馈。
     void refreshIOFromSettings();
 
+    /// NormalCuttingManager 在执行普通切割期间调用，旁路 onSimulationTick 的
+    /// Lissajous 正弦波 + 硬件状态轮询，避免与刀路驱动写入 setAxisPosition 抢占。
+    void setNormalCuttingActive(bool active);
+
+    /// 切换"加工链表"面板（非模态独立窗口）可见性；首次调用时创建。
+    void toggleCuttingPlanPanel();
+
+    /// 暴露给 NormalCuttingManager 等需要工艺数据的内部组件。
+    lcnc::process::ProcessCuttingPlanService* cuttingPlanService() const { return m_cuttingPlanService.get(); }
+
+    // ── Ribbon「加工顺序」状态 ────────────────────────────────────────────
+    /// 自动排序使用的主轴方向（Ribbon 下拉同步而来）。
+    lcnc::process::AutoSortAxis autoSortAxis() const { return m_autoSortAxis; }
+    void setAutoSortAxis(lcnc::process::AutoSortAxis a);
+    /// 从 Ribbon QComboBox 当前文本（"X+"/"X-"/"Y+"/...）回写。
+    void setAutoSortAxisFromText(const QString& text);
+
+    /// 切割路径虚线显示开关；ProcessModule 仅维护状态，绘制在 CAM 端。
+    bool isTravelPathVisible() const { return m_travelPathVisible; }
+    void setTravelPathVisible(bool on);
+
 signals:
     void connectionChanged(bool connected);
     void simulationModeChanged(bool enabled);
@@ -167,7 +194,16 @@ private:
     std::unique_ptr<lcnc::process::LegacyProcessMotionService> m_motionStepService;
     std::unique_ptr<lcnc::process::LegacyProcessIoService> m_ioStepService;
     std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;
+    std::unique_ptr<lcnc::process::ProcessCuttingPlanService> m_cuttingPlanService;
+    std::unique_ptr<lcnc::process::NormalCuttingManager> m_normalCuttingManager;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
+    // QPointer 而非 unique_ptr：dialog 关闭时由 Qt 删除（WA_DeleteOnClose）。
+    QPointer<class QDialog> m_cuttingPlanDialog;
+    std::atomic_bool      m_normalCuttingActive{false};  ///< 见 setNormalCuttingActive
+
+    // ── Ribbon「加工顺序」状态镜像 ────────────────────────────────────────
+    lcnc::process::AutoSortAxis m_autoSortAxis{lcnc::process::AutoSortAxis::XPos};
+    bool                        m_travelPathVisible{false};
 };
 
 Q_DECLARE_METATYPE(DigitalOutputDescriptor)

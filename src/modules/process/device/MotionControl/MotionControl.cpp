@@ -565,24 +565,10 @@ ErrorCode MotionControl::SetLaserParameterTable()
 
 ErrorCode MotionControl::SetLaserParameterTable(const table& tableLaser)
 {
-	ErrorCode eCode = ErrorCode::ERROR_NONE;
-	if (tableLaser.count("Laser"))
-	{
-		table t_Laser = SETTINGS->GetTable(SettingSection::Laser, "Laser");
-		/*if (tableLaser.count("fFrequency") && tableLaser.count("fPulseWidth"))*/
-		{
-			double dFrequency = t_Laser["fFrequency"].as_floating();
-			double dPulseWidth = t_Laser["fPulseWidth"].as_floating();
-			if (!GSN_SetLaserParameterApplication(dFrequency, dPulseWidth, 0.0))
-			{
-				eCode = ErrorCode::ERROR_LASER_SETTINGFAILED;
-				SHOW_OPER_ERROR(ErrorCode::ERROR_LASER_SETTINGFAILED,
-					QObject::tr("Set signal source frequency %1 pulse width %2 failed.")
-					.arg(dFrequency).arg(dPulseWidth).toUtf8().data());
-			}
-		}
-	}
-	return eCode;
+    // GSN PWM 信号源已废弃。激光参数由 ProcessSettings → AcsMotionControllerAdapter / 实际激光器
+    // 路径下发，这里保留接口以维持 Setting 层向下传 table 的语义兼容。
+    Q_UNUSED(tableLaser);
+    return ErrorCode::ERROR_NONE;
 }
 
 bool MotionControl::DigitalOutputSet(DigitalOUT eIOIndex, int iValue, bool bLogError)

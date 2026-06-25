@@ -6,11 +6,15 @@
 
 namespace lcnc::cam {
 
-void CamDataManager::clearToolpath()
+void CamDataManager::clearToolpath(bool resetIds)
 {
     m_toolpath.clear();
-    m_nextContourId = 1;
-    m_nextLayerId = 1;
+    if (resetIds) {
+        m_nextContourId = 1;
+        m_nextLayerId = 1;
+        m_signatureToContourId.clear();
+        m_signatureToLayerId.clear();
+    }
     m_dirty = true;
 }
 
@@ -37,10 +41,19 @@ int CamDataManager::contourIndexById(ContourId contourId) const
 void CamDataManager::ensureContourIds()
 {
     for (LaserContour& contour : m_toolpath.contours()) {
+        // 优先：用 signature 复用历史 id（跨 generateToolpath / 跨会话稳定）。
+        if (contour.contourId == 0 && contour.signature != 0) {
+            auto it = m_signatureToContourId.constFind(contour.signature);
+            if (it != m_signatureToContourId.constEnd())
+                contour.contourId = it.value();
+        }
         if (contour.contourId == 0)
             contour.contourId = nextContourId();
         if (contour.contourId >= m_nextContourId)
             m_nextContourId = static_cast<ContourId>(contour.contourId + 1);
+        // 把当前映射写回缓存，使后续 commitToolpathStates() 拿到最新表。
+        if (contour.signature != 0)
+            m_signatureToContourId.insert(contour.signature, contour.contourId);
     }
 }
 
@@ -61,8 +74,18 @@ void CamDataManager::ensureToolpathLayers()
         QColor(90, 175, 210),
     };
 
+    // 辅助：对分组 key 做确定性哈希 → layer 的 signature。
+    auto layerSigFromKey = [](const QString& key) {
+        std::uint64_t h = 1469598103934665603ull;
+        for (QChar ch : key) {
+            std::uint64_t v = static_cast<std::uint64_t>(ch.unicode());
+            h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+        }
+        return h;
+    };
+
     if (m_toolpath.layers().empty()) {
-        QHash<QString, std::uint64_t> layerByKey;
+        QHash<QString, std::uint64_t> layerIdByKey;
         for (LaserContour& contour : m_toolpath.contours()) {
             QString key = contour.sourceInfo.trimmed();
             if (key.isEmpty())
@@ -72,17 +95,26 @@ void CamDataManager::ensureToolpathLayers()
             if (key.isEmpty())
                 key = QStringLiteral("Default");
 
-            if (!layerByKey.contains(key)) {
+            if (!layerIdByKey.contains(key)) {
+                const std::uint64_t layerSig = layerSigFromKey(key);
+                std::uint64_t lid = 0;
+                auto it = m_signatureToLayerId.constFind(layerSig);
+                if (it != m_signatureToLayerId.constEnd())
+                    lid = it.value();
+                if (lid == 0)
+                    lid = nextLayerId();
+
                 ToolpathLayer layer;
-                layer.layerId = nextLayerId();
-                layer.name = key == QStringLiteral("Default")
-                    ? QStringLiteral("未分组")
-                    : key;
-                layer.color = palette.at((layerByKey.size()) % palette.size());
+                layer.layerId   = lid;
+                layer.signature = layerSig;
+                layer.name      = (key == QStringLiteral("Default"))
+                                    ? QStringLiteral("未分组") : key;
+                layer.color     = palette.at((layerIdByKey.size()) % palette.size());
                 m_toolpath.layers().push_back(layer);
-                layerByKey.insert(key, layer.layerId);
+                layerIdByKey.insert(key, lid);
+                m_signatureToLayerId.insert(layerSig, lid);
             }
-            contour.layerId = layerByKey.value(key);
+            contour.layerId = layerIdByKey.value(key);
         }
     }
 
@@ -236,6 +268,49 @@ void CamDataManager::syncLayerContourIds()
         if (ToolpathLayer* layer = toolpathLayer(contour.layerId))
             layer->contourIds.push_back(contour.contourId);
     }
+}
+
+void CamDataManager::commitToolpathStates()
+{
+    // 把当前 toolpath 的 signature → id 写入持久映射表，给下次 generateToolpath
+    // 或下次会话 restore 用。
+    for (const LaserContour& contour : m_toolpath.contours()) {
+        if (contour.signature != 0 && contour.contourId != 0)
+            m_signatureToContourId.insert(contour.signature, contour.contourId);
+    }
+    for (const ToolpathLayer& layer : m_toolpath.layers()) {
+        if (layer.signature != 0 && layer.layerId != 0)
+            m_signatureToLayerId.insert(layer.signature, layer.layerId);
+    }
+}
+
+void CamDataManager::restoreSignatureTables(const QHash<std::uint64_t, std::uint64_t>& sigToContour,
+                                             const QHash<std::uint64_t, std::uint64_t>& sigToLayer,
+                                             ContourId nextContour,
+                                             std::uint64_t nextLayer)
+{
+    m_signatureToContourId = sigToContour;
+    m_signatureToLayerId   = sigToLayer;
+    if (nextContour > m_nextContourId) m_nextContourId = nextContour;
+    if (nextLayer   > m_nextLayerId)   m_nextLayerId   = nextLayer;
+}
+
+void CamDataManager::replaceToolpath(LaserToolpath&& toolpath,
+                                      ContourId nextContour,
+                                      std::uint64_t nextLayer)
+{
+    m_toolpath = std::move(toolpath);
+    if (nextContour > m_nextContourId) m_nextContourId = nextContour;
+    if (nextLayer   > m_nextLayerId)   m_nextLayerId   = nextLayer;
+    // 把已加载的 signature 映射也填进缓存
+    for (const LaserContour& c : m_toolpath.contours())
+        if (c.signature != 0 && c.contourId != 0)
+            m_signatureToContourId.insert(c.signature, c.contourId);
+    for (const ToolpathLayer& l : m_toolpath.layers())
+        if (l.signature != 0 && l.layerId != 0)
+            m_signatureToLayerId.insert(l.signature, l.layerId);
+    syncLayerContourIds();
+    m_dirty = false;
 }
 
 } // namespace lcnc::cam
