@@ -128,6 +128,7 @@ private:
     QWidget*           m_processLeftPanel{nullptr};
     WidgetOccView*     m_occView{nullptr};
     QStackedWidget*    m_rightStack{nullptr};
+    QTabWidget*        m_camRightTabs{nullptr};   // CAM ribbon 右栏：机床面板 / 刀路参数面板 两个 tab
     WidgetMachinePanel*   m_machinePanel{nullptr};
     lcnc::cad::ui::WidgetCadTaskPanel* m_cadTaskPanel{nullptr};
     WidgetToolpathPanel*   m_toolpathPanel{nullptr};

@@ -536,13 +536,20 @@ void MainWindow::createRightPanel()
     });
 
     m_rightStack = new QStackedWidget(this);
-    m_rightStack->addWidget(m_machinePanel);   // index 0 — CAM ribbon page
-    m_rightStack->addWidget(m_toolpathPanel);  // index 1 — data detail page, updated by selection
-    m_rightStack->addWidget(m_laserControl);   // index 2 — laser/process ribbon page
-    m_rightStack->addWidget(m_cadTaskPanel);   // index 3 — CAD ribbon page
+
+    // CAM 右栏：两个 tab 页 —— 机床面板 / 刀路参数面板。
+    m_camRightTabs = new QTabWidget(this);
+    m_camRightTabs->setTabPosition(QTabWidget::North);
+    m_camRightTabs->setDocumentMode(true);
+    m_camRightTabs->addTab(m_machinePanel,  tr("机床"));
+    m_camRightTabs->addTab(m_toolpathPanel, tr("刀路参数"));
+
+    m_rightStack->addWidget(m_camRightTabs);   // index 0 — CAM ribbon page
+    m_rightStack->addWidget(m_laserControl);   // index 1 — laser/process ribbon page
+    m_rightStack->addWidget(m_cadTaskPanel);   // index 2 — CAD ribbon page
     m_rightStack->setMinimumWidth(320);
     m_rightStack->setMaximumWidth(420);
-    m_rightStack->setCurrentIndex(3);
+    m_rightStack->setCurrentIndex(2);
 
     connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::commandRequested,
             this, [this](const QString& commandId) {
@@ -1966,7 +1973,7 @@ void MainWindow::syncRightPanelForRibbonIndex(int index)
         showWorkpieceView();
         break;
     case kRibbonCamIndex:
-        m_rightStack->setCurrentWidget(m_machinePanel);
+        m_rightStack->setCurrentWidget(m_camRightTabs);
         showMachineView();
         break;
     case kRibbonLaserIndex:
