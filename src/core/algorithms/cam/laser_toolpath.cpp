@@ -12,6 +12,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepTools.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <GCPnts_UniformDeflection.hxx>
 #include <BRepLProp_CLProps.hxx>
 #include <BRepGProp_Face.hxx>
@@ -391,27 +392,44 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
 
     const gp_Pnt workpieceCenter = shapeCenter(workpiece);
 
-    for (TopExp_Explorer exp(contour.wire, TopAbs_EDGE); exp.More(); exp.Next()) {
-        const TopoDS_Edge& edge = TopoDS::Edge(exp.Current());
+    // 必须按 WireExplorer 的连接顺序遍历边，不能用 TopExp_Explorer（拓扑集合顺序不保证连贯）。
+    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next()) {
+        const TopoDS_Edge edge = exp.Current();
         if (BRep_Tool::Degenerated(edge))
             continue;
 
         BRepAdaptor_Curve curve(edge);
         GCPnts_UniformDeflection sampler(curve, deflection);
-
         if (!sampler.IsDone())
             continue;
 
-        for (int i = 1; i <= sampler.NbPoints(); ++i) {
+        const bool reversed = edge.Orientation() == TopAbs_REVERSED;
+        const int n = sampler.NbPoints();
+        for (int k = 1; k <= n; ++k) {
+            const int i = reversed ? (n - k + 1) : k;
             ToolpathPoint tp;
             tp.param    = sampler.Parameter(i);
             tp.position = sampler.Value(i);
 
-            // Compute surface normal at this point
+            if (!contour.points.empty()
+                && contour.points.back().position.SquareDistance(tp.position) < 1e-12) {
+                continue; // 去除相邻边连接处重复点
+            }
+
             tp.normal = enforceOutwardDirection(
                 tp.position,
                 findSurfaceNormal(workpiece, tp.position),
                 workpieceCenter);
+
+            gp_Pnt pDummy;
+            gp_Vec tangentVec;
+            curve.D1(tp.param, pDummy, tangentVec);
+            if (reversed)
+                tangentVec.Reverse();
+            if (tangentVec.Magnitude() > 1e-10)
+                tp.tangent = gp_Dir(tangentVec);
+            else
+                tp.tangent = gp_Dir(0, 0, 1);
 
             contour.points.push_back(tp);
         }
@@ -434,21 +452,30 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
 
     const gp_Pnt outerCenter = faceGroupCenter(outerFaces);
 
-    for (TopExp_Explorer exp(contour.wire, TopAbs_EDGE); exp.More(); exp.Next()) {
-        const TopoDS_Edge& edge = TopoDS::Edge(exp.Current());
+    // 必须按 WireExplorer 的连接顺序遍历边，并尊重每条边的 Orientation。
+    // TopExp_Explorer 只是拓扑枚举，会导致矩形孔等多边轮廓边之间顺序错乱。
+    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next()) {
+        const TopoDS_Edge edge = exp.Current();
         if (BRep_Tool::Degenerated(edge))
             continue;
 
         BRepAdaptor_Curve curve(edge);
         GCPnts_UniformDeflection sampler(curve, deflection);
-
         if (!sampler.IsDone())
             continue;
 
-        for (int i = 1; i <= sampler.NbPoints(); ++i) {
+        const bool reversed = edge.Orientation() == TopAbs_REVERSED;
+        const int n = sampler.NbPoints();
+        for (int k = 1; k <= n; ++k) {
+            const int i = reversed ? (n - k + 1) : k;
             ToolpathPoint tp;
             tp.param    = sampler.Parameter(i);
             tp.position = sampler.Value(i);
+
+            if (!contour.points.empty()
+                && contour.points.back().position.SquareDistance(tp.position) < 1e-12) {
+                continue; // 去除相邻边连接处重复点，避免插补重复点和角度突跳
+            }
 
             // Compute machining normal using face classification
             tp.normal = avoidCrossSectionDirection(
@@ -461,6 +488,8 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             gp_Pnt pDummy;
             gp_Vec tangentVec;
             curve.D1(tp.param, pDummy, tangentVec);
+            if (reversed)
+                tangentVec.Reverse();
             if (tangentVec.Magnitude() > 1e-10)
                 tp.tangent = gp_Dir(tangentVec);
             else
@@ -678,11 +707,18 @@ void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
 {
     if (!kinematics) return;
 
+    MachineCoord previous;
+    bool hasPrevious = false;
     for (auto& pt : contour.points) {
         // Transform from workpiece-local to world frame
         gp_Pnt worldPos = pt.position.Transformed(wpcTransform);
         gp_Dir worldDir = pt.normal.Transformed(wpcTransform);
 
-        pt.machineCoord = IKSolver::solve(kinematics, worldPos, worldDir);
+        pt.machineCoord = IKSolver::solveContinuous(
+            kinematics, worldPos, worldDir, hasPrevious ? &previous : nullptr);
+        if (pt.machineCoord.valid) {
+            previous = pt.machineCoord;
+            hasPrevious = true;
+        }
     }
 }

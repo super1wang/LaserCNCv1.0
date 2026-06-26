@@ -275,6 +275,7 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     const auto& p0 = pts.front();
     const double p0x = p0.machineX + ox;
     const double p0y = p0.machineY + oy;
+    const MachinePose5 startPose = toPose5(p0, ox, oy);
 
     // ——— 程序起始（与遗留 buildContourACS / executeContourGTN 等价的语义序列）———
     sink.resetProgram();
@@ -287,16 +288,17 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
             sink.stopCuttingHead();
             sink.jumpToIdleZ(tool);
             sink.jumpToXY(p0x, p0y, tool);
-            sink.jumpToCuttingZ(tool);
+            sink.jumpToPose(startPose, tool);
             sink.startCuttingHead(tool);
         } else {
             sink.jumpToXY(p0x, p0y, tool);
+            sink.jumpToPose(startPose, tool);
             sink.startCuttingHead(tool);
         }
     } else {
         sink.jumpToIdleZ(tool);
         sink.jumpToXY(p0x, p0y, tool);
-        sink.jumpToCuttingZ(tool);
+        sink.jumpToPose(startPose, tool);
     }
 
     sink.setShutterTimings(tool.m_dBeforeOn, tool.m_dAfterOn,
@@ -304,7 +306,6 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     sink.laserOn(tool);
 
     // ——— 协调插补段：beginSegment → lineTo*  → endSegment ———
-    const MachinePose5 startPose = toPose5(p0, ox, oy);
     sink.beginSegment(startPose, tool);
 
     for (int j = 1; j < pts.size(); ++j) {

@@ -87,6 +87,13 @@ std::string poseCoordsText(const MachinePose5& pose, std::uint8_t effectiveMask)
     return s;
 }
 
+double unwrapNear(double value, double reference)
+{
+    while (value - reference > 180.0) value -= 360.0;
+    while (value - reference < -180.0) value += 360.0;
+    return value;
+}
+
 // 按 axisMap + mask 取出 "APOSx, APOSy[, APOSz, APOSr1, APOSr2]"，
 // 用作 XSEG 起点（控制器侧已有的实时位置）。
 std::string aposListText(const AxisMap& axes, std::uint8_t effectiveMask)
@@ -133,6 +140,10 @@ void AcsTextCommandSink::appendText(const std::string& text)
 
 void AcsTextCommandSink::resetProgram()
 {
+    m_hasLastR1 = false;
+    m_hasLastR2 = false;
+    m_lastR1 = 0.0;
+    m_lastR2 = 0.0;
     if (m_acs)
         m_acs->ResetProgramCommand();
 }
@@ -178,6 +189,35 @@ void AcsTextCommandSink::jumpToIdleZ(const Tool& tool)
 void AcsTextCommandSink::jumpToXY(double x, double y, const Tool& tool)
 {
     if (m_acs) m_acs->JumpToIdleXYPosition(x, y, tool);
+}
+
+void AcsTextCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
+{
+    if (!m_acs) return;
+    // 先用遗留 XY 定位逻辑保留扩展定位轴行为，再补齐 Z/C/A 到首点位姿。
+    m_acs->JumpToIdleXYPosition(pose.x, pose.y, tool);
+
+    auto emitPtp = [this](AxisMap::SemanticAxis axis, double pos, double vel) {
+        const int idx = m_axisMap.controllerIndex(axis);
+        if (idx < 0) return;
+        std::string s;
+        s += "PTP/EV ";
+        s += I(idx);
+        s += ", ";
+        s += D(pos);
+        s += ", ";
+        s += D(vel);
+        s += "\n";
+        appendText(s);
+    };
+
+    const double r1 = m_hasLastR1 ? unwrapNear(pose.r1, m_lastR1) : pose.r1;
+    const double r2 = m_hasLastR2 ? unwrapNear(pose.r2, m_lastR2) : pose.r2;
+    emitPtp(AxisMap::Z,  pose.z,  tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0);
+    emitPtp(AxisMap::R1, r1,      tool.m_dIdleAVelocity > 0 ? tool.m_dIdleAVelocity : 10.0);
+    emitPtp(AxisMap::R2, r2,      tool.m_dIdleA1Velocity > 0 ? tool.m_dIdleA1Velocity : 10.0);
+    m_lastR1 = r1; m_hasLastR1 = true;
+    m_lastR2 = r2; m_hasLastR2 = true;
 }
 
 void AcsTextCommandSink::jumpToCuttingZ(const Tool& tool)
@@ -281,11 +321,23 @@ void AcsTextCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
     const std::uint8_t segMask = static_cast<std::uint8_t>(
         target.mask & segmentMaskFor(m_axisMap));
 
+    MachinePose5 out = target;
+    if (segMask & MachinePose5::Br1) {
+        out.r1 = m_hasLastR1 ? unwrapNear(target.r1, m_lastR1) : target.r1;
+        m_lastR1 = out.r1;
+        m_hasLastR1 = true;
+    }
+    if (segMask & MachinePose5::Br2) {
+        out.r2 = m_hasLastR2 ? unwrapNear(target.r2, m_lastR2) : target.r2;
+        m_lastR2 = out.r2;
+        m_hasLastR2 = true;
+    }
+
     std::string text;
     text += "LINE/V ";
     text += m_axisMap.axisTupleText(segMask).toStdString();
     text += ", ";
-    text += poseCoordsText(target, segMask);
+    text += poseCoordsText(out, segMask);
     text += ", ";
     text += D(motion.feed);
     text += "\n";

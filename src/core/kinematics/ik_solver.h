@@ -35,6 +35,13 @@ public:
                               const gp_Pnt& toolPos,
                               const gp_Dir& toolDir);
 
+    /// Solve IK for a point while preserving rotary-axis continuity relative to previous point.
+    /// @param previous Previous valid machine coordinate in the same contour; may be nullptr.
+    static MachineCoord solveContinuous(const MachineKinematics* kinematics,
+                                        const gp_Pnt& toolPos,
+                                        const gp_Dir& toolDir,
+                                        const MachineCoord* previous);
+
 private:
     IKSolver() = delete;
 
@@ -44,7 +51,8 @@ private:
                                        const gp_Pnt& toolPos,
                                        const gp_Dir& toolDir,
                                        const QString& r1Name,
-                                       const QString& r2Name);
+                                       const QString& r2Name,
+                                       const MachineCoord* previous = nullptr);
 
     /// Solve for head-tilt configurations (AB_HEAD / AC_HEAD).
     /// The two rotary axes tilt the laser head; workpiece is fixed.

@@ -67,6 +67,7 @@ bool PureSimulationSink::flush(QString* errorMessage)
 
 void PureSimulationSink::jumpToIdleZ(const Tool& /*tool*/)        {}
 void PureSimulationSink::jumpToXY(double, double, const Tool&)    {}
+void PureSimulationSink::jumpToPose(const MachinePose5&, const Tool&) {}
 void PureSimulationSink::jumpToCuttingZ(const Tool& /*tool*/)     {}
 void PureSimulationSink::startCuttingHead(const Tool& /*tool*/)   {}
 void PureSimulationSink::stopCuttingHead()                         {}

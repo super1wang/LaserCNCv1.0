@@ -53,6 +53,8 @@ public:
     virtual void jumpToIdleZ(const Tool& tool) = 0;
     /// XY 跳到目标位置。
     virtual void jumpToXY(double x, double y, const Tool& tool) = 0;
+    /// 进入切割前跳到首个完整五轴位姿（XYZ + 旋转轴）。
+    virtual void jumpToPose(const MachinePose5& pose, const Tool& tool) = 0;
     /// 下到切割 Z 高度。
     virtual void jumpToCuttingZ(const Tool& tool) = 0;
     /// 启动 / 停止跟随头（仅切割头模式）。

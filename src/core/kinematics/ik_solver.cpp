@@ -2,7 +2,9 @@
 
 #include <gp_Vec.hxx>
 #include <gp_Ax1.hxx>
+#include <algorithm>
 #include <cmath>
+#include <utility>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -16,19 +18,66 @@ MachineCoord IKSolver::solve(const MachineKinematics* kin,
                              const gp_Pnt& toolPos,
                              const gp_Dir& toolDir)
 {
+    return solveContinuous(kin, toolPos, toolDir, nullptr);
+}
+
+MachineCoord IKSolver::solveContinuous(const MachineKinematics* kin,
+                                        const gp_Pnt& toolPos,
+                                        const gp_Dir& toolDir,
+                                        const MachineCoord* previous)
+{
     MachineCoord result;
     if (!kin) return result;
 
     const QString cfg = kin->configType();
 
-    // Identify the two rotary axes
-    QString r1Name, r2Name;
+    // Identify the two rotary axes, distinguishing parent/child by parentAxis chain.
+    // 关键：IK 的数学需要 r1 = 先施加的旋转，r2 = 后施加的旋转。
+    // MachineKinematics::chainTrsf 走 BASE→parent→child 累乘，OCC 的 Multiplied 语义使
+    // 子轴的局部变换被先应用到点上、父轴的变换后应用 —— 因此 **r1 必须是 child**，
+    // **r2 必须是 parent**，否则旋转组合反向，机床实际姿态与 IK 求解的不一致，
+    // 表现为切割头偏离轮廓点 / 法线对不齐。
+    QString rotaryAxes[2];
+    int rotaryCount = 0;
     for (const auto& axis : kin->axes()) {
-        if (axis.motionType == MachineAxisDef::Rotary) {
-            if (r1Name.isEmpty())
-                r1Name = axis.name;
-            else if (r2Name.isEmpty())
-                r2Name = axis.name;
+        if (axis.motionType == MachineAxisDef::Rotary && rotaryCount < 2) {
+            rotaryAxes[rotaryCount++] = axis.name;
+        }
+    }
+    QString r1Name, r2Name;
+    if (rotaryCount == 2) {
+        // 父子判定：若 rotaryAxes[1] 的 parentAxis 链路上能到达 rotaryAxes[0]，
+        // 则 rotaryAxes[0] 是父；否则反过来。
+        const MachineAxisDef* a0 = kin->findAxis(rotaryAxes[0]);
+        const MachineAxisDef* a1 = kin->findAxis(rotaryAxes[1]);
+        const MachineAxisDef* child  = nullptr;
+        const MachineAxisDef* parent = nullptr;
+        if (a0 && a1) {
+            // 检查 a1 的祖先里是否有 a0
+            QString cur = a1->parentAxis;
+            while (!cur.isEmpty()) {
+                if (cur == a0->name) { child = a1; parent = a0; break; }
+                const MachineAxisDef* d = kin->findAxis(cur);
+                if (!d) break;
+                cur = d->parentAxis;
+            }
+            if (!child) {
+                cur = a0->parentAxis;
+                while (!cur.isEmpty()) {
+                    if (cur == a1->name) { child = a0; parent = a1; break; }
+                    const MachineAxisDef* d = kin->findAxis(cur);
+                    if (!d) break;
+                    cur = d->parentAxis;
+                }
+            }
+        }
+        if (child && parent) {
+            r1Name = child->name;   // 先施加（chain 中子轴先作用于点）
+            r2Name = parent->name;  // 后施加
+        } else {
+            // 兼容兜底：保持原有的 m_axes 遍历顺序
+            r1Name = rotaryAxes[0];
+            r2Name = rotaryAxes[1];
         }
     }
 
@@ -44,7 +93,7 @@ MachineCoord IKSolver::solve(const MachineKinematics* kin,
     }
 
     if (cfg == "VERTICAL_AC_TABLE" || cfg == "VERTICAL_BC_TABLE")
-        return solveTableType(kin, toolPos, toolDir, r1Name, r2Name);
+        return solveTableType(kin, toolPos, toolDir, r1Name, r2Name, previous);
     else if (cfg == "AB_HEAD" || cfg == "AC_HEAD")
         return solveHeadType(kin, toolPos, toolDir, r1Name, r2Name);
 
@@ -91,7 +140,8 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
                                       const gp_Pnt& toolPos,
                                       const gp_Dir& toolDir,
                                       const QString& r1Name,
-                                      const QString& r2Name)
+                                      const QString& r2Name,
+                                      const MachineCoord* previous)
 {
     MachineCoord result;
     result.r1Name = r1Name;
@@ -139,92 +189,154 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
     // Let's solve this numerically with atan2.
 
     double n_perp_mag = n_perp.Magnitude();
+
+    // 工具函数：给定 r1（度），返回最优 r2（度）及对齐误差。
+    auto evalBranch = [&](double r1deg) {
+        gp_Trsf rotTry;
+        rotTry.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis1Dir), r1deg * M_PI / 180.0);
+        gp_Vec n_try = n;
+        n_try.Transform(rotTry);
+
+        gp_Vec a2v(axis2Dir);
+        gp_Vec t_para = a2v * target.Dot(a2v);
+        gp_Vec t_perp = target - t_para;
+        gp_Vec n2_para = a2v * n_try.Dot(a2v);
+        gp_Vec n2_perp = n_try - n2_para;
+
+        double r2deg = 0.0;
+        if (n2_perp.Magnitude() > 1e-10 && t_perp.Magnitude() > 1e-10) {
+            gp_Vec n2n = n2_perp; n2n.Normalize();
+            gp_Vec ttn = t_perp;  ttn.Normalize();
+            double dotV = n2n.Dot(ttn);
+            if (dotV >  1.0) dotV =  1.0;
+            if (dotV < -1.0) dotV = -1.0;
+            double ang = std::acos(dotV);
+            gp_Vec cv = n2n.Crossed(ttn);
+            if (cv.Dot(a2v) < 0) ang = -ang;
+            r2deg = ang * 180.0 / M_PI;
+        }
+
+        // 真实对齐误差：施加 r2 后看 n_final 与 target 的夹角。
+        gp_Trsf rot2Try;
+        rot2Try.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis2Dir), r2deg * M_PI / 180.0);
+        gp_Vec n_final = n_try;
+        n_final.Transform(rot2Try);
+        double err = (n_final - target).Magnitude();
+        return std::make_pair(r2deg, err);
+    };
+
     if (n_perp_mag < 1e-10) {
-        // Normal is parallel to axis1 — cannot tilt with r1
-        // Just use r2 to align in the remaining plane
+        // Normal is parallel to axis1 — r1 has no effect; let r2 finish alignment.
         result.r1 = 0;
+        auto [r2v, err] = evalBranch(0.0);
+        result.r2 = r2v;
     } else {
-        // Project everything onto the plane perpendicular to axis1
-        // to find the angle that brings n_perp to where it needs to be.
-        //
-        // After rotation by r1 around axis1:
-        //   n' = n_para + cos(r1)*n_perp + sin(r1)*(a1 x n_perp)
-        //
-        // We need n'.Z = target.Z = 1 (or close to 1)
-        // n_para.Z + cos(r1)*n_perp.Z + sin(r1)*(a1 x n_perp).Z = 1
+        // n_para.Dot(axis2) + cos(r1)*coeff_cos + sin(r1)*coeff_sin = target.Dot(axis2)
+        // 等价形式：A*cos(r1) + B*sin(r1) = C，即 R*sin(r1 + φ) = C 其中 φ = atan2(A,B)。
+        // ⇒ sin(r1 + φ) = C/R，有两个解：r1 + φ = asin(C/R) 或 π − asin(C/R)。
+        // 两支都对应一个合法的法线对齐方向；选择使后续 |r2| 最小、对齐误差最小的那一支。
 
         gp_Vec cross_a1_nperp = a1.Crossed(n_perp);
+        gp_Vec a2v(axis2Dir);
+        double Av = n_perp.Dot(a2v);                       // 系数 A
+        double Bv = cross_a1_nperp.Dot(a2v);               // 系数 B
+        double Cv = target.Dot(a2v) - n_para.Dot(a2v);     // 常数 C
+        double Rv = std::sqrt(Av * Av + Bv * Bv);
 
-        // But actually we need: n'.Dot(axis2) = target.Dot(axis2)
-        // for axis2 to handle the rest.
-        gp_Vec a2(axis2Dir);
-        double lhs_const = n_para.Dot(a2);
-        double coeff_cos = n_perp.Dot(a2);
-        double coeff_sin = cross_a1_nperp.Dot(a2);
-        double rhs = target.Dot(a2);
+        auto computeAndPick = [&](double r1cand1, double r1cand2) {
+            // 归一化到 [-180, 180]
+            auto norm180 = [](double d) {
+                while (d >  180.0) d -= 360.0;
+                while (d < -180.0) d += 360.0;
+                return d;
+            };
+            r1cand1 = norm180(r1cand1);
+            r1cand2 = norm180(r1cand2);
 
-        // lhs_const + coeff_cos * cos(r1) + coeff_sin * sin(r1) = rhs
-        // A*cos(r1) + B*sin(r1) = C
-        double A = coeff_cos;
-        double B = coeff_sin;
-        double C = rhs - lhs_const;
-        double R = std::sqrt(A * A + B * B);
+            // 截断到 r1 轴限位（在选解前）
+            auto clampR1 = [&](double v) {
+                if (v > ax1->maxVal) return ax1->maxVal;
+                if (v < ax1->minVal) return ax1->minVal;
+                return v;
+            };
+            double a1deg_a = clampR1(r1cand1);
+            double a1deg_b = clampR1(r1cand2);
 
-        if (R < 1e-10) {
+            auto [r2_a, err_a] = evalBranch(a1deg_a);
+            auto [r2_b, err_b] = evalBranch(a1deg_b);
+
+            // 截断 r2 限位
+            auto clampR2 = [&](double v) {
+                if (v > ax2->maxVal) return ax2->maxVal;
+                if (v < ax2->minVal) return ax2->minVal;
+                return v;
+            };
+            r2_a = clampR2(r2_a);
+            r2_b = clampR2(r2_b);
+
+            auto unwrapNear = [](double value, double ref) {
+                while (value - ref > 180.0) value -= 360.0;
+                while (value - ref < -180.0) value += 360.0;
+                return value;
+            };
+            auto rotaryCost = [&](double r1v, double r2v, double err) {
+                if (previous && previous->valid
+                    && previous->r1Name == r1Name
+                    && previous->r2Name == r2Name) {
+                    const double u1 = unwrapNear(r1v, previous->r1);
+                    const double u2 = unwrapNear(r2v, previous->r2);
+                    return err * 100000.0
+                         + std::abs(u1 - previous->r1)
+                         + std::abs(u2 - previous->r2) * 2.0;
+                }
+                // 首点没有上一姿态时，优先让父轴 r2 稳定，同时兼顾较小的 r1 起始跳转。
+                return err * 100000.0 + std::abs(r2v) * 10.0 + std::abs(r1v) * 0.01;
+            };
+            const double costA = rotaryCost(a1deg_a, r2_a, err_a);
+            const double costB = rotaryCost(a1deg_b, r2_b, err_b);
+            const bool pickB = costB < costA;
+            if (pickB) { result.r1 = a1deg_b; result.r2 = r2_b; }
+            else       { result.r1 = a1deg_a; result.r2 = r2_a; }
+        };
+
+        if (Rv < 1e-10) {
+            // 法线在 axis2 上的投影与 axis1 的旋转面无相关分量；r1 任意都能让 r2 完成对齐。
+            // 选 r1=0，给 r2 处理。
             result.r1 = 0;
+            auto [r2v, err] = evalBranch(0.0);
+            result.r2 = std::clamp(r2v, ax2->minVal, ax2->maxVal);
         } else {
-            double sinVal = C / R;
-            if (sinVal > 1.0) sinVal = 1.0;
+            double sinVal = Cv / Rv;
+            if (sinVal > 1.0)  sinVal = 1.0;
             if (sinVal < -1.0) sinVal = -1.0;
-            double baseAngle = std::asin(sinVal);
-            double phaseAngle = std::atan2(B, A);
-            result.r1 = (baseAngle - phaseAngle) * 180.0 / M_PI;
+            // A·cos(r1) + B·sin(r1) = C ⇔ R·sin(r1+φ) = C，匹配系数得
+            //   R·sin φ = A、R·cos φ = B   →   φ = atan2(A, B)
+            double phaseAngle = std::atan2(Av, Bv);
+            // 主分支：r1 + φ = asin(sinVal)  ⇒  r1 = asin - φ
+            double r1cand1 = (std::asin(sinVal) - phaseAngle) * 180.0 / M_PI;
+            // 次分支：r1 + φ = π - asin(sinVal)
+            double r1cand2 = ((M_PI - std::asin(sinVal)) - phaseAngle) * 180.0 / M_PI;
+            computeAndPick(r1cand1, r1cand2);
         }
     }
 
-    // Clamp r1 to axis limits
-    if (result.r1 > ax1->maxVal) result.r1 = ax1->maxVal;
-    if (result.r1 < ax1->minVal) result.r1 = ax1->minVal;
-
-    // Apply R1 rotation to n
-    gp_Trsf rot1;
-    rot1.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis1Dir), result.r1 * M_PI / 180.0);
-    gp_Vec n_after_r1 = n;
-    n_after_r1.Transform(rot1);
-
-    // Step 2: Find r2 to rotate n_after_r1 around axis2 to align with target
-    gp_Vec a2(axis2Dir);
-    double n1_dot_a2 = n_after_r1.Dot(a2);
-    gp_Vec n1_para = a2 * n1_dot_a2;
-    gp_Vec n1_perp = n_after_r1 - n1_para;
-    gp_Vec tgt_perp = target - a2 * target.Dot(a2);
-
-    double n1_perp_mag = n1_perp.Magnitude();
-    double tgt_perp_mag = tgt_perp.Magnitude();
-
-    if (n1_perp_mag < 1e-10 || tgt_perp_mag < 1e-10) {
-        result.r2 = 0;
-    } else {
-        n1_perp.Normalize();
-        tgt_perp.Normalize();
-        double dotVal = n1_perp.Dot(tgt_perp);
-        if (dotVal >  1.0) dotVal =  1.0;
-        if (dotVal < -1.0) dotVal = -1.0;
-        double angle = std::acos(dotVal);
-        // Determine sign
-        gp_Vec crossVal = n1_perp.Crossed(tgt_perp);
-        if (crossVal.Dot(a2) < 0) angle = -angle;
-        result.r2 = angle * 180.0 / M_PI;
+    if (previous && previous->valid
+        && previous->r1Name == r1Name
+        && previous->r2Name == r2Name) {
+        while (result.r1 - previous->r1 > 180.0) result.r1 -= 360.0;
+        while (result.r1 - previous->r1 < -180.0) result.r1 += 360.0;
+        while (result.r2 - previous->r2 > 180.0) result.r2 -= 360.0;
+        while (result.r2 - previous->r2 < -180.0) result.r2 += 360.0;
     }
 
-    // Clamp r2 to axis limits
-    if (result.r2 > ax2->maxVal) result.r2 = ax2->maxVal;
-    if (result.r2 < ax2->minVal) result.r2 = ax2->minVal;
-
     // Step 3: Compute the actual rotation applied to the workpiece
-    gp_Trsf rot2;
-    rot2.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis2Dir), result.r2 * M_PI / 180.0);
-    gp_Trsf totalRot = rot2.Multiplied(rot1);
+    gp_Trsf rot1Final;
+    rot1Final.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis1Dir), result.r1 * M_PI / 180.0);
+    gp_Trsf rot2Final;
+    rot2Final.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis2Dir), result.r2 * M_PI / 180.0);
+    // 链路顺序与 MachineKinematics::chainTrsf(BASE→parent→child) 一致：
+    // totalRot = T_parent * T_child（child=r1 先施加，parent=r2 后施加）。
+    gp_Trsf totalRot = rot2Final.Multiplied(rot1Final);
 
     // The tool tip position in world after table rotation:
     // The workpiece point P rotates with the table → P_world = totalRot * P

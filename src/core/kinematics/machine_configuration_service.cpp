@@ -258,12 +258,32 @@ QVector<MachineAxisRuntimeConfig> MachineConfigurationService::defaultAxisConfig
 {
     MachineKinematics kinematics;
     kinematics.loadPreset(presetName);
+
+    // 控制器编号按"标准 CNC 习惯"分配：
+    //   X=0, Y=1, Z=2, 然后旋转轴：A/B → 3，C → 4。
+    // MachineKinematics::loadPreset 出于"动力学父子链路"考虑会把先转的轴前置（例如
+    // VERTICAL_AC_TABLE 里链路是 BASE→Y→X→Z，Y 先于 X），但物理控制器序号与运动学
+    // 父子无关，不能按枚举顺序简单赋 0/1/2 否则会出现 X↔Y 互换。
+    auto controllerIndexFor = [](const QString& axisName) -> int {
+        const QString n = axisName.trimmed().toUpper();
+        if (n == QStringLiteral("X")) return 0;
+        if (n == QStringLiteral("Y")) return 1;
+        if (n == QStringLiteral("Z")) return 2;
+        if (n == QStringLiteral("A") || n == QStringLiteral("B")) return 3;
+        if (n == QStringLiteral("C")) return 4;
+        return -1;
+    };
+
     QVector<MachineAxisRuntimeConfig> configs;
-    int index = 0;
+    int fallbackIndex = 0;
     for (const MachineAxisDef& axis : kinematics.axes()) {
         if (axis.name == QStringLiteral("BASE"))
             continue;
-        configs.append(defaultRuntimeConfig(axis, index++));
+        int idx = controllerIndexFor(axis.name);
+        if (idx < 0)
+            idx = fallbackIndex;  // 非常规轴名兜底
+        ++fallbackIndex;
+        configs.append(defaultRuntimeConfig(axis, idx));
     }
     return configs;
 }

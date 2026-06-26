@@ -38,6 +38,7 @@ public:
 
     void jumpToIdleZ(const Tool& tool) override;
     void jumpToXY(double x, double y, const Tool& tool) override;
+    void jumpToPose(const MachinePose5& pose, const Tool& tool) override;
     void jumpToCuttingZ(const Tool& tool) override;
     void startCuttingHead(const Tool& tool) override;
     void stopCuttingHead() override;

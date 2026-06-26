@@ -68,6 +68,13 @@ void GtnBufferedCommandSink::jumpToXY(double x, double y, const Tool& tool)
     if (m_gtn) m_gtn->JumpToIdleXYPosition(x, y, tool);
 }
 
+void GtnBufferedCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
+{
+    if (!m_gtn) return;
+    m_gtn->JumpToIdleXYPosition(pose.x, pose.y, tool);
+    // GTN 的旋转轴首点定位由后续缓冲插补段完成；这里保持与旧链路一致。
+}
+
 void GtnBufferedCommandSink::jumpToCuttingZ(const Tool& tool)
 {
     if (m_gtn) m_gtn->JumpToCuttingHeight(tool);
