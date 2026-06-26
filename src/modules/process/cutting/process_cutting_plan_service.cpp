@@ -4,6 +4,7 @@
 #include "core/kernel/event_bus.h"
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
+#include "core/services/selection_service.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
 #include "modules/process/Tool/Tool.h"
 #include "modules/process/Tool/ToolFactory.h"
@@ -610,6 +611,8 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
 
     QVector<lcnc::cam::ContourEndpoints> inputs;
     inputs.reserve(snapshot.contours.size());
+    QHash<lcnc::cam::ContourId, lcnc::cam::ContourEndpoints> byId;
+    byId.reserve(snapshot.contours.size());
     for (const auto& c : snapshot.contours) {
         if (!c.enabled || !c.layerEnabled) continue;
         if (!c.endpointsValid) continue;
@@ -617,12 +620,31 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
         ep.id = c.contourId;
         ep.sx = c.startX; ep.sy = c.startY; ep.sz = c.startZ;
         ep.ex = c.endX;   ep.ey = c.endY;   ep.ez = c.endZ;
+        byId.insert(ep.id, ep);
         inputs.append(ep);
     }
     if (inputs.isEmpty()) {
         if (errorMessage)
             *errorMessage = QObject::tr("当前没有可参与排序的启用轮廓");
         return false;
+    }
+
+    QVector<lcnc::cam::ContourEndpoints> selectedInputs;
+    selectedInputs.reserve(inputs.size());
+
+    QSet<lcnc::cam::ContourId> selectedIds;
+    QVector<lcnc::cam::ContourId> selectedOrder;
+    if (auto* k = lcnc::Kernel::tryCurrent()) {
+        if (auto selSvc = k->services().getService<lcnc::core::SelectionService>()) {
+            const auto selected = selSvc->contoursInSelectionOrder();
+            selectedOrder.reserve(selected.size());
+            for (auto id : selected) {
+                if (id == 0 || selectedIds.contains(id))
+                    continue;
+                selectedIds.insert(id);
+                selectedOrder.append(id);
+            }
+        }
     }
 
     lcnc::cam::ContourOrderParams params;
@@ -634,7 +656,21 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
     case AutoSortAxis::ZPos: params.axis = lcnc::cam::PrimaryAxis::ZPos; break;
     case AutoSortAxis::ZNeg: params.axis = lcnc::cam::PrimaryAxis::ZNeg; break;
     }
-    const auto ordered = lcnc::cam::planContourOrder(inputs, params);
+
+    for (auto id : selectedOrder) {
+        if (auto it = byId.constFind(id); it != byId.constEnd())
+            selectedInputs.append(it.value());
+    }
+
+    // 有有效选择时仅对选择集自动排序；否则回退到全部启用轮廓。
+    const auto ordered = selectedInputs.isEmpty()
+        ? lcnc::cam::planContourOrder(inputs, params)
+        : lcnc::cam::planContourOrder(selectedInputs, params);
+    if (ordered.isEmpty()) {
+        if (errorMessage)
+            *errorMessage = QObject::tr("自动排序未生成有效轮廓顺序");
+        return false;
+    }
 
     m_manualContourOrder = ordered;
     m_manualOrderSet = QSet<lcnc::cam::ContourId>(ordered.cbegin(), ordered.cend());

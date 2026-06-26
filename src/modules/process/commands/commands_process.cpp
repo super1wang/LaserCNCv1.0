@@ -364,7 +364,7 @@ void CmdManualAppendSelectedToCuttingOrder::execute()
 CmdAutoSortCuttingOrder::CmdAutoSortCuttingOrder(IAppContext* ctx) : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("自动设置加工顺序"), this);
-    a->setStatusTip(tr("按当前轴模式 + 最近邻贪心，自动规划加工顺序"));
+    a->setStatusTip(tr("若当前已选轮廓，则仅对选中轮廓按当前轴模式自动规划；否则对全部轮廓自动规划"));
     setAction(a);
 }
 bool CmdAutoSortCuttingOrder::isEnabled() const
