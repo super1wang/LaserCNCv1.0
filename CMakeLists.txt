@@ -36,6 +36,24 @@ set(LCNC_SARIBBON_ROOT "F:/wangchao/SARibbon/bin_qt6.9.1_MSVC_x64" CACHE PATH "S
 set(SARibbonBar_DIR "${LCNC_SARIBBON_ROOT}/lib/cmake/SARibbonBar" CACHE PATH "SARibbonBar CMake package directory")
 find_package(SARibbonBar REQUIRED)
 
+# ─── QuaZip (.lcnc 打包后端，替换原 PowerShell Compress-Archive/Expand-Archive) ─
+set(LCNC_QUAZIP_ROOT "E:/GitHub/quazip" CACHE PATH "QuaZip source tree")
+set(LCNC_ZLIB_ROOT "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/zlib-1.2.8-vc14-64"
+    CACHE PATH "zlib root used by QuaZip (defaults to the OCCT 3rdparty zlib)")
+# 让 QuaZip 的 find_package(ZLIB) 命中 OCCT 自带的静态 zlib（无需额外 DLL / 不联网下载）。
+set(ZLIB_INCLUDE_DIR "${LCNC_ZLIB_ROOT}/include" CACHE PATH "" FORCE)
+set(ZLIB_LIBRARY "${LCNC_ZLIB_ROOT}/lib/zlibstatic.lib" CACHE FILEPATH "" FORCE)
+# QuaZip 构建选项：静态库；关闭 bzip2/QTextCodec/测试/安装（规避网络拉取与 Core5Compat 依赖）。
+set(QUAZIP_QT_MAJOR_VERSION 6 CACHE STRING "" FORCE)
+set(QUAZIP_USE_QT_ZLIB OFF CACHE BOOL "" FORCE)
+set(QUAZIP_BZIP2 OFF CACHE BOOL "" FORCE)
+set(QUAZIP_ENABLE_QTEXTCODEC OFF CACHE BOOL "" FORCE)
+set(QUAZIP_INSTALL OFF CACHE BOOL "" FORCE)
+set(QUAZIP_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(QUAZIP_FETCH_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF) # 构建静态 QuaZip（CMP0077 使其 option() 尊重此普通变量）
+add_subdirectory("${LCNC_QUAZIP_ROOT}" "${CMAKE_BINARY_DIR}/quazip-build")
+
 # ─── Optional process device SDKs ─────────────────────────────────────────────
 option(LCNC_WITH_ACS "Enable ACS motion controller adapter" OFF)
 option(LCNC_WITH_GTN "Enable GTN motion controller adapter" OFF)
@@ -169,6 +187,8 @@ set(SRCS_CORE
     src/core/project/cam/layer_container.cpp
     src/core/project/cam/layer_manager.cpp
     src/core/project/cam/layer_manager.h
+    src/core/machine/machine_workspace.cpp
+    src/core/machine/machine_workspace.h
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_kinematics.cpp
@@ -243,8 +263,6 @@ set(SRCS_MODULE_CAM
     src/modules/cam/contracts/toolpath_export_dto.cpp
     src/modules/cam/settings/cam_config.cpp
     src/modules/cam/services/machine_axis_detector.cpp
-    src/modules/cam/workspace/machine_workspace.cpp
-    src/modules/cam/workspace/machine_workspace.h
     src/modules/cam/services/machine_io.cpp
     src/modules/cam/services/reference_pick.cpp
     src/modules/cam/commands/commands_machine.cpp
@@ -408,6 +426,8 @@ target_link_libraries(lcnc_core PUBLIC
     Qt6::Gui
     Qt6::Concurrent
 )
+# QuaZip 仅在 lcnc_project_package.cpp 实现内部使用（不出现在公开头文件）→ PRIVATE。
+target_link_libraries(lcnc_core PRIVATE QuaZip::QuaZip)
 
 # view ────────────────────────────────────────────────────────────────────────
 add_library(lcnc_view STATIC ${SRCS_VIEW})

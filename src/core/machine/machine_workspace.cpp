@@ -1,4 +1,4 @@
-#include "modules/cam/workspace/machine_workspace.h"
+#include "core/machine/machine_workspace.h"
 
 #include "core/document/lcnc_document.h"
 #include "core/kinematics/machine_kinematics.h"

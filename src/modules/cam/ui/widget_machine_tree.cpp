@@ -3,7 +3,7 @@
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kinematics/machine_kinematics.h"
-#include "modules/cam/workspace/machine_workspace.h"
+#include "core/machine/machine_workspace.h"
 
 #include <QHeaderView>
 #include <QMap>

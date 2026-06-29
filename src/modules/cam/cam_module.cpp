@@ -9,7 +9,7 @@
 #include "modules/cam/services/machine_axis_detector.h"
 #include "modules/cam/services/machine_io.h"
 #include "modules/cam/services/reference_pick.h"
-#include "modules/cam/workspace/machine_workspace.h"
+#include "core/machine/machine_workspace.h"
 #include "modules/cam/i_cam_layer_provider.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kernel/kernel.h"
@@ -435,12 +435,9 @@ CamModule::CamModule(QObject* parent)
     auto* project = lcnc::Kernel::current().projectManager();
     project->ensureProject();
 
-    // Phase D：CAM 拥有机台工作台。本构造发生在 CamModule::init() 之前的
-    // 构造期；MachineWorkspace 的内部 LcncDocument 用 manager 的 id 序列分配
-    // docId，然后通过 attachMachineDocument() 借给 manager，让既有的
-    // `machineDocument()` 调用面（30+ 处）继续工作。
-    m_machineWorkspace = std::make_unique<lcnc::cam::MachineWorkspace>(this);
-    project->attachMachineDocument(m_machineWorkspace->document());
+    // 机台工作台是独立参考资产，由 Kernel(core) 拥有并已 attach 到 pm 做视图域路由；
+    // CAM 仅借用它执行加载/标定等业务，不负责其生命周期。
+    m_machineWorkspace = lcnc::Kernel::current().machineWorkspace();
 
     m_machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
     if (m_machineConfig) {
@@ -467,6 +464,8 @@ CamModule::CamModule(QObject* parent)
     m_useFaceClassification = config.useFaceClassification();
     m_toolpathRenderer->setShowNormals(config.showNormals());
     m_toolpathRenderer->setNormalSampleStep(config.normalSampleStep());
+    // 用全局默认值播种初始（空）工程的工程级生成参数。
+    pushGenerationParamsToCamData();
 
     connect(project, &lcnc::LcncProjectManager::domainDataChanged,
             this, [this](lcnc::ProjectDomain domain) {
@@ -2219,6 +2218,8 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     m_camData->ensureContourIds();
     m_camData->ensureToolpathLayers();
     m_camData->commitToolpathStates();    // 把 signature → id 映射固化下来，跨次稳定
+    pushGenerationParamsToCamData();       // 固化本次生成所用参数，随工程持久化
+    writeContourGeometryToDocument();      // 轮廓 wire 写入统一工程文档(EntityKind::Cam)
     syncCamDocumentContours();
     m_toolpathRenderer->setVisible(workspaceGuiDocument(), true);
 
@@ -2233,7 +2234,10 @@ void CamModule::clearToolpath()
 {
     eraseToolpathDisplay();
     m_camData->clearToolpath();
-    // Phase C：CAM AIS 按 ContourId 管理，eraseAllContours 删 GuiDocument 注册项。
+    // 统一工程文档：清掉轮廓几何(EntityKind::Cam)实体。
+    if (LcncDocument* doc = workpieceDocument())
+        doc->clearEntityKind(LcncDocument::EntityKind::Cam);
+    // CAM AIS 按 ContourId 管理，eraseAllContours 删 GuiDocument 注册项。
     if (GuiDocument* gd = workspaceGuiDocument())
         gd->eraseAllContours();
     lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
@@ -2708,6 +2712,28 @@ const std::vector<ToolpathLayer>& CamModule::toolpathLayers() const
 {
     static const std::vector<ToolpathLayer> empty;
     return m_camData ? m_camData->toolpathLayers() : empty;
+}
+
+std::uint64_t CamModule::addToolpathLayer(const QString& name, const QColor& color)
+{
+    if (!m_camData)
+        return 0;
+    const std::uint64_t id = m_camData->addLayer(name, color);
+    emit toolpathLayersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return id;
+}
+
+bool CamModule::removeToolpathLayer(std::uint64_t layerId, std::uint64_t reassignTo)
+{
+    if (!m_camData || !m_camData->removeLayer(layerId, reassignTo))
+        return false;
+    applyToolpathLayerColors();
+    if (m_toolpathRenderer->isVisible())
+        refreshToolpathDisplay();
+    emit toolpathLayersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
 }
 
 QList<int> CamModule::contourIndexesInLayer(std::uint64_t layerId) const
@@ -3239,9 +3265,89 @@ void CamModule::applyToolpathLayerColors(bool updateView)
 // 工程核心 CAM 数据加载后的视图刷新（数据 IO 已下沉到 core/project/cam）
 // ============================================================================
 
+void CamModule::writeContourGeometryToDocument()
+{
+    // 统一工程文档：把每条轮廓的 wire 作为 EntityKind::Cam 实体写入工程 doc，
+    // 并把返回的 label entry 记录到 LaserContour.xcafEntry，供持久化 + 读回时重连几何。
+    LcncDocument* doc = workpieceDocument();
+    if (!doc)
+        return;
+    doc->clearEntityKind(LcncDocument::EntityKind::Cam);
+    for (int i = 0; i < m_toolpath.contourCount(); ++i) {
+        LaserContour& c = m_toolpath.contour(i);
+        if (c.wire.IsNull()) {
+            c.xcafEntry.clear();
+            continue;
+        }
+        const QString name = c.name.trimmed().isEmpty()
+            ? tr("轮廓 %1").arg(i + 1) : c.name;
+        const TDF_Label lbl = doc->addShapeEntity(c.wire, name, LcncDocument::EntityKind::Cam);
+        c.xcafEntry = XcafUtils::entry(lbl);
+    }
+}
+
+void CamModule::relinkContourGeometryFromDocument()
+{
+    // 读档后：core 已恢复轮廓元数据(含 xcafEntry)+采样点；此处按 xcafEntry 从工程 doc
+    // 的 Cam 实体取回 wire 几何（v3 起几何随 XCAF 持久化，无需运行时重算）。
+    LcncDocument* doc = workpieceDocument();
+    if (!doc)
+        return;
+    QHash<QString, TopoDS_Shape> byEntry;
+    const TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Cam);
+    for (int i = 1; i <= labels.Length(); ++i) {
+        const TDF_Label lbl = labels.Value(i);
+        byEntry.insert(XcafUtils::entry(lbl), XcafUtils::shape(lbl));
+    }
+    for (int i = 0; i < m_toolpath.contourCount(); ++i) {
+        LaserContour& c = m_toolpath.contour(i);
+        if (c.xcafEntry.isEmpty())
+            continue;
+        auto it = byEntry.constFind(c.xcafEntry);
+        if (it == byEntry.constEnd() || it.value().IsNull())
+            continue;
+        if (it.value().ShapeType() == TopAbs_WIRE)
+            c.wire = TopoDS::Wire(it.value());
+    }
+}
+
+void CamModule::pushGenerationParamsToCamData()
+{
+    // 把当前运行时生成参数固化到工程核心数据，供随工程持久化。
+    if (!m_camData)
+        return;
+    auto& gp = m_camData->generationParams();
+    gp.leadInLength         = m_toolpath.globalLeadInLength();
+    gp.normalAngle          = m_toolpath.globalNormalAngle();
+    gp.deflection           = m_deflection;
+    gp.smoothAngle          = m_smoothAngle;
+    gp.useFaceClassification = m_useFaceClassification;
+    if (m_toolpathRenderer)
+        gp.normalSampleStep = m_toolpathRenderer->normalSampleStep();
+}
+
+void CamModule::applyGenerationParamsFromCamData()
+{
+    // 读档后把工程级生成参数应用到运行时（直接赋值，不触发重算以免覆盖已加载的
+    // 每轮廓引刀线/采样点）。
+    if (!m_camData)
+        return;
+    const auto& gp = m_camData->generationParams();
+    m_toolpath.setGlobalLeadInLength(gp.leadInLength);
+    m_toolpath.setGlobalNormalAngle(gp.normalAngle);
+    m_deflection            = gp.deflection;
+    m_smoothAngle           = gp.smoothAngle;
+    m_useFaceClassification = gp.useFaceClassification;
+    if (m_toolpathRenderer)
+        m_toolpathRenderer->setNormalSampleStep(gp.normalSampleStep);
+}
+
 void CamModule::onCamDataLoaded()
 {
-    // core 已把刀路灌入 CamDataManager；此处只负责把数据映射到 OCC 文档与渲染层。
+    // core 已把刀路灌入 CamDataManager；此处先恢复工程级生成参数与轮廓 wire，
+    // 再把数据映射到渲染层。
+    applyGenerationParamsFromCamData();
+    relinkContourGeometryFromDocument();
     syncCamDocumentContours();
     refreshToolpathDisplay();
     emit toolpathGenerated();

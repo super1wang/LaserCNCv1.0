@@ -52,11 +52,10 @@ void LcncProjectManager::ensureProject()
 {
     if (!m_workpieceDocument)
         m_workpieceDocument.reset(createDomainDocument(ProjectDomain::Workpiece, QStringLiteral("LaserCNC 项目")));
-    // 机台 doc 由 CAM 的 MachineWorkspace 拥有（独立参考资产），通过 attachMachineDocument
+    // 统一工程文档：工件原始模型(EntityKind::Workpiece) 与 CAM 轮廓几何(EntityKind::Cam)
+    // 同存于 m_workpieceDocument，不再有独立 CAM doc。ProjectDomain::Cam 保留为渲染域。
+    // 机台 doc 由 CAM 的 MachineWorkspace 拥有（独立参考资产），仅通过 attachMachineDocument
     // 登记一个非拥有引用供视图域路由使用；本类不创建/拥有机台几何，也不持久化它。
-    // （m_machineDocument 仅作未注入时的空兜底。）
-    if (!m_camDocument)
-        m_camDocument.reset(createDomainDocument(ProjectDomain::Cam, QStringLiteral("CAM 数据")));
 
     syncSessionFromDocuments();
 }
@@ -277,7 +276,8 @@ LcncDocument* LcncProjectManager::document(ProjectDomain domain) const
         // Phase D：CAM 注入的工作台 doc 优先；未注入时回落 manager 内 owned doc。
         return m_machineBorrowed ? m_machineBorrowed : m_machineDocument.get();
     case ProjectDomain::Cam:
-        return m_camDocument.get();
+        // 统一文档：CAM 轮廓几何与工件同存于工程文档。
+        return m_workpieceDocument.get();
     case ProjectDomain::Project:
         return nullptr;
     }
@@ -292,8 +292,6 @@ LcncDocument* LcncProjectManager::domainDocumentById(DocumentId documentId) cons
         return m_machineBorrowed;
     if (m_machineDocument && m_machineDocument->id() == documentId)
         return m_machineDocument.get();
-    if (m_camDocument && m_camDocument->id() == documentId)
-        return m_camDocument.get();
     return nullptr;
 }
 
@@ -349,10 +347,8 @@ bool LcncProjectManager::domainForDocument(DocumentId documentId, ProjectDomain*
         *domain = ProjectDomain::Machine;
         return true;
     }
-    if (m_camDocument && m_camDocument->id() == documentId) {
-        *domain = ProjectDomain::Cam;
-        return true;
-    }
+    // 统一文档：CAM 与工件共享同一 docId，按 docId 解析的"主域"归工件；
+    // CAM 轮廓的域在 DisplayObject 级单独标注（ProjectDomain::Cam）。
     return false;
 }
 
@@ -386,13 +382,11 @@ LcncDocument* LcncProjectManager::createDomainDocument(ProjectDomain domain, con
 void LcncProjectManager::resetProjectDocuments(const QString& projectName)
 {
     ensureProject();
-    // 仅重置工程数据（工件 + CAM）；机台是独立参考资产，跨工程保留，不在此清空。
+    // 统一工程文档：clearProjectData 会清掉工件 + CAM 轮廓(EntityKind::Cam)；机台是
+    // 独立参考资产，跨工程保留，不在此清空。
     workpieceDocument()->clearProjectData();
-    camDocument()->clearProjectData();
     workpieceDocument()->setName(projectName);
     workpieceDocument()->setFilePath(QString());
-    camDocument()->setName(QStringLiteral("CAM 数据"));
-    camDocument()->setFilePath(QString());
     syncSessionFromDocuments();
 }
 

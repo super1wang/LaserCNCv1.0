@@ -49,6 +49,19 @@ public:
     LaserToolpath& toolpath() { return m_toolpath; }
     const LaserToolpath& toolpath() const { return m_toolpath; }
 
+    /// 工程级刀路生成参数（随工程持久化，保证重开可复现同一刀路）。
+    /// 新建工程时由 CAM 模块用全局 cam.toml 默认值播种。
+    struct GenerationParams {
+        double leadInLength{5.0};
+        double normalAngle{0.0};
+        double deflection{0.1};
+        double smoothAngle{5.0};
+        bool   useFaceClassification{true};
+        double normalSampleStep{2.0};
+    };
+    GenerationParams&       generationParams()       { return m_generationParams; }
+    const GenerationParams& generationParams() const { return m_generationParams; }
+
     /// Phase A: 新引入的图层容器与 Qt 信号源。
     /// 现阶段是 LaserToolpath 上层的薄包装，Phase B 起逐步成为图层级状态的唯一权威。
     LayerContainer&       layerContainer()       { return m_layerContainer; }
@@ -67,6 +80,13 @@ public:
     ToolpathLayer* toolpathLayer(std::uint64_t layerId);
     const ToolpathLayer* toolpathLayer(std::uint64_t layerId) const;
     QList<int> contourIndexesInLayer(std::uint64_t layerId) const;
+
+    // ── 三级容器：工程文档级图层增删改名（重命名走 updateToolpathLayer）─────────
+    /// 新建一个空图层；返回分配的 layerId。
+    std::uint64_t addLayer(const QString& name, const QColor& color = QColor());
+    /// 删除图层；其下轮廓改挂到 reassignTo（为 0 或非法时挂到第一个其余图层）。
+    /// 至少保留一个图层时才删除；成功返回 true。
+    bool removeLayer(std::uint64_t layerId, std::uint64_t reassignTo = 0);
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,
                              const QColor& color,
@@ -106,6 +126,7 @@ private:
     void syncLayerContourIds();
 
     LaserToolpath m_toolpath;
+    GenerationParams m_generationParams;
     ContourId m_nextContourId{1};
     std::uint64_t m_nextLayerId{1};
     bool m_dirty{false};

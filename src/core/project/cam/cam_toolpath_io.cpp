@@ -277,6 +277,7 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
         entry["contourId"]      = static_cast<std::int64_t>(c.contourId);
         entry["layerId"]        = static_cast<std::int64_t>(c.layerId);
         entry["signature"]      = static_cast<std::int64_t>(c.signature);
+        entry["xcafEntry"]      = c.xcafEntry.toStdString(); // v3: 关联工程文档内的 Cam 几何 label
         entry["name"]           = c.name.toStdString();
         entry["enabled"]        = c.enabled;
         entry["workpieceEntry"] = c.workpieceEntry.toStdString();
@@ -304,6 +305,17 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
     root["manualContourOrder"] = manualArr;
     root["sortStrategy"]     = std::string(sortStrategyToString(container.sortStrategy()));
     root["lastAutoSortAxis"] = std::string(autoSortAxisToString(container.lastAutoSortAxis()));
+
+    // 工程级刀路生成参数（随工程持久化，保证重开可复现）。
+    const CamDataManager::GenerationParams& gp = cam.generationParams();
+    toml::value gen(toml::table{});
+    gen["leadInLength"]         = gp.leadInLength;
+    gen["normalAngle"]          = gp.normalAngle;
+    gen["deflection"]           = gp.deflection;
+    gen["smoothAngle"]          = gp.smoothAngle;
+    gen["useFaceClassification"] = gp.useFaceClassification;
+    gen["normalSampleStep"]     = gp.normalSampleStep;
+    root["generation"]          = gen;
 
     std::ofstream out(camToolpathTomlPath(packageDir).toStdString(), std::ios::binary);
     if (!out.is_open()) {
@@ -388,6 +400,7 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             if (e.contains("contourId"))      c.contourId      = static_cast<std::uint64_t>(e.at("contourId").as_integer());
             if (e.contains("layerId"))        c.layerId        = static_cast<std::uint64_t>(e.at("layerId").as_integer());
             if (e.contains("signature"))      c.signature      = static_cast<std::uint64_t>(e.at("signature").as_integer());
+            if (e.contains("xcafEntry"))      c.xcafEntry      = QString::fromStdString(e.at("xcafEntry").as_string());
             if (e.contains("name"))           c.name           = QString::fromStdString(e.at("name").as_string());
             if (e.contains("enabled"))        c.enabled        = e.at("enabled").as_boolean();
             if (e.contains("workpieceEntry")) c.workpieceEntry = QString::fromStdString(e.at("workpieceEntry").as_string());
@@ -464,6 +477,19 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
     if (root.contains("lastAutoSortAxis") && root.at("lastAutoSortAxis").is_string()) {
         container.setLastAutoSortAxis(autoSortAxisFromString(
             QString::fromStdString(root.at("lastAutoSortAxis").as_string()), AutoSortAxis::XPos));
+    }
+
+    // 工程级刀路生成参数。
+    if (root.contains("generation") && root.at("generation").is_table()) {
+        const toml::value& gen = root.at("generation");
+        CamDataManager::GenerationParams gp = cam.generationParams();
+        if (gen.contains("leadInLength"))         gp.leadInLength         = gen.at("leadInLength").as_floating();
+        if (gen.contains("normalAngle"))          gp.normalAngle          = gen.at("normalAngle").as_floating();
+        if (gen.contains("deflection"))           gp.deflection           = gen.at("deflection").as_floating();
+        if (gen.contains("smoothAngle"))          gp.smoothAngle          = gen.at("smoothAngle").as_floating();
+        if (gen.contains("useFaceClassification")) gp.useFaceClassification = gen.at("useFaceClassification").as_boolean();
+        if (gen.contains("normalSampleStep"))     gp.normalSampleStep     = gen.at("normalSampleStep").as_floating();
+        cam.generationParams() = gp;
     }
 
     LCNC_INFO(lcnc::LogCode::Generic,

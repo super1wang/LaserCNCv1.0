@@ -4,6 +4,8 @@
 #include <QSet>
 #include <QVector>
 
+#include <algorithm>
+
 namespace lcnc::cam {
 
 CamDataManager::CamDataManager()
@@ -139,6 +141,53 @@ void CamDataManager::ensureToolpathLayers()
     syncLayerContourIds();
     if (m_layerManager)
         m_layerManager->emitLayersReset();
+}
+
+std::uint64_t CamDataManager::addLayer(const QString& name, const QColor& color)
+{
+    ToolpathLayer layer;
+    layer.layerId = nextLayerId();
+    const QString trimmed = name.trimmed();
+    layer.name = trimmed.isEmpty() ? QStringLiteral("图层 %1").arg(layer.layerId) : trimmed;
+    if (color.isValid())
+        layer.color = color;
+    m_toolpath.layers().push_back(layer);
+    m_dirty = true;
+    if (m_layerManager)
+        m_layerManager->emitLayerAdded(layer.layerId);
+    return layer.layerId;
+}
+
+bool CamDataManager::removeLayer(std::uint64_t layerId, std::uint64_t reassignTo)
+{
+    std::vector<ToolpathLayer>& layers = m_toolpath.layers();
+    auto it = std::find_if(layers.begin(), layers.end(),
+                           [layerId](const ToolpathLayer& l) { return l.layerId == layerId; });
+    if (it == layers.end())
+        return false;
+    if (layers.size() <= 1)
+        return false; // 至少保留一个图层，避免轮廓变成"无主"。
+
+    // 选择重挂目标：优先入参；非法/自身/0 时退回第一个其余图层。
+    std::uint64_t target = reassignTo;
+    if (target == layerId || target == 0 || !toolpathLayer(target)) {
+        target = 0;
+        for (const ToolpathLayer& l : layers) {
+            if (l.layerId != layerId) { target = l.layerId; break; }
+        }
+    }
+    for (LaserContour& c : m_toolpath.contours()) {
+        if (c.layerId == layerId)
+            c.layerId = target;
+    }
+    layers.erase(it);
+    syncLayerContourIds();
+    m_dirty = true;
+    if (m_layerManager) {
+        m_layerManager->emitLayerRemoved(layerId);
+        m_layerManager->emitContourMembershipChanged();
+    }
+    return true;
 }
 
 ToolpathLayer* CamDataManager::toolpathLayer(std::uint64_t layerId)

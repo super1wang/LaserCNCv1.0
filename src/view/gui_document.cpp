@@ -327,18 +327,33 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
 
     m_sourceDocument = document;
 
-    // Erase only tracked shapes — do NOT call eraseAll() which would also
-    // erase the overlay gizmos (ViewCube / Trihedron) stored in the same context.
-    Handle(XCAFDoc_ShapeTool) st = document->shapeTool();
-    TDF_LabelSequence freeShapes;
-    st->GetFreeShapes(freeShapes);
+    // 统一工程文档可同时持有工件与 CAM 轮廓实体（按 EntityKind 区分）。按本次请求的
+    // 域只取对应 EntityKind 的实体，避免把 CAM 轮廓当作工件域显示（或反之）。
+    // 仅注册被跟踪的 shape — 不调用 eraseAll()，以免连同 overlay gizmo 一起清掉。
+    QVector<LcncDocument::EntityKind> kinds;
+    switch (domain) {
+    case lcnc::ProjectDomain::Workpiece:
+        kinds = { LcncDocument::EntityKind::Workpiece, LcncDocument::EntityKind::Auxiliary };
+        break;
+    case lcnc::ProjectDomain::Machine:
+        kinds = { LcncDocument::EntityKind::Machine };
+        break;
+    case lcnc::ProjectDomain::Cam:
+        kinds = { LcncDocument::EntityKind::Cam };
+        break;
+    case lcnc::ProjectDomain::Project:
+        break;
+    }
 
-    for (int i = 1; i <= freeShapes.Length(); ++i) {
-        TDF_Label lbl   = freeShapes.Value(i);
-        TopoDS_Shape sh = XcafUtils::shape(lbl);
-        if (!sh.IsNull()) {
-            Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
-            registerDisplayObject(domain, document, XcafUtils::entry(lbl), ais);
+    for (LcncDocument::EntityKind kind : kinds) {
+        const TDF_LabelSequence labels = document->entityLabels(kind);
+        for (int i = 1; i <= labels.Length(); ++i) {
+            TDF_Label lbl   = labels.Value(i);
+            TopoDS_Shape sh = XcafUtils::shape(lbl);
+            if (!sh.IsNull()) {
+                Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
+                registerDisplayObject(domain, document, XcafUtils::entry(lbl), ais);
+            }
         }
     }
 
@@ -347,12 +362,11 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
         m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
                                                   m_renderingManager->runtimeFaceBoundary());
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "GuiDocument::rebuildDomain domain={} docId={} beforeDomain={} beforeTotal={} freeShapes={} afterDomain={} afterTotal={}",
+               "GuiDocument::rebuildDomain domain={} docId={} beforeDomain={} beforeTotal={} afterDomain={} afterTotal={}",
                static_cast<int>(domain),
                document->id(),
                beforeDomainCount,
                beforeTotalCount,
-               freeShapes.Length(),
                displayObjectCount(domain),
                m_displayObjects.size());
 

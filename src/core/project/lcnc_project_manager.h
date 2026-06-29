@@ -81,10 +81,9 @@ private:
     void syncSessionFromDocuments();
     void markDomainDirty(ProjectDomain domain);
 
-    std::unique_ptr<LcncDocument> m_workpieceDocument;
+    std::unique_ptr<LcncDocument> m_workpieceDocument;     ///< 统一工程文档：工件 + CAM 轮廓(EntityKind::Cam)。
     std::unique_ptr<LcncDocument> m_machineDocument;       ///< 内部 owned 兜底；attachMachineDocument 后被借用指针取代。
-    LcncDocument*                 m_machineBorrowed{nullptr}; ///< Phase D：CAM 工作台注入的"借用" machine doc。
-    std::unique_ptr<LcncDocument> m_camDocument;
+    LcncDocument*                 m_machineBorrowed{nullptr}; ///< CAM 工作台登记的"借用"机台 doc（非拥有视图路由引用）。
     std::unique_ptr<lcnc::cam::CamDataManager> m_camData; ///< 工程核心：CAM 运行时数据。
     int m_nextDocumentId{0};
     LcncProjectSession m_session;

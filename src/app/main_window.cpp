@@ -39,7 +39,7 @@
 #include "modules/cad/cad_module.h"
 #include "modules/cad/selection/cad_selection_resolver.h"
 #include "modules/cam/cam_module.h"
-#include "modules/cam/workspace/machine_workspace.h"
+#include "core/machine/machine_workspace.h"
 #include "modules/process/process_module.h"
 
 #include <SARibbonBar.h>
@@ -1307,14 +1307,18 @@ void MainWindow::createStatusBar()
 // ── Slots ──────────────────────────────────────────────────────────────────────
 void MainWindow::onProjectReset()
 {
+    // 文档-视图生命周期：工程切换时统一释放"按工程"显示资源（工件 + CAM 轮廓），
+    // 但机台是独立常驻参考资产 —— 不擦除其显示，使其跨工程保持在视图中。
     if (m_appContext && m_appContext->camModule()) {
         if (auto* gd = m_appContext->camModule()->workspaceGuiDocument()) {
             gd->eraseDomain(lcnc::ProjectDomain::Workpiece);
-            gd->eraseDomain(lcnc::ProjectDomain::Machine);
-            // Phase C：CAM AIS 改走 ContourId 注册，用 eraseAllContours 代替 eraseDomain。
+            // CAM AIS 走 ContourId 注册，用 eraseAllContours 释放轮廓显示。
             gd->eraseAllContours();
         }
     }
+    // 清空跨模块的轮廓选择顺序（属当前工程的瞬态状态）。
+    if (auto svc = lcnc::Kernel::current().services().getService<lcnc::core::SelectionService>())
+        svc->clear();
     if (m_appContext && m_appContext->cadModule()) {
         if (LcncDocument* doc = m_appContext->cadModule()->workpieceDocument())
             m_sbDocName->setText(doc->name());

@@ -72,6 +72,9 @@ struct LaserContour
     bool                       enabled{true};
     QString                    name;
     QString                    workpieceEntry; ///< Mounted workpiece entry owning this contour
+    QString                    xcafEntry;   ///< Label entry of this contour's wire inside the unified
+                                            ///< project document (EntityKind::Cam). Empty until the
+                                            ///< wire has been written into the doc (see CamModule).
 
     // ── Face-classification metadata (set when using face-based extraction) ──
     int  contourType{3};   ///< FaceGroupKind cast to int (3 = Unknown / legacy)

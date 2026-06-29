@@ -9,6 +9,8 @@
 class GuiApplication;
 class TaskManager;
 
+namespace lcnc::cam { class MachineWorkspace; }
+
 namespace lcnc {
 
 class AppSettings;
@@ -91,6 +93,9 @@ public:
 
     /// 返回 Kernel 持有的项目管理器（在 registerCoreServices 后非空）。
     LcncProjectManager* projectManager() const { return m_projectMgr.get(); }
+    /// 返回 Kernel 持有的机台工作台（独立参考资产，core 拥有、跨工程常驻；
+    /// 在 registerCoreServices 后非空）。CAM 模块借用它做加载/标定等业务。
+    lcnc::cam::MachineWorkspace* machineWorkspace() const { return m_machineWorkspace.get(); }
     /// 返回由 main() 创建并交付 Kernel 的图形/视图管理器。
     /// 所有权不在 Kernel（避免 core 反向 include view），在
     /// @ref setGuiApp 调用后非空。
@@ -136,6 +141,7 @@ private:
 
     // 由 Kernel 直接拥有所有权（取代原来的 self-managing singleton）。
     std::unique_ptr<LcncProjectManager> m_projectMgr;
+    std::unique_ptr<lcnc::cam::MachineWorkspace> m_machineWorkspace; ///< 独立机台参考资产（core 拥有）。
     std::unique_ptr<::TaskManager>     m_taskMgr;
     std::unique_ptr<AppSettings>       m_appSettings;
     std::shared_ptr<MachineConfigurationService> m_machineConfig;

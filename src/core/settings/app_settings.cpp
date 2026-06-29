@@ -1,7 +1,10 @@
 #include "core/settings/app_settings.h"
 
+#include "core/logging/logger.h"
+
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 
 namespace lcnc {
 
@@ -226,7 +229,28 @@ AppSettings::~AppSettings()
     if (g_instance == this) g_instance = nullptr;
 }
 
-bool AppSettings::loadDefault() { return load(defaultPath()); }
+bool AppSettings::loadDefault()
+{
+    const QString path = defaultPath();
+    if (path.trimmed().isEmpty()) {
+        LCNC_ERR(LogCode::SettingsLoaded,
+                 "AppSettings: empty config path; keeping built-in defaults");
+        return false;
+    }
+    if (!QFileInfo::exists(path)) {
+        // 首次启动 / 无有效配置：用内置默认值生成一份配置，避免"无配置"状态，
+        // 并便于用户后续编辑、排查路径问题。生成失败也不阻塞启动（继续用默认值）。
+        LCNC_INFO(LogCode::SettingsLoaded,
+                  "AppSettings: no config at '{}'; generating default",
+                  path.toStdString());
+        if (!saveDefault())
+            LCNC_WARN(LogCode::SettingsSaveFailed,
+                      "AppSettings: failed to write default config '{}'",
+                      path.toStdString());
+        return true;
+    }
+    return load(path);
+}
 bool AppSettings::saveDefault() const { return save(defaultPath()); }
 
 bool AppSettings::isModuleDisabled(const QString& moduleId) const

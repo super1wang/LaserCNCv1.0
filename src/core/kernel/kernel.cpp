@@ -2,6 +2,7 @@
 
 #include "core/logging/logger.h"
 #include "core/kinematics/machine_configuration_service.h"
+#include "core/machine/machine_workspace.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/services/selection_service.h"
 #include "core/settings/app_settings.h"
@@ -32,6 +33,7 @@ Kernel::~Kernel()
     // 释放顺序：依赖反向（gui 订阅了 lcnc 信号，故需在 main 中先于
     // Kernel 销毁 GuiApplication；Kernel 不拥有以避免 core 依赖 view）。
     m_taskMgr.reset();
+    m_machineWorkspace.reset();  // 机台资产在 projectMgr 之前释放（其借用引用随之失效，pm 析构不触碰它）。
     m_projectMgr.reset();
     m_appSettings.reset();
     if (g_kernelCurrent == this) g_kernelCurrent = nullptr;
@@ -56,8 +58,13 @@ void Kernel::registerCoreServices()
     // 1) AppSettings — 由 Kernel 直接拥有
     m_appSettings = std::make_unique<AppSettings>();
 
-    // 2) ProjectManager — 单项目生命周期和三域文档入口。
+    // 2) ProjectManager — 单项目生命周期和文档入口。
     m_projectMgr = std::make_unique<LcncProjectManager>();
+
+    // 2b) MachineWorkspace — 独立机台参考资产（core 拥有，跨工程常驻）。
+    //     在 pm 之后创建（其内部 LcncDocument 由 pm 代建并借给 pm 做视图域路由）。
+    m_machineWorkspace = std::make_unique<lcnc::cam::MachineWorkspace>();
+    m_projectMgr->attachMachineDocument(m_machineWorkspace->document());
 
     // 3) GuiApplication 不在 Kernel 创建（core 反向 view 依赖），由 main()
     //    在 registerCoreServices 后、bootstrap 前调用 setGuiApp(...)。
