@@ -447,6 +447,116 @@ Handle(AIS_Shape) GuiDocument::aisShape(DocumentId documentId, const QString& la
     return m_displayObjects.value(DisplayKey{documentId, labelEntry}).ais;
 }
 
+// ── CAM contour bodies (Phase C: ContourId-keyed) ─────────────────────────────
+namespace {
+constexpr char kCamContourEntryPrefix[] = "cam:";
+QString camContourEntry(std::uint64_t contourId)
+{
+    return QString::fromLatin1(kCamContourEntryPrefix) + QString::number(contourId);
+}
+bool isCamContourEntry(const QString& entry, std::uint64_t* outId = nullptr)
+{
+    if (!entry.startsWith(QLatin1String(kCamContourEntryPrefix)))
+        return false;
+    bool ok = false;
+    const std::uint64_t id = entry.mid(int(sizeof(kCamContourEntryPrefix) - 1)).toULongLong(&ok);
+    if (!ok)
+        return false;
+    if (outId) *outId = id;
+    return true;
+}
+}
+
+Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
+                                                   const TopoDS_Shape& wire,
+                                                   const QString& name)
+{
+    if (contourId == 0)
+        return {};
+    auto* pm = lcnc::Kernel::current().projectManager();
+    LcncDocument* camDoc = pm ? pm->camDocument() : nullptr;
+    if (!camDoc) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "GuiDocument::displayContourBody no cam document, skipping contourId={}", contourId);
+        return {};
+    }
+
+    const QString entry = camContourEntry(contourId);
+    // 替换语义：先删旧，再注册新（同 DisplayKey 命中即覆盖）。
+    eraseKey(DisplayKey{camDoc->id(), entry}, /*updateViewer=*/false);
+
+    Handle(AIS_Shape) ais = m_scene->displayShape(wire, /*fitAll=*/false, /*update=*/true, /*background=*/false);
+    if (ais.IsNull())
+        return {};
+    DisplayObject obj;
+    obj.domain     = lcnc::ProjectDomain::Cam;
+    obj.documentId = camDoc->id();
+    obj.document   = camDoc;
+    obj.entry      = entry;
+    obj.ais        = ais;
+    m_displayObjects.insert(DisplayKey{camDoc->id(), entry}, obj);
+    (void)name; // name 仅用于日志/将来交互提示
+    if (!m_view.IsNull())
+        m_view->Redraw();
+    return ais;
+}
+
+Handle(AIS_Shape) GuiDocument::aisShapeForContour(std::uint64_t contourId) const
+{
+    if (contourId == 0) return {};
+    const QString entry = camContourEntry(contourId);
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == lcnc::ProjectDomain::Cam && it.value().entry == entry)
+            return it.value().ais;
+    }
+    return {};
+}
+
+void GuiDocument::eraseContour(std::uint64_t contourId)
+{
+    if (contourId == 0) return;
+    const QString entry = camContourEntry(contourId);
+    QList<DisplayKey> matches;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == lcnc::ProjectDomain::Cam && it.value().entry == entry)
+            matches.append(it.key());
+    }
+    if (!matches.isEmpty() && eraseKeys(matches))
+        emit displayUpdated();
+}
+
+void GuiDocument::eraseAllContours()
+{
+    QList<DisplayKey> matches;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == lcnc::ProjectDomain::Cam)
+            matches.append(it.key());
+    }
+    if (!matches.isEmpty() && eraseKeys(matches))
+        emit displayUpdated();
+}
+
+QVector<std::uint64_t> GuiDocument::selectedContourIds() const
+{
+    QVector<std::uint64_t> out;
+    if (!m_scene) return out;
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull()) return out;
+    for (ctx->InitSelected(); ctx->MoreSelected(); ctx->NextSelected()) {
+        const AIS_InteractiveObject* objPtr = ctx->SelectedInteractive().get();
+        for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+            const DisplayObject& object = it.value();
+            if (object.domain != lcnc::ProjectDomain::Cam) continue;
+            if (object.ais.get() != objPtr) continue;
+            std::uint64_t cid = 0;
+            if (isCamContourEntry(object.entry, &cid) && cid != 0)
+                out.push_back(cid);
+            break;
+        }
+    }
+    return out;
+}
+
 void GuiDocument::setEntitySelectionMode(int selectionMode)
 {
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();

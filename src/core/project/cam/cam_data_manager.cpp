@@ -1,10 +1,18 @@
-#include "modules/cam/services/cam_data_manager.h"
+#include "core/project/cam/cam_data_manager.h"
 
 #include <QHash>
 #include <QSet>
 #include <QVector>
 
 namespace lcnc::cam {
+
+CamDataManager::CamDataManager()
+{
+    m_layerContainer.attach(&m_toolpath);
+    m_layerManager = std::make_unique<LayerManager>(&m_layerContainer);
+}
+
+CamDataManager::~CamDataManager() = default;
 
 void CamDataManager::clearToolpath(bool resetIds)
 {
@@ -16,6 +24,8 @@ void CamDataManager::clearToolpath(bool resetIds)
         m_signatureToLayerId.clear();
     }
     m_dirty = true;
+    if (m_layerManager)
+        m_layerManager->emitLayersReset();
 }
 
 ContourId CamDataManager::contourIdAt(int contourIdx) const
@@ -127,6 +137,8 @@ void CamDataManager::ensureToolpathLayers()
     }
 
     syncLayerContourIds();
+    if (m_layerManager)
+        m_layerManager->emitLayersReset();
 }
 
 ToolpathLayer* CamDataManager::toolpathLayer(std::uint64_t layerId)
@@ -165,11 +177,31 @@ bool CamDataManager::updateToolpathLayer(std::uint64_t layerId,
     ToolpathLayer* layer = toolpathLayer(layerId);
     if (!layer)
         return false;
-    layer->name = name.trimmed().isEmpty() ? layer->name : name.trimmed();
-    if (color.isValid())
+    bool anyChange = false;
+
+    const QString trimmedName = name.trimmed();
+    if (!trimmedName.isEmpty() && trimmedName != layer->name) {
+        layer->name = trimmedName;
+        anyChange = true;
+        if (m_layerManager)
+            m_layerManager->emitLayerPropertyChanged(layerId, LayerProperty::Name);
+    }
+    if (color.isValid() && layer->color != color) {
         layer->color = color;
-    layer->toolName = toolName.trimmed();
-    m_dirty = true;
+        anyChange = true;
+        if (m_layerManager)
+            m_layerManager->emitLayerPropertyChanged(layerId, LayerProperty::Color);
+    }
+    const QString trimmedTool = toolName.trimmed();
+    if (layer->toolName != trimmedTool) {
+        layer->toolName = trimmedTool;
+        anyChange = true;
+        if (m_layerManager)
+            m_layerManager->emitLayerPropertyChanged(layerId, LayerProperty::ToolName);
+    }
+    if (anyChange)
+        m_dirty = true;
+    // 保持与旧实现一致的"成功"语义：找到图层即返回 true，不要求字段必须变。
     return true;
 }
 
@@ -186,6 +218,8 @@ bool CamDataManager::setToolpathLayerEnabled(std::uint64_t layerId, bool enabled
             contour.enabled = enabled;
     }
     m_dirty = true;
+    if (m_layerManager)
+        m_layerManager->emitLayerPropertyChanged(layerId, LayerProperty::Enabled);
     return true;
 }
 
@@ -196,9 +230,15 @@ bool CamDataManager::assignContourToLayer(ContourId contourId, std::uint64_t lay
     const int index = contourIndexById(contourId);
     if (index < 0)
         return false;
+    if (m_toolpath.contour(index).layerId == layerId)
+        return false;
     m_toolpath.contour(index).layerId = layerId;
     syncLayerContourIds();
     m_dirty = true;
+    if (m_layerManager) {
+        m_layerManager->emitContourMembershipChanged();
+        m_layerManager->emitLayerPropertyChanged(layerId, LayerProperty::ContourMembership);
+    }
     return true;
 }
 
@@ -226,6 +266,8 @@ bool CamDataManager::reorderContours(const QList<int>& order)
     ensureContourIds();
     syncLayerContourIds();
     m_dirty = true;
+    if (m_layerManager)
+        m_layerManager->emitContourMembershipChanged();
     return true;
 }
 
@@ -311,6 +353,8 @@ void CamDataManager::replaceToolpath(LaserToolpath&& toolpath,
             m_signatureToLayerId.insert(l.signature, l.layerId);
     syncLayerContourIds();
     m_dirty = false;
+    if (m_layerManager)
+        m_layerManager->emitLayersReset();
 }
 
 } // namespace lcnc::cam

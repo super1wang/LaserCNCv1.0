@@ -21,12 +21,15 @@ enum class ProjectDomain {
 
 /**
  * @brief Dirty regions tracked by the project manager.
+ *
+ * Machine geometry is a reference asset (independently managed by the CAM
+ * MachineWorkspace, never persisted into the .lcnc project), so it has no dirty
+ * flag — machine edits never mark the project dirty.
  */
 enum class ProjectDirtyFlag {
     None      = 0x0,
     Project   = 0x1,
     Workpiece = 0x2,
-    Machine   = 0x4,
     Cam       = 0x8
 };
 

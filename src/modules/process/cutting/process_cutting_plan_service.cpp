@@ -5,6 +5,7 @@
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
 #include "core/services/selection_service.h"
+#include "modules/cam/i_cam_layer_provider.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
 #include "modules/process/Tool/Tool.h"
 #include "modules/process/Tool/ToolFactory.h"
@@ -21,22 +22,6 @@
 #include <fstream>
 
 namespace lcnc::process {
-
-namespace {
-
-constexpr int kPlanSchemaVersion = 2;
-
-constexpr char kFieldLayerId[]          = "layerId";
-constexpr char kFieldLayerName[]        = "layerName";
-constexpr char kFieldToolName[]         = "toolName";
-constexpr char kFieldEnabled[]          = "enabled";
-constexpr char kFieldOrder[]            = "order";
-constexpr char kFieldCompensation[]     = "compensationIndex";
-constexpr char kFieldIncludedContours[] = "includedContours";
-constexpr char kFieldManualOrder[]      = "manualContourOrder";
-constexpr char kFieldLastAxis[]         = "lastAutoSortAxis";
-
-} // namespace
 
 QString autoSortAxisToString(AutoSortAxis a)
 {
@@ -99,128 +84,129 @@ void ProcessCuttingPlanService::setToolpathProvider(std::shared_ptr<lcnc::cam::I
     m_provider = std::move(provider);
 }
 
+void ProcessCuttingPlanService::setLayerProvider(std::shared_ptr<lcnc::cam::ICamLayerProvider> provider)
+{
+    m_layerProvider = std::move(provider);
+    wireLayerProviderSignals();
+}
+
+void ProcessCuttingPlanService::wireLayerProviderSignals()
+{
+    // Phase B 收尾：调用方（ProcessModule）负责把 layerProvider->notifier() 的
+    // 细粒度 Qt 信号桥接到本服务的 planChanged/manualOrderChanged。这里只在 provider
+    // 接入完成时立即广播一次，确保首屏 UI 拉到正确值。
+    if (m_layerProvider)
+        bumpRevisionAndNotify();
+}
+
 QVector<ProcessLayerJob> ProcessCuttingPlanService::layerJobs() const
 {
     QVector<ProcessLayerJob> out;
-    out.reserve(m_layerOrder.size());
-    for (std::uint64_t id : m_layerOrder) {
-        auto it = m_jobs.constFind(id);
-        if (it != m_jobs.constEnd())
-            out.append(*it);
+    if (!m_layerProvider)
+        return out;
+    const auto layers = m_layerProvider->layers();
+    out.reserve(layers.size());
+    int seq = 1;
+    for (const auto& s : layers) {
+        ProcessLayerJob job;
+        job.layerId           = s.layerId;
+        job.layerName         = s.name;
+        job.toolName          = s.toolName;
+        job.enabled           = s.enabled;
+        job.order             = seq++; // deprecated 字段，仅做次序提示
+        job.compensationIndex = s.compensationIndex;
+        job.includedContours  = s.includedContours;
+        out.append(job);
     }
     return out;
 }
 
 bool ProcessCuttingPlanService::layerJob(std::uint64_t layerId, ProcessLayerJob* out) const
 {
-    auto it = m_jobs.constFind(layerId);
-    if (it == m_jobs.constEnd())
-        return false;
-    if (out) *out = *it;
-    return true;
+    if (!m_layerProvider) return false;
+    const auto layers = m_layerProvider->layers();
+    for (const auto& s : layers) {
+        if (s.layerId != layerId) continue;
+        if (out) {
+            out->layerId           = s.layerId;
+            out->layerName         = s.name;
+            out->toolName          = s.toolName;
+            out->enabled           = s.enabled;
+            out->order             = 0;
+            out->compensationIndex = s.compensationIndex;
+            out->includedContours  = s.includedContours;
+        }
+        return true;
+    }
+    return false;
 }
 
 void ProcessCuttingPlanService::setLayerJob(const ProcessLayerJob& job)
 {
-    if (job.layerId == 0)
-        return;
-    const bool newEntry = !m_jobs.contains(job.layerId);
-    m_jobs.insert(job.layerId, job);
-    if (newEntry)
-        m_layerOrder.append(job.layerId);
+    if (!m_layerProvider || job.layerId == 0) return;
+    m_layerProvider->setLayerToolName(job.layerId, job.toolName);
+    m_layerProvider->setLayerEnabled(job.layerId, job.enabled);
+    m_layerProvider->setLayerCompensationIndex(job.layerId, job.compensationIndex);
+    m_layerProvider->setLayerIncludedContours(job.layerId, job.includedContours);
     bumpRevisionAndNotify();
 }
 
 void ProcessCuttingPlanService::setLayerJobs(const QVector<ProcessLayerJob>& jobs)
 {
-    m_jobs.clear();
-    m_layerOrder.clear();
+    if (!m_layerProvider) return;
     for (const auto& j : jobs) {
-        if (j.layerId == 0)
-            continue;
-        m_jobs.insert(j.layerId, j);
-        m_layerOrder.append(j.layerId);
+        if (j.layerId == 0) continue;
+        m_layerProvider->setLayerToolName(j.layerId, j.toolName);
+        m_layerProvider->setLayerEnabled(j.layerId, j.enabled);
+        m_layerProvider->setLayerCompensationIndex(j.layerId, j.compensationIndex);
+        m_layerProvider->setLayerIncludedContours(j.layerId, j.includedContours);
     }
     bumpRevisionAndNotify();
 }
 
 void ProcessCuttingPlanService::clearAll()
 {
-    m_jobs.clear();
-    m_layerOrder.clear();
-    m_sortStrategy = CuttingPlanSortStrategy::LayerThenContour;
-    m_manualContourOrder.clear();
-    m_manualOrderSet.clear();
+    // CAM 端 LayerContainer 的"清空"由 CamDataManager::clearToolpath 负责；
+    // 这里只把策略与人工顺序复位即可（图层是 CAM 数据生命周期的）。
+    if (m_layerProvider) {
+        m_layerProvider->clearManualOrder();
+        m_layerProvider->setSortStrategy(CuttingPlanSortStrategy::LayerThenContour);
+    }
     bumpRevisionAndNotify();
+}
+
+CuttingPlanSortStrategy ProcessCuttingPlanService::sortStrategy() const
+{
+    return m_layerProvider ? m_layerProvider->sortStrategy()
+                           : CuttingPlanSortStrategy::LayerThenContour;
 }
 
 void ProcessCuttingPlanService::setSortStrategy(CuttingPlanSortStrategy s)
 {
-    if (m_sortStrategy == s)
-        return;
-    m_sortStrategy = s;
+    if (!m_layerProvider) return;
+    m_layerProvider->setSortStrategy(s);
     bumpRevisionAndNotify();
 }
 
 void ProcessCuttingPlanService::syncFromCam()
 {
-    if (!m_provider) {
+    // Phase B：图层/人工顺序的"存量"已经在 CAM 内统一了；不再需要 jobs 增删表的同步。
+    // 唯一仍可能需要做的是清掉手动顺序里已不存在的 contourId（同步 alive 集）。
+    if (!m_provider || !m_layerProvider) {
         bumpRevisionAndNotify();
         return;
     }
-
     const auto snapshot = m_provider->exportToolpathSnapshot();
+    QSet<lcnc::cam::ContourId> alive;
+    for (const auto& c : snapshot.contours) alive.insert(c.contourId);
 
-    // 1. 从 snapshot 中提取唯一图层（按出现次序），保留 CAM 端 layerName 镜像。
-    QHash<std::uint64_t, QString> camLayerNames;
-    QVector<std::uint64_t> camLayerOrder;
-    for (const auto& contour : snapshot.contours) {
-        if (contour.layerId == 0)
-            continue;
-        if (!camLayerNames.contains(contour.layerId)) {
-            camLayerNames.insert(contour.layerId, contour.layerName);
-            camLayerOrder.append(contour.layerId);
-        }
-    }
-
-    // 2. 删除已不存在的图层条目。
-    QHash<std::uint64_t, ProcessLayerJob> nextJobs;
-    QVector<std::uint64_t> nextOrder;
-    nextJobs.reserve(camLayerOrder.size());
-    nextOrder.reserve(camLayerOrder.size());
-
-    int sequentialOrder = 1;
-    for (std::uint64_t layerId : camLayerOrder) {
-        ProcessLayerJob job;
-        if (auto it = m_jobs.constFind(layerId); it != m_jobs.constEnd()) {
-            job = *it; // 保留用户已设置的 toolName/enabled/order/compensation
-        } else {
-            job.layerId = layerId;
-            job.enabled = true;
-            job.order   = sequentialOrder; // 新图层放在末尾
-        }
-        job.layerName = camLayerNames.value(layerId, job.layerName);
-        nextJobs.insert(layerId, job);
-        nextOrder.append(layerId);
-        ++sequentialOrder;
-    }
-
-    m_jobs = std::move(nextJobs);
-    m_layerOrder = std::move(nextOrder);
-
-    // 3. 清掉 manual 顺序里已不存在的 contourId。
-    if (!m_manualContourOrder.isEmpty()) {
-        QSet<lcnc::cam::ContourId> alive;
-        for (const auto& c : snapshot.contours) alive.insert(c.contourId);
-        QVector<lcnc::cam::ContourId> filtered;
-        filtered.reserve(m_manualContourOrder.size());
-        for (auto id : m_manualContourOrder)
-            if (alive.contains(id)) filtered.append(id);
-        if (filtered.size() != m_manualContourOrder.size()) {
-            m_manualContourOrder = filtered;
-            m_manualOrderSet = QSet<lcnc::cam::ContourId>(filtered.cbegin(), filtered.cend());
-        }
-    }
+    const auto manual = m_layerProvider->manualContourOrder();
+    QVector<lcnc::cam::ContourId> filtered;
+    filtered.reserve(manual.size());
+    for (auto id : manual)
+        if (alive.contains(id)) filtered.append(id);
+    if (filtered.size() != manual.size())
+        m_layerProvider->setManualContourOrder(filtered);
 
     bumpRevisionAndNotify();
 }
@@ -247,11 +233,22 @@ ProcessCuttingPlanService::buildCuttingList(const CuttingListFilter& filter) con
     if (snapshot.contours.isEmpty())
         return out;
 
-    // 1. 先把符合 enabled 条件的轮廓收集成 (contour, layerJob*) 列表。
+    // 从 CAM 拉一份图层级映射 (layerId → snapshot)，按图层 layer-level 字段过滤/绑工具。
+    QHash<std::uint64_t, lcnc::cam::LayerSnapshot> layerById;
+    if (m_layerProvider) {
+        const auto layers = m_layerProvider->layers();
+        layerById.reserve(layers.size());
+        for (const auto& l : layers) layerById.insert(l.layerId, l);
+    }
+    const CuttingPlanSortStrategy strategy = sortStrategy();
+    const QVector<lcnc::cam::ContourId> manualOrder =
+        m_layerProvider ? m_layerProvider->manualContourOrder() : QVector<lcnc::cam::ContourId>{};
+    QSet<lcnc::cam::ContourId> manualSet(manualOrder.cbegin(), manualOrder.cend());
+
     struct Item
     {
         const lcnc::cam::ToolpathExportContour* contour;
-        const ProcessLayerJob* job;
+        const lcnc::cam::LayerSnapshot*         layer;
     };
     QVector<Item> items;
     items.reserve(snapshot.contours.size());
@@ -259,45 +256,40 @@ ProcessCuttingPlanService::buildCuttingList(const CuttingListFilter& filter) con
     for (const auto& contour : snapshot.contours) {
         if (!contour.enabled || !contour.layerEnabled)
             continue;
-        const ProcessLayerJob* job = nullptr;
-        if (auto it = m_jobs.constFind(contour.layerId); it != m_jobs.constEnd())
-            job = &it.value();
-        if (job && !job->enabled)
+        const lcnc::cam::LayerSnapshot* layer = nullptr;
+        if (auto it = layerById.constFind(contour.layerId); it != layerById.constEnd())
+            layer = &it.value();
+        if (layer && !layer->enabled)
             continue;
-        // 轮廓级过滤：空 includedContours = 全选；非空时只接受集合内的轮廓。
-        if (job && !job->includedContours.isEmpty()
-            && !job->includedContours.contains(contour.contourId)) {
-            continue;
-        }
-        // Manual 策略下，链表只包含用户显式排过序的轮廓；其它一律忽略。
-        if (m_sortStrategy == CuttingPlanSortStrategy::Manual
-            && !m_manualOrderSet.contains(contour.contourId)) {
+        if (layer && !layer->includedContours.isEmpty()
+            && !layer->includedContours.contains(contour.contourId)) {
             continue;
         }
-        items.append({&contour, job});
+        if (strategy == CuttingPlanSortStrategy::Manual
+            && !manualSet.contains(contour.contourId)) {
+            continue;
+        }
+        items.append({&contour, layer});
     }
 
-    // 2. 排序。
-    // 预计算 manual 序列中 contourId -> 位置，加速查找。
     QHash<lcnc::cam::ContourId, int> manualRank;
-    if (m_sortStrategy == CuttingPlanSortStrategy::Manual) {
-        manualRank.reserve(m_manualContourOrder.size());
-        for (int i = 0; i < m_manualContourOrder.size(); ++i)
-            manualRank.insert(m_manualContourOrder[i], i);
+    if (strategy == CuttingPlanSortStrategy::Manual) {
+        manualRank.reserve(manualOrder.size());
+        for (int i = 0; i < manualOrder.size(); ++i)
+            manualRank.insert(manualOrder[i], i);
     }
 
-    auto cmp = [this, &manualRank](const Item& a, const Item& b) -> bool {
-        switch (m_sortStrategy) {
+    auto cmp = [strategy, &manualRank](const Item& a, const Item& b) -> bool {
+        switch (strategy) {
         case CuttingPlanSortStrategy::CamOrder:
-            // 已经是 CAM 顺序，stable_sort 等价
             return false;
         case CuttingPlanSortStrategy::LayerThenContour:
             if (a.contour->layerId != b.contour->layerId)
                 return a.contour->layerId < b.contour->layerId;
             return a.contour->contourId < b.contour->contourId;
         case CuttingPlanSortStrategy::ToolThenLayer: {
-            const QString ta = a.job ? a.job->toolName : QString();
-            const QString tb = b.job ? b.job->toolName : QString();
+            const QString ta = a.layer ? a.layer->toolName : QString();
+            const QString tb = b.layer ? b.layer->toolName : QString();
             const int c = QString::localeAwareCompare(ta, tb);
             if (c != 0) return c < 0;
             if (a.contour->layerId != b.contour->layerId)
@@ -305,7 +297,6 @@ ProcessCuttingPlanService::buildCuttingList(const CuttingListFilter& filter) con
             return a.contour->contourId < b.contour->contourId;
         }
         case CuttingPlanSortStrategy::Manual: {
-            // 轮廓级 manual：以 m_manualContourOrder 中的索引为序；不在列表中的沉到末尾。
             const int ra = manualRank.value(a.contour->contourId, INT_MAX);
             const int rb = manualRank.value(b.contour->contourId, INT_MAX);
             if (ra != rb) return ra < rb;
@@ -316,7 +307,6 @@ ProcessCuttingPlanService::buildCuttingList(const CuttingListFilter& filter) con
     };
     std::stable_sort(items.begin(), items.end(), cmp);
 
-    // 3. 应用 startSequence / endSequence 过滤（1-based）。
     const int start = std::max(1, filter.startSequence);
     const int end   = filter.endSequence > 0 ? filter.endSequence : items.size();
 
@@ -331,8 +321,8 @@ ProcessCuttingPlanService::buildCuttingList(const CuttingListFilter& filter) con
         entry.layerId           = it.contour->layerId;
         entry.layerName         = it.contour->layerName;
         entry.contourName       = it.contour->contourName;
-        entry.toolName          = it.job ? it.job->toolName : QString();
-        entry.compensationIndex = it.job ? it.job->compensationIndex : QString();
+        entry.toolName          = it.layer ? it.layer->toolName : QString();
+        entry.compensationIndex = it.layer ? it.layer->compensationIndex : QString();
         entry.sequence          = seq;
         out.append(entry);
     }
@@ -358,244 +348,81 @@ ProcessCuttingPlanService::contoursInLayer(std::uint64_t layerId) const
     return out;
 }
 
-QString ProcessCuttingPlanService::kPlanFileName()
-{
-    return QStringLiteral("process_cutting_plan.toml");
-}
-
-bool ProcessCuttingPlanService::saveToProjectDir(const QString& packageDir, QString* errorMessage) const
-{
-    QDir dir(packageDir);
-    if (!dir.exists() && !QDir().mkpath(packageDir)) {
-        if (errorMessage)
-            *errorMessage = QObject::tr("无法创建项目目录: %1").arg(packageDir);
-        return false;
-    }
-
-    toml::value root(toml::table{});
-    root["schemaVersion"] = kPlanSchemaVersion;
-    root["sortStrategy"]  = sortStrategyToString(m_sortStrategy).toStdString();
-
-    toml::array layers;
-    for (std::uint64_t id : m_layerOrder) {
-        auto it = m_jobs.constFind(id);
-        if (it == m_jobs.constEnd())
-            continue;
-        const ProcessLayerJob& j = *it;
-        toml::value entry(toml::table{});
-        entry[kFieldLayerId]      = static_cast<std::int64_t>(j.layerId);
-        entry[kFieldLayerName]    = j.layerName.toStdString();
-        entry[kFieldToolName]     = j.toolName.toStdString();
-        entry[kFieldEnabled]      = j.enabled;
-        entry[kFieldOrder]        = static_cast<std::int64_t>(j.order);
-        entry[kFieldCompensation] = j.compensationIndex.toStdString();
-        toml::array includedArr;
-        // QSet 顺序不定，写入时排序确保 diff 稳定。
-        QList<lcnc::cam::ContourId> sortedIncluded(j.includedContours.cbegin(),
-                                                   j.includedContours.cend());
-        std::sort(sortedIncluded.begin(), sortedIncluded.end());
-        for (auto cid : sortedIncluded)
-            includedArr.push_back(static_cast<std::int64_t>(cid));
-        entry[kFieldIncludedContours] = includedArr;
-        layers.push_back(entry);
-    }
-    root["layers"] = layers;
-
-    // 手动轮廓顺序（轮廓级 Manual 策略）。
-    toml::array manualArr;
-    for (auto cid : m_manualContourOrder)
-        manualArr.push_back(static_cast<std::int64_t>(cid));
-    root[kFieldManualOrder] = manualArr;
-    root[kFieldLastAxis] = autoSortAxisToString(m_lastAutoSortAxis).toStdString();
-
-    const QString filePath = dir.filePath(kPlanFileName());
-    std::ofstream out(filePath.toStdString(), std::ios::binary);
-    if (!out.is_open()) {
-        if (errorMessage)
-            *errorMessage = QObject::tr("无法写入文件: %1").arg(filePath);
-        return false;
-    }
-    out << toml::format(root);
-    LCNC_INFO(lcnc::LogCode::Generic,
-              "process.cuttingPlan: saved {} layers to '{}'",
-              m_layerOrder.size(),
-              filePath.toStdString());
-    return true;
-}
-
-bool ProcessCuttingPlanService::loadFromProjectDir(const QString& packageDir, QString* errorMessage)
-{
-    const QString filePath = QDir(packageDir).filePath(kPlanFileName());
-    if (!QFileInfo::exists(filePath)) {
-        // 项目尚未保存过工艺数据，视为正常的"全新项目"。
-        clearAll();
-        return true;
-    }
-
-    toml::value root;
-    try {
-        root = toml::parse(filePath.toStdString());
-    } catch (const std::exception& e) {
-        if (errorMessage)
-            *errorMessage = QObject::tr("解析 process_cutting_plan.toml 失败: %1")
-                                .arg(QString::fromLocal8Bit(e.what()));
-        return false;
-    }
-
-    if (!root.is_table()) {
-        if (errorMessage)
-            *errorMessage = QObject::tr("process_cutting_plan.toml 根节点不是 table");
-        return false;
-    }
-
-    QHash<std::uint64_t, ProcessLayerJob> nextJobs;
-    QVector<std::uint64_t> nextOrder;
-
-    if (root.contains("sortStrategy") && root.at("sortStrategy").is_string()) {
-        m_sortStrategy = sortStrategyFromString(
-            QString::fromStdString(root.at("sortStrategy").as_string()),
-            CuttingPlanSortStrategy::LayerThenContour);
-    }
-
-    if (root.contains("layers") && root.at("layers").is_array()) {
-        for (const toml::value& entry : root.at("layers").as_array()) {
-            if (!entry.is_table()) continue;
-            ProcessLayerJob j;
-            if (entry.contains(kFieldLayerId) && entry.at(kFieldLayerId).is_integer())
-                j.layerId = static_cast<std::uint64_t>(entry.at(kFieldLayerId).as_integer());
-            if (j.layerId == 0)
-                continue;
-            if (entry.contains(kFieldLayerName) && entry.at(kFieldLayerName).is_string())
-                j.layerName = QString::fromStdString(entry.at(kFieldLayerName).as_string());
-            if (entry.contains(kFieldToolName) && entry.at(kFieldToolName).is_string())
-                j.toolName = QString::fromStdString(entry.at(kFieldToolName).as_string());
-            if (entry.contains(kFieldEnabled) && entry.at(kFieldEnabled).is_boolean())
-                j.enabled = entry.at(kFieldEnabled).as_boolean();
-            if (entry.contains(kFieldOrder) && entry.at(kFieldOrder).is_integer())
-                j.order = static_cast<int>(entry.at(kFieldOrder).as_integer());
-            if (entry.contains(kFieldCompensation) && entry.at(kFieldCompensation).is_string())
-                j.compensationIndex = QString::fromStdString(entry.at(kFieldCompensation).as_string());
-            if (entry.contains(kFieldIncludedContours)
-                && entry.at(kFieldIncludedContours).is_array()) {
-                for (const toml::value& cid : entry.at(kFieldIncludedContours).as_array()) {
-                    if (cid.is_integer())
-                        j.includedContours.insert(
-                            static_cast<lcnc::cam::ContourId>(cid.as_integer()));
-                }
-            }
-
-            nextJobs.insert(j.layerId, j);
-            nextOrder.append(j.layerId);
-        }
-    }
-
-    m_jobs = std::move(nextJobs);
-    m_layerOrder = std::move(nextOrder);
-
-    // 读取手动轮廓顺序与 last axis（若存在）。
-    m_manualContourOrder.clear();
-    m_manualOrderSet.clear();
-    if (root.contains(kFieldManualOrder) && root.at(kFieldManualOrder).is_array()) {
-        for (const toml::value& v : root.at(kFieldManualOrder).as_array()) {
-            if (!v.is_integer()) continue;
-            const auto cid = static_cast<lcnc::cam::ContourId>(v.as_integer());
-            if (cid == 0) continue;
-            if (m_manualOrderSet.contains(cid)) continue;
-            m_manualContourOrder.append(cid);
-            m_manualOrderSet.insert(cid);
-        }
-    }
-    if (root.contains(kFieldLastAxis) && root.at(kFieldLastAxis).is_string()) {
-        m_lastAutoSortAxis = autoSortAxisFromString(
-            QString::fromStdString(root.at(kFieldLastAxis).as_string()),
-            AutoSortAxis::XPos);
-    }
-
-    LCNC_INFO(lcnc::LogCode::Generic,
-              "process.cuttingPlan: loaded {} layers from '{}'",
-              m_layerOrder.size(),
-              filePath.toStdString());
-    bumpRevisionAndNotify();
-    return true;
-}
+// 项目持久化已下沉到 core（cam_toolpath_io）；本服务不再读写任何项目文件。
 
 // ── 手动顺序 / 自动排序 / Provider 实现 ─────────────────────────────────────
 
 void ProcessCuttingPlanService::bumpRevisionAndNotify(bool manualOnly)
 {
     ++m_planRevision;
-    if (manualOnly) {
+    if (manualOnly)
         emit manualOrderChanged();
-        // manual 顺序变化必然会影响 Manual 策略下的链表，所以同时也广播一次 planChanged
-        // 以便 UI / TravelPathRenderer 等订阅者统一刷新。
-    }
     emit planChanged();
-    // 跨模块通知（CAM 端 TravelPathRenderer 不能 connect 到我们的 Qt 信号——
-    // 它只持有 IProcessCuttingPlanProvider 接口），统一走 EventBus。
     if (auto* k = lcnc::Kernel::tryCurrent())
         k->events().publish(lcnc::process::events::CuttingPlanChanged{m_planRevision});
 }
 
+void ProcessCuttingPlanService::notifyExternalPlanChanged()
+{
+    bumpRevisionAndNotify(false);
+}
+
+void ProcessCuttingPlanService::notifyExternalManualOrderChanged()
+{
+    bumpRevisionAndNotify(true);
+}
+
+QVector<lcnc::cam::ContourId> ProcessCuttingPlanService::manualContourOrder() const
+{
+    return m_layerProvider ? m_layerProvider->manualContourOrder()
+                           : QVector<lcnc::cam::ContourId>{};
+}
+
 void ProcessCuttingPlanService::setManualContourOrder(const QVector<lcnc::cam::ContourId>& ids)
 {
-    m_manualContourOrder.clear();
-    m_manualOrderSet.clear();
-    m_manualContourOrder.reserve(ids.size());
-    for (auto id : ids) {
-        if (id == 0) continue;
-        if (m_manualOrderSet.contains(id)) continue;
-        m_manualContourOrder.append(id);
-        m_manualOrderSet.insert(id);
-    }
+    if (!m_layerProvider) return;
+    m_layerProvider->setManualContourOrder(ids);
     bumpRevisionAndNotify(true);
 }
 
 int ProcessCuttingPlanService::appendToManualOrder(const QVector<lcnc::cam::ContourId>& ids)
 {
-    int added = 0;
-    for (auto id : ids) {
-        if (id == 0) continue;
-        if (m_manualOrderSet.contains(id)) continue;
-        m_manualContourOrder.append(id);
-        m_manualOrderSet.insert(id);
-        ++added;
-    }
-    if (added > 0)
-        bumpRevisionAndNotify(true);
+    if (!m_layerProvider) return 0;
+    const int added = m_layerProvider->appendToManualOrder(ids);
+    if (added > 0) bumpRevisionAndNotify(true);
     return added;
 }
 
 void ProcessCuttingPlanService::removeFromManualOrder(const QVector<lcnc::cam::ContourId>& ids)
 {
-    bool changed = false;
-    for (auto id : ids) {
-        if (m_manualOrderSet.remove(id)) {
-            m_manualContourOrder.removeAll(id);
-            changed = true;
-        }
-    }
-    if (changed)
-        bumpRevisionAndNotify(true);
+    if (!m_layerProvider) return;
+    m_layerProvider->removeFromManualOrder(ids);
+    bumpRevisionAndNotify(true);
 }
 
 void ProcessCuttingPlanService::clearManualOrder()
 {
-    if (m_manualContourOrder.isEmpty()) return;
-    m_manualContourOrder.clear();
-    m_manualOrderSet.clear();
+    if (!m_layerProvider) return;
+    m_layerProvider->clearManualOrder();
     bumpRevisionAndNotify(true);
+}
+
+AutoSortAxis ProcessCuttingPlanService::lastAutoSortAxis() const
+{
+    return m_layerProvider ? m_layerProvider->lastAutoSortAxis() : AutoSortAxis::XPos;
 }
 
 void ProcessCuttingPlanService::setLastAutoSortAxis(AutoSortAxis a)
 {
-    if (m_lastAutoSortAxis == a) return;
-    m_lastAutoSortAxis = a;
+    if (!m_layerProvider) return;
+    m_layerProvider->setLastAutoSortAxis(a);
     // 仅 UI 状态变化，不动 plan revision。
 }
 
 bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorMessage)
 {
-    m_lastAutoSortAxis = axis;
+    if (m_layerProvider)
+        m_layerProvider->setLastAutoSortAxis(axis);
 
     if (!m_provider) {
         if (errorMessage)
@@ -662,7 +489,6 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
             selectedInputs.append(it.value());
     }
 
-    // 有有效选择时仅对选择集自动排序；否则回退到全部启用轮廓。
     const auto ordered = selectedInputs.isEmpty()
         ? lcnc::cam::planContourOrder(inputs, params)
         : lcnc::cam::planContourOrder(selectedInputs, params);
@@ -672,9 +498,10 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
         return false;
     }
 
-    m_manualContourOrder = ordered;
-    m_manualOrderSet = QSet<lcnc::cam::ContourId>(ordered.cbegin(), ordered.cend());
-    m_sortStrategy = CuttingPlanSortStrategy::Manual;
+    if (m_layerProvider) {
+        m_layerProvider->setManualContourOrder(ordered);
+        m_layerProvider->setSortStrategy(CuttingPlanSortStrategy::Manual);
+    }
 
     LCNC_INFO(lcnc::LogCode::Generic,
               "process.cuttingPlan: applyAutoSort axis={} -> {} contours",

@@ -485,6 +485,17 @@ CadModule::CadModule(QObject* parent)
         emit workpieceStructureChanged();
         emit sketchSelectionChanged(0);
     });
+    // 项目打开后刷新工件显示：确保无论通过哪个入口打开，视图都会重建。
+    connect(project, &lcnc::LcncProjectManager::projectOpened, this, [this, project](const QString&) {
+        if (auto* gd = workspaceGuiDocument()) {
+            gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
+            if (auto* md = project->machineDocument())
+                gd->rebuildDomain(lcnc::ProjectDomain::Machine, md);
+            if (auto* md = project->machineDocument())
+                gd->updateMachineWorkspaceTransforms(md, project->workpieceDocument());
+            gd->fitAll();
+        }
+    });
     connect(project, &lcnc::LcncProjectManager::domainDataChanged, this, [this, project](lcnc::ProjectDomain domain) {
         const DocumentId id = project->documentId(domain);
         if (id != kInvalidDocumentId)
@@ -534,7 +545,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
         if (auto* gd = workspaceGuiDocument()) {
             gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
             gd->rebuildDomain(lcnc::ProjectDomain::Machine, project->machineDocument());
-            gd->rebuildDomain(lcnc::ProjectDomain::Cam, project->camDocument());
+            // Phase C：CAM AIS 由 CamModule 在加载 toolpath 缓存时按 ContourId 重建，
+            // 不再通过 GuiDocument::rebuildDomain(Cam, ...) 从 XCAF 还原。
             gd->updateMachineWorkspaceTransforms(project->machineDocument(), project->workpieceDocument());
             gd->fitAll();
         }

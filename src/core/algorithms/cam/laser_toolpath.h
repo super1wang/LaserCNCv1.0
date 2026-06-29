@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QString>
 #include <QList>
+#include <QSet>
 
 #include <gp_Pnt.hxx>
 #include <gp_Dir.hxx>
@@ -83,9 +84,17 @@ struct ToolpathLayer
     std::uint64_t signature{0};   ///< Deterministic key fingerprint (mirrors LaserContour::signature)
     QString name;
     QColor color{QColor(80, 190, 150)};
-    QString toolName;   ///< @deprecated Tool mapping moved to ProcessCuttingPlanService; kept for legacy projects.
+    QString toolName;             ///< 该图层的工具名（自 Phase B 起为唯一权威，替代原 Process 端副本）。
     bool enabled{true};
     std::vector<std::uint64_t> contourIds;
+
+    // ── Phase A: layer-level state moved in from ProcessCuttingPlanService ───
+    // These fields default to the previous Process-side semantics so old code
+    // paths that ignore them stay correct. They become the single source of
+    // truth in Phase B; readers should prefer LayerContainer accessors.
+    QString compensationIndex;            ///< Default compensation index for this layer.
+    QSet<std::uint64_t> includedContours; ///< Empty = all enabled contours; non-empty = explicit subset (ContourId).
+    int manualOrder{0};                   ///< Layer-level order hint; sorting still uses LayerContainer-level order.
 };
 
 /**

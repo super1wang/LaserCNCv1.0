@@ -19,6 +19,7 @@
 #include "modules/process/Process/qg_processeswidget.h"
 #include "view/widget_occ_view.h"
 #include "modules/cam/ui/widget_machine_panel.h"
+#include "modules/cam/ui/widget_machine_tree.h"
 #include "modules/cam/ui/widget_toolpath_panel.h"
 #include "modules/cam/ui/dialog_axis_calibration_wizard.h"
 #include "modules/process/ui/widget_laser_control.h"
@@ -38,6 +39,7 @@
 #include "modules/cad/cad_module.h"
 #include "modules/cad/selection/cad_selection_resolver.h"
 #include "modules/cam/cam_module.h"
+#include "modules/cam/workspace/machine_workspace.h"
 #include "modules/process/process_module.h"
 
 #include <SARibbonBar.h>
@@ -496,10 +498,31 @@ void MainWindow::createLeftPanel()
         connect(process, &ProcessModule::processFlowChanged,
                 processWidget, &QG_ProcessesWidget::reloadFlowModel);
     }
+    // 机台模型树：独立 tab，展示已加载的机台几何结构（按轴分组）。
+    m_machineTree = new WidgetMachineTree(m_leftTabs);
+    if (auto* cam = m_appContext->camModule()) {
+        m_machineTree->setWorkspace(cam->machineWorkspace());
+        // 机台加载/卸载/配置变化后自动刷新
+        if (auto* ws = cam->machineWorkspace()) {
+            connect(ws, &lcnc::cam::MachineWorkspace::machineModelChanged,
+                    m_machineTree, &WidgetMachineTree::rebuild);
+        }
+        connect(cam, &CamModule::axisAssignmentsChanged,
+                m_machineTree, &WidgetMachineTree::rebuild);
+        // checkbox 勾选 → 显示/隐藏对应 AIS
+        connect(m_machineTree, &WidgetMachineTree::shapeVisibilityChanged,
+                cam, &CamModule::setEntityVisible);
+    }
+
     m_leftTabs->addTab(m_projectExplorerTree, tr("项目"));
+    m_leftTabs->addTab(m_machineTree, tr("机台"));
     m_leftTabs->addTab(m_processLeftPanel, tr("执行"));
     connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if (index == 1) {
+            // "机台" tab：切到机台视图
+            m_appContext->camModule()->requestMachineView();
+        } else if (index == 2) {
+            // "执行" tab：也切到机台视图（仿真监控）
             m_appContext->camModule()->requestMachineView();
         } else if (m_projectExplorerTree && m_projectExplorerTree->currentItem()) {
             onProjectExplorerCurrentItemChanged(m_projectExplorerTree->currentItem(), nullptr);
@@ -1288,7 +1311,8 @@ void MainWindow::onProjectReset()
         if (auto* gd = m_appContext->camModule()->workspaceGuiDocument()) {
             gd->eraseDomain(lcnc::ProjectDomain::Workpiece);
             gd->eraseDomain(lcnc::ProjectDomain::Machine);
-            gd->eraseDomain(lcnc::ProjectDomain::Cam);
+            // Phase C：CAM AIS 改走 ContourId 注册，用 eraseAllContours 代替 eraseDomain。
+            gd->eraseAllContours();
         }
     }
     if (m_appContext && m_appContext->cadModule()) {

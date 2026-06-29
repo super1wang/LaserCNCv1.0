@@ -164,6 +164,11 @@ set(SRCS_CORE
     src/core/project/lcnc_project_package.cpp
     src/core/project/lcnc_project_session.cpp
     src/core/project/lcnc_project_manager.cpp
+    src/core/project/cam/cam_data_manager.cpp
+    src/core/project/cam/cam_toolpath_io.cpp
+    src/core/project/cam/layer_container.cpp
+    src/core/project/cam/layer_manager.cpp
+    src/core/project/cam/layer_manager.h
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_kinematics.cpp
@@ -237,13 +242,16 @@ set(SRCS_MODULE_CAM
     src/modules/cam/cam_module.cpp
     src/modules/cam/contracts/toolpath_export_dto.cpp
     src/modules/cam/settings/cam_config.cpp
-    src/modules/cam/services/cam_data_manager.cpp
     src/modules/cam/services/machine_axis_detector.cpp
+    src/modules/cam/workspace/machine_workspace.cpp
+    src/modules/cam/workspace/machine_workspace.h
     src/modules/cam/services/machine_io.cpp
     src/modules/cam/services/reference_pick.cpp
     src/modules/cam/commands/commands_machine.cpp
     src/modules/cam/commands/commands_cam.cpp
     src/modules/cam/ui/widget_machine_panel.cpp
+    src/modules/cam/ui/widget_machine_tree.cpp
+    src/modules/cam/ui/widget_machine_tree.h
     src/modules/cam/ui/widget_toolpath_panel.cpp
     src/modules/cam/ui/dialog_mark_axes.cpp
     src/modules/cam/ui/dialog_axis_calibration_wizard.cpp
@@ -322,7 +330,6 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/pure_simulation_sink.h
     src/modules/process/runtime/pure_simulation_sink.cpp
     src/modules/process/runtime/motion_sink_factory.cpp
-    src/modules/process/toolpath/process_toolpath_sorter.cpp
     src/modules/process/toolpath/process_toolpath_service.cpp
     src/modules/process/toolpath/process_tool_matcher.cpp
     src/modules/process/cutting/normal_cutting_manager.h

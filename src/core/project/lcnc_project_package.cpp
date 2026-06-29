@@ -266,6 +266,7 @@ bool saveXcafSnapshot(const LcncDocument& workpieceDocument,
                       const LcncDocument* camDocument,
                       const QString& xcafPath,
                       const lcnc::ProjectSaveOptions& options,
+                      int formatVersion,
                       QString* errorMsg)
 {
     ensureXcafDrivers();
@@ -278,11 +279,11 @@ bool saveXcafSnapshot(const LcncDocument& workpieceDocument,
     const Handle(XCAFDoc_ShapeTool) shapeTool = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
     if (options.includeWorkpieceModel)
         exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Workpiece, shapeTool);
-    if (options.includeMachineModel && machineDocument)
-        exportEntityKind(*machineDocument, LcncDocument::EntityKind::Machine, shapeTool);
-    if (options.includeCamData && camDocument)
-        exportEntityKind(*camDocument, LcncDocument::EntityKind::Cam, shapeTool);
     exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Auxiliary, shapeTool);
+    // Phase E v2：机台与 CAM 不进 XBF。机台由 CamConfig 全局持有；CAM 由 cam_toolpath.* 持久化。
+    (void)machineDocument;
+    (void)camDocument;
+    (void)formatVersion;
 
     const PCDM_StoreStatus status = app->SaveAs(xdeDoc, occPath(xcafPath));
     if (status != PCDM_SS_OK) {
@@ -297,6 +298,7 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
                       LcncDocument* machineDocument,
                       LcncDocument* camDocument,
                       const QString& xcafPath,
+                      int formatVersion,
                       QString* errorMsg)
 {
     ensureXcafDrivers();
@@ -313,6 +315,8 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
     const Handle(XCAFDoc_ShapeTool) shapeTool = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
     TDF_LabelSequence labels;
     shapeTool->GetFreeShapes(labels);
+    int migratedMachine = 0;
+    int discardedCam = 0;
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label label = labels.Value(i);
         const TopoDS_Shape shape = shapeTool->GetShape(label);
@@ -320,17 +324,34 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
             continue;
 
         const LcncDocument::EntityKind kind = entityKindFromLabel(label);
-        LcncDocument* target = &workpieceDocument;
-        if (kind == LcncDocument::EntityKind::Machine && machineDocument)
-            target = machineDocument;
-        else if (kind == LcncDocument::EntityKind::Cam && camDocument)
-            target = camDocument;
-
-        target->addShapeEntity(shape,
-                               labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
-                               kind);
+        if (formatVersion >= 2) {
+            // v2: 所有 shape 都属工件（只有 workpiece.xbf）。
+            workpieceDocument.addShapeEntity(shape,
+                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
+                LcncDocument::EntityKind::Workpiece);
+        } else {
+            // v1: 按 kind 分发。
+            LcncDocument* target = &workpieceDocument;
+            LcncDocument::EntityKind targetKind = LcncDocument::EntityKind::Workpiece;
+            if (kind == LcncDocument::EntityKind::Machine && machineDocument) {
+                target = machineDocument;
+                targetKind = LcncDocument::EntityKind::Machine;
+                ++migratedMachine;
+            } else if (kind == LcncDocument::EntityKind::Cam) {
+                // CAM 实体不再需要(Phase C 剥离了 XCAF 镜像)，直接丢弃。
+                ++discardedCam;
+                continue;
+            }
+            target->addShapeEntity(shape,
+                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
+                targetKind);
+        }
     }
-
+    if (migratedMachine > 0 || discardedCam > 0) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "loadXcafSnapshot: v1 migration machine={} cam_discarded={}",
+                  migratedMachine, discardedCam);
+    }
     return true;
 }
 
@@ -366,7 +387,9 @@ QString LcncProjectPackage::manifestPath(const QString& path)
 QString LcncProjectPackage::projectXcafPath(const QString& path,
                                             const LcncProjectManifest& manifest)
 {
-    return QDir(packageDirectory(path)).filePath(manifest.projectXcafPath);
+    // v2+ 使用 workpiece.xbf；v1 保持 project.xbf
+    const QString xbf = manifest.formatVersion >= 2 ? manifest.workpieceXcafPath : manifest.projectXcafPath;
+    return QDir(packageDirectory(path)).filePath(xbf);
 }
 
 bool LcncProjectPackage::save(const LcncDocument& document,
@@ -435,7 +458,7 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
 
     const QString xcafPath = projectXcafPath(packagePath, manifest);
     if (!saveXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, options, errorMsg)) {
+                          xcafPath, options, manifest.formatVersion, errorMsg)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Failed to save .lcnc XCAF snapshot '{}'",
                  xcafPath.toStdString());
@@ -534,7 +557,7 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
         return false;
     }
     if (!loadXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, errorMsg)) {
+                          xcafPath, manifest.formatVersion, errorMsg)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Failed to load .lcnc XCAF snapshot '{}'",
                  xcafPath.toStdString());

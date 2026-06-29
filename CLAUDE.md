@@ -24,12 +24,22 @@ The application is a single-process, single-project desktop app for 5-axis laser
 
 **Kernel** (`src/core/kernel/kernel.h`) is the one global entry point (`Kernel::current()`). It owns `AppSettings`, `LcncProjectManager`, `TaskManager`, `MachineConfigurationService`, `ServiceRegistry`, `EventBus`, and `ModuleRegistry`. `GuiApplication` and `CommandContainer` are injected as raw pointers (owned by `main()` and `MainWindow` respectively).
 
-**Three independent `LcncDocument`s** (OCC/XCAF containers) managed by `LcncProjectManager`:
-- **Workpiece** — source geometry, CAD modeling results.
-- **Machine** — machine tool geometry, kinematics, mounting.
-- **CAM** — sparse OCC contours + dense toolpath runtime data (`CamDataManager`).
+**Project core = workpiece geometry + CAM data, both owned by `core/` and saved/loaded as one unit.** `LcncProjectManager` owns:
+- **Workpiece `LcncDocument`** (OCC/XCAF) — source geometry, CAD modeling results.
+- **CAM data** — `lcnc::cam::CamDataManager` (in `core/project/cam/`) owns the dense, project-core CAM runtime: contours, toolpaths, layers, lead-ins, and **process parameters** (`LaserToolpath` + `LayerContainer`/`LayerManager`). Sparse OCC contour mirrors live in a CAM `LcncDocument` for tree/selection.
 
-**Single workspace `GuiDocument`** — all three domains display into one shared OCC view. AIS objects are registered by `{DocumentId, XCAF entry}` to avoid cross-document conflicts.
+**The machine model is an independent reference asset, NOT project data.** `CamModule`'s `MachineWorkspace` *owns* the machine `LcncDocument` + kinematics; it loads from a global config path (`CamConfig::machineModelPath`) and is **never written into `.lcnc`, never marks the project dirty, and is not cleared on new/open project**. `LcncProjectManager` holds only a non-owning *reference* to the machine doc (`attachMachineDocument`) purely so the view layer (`GuiDocument::domainForDocument`) can route machine rendering/selection by domain.
+
+**Persistence is a single transactional writer in `core`.** `LcncProjectManager::saveProject`/`openProject` write/read manifest + `workpiece.xbf` + CAM data (`lcnc::cam::saveCamToolpath`/`loadCamToolpath` in `core/project/cam/cam_toolpath_io.*`) together. Modules do **no** project-file IO — there are no `projectSaved`/`projectOpened` persistence hooks. CAM only refreshes its view after core loads (`CamModule::onCamDataLoaded`); the legacy `process_cutting_plan.toml` v1 migration also runs in core (`migrateLegacyProcessCuttingPlan`).
+
+**CAD / CAM / Process own no project data — they are business logic** over the core data:
+- **CAD** edits workpiece geometry through core document APIs.
+- **CAM** runs algorithms (extract / discretise / IK), writes results into the core-owned `CamDataManager` (borrowed via `projectManager()->camData()`), and keeps only the machine reference asset + renderers + transient UI/preview state.
+- **Process** consumes CAM data read-only via the OCC-free `ToolpathExportSnapshot` DTO.
+
+**Single workspace `GuiDocument`** — workpiece + machine + CAM display into one shared OCC view. AIS objects are registered by `{DocumentId, XCAF entry}` to avoid cross-document conflicts.
+
+> Remaining cleanup (not yet done): `MachineKinematics` still physically lives in the (workspace-owned) machine `LcncDocument` rather than in `MachineWorkspace` itself; and `LcncProjectManager` still exposes `machineDocument()`/`machineDocumentId()` as the view-routing reference accessor (fully excising them needs a `GuiDocument` domain-routing rework). Both are spirit-compliant (machine is independently owned) but not literal-final.
 
 ### Layer Dependency (strict, top-down only)
 
@@ -94,7 +104,7 @@ Internal structure — thin `ProcessModule` facade delegates to:
 - `ProcessRuntime` — internal coordinator (NOT a global singleton)
 - `ProcessStateMachine` — states: Idle → Preparing → Ready → Processing → Paused/Stopping/Error/EmergencyStop
 - `ProcessDeviceCoordinator` — unified motion/laser/IO entry point
-- `ProcessToolpathService` → `ProcessToolpathSorter` + `ProcessToolMatcher` → `ProcessJobPlan`
+- `ProcessToolpathService` → `ProcessToolMatcher` → `ProcessJobPlan` (contour ordering/sorting now lives in the core CAM layer model — `LayerContainer` sort strategy + `core/algorithms/cam/contour_order_planner` — not a Process-side sorter)
 - `ProcessInstructionPlanner` → controller-neutral `ProcessCommandBuffer` → `IControllerTranslator` → ACS/GTN/PureSimulation adapter
 - `ProcessWorkflowService` + `ProcessExecutionService` + `ProcessNodeExecutorRegistry`
 
@@ -103,14 +113,19 @@ Controller adapters (`PureSimulation`, `SimulatorCMHP`, ACS, GTN) are behind `IM
 ## `.lcnc` Project Package
 
 Zip archive (currently PowerShell-based, planned replacement with QuaZip) containing:
-- `project.toml` — manifest, version, metadata
-- `project.xbf` — OCC/XCAF binary snapshot
+- `project.toml` — manifest, version, metadata (`formatVersion` 2)
+- `workpiece.xbf` — OCC/XCAF binary snapshot of the workpiece geometry (v1 used `project.xbf`)
+- `cam_toolpath.toml` + `cam_toolpath_points.bin` — project-core CAM data (layers, contours, signature tables, dense sampled points)
 
-Save/load goes through `LcncProjectManager` → `LcncProjectPackage`.
+The machine model is **not** in the package (independent reference asset). Save/load is one transaction in `core`: `LcncProjectManager::saveProject`/`openProject` → `LcncProjectPackage` (geometry) + `lcnc::cam::saveCamToolpath`/`loadCamToolpath` (CAM data). Modules never read/write the package.
+
+## Build (this environment)
+
+The `build/` dir uses the **Ninja** generator and needs the MSVC env. The `-- /m /nologo` MSBuild flags in older docs do **not** work here. Build via a shell that has run `vcvars64.bat` (VS 18 Insiders), e.g. a `.bat` that `call`s vcvars then `cmake --build build --config Debug -j 16`. `LNK1168` on link = `LaserCNC.exe` is still running; kill it and relink.
 
 ## Pre-Commit Verification
 
-1. Build passes: `cmake --build build --config Debug --target all -j 16 --`
+1. Build passes (see Build section above — Ninja + vcvars, not `/m /nologo`)
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
 3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)

@@ -3,11 +3,15 @@
 #include <QObject>
 #include <QList>
 #include <QMap>
+#include <QString>
+#include <QVector>
 #include <Standard_Handle.hxx>
 #include <AIS_Shape.hxx>
 #include <V3d_View.hxx>
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_NeutralWindow.hxx>
+
+#include <cstdint>
 
 #include "core/project/project_types.h"
 #include "core/settings/app_settings.h"
@@ -81,6 +85,25 @@ public:
     void applyMachineDisplayStyle();
     Handle(AIS_Shape) aisShape(const QString& labelEntry) const;
     Handle(AIS_Shape) aisShape(DocumentId documentId, const QString& labelEntry) const;
+
+    // ── CAM contour bodies (Phase C: ContourId-keyed AIS) ─────────────────
+    // 工件/机台路径继续走 (DocumentId, entry) 键；CAM 轮廓本体改为以稳定的
+    // ContourId 寻址，内部仍复用 m_displayObjects（entry 合成为 "cam:<id>"），
+    // 因此 selectedEntries / applyMachineDisplayStyle / rebuildDomain 等遍历型
+    // 接口对工件/机台无任何感知变化。
+    /// 显示一条 CAM 轮廓体；若 contourId 已存在则替换其 AIS。
+    Handle(AIS_Shape) displayContourBody(std::uint64_t contourId,
+                                         const TopoDS_Shape& wire,
+                                         const QString& name);
+    /// 查找；不存在返回空 handle。
+    Handle(AIS_Shape) aisShapeForContour(std::uint64_t contourId) const;
+    /// 删除单条；不存在则忽略。
+    void              eraseContour(std::uint64_t contourId);
+    /// 删除所有 CAM 域的 DisplayObject（替代 eraseDomain(ProjectDomain::Cam)）。
+    void              eraseAllContours();
+    /// 反向：从当前选中 AIS 集中提取 contourId 列表（仅看 CAM 域 + 合成 entry 前缀）。
+    QVector<std::uint64_t> selectedContourIds() const;
+
     /// Returns label entries of all currently selected AIS shapes.
     QStringList selectedEntries() const;
     QStringList selectedEntries(DocumentId documentId) const;

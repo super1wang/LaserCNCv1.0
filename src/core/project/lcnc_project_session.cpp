@@ -8,11 +8,6 @@ void WorkpieceProjectState::clear()
     sourceFilePath.clear();
 }
 
-void MachineProjectState::clear()
-{
-    modelFilePath.clear();
-}
-
 void CamProjectState::clear()
 {
     hasRuntimeData = false;
@@ -59,7 +54,6 @@ void LcncProjectSession::resetProjectState()
     m_manifest = LcncProjectManifest{};
     m_saveOptions = ProjectSaveOptions{};
     m_workpiece.clear();
-    m_machine.clear();
     m_cam.clear();
     clearDirty();
 }
@@ -72,7 +66,8 @@ ProjectDirtyFlag dirtyFlagForDomain(ProjectDomain domain)
     case ProjectDomain::Workpiece:
         return ProjectDirtyFlag::Workpiece;
     case ProjectDomain::Machine:
-        return ProjectDirtyFlag::Machine;
+        // 机台是参考资产，不属于工程数据，永不弄脏工程。
+        return ProjectDirtyFlag::None;
     case ProjectDomain::Cam:
         return ProjectDirtyFlag::Cam;
     }

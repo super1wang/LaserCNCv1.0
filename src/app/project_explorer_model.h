@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/project/project_types.h"
-#include "modules/cam/contracts/cam_data_contracts.h"
+#include "core/project/cam/cam_data_contracts.h"
 
 #include <QList>
 #include <QColor>
