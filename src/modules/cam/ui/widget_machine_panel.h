@@ -8,16 +8,12 @@
 class LcncDocument;
 class MachineKinematics;
 class QLabel;
-class QComboBox;
 class QCheckBox;
-class QFormLayout;
 class QGroupBox;
 class QDoubleSpinBox;
 class QEvent;
 class QGridLayout;
-class QLineEdit;
 class QPushButton;
-class QTabWidget;
 
 /**
  * @brief Right-panel widget shown when the "准备" tab is active.
@@ -41,15 +37,8 @@ public:
     /// Called from MainWindow whenever the 3D selection changes.
     void setSelectedEntries(const QStringList& entries);
     void setCalibrationPickAxis(const QString& axisName);
-    void setMachineModelPath(const QString& path);
 
 signals:
-    void machinePresetChanged(const QString& presetName);
-    void machineModelPathChanged(const QString& path);
-    void loadMachineRequested();
-    void compressMachineRequested();
-    void unloadMachineRequested();
-    void exportMachineRequested();
     void axisOriginChanged(const QString& axisName, double x, double y, double z);
     void calibrationFacePickRequested(const QString& targetName);
     void alignToPhysicalCenterRequested(double x, double y, double z);
@@ -77,11 +66,9 @@ private:
 
     LcncDocument* m_doc{nullptr};
 
-    QTabWidget* m_pages{nullptr};
     QWidget*    m_configPage{nullptr};
 
     // Static widgets
-    QComboBox* m_comboPreset{nullptr};
     QLabel* m_lblCalibrationHint{nullptr};
     QLabel* m_lblCurrentAcCenter{nullptr};
     QLabel* m_lblPickStatus{nullptr};
@@ -108,8 +95,6 @@ private:
     QPushButton* m_btnAlignHeadToPhysical{nullptr};
     QPushButton* m_btnOpenCalibrationWizard{nullptr};
 
-    QLabel*    m_lblMachineName{nullptr};
-    QLineEdit* m_editMachinePath{nullptr};
     QGroupBox* m_assignGroup{nullptr};
     QLabel*    m_lblAssignSelection{nullptr};
     QGridLayout* m_assignGrid{nullptr};

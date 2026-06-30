@@ -15,7 +15,6 @@
 #include "modules/cam/i_cam_facade.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
 #include "core/algorithms/cam/laser_toolpath.h"
-#include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "core/project/project_types.h"
@@ -71,12 +70,6 @@ public:
     explicit CamModule(QObject* parent = nullptr);
     /// 显式析构（用于 unique_ptr<前置声明类型>）。
     ~CamModule() override;
-    enum class MachineCompressionStrategy {
-        FilledSolid,
-        ExteriorShell,
-        SewingShell,
-        BoundingBoxProxy,
-    };
 
     struct AxisOption {
         QString name;
@@ -195,8 +188,6 @@ public:
     /// 当前机台是否已经完成至少一次三段式标定（cam.toml 里有完整记录）。
     /// 用于向导启动时回填 + 状态指示。
     bool isMachineCalibrated() const;
-    /// Start machine compression asynchronously; returns false if startup validation fails.
-    bool compressMachineModel(MachineCompressionStrategy strategy = MachineCompressionStrategy::FilledSolid);
     QList<WorkpieceMountCandidate> mountableWorkpieces() const;
     gp_Pnt workpieceInstallPosition() const;
     bool autoInstallWorkpiece() const;
@@ -378,6 +369,7 @@ private:
     void translateToolpathWorldData(const gp_Vec& translation);
     void autoDetectAxisOrigins();
     void applyStoredMachineProfile(const QString& machinePath);
+    bool applyConfiguredMachineAxes(bool updateView);
     gp_Pnt defaultWorkpieceInstallPosition() const;
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
@@ -459,7 +451,6 @@ private:
     QSet<QString> m_pendingDirtyAxes;
     /// pose→cam 自更新过程中的 reentry 防护。
     bool m_inPoseSelfUpdate{false};
-    bool    m_machineCompressionRunning{false};
 
     /// 上一帧 OCC 视图中已选的 CAM contourId 集合，用于把"新增/移除"差分推给 SelectionService。
     QSet<std::uint64_t> m_lastCamSelectionContourIds;

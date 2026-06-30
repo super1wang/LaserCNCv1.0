@@ -6,19 +6,15 @@
 #include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
 
-#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
-#include <QHBoxLayout>
 #include <QLabel>
 #include <QLayoutItem>
-#include <QLineEdit>
 #include <QPushButton>
 #include <QSignalBlocker>
-#include <QTabWidget>
 #include <QVBoxLayout>
 #include <QAbstractSpinBox>
 #include <QCheckBox>
@@ -45,15 +41,6 @@ void clearLayout(QLayout* layout)
     }
 }
 
-void clearFormLayout(QFormLayout* formLayout)
-{
-    if (!formLayout)
-        return;
-
-    while (formLayout->rowCount() > 0)
-        formLayout->removeRow(0);
-}
-
 bool supportsAcCalibration(const MachineKinematics* kin)
 {
     return kin
@@ -68,15 +55,6 @@ QString formatPointText(const gp_Pnt& point)
         .arg(point.X(), 0, 'f', 3)
         .arg(point.Y(), 0, 'f', 3)
         .arg(point.Z(), 0, 'f', 3);
-}
-
-void addPresetOption(QComboBox* comboBox,
-                     const QString& displayName,
-                     const QString& presetName)
-{
-    if (!comboBox)
-        return;
-    comboBox->addItem(displayName, presetName);
 }
 
 QDoubleSpinBox* createMillimeterSpin(QWidget* parent,
@@ -116,13 +94,7 @@ void WidgetMachinePanel::setDocument(LcncDocument* doc)
     m_doc = doc;
 
     const MachineKinematics* kin = doc ? doc->machineKinematics() : nullptr;
-    const QString configType = kin ? kin->configType() : QString();
-
-    if (m_comboPreset) {
-        const QSignalBlocker blocker(m_comboPreset);
-        const int index = m_comboPreset->findData(configType);
-        m_comboPreset->setCurrentIndex(index >= 0 ? index : 0);
-    }
+    Q_UNUSED(kin);
 
     refreshCalibrationSection();
     if (!doc)
@@ -130,11 +102,6 @@ void WidgetMachinePanel::setDocument(LcncDocument* doc)
     rebuildAssignmentSection();
     rebuildWpcSection();
 
-    if (doc) {
-        m_lblMachineName->setText(doc->name());
-    } else {
-        m_lblMachineName->setText(tr("—"));
-    }
 }
 
 void WidgetMachinePanel::buildUi()
@@ -143,76 +110,21 @@ void WidgetMachinePanel::buildUi()
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(6);
 
-    m_pages = new QTabWidget(this);
-    m_pages->setDocumentMode(true);
     buildConfigPage();
     const auto spins = findChildren<QAbstractSpinBox*>();
     for (QAbstractSpinBox* spin : spins) {
         spin->setFocusPolicy(Qt::StrongFocus);
         spin->installEventFilter(this);
     }
-    mainLayout->addWidget(m_pages);
+    mainLayout->addWidget(m_configPage);
 }
 
 void WidgetMachinePanel::buildConfigPage()
 {
-    m_configPage = new QWidget(m_pages);
+    m_configPage = new QWidget(this);
     auto* mainLayout = new QVBoxLayout(m_configPage);
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(8);
-
-    auto* cfgGroup = new QGroupBox(tr("机台模型"), m_configPage);
-    auto* cfgLayout = new QVBoxLayout(cfgGroup);
-    cfgLayout->setSpacing(4);
-
-    auto* infoRow = new QFormLayout;
-    m_lblMachineName = new QLabel(tr("—"), cfgGroup);
-    m_lblMachineName->setStyleSheet("color: #aaa;");
-    m_comboPreset = new QComboBox(cfgGroup);
-    addPresetOption(m_comboPreset, tr("— 请选择构型 —"), QString());
-    addPresetOption(m_comboPreset, tr("XYZ 三轴（平面 / 圆管）"), QStringLiteral("XYZ"));
-    addPresetOption(m_comboPreset, tr("XYZA 四轴（工件转台）"), QStringLiteral("XYZA"));
-    addPresetOption(m_comboPreset, tr("AC 转台（垂直主轴）"), QStringLiteral("VERTICAL_AC_TABLE"));
-    addPresetOption(m_comboPreset, tr("BC 转台（垂直主轴）"), QStringLiteral("VERTICAL_BC_TABLE"));
-    addPresetOption(m_comboPreset, tr("AB 摆头"), QStringLiteral("AB_HEAD"));
-    addPresetOption(m_comboPreset, tr("AC 摆头"), QStringLiteral("AC_HEAD"));
-    m_editMachinePath = new QLineEdit(cfgGroup);
-    m_editMachinePath->setClearButtonEnabled(true);
-    m_editMachinePath->setPlaceholderText(tr("输入或粘贴机台模型路径"));
-    infoRow->addRow(tr("文档:"), m_lblMachineName);
-    infoRow->addRow(tr("构型:"), m_comboPreset);
-    infoRow->addRow(tr("路径:"), m_editMachinePath);
-    cfgLayout->addLayout(infoRow);
-
-    auto* btnLoad = new QPushButton(QIcon(":/icons/machine.svg"), tr("加载机台模型..."), cfgGroup);
-    auto* btnCompress = new QPushButton(QIcon(":/icons/machine.svg"), tr("压缩机台模型"), cfgGroup);
-    auto* btnUnload = new QPushButton(QIcon(":/icons/machine.svg"), tr("卸载机台"), cfgGroup);
-    auto* btnExport = new QPushButton(QIcon(":/icons/export.svg"), tr("导出机台模型..."), cfgGroup);
-
-    cfgLayout->addWidget(btnLoad);
-    cfgLayout->addWidget(btnCompress);
-    cfgLayout->addWidget(btnUnload);
-    cfgLayout->addWidget(btnExport);
-    mainLayout->addWidget(cfgGroup);
-
-    connect(m_comboPreset, &QComboBox::currentIndexChanged, this,
-            [this](int index) {
-                if (!m_comboPreset)
-                    return;
-
-                const QString presetName = m_comboPreset->itemData(index).toString();
-                emit machinePresetChanged(presetName);
-            });
-    connect(btnLoad, &QPushButton::clicked, this, &WidgetMachinePanel::loadMachineRequested);
-    connect(btnCompress, &QPushButton::clicked, this, &WidgetMachinePanel::compressMachineRequested);
-    connect(btnUnload, &QPushButton::clicked, this, &WidgetMachinePanel::unloadMachineRequested);
-    connect(btnExport, &QPushButton::clicked, this, &WidgetMachinePanel::exportMachineRequested);
-    connect(m_editMachinePath, &QLineEdit::editingFinished, this, [this] {
-        emit machineModelPathChanged(m_editMachinePath ? m_editMachinePath->text().trimmed() : QString());
-    });
-    connect(m_editMachinePath, &QLineEdit::returnPressed, this, [this] {
-        emit machineModelPathChanged(m_editMachinePath ? m_editMachinePath->text().trimmed() : QString());
-    });
 
     m_assignGroup = new QGroupBox(tr("标记所选部件"), m_configPage);
     auto* assignLayout = new QVBoxLayout(m_assignGroup);
@@ -250,7 +162,6 @@ void WidgetMachinePanel::buildConfigPage()
     buildWorkpiecePage();
 
     mainLayout->addStretch();
-    m_pages->addTab(m_configPage, tr("机台模型"));
 }
 
 void WidgetMachinePanel::buildWorkpiecePage()
@@ -558,19 +469,6 @@ void WidgetMachinePanel::setCalibrationPickAxis(const QString& axisName)
 
     m_pendingCalibrationAxis = axisName;
     refreshCalibrationSection();
-}
-
-void WidgetMachinePanel::setMachineModelPath(const QString& path)
-{
-    if (!m_editMachinePath)
-        return;
-
-    const QString normalized = path.trimmed();
-    if (m_editMachinePath->text() == normalized)
-        return;
-
-    const QSignalBlocker blocker(m_editMachinePath);
-    m_editMachinePath->setText(normalized);
 }
 
 void WidgetMachinePanel::onAxisOriginEditorChanged()

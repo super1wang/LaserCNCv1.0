@@ -204,7 +204,6 @@ set(SRCS_CORE
     src/core/algorithms/cad/transform_ops.cpp
     src/core/algorithms/cam/face_classifier.cpp
     src/core/algorithms/cam/laser_toolpath.cpp
-    src/core/algorithms/cam/machine_model_compressor.cpp
     src/core/algorithms/cam/contour_order_planner.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp

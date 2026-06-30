@@ -21,7 +21,6 @@
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kinematics/machine_pose.h"
-#include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/service_registry.h"
 #include "core/services/selection_service.h"
@@ -93,14 +92,6 @@ void watchTask(QObject* owner, TaskId taskId, std::function<void(bool)> onFinish
         });
 }
 
-QSet<QString> toEntrySet(const QStringList& entries)
-{
-    QSet<QString> result;
-    for (const QString& entry : entries)
-        result.insert(entry);
-    return result;
-}
-
 QStringList entityEntries(LcncDocument* doc, LcncDocument::EntityKind kind)
 {
     QStringList result;
@@ -111,38 +102,6 @@ QStringList entityEntries(LcncDocument* doc, LcncDocument::EntityKind kind)
     for (int i = 1; i <= labels.Length(); ++i)
         result << XcafUtils::entry(labels.Value(i));
     return result;
-}
-
-MachineModelCompressor::Strategy toCompressorStrategy(CamModule::MachineCompressionStrategy strategy)
-{
-    switch (strategy) {
-    case CamModule::MachineCompressionStrategy::FilledSolid:
-        return MachineModelCompressor::Strategy::FilledSolid;
-    case CamModule::MachineCompressionStrategy::ExteriorShell:
-        return MachineModelCompressor::Strategy::ExteriorShell;
-    case CamModule::MachineCompressionStrategy::SewingShell:
-        return MachineModelCompressor::Strategy::SewingShell;
-    case CamModule::MachineCompressionStrategy::BoundingBoxProxy:
-        return MachineModelCompressor::Strategy::BoundingBoxProxy;
-    }
-
-    return MachineModelCompressor::Strategy::FilledSolid;
-}
-
-QString compressionStrategyText(CamModule::MachineCompressionStrategy strategy)
-{
-    switch (strategy) {
-    case CamModule::MachineCompressionStrategy::FilledSolid:
-        return QObject::tr("实体填充并集");
-    case CamModule::MachineCompressionStrategy::ExteriorShell:
-        return QObject::tr("外壳抽取");
-    case CamModule::MachineCompressionStrategy::SewingShell:
-        return QObject::tr("缝合壳体");
-    case CamModule::MachineCompressionStrategy::BoundingBoxProxy:
-        return QObject::tr("外观示意代理");
-    }
-
-    return QObject::tr("机台压缩");
 }
 
 class CamToolpathProviderAdapter final : public lcnc::cam::ICamToolpathProvider
@@ -443,14 +402,7 @@ CamModule::CamModule(QObject* parent)
     if (m_machineConfig) {
         connect(m_machineConfig, &lcnc::MachineConfigurationService::machineConfigurationChanged,
                 this, [this] {
-                    MachineKinematics* kin = kinematics();
-                    if (!kin || !m_machineConfig)
-                        return;
-                    kin->setAxes(m_machineConfig->axisDefinitions(), m_machineConfig->presetName());
-                    displayAxisGuides();
-                    refreshMachineTransforms();
-                    emit axisAssignmentsChanged();
-                    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
+                    applyConfiguredMachineAxes(true);
                 });
     }
 
@@ -498,6 +450,8 @@ CamModule::CamModule(QObject* parent)
         if (!m_refreshCoalescer->isActive())
             m_refreshCoalescer->start();
     });
+
+    applyConfiguredMachineAxes(false);
 }
 
 // ── Domain documents ──────────────────────────────────────────────────────────
@@ -648,6 +602,7 @@ void CamModule::loadMachine(const QString& filePath)
 
         m_machineModelPath = normalizedPath;
         m_config.setMachineModelPath(m_machineModelPath);
+        applyConfiguredMachineAxes(false);
         autoDetectAxes();
         applyStoredMachineProfile(m_machineModelPath);
         const bool installed = autoInstallCurrentWorkpieceInternal(m_config.autoInstallWorkpiece());
@@ -1332,164 +1287,6 @@ bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QStri
     return true;
 }
 
-bool CamModule::compressMachineModel(MachineCompressionStrategy strategy)
-{
-    LcncDocument* doc = machineDocument();
-    MachineKinematics* kin = kinematics();
-    if (!doc || !kin) {
-        emit operationFailed(tr("压缩机台"), tr("找不到项目文档或轴系配置。"));
-        return false;
-    }
-
-    if (m_machineCompressionRunning) {
-        emit operationFailed(tr("压缩机台"), tr("机台压缩任务正在执行，请稍候。"));
-        return false;
-    }
-
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
-    if (labels.Length() == 0) {
-        emit operationFailed(tr("压缩机台"), tr("当前没有可压缩的机台模型。"));
-        return false;
-    }
-
-    QMap<QString, TDF_Label> labelByEntry;
-    QStringList oldEntries;
-    for (int i = 1; i <= labels.Length(); ++i) {
-        const TDF_Label lbl = labels.Value(i);
-        const QString entry = XcafUtils::entry(lbl);
-        labelByEntry.insert(entry, lbl);
-        oldEntries.append(entry);
-    }
-
-    QList<MachineModelCompressor::GroupInput> groups;
-    auto collectGroup = [&](const QString& axisName,
-                            const QString& displayName,
-                            const QStringList& entries) {
-        if (entries.isEmpty())
-            return;
-
-        QList<TopoDS_Shape> shapes;
-        shapes.reserve(entries.size());
-        for (const QString& entry : entries) {
-            const auto it = labelByEntry.constFind(entry);
-            if (it == labelByEntry.cend())
-                continue;
-
-            const TopoDS_Shape shape = XcafUtils::shape(it.value());
-            if (shape.IsNull())
-                continue;
-
-            shapes.push_back(shape);
-        }
-
-        if (shapes.empty())
-            return;
-
-        groups.append({axisName, displayName, shapes});
-    };
-
-    for (const MachineAxisDef& axis : kin->axes()) {
-        collectGroup(axis.name,
-                     QStringLiteral("LCNC_AXIS_%1").arg(axis.name),
-                     kin->shapesForAxis(axis.name));
-    }
-
-    QStringList unassignedEntries;
-    for (const QString& entry : oldEntries) {
-        if (kin->axisForShape(entry).isEmpty())
-            unassignedEntries.append(entry);
-    }
-    collectGroup(QString(), QStringLiteral("LCNC_AXIS_UNASSIGNED"), unassignedEntries);
-
-    if (groups.isEmpty()) {
-        emit operationFailed(tr("压缩机台"), tr("没有收集到可压缩的机台形体。"));
-        return false;
-    }
-
-    auto resultHolder = std::make_shared<MachineModelCompressor::Result>();
-    auto errorMessage = std::make_shared<QString>();
-    const QStringList snapshotEntries = oldEntries;
-    const QString strategyName = compressionStrategyText(strategy);
-    const MachineModelCompressor::Options options{toCompressorStrategy(strategy)};
-
-    m_machineCompressionRunning = true;
-    const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        tr("压缩机台模型 - %1").arg(strategyName),
-        [groups, options, resultHolder, errorMessage](TaskProgress* progress) {
-            *resultHolder = MachineModelCompressor::compressGroups(
-                groups,
-                options,
-                progress);
-
-            if (resultHolder->aborted) {
-                *errorMessage = resultHolder->error.isEmpty()
-                    ? QStringLiteral("机台压缩已中止，当前模型未修改。")
-                    : resultHolder->error;
-                throw std::runtime_error("machine compression aborted");
-            }
-
-            if (!resultHolder->success() || resultHolder->groups.isEmpty()) {
-                *errorMessage = resultHolder->error.isEmpty()
-                    ? QStringLiteral("机台压缩失败，当前模型已保持不变。")
-                    : resultHolder->error;
-                throw std::runtime_error("machine compression failed");
-            }
-        });
-
-    watchTask(this, taskId, [this, doc, kin, snapshotEntries, resultHolder, errorMessage](bool success) {
-        m_machineCompressionRunning = false;
-
-        if (!success) {
-            emit operationFailed(tr("压缩机台"),
-                                 errorMessage->isEmpty()
-                                     ? tr("机台压缩失败，当前模型已保持不变。")
-                                     : *errorMessage);
-            return;
-        }
-
-        if (!doc || !kin) {
-            emit operationFailed(tr("压缩机台"), tr("压缩完成后找不到项目文档，结果未写回。"));
-            return;
-        }
-
-        TDF_LabelSequence currentLabels = doc->entityLabels(LcncDocument::EntityKind::Machine);
-        QStringList currentEntries;
-        for (int i = 1; i <= currentLabels.Length(); ++i)
-            currentEntries.append(XcafUtils::entry(currentLabels.Value(i)));
-
-        if (toEntrySet(currentEntries) != toEntrySet(snapshotEntries)) {
-            emit operationFailed(tr("压缩机台"),
-                                 tr("机台模型在压缩期间已发生变化，压缩结果已丢弃，请重新执行压缩。"));
-            return;
-        }
-
-        {
-            QSignalBlocker blocker(kin);
-            for (const QString& entry : snapshotEntries)
-                kin->unassignShape(entry);
-        }
-
-        for (const QString& entry : snapshotEntries)
-            doc->removeShapeEntity(entry);
-
-        {
-            QSignalBlocker blocker(kin);
-            for (const MachineModelCompressor::GroupOutput& group : resultHolder->groups) {
-                const TDF_Label lbl = doc->addShapeEntity(group.shape,
-                                                          group.displayName,
-                                                          LcncDocument::EntityKind::Machine);
-                if (!group.axisName.isEmpty())
-                    kin->assignShape(XcafUtils::entry(lbl), group.axisName);
-            }
-        }
-
-        refreshMachineDisplay();
-        emit axisAssignmentsChanged();
-    });
-
-    return true;
-}
-
 QList<CamModule::WorkpieceMountCandidate> CamModule::mountableWorkpieces() const
 {
     QList<WorkpieceMountCandidate> result;
@@ -1768,6 +1565,31 @@ void CamModule::applyStoredMachineProfile(const QString& machinePath)
         m_hasPhysicalAcCenter = false;
         m_physicalAcCenter    = gp_Pnt(0.0, 0.0, 0.0);
     }
+}
+
+bool CamModule::applyConfiguredMachineAxes(bool updateView)
+{
+    MachineKinematics* kin = kinematics();
+    if (!kin || !m_machineConfig)
+        return false;
+
+    const QList<MachineAxisDef> axes = m_machineConfig->axisDefinitions();
+    if (axes.isEmpty())
+        return false;
+
+    kin->setAxes(axes, m_machineConfig->presetName());
+    m_config.setMachinePreset(m_machineConfig->presetName());
+    if (m_pose && m_pose->kinematics() != kin)
+        m_pose->setKinematics(kin);
+
+    if (!updateView)
+        return true;
+
+    displayAxisGuides();
+    refreshMachineTransforms();
+    emit axisAssignmentsChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
+    return true;
 }
 
 gp_Pnt CamModule::defaultWorkpieceInstallPosition() const

@@ -2,6 +2,7 @@
 
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
+#include "modules/cam/cam_module.h"
 #include "view/gui_application.h"
 #include "view/rendering_manager.h"
 
@@ -13,10 +14,14 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QEvent>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QHBoxLayout>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
 #include <QHeaderView>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSplitter>
@@ -573,6 +578,21 @@ void DialogOptions::buildMachineConfigurationPage()
         m_cbMachinePreset->addItem(machinePresetText(preset), preset);
     form->addRow(tr("构型"), m_cbMachinePreset);
 
+    auto* pathRow = new QWidget(group);
+    auto* pathLayout = new QHBoxLayout(pathRow);
+    pathLayout->setContentsMargins(0, 0, 0, 0);
+    pathLayout->setSpacing(4);
+    m_editMachineModelPath = new QLineEdit(pathRow);
+    m_editMachineModelPath->setClearButtonEnabled(true);
+    m_editMachineModelPath->setPlaceholderText(tr("选择或输入机台模型文件路径"));
+    m_btnBrowseMachineModel = new QPushButton(tr("浏览..."), pathRow);
+    pathLayout->addWidget(m_editMachineModelPath, 1);
+    pathLayout->addWidget(m_btnBrowseMachineModel);
+    form->addRow(tr("机台模型路径"), pathRow);
+
+    m_chkAutoLoadMachineModel = new QCheckBox(tr("启动时自动加载机台模型"), group);
+    form->addRow(QString(), m_chkAutoLoadMachineModel);
+
     m_lblMachineAlgorithm = new QLabel(group);
     m_lblMachineAlgorithm->setTextInteractionFlags(Qt::TextSelectableByMouse);
     form->addRow(tr("刀路算法"), m_lblMachineAlgorithm);
@@ -597,6 +617,20 @@ void DialogOptions::buildMachineConfigurationPage()
                 if (m_loadingUi || !m_cbMachinePreset)
                     return;
                 populateMachineAxisTable(machineConfigsForPreset(m_cbMachinePreset->currentData().toString()));
+            });
+    connect(m_btnBrowseMachineModel, &QPushButton::clicked, this,
+            [this] {
+                const QString currentPath = m_editMachineModelPath
+                    ? m_editMachineModelPath->text().trimmed()
+                    : QString();
+                const QString dir = currentPath.isEmpty() ? QString() : QFileInfo(currentPath).absolutePath();
+                const QString path = QFileDialog::getOpenFileName(
+                    this,
+                    tr("选择机台模型文件"),
+                    dir,
+                    tr("三维模型文件 (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;所有文件 (*)"));
+                if (!path.isEmpty() && m_editMachineModelPath)
+                    m_editMachineModelPath->setText(QFileInfo(path).absoluteFilePath());
             });
 
     m_stack->addWidget(page);
@@ -731,6 +765,13 @@ void DialogOptions::loadFromSettings()
     m_originalTheme = settings->theme;
     m_originalUnitSystem = settings->unitSystem;
     m_originalRecentLimit = settings->recentLimit;
+    if (auto* cam = lcnc::Kernel::current().service<CamModule>()) {
+        m_originalMachineModelPath = cam->machineModelPath();
+        m_originalAutoLoadMachineModel = cam->config().autoLoadMachineModel();
+    } else {
+        m_originalMachineModelPath.clear();
+        m_originalAutoLoadMachineModel = true;
+    }
 
     m_renderDraft = m_originalCam;
     m_colorDraft = m_originalColors;
@@ -759,6 +800,10 @@ void DialogOptions::loadFromSettings()
     setComboByData(m_cbTheme, settings->theme);
     setComboByData(m_cbUnits, settings->unitSystem);
     m_spRecentLimit->setValue(settings->recentLimit);
+    if (m_editMachineModelPath)
+        m_editMachineModelPath->setText(m_originalMachineModelPath);
+    if (m_chkAutoLoadMachineModel)
+        m_chkAutoLoadMachineModel->setChecked(m_originalAutoLoadMachineModel);
     if (m_machineConfig) {
         m_originalMachinePreset = m_machineConfig->presetName();
         m_originalMachineConfigs = m_machineConfig->axisConfigurations();
@@ -937,6 +982,12 @@ bool DialogOptions::applyChanges()
     const QString newTheme = m_cbTheme->currentData().toString();
     const QString newUnits = m_cbUnits->currentData().toString();
     const int newRecentLimit = m_spRecentLimit->value();
+    const QString newMachineModelPath = m_editMachineModelPath
+        ? m_editMachineModelPath->text().trimmed()
+        : m_originalMachineModelPath;
+    const bool newAutoLoadMachineModel = m_chkAutoLoadMachineModel
+        ? m_chkAutoLoadMachineModel->isChecked()
+        : m_originalAutoLoadMachineModel;
     const QString newMachinePreset = m_cbMachinePreset
         ? m_cbMachinePreset->currentData().toString()
         : m_originalMachinePreset;
@@ -954,13 +1005,16 @@ bool DialogOptions::applyChanges()
         || m_originalTheme != newTheme
         || m_originalUnitSystem != newUnits
         || m_originalRecentLimit != newRecentLimit;
+    const bool machineModelPathDirty = m_originalMachineModelPath != newMachineModelPath;
+    const bool autoLoadMachineDirty = m_originalAutoLoadMachineModel != newAutoLoadMachineModel;
     const bool machineDirty = m_machineConfig
         && (m_originalMachinePreset != newMachinePreset
             || !sameMachineAxisDefinitions(m_originalMachineConfigs, newMachineAxes));
 
     if (!cadRuntimeDirty && !camRuntimeDirty && !cadDefaultDirty && !camDefaultDirty
         && !backgroundDirty && !modelColorDirty
-        && !highlightDirty && !treeDirty && !applicationDirty && !machineDirty) {
+        && !highlightDirty && !treeDirty && !applicationDirty
+        && !machineModelPathDirty && !autoLoadMachineDirty && !machineDirty) {
         LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions::applyChanges no changes");
         return true;
     }
@@ -1023,6 +1077,16 @@ bool DialogOptions::applyChanges()
         m_originalMachinePreset = m_machineConfig->presetName();
         m_originalMachineConfigs = m_machineConfig->axisConfigurations();
         populateMachineAxisTable(m_originalMachineConfigs);
+    }
+    if (auto* cam = lcnc::Kernel::current().service<CamModule>()) {
+        if (machineModelPathDirty)
+            cam->setMachineModelPath(newMachineModelPath);
+        if (autoLoadMachineDirty)
+            cam->config().setAutoLoadMachineModel(newAutoLoadMachineModel);
+        m_originalMachineModelPath = cam->machineModelPath();
+        m_originalAutoLoadMachineModel = cam->config().autoLoadMachineModel();
+        if (m_editMachineModelPath && machineModelPathDirty)
+            m_editMachineModelPath->setText(m_originalMachineModelPath);
     }
 
     m_originalCad = m_renderDraft;

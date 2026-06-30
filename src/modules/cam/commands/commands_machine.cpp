@@ -5,9 +5,7 @@
 #include "core/project/project_types.h"
 #include "core/document/lcnc_document.h"
 #include "core/kinematics/machine_kinematics.h"
-#include "core/algorithms/cam/machine_model_compressor.h"
 #include "core/document/xcaf_utils.h"
-#include "core/task/task_manager.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
 #include "modules/cam/cam_module.h"
@@ -18,11 +16,6 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QDialog>
-#include <QDialogButtonBox>
-#include <QVBoxLayout>
-#include <QFormLayout>
-#include <QComboBox>
-#include <QLabel>
 
 #include <QSet>
 
@@ -151,75 +144,6 @@ void CmdMountWorkpiece::execute()
 
     context()->camModule()->mountWorkpiece(mountCandidates.first().documentId, QString());
     context()->updateCommandStates();
-}
-
-// ── CmdCompressMachine ───────────────────────────────────────────────────────
-
-CmdCompressMachine::CmdCompressMachine(IAppContext* ctx)
-    : CommandBase(ctx)
-{
-    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("压缩机台"), this);
-    a->setStatusTip(tr("按轴系对机台模型执行独立压缩，并在压缩前选择算法策略"));
-    setAction(a);
-}
-
-bool CmdCompressMachine::isEnabled() const
-{
-    LcncDocument* doc = context()->machineDocument();
-    if (!doc)
-        return false;
-    return doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
-}
-
-void CmdCompressMachine::execute()
-{
-    LcncDocument* doc = context()->machineDocument();
-    if (!doc)
-        return;
-
-    if (context()->camModule()->axisOptions().isEmpty()) {
-        QMessageBox::information(nullptr, tr("压缩机台"),
-            tr("请先在准备页配置机台构型。"));
-        return;
-    }
-
-    QDialog dlg;
-    dlg.setWindowTitle(tr("压缩机台"));
-    auto* layout = new QVBoxLayout(&dlg);
-    auto* form = new QFormLayout;
-    auto* combo = new QComboBox(&dlg);
-    combo->addItem(tr("实体填充并集（最快，适合先验证外形）"),
-                   static_cast<int>(CamModule::MachineCompressionStrategy::FilledSolid));
-    combo->addItem(tr("外壳抽取（去内部结构，保留外壳）"),
-                   static_cast<int>(CamModule::MachineCompressionStrategy::ExteriorShell));
-    combo->addItem(tr("缝合壳体（布尔失败时更稳，结果可能更松散）"),
-                   static_cast<int>(CamModule::MachineCompressionStrategy::SewingShell));
-    combo->addItem(tr("平衡外观代理（保留大件外形，小件盒化）"),
-                   static_cast<int>(CamModule::MachineCompressionStrategy::BoundingBoxProxy));
-    form->addRow(tr("压缩策略:"), combo);
-    layout->addLayout(form);
-
-    auto* info = new QLabel(
-          tr("如果想在体积和外观之间折中，优先试‘平衡外观代理’。\n"
-              "它会保留大件外形，把螺钉、附件和碎细节盒化。\n"
-              "前面三种策略仍然保留较多解析几何，通常不会显著缩小 STEP 文件。\n"
-              "注：网格三角化不是 STEP 的 B-Rep 简化，本次不作为压缩选项。"),
-        &dlg);
-    info->setWordWrap(true);
-    info->setStyleSheet("color: #888; font-size: 11px;");
-    layout->addWidget(info);
-
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    layout->addWidget(buttons);
-
-    if (dlg.exec() != QDialog::Accepted)
-        return;
-
-    const CamModule::MachineCompressionStrategy strategy =
-        static_cast<CamModule::MachineCompressionStrategy>(combo->currentData().toInt());
-    context()->camModule()->compressMachineModel(strategy);
 }
 
 // ── CmdUnloadMachine ──────────────────────────────────────────────────────────

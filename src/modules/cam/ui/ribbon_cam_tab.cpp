@@ -19,7 +19,6 @@ void registerCommands(CommandContainer* container)
 
     // Machine
     container->addCommand<CmdLoadMachine>(CmdLoadMachine::Name);
-    container->addCommand<CmdCompressMachine>(CmdCompressMachine::Name);
     container->addCommand<CmdUnloadMachine>(CmdUnloadMachine::Name);
     container->addCommand<CmdExportMachine>(CmdExportMachine::Name);
 
@@ -45,23 +44,22 @@ void buildRibbonTab(SARibbonCategory* cat,
     // ── 机台 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelMach = cat->addPanel(QObject::tr("机台"));
     panelMach->addLargeAction(container->findAction(CmdLoadMachine::Name));
-    panelMach->addSmallAction(container->findAction(CmdCompressMachine::Name));
-    panelMach->addSmallAction(container->findAction(CmdUnloadMachine::Name));
-    panelMach->addSmallAction(container->findAction(CmdExportMachine::Name));
+    panelMach->addLargeAction(container->findAction(CmdUnloadMachine::Name));
+    panelMach->addLargeAction(container->findAction(CmdExportMachine::Name));
 
     // ── 刀路 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelPath = cat->addPanel(QObject::tr("刀路"));
     panelPath->addLargeAction(container->findAction(CmdGenerateToolpath::Name));
-    panelPath->addSmallAction(container->findAction(CmdSetLeadIn::Name));
-    panelPath->addSmallAction(container->findAction(CmdRecalcToolpath::Name));
-    panelPath->addSmallAction(container->findAction(CmdToolpathPreview::Name));
+    panelPath->addLargeAction(container->findAction(CmdSetLeadIn::Name));
+    panelPath->addLargeAction(container->findAction(CmdRecalcToolpath::Name));
+    panelPath->addLargeAction(container->findAction(CmdToolpathPreview::Name));
 
     // ── G代码（占位） ─────────────────────────────────────────────────────
     SARibbonPanel* panelNC = cat->addPanel(QObject::tr("G代码"));
     panelNC->addLargeAction(makeAct(QObject::tr("生成G代码"), QStringLiteral(":/icons/gcode.svg")));
-    panelNC->addSmallAction(makeAct(QObject::tr("导入G代码"), QStringLiteral(":/icons/import.svg")));
-    panelNC->addSmallAction(makeAct(QObject::tr("导出G代码"), QStringLiteral(":/icons/export.svg")));
-    panelNC->addSmallAction(makeAct(QObject::tr("代码查看"),  QStringLiteral(":/icons/code.svg")));
+    panelNC->addLargeAction(makeAct(QObject::tr("导入G代码"), QStringLiteral(":/icons/import.svg")));
+    panelNC->addLargeAction(makeAct(QObject::tr("导出G代码"), QStringLiteral(":/icons/export.svg")));
+    panelNC->addLargeAction(makeAct(QObject::tr("代码查看"),  QStringLiteral(":/icons/code.svg")));
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::buildRibbonTab end");
 }

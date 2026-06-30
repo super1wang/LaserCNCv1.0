@@ -12,7 +12,7 @@
  * @brief CAM 模块持久化配置（cam.toml）。
  *
  * 字段：
- *   - 全局：machineModelPath / machinePreset / machineRenderQualityPreset
+ *   - 全局：machineModelPath / autoLoadMachineModel / machinePreset / machineRenderQualityPreset
  *   - [toolpath]：leadInLength / normalAngle / deflection / smoothAngle /
  *     useFaceClassification / showNormals / normalSampleStep
  *   - machineProfile（按机台 absolute 路径分组，array of tables）：
@@ -39,6 +39,9 @@ public:
 
     QString machineModelPath() const { return m_machineModelPath; }
     void setMachineModelPath(const QString& path);
+
+    bool autoLoadMachineModel() const { return m_autoLoadMachineModel; }
+    void setAutoLoadMachineModel(bool enabled);
 
     QString machinePreset() const { return m_machinePreset; }
     void setMachinePreset(const QString& preset);
@@ -141,6 +144,7 @@ private:
     const MachineProfile* profileForMachine(const QString& machinePath) const;
 
     QString m_machineModelPath;
+    bool m_autoLoadMachineModel{true};
     QString m_machinePreset;
     lcnc::RenderQualityPreset m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     bool m_autoInstallWorkpiece{true};

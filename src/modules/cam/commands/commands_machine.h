@@ -56,23 +56,6 @@ public:
 };
 
 /**
- * @brief Compress the current machine model with a selectable axis-grouped strategy.
- *
- * This is a CAM-side geometry optimisation step and is intentionally decoupled
- * from axis assignment so users can trigger it explicitly and compare strategies.
- */
-class CmdCompressMachine : public CommandBase
-{
-    Q_OBJECT
-public:
-    explicit CmdCompressMachine(IAppContext* ctx);
-    static constexpr const char* Name = "machine.compress";
-
-    bool isEnabled() const override;
-    void execute()   override;
-};
-
-/**
  * @brief Remove all machine entities and reset the kinematic configuration.
  *
  * Asks for confirmation, then clears the machine model geometry.

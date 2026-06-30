@@ -14,6 +14,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QEvent;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QSpinBox;
 class QStackedWidget;
@@ -107,6 +108,9 @@ private:
     QSpinBox* m_spRecentLimit{nullptr};
 
     QComboBox* m_cbMachinePreset{nullptr};
+    QLineEdit* m_editMachineModelPath{nullptr};
+    QPushButton* m_btnBrowseMachineModel{nullptr};
+    QCheckBox* m_chkAutoLoadMachineModel{nullptr};
     QLabel* m_lblMachineAlgorithm{nullptr};
     QTableWidget* m_machineAxesTable{nullptr};
     MachineConfigurationService* m_machineConfig{nullptr};
@@ -120,6 +124,8 @@ private:
     QString m_originalTheme;
     QString m_originalUnitSystem;
     int m_originalRecentLimit{10};
+    QString m_originalMachineModelPath;
+    bool m_originalAutoLoadMachineModel{true};
     QString m_originalMachinePreset;
     QVector<MachineAxisRuntimeConfig> m_originalMachineConfigs;
     bool m_loadingUi{false};

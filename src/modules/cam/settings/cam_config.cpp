@@ -152,6 +152,7 @@ bool CamConfig::importLegacyJson(const QString& jsonPath)
 
     const auto root = doc.object();
     m_machineModelPath     = root.value(QStringLiteral("machineModelPath")).toString();
+    m_autoLoadMachineModel = root.value(QStringLiteral("autoLoadMachineModel")).toBool(true);
     m_machinePreset        = root.value(QStringLiteral("machinePreset")).toString();
     m_autoInstallWorkpiece = root.value(QStringLiteral("autoInstallWorkpiece")).toBool(true);
     m_machineRenderQualityPreset = renderQualityFromString(
@@ -195,6 +196,7 @@ void CamConfig::readFrom(const toml::value& root)
     using namespace lcnc::toml_io;
 
     m_machineModelPath     = get_qstring(root, "machineModelPath",     QString());
+    m_autoLoadMachineModel = get_bool(root, "autoLoadMachineModel", true);
     m_machinePreset        = get_qstring(root, "machinePreset",        QString());
     m_autoInstallWorkpiece = get_bool(root, "autoInstallWorkpiece", true);
     const QString presetText = get_qstring(
@@ -259,6 +261,7 @@ void CamConfig::writeTo(toml::value& root) const
     using namespace lcnc::toml_io;
 
     root["machineModelPath"]     = qs(m_machineModelPath);
+    root["autoLoadMachineModel"] = m_autoLoadMachineModel;
     root["machinePreset"]        = qs(m_machinePreset);
     root["autoInstallWorkpiece"] = m_autoInstallWorkpiece;
     root["machineRenderQualityPreset"] = qs(renderQualityToString(m_machineRenderQualityPreset));
@@ -309,6 +312,13 @@ void CamConfig::setMachineModelPath(const QString& path)
         : QFileInfo(path).absoluteFilePath();
     if (m_machineModelPath == normalized) return;
     m_machineModelPath = normalized;
+    saveDefault();
+}
+
+void CamConfig::setAutoLoadMachineModel(bool enabled)
+{
+    if (m_autoLoadMachineModel == enabled) return;
+    m_autoLoadMachineModel = enabled;
     saveDefault();
 }
 

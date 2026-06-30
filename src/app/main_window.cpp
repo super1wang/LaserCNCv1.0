@@ -543,7 +543,6 @@ void MainWindow::createRightPanel()
 
     CamModule* cam = m_appContext->camModule();
     CadModule* cad = m_appContext->cadModule();
-    m_machinePanel->setMachineModelPath(cam->machineModelPath());
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setNormalAngle(cam->normalAngle());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
@@ -801,19 +800,7 @@ void MainWindow::createRightPanel()
 
     updateCadTaskPanelState();
 
-    // Wire machine panel signals to commands
-        connect(m_machinePanel, &WidgetMachinePanel::machinePresetChanged, this,
-            [this](const QString& presetName) {
-            m_appContext->camModule()->configureMachine(presetName);
-            });
-    connect(m_machinePanel, &WidgetMachinePanel::machineModelPathChanged, this,
-            [this](const QString& path) {
-                m_appContext->camModule()->setMachineModelPath(path);
-            });
-    connect(m_machinePanel, &WidgetMachinePanel::loadMachineRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdLoadMachine::Name)->execute(); });
-        connect(m_machinePanel, &WidgetMachinePanel::compressMachineRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdCompressMachine::Name)->execute(); });
+    // Wire machine panel signals.
     connect(m_machinePanel, &WidgetMachinePanel::autoInstallWorkpieceChanged, this,
             [this](bool enabled) {
                 m_appContext->camModule()->setAutoInstallWorkpiece(enabled);
@@ -868,12 +855,6 @@ void MainWindow::createRightPanel()
             [this]() {
             m_appContext->camModule()->alignWorkpieceInstallPositionToRotationCenter();
             });
-
-    // New machine panel signals
-    connect(m_machinePanel, &WidgetMachinePanel::unloadMachineRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdUnloadMachine::Name)->execute(); });
-    connect(m_machinePanel, &WidgetMachinePanel::exportMachineRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdExportMachine::Name)->execute(); });
 
         connect(m_appContext->camModule(), &CamModule::toolpathGenerated, this,
             [this]() {
@@ -1914,10 +1895,9 @@ void MainWindow::restorePersistedCamState()
 
     const CamConfig& config = cam->config();
     const QString presetName = config.machinePreset();
-    if (!presetName.isEmpty())
+    if (!lcnc::Kernel::current().service<lcnc::MachineConfigurationService>() && !presetName.isEmpty())
         cam->configureMachine(presetName);
 
-    m_machinePanel->setMachineModelPath(cam->machineModelPath());
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setNormalAngle(cam->normalAngle());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
@@ -1927,7 +1907,7 @@ void MainWindow::restorePersistedCamState()
     m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
 
     const QString machinePath = cam->machineModelPath();
-    if (!machinePath.isEmpty() && QFileInfo::exists(machinePath))
+    if (config.autoLoadMachineModel() && !machinePath.isEmpty() && QFileInfo::exists(machinePath))
         cam->loadMachine(machinePath);
 }
 
@@ -1949,7 +1929,6 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         if (rebuildTree)
             rebuildProjectExplorer();
         m_machinePanel->setDocument(nullptr);
-        m_machinePanel->setMachineModelPath(cam->machineModelPath());
         if (process)
             process->setAxisDefinitions(configuredAxes);
         if (m_laserControl)
@@ -1961,7 +1940,6 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         rebuildProjectExplorer();
 
     m_machinePanel->setDocument(machineDoc);
-    m_machinePanel->setMachineModelPath(cam->machineModelPath());
 
     const QList<MachineAxisDef> axes = configuredAxes.isEmpty()
         ? machineDoc->machineKinematics()->axes()
