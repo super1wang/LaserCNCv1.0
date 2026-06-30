@@ -21,15 +21,6 @@ struct WorkpieceProjectState {
 };
 
 /**
- * @brief Project-level identity and source data for the machine domain.
- */
-struct MachineProjectState {
-    QString modelFilePath;
-
-    void clear();
-};
-
-/**
  * @brief Project-level state for CAM runtime and sparse OCC data.
  */
 struct CamProjectState {
@@ -72,8 +63,6 @@ public:
 
     WorkpieceProjectState& workpiece() { return m_workpiece; }
     const WorkpieceProjectState& workpiece() const { return m_workpiece; }
-    MachineProjectState& machine() { return m_machine; }
-    const MachineProjectState& machine() const { return m_machine; }
     CamProjectState& cam() { return m_cam; }
     const CamProjectState& cam() const { return m_cam; }
 
@@ -95,7 +84,6 @@ private:
     ProjectSaveOptions m_saveOptions;
 
     WorkpieceProjectState m_workpiece;
-    MachineProjectState m_machine;
     CamProjectState m_cam;
     ProjectDirtyFlags m_dirtyFlags;
 };

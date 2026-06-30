@@ -1,31 +1,39 @@
 #pragma once
 
 #include "core/algorithms/cam/laser_toolpath.h"
-#include "modules/cam/contracts/cam_data_contracts.h"
+#include "core/project/cam/cam_data_contracts.h"
+#include "core/project/cam/layer_container.h"
+#include "core/project/cam/layer_manager.h"
 
 #include <QHash>
 #include <QList>
 #include <QColor>
 
 #include <cstdint>
+#include <memory>
 
 namespace lcnc::cam {
 
 /**
- * @brief Project-scoped CAM runtime data owner.
+ * @brief Project-core CAM runtime data owner (core layer).
  *
- * Owns dense/non-OCC CAM runtime data such as sampled points, lead-ins,
- * machine coordinates, and parameters. Sparse OCC geometry that should be
- * visible/selectable in the project tree is mirrored into the CAM document by
- * CamModule; dense point arrays intentionally stay here to avoid bloating OCAF.
+ * Owned by LcncProjectManager (the project core), not by the CAM module. Holds
+ * the dense CAM runtime data — contours, layers, lead-ins, machine coordinates,
+ * and process parameters. The CAM module borrows this instance to run algorithms
+ * and drive rendering. Sparse OCC geometry that should be visible/selectable in
+ * the project tree is mirrored into the CAM document by CamModule; dense point
+ * arrays intentionally stay here to avoid bloating OCAF.
+ *
+ * Persistence lives in core too: lcnc::cam::saveCamToolpath / loadCamToolpath
+ * (cam_toolpath_io.h), invoked transactionally by LcncProjectManager alongside
+ * the workpiece geometry.
  *
  * ID stability
  * ------------
  * Contour and layer IDs are paired with a deterministic ``signature``
  * (see LaserContour::signature / ToolpathLayer::signature) so that
  * re-running generateToolpath() preserves the same IDs across regenerations
- * and across sessions when the toolpath state is persisted via
- * saveToolpathToDir / loadToolpathFromDir.
+ * and across sessions when the toolpath state is persisted.
  *
  * The two ``m_signatureTo*`` maps are the "historical mapping" – they remember
  * which ID was assigned to each signature from the previous generation.
@@ -35,8 +43,31 @@ namespace lcnc::cam {
 class CamDataManager
 {
 public:
+    CamDataManager();
+    ~CamDataManager();
+
     LaserToolpath& toolpath() { return m_toolpath; }
     const LaserToolpath& toolpath() const { return m_toolpath; }
+
+    /// 工程级刀路生成参数（随工程持久化，保证重开可复现同一刀路）。
+    /// 新建工程时由 CAM 模块用全局 cam.toml 默认值播种。
+    struct GenerationParams {
+        double leadInLength{5.0};
+        double normalAngle{0.0};
+        double deflection{0.1};
+        double smoothAngle{5.0};
+        bool   useFaceClassification{true};
+        double normalSampleStep{2.0};
+    };
+    GenerationParams&       generationParams()       { return m_generationParams; }
+    const GenerationParams& generationParams() const { return m_generationParams; }
+
+    /// Phase A: 新引入的图层容器与 Qt 信号源。
+    /// 现阶段是 LaserToolpath 上层的薄包装，Phase B 起逐步成为图层级状态的唯一权威。
+    LayerContainer&       layerContainer()       { return m_layerContainer; }
+    const LayerContainer& layerContainer() const { return m_layerContainer; }
+    LayerManager*         layerManager()       { return m_layerManager.get(); }
+    const LayerManager*   layerManager() const { return m_layerManager.get(); }
 
     bool hasToolpath() const { return m_toolpath.contourCount() > 0; }
     void clearToolpath(bool resetIds = true);
@@ -49,6 +80,13 @@ public:
     ToolpathLayer* toolpathLayer(std::uint64_t layerId);
     const ToolpathLayer* toolpathLayer(std::uint64_t layerId) const;
     QList<int> contourIndexesInLayer(std::uint64_t layerId) const;
+
+    // ── 三级容器：工程文档级图层增删改名（重命名走 updateToolpathLayer）─────────
+    /// 新建一个空图层；返回分配的 layerId。
+    std::uint64_t addLayer(const QString& name, const QColor& color = QColor());
+    /// 删除图层；其下轮廓改挂到 reassignTo（为 0 或非法时挂到第一个其余图层）。
+    /// 至少保留一个图层时才删除；成功返回 true。
+    bool removeLayer(std::uint64_t layerId, std::uint64_t reassignTo = 0);
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,
                              const QColor& color,
@@ -88,6 +126,7 @@ private:
     void syncLayerContourIds();
 
     LaserToolpath m_toolpath;
+    GenerationParams m_generationParams;
     ContourId m_nextContourId{1};
     std::uint64_t m_nextLayerId{1};
     bool m_dirty{false};
@@ -95,6 +134,11 @@ private:
     /// Deterministic signature → allocated id maps (see ID stability doc above).
     QHash<std::uint64_t, std::uint64_t> m_signatureToContourId;
     QHash<std::uint64_t, std::uint64_t> m_signatureToLayerId;
+
+    /// Phase A: 图层容器 + Qt 信号外壳。LayerManager 在 attach 时延迟构造，
+    /// 以避免在 Q_OBJECT 头文件不可在该 TU 包含的场景（这里都 OK）。
+    LayerContainer                  m_layerContainer;
+    std::unique_ptr<LayerManager>   m_layerManager;
 };
 
 } // namespace lcnc::cam

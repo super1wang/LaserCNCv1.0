@@ -1,7 +1,10 @@
 #include "core/project/lcnc_project_manager.h"
 
 #include "core/document/lcnc_document.h"
+#include "core/project/cam/cam_data_manager.h"
+#include "core/project/cam/cam_toolpath_io.h"
 #include "core/project/lcnc_project_package.h"
+#include "core/logging/logger.h"
 
 #include <QFileInfo>
 
@@ -37,18 +40,22 @@ LcncProjectManager::LcncProjectManager(QObject* parent)
     BinXCAFDrivers::DefineFormat(occApp);
     XmlXCAFDrivers::DefineFormat(occApp);
 
+    m_camData = std::make_unique<lcnc::cam::CamDataManager>();
+
     ensureProject();
     m_session.clearDirty();
 }
+
+LcncProjectManager::~LcncProjectManager() = default;
 
 void LcncProjectManager::ensureProject()
 {
     if (!m_workpieceDocument)
         m_workpieceDocument.reset(createDomainDocument(ProjectDomain::Workpiece, QStringLiteral("LaserCNC 项目")));
-    if (!m_machineDocument)
-        m_machineDocument.reset(createDomainDocument(ProjectDomain::Machine, QStringLiteral("机台文档")));
-    if (!m_camDocument)
-        m_camDocument.reset(createDomainDocument(ProjectDomain::Cam, QStringLiteral("CAM 数据")));
+    // 统一工程文档：工件原始模型(EntityKind::Workpiece) 与 CAM 轮廓几何(EntityKind::Cam)
+    // 同存于 m_workpieceDocument，不再有独立 CAM doc。ProjectDomain::Cam 保留为渲染域。
+    // 机台 doc 由 CAM 的 MachineWorkspace 拥有（独立参考资产），仅通过 attachMachineDocument
+    // 登记一个非拥有引用供视图域路由使用；本类不创建/拥有机台几何，也不持久化它。
 
     syncSessionFromDocuments();
 }
@@ -66,7 +73,6 @@ LcncDocument* LcncProjectManager::newProject(const QString& name)
     emit projectReset();
     emit projectDirtyChanged(false);
     emit domainDataChanged(ProjectDomain::Workpiece);
-    emit domainDataChanged(ProjectDomain::Machine);
     emit domainDataChanged(ProjectDomain::Cam);
     return workpieceDocument();
 }
@@ -85,8 +91,10 @@ LcncDocument* LcncProjectManager::openProject(const QString& filePath, QString* 
     m_session.resetProjectState();
 
     ProjectLoadResult result;
-    if (!LcncProjectPackage::load(*workpieceDocument(), machineDocument(), camDocument(),
-                                  packagePath, &result, errorMsg)) {
+    // 机台不进 .lcnc（参考资产，独立管理）→ 传 nullptr。
+    // CAM 数据随包内一并读取（在解压目录销毁前），与几何同一事务。
+    if (!LcncProjectPackage::load(*workpieceDocument(), nullptr, camDocument(),
+                                  packagePath, &result, errorMsg, m_camData.get())) {
         return nullptr;
     }
 
@@ -103,10 +111,11 @@ LcncDocument* LcncProjectManager::openProject(const QString& filePath, QString* 
     m_session.clearDirty();
     syncSessionFromDocuments();
 
+    // CAM 数据已在 LcncProjectPackage::load 内部随包读出到 m_camData（包内、解压目录销毁前）。
+    // 视图刷新由 CAM 模块订阅 projectOpened 完成（onCamDataLoaded → 重连 wire + 显示）。
     emit projectOpened(m_session.projectPath());
     emit projectDirtyChanged(false);
     emit domainDataChanged(ProjectDomain::Workpiece);
-    emit domainDataChanged(ProjectDomain::Machine);
     emit domainDataChanged(ProjectDomain::Cam);
     return workpieceDocument();
 }
@@ -131,12 +140,16 @@ bool LcncProjectManager::saveProject(const QString& filePath, QString* errorMsg)
     manifest.saveOptions = options;
 
     LcncProjectManifest savedManifest;
-    const bool ok = LcncProjectPackage::save(*workpieceDocument(), machineDocument(), camDocument(),
-                                             targetPath, manifest, options, &savedManifest, errorMsg);
+    // 机台不进 .lcnc（参考资产，独立管理）→ 传 nullptr。
+    // CAM 数据随包内一并写出（在打包前写入 staging 目录），与几何同一事务。
+    const bool ok = LcncProjectPackage::save(*workpieceDocument(), nullptr, camDocument(),
+                                             targetPath, manifest, options, &savedManifest, errorMsg,
+                                             m_camData.get());
     if (!ok)
         return false;
 
     const QString packagePath = LcncProjectPackage::packageDirectory(targetPath);
+
     workpieceDocument()->setFilePath(packagePath);
     m_session.setProjectPath(packagePath);
     m_session.setManifest(savedManifest);
@@ -208,8 +221,8 @@ void LcncProjectManager::clearDomain(ProjectDomain domain)
         m_session.workpiece().clear();
         break;
     case ProjectDomain::Machine:
+        // 机台是参考资产（CAM MachineWorkspace 独立管理），不属于工程数据。
         target->clearEntityKind(LcncDocument::EntityKind::Machine);
-        m_session.machine().clear();
         break;
     case ProjectDomain::Cam:
         target->clearEntityKind(LcncDocument::EntityKind::Cam);
@@ -242,9 +255,11 @@ LcncDocument* LcncProjectManager::document(ProjectDomain domain) const
     case ProjectDomain::Workpiece:
         return m_workpieceDocument.get();
     case ProjectDomain::Machine:
-        return m_machineDocument.get();
+        // Phase D：CAM 注入的工作台 doc 优先；未注入时回落 manager 内 owned doc。
+        return m_machineBorrowed ? m_machineBorrowed : m_machineDocument.get();
     case ProjectDomain::Cam:
-        return m_camDocument.get();
+        // 统一文档：CAM 轮廓几何与工件同存于工程文档。
+        return m_workpieceDocument.get();
     case ProjectDomain::Project:
         return nullptr;
     }
@@ -255,10 +270,10 @@ LcncDocument* LcncProjectManager::domainDocumentById(DocumentId documentId) cons
 {
     if (m_workpieceDocument && m_workpieceDocument->id() == documentId)
         return m_workpieceDocument.get();
+    if (m_machineBorrowed && m_machineBorrowed->id() == documentId)
+        return m_machineBorrowed;
     if (m_machineDocument && m_machineDocument->id() == documentId)
         return m_machineDocument.get();
-    if (m_camDocument && m_camDocument->id() == documentId)
-        return m_camDocument.get();
     return nullptr;
 }
 
@@ -306,15 +321,32 @@ bool LcncProjectManager::domainForDocument(DocumentId documentId, ProjectDomain*
         *domain = ProjectDomain::Workpiece;
         return true;
     }
+    if (m_machineBorrowed && m_machineBorrowed->id() == documentId) {
+        *domain = ProjectDomain::Machine;
+        return true;
+    }
     if (m_machineDocument && m_machineDocument->id() == documentId) {
         *domain = ProjectDomain::Machine;
         return true;
     }
-    if (m_camDocument && m_camDocument->id() == documentId) {
-        *domain = ProjectDomain::Cam;
-        return true;
-    }
+    // 统一文档：CAM 与工件共享同一 docId，按 docId 解析的"主域"归工件；
+    // CAM 轮廓的域在 DisplayObject 级单独标注（ProjectDomain::Cam）。
     return false;
+}
+
+int LcncProjectManager::reserveDocumentId()
+{
+    return m_nextDocumentId++;
+}
+
+LcncDocument* LcncProjectManager::createMachineDocument()
+{
+    return createDomainDocument(ProjectDomain::Machine, QStringLiteral("机台工作台"));
+}
+
+void LcncProjectManager::attachMachineDocument(LcncDocument* borrowed)
+{
+    m_machineBorrowed = borrowed;
 }
 
 bool LcncProjectManager::isDomainDocument(DocumentId documentId, ProjectDomain domain) const
@@ -332,15 +364,11 @@ LcncDocument* LcncProjectManager::createDomainDocument(ProjectDomain domain, con
 void LcncProjectManager::resetProjectDocuments(const QString& projectName)
 {
     ensureProject();
+    // 统一工程文档：clearProjectData 会清掉工件 + CAM 轮廓(EntityKind::Cam)；机台是
+    // 独立参考资产，跨工程保留，不在此清空。
     workpieceDocument()->clearProjectData();
-    machineDocument()->clearProjectData();
-    camDocument()->clearProjectData();
     workpieceDocument()->setName(projectName);
     workpieceDocument()->setFilePath(QString());
-    machineDocument()->setName(QStringLiteral("机台文档"));
-    machineDocument()->setFilePath(QString());
-    camDocument()->setName(QStringLiteral("CAM 数据"));
-    camDocument()->setFilePath(QString());
     syncSessionFromDocuments();
 }
 

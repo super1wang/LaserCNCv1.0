@@ -13,7 +13,7 @@ namespace lcnc {
 class LcncProjectManifest : public TomlConfig
 {
 public:
-    static constexpr int kCurrentFormatVersion = 1;
+    static constexpr int kCurrentFormatVersion = 3;
 
     QString schema{QStringLiteral("lcnc.project")};
     int formatVersion{kCurrentFormatVersion};
@@ -22,7 +22,8 @@ public:
     QString sourceFilePath;
     QString createdUtc;
     QString savedUtc;
-    QString projectXcafPath{QStringLiteral("project.xbf")};
+    QString projectXcafPath{QStringLiteral("project.xbf")};   ///< v1 legacy; v2 uses workpieceXcafPath
+    QString workpieceXcafPath{QStringLiteral("workpiece.xbf")}; ///< v2 workpiece only
     QString camCacheDirectory{QStringLiteral("cam/cache")};
     ProjectSaveOptions saveOptions;
 

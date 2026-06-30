@@ -10,7 +10,7 @@
 
 #include <memory>
 
-#include "modules/cam/contracts/cam_data_contracts.h"
+#include "core/project/cam/cam_data_contracts.h"
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
@@ -44,6 +44,7 @@ class TravelPathRenderer;
 
 namespace lcnc::cam {
 class CamDataManager;
+class MachineWorkspace;
 } // namespace lcnc::cam
 
 /**
@@ -229,16 +230,8 @@ public:
     bool generateToolpath(double smoothAngle, bool useFaceClassification, double deflection = 0.1);
     void clearToolpath();
 
-    /// 把当前刀路（轮廓 + 图层 + 离散点 + signature 表）保存到指定项目目录。
-    /// 会写入 packageDir/cam_toolpath.toml 和 packageDir/cam_toolpath_points.bin。
-    bool saveToolpathToDir(const QString& packageDir, QString* errorMsg = nullptr) const;
-
-    /// 从指定项目目录恢复刀路。若两个文件都不存在则返回 false（视为"未持久化"，
-    /// 走传统的"用户手动生成刀路"流程）。
-    bool loadToolpathFromDir(const QString& packageDir, QString* errorMsg = nullptr);
-
-    /// 探测指定项目目录是否包含可加载的刀路缓存（不实际加载）。
-    bool hasCachedToolpath(const QString& packageDir) const;
+    // 刀路持久化（cam_toolpath.toml + points.bin）已下沉到 core
+    // （lcnc::cam::saveCamToolpath / loadCamToolpath，由 LcncProjectManager 统一调度）。
     const LaserToolpath& toolpath() const;
     LaserToolpath& toolpathRef();
     bool hasToolpath() const override;
@@ -263,6 +256,10 @@ public:
     void reorderContours(const QList<int>& order);
     const std::vector<ToolpathLayer>& toolpathLayers() const;
     QList<int> contourIndexesInLayer(std::uint64_t layerId) const;
+    /// 工程文档级图层管理：新建图层，返回 layerId（重命名/改色走 updateToolpathLayer）。
+    std::uint64_t addToolpathLayer(const QString& name, const QColor& color = QColor());
+    /// 删除图层；其下轮廓重挂到 reassignTo（0=自动选其余图层）。
+    bool removeToolpathLayer(std::uint64_t layerId, std::uint64_t reassignTo = 0);
     /// 仅更新图层的外观/名称（工具映射已迁移到 Process 模块的 ProcessCuttingPlanService）。
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,
@@ -280,6 +277,13 @@ public:
     /// Toggle toolpath display visibility.
     void setToolpathVisible(bool visible);
     bool isToolpathVisible() const;
+
+    /// CAM 运行时数据管理器（图层容器、轮廓 id 表、signature 表）。
+    /// 由 CamLayerProviderAdapter / 部分命令路径使用；保持非空。
+    lcnc::cam::CamDataManager*       camData()       { return m_camData; }
+    const lcnc::cam::CamDataManager* camData() const { return m_camData; }
+    lcnc::cam::MachineWorkspace*       machineWorkspace()       { return m_machineWorkspace; }
+    const lcnc::cam::MachineWorkspace* machineWorkspace() const { return m_machineWorkspace; }
 
     // ── Toolpath Parameters ──────────────────────────────────────────────
     double smoothAngle() const;
@@ -392,6 +396,16 @@ private:
 
     void refreshMachineDisplay();
     void syncCamDocumentContours();
+    /// 把当前刀路的轮廓 wire 作为 EntityKind::Cam 实体写入统一工程文档，记录 xcafEntry。
+    void writeContourGeometryToDocument();
+    /// 读档后按 xcafEntry 从工程文档的 Cam 实体重连每条轮廓的 wire 几何。
+    void relinkContourGeometryFromDocument();
+    /// 把当前运行时刀路生成参数固化到工程核心数据（随工程持久化）。
+    void pushGenerationParamsToCamData();
+    /// 读档后把工程级生成参数应用回运行时。
+    void applyGenerationParamsFromCamData();
+    /// core 完成工程 CAM 数据加载后，刷新 OCC 文档镜像 + 渲染 + 相关信号。
+    void onCamDataLoaded();
 
     bool              m_initialized{false};
 
@@ -403,7 +417,10 @@ private:
     std::unique_ptr<lcnc::view::TravelPathRenderer>    m_travelPathRenderer;
 
     // ── CAM data managers ─────────────────────────────────────────────
-    std::unique_ptr<lcnc::cam::CamDataManager>          m_camData;
+    /// 借用自 LcncProjectManager（工程核心数据，core 层拥有）；本模块不负责其生命周期。
+    lcnc::cam::CamDataManager*                          m_camData{nullptr};
+    /// 借用自 Kernel（独立机台参考资产，core 拥有）；本模块不负责其生命周期。
+    lcnc::cam::MachineWorkspace*                         m_machineWorkspace{nullptr};
 
     // Temporary compatibility reference while callsites migrate to m_camData.
     LaserToolpath&              m_toolpath;

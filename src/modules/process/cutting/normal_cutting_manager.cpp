@@ -12,7 +12,6 @@
 #include "modules/process/runtime/i_motion_command_sink.h"
 #include "modules/process/runtime/machine_pose5.h"
 #include "modules/process/runtime/process_interrupt_context.h"
-#include "modules/process/toolpath/process_toolpath_sorter.h"
 
 #include <QCoreApplication>
 #include <QString>
@@ -387,49 +386,13 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
         }
         if (!out.isEmpty())
             return out;
-        LCNC_WARN(lcnc::LogCode::Generic,
-                  "normal-cutting: cutting plan service returned empty list, falling back to legacy path");
+        // Phase F：掉落的 fallback 路径已删除。plan service 失败时直接返回空结果。
+        if (errorMessage)
+            *errorMessage = tr("无法生成切割链表: 加工链表服务未返回数据");
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "normal-cutting: cutting plan service returned empty list, giving up");
     }
 
-    auto orderedIds = ProcessToolpathSorter::sortedContourIds(
-        snapshot, ProcessToolpathSortStrategy::LayerThenContour);
-    if (orderedIds.isEmpty()) {
-        if (errorMessage) *errorMessage = tr("排序后没有启用轮廓");
-        return out;
-    }
-
-    int seq = 0;
-    for (const auto id : orderedIds) {
-        ++seq;
-        if (seq < startNumber) continue;
-        if (endNumber > 0 && seq > endNumber) break;
-
-        const int srcIdx = indexById.value(id, -1);
-        if (srcIdx < 0) continue;
-
-        CuttingRow row;
-        row.data.contour = snapshot.contours.at(srcIdx);
-        row.data.points = snapshot.pointsByContourId.value(id);
-        row.compensationOffsetX = offsetX;
-        row.compensationOffsetY = offsetY;
-        if (row.data.points.size() < 2) {
-            LCNC_WARN(lcnc::LogCode::Generic,
-                      "normal-cutting: contour {} skipped (only {} point(s))",
-                      id, row.data.points.size());
-            continue;
-        }
-
-        QStringList warnings;
-        row.tool = resolveTool(row.data.contour.toolName, row.data.contour.layerName, &warnings);
-        if (!row.tool) {
-            LCNC_WARN(lcnc::LogCode::Generic,
-                      "normal-cutting: contour {} skipped, no tool resolved", id);
-            continue;
-        }
-        for (const auto& w : warnings)
-            LCNC_WARN(lcnc::LogCode::Generic, "normal-cutting: {}", w.toStdString());
-        out.append(std::move(row));
-    }
     return out;
 }
 

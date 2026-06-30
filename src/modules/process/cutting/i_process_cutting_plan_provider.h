@@ -11,7 +11,7 @@
  */
 
 #include "core/kernel/i_service.h"
-#include "modules/cam/contracts/cam_data_contracts.h"
+#include "core/project/cam/cam_data_contracts.h"
 
 #include <QVector>
 #include <cstdint>

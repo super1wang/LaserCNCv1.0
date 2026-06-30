@@ -327,18 +327,33 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
 
     m_sourceDocument = document;
 
-    // Erase only tracked shapes — do NOT call eraseAll() which would also
-    // erase the overlay gizmos (ViewCube / Trihedron) stored in the same context.
-    Handle(XCAFDoc_ShapeTool) st = document->shapeTool();
-    TDF_LabelSequence freeShapes;
-    st->GetFreeShapes(freeShapes);
+    // 统一工程文档可同时持有工件与 CAM 轮廓实体（按 EntityKind 区分）。按本次请求的
+    // 域只取对应 EntityKind 的实体，避免把 CAM 轮廓当作工件域显示（或反之）。
+    // 仅注册被跟踪的 shape — 不调用 eraseAll()，以免连同 overlay gizmo 一起清掉。
+    QVector<LcncDocument::EntityKind> kinds;
+    switch (domain) {
+    case lcnc::ProjectDomain::Workpiece:
+        kinds = { LcncDocument::EntityKind::Workpiece, LcncDocument::EntityKind::Auxiliary };
+        break;
+    case lcnc::ProjectDomain::Machine:
+        kinds = { LcncDocument::EntityKind::Machine };
+        break;
+    case lcnc::ProjectDomain::Cam:
+        kinds = { LcncDocument::EntityKind::Cam };
+        break;
+    case lcnc::ProjectDomain::Project:
+        break;
+    }
 
-    for (int i = 1; i <= freeShapes.Length(); ++i) {
-        TDF_Label lbl   = freeShapes.Value(i);
-        TopoDS_Shape sh = XcafUtils::shape(lbl);
-        if (!sh.IsNull()) {
-            Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
-            registerDisplayObject(domain, document, XcafUtils::entry(lbl), ais);
+    for (LcncDocument::EntityKind kind : kinds) {
+        const TDF_LabelSequence labels = document->entityLabels(kind);
+        for (int i = 1; i <= labels.Length(); ++i) {
+            TDF_Label lbl   = labels.Value(i);
+            TopoDS_Shape sh = XcafUtils::shape(lbl);
+            if (!sh.IsNull()) {
+                Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
+                registerDisplayObject(domain, document, XcafUtils::entry(lbl), ais);
+            }
         }
     }
 
@@ -347,12 +362,11 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
         m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
                                                   m_renderingManager->runtimeFaceBoundary());
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "GuiDocument::rebuildDomain domain={} docId={} beforeDomain={} beforeTotal={} freeShapes={} afterDomain={} afterTotal={}",
+               "GuiDocument::rebuildDomain domain={} docId={} beforeDomain={} beforeTotal={} afterDomain={} afterTotal={}",
                static_cast<int>(domain),
                document->id(),
                beforeDomainCount,
                beforeTotalCount,
-               freeShapes.Length(),
                displayObjectCount(domain),
                m_displayObjects.size());
 
@@ -445,6 +459,116 @@ Handle(AIS_Shape) GuiDocument::aisShape(const QString& labelEntry) const
 Handle(AIS_Shape) GuiDocument::aisShape(DocumentId documentId, const QString& labelEntry) const
 {
     return m_displayObjects.value(DisplayKey{documentId, labelEntry}).ais;
+}
+
+// ── CAM contour bodies (Phase C: ContourId-keyed) ─────────────────────────────
+namespace {
+constexpr char kCamContourEntryPrefix[] = "cam:";
+QString camContourEntry(std::uint64_t contourId)
+{
+    return QString::fromLatin1(kCamContourEntryPrefix) + QString::number(contourId);
+}
+bool isCamContourEntry(const QString& entry, std::uint64_t* outId = nullptr)
+{
+    if (!entry.startsWith(QLatin1String(kCamContourEntryPrefix)))
+        return false;
+    bool ok = false;
+    const std::uint64_t id = entry.mid(int(sizeof(kCamContourEntryPrefix) - 1)).toULongLong(&ok);
+    if (!ok)
+        return false;
+    if (outId) *outId = id;
+    return true;
+}
+}
+
+Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
+                                                   const TopoDS_Shape& wire,
+                                                   const QString& name)
+{
+    if (contourId == 0)
+        return {};
+    auto* pm = lcnc::Kernel::current().projectManager();
+    LcncDocument* camDoc = pm ? pm->camDocument() : nullptr;
+    if (!camDoc) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "GuiDocument::displayContourBody no cam document, skipping contourId={}", contourId);
+        return {};
+    }
+
+    const QString entry = camContourEntry(contourId);
+    // 替换语义：先删旧，再注册新（同 DisplayKey 命中即覆盖）。
+    eraseKey(DisplayKey{camDoc->id(), entry}, /*updateViewer=*/false);
+
+    Handle(AIS_Shape) ais = m_scene->displayShape(wire, /*fitAll=*/false, /*update=*/true, /*background=*/false);
+    if (ais.IsNull())
+        return {};
+    DisplayObject obj;
+    obj.domain     = lcnc::ProjectDomain::Cam;
+    obj.documentId = camDoc->id();
+    obj.document   = camDoc;
+    obj.entry      = entry;
+    obj.ais        = ais;
+    m_displayObjects.insert(DisplayKey{camDoc->id(), entry}, obj);
+    (void)name; // name 仅用于日志/将来交互提示
+    if (!m_view.IsNull())
+        m_view->Redraw();
+    return ais;
+}
+
+Handle(AIS_Shape) GuiDocument::aisShapeForContour(std::uint64_t contourId) const
+{
+    if (contourId == 0) return {};
+    const QString entry = camContourEntry(contourId);
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == lcnc::ProjectDomain::Cam && it.value().entry == entry)
+            return it.value().ais;
+    }
+    return {};
+}
+
+void GuiDocument::eraseContour(std::uint64_t contourId)
+{
+    if (contourId == 0) return;
+    const QString entry = camContourEntry(contourId);
+    QList<DisplayKey> matches;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == lcnc::ProjectDomain::Cam && it.value().entry == entry)
+            matches.append(it.key());
+    }
+    if (!matches.isEmpty() && eraseKeys(matches))
+        emit displayUpdated();
+}
+
+void GuiDocument::eraseAllContours()
+{
+    QList<DisplayKey> matches;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == lcnc::ProjectDomain::Cam)
+            matches.append(it.key());
+    }
+    if (!matches.isEmpty() && eraseKeys(matches))
+        emit displayUpdated();
+}
+
+QVector<std::uint64_t> GuiDocument::selectedContourIds() const
+{
+    QVector<std::uint64_t> out;
+    if (!m_scene) return out;
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull()) return out;
+    for (ctx->InitSelected(); ctx->MoreSelected(); ctx->NextSelected()) {
+        const AIS_InteractiveObject* objPtr = ctx->SelectedInteractive().get();
+        for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+            const DisplayObject& object = it.value();
+            if (object.domain != lcnc::ProjectDomain::Cam) continue;
+            if (object.ais.get() != objPtr) continue;
+            std::uint64_t cid = 0;
+            if (isCamContourEntry(object.entry, &cid) && cid != 0)
+                out.push_back(cid);
+            break;
+        }
+    }
+    return out;
 }
 
 void GuiDocument::setEntitySelectionMode(int selectionMode)

@@ -19,34 +19,6 @@
 namespace lcnc::app {
 namespace {
 
-QMap<QString, QString> labelNameMap(LcncDocument* doc, LcncDocument::EntityKind kind)
-{
-    QMap<QString, QString> result;
-    if (!doc)
-        return result;
-
-    const TDF_LabelSequence labels = doc->entityLabels(kind);
-    for (int index = 1; index <= labels.Length(); ++index) {
-        const TDF_Label label = labels.Value(index);
-        result.insert(XcafUtils::entry(label), XcafUtils::name(label));
-    }
-    return result;
-}
-
-QString axisDisplayName(const MachineAxisDef& axis)
-{
-    if (axis.name == QStringLiteral("BASE"))
-        return QObject::tr("BASE（固定基座）");
-
-    if (axis.motionType == MachineAxisDef::Linear)
-        return QObject::tr("%1 轴  (线性  ±%2 mm)").arg(axis.name).arg(axis.maxVal, 0, 'f', 0);
-
-    const QString range = axis.maxVal >= 9000.0
-        ? QObject::tr("连续旋转")
-        : QObject::tr("±%1°").arg(axis.maxVal, 0, 'f', 0);
-    return QObject::tr("%1 轴  (旋转  %2)").arg(axis.name, range);
-}
-
 void collectLeafEntries(ProjectExplorerNode& node)
 {
     QStringList leaves;
@@ -209,92 +181,6 @@ void appendWorkpieceSection(ProjectExplorerSnapshot& snapshot, CadModule* cad)
     snapshot.roots.append(std::move(root));
 }
 
-void appendMachineSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
-{
-    LcncDocument* doc = cam ? cam->machineDocument() : nullptr;
-    const DocumentId docId = cam ? cam->machineDocumentId() : kInvalidDocumentId;
-    MachineKinematics* kin = doc ? doc->machineKinematics() : nullptr;
-
-    ProjectExplorerNode root;
-    root.kind = ProjectExplorerNodeKind::MachineRoot;
-    root.documentId = docId;
-    root.nodeKey = QStringLiteral("project.machine");
-    root.displayName = QObject::tr("机台模型");
-    root.infoText = (!doc || !kin || kin->axes().isEmpty()) ? QObject::tr("未配置") : QString();
-    root.checkable = true;
-    root.checked = true;
-
-    if (!doc || !kin || kin->axes().isEmpty()) {
-        snapshot.roots.append(std::move(root));
-        return;
-    }
-
-    const QMap<QString, QString> machineNames = labelNameMap(doc, LcncDocument::EntityKind::Machine);
-    QSet<QString> placed;
-
-    for (const MachineAxisDef& axis : kin->axes()) {
-        ProjectExplorerNode axisNode;
-        axisNode.kind = ProjectExplorerNodeKind::MachineAxis;
-        axisNode.documentId = docId;
-        axisNode.nodeKey = QStringLiteral("project.machine.axis.%1").arg(axis.name);
-        axisNode.displayName = axisDisplayName(axis);
-        axisNode.axisName = axis.name;
-        axisNode.checkable = true;
-        axisNode.checked = true;
-        axisNode.selectable = true;
-
-        const QStringList machineEntries = kin->shapesForAxis(axis.name);
-        for (const QString& entry : machineEntries) {
-            ProjectExplorerNode shapeNode;
-            shapeNode.kind = ProjectExplorerNodeKind::MachineShape;
-            shapeNode.documentId = docId;
-            shapeNode.nodeKey = QStringLiteral("project.machine.shape.%1").arg(entry);
-            shapeNode.displayName = machineNames.value(entry, entry);
-            shapeNode.entry = entry;
-            shapeNode.axisName = axis.name;
-            shapeNode.checkable = true;
-            shapeNode.checked = true;
-            axisNode.children.append(shapeNode);
-            placed.insert(entry);
-        }
-
-        collectLeafEntries(axisNode);
-        root.children.append(axisNode);
-    }
-
-    ProjectExplorerNode unassignedNode;
-    unassignedNode.kind = ProjectExplorerNodeKind::MachineUnassignedGroup;
-    unassignedNode.documentId = docId;
-    unassignedNode.nodeKey = QStringLiteral("project.machine.unassigned");
-    unassignedNode.displayName = QObject::tr("未分配");
-    unassignedNode.checkable = true;
-    unassignedNode.checked = true;
-    unassignedNode.selectable = false;
-
-    for (auto it = machineNames.cbegin(); it != machineNames.cend(); ++it) {
-        if (placed.contains(it.key()))
-            continue;
-
-        ProjectExplorerNode shapeNode;
-        shapeNode.kind = ProjectExplorerNodeKind::MachineShape;
-        shapeNode.documentId = docId;
-        shapeNode.nodeKey = QStringLiteral("project.machine.unassigned.%1").arg(it.key());
-        shapeNode.displayName = it.value();
-        shapeNode.entry = it.key();
-        shapeNode.checkable = true;
-        shapeNode.checked = true;
-        unassignedNode.children.append(shapeNode);
-    }
-
-    if (!unassignedNode.children.isEmpty()) {
-        collectLeafEntries(unassignedNode);
-        root.children.append(unassignedNode);
-    }
-
-    collectLeafEntries(root);
-    snapshot.roots.append(std::move(root));
-}
-
 void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
 {
     ProjectExplorerNode root;
@@ -381,26 +267,8 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
         root.children.append(contourNode(index));
     }
 
-    if (toolpath.contourCount() == 0) {
-        LcncDocument* camDoc = cam->camDocument();
-        const QMap<QString, QString> contourNames = labelNameMap(camDoc, LcncDocument::EntityKind::Cam);
-        int index = 0;
-        for (auto it = contourNames.cbegin(); it != contourNames.cend(); ++it, ++index) {
-            ProjectExplorerNode node;
-            node.kind = ProjectExplorerNodeKind::ToolpathContour;
-            node.documentId = camDoc ? camDoc->id() : kInvalidDocumentId;
-            node.nodeKey = QStringLiteral("project.cam.geometry.%1").arg(index);
-            node.displayName = it.value().isEmpty()
-                ? QObject::tr("轮廓 %1").arg(index + 1)
-                : it.value();
-            node.entry = it.key();
-            node.checkable = true;
-            node.checked = true;
-            root.children.append(node);
-        }
-        if (!root.children.isEmpty())
-            root.infoText = QObject::tr("%1 条轮廓").arg(root.children.size());
-    }
+    // Phase C：删除"无 toolpath 时按 CAM XCAF 还原轮廓节点"的兜底分支 ——
+    // CAM 已不再镜像 wire 到 XCAF；toolpath 缓存通过 cam_toolpath.toml 还原。
 
     snapshot.roots.append(std::move(root));
 }
@@ -411,7 +279,6 @@ ProjectExplorerSnapshot ProjectExplorerModel::build(CadModule* cad, CamModule* c
 {
     ProjectExplorerSnapshot snapshot;
     appendWorkpieceSection(snapshot, cad);
-    appendMachineSection(snapshot, cam);
     appendToolpathSection(snapshot, cam);
     return snapshot;
 }
@@ -432,17 +299,12 @@ bool isCadProjectNode(ProjectExplorerNodeKind kind)
     }
 }
 
+// Phase D：机台节点已从工程树删除，该函数保留以兼容 main_window 调用方；
+// 后续 Phase F 可改为返回 false 并删掉调用方 switch 分支。
 bool isMachineProjectNode(ProjectExplorerNodeKind kind)
 {
-    switch (kind) {
-    case ProjectExplorerNodeKind::MachineRoot:
-    case ProjectExplorerNodeKind::MachineAxis:
-    case ProjectExplorerNodeKind::MachineShape:
-    case ProjectExplorerNodeKind::MachineUnassignedGroup:
-        return true;
-    default:
-        return false;
-    }
+    (void)kind;
+    return false;
 }
 
 bool isToolpathProjectNode(ProjectExplorerNodeKind kind)

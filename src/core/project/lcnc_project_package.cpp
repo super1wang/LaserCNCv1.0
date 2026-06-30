@@ -3,13 +3,16 @@
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/logging/logger.h"
+#include "core/project/cam/cam_data_manager.h"
+#include "core/project/cam/cam_toolpath_io.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QProcess>
 #include <QTemporaryDir>
+
+#include <JlCompress.h>
 
 #include <BinXCAFDrivers.hxx>
 #include <PCDM_ReaderStatus.hxx>
@@ -37,60 +40,9 @@ bool isArchiveFile(const QFileInfo& info)
         && info.isFile();
 }
 
-QString processError(QProcess& process)
-{
-    const QString stdErr = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
-    if (!stdErr.isEmpty())
-        return stdErr;
-    const QString stdOut = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
-    return stdOut;
-}
-
-bool runPowerShellArchiveCommand(const QString& script,
-                                 const QStringList& scriptArgs,
-                                 QString* errorMsg)
-{
-#ifdef Q_OS_WIN
-    QProcess process;
-    QStringList args;
-    args << QStringLiteral("-NoProfile")
-         << QStringLiteral("-ExecutionPolicy")
-         << QStringLiteral("Bypass")
-         << QStringLiteral("-Command")
-         << script;
-    args << scriptArgs;
-
-    process.start(QStringLiteral("powershell"), args);
-    if (!process.waitForStarted(10000)) {
-        if (errorMsg)
-            *errorMsg = QStringLiteral("无法启动 PowerShell zip 后端");
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "PowerShell archive backend failed to start");
-        return false;
-    }
-    process.waitForFinished(-1);
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        const QString message = processError(process);
-        if (errorMsg)
-            *errorMsg = message;
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "PowerShell archive command failed status={} code={} message={}",
-                 static_cast<int>(process.exitStatus()),
-                 process.exitCode(),
-                 message.toStdString());
-        return false;
-    }
-    return true;
-#else
-    Q_UNUSED(script);
-    Q_UNUSED(scriptArgs);
-    if (errorMsg)
-        *errorMsg = QStringLiteral("当前平台尚未集成 .lcnc zip 后端");
-    LCNC_ERR(lcnc::LogCode::Generic,
-             "PowerShell archive backend is unavailable on this platform");
-    return false;
-#endif
-}
+// .lcnc 打包/解包后端：QuaZip（替换原 PowerShell Compress-Archive/Expand-Archive）。
+// JlCompress::compressDir 以"相对 sourceDir 的路径"写入条目 —— 即包内 project.toml /
+// workpiece.xbf / cam/... 位于根目录，与旧后端及 load 端的期望一致。
 
 bool archiveDirectoryToZip(const QString& sourceDir, const QString& archivePath, QString* errorMsg)
 {
@@ -104,26 +56,7 @@ bool archiveDirectoryToZip(const QString& sourceDir, const QString& archivePath,
         return false;
     }
 
-    QTemporaryDir archiveTemp;
-    if (!archiveTemp.isValid()) {
-        if (errorMsg)
-            *errorMsg = QStringLiteral("无法创建 .lcnc 临时压缩目录");
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "Failed to create temporary .lcnc archive directory");
-        return false;
-    }
-    const QString tempZip = QDir(archiveTemp.path()).filePath(QStringLiteral("package.zip"));
-    const QString script = QStringLiteral(
-        "$source=$args[0]; $dest=$args[1]; "
-        "Compress-Archive -Path (Join-Path $source '*') -DestinationPath $dest -Force");
-    LCNC_DEBUG(lcnc::LogCode::Generic,
-               "Archiving .lcnc staging directory source='{}' tempZip='{}' target='{}'",
-               sourceDir.toStdString(),
-               tempZip.toStdString(),
-               archivePath.toStdString());
-    if (!runPowerShellArchiveCommand(script, {sourceDir, tempZip}, errorMsg))
-        return false;
-
+    // 覆盖式写入：先删旧包，避免 QuaZip 追加/残留。
     if (QFileInfo::exists(archivePath) && !QFile::remove(archivePath)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("无法覆盖已有项目包: %1").arg(archivePath);
@@ -132,13 +65,19 @@ bool archiveDirectoryToZip(const QString& sourceDir, const QString& archivePath,
                  archivePath.toStdString());
         return false;
     }
-    if (!QFile::copy(tempZip, archivePath)) {
+
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "Archiving .lcnc staging dir source='{}' target='{}' (QuaZip)",
+               sourceDir.toStdString(),
+               archivePath.toStdString());
+
+    if (!JlCompress::compressDir(archivePath, sourceDir, /*recursive=*/true)) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("无法写入项目包: %1").arg(archivePath);
+            *errorMsg = QStringLiteral("打包 .lcnc 项目失败: %1").arg(archivePath);
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "Failed to copy temporary package '{}' to '{}'",
-                 tempZip.toStdString(),
-                 archivePath.toStdString());
+                 "QuaZip compressDir failed source='{}' target='{}'",
+                 sourceDir.toStdString(), archivePath.toStdString());
+        QFile::remove(archivePath); // 清理可能的半成品
         return false;
     }
     return true;
@@ -146,33 +85,30 @@ bool archiveDirectoryToZip(const QString& sourceDir, const QString& archivePath,
 
 bool extractZipToDirectory(const QString& archivePath, const QString& targetDir, QString* errorMsg)
 {
-    QTemporaryDir archiveTemp;
-    if (!archiveTemp.isValid()) {
+    if (!QDir().mkpath(targetDir)) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("无法创建 .lcnc 临时解压目录");
+            *errorMsg = QStringLiteral("无法创建 .lcnc 解压目录: %1").arg(targetDir);
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "Failed to create temporary .lcnc extract directory");
-        return false;
-    }
-    const QString tempZip = QDir(archiveTemp.path()).filePath(QStringLiteral("package.zip"));
-    if (!QFile::copy(archivePath, tempZip)) {
-        if (errorMsg)
-            *errorMsg = QStringLiteral("无法读取项目包: %1").arg(archivePath);
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "Failed to copy package '{}' into temporary zip '{}'",
-                 archivePath.toStdString(),
-                 tempZip.toStdString());
+                 "Failed to create .lcnc extract directory '{}'",
+                 targetDir.toStdString());
         return false;
     }
 
-    const QString script = QStringLiteral(
-        "$source=$args[0]; $dest=$args[1]; "
-        "Expand-Archive -Path $source -DestinationPath $dest -Force");
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "Extracting .lcnc archive source='{}' targetDir='{}'",
+               "Extracting .lcnc archive source='{}' targetDir='{}' (QuaZip)",
                archivePath.toStdString(),
                targetDir.toStdString());
-    return runPowerShellArchiveCommand(script, {tempZip, targetDir}, errorMsg);
+
+    const QStringList extracted = JlCompress::extractDir(archivePath, targetDir);
+    if (extracted.isEmpty()) {
+        if (errorMsg)
+            *errorMsg = QStringLiteral("解压 .lcnc 项目失败或包为空: %1").arg(archivePath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "QuaZip extractDir failed or empty archive='{}'",
+                 archivePath.toStdString());
+        return false;
+    }
+    return true;
 }
 
 lcnc::LcncProjectManifest prepareSaveManifest(const LcncDocument& workpieceDocument,
@@ -266,6 +202,7 @@ bool saveXcafSnapshot(const LcncDocument& workpieceDocument,
                       const LcncDocument* camDocument,
                       const QString& xcafPath,
                       const lcnc::ProjectSaveOptions& options,
+                      int formatVersion,
                       QString* errorMsg)
 {
     ensureXcafDrivers();
@@ -278,11 +215,13 @@ bool saveXcafSnapshot(const LcncDocument& workpieceDocument,
     const Handle(XCAFDoc_ShapeTool) shapeTool = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
     if (options.includeWorkpieceModel)
         exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Workpiece, shapeTool);
-    if (options.includeMachineModel && machineDocument)
-        exportEntityKind(*machineDocument, LcncDocument::EntityKind::Machine, shapeTool);
-    if (options.includeCamData && camDocument)
-        exportEntityKind(*camDocument, LcncDocument::EntityKind::Cam, shapeTool);
     exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Auxiliary, shapeTool);
+    // v3：统一工程文档 —— CAM 轮廓几何(wire)随工程持久化（EntityKind::Cam）；
+    // 稠密采样点仍存 cam_toolpath_points.bin。机台不进 XBF（独立参考资产）。
+    exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Cam, shapeTool);
+    (void)machineDocument;
+    (void)camDocument;
+    (void)formatVersion;
 
     const PCDM_StoreStatus status = app->SaveAs(xdeDoc, occPath(xcafPath));
     if (status != PCDM_SS_OK) {
@@ -297,6 +236,7 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
                       LcncDocument* machineDocument,
                       LcncDocument* camDocument,
                       const QString& xcafPath,
+                      int formatVersion,
                       QString* errorMsg)
 {
     ensureXcafDrivers();
@@ -313,6 +253,8 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
     const Handle(XCAFDoc_ShapeTool) shapeTool = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
     TDF_LabelSequence labels;
     shapeTool->GetFreeShapes(labels);
+    int migratedMachine = 0;
+    int discardedCam = 0;
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label label = labels.Value(i);
         const TopoDS_Shape shape = shapeTool->GetShape(label);
@@ -320,17 +262,39 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
             continue;
 
         const LcncDocument::EntityKind kind = entityKindFromLabel(label);
-        LcncDocument* target = &workpieceDocument;
-        if (kind == LcncDocument::EntityKind::Machine && machineDocument)
-            target = machineDocument;
-        else if (kind == LcncDocument::EntityKind::Cam && camDocument)
-            target = camDocument;
-
-        target->addShapeEntity(shape,
-                               labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
-                               kind);
+        if (formatVersion >= 3) {
+            // v3: 统一工程文档 —— 工件 + CAM 轮廓同存，按存储的 EntityKind 还原。
+            workpieceDocument.addShapeEntity(shape,
+                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
+                kind);
+        } else if (formatVersion == 2) {
+            // v2: 所有 shape 都属工件（只有 workpiece.xbf，无 CAM 几何）。
+            workpieceDocument.addShapeEntity(shape,
+                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
+                LcncDocument::EntityKind::Workpiece);
+        } else {
+            // v1: 按 kind 分发。
+            LcncDocument* target = &workpieceDocument;
+            LcncDocument::EntityKind targetKind = LcncDocument::EntityKind::Workpiece;
+            if (kind == LcncDocument::EntityKind::Machine && machineDocument) {
+                target = machineDocument;
+                targetKind = LcncDocument::EntityKind::Machine;
+                ++migratedMachine;
+            } else if (kind == LcncDocument::EntityKind::Cam) {
+                // CAM 实体不再需要(Phase C 剥离了 XCAF 镜像)，直接丢弃。
+                ++discardedCam;
+                continue;
+            }
+            target->addShapeEntity(shape,
+                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
+                targetKind);
+        }
     }
-
+    if (migratedMachine > 0 || discardedCam > 0) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "loadXcafSnapshot: v1 migration machine={} cam_discarded={}",
+                  migratedMachine, discardedCam);
+    }
     return true;
 }
 
@@ -366,7 +330,9 @@ QString LcncProjectPackage::manifestPath(const QString& path)
 QString LcncProjectPackage::projectXcafPath(const QString& path,
                                             const LcncProjectManifest& manifest)
 {
-    return QDir(packageDirectory(path)).filePath(manifest.projectXcafPath);
+    // v2+ 使用 workpiece.xbf；v1 保持 project.xbf
+    const QString xbf = manifest.formatVersion >= 2 ? manifest.workpieceXcafPath : manifest.projectXcafPath;
+    return QDir(packageDirectory(path)).filePath(xbf);
 }
 
 bool LcncProjectPackage::save(const LcncDocument& document,
@@ -397,7 +363,8 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
                               const LcncProjectManifest& manifestTemplate,
                               const ProjectSaveOptions& options,
                               LcncProjectManifest* savedManifest,
-                              QString* errorMsg)
+                              QString* errorMsg,
+                              lcnc::cam::CamDataManager* camData)
 {
     const QFileInfo targetInfo(path);
     const bool writeArchive = targetInfo.suffix().compare(QStringLiteral("lcnc"), Qt::CaseInsensitive) == 0
@@ -435,7 +402,7 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
 
     const QString xcafPath = projectXcafPath(packagePath, manifest);
     if (!saveXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, options, errorMsg)) {
+                          xcafPath, options, manifest.formatVersion, errorMsg)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Failed to save .lcnc XCAF snapshot '{}'",
                  xcafPath.toStdString());
@@ -459,6 +426,16 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
                  "Failed to write .lcnc manifest '{}'",
                  manifestPath(packagePath).toStdString());
         return false;
+    }
+
+    // 工程核心 CAM 数据写入与几何同一个 staging 目录 —— 对归档(.lcnc zip)而言即写入包内，
+    // 随后一起打包；对目录包而言写入包目录。单一事务。
+    if (camData) {
+        QString camErr;
+        if (!lcnc::cam::saveCamToolpath(*camData, packagePath, &camErr))
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "Failed to save CAM toolpath into package '{}': {}",
+                      packagePath.toStdString(), camErr.toStdString());
     }
 
     if (writeArchive && !archiveDirectoryToZip(packagePath, targetInfo.absoluteFilePath(), errorMsg))
@@ -487,7 +464,8 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
                               LcncDocument* camDocument,
                               const QString& path,
                               ProjectLoadResult* result,
-                              QString* errorMsg)
+                              QString* errorMsg,
+                              lcnc::cam::CamDataManager* camData)
 {
     const QFileInfo inputInfo(path);
     const bool readArchive = isArchiveFile(inputInfo);
@@ -534,11 +512,25 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
         return false;
     }
     if (!loadXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, errorMsg)) {
+                          xcafPath, manifest.formatVersion, errorMsg)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Failed to load .lcnc XCAF snapshot '{}'",
                  xcafPath.toStdString());
         return false;
+    }
+
+    // 工程核心 CAM 数据从同一解压目录读取（归档 .lcnc 时即包内）——必须在 tempPackage 销毁前完成。
+    if (camData) {
+        QString camErr;
+        if (!lcnc::cam::loadCamToolpath(*camData, packagePath, &camErr))
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "No CAM toolpath in package '{}' ({})",
+                      packagePath.toStdString(), camErr.toStdString());
+        // v1 旧档 process_cutting_plan.toml → CAM 容器的一次性迁移（包内）。
+        if (!lcnc::cam::migrateLegacyProcessCuttingPlan(*camData, packagePath, &camErr))
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "v1 cutting-plan migration failed in '{}': {}",
+                      packagePath.toStdString(), camErr.toStdString());
     }
 
     if (result) {

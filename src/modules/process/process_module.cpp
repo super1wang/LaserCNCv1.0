@@ -9,7 +9,9 @@
 #include "core/task/task_manager.h"
 #include "core/task/task_progress.h"
 #include "modules/cam/cam_module.h"
+#include "modules/cam/i_cam_layer_provider.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
+#include "core/project/cam/layer_manager.h"
 #include "modules/process/cutting/normal_cutting_manager.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/execution/process_workflow_executor.h"
@@ -257,6 +259,33 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     // 加工链表服务：项目级图层 → 工具映射、切割顺序、补偿索引等工艺数据。
     m_cuttingPlanService = std::make_unique<lcnc::process::ProcessCuttingPlanService>(this);
     m_cuttingPlanService->setToolpathProvider(camProvider);
+    // Phase B：把 CAM 端图层视图注入，图层级状态以 CAM 容器为权威。
+    if (auto layerProvider = kernel.services().getService<lcnc::cam::ICamLayerProvider>()) {
+        m_cuttingPlanService->setLayerProvider(layerProvider);
+        if (auto* mgr = qobject_cast<lcnc::cam::LayerManager*>(layerProvider->notifier())) {
+            auto* svc = m_cuttingPlanService.get();
+            connect(mgr, &lcnc::cam::LayerManager::layersReset,
+                    svc, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
+            connect(mgr, &lcnc::cam::LayerManager::layerAdded,
+                    svc, [svc](std::uint64_t) { svc->notifyExternalPlanChanged(); });
+            connect(mgr, &lcnc::cam::LayerManager::layerRemoved,
+                    svc, [svc](std::uint64_t) { svc->notifyExternalPlanChanged(); });
+            connect(mgr, &lcnc::cam::LayerManager::layersReordered,
+                    svc, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
+            connect(mgr, &lcnc::cam::LayerManager::layerPropertyChanged,
+                    svc, [svc](std::uint64_t, lcnc::cam::LayerProperty) {
+                        svc->notifyExternalPlanChanged();
+                    });
+            connect(mgr, &lcnc::cam::LayerManager::contourMembershipChanged,
+                    svc, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
+            connect(mgr, &lcnc::cam::LayerManager::manualContourOrderChanged,
+                    svc, &lcnc::process::ProcessCuttingPlanService::notifyExternalManualOrderChanged);
+            connect(mgr, &lcnc::cam::LayerManager::sortStrategyChanged,
+                    svc, [svc](lcnc::cam::CuttingPlanSortStrategy) {
+                        svc->notifyExternalPlanChanged();
+                    });
+        }
+    }
     {
         auto planService = std::shared_ptr<lcnc::process::ProcessCuttingPlanService>(
             m_cuttingPlanService.get(), [](lcnc::process::ProcessCuttingPlanService*) {});
@@ -273,26 +302,14 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                         m_cuttingPlanService->syncFromCam();
                 });
     }
-    // 项目 open/save 联动：load 时从 packageDir 读 process_cutting_plan.toml；
-    // save 时写回到当前项目目录（manager 在 save 后已 emit projectSaved）。
+    // 项目文件 IO 已全部下沉到 core：CAM 数据（含 v1 process_cutting_plan.toml 兼容迁移）
+    // 由 LcncProjectManager + cam_toolpath_io 统一读写。Process 不再做任何项目文件 IO，
+    // 仅在工程重置时清空派生状态、在 open 后从 CAM 容器重新派生切割链表。
     if (auto* pm = lcnc::Kernel::current().projectManager()) {
         connect(pm, &lcnc::LcncProjectManager::projectOpened,
-                this, [this](const QString& packagePath) {
-                    if (!m_cuttingPlanService) return;
-                    const QString dir = lcnc::LcncProjectPackage::packageDirectory(packagePath);
-                    QString err;
-                    if (!m_cuttingPlanService->loadFromProjectDir(dir, &err))
-                        LCNC_WARN(lcnc::LogCode::Generic,
-                                  "process.cuttingPlan load: {}", err.toStdString());
-                });
-        connect(pm, &lcnc::LcncProjectManager::projectSaved,
-                this, [this](const QString& packagePath) {
-                    if (!m_cuttingPlanService) return;
-                    const QString dir = lcnc::LcncProjectPackage::packageDirectory(packagePath);
-                    QString err;
-                    if (!m_cuttingPlanService->saveToProjectDir(dir, &err))
-                        LCNC_WARN(lcnc::LogCode::Generic,
-                                  "process.cuttingPlan save: {}", err.toStdString());
+                this, [this](const QString&) {
+                    if (m_cuttingPlanService)
+                        m_cuttingPlanService->syncFromCam();
                 });
         connect(pm, &lcnc::LcncProjectManager::projectReset,
                 this, [this]() {

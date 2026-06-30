@@ -10,6 +10,7 @@ class AppContext;
 class CommandContainer;
 class WidgetOccView;
 class WidgetMachinePanel;
+class WidgetMachineTree;
 class WidgetLaserControl;
 class WidgetToolpathPanel;
 class DialogTaskManager;
@@ -126,6 +127,7 @@ private:
     QTabWidget*        m_leftTabs{nullptr};
     QTreeWidget*       m_projectExplorerTree{nullptr};
     QWidget*           m_processLeftPanel{nullptr};
+    WidgetMachineTree* m_machineTree{nullptr};
     WidgetOccView*     m_occView{nullptr};
     QStackedWidget*    m_rightStack{nullptr};
     QTabWidget*        m_camRightTabs{nullptr};   // CAM ribbon 右栏：机床面板 / 刀路参数面板 两个 tab
