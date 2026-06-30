@@ -3,7 +3,6 @@
 #include <QObject>
 #include <QList>
 #include <QMap>
-#include <QPointer>
 #include <QString>
 #include <atomic>
 #include <memory>
@@ -26,7 +25,6 @@ class LegacyProcessMotionService;
 class NormalCuttingManager;
 class ProcessCuttingPlanService;
 class ProcessWorkflowExecutor;
-class WidgetCuttingPlanPanel;
 }
 
 namespace lcnc {
@@ -124,9 +122,6 @@ public:
     /// Lissajous 正弦波 + 硬件状态轮询，避免与刀路驱动写入 setAxisPosition 抢占。
     void setNormalCuttingActive(bool active);
 
-    /// 切换"加工链表"面板（非模态独立窗口）可见性；首次调用时创建。
-    void toggleCuttingPlanPanel();
-
     /// 暴露给 NormalCuttingManager 等需要工艺数据的内部组件。
     lcnc::process::ProcessCuttingPlanService* cuttingPlanService() const { return m_cuttingPlanService.get(); }
 
@@ -197,8 +192,6 @@ private:
     std::unique_ptr<lcnc::process::ProcessCuttingPlanService> m_cuttingPlanService;
     std::unique_ptr<lcnc::process::NormalCuttingManager> m_normalCuttingManager;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
-    // QPointer 而非 unique_ptr：dialog 关闭时由 Qt 删除（WA_DeleteOnClose）。
-    QPointer<class QDialog> m_cuttingPlanDialog;
     std::atomic_bool      m_normalCuttingActive{false};  ///< 见 setNormalCuttingActive
 
     // ── Ribbon「加工顺序」状态镜像 ────────────────────────────────────────

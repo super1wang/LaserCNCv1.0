@@ -19,6 +19,7 @@ void ProcessFlowDocument::resetToDefault()
 {
     m_rootNodes.clear();
     m_rootNodes.append(ProcessNodeRegistry::instance().createDefaultNode(ProcessNodeType::Start));
+    m_rootNodes.append(ProcessNodeRegistry::instance().createDefaultNode(ProcessNodeType::NormalCutting));
     m_rootNodes.append(ProcessNodeRegistry::instance().createDefaultNode(ProcessNodeType::Stop));
     markDirty();
 }

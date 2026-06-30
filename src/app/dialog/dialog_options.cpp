@@ -478,11 +478,9 @@ void DialogOptions::buildColorPage()
     auto* modelGroup = new QGroupBox(tr("模型与背景"), page);
     auto* modelForm = new QFormLayout(modelGroup);
     m_btnWorkpieceColor = makeColorButton(&m_colorDraft.workpieceColor);
-    m_btnCadBackground = makeColorButton(&m_colorDraft.cadBackgroundColor);
-    m_btnCamBackground = makeColorButton(&m_colorDraft.camBackgroundColor);
+    m_btnBackgroundColor = makeColorButton(&m_colorDraft.backgroundColor);
     modelForm->addRow(tr("工件颜色:"), m_btnWorkpieceColor);
-    modelForm->addRow(tr("CAD View 背景:"), m_btnCadBackground);
-    modelForm->addRow(tr("CAM View 背景:"), m_btnCamBackground);
+    modelForm->addRow(tr("视图背景:"), m_btnBackgroundColor);
     root->addWidget(modelGroup);
 
     auto* axisGroup = new QGroupBox(tr("机台分轴颜色"), page);
@@ -736,14 +734,15 @@ void DialogOptions::loadFromSettings()
 
     m_renderDraft = m_originalCam;
     m_colorDraft = m_originalColors;
+    m_colorDraft.cadBackgroundColor = m_colorDraft.backgroundColor;
+    m_colorDraft.camBackgroundColor = m_colorDraft.backgroundColor;
     if (m_colorDraft.machineAxisColors.isEmpty())
         m_colorDraft.machineAxisColors = defaultMachineAxisColors();
 
     setProfileToUi(m_renderDraft, m_renderControls);
 
     styleColorButton(m_btnWorkpieceColor, m_colorDraft.workpieceColor);
-    styleColorButton(m_btnCadBackground, m_colorDraft.cadBackgroundColor);
-    styleColorButton(m_btnCamBackground, m_colorDraft.camBackgroundColor);
+    styleColorButton(m_btnBackgroundColor, m_colorDraft.backgroundColor);
     styleColorButton(m_btnSelectionColor, m_colorDraft.selectionColor);
     styleColorButton(m_btnHoverColor, m_colorDraft.hoverColor);
     styleColorButton(m_btnTreeSelectionColor, m_colorDraft.treeSelectionColor);
@@ -929,6 +928,8 @@ bool DialogOptions::applyChanges()
     }
 
     m_renderDraft = collectProfileFromUi(m_renderControls);
+    m_colorDraft.cadBackgroundColor = m_colorDraft.backgroundColor;
+    m_colorDraft.camBackgroundColor = m_colorDraft.backgroundColor;
     m_colorDraft.highlightDisplayMode = m_cbHighlightMode->currentData().toInt();
     m_colorDraft.highlightLineWidth = m_spHighlightLineWidth->value();
 
@@ -945,8 +946,7 @@ bool DialogOptions::applyChanges()
     const bool camRuntimeDirty = !profileRuntimeEqual(m_originalCam, m_renderDraft);
     const bool cadDefaultDirty = m_originalCad.defaultDisplayMode != m_renderDraft.defaultDisplayMode;
     const bool camDefaultDirty = m_originalCam.defaultDisplayMode != m_renderDraft.defaultDisplayMode;
-    const bool cadBackgroundDirty = m_originalColors.cadBackgroundColor != m_colorDraft.cadBackgroundColor;
-    const bool camBackgroundDirty = m_originalColors.camBackgroundColor != m_colorDraft.camBackgroundColor;
+    const bool backgroundDirty = m_originalColors.backgroundColor != m_colorDraft.backgroundColor;
     const bool modelColorDirty = !colorModelEqual(m_originalColors, m_colorDraft);
     const bool highlightDirty = !highlightEqual(m_originalColors, m_colorDraft);
     const bool treeDirty = m_originalColors.treeSelectionColor != m_colorDraft.treeSelectionColor;
@@ -959,7 +959,7 @@ bool DialogOptions::applyChanges()
             || !sameMachineAxisDefinitions(m_originalMachineConfigs, newMachineAxes));
 
     if (!cadRuntimeDirty && !camRuntimeDirty && !cadDefaultDirty && !camDefaultDirty
-        && !cadBackgroundDirty && !camBackgroundDirty && !modelColorDirty
+        && !backgroundDirty && !modelColorDirty
         && !highlightDirty && !treeDirty && !applicationDirty && !machineDirty) {
         LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions::applyChanges no changes");
         return true;
@@ -983,8 +983,10 @@ bool DialogOptions::applyChanges()
         lcnc::view::RenderDirtyFlags camFlags(lcnc::view::RenderDirtyFlag::None);
         if (cadRuntimeDirty) cadFlags |= lcnc::view::RenderDirtyFlag::Profile;
         if (camRuntimeDirty) camFlags |= lcnc::view::RenderDirtyFlag::Profile;
-        if (cadBackgroundDirty) cadFlags |= lcnc::view::RenderDirtyFlag::Background;
-        if (camBackgroundDirty) camFlags |= lcnc::view::RenderDirtyFlag::Background;
+        if (backgroundDirty) {
+            cadFlags |= lcnc::view::RenderDirtyFlag::Background;
+            camFlags |= lcnc::view::RenderDirtyFlag::Background;
+        }
         if (modelColorDirty) {
             cadFlags |= lcnc::view::RenderDirtyFlag::Colors;
             camFlags |= lcnc::view::RenderDirtyFlag::Colors;

@@ -37,7 +37,6 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdEmergencyStop>(CmdEmergencyStop::Name);
     container->addCommand<CmdResetEmergencyStop>(CmdResetEmergencyStop::Name);
 
-    container->addCommand<CmdToggleCuttingPlanPanel>(CmdToggleCuttingPlanPanel::Name);
     container->addCommand<CmdManualAppendSelectedToCuttingOrder>(CmdManualAppendSelectedToCuttingOrder::Name);
     container->addCommand<CmdAutoSortCuttingOrder>(CmdAutoSortCuttingOrder::Name);
     container->addCommand<CmdToggleTravelPath>(CmdToggleTravelPath::Name);
@@ -62,7 +61,6 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelProc->addLargeAction(container->findAction(CmdNewProcess::Name));
     panelProc->addLargeAction(container->findAction(CmdLoadProcess::Name));
     panelProc->addSmallAction(container->findAction(CmdSaveProcess::Name));
-    panelProc->addLargeAction(container->findAction(CmdToggleCuttingPlanPanel::Name));
 
     // ── 加工顺序 ──────────────────────────────────────────────────────────
     SARibbonPanel* panelOrder = cat->addPanel(QObject::tr("加工顺序"));

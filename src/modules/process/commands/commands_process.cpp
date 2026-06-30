@@ -293,22 +293,6 @@ void CmdDisconnectController::execute()
     if (auto* p = processFacade()) p->disconnectAllDevices();
 }
 
-// ── CmdToggleCuttingPlanPanel ───────────────────────────────────────────────
-CmdToggleCuttingPlanPanel::CmdToggleCuttingPlanPanel(IAppContext* ctx) : CommandBase(ctx)
-{
-    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("加工链表"), this);
-    a->setStatusTip(tr("打开/关闭 图层 → 工具映射 与 切割顺序 面板"));
-    setAction(a);
-}
-bool CmdToggleCuttingPlanPanel::isEnabled() const
-{
-    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
-}
-void CmdToggleCuttingPlanPanel::execute()
-{
-    if (auto* m = processModule()) m->toggleCuttingPlanPanel();
-}
-
 // ── CmdManualAppendSelectedToCuttingOrder ───────────────────────────────────
 CmdManualAppendSelectedToCuttingOrder::CmdManualAppendSelectedToCuttingOrder(IAppContext* ctx)
     : CommandBase(ctx)

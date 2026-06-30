@@ -93,8 +93,7 @@ private:
     RenderControls m_renderControls;
 
     QPushButton* m_btnWorkpieceColor{nullptr};
-    QPushButton* m_btnCadBackground{nullptr};
-    QPushButton* m_btnCamBackground{nullptr};
+    QPushButton* m_btnBackgroundColor{nullptr};
     QPushButton* m_btnSelectionColor{nullptr};
     QPushButton* m_btnHoverColor{nullptr};
     QPushButton* m_btnTreeSelectionColor{nullptr};

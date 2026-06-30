@@ -21,11 +21,7 @@
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/steps/services/legacy_process_services.h"
 #include "modules/process/System/Service.h"
-#include "modules/process/ui/widget_cutting_plan_panel.h"
 #include "modules/process/workflow/process_flow_store.h"
-
-#include <QDialog>
-#include <QVBoxLayout>
 
 #include <QList>
 #include <QPointer>
@@ -208,6 +204,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     SETTINGS->EnsureDefaultFiles("./Peripheral.toml", "./config.toml");
     SETTINGS->LoadSettings("./Peripheral.toml");
     SETTINGS->LoadSettings("./config.toml");
+    m_service->SetToolTable();
 
     // 用静态预设清单填充 settings 中缺失的 IO 子表（已存在的不动），保证
     // 即使旧 toml 没有新字段也能开箱即用。
@@ -1175,32 +1172,6 @@ void ProcessModule::initializeAxisPositions()
 void ProcessModule::setNormalCuttingActive(bool active)
 {
     m_normalCuttingActive.store(active);
-}
-
-void ProcessModule::toggleCuttingPlanPanel()
-{
-    if (!m_cuttingPlanService)
-        return;
-    if (m_cuttingPlanDialog) {
-        if (m_cuttingPlanDialog->isVisible()) {
-            m_cuttingPlanDialog->hide();
-        } else {
-            m_cuttingPlanDialog->show();
-            m_cuttingPlanDialog->raise();
-            m_cuttingPlanDialog->activateWindow();
-        }
-        return;
-    }
-    auto* dlg = new QDialog(nullptr);
-    dlg->setWindowTitle(tr("加工链表配置"));
-    dlg->setAttribute(Qt::WA_DeleteOnClose, false); // 重复打开复用
-    dlg->resize(900, 640);
-    auto* layout = new QVBoxLayout(dlg);
-    layout->setContentsMargins(0, 0, 0, 0);
-    auto* panel = new lcnc::process::WidgetCuttingPlanPanel(m_cuttingPlanService.get(), dlg);
-    layout->addWidget(panel);
-    m_cuttingPlanDialog = dlg;
-    dlg->show();
 }
 
 void ProcessModule::initializeAxisEnabledStates()

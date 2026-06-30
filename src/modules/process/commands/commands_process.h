@@ -132,16 +132,6 @@ public:
     bool isEnabled() const override;
 };
 
-/// 切换"加工链表"面板可见性（Process Ribbon → 流程面板）。
-class CmdToggleCuttingPlanPanel : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.toggleCuttingPlanPanel";
-    explicit CmdToggleCuttingPlanPanel(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
 /// 把当前选中的轮廓按选择顺序追加到切割链表（手动设置加工顺序）。
 class CmdManualAppendSelectedToCuttingOrder : public CommandBase {
     Q_OBJECT

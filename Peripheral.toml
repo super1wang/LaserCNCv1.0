@@ -1,0 +1,264 @@
+[Setting]
+[Setting.Special]
+[Setting.MotionControl]
+[Setting.MotionControl.MotionControl]
+sType = "SimulatorCMHP"
+sAxis = "X"
+ExtensionAxes = ""
+
+[Setting.MotionControl.X]
+iIndex = 0
+fRightLimit = 50.0
+iHomeIndex = 0
+fLeftLimit = 0.0
+bRotation = false
+fJerk = 10000.0
+fResolution = 2000.0
+fVel = 10.0
+fAcc = 1000.0
+
+[Setting.MotionControl.X.Home]
+iIndexDir = -1
+iMode = 10
+fVelHigh = 5.0
+iMoveDir = -1
+iEdge = 0
+iTriggerIndex = -1
+fAcc = 50.0
+fVelLow = 1.0
+fDec = 50.0
+iSearchIndexDistance = 0
+iSmoothTime = 0
+iHomeOffset = 0
+iSearchHomeDistance = 0
+iEscapeStep = 20000
+
+[Setting.Digital]
+[Setting.Digital.DigitalOUT]
+[Setting.Digital.DigitalOUT.aLaser]
+enabled = true
+name = "激光"
+index = "0.4"
+active = true
+showInMain = true
+builtin = true
+
+[Setting.Digital.DigitalOUT.aYellowLight]
+enabled = true
+name = "黄灯"
+index = "0.6"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalOUT.aBlow]
+enabled = true
+name = "吹气"
+index = "0.2"
+active = true
+showInMain = true
+builtin = true
+
+[Setting.Digital.DigitalOUT.aChuck]
+enabled = true
+name = "夹头"
+index = "0.0"
+active = true
+showInMain = true
+builtin = true
+
+[Setting.Digital.DigitalOUT.aPliers]
+enabled = true
+name = "夹爪"
+index = "0.1"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalOUT.aWater]
+enabled = true
+name = "出水泵"
+index = "0.10"
+active = true
+showInMain = true
+builtin = true
+
+[Setting.Digital.DigitalOUT.aPump]
+enabled = true
+name = "回水泵"
+index = "0.11"
+active = true
+showInMain = true
+builtin = true
+
+[Setting.Digital.DigitalOUT.aRedLight]
+enabled = true
+name = "红灯"
+index = "0.7"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalOUT.aGreenLight]
+enabled = true
+name = "绿灯"
+index = "0.5"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalOUT.aBuzzer]
+enabled = true
+name = "蜂鸣器"
+index = "1.0"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN]
+[Setting.Digital.DigitalIN.aStart]
+enabled = true
+name = "开始"
+index = "0.0"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN.aSafetyLightCurtain]
+enabled = true
+name = "安全光幕"
+index = "0.7"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN.aStop]
+enabled = true
+name = "停止"
+index = "0.1"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN.aInterLock]
+enabled = true
+name = "互锁"
+index = "0.3"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN.aPressureMonitor]
+enabled = true
+name = "气压监控"
+index = "0.2"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN.aWaterTankMonitor]
+enabled = true
+name = "水箱监控"
+index = "0.6"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN.aRemnantsMonitor]
+enabled = true
+name = "余料监控"
+index = "0.5"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Digital.DigitalIN.aWaterLeakageMonitor]
+enabled = true
+name = "液位监控"
+index = "0.4"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Analog]
+[Setting.Analog.AnalogOUT]
+[Setting.Analog.AnalogOUT.aLaser]
+enabled = true
+name = "激光功率"
+index = "1"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Analog.AnalogOUT.aPressure]
+enabled = true
+name = "气压设定"
+index = "0"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Analog.AnalogIN]
+[Setting.Analog.AnalogIN.aWaterLevel]
+enabled = true
+name = "液位"
+index = "0"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Analog.AnalogIN.aWaterPressure]
+enabled = true
+name = "水压"
+index = "1"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Analog.AnalogIN.aPressure]
+enabled = true
+name = "气压"
+index = "2"
+active = true
+showInMain = false
+builtin = true
+
+[Setting.Internet]
+[Setting.Internet.Internet]
+sProtocol = "TCP"
+sIP = "127.0.0.1"
+sCommand = "NULL"
+sPort = "22"
+
+[Setting.Laser]
+[Setting.Laser.Laser]
+sType = "Simulator"
+fPpDivider = 2.0
+fEnergy = 20.0
+fFrequency = 20.0
+fPulseWidth = 20.0
+fAttenuatorPercentage = 30.0
+fResolution = 0.0
+iDelay = 0
+
+[Setting.Laser.SignalSource]
+bSignal = false
+sPort = "COM1"
+sBaudRate = "9600"
+sDataBits = "8"
+sStopBits = "1"
+sParity = "NONE"
+
+[Setting.Laser.ComSetting]
+sPort = "COM1"
+sBaudRate = "9600"
+sDataBits = "8"
+sStopBits = "1"
+sParity = "NONE"
+
+[Setting.Laser.HTTP]
+sHost = "127.0.0.1"
+iPort = 20020
+iTimeOut = 1000
+sPath = "v1/Basic"
+

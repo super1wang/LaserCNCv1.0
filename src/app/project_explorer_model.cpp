@@ -245,10 +245,8 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
         layerNode.selectable = true;
         layerNode.droppable = true;
         layerNode.infoText = layer.toolName.trimmed().isEmpty()
-            ? QObject::tr("%1 条轮廓").arg(static_cast<int>(layer.contourIds.size()))
-            : QObject::tr("%1 条 / %2")
-                .arg(static_cast<int>(layer.contourIds.size()))
-                .arg(layer.toolName.trimmed());
+            ? QObject::tr("工具: 未指定")
+            : QObject::tr("工具: %1").arg(layer.toolName.trimmed());
 
         for (std::uint64_t contourId : layer.contourIds) {
             const int index = cam->contourIndexById(static_cast<lcnc::cam::ContourId>(contourId));

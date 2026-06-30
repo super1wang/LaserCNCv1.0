@@ -100,8 +100,7 @@ QString ProcessNodeRegistry::summary(const ProcessNode& node) const
             valueText(p, QStringLiteral("targetValue"), true),
             valueText(p, QStringLiteral("timeoutMs"), 5000));
     case ProcessNodeType::Cutting:
-        return QStringLiteral("普通切割 %1").arg(
-            p.value(QStringLiteral("dryRun"), true).toBool() ? QStringLiteral("dry-run") : QStringLiteral("production"));
+        return QStringLiteral("普通切割");
     default:
         return QStringLiteral("Ready");
     }
@@ -189,8 +188,7 @@ void ProcessNodeRegistry::registerBuiltIns()
               { QStringLiteral("pollIntervalMs"), 100 } }), QStringLiteral("inputSignalWait"));
 
     add(ProcessNodeType::NormalCutting, QStringLiteral("Process"), false, false,
-        map({ { QStringLiteral("dryRun"), true },
-              { QStringLiteral("selectionMode"), QStringLiteral("allEnabled") },
+        map({ { QStringLiteral("selectionMode"), QStringLiteral("allEnabled") },
               { QStringLiteral("startNumber"), 1 },
               { QStringLiteral("endNumber"), 0 },
               { QStringLiteral("compensationIndex"), QString() } }), QStringLiteral("normalCutting"));

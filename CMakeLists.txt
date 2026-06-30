@@ -356,8 +356,6 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/cutting/pure_simulation_toolpath_ticker.cpp
     src/modules/process/cutting/process_cutting_plan_service.h
     src/modules/process/cutting/process_cutting_plan_service.cpp
-    src/modules/process/ui/widget_cutting_plan_panel.h
-    src/modules/process/ui/widget_cutting_plan_panel.cpp
     src/modules/process/workflow/process_node.cpp
     src/modules/process/workflow/process_node_registry.cpp
     src/modules/process/workflow/process_flow_document.cpp

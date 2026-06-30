@@ -2,15 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // F5 会跑这个 — VS Code 当前 build 目录是 build/(Debug)。
-      // ${command:cmake.launchTargetPath} 让 CMake Tools 自动指向当前 variant 的 LaserCNC.exe。
+      // F5 只走一条链路：先执行 preLaunchTask，再启动 VS2022 生成的 Debug 可执行文件。
+      // 不再通过 cmake.launchTargetPath 让 CMake Tools 额外触发一次 build。
       "name": "Debug LaserCNC",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${command:cmake.launchTargetPath}",
+      "program": "${workspaceFolder}/cmake-build-sdkcheck/Debug/LaserCNC.exe",
       "args": [],
       "stopAtEntry": false,
-      "cwd": "${command:cmake.launchTargetDirectory}",
+      "cwd": "${workspaceFolder}/cmake-build-sdkcheck/Debug",
       "environment": [],
       "console": "integratedTerminal",
       "preLaunchTask": "CMake: build"

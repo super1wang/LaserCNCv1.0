@@ -40,6 +40,7 @@
 #include "modules/cad/selection/cad_selection_resolver.h"
 #include "modules/cam/cam_module.h"
 #include "core/machine/machine_workspace.h"
+#include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/process_module.h"
 
 #include <SARibbonBar.h>
@@ -1579,6 +1580,7 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
     auto* form = new QFormLayout();
     auto* nameEdit = new QLineEdit(sourceLayer->name, &dialog);
     auto* colorButton = new QPushButton(&dialog);
+    auto* toolCombo = new QComboBox(&dialog);
     QColor selectedColor = sourceLayer->color.isValid() ? sourceLayer->color : QColor(80, 190, 150);
 
     auto refreshColorButton = [&]() {
@@ -1598,7 +1600,22 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
 
     form->addRow(tr("名称"), nameEdit);
     form->addRow(tr("颜色"), colorButton);
-    // 工具映射已迁移到 Process 模块的 "加工链表" 面板，CAM 这里只保留外观属性。
+    toolCombo->addItem(tr("未指定工具"), QString());
+    if (auto* planService = lcnc::Kernel::current().service<lcnc::process::ProcessCuttingPlanService>()) {
+        const QStringList tools = planService->availableToolNames();
+        for (const QString& toolName : tools) {
+            const QString trimmed = toolName.trimmed();
+            if (trimmed.isEmpty())
+                continue;
+            toolCombo->addItem(trimmed, trimmed);
+        }
+    }
+    const QString currentTool = sourceLayer->toolName.trimmed();
+    if (!currentTool.isEmpty() && toolCombo->findData(currentTool) < 0)
+        toolCombo->addItem(currentTool, currentTool);
+    const int currentToolIndex = toolCombo->findData(currentTool);
+    toolCombo->setCurrentIndex(currentToolIndex >= 0 ? currentToolIndex : 0);
+    form->addRow(tr("工具"), toolCombo);
     layout->addLayout(form);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -1609,7 +1626,8 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
     if (dialog.exec() != QDialog::Accepted)
         return;
 
-    if (cam->updateToolpathLayer(layerId, nameEdit->text(), selectedColor))
+    const QString selectedTool = toolCombo->currentData().toString();
+    if (cam->updateToolpathLayer(layerId, nameEdit->text(), selectedColor, selectedTool))
         rebuildProjectExplorer();
 }
 

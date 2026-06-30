@@ -10,13 +10,11 @@
   // so first-time `CMake: Configure` does not fall back to a global kit
   // (which on this machine would be VS 2017 x86, the highest-priority match
   // in the user-level kit list).
-  "cmake.generator": "Ninja",
-  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.buildDirectory": "${workspaceFolder}/cmake-build-sdkcheck",
   "cmake.parallelJobs": 16,
-  "cmake.defaultKit": "VS 2026 Insiders x64",
-  "cmake.buildBeforeRun": true,
+  "cmake.buildBeforeRun": false,
   "cmake.debugConfig": {
     "console": "integratedTerminal",
-    "cwd": "${workspaceFolder}/build"
+    "cwd": "${workspaceFolder}/cmake-build-sdkcheck/Debug"
   }
 }

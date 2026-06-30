@@ -260,7 +260,6 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
         break;
     }
     case ProcessNodeType::Cutting:
-        addBool(QStringLiteral("dryRun"), tr("Dry-run"));
         addText(QStringLiteral("selectionMode"), tr("选择模式"), QStringLiteral("allEnabled"));
         addInt(QStringLiteral("startNumber"), tr("起始序号"), 1, 1000000);
         addInt(QStringLiteral("endNumber"), tr("结束序号(0=不限)"), 0, 1000000);
@@ -479,6 +478,8 @@ void ProcessNodeEditDialog::loadTypedParameterEditors()
 void ProcessNodeEditDialog::applyTypedParameterEditors()
 {
     QVariantMap parameters = m_node.parameters;
+    if (m_node.type == ProcessNodeType::Cutting)
+        parameters.remove(QStringLiteral("dryRun"));
     for (auto it = m_textEditors.cbegin(); it != m_textEditors.cend(); ++it)
         parameters.insert(it.key(), it.value()->text().trimmed());
     for (auto it = m_comboEditors.cbegin(); it != m_comboEditors.cend(); ++it) {

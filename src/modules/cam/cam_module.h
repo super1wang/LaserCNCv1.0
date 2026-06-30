@@ -260,11 +260,11 @@ public:
     std::uint64_t addToolpathLayer(const QString& name, const QColor& color = QColor());
     /// 删除图层；其下轮廓重挂到 reassignTo（0=自动选其余图层）。
     bool removeToolpathLayer(std::uint64_t layerId, std::uint64_t reassignTo = 0);
-    /// 仅更新图层的外观/名称（工具映射已迁移到 Process 模块的 ProcessCuttingPlanService）。
+    /// 仅更新图层的外观/名称，保留现有工具映射。
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,
                              const QColor& color);
-    /// @deprecated 工具名将在后续版本完全脱离 CAM；当前保留以兼容旧项目读写。
+    /// 更新图层的外观/名称/工具映射。
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,
                              const QColor& color,

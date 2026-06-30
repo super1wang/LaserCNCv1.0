@@ -25,7 +25,6 @@ namespace lcnc::process {
 
 namespace {
 
-constexpr char kDryRun[]            = "dryRun";
 constexpr char kStartNumber[]       = "startNumber";
 constexpr char kEndNumber[]         = "endNumber";
 constexpr char kCompensationIndex[] = "compensationIndex";
@@ -98,7 +97,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
     ProcessInterruptContext localFallback;
     ProcessInterruptContext& ic = interrupt ? *interrupt : localFallback;
 
-    const bool dryRun       = parameters.value(QString::fromLatin1(kDryRun), true).toBool();
     const int startNumber   = parameters.value(QString::fromLatin1(kStartNumber), 1).toInt();
     const int endNumber     = parameters.value(QString::fromLatin1(kEndNumber), 0).toInt();
     const QString compIndex = parameters.value(QString::fromLatin1(kCompensationIndex)).toString();
@@ -126,13 +124,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
         if (errorMessage && errorMessage->isEmpty())
             *errorMessage = tr("筛选后的切割链表为空");
         return false;
-    }
-
-    if (dryRun) {
-        emit logMessage(tr("普通切割 dry-run：%1 条轮廓，共 %2 点")
-                            .arg(cuttingList.size())
-                            .arg(snapshot.totalPointCount()));
-        return true;
     }
 
     // 选 sink —— 工厂内自决 ACS / GTN / PureSim。

@@ -16,8 +16,12 @@ void mergeMissingTable(table& target, const table& defaults)
 			target[key] = defValue;
 			continue;
 		}
-		if (target[key].is_table() && defValue.is_table())
+		if (defValue.is_table())
+		{
+			if (!target[key].is_table())
+				target[key] = table{};
 			mergeMissingTable(target[key].as_table(), defValue.as_table());
+		}
 	}
 }
 
@@ -383,7 +387,7 @@ void Settings::LoadTable(bool bOverride, table& Value_Original, const table& Val
 		if (v_Input.is_table())
 		{
 			// 值是table，递归处理
-			if (!t_Original.count(key)) 
+			if (!t_Original.count(key) || !t_Original[key].is_table())
 				t_Original[key] = table{};
 			LoadTable(bOverride, t_Original[key].as_table(), v_Input.as_table());
 		}

@@ -1,0 +1,196 @@
+[Setting]
+[Setting.LoadingPos]
+[Setting.LoadingPos.LoadingPos]
+bLoadingPosX = false
+fLoadingPosX = 0.0
+bLoadingPosY = false
+bLoadingPosA = false
+fLoadingPosY = 0.0
+fLoadingPosZ1 = 0.0
+fLoadingPosA = 0.0
+bLoadingPosZ = false
+fLoadingPosZ = 0.0
+bLoadingPosZIdle = false
+fLoadingPosZIdle = 0.0
+bLoadingPosA1 = false
+bLoadingPosX1 = false
+fLoadingPosX1 = 0.0
+fLoadingPosA1 = 0.0
+bLoadingPosY1 = false
+fLoadingPosY1 = 0.0
+bLoadingPosZ1 = false
+bLoadingPosZ1Idle = false
+fLoadingPosZ1Idle = 0.0
+
+[Setting.LoadingPos.BlankingPos]
+bBlankingPosX = false
+fBlankingPosA1 = 0.0
+fBlankingPosX = 0.0
+bBlankingPosY = false
+bBlankingPosA = false
+fBlankingPosY = 0.0
+fBlankingPosA = 0.0
+bBlankingPosZ = false
+fBlankingPosZ = 0.0
+bBlankingPosZIdle = false
+fBlankingPosZIdle = 0.0
+bBlankingPosX1 = false
+bBlankingPosZ1Idle = false
+fBlankingPosX1 = 0.0
+bBlankingPosA1 = false
+bBlankingPosY1 = false
+fBlankingPosY1 = 0.0
+bBlankingPosZ1 = false
+fBlankingPosZ1 = 0.0
+fBlankingPosZ1Idle = 0.0
+
+[Setting.Tool]
+[Setting.Tool.ToolIndex]
+sToolIndex = "Default"
+sTool_0 = "Default"
+
+[Setting.Tool.Default]
+fLinkageParameterA = 0.0
+fA1Vel = 10.0
+fAfterCloseLaser = 0.0
+fXVel = 20.0
+bSetPosA = false
+fY1Vel = 20.0
+fLineVel = 10.0
+fArcVel = 10.0
+fCutAcc = 100.0
+fCutJerk = 1000.0
+iDelay = 0
+fAVel = 10.0
+fYVel = 20.0
+bMovePosX1 = false
+fX1Vel = 20.0
+fZVel = 10.0
+fSetPosA = 0.0
+fPpDivider = 2.0
+fIdelAcc = 100.0
+sDirectionsY = "A"
+fAxisSmoothTime = 0.0
+fIdelJerk = 1000.0
+fEnergy = 20.0
+fPluse = 20.0
+fFrequency = 30.0
+fMovePosX = 0.0
+fAttenuatorPercentage = 30.0
+bCuttingHead = false
+fPulsePickerDivider = 30.0
+fMovePosA = 0.0
+fBeforeOpenLaser = 0.0
+fIdleHeight = 0.0
+fAfterOpenLaser = 0.0
+fBeforeCloseLaser = 0.0
+fCornerVelocity = 1.0
+fAxisSmoothK = 0.0
+fCornerAngle = 1.0
+sLinkedFormula = ""
+fLinkageParameterB = 0.0
+fXSEGVelocity = 1.0
+fCutSmoothTime = 0.0
+bCrossBridge = false
+fCutSmoothK = 0.0
+fCuttingHeight = 0.0
+bMovePosY1 = false
+sDirectionsX = "X"
+fServoCuttingHeight = 0.0
+fSetPosA1 = 0.0
+bStopBlow = false
+bEnergySwitch = false
+bPunch = false
+bMovePosY = false
+bSetPosA1 = false
+iLinkedMode = 0
+bMovePosX = false
+fMovePosX1 = 0.0
+bAxisZLinkage = false
+bMovePosA = false
+bMovePosA1 = false
+fMovePosA1 = 0.0
+fMovePosY = 0.0
+fMovePosY1 = 0.0
+fLinkedDelay = 50.0
+sLinkedDirection = "X"
+bTrough = false
+iRunBuffer = 0
+fCHCompensate = 0.0
+fExtendSctart = 0.0
+fExtendEnd = 0.0
+fAccTime = 0.0
+fDelay = 0.0
+bFlightCutting = false
+fMotorDelay = 0.0
+
+[Setting.Axis]
+[Setting.Axis.Axis]
+sAxis = "X"
+
+[Setting.Axis.X]
+fLowSpeed = 3.0
+fMediumSpeed = 5.0
+fHighSpeed = 10.0
+fPipeDiameter = 1.6
+
+[Setting.Gas]
+[Setting.Gas.Gas]
+bBlow = true
+fBlowDelay = 0.0
+fPressure = 500.0
+
+[Setting.Gas.GasSetting]
+iConversions = 65535
+
+[Setting.Water]
+[Setting.Water.Water]
+bWater = false
+fWaterDelay = 0.0
+
+[Setting.Water.Pump]
+bPump = false
+fPumpOpenTime = 10.0
+fPumpCloseTime = 2.0
+
+[Setting.Monitor]
+[Setting.Monitor.Cutting]
+bInterLock = false
+bSafetyLightCurtain = false
+
+[Setting.Monitor.Gas]
+bPressureMonitor = false
+
+[Setting.Monitor.Water]
+bWaterLeakageMonitor = false
+bWaterLevelMonitor = false
+bWaterTankMonitor = false
+bWaterPressureMonitor = false
+fWaterPressureLimit = 1.0
+fWaterLevelLimit = 50.0
+
+[Setting.Monitor.WaterSetting]
+sWaterPressureConversions = "Y=X*4096"
+sWaterLevelConversions = "Y=X*4096"
+
+[Setting.Camera]
+[Setting.Camera.Calibration]
+fPixelAccuracy = 0.025
+iXStandard = 0
+iYStandard = 0
+
+[Setting.Camera.Commands]
+sCommand1Name = "指令1"
+sCommand4 = "T4"
+sCommand2Name = "指令2"
+sCommand3 = "T3"
+sCommand3Name = "指令3"
+sCommand2 = "T2"
+sCommand4Name = "指令4"
+sCommand1 = "T1"
+
+[Setting.Camera.Connect]
+sHost = "127.0.0.1"
+iPort = 6800
+iTimeOut = 1000
+

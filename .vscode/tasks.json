@@ -2,18 +2,18 @@
   "version": "2.0.0",
   "tasks": [
     {
-      // 给 launch.json 的 preLaunchTask 用，标签必须叫 "CMake: build"。
-      // 内部跑 ninja，跟状态栏 ▶ Build 按钮等价。
+      // 给 launch.json 的 preLaunchTask 用，保留这个标签名避免改动调试配置引用。
+      // 实际改为直接调用 VS2022 的 MSBuild，稳定构建 cmake-build-sdkcheck 下的解决方案。
       "label": "CMake: build",
       "type": "shell",
-      "command": "D:/CMake/bin/cmake.exe",
+      "command": "E:/vs2022IDE/MSBuild/Current/Bin/MSBuild.exe",
       "args": [
-        "--build",
-        "${workspaceFolder}/build",
-        "--target",
-        "all",
-        "-j",
-        "16"
+        "${workspaceFolder}/cmake-build-sdkcheck/LaserCNC.sln",
+        "/t:LaserCNC",
+        "/p:Configuration=Debug",
+        "/p:Platform=x64",
+        "/m",
+        "/nologo"
       ],
       "group": {
         "kind": "build",
