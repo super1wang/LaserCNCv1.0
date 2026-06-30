@@ -3,6 +3,8 @@
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/logging/logger.h"
+#include "core/project/cam/cam_data_manager.h"
+#include "core/project/cam/cam_toolpath_io.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -361,7 +363,8 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
                               const LcncProjectManifest& manifestTemplate,
                               const ProjectSaveOptions& options,
                               LcncProjectManifest* savedManifest,
-                              QString* errorMsg)
+                              QString* errorMsg,
+                              lcnc::cam::CamDataManager* camData)
 {
     const QFileInfo targetInfo(path);
     const bool writeArchive = targetInfo.suffix().compare(QStringLiteral("lcnc"), Qt::CaseInsensitive) == 0
@@ -425,6 +428,16 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
         return false;
     }
 
+    // 工程核心 CAM 数据写入与几何同一个 staging 目录 —— 对归档(.lcnc zip)而言即写入包内，
+    // 随后一起打包；对目录包而言写入包目录。单一事务。
+    if (camData) {
+        QString camErr;
+        if (!lcnc::cam::saveCamToolpath(*camData, packagePath, &camErr))
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "Failed to save CAM toolpath into package '{}': {}",
+                      packagePath.toStdString(), camErr.toStdString());
+    }
+
     if (writeArchive && !archiveDirectoryToZip(packagePath, targetInfo.absoluteFilePath(), errorMsg))
         return false;
 
@@ -451,7 +464,8 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
                               LcncDocument* camDocument,
                               const QString& path,
                               ProjectLoadResult* result,
-                              QString* errorMsg)
+                              QString* errorMsg,
+                              lcnc::cam::CamDataManager* camData)
 {
     const QFileInfo inputInfo(path);
     const bool readArchive = isArchiveFile(inputInfo);
@@ -503,6 +517,20 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
                  "Failed to load .lcnc XCAF snapshot '{}'",
                  xcafPath.toStdString());
         return false;
+    }
+
+    // 工程核心 CAM 数据从同一解压目录读取（归档 .lcnc 时即包内）——必须在 tempPackage 销毁前完成。
+    if (camData) {
+        QString camErr;
+        if (!lcnc::cam::loadCamToolpath(*camData, packagePath, &camErr))
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "No CAM toolpath in package '{}' ({})",
+                      packagePath.toStdString(), camErr.toStdString());
+        // v1 旧档 process_cutting_plan.toml → CAM 容器的一次性迁移（包内）。
+        if (!lcnc::cam::migrateLegacyProcessCuttingPlan(*camData, packagePath, &camErr))
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "v1 cutting-plan migration failed in '{}': {}",
+                      packagePath.toStdString(), camErr.toStdString());
     }
 
     if (result) {

@@ -7,6 +7,8 @@
 
 class LcncDocument;
 
+namespace lcnc::cam { class CamDataManager; }
+
 namespace lcnc {
 
 /**
@@ -47,6 +49,8 @@ public:
                      QString* errorMsg = nullptr);
 
     /// Save using project/session metadata supplied by LcncProjectManager.
+    /// When @p camData is non-null, the project-core CAM data is written **inside**
+    /// the same staging dir (so it ends up inside the .lcnc archive) — one transaction.
     static bool save(const LcncDocument& workpieceDocument,
                      const LcncDocument* machineDocument,
                      const LcncDocument* camDocument,
@@ -54,19 +58,23 @@ public:
                      const LcncProjectManifest& manifestTemplate,
                      const ProjectSaveOptions& options,
                      LcncProjectManifest* savedManifest = nullptr,
-                     QString* errorMsg = nullptr);
+                     QString* errorMsg = nullptr,
+                     lcnc::cam::CamDataManager* camData = nullptr);
 
     static bool load(LcncDocument& document,
                      const QString& path,
                      ProjectLoadResult* result = nullptr,
                      QString* errorMsg = nullptr);
 
+    /// When @p camData is non-null, the project-core CAM data is read from the same
+    /// extraction dir (inside the .lcnc archive) before it is torn down — one transaction.
     static bool load(LcncDocument& workpieceDocument,
                      LcncDocument* machineDocument,
                      LcncDocument* camDocument,
                      const QString& path,
                      ProjectLoadResult* result = nullptr,
-                     QString* errorMsg = nullptr);
+                     QString* errorMsg = nullptr,
+                     lcnc::cam::CamDataManager* camData = nullptr);
 };
 
 } // namespace lcnc

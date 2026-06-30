@@ -92,8 +92,9 @@ LcncDocument* LcncProjectManager::openProject(const QString& filePath, QString* 
 
     ProjectLoadResult result;
     // 机台不进 .lcnc（参考资产，独立管理）→ 传 nullptr。
+    // CAM 数据随包内一并读取（在解压目录销毁前），与几何同一事务。
     if (!LcncProjectPackage::load(*workpieceDocument(), nullptr, camDocument(),
-                                  packagePath, &result, errorMsg)) {
+                                  packagePath, &result, errorMsg, m_camData.get())) {
         return nullptr;
     }
 
@@ -110,20 +111,8 @@ LcncDocument* LcncProjectManager::openProject(const QString& filePath, QString* 
     m_session.clearDirty();
     syncSessionFromDocuments();
 
-    // 统一加载工程核心 CAM 数据（与几何同一事务的一部分），随后再做 v1 兼容迁移。
-    // 视图刷新由 CAM 模块订阅 projectOpened 完成。
-    if (m_camData) {
-        QString camErr;
-        if (!lcnc::cam::loadCamToolpath(*m_camData, packagePath, &camErr)) {
-            LCNC_INFO(LogCode::Generic,
-                      "project: no CAM toolpath cache to load ({})", camErr.toStdString());
-        }
-        if (!lcnc::cam::migrateLegacyProcessCuttingPlan(*m_camData, packagePath, &camErr)) {
-            LCNC_WARN(LogCode::Generic,
-                      "project: v1 cutting-plan migration failed ({})", camErr.toStdString());
-        }
-    }
-
+    // CAM 数据已在 LcncProjectPackage::load 内部随包读出到 m_camData（包内、解压目录销毁前）。
+    // 视图刷新由 CAM 模块订阅 projectOpened 完成（onCamDataLoaded → 重连 wire + 显示）。
     emit projectOpened(m_session.projectPath());
     emit projectDirtyChanged(false);
     emit domainDataChanged(ProjectDomain::Workpiece);
@@ -152,21 +141,14 @@ bool LcncProjectManager::saveProject(const QString& filePath, QString* errorMsg)
 
     LcncProjectManifest savedManifest;
     // 机台不进 .lcnc（参考资产，独立管理）→ 传 nullptr。
+    // CAM 数据随包内一并写出（在打包前写入 staging 目录），与几何同一事务。
     const bool ok = LcncProjectPackage::save(*workpieceDocument(), nullptr, camDocument(),
-                                             targetPath, manifest, options, &savedManifest, errorMsg);
+                                             targetPath, manifest, options, &savedManifest, errorMsg,
+                                             m_camData.get());
     if (!ok)
         return false;
 
     const QString packagePath = LcncProjectPackage::packageDirectory(targetPath);
-
-    // 工程核心 CAM 数据与几何同一事务写出（单一写入器，core 层）。
-    if (m_camData) {
-        QString camErr;
-        if (!lcnc::cam::saveCamToolpath(*m_camData, packagePath, &camErr)) {
-            LCNC_WARN(LogCode::Generic,
-                      "project: failed to save CAM toolpath ({})", camErr.toStdString());
-        }
-    }
 
     workpieceDocument()->setFilePath(packagePath);
     m_session.setProjectPath(packagePath);

@@ -3275,12 +3275,13 @@ void CamModule::writeContourGeometryToDocument()
     doc->clearEntityKind(LcncDocument::EntityKind::Cam);
     for (int i = 0; i < m_toolpath.contourCount(); ++i) {
         LaserContour& c = m_toolpath.contour(i);
-        if (c.wire.IsNull()) {
+        if (c.wire.IsNull() || c.contourId == 0) {
             c.xcafEntry.clear();
             continue;
         }
-        const QString name = c.name.trimmed().isEmpty()
-            ? tr("轮廓 %1").arg(i + 1) : c.name;
+        // 实体名编码 contourId（"cam:<id>"）——XCAF 名称会随 .xbf 导出/导入保留，
+        // 而 label entry 字符串在导出/导入后会变；故 relink 以名称里的 contourId 为准。
+        const QString name = QStringLiteral("cam:%1").arg(c.contourId);
         const TDF_Label lbl = doc->addShapeEntity(c.wire, name, LcncDocument::EntityKind::Cam);
         c.xcafEntry = XcafUtils::entry(lbl);
     }
@@ -3293,18 +3294,23 @@ void CamModule::relinkContourGeometryFromDocument()
     LcncDocument* doc = workpieceDocument();
     if (!doc)
         return;
-    QHash<QString, TopoDS_Shape> byEntry;
+    // 以实体名里编码的 contourId 关联（"cam:<id>"）——稳定且跨 .xbf 导出/导入有效。
+    QHash<std::uint64_t, TopoDS_Shape> byContourId;
     const TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Cam);
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label lbl = labels.Value(i);
-        byEntry.insert(XcafUtils::entry(lbl), XcafUtils::shape(lbl));
+        const QString name = XcafUtils::name(lbl);
+        if (!name.startsWith(QStringLiteral("cam:")))
+            continue;
+        bool ok = false;
+        const std::uint64_t id = name.mid(4).toULongLong(&ok);
+        if (ok && id != 0)
+            byContourId.insert(id, XcafUtils::shape(lbl));
     }
     for (int i = 0; i < m_toolpath.contourCount(); ++i) {
         LaserContour& c = m_toolpath.contour(i);
-        if (c.xcafEntry.isEmpty())
-            continue;
-        auto it = byEntry.constFind(c.xcafEntry);
-        if (it == byEntry.constEnd() || it.value().IsNull())
+        auto it = byContourId.constFind(c.contourId);
+        if (it == byContourId.constEnd() || it.value().IsNull())
             continue;
         if (it.value().ShapeType() == TopAbs_WIRE)
             c.wire = TopoDS::Wire(it.value());
