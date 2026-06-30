@@ -21,6 +21,7 @@ public:
 	static Settings*	instance();
 
 	// 存读全部参数
+	bool				EnsureDefaultFiles(const string& peripheralPath = "./Peripheral.toml", const string& technologyPath = "./config.toml");
 	bool				SaveSettings(string FilePath);  //处理并集中非初始参数部分，通过与初始参数比对，删除对应的Key&Value
 	bool				LoadSettings(string FilePath);  //先读取初始参数，再读取用户参数，得出并集Settings 
 	bool				LoadSettingsValue(const value& valueSetting);

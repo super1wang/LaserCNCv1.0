@@ -205,6 +205,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 
     // 加载外设/工艺参数（连接控制器与构造轴系/IO 表都依赖这些 toml）。
     // qg_dlgsetting 在打开时会再次加载，幂等。
+    SETTINGS->EnsureDefaultFiles("./Peripheral.toml", "./config.toml");
     SETTINGS->LoadSettings("./Peripheral.toml");
     SETTINGS->LoadSettings("./config.toml");
 

@@ -739,6 +739,8 @@ void QG_dlgSetting::clickImportConfig()
 
 void QG_dlgSetting::LoadSetting()
 {
+	SETTINGS->EnsureDefaultFiles("./Peripheral.toml", "./config.toml");
+
 	// 外设参数
 	SETTINGS->LoadSettings("./Peripheral.toml");
 	LOG_SYS_INFO(tr("Peripheral setting imported.").toUtf8().data());
