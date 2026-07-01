@@ -409,6 +409,7 @@ set(SRCS_APP
     src/app/dialog/dialog_task_manager.cpp
     src/app/project_explorer_model.cpp
     src/app/project_explorer_tree_utils.cpp
+    src/app/start_guide_widget.cpp
     src/app/main_window.cpp
 )
 

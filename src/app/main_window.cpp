@@ -4,6 +4,7 @@
 #include "app/app_context.h"
 #include "app/command_registry.h"
 #include "app/project_explorer_tree_utils.h"
+#include "app/start_guide_widget.h"
 #include "core/command/commands_api.h"
 #include "core/logging/logger.h"
 #include "modules/cad/commands/commands_file.h"
@@ -28,6 +29,7 @@
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/document/lcnc_document.h"
 #include "core/project/lcnc_project_manager.h"
+#include "core/project/lcnc_project_package.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
@@ -72,11 +74,15 @@
 #include <QApplication>
 #include <QFileInfo>
 #include <QIcon>
+#include <QPixmap>
 #include <QTimer>
 #include <QStyle>
 #include <QSignalBlocker>
 #include <QSet>
 #include <QVariantMap>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QStandardPaths>
 #include <functional>
 #include <V3d_TypeOfOrientation.hxx>
 #include <TDF_LabelSequence.hxx>
@@ -165,6 +171,12 @@ constexpr int kRibbonCadIndex = 1;
 constexpr int kRibbonCamIndex = 2;
 constexpr int kRibbonLaserIndex = 3;
 
+bool isStepFile(const QString& filePath)
+{
+    const QString ext = QFileInfo(filePath).suffix().toLower();
+    return ext == QStringLiteral("stp") || ext == QStringLiteral("step");
+}
+
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -186,6 +198,18 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onProjectReset);
         connect(project, &lcnc::LcncProjectManager::domainDataChanged,
             this, &MainWindow::onProjectDomainChanged);
+        connect(project, &lcnc::LcncProjectManager::projectOpened,
+            this, [this](const QString& filePath) {
+                m_skipNextSourceRecent = true;
+                addRecentFile(filePath);
+                showViewTab();
+                scheduleRecentThumbnailCapture(filePath);
+            });
+        connect(project, &lcnc::LcncProjectManager::projectSaved,
+            this, [this](const QString& filePath) {
+                addRecentFile(filePath);
+                scheduleRecentThumbnailCapture(filePath);
+            });
 
     // 世界坐标系渲染器：新建/关闭文档时自动 attach/detach 到该文档场景，
     // 全局可见性由 ribbon 上的 CmdToggleWorldAxes 控制。
@@ -199,6 +223,8 @@ MainWindow::MainWindow(QWidget* parent)
 
     restorePersistedCamState();
     showMachineView();
+    refreshStartGuide();
+    showStartGuide();
 
     updateCommandStates();
 }
@@ -246,6 +272,15 @@ void MainWindow::createCentralLayout()
     // ── 3D View ────────────────────────────────────────────────────────────
     create3DView();
 
+    m_startGuide = new lcnc::app::StartGuideWidget(this);
+    connect(m_startGuide, &lcnc::app::StartGuideWidget::fileActivated,
+            this, &MainWindow::openStartGuideFile);
+
+    m_centerTabs = new QTabWidget(this);
+    m_centerTabs->setDocumentMode(true);
+    m_centerTabs->addTab(m_startGuide, tr("开始"));
+    m_centerTabs->addTab(m_occView, tr("视图"));
+
     // ── Left panel ─────────────────────────────────────────────────────────
     createLeftPanel();
 
@@ -255,7 +290,7 @@ void MainWindow::createCentralLayout()
     // ── Splitter ───────────────────────────────────────────────────────────
     m_splitter = new QSplitter(Qt::Horizontal, this);
     m_splitter->addWidget(m_leftTabs);
-    m_splitter->addWidget(m_occView);
+    m_splitter->addWidget(m_centerTabs);
     m_splitter->addWidget(m_rightStack);
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 5);
@@ -1318,6 +1353,21 @@ void MainWindow::onProjectDomainChanged(lcnc::ProjectDomain domain)
         m_appContext->camModule()->autoInstallCurrentWorkpiece();
         if (m_occView && m_appContext->camModule()->workspaceGuiDocument())
             m_occView->attachDocument(m_appContext->camModule()->workspaceGuiDocument());
+
+        const QString sourcePath = lcnc::Kernel::current()
+            .projectManager()
+            ->session()
+            .workpiece()
+            .sourceFilePath;
+        if (m_skipNextSourceRecent) {
+            m_skipNextSourceRecent = false;
+        } else if (isStartGuideSupportedFile(sourcePath)) {
+            addRecentFile(sourcePath);
+            showViewTab();
+            scheduleRecentThumbnailCapture(sourcePath);
+        } else if (!m_pendingRecentThumbnailPath.isEmpty()) {
+            scheduleRecentThumbnailCapture(m_pendingRecentThumbnailPath);
+        }
     }
     updateCommandStates();
     updateCadSketchOverlay();
@@ -1953,6 +2003,158 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         const auto axisPositions = process->currentAxisPositions();
         for (auto it = axisPositions.cbegin(); it != axisPositions.cend(); ++it)
             m_laserControl->updateAxisPosition(it.key(), it.value());
+    }
+}
+
+void MainWindow::showStartGuide()
+{
+    if (m_centerTabs && m_startGuide)
+        m_centerTabs->setCurrentWidget(m_startGuide);
+}
+
+void MainWindow::showViewTab()
+{
+    if (m_centerTabs && m_occView)
+        m_centerTabs->setCurrentWidget(m_occView);
+}
+
+bool MainWindow::isStartGuideSupportedFile(const QString& filePath) const
+{
+    if (filePath.trimmed().isEmpty())
+        return false;
+    const QFileInfo info(filePath);
+    if (!info.exists())
+        return false;
+    return lcnc::LcncProjectPackage::isProjectPath(filePath) || isStepFile(filePath);
+}
+
+QString MainWindow::recentThumbnailPath(const QString& filePath) const
+{
+    QString root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (root.isEmpty())
+        root = QDir::tempPath() + QStringLiteral("/LaserCNC");
+    const QString dirPath = root + QStringLiteral("/recent_thumbnails");
+    QDir().mkpath(dirPath);
+
+    const QString normalized = QFileInfo(filePath).absoluteFilePath();
+    const QByteArray hash = QCryptographicHash::hash(normalized.toUtf8(),
+                                                     QCryptographicHash::Sha1).toHex();
+    return dirPath + QLatin1Char('/') + QString::fromLatin1(hash) + QStringLiteral(".png");
+}
+
+void MainWindow::refreshStartGuide()
+{
+    if (!m_startGuide)
+        return;
+
+    auto* settings = lcnc::Kernel::current().appSettings();
+    QStringList files;
+    QHash<QString, QString> thumbnails;
+    if (settings) {
+        for (const QString& path : settings->recentFiles) {
+            if (!isStartGuideSupportedFile(path))
+                continue;
+            const QString normalized = lcnc::LcncProjectPackage::isProjectPath(path)
+                ? QFileInfo(lcnc::LcncProjectPackage::packageDirectory(path)).absoluteFilePath()
+                : QFileInfo(path).absoluteFilePath();
+            if (files.contains(normalized, Qt::CaseInsensitive))
+                continue;
+            files.append(normalized);
+            thumbnails.insert(normalized, recentThumbnailPath(normalized));
+        }
+    }
+    m_startGuide->setRecentFiles(files, thumbnails);
+}
+
+void MainWindow::addRecentFile(const QString& filePath)
+{
+    if (!isStartGuideSupportedFile(filePath))
+        return;
+
+    auto* settings = lcnc::Kernel::current().appSettings();
+    if (!settings)
+        return;
+
+    const QString normalized = lcnc::LcncProjectPackage::isProjectPath(filePath)
+        ? QFileInfo(lcnc::LcncProjectPackage::packageDirectory(filePath)).absoluteFilePath()
+        : QFileInfo(filePath).absoluteFilePath();
+
+    QStringList next;
+    next.append(normalized);
+    for (const QString& existing : settings->recentFiles) {
+        const QString existingNormalized = lcnc::LcncProjectPackage::isProjectPath(existing)
+            ? QFileInfo(lcnc::LcncProjectPackage::packageDirectory(existing)).absoluteFilePath()
+            : QFileInfo(existing).absoluteFilePath();
+        if (existingNormalized.compare(normalized, Qt::CaseInsensitive) == 0)
+            continue;
+        if (!isStartGuideSupportedFile(existingNormalized))
+            continue;
+        next.append(existingNormalized);
+        if (next.size() >= settings->recentLimit)
+            break;
+    }
+
+    settings->recentFiles = next;
+    settings->saveDefault();
+    refreshStartGuide();
+}
+
+void MainWindow::openStartGuideFile(const QString& filePath)
+{
+    if (!isStartGuideSupportedFile(filePath)) {
+        QMessageBox::warning(this, tr("打开文件"), tr("文件不存在或格式不支持: %1").arg(filePath));
+        refreshStartGuide();
+        return;
+    }
+
+    showViewTab();
+    addRecentFile(filePath);
+
+    const DocumentId docId = m_appContext->cadModule()->openDocument(filePath);
+    if (docId != kInvalidDocumentId)
+        m_appContext->cadModule()->requestWorkpieceView(docId);
+    if (isStepFile(filePath))
+        m_pendingRecentThumbnailPath = QFileInfo(filePath).absoluteFilePath();
+    else
+        scheduleRecentThumbnailCapture(filePath);
+    updateCommandStates();
+}
+
+void MainWindow::scheduleRecentThumbnailCapture(const QString& filePath)
+{
+    if (!isStartGuideSupportedFile(filePath))
+        return;
+
+    const QString normalized = lcnc::LcncProjectPackage::isProjectPath(filePath)
+        ? QFileInfo(lcnc::LcncProjectPackage::packageDirectory(filePath)).absoluteFilePath()
+        : QFileInfo(filePath).absoluteFilePath();
+    m_pendingRecentThumbnailPath = normalized;
+
+    QTimer::singleShot(350, this, [this, normalized]() {
+        if (m_pendingRecentThumbnailPath.compare(normalized, Qt::CaseInsensitive) != 0)
+            return;
+        captureRecentThumbnail(normalized);
+    });
+}
+
+void MainWindow::captureRecentThumbnail(const QString& filePath)
+{
+    if (!m_occView || !isStartGuideSupportedFile(filePath))
+        return;
+
+    if (m_occView->view())
+        m_occView->fitAll();
+
+    const QPixmap pix = m_occView->grab();
+    if (pix.isNull())
+        return;
+
+    const QPixmap thumb = pix.scaled(QSize(336, 236),
+                                     Qt::KeepAspectRatioByExpanding,
+                                     Qt::SmoothTransformation);
+    if (thumb.save(recentThumbnailPath(filePath), "PNG")) {
+        m_pendingRecentThumbnailPath.clear();
+        refreshStartGuide();
     }
 }
 

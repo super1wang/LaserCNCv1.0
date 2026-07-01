@@ -16,6 +16,7 @@ class WidgetToolpathPanel;
 class DialogTaskManager;
 namespace lcnc::cad::ui { class WidgetCadTaskPanel; }
 namespace lcnc::cam::ui { class DialogAxisCalibrationWizard; }
+namespace lcnc::app { class StartGuideWidget; }
 class GraphicsScene;
 class QStackedWidget;
 class QSplitter;
@@ -105,6 +106,15 @@ private:
     void showWorkpieceView(DocumentId id = kInvalidDocumentId);
     /// Keep the right-side parameter page in sync with the active Ribbon page.
     void syncRightPanelForRibbonIndex(int index);
+    void showStartGuide();
+    void showViewTab();
+    void refreshStartGuide();
+    void openStartGuideFile(const QString& filePath);
+    void addRecentFile(const QString& filePath);
+    void scheduleRecentThumbnailCapture(const QString& filePath);
+    void captureRecentThumbnail(const QString& filePath);
+    QString recentThumbnailPath(const QString& filePath) const;
+    bool isStartGuideSupportedFile(const QString& filePath) const;
 
     // ── Slots ─────────────────────────────────────────────────────────────────
     void onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);
@@ -124,6 +134,8 @@ private:
 
     // Widgets
     QSplitter*         m_splitter{nullptr};
+    QTabWidget*        m_centerTabs{nullptr};
+    lcnc::app::StartGuideWidget* m_startGuide{nullptr};
     QTabWidget*        m_leftTabs{nullptr};
     QTreeWidget*       m_projectExplorerTree{nullptr};
     QWidget*           m_processLeftPanel{nullptr};
@@ -148,5 +160,7 @@ private:
     lcnc::app::ProjectExplorerSnapshot m_projectExplorerSnapshot;
     bool m_machineWorkspaceActive{false};
     bool m_blockProjectExplorerSignals{false};
+    bool m_skipNextSourceRecent{false};
+    QString m_pendingRecentThumbnailPath;
     QSet<std::uint64_t> m_lastExplorerContourSelection; ///< 上一帧 Explorer 选中的 contourId，用于差分推 SelectionService
 };
