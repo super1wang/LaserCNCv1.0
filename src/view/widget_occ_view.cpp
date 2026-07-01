@@ -869,6 +869,10 @@ void WidgetOccView::fitAll()
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "WidgetOccView::fitAll activeDoc={}",
                static_cast<void*>(m_activeDoc));
+    if (m_activeDoc) {
+        m_activeDoc->fitAll();
+        return;
+    }
     m_view->FitAll(0.01, true);
     m_view->ZFitAll();
     m_view->Redraw();

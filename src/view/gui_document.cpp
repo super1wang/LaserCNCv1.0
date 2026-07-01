@@ -17,6 +17,8 @@
 #include <AIS_ViewCube.hxx>
 #include <AIS_Trihedron.hxx>
 #include <AIS_ListOfInteractive.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <Geom_Axis2Placement.hxx>
 #include <Prs3d_DatumAspect.hxx>
 #include <Prs3d_DatumParts.hxx>
@@ -111,8 +113,8 @@ void GuiDocument::attachView(const Handle(Aspect_NeutralWindow)& win, int w, int
     m_scene->logOpenGlContextState("document");
 
     if (!m_displayObjects.isEmpty()) {
-        m_view->FitAll(0.01, false);
-        m_view->ZFitAll();
+        if (!fitDisplayObjects(0, false) && !fitDisplayObjects(1, false))
+            fitDisplayObjects(2, false);
         m_view->Redraw();
     } else {
         m_view->ZFitAll();
@@ -148,8 +150,8 @@ void GuiDocument::fitAll()
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "GuiDocument::fitAll count={}",
                m_displayObjects.size());
-    m_view->FitAll(0.01, true);
-    m_view->ZFitAll();
+    if (!fitDisplayObjects(0, true) && !fitDisplayObjects(1, true))
+        fitDisplayObjects(2, true);
     m_view->Redraw();
 }
 
@@ -307,7 +309,7 @@ Handle(AIS_Shape) GuiDocument::displayShape(lcnc::ProjectDomain domain,
                                              bool fitAll)
 {
     Handle(AIS_Shape) ais = m_scene->displayShape(shape, fitAll, true, false);
-    registerDisplayObject(domain, document, name, ais);
+    registerDisplayObject(domain, document, static_cast<int>(LcncDocument::EntityKind::Workpiece), name, ais);
     applyMachineDisplayStyle();
     if (m_renderingManager)
         m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
@@ -317,8 +319,8 @@ Handle(AIS_Shape) GuiDocument::displayShape(lcnc::ProjectDomain domain,
                name.toStdString(), fitAll, m_displayObjects.size());
     if (!m_view.IsNull()) {
         if (fitAll) {
-            m_view->FitAll(0.01, false);
-            m_view->ZFitAll();
+            if (!fitDisplayObjects(0, false) && !fitDisplayObjects(1, false))
+                fitDisplayObjects(2, false);
         }
         m_view->Redraw();
     }
@@ -427,7 +429,7 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
             TopoDS_Shape sh = XcafUtils::shape(lbl);
             if (!sh.IsNull()) {
                 Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
-                registerDisplayObject(domain, document, XcafUtils::entry(lbl), ais);
+                registerDisplayObject(domain, document, static_cast<int>(kind), XcafUtils::entry(lbl), ais);
             }
         }
     }
@@ -608,6 +610,7 @@ Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
     activateCamContourSelection(m_scene->context(), ais);
     DisplayObject obj;
     obj.domain     = lcnc::ProjectDomain::Cam;
+    obj.entityKind = static_cast<int>(LcncDocument::EntityKind::Cam);
     obj.documentId = camDoc->id();
     obj.document   = camDoc;
     obj.entry      = entry;
@@ -895,6 +898,7 @@ bool GuiDocument::eraseDomainObjects(lcnc::ProjectDomain domain, bool updateView
 
 void GuiDocument::registerDisplayObject(lcnc::ProjectDomain domain,
                                         LcncDocument* document,
+                                        int entityKind,
                                         const QString& entry,
                                         const Handle(AIS_Shape)& ais)
 {
@@ -904,9 +908,63 @@ void GuiDocument::registerDisplayObject(lcnc::ProjectDomain domain,
     const DocumentId documentId = document ? document->id() : kInvalidDocumentId;
     DisplayObject object;
     object.domain = domain;
+    object.entityKind = entityKind;
     object.documentId = documentId;
     object.document = document;
     object.entry = entry;
     object.ais = ais;
     m_displayObjects.insert(DisplayKey{documentId, entry}, object);
+}
+
+bool GuiDocument::fitDisplayObjects(int priority, bool update)
+{
+    if (m_view.IsNull())
+        return false;
+
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull())
+        return false;
+
+    Bnd_Box fitBox;
+    int fitCount = 0;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        const DisplayObject& object = it.value();
+        static constexpr int kWorkpieceKind = static_cast<int>(LcncDocument::EntityKind::Workpiece);
+        static constexpr int kAuxiliaryKind = static_cast<int>(LcncDocument::EntityKind::Auxiliary);
+
+        bool include = false;
+        if (priority == 0) {
+            include = object.domain == lcnc::ProjectDomain::Workpiece
+                && object.entityKind == kWorkpieceKind;
+        } else if (priority == 1) {
+            include = object.domain == lcnc::ProjectDomain::Cam;
+        } else {
+            include = object.entityKind != kAuxiliaryKind;
+        }
+
+        if (!include || object.ais.IsNull() || !ctx->IsDisplayed(object.ais))
+            continue;
+
+        Bnd_Box shapeBox;
+        BRepBndLib::Add(object.ais->Shape(), shapeBox);
+        if (shapeBox.IsVoid())
+            continue;
+
+        if (object.ais->HasTransformation())
+            fitBox.Add(shapeBox.Transformed(object.ais->Transformation()));
+        else
+            fitBox.Add(shapeBox);
+        ++fitCount;
+    }
+
+    if (fitBox.IsVoid())
+        return false;
+
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "GuiDocument::fitAll using priority={} bounds count={}",
+               priority,
+               fitCount);
+    m_view->FitAll(fitBox, 0.01, update ? Standard_True : Standard_False);
+    m_view->ZFitAll();
+    return true;
 }

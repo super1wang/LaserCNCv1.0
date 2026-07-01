@@ -137,6 +137,7 @@ private:
 
     struct DisplayObject {
         lcnc::ProjectDomain domain{lcnc::ProjectDomain::Project};
+        int entityKind{0};
         DocumentId documentId{kInvalidDocumentId};
         LcncDocument* document{nullptr};
         QString entry;
@@ -152,8 +153,10 @@ private:
     bool eraseDomainObjects(lcnc::ProjectDomain domain, bool updateViewer = true);
     void registerDisplayObject(lcnc::ProjectDomain domain,
                                LcncDocument* document,
+                               int entityKind,
                                const QString& entry,
                                const Handle(AIS_Shape)& ais);
+    bool fitDisplayObjects(int priority, bool update);
 
     LcncDocument*  m_sourceDocument{nullptr};
     GraphicsScene* m_scene{nullptr};
