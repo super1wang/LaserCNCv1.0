@@ -2142,17 +2142,12 @@ void MainWindow::captureRecentThumbnail(const QString& filePath)
     if (!m_occView || !isStartGuideSupportedFile(filePath))
         return;
 
-    if (m_occView->view())
-        m_occView->fitAll();
-
-    const QPixmap pix = m_occView->grab();
-    if (pix.isNull())
-        return;
-
-    const QPixmap thumb = pix.scaled(QSize(336, 236),
-                                     Qt::KeepAspectRatioByExpanding,
-                                     Qt::SmoothTransformation);
-    if (thumb.save(recentThumbnailPath(filePath), "PNG")) {
+    const QString path = recentThumbnailPath(filePath);
+    auto* gd = m_appContext && m_appContext->camModule()
+        ? m_appContext->camModule()->workspaceGuiDocument()
+        : nullptr;
+    const bool saved = gd && gd->dumpWorkpiecePreview(path, 336, 236);
+    if (saved) {
         m_pendingRecentThumbnailPath.clear();
         refreshStartGuide();
     }

@@ -60,6 +60,7 @@ public:
 
     void resizeView(int w, int h);
     void fitAll();
+    bool dumpWorkpiecePreview(const QString& filePath, int width, int height);
 
     // Gizmo accessors used by WidgetOccView for ViewCube click handling
     const Handle(AIS_ViewCube)& viewCube()  const { return m_viewCube; }

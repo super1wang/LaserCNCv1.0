@@ -16,14 +16,19 @@
 // View and gizmo includes
 #include <AIS_ViewCube.hxx>
 #include <AIS_Trihedron.hxx>
+#include <AIS_ListOfInteractive.hxx>
 #include <Geom_Axis2Placement.hxx>
 #include <Prs3d_DatumAspect.hxx>
 #include <Prs3d_DatumParts.hxx>
 #include <Graphic3d_TransformPers.hxx>
 #include <Graphic3d_MaterialAspect.hxx>
 #include <Graphic3d_AspectFillArea3d.hxx>
+#include <Graphic3d_Camera.hxx>
+#include <Image_AlienPixMap.hxx>
+#include <TCollection_AsciiString.hxx>
 #include <Aspect_TypeOfTriedronPosition.hxx>
 #include <V3d_Viewer.hxx>
+#include <V3d_TypeOfOrientation.hxx>
 #include <QTimer>
 #include <QSet>
 #include <QList>
@@ -145,6 +150,75 @@ void GuiDocument::fitAll()
     m_view->FitAll(0.01, true);
     m_view->ZFitAll();
     m_view->Redraw();
+}
+
+bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int height)
+{
+    const Handle(AIS_InteractiveContext)& ctx = context();
+    if (filePath.isEmpty() || width <= 0 || height <= 0 || m_view.IsNull() || ctx.IsNull())
+        return false;
+
+    struct DisplayState {
+        Handle(AIS_InteractiveObject) object;
+        bool wasDisplayed{false};
+    };
+
+    QList<DisplayState> states;
+    QList<Handle(AIS_InteractiveObject)> workpieceObjects;
+    auto hideTemporarily = [&ctx, &states](const Handle(AIS_InteractiveObject)& object) {
+        if (object.IsNull())
+            return;
+        const bool wasDisplayed = ctx->IsDisplayed(object);
+        states.append({object, wasDisplayed});
+        if (wasDisplayed)
+            ctx->Erase(object, Standard_False);
+    };
+
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (it.value().domain == lcnc::ProjectDomain::Workpiece && !it.value().ais.IsNull())
+            workpieceObjects.append(Handle(AIS_InteractiveObject)::DownCast(it.value().ais));
+    }
+
+    if (workpieceObjects.isEmpty())
+        return false;
+
+    auto isWorkpieceObject = [&workpieceObjects](const Handle(AIS_InteractiveObject)& object) {
+        for (const Handle(AIS_InteractiveObject)& workpieceObject : workpieceObjects) {
+            if (object == workpieceObject)
+                return true;
+        }
+        return false;
+    };
+
+    AIS_ListOfInteractive displayedObjects;
+    ctx->DisplayedObjects(displayedObjects);
+    for (AIS_ListIteratorOfListOfInteractive it(displayedObjects); it.More(); it.Next()) {
+        const Handle(AIS_InteractiveObject)& object = it.Value();
+        if (!isWorkpieceObject(object))
+            hideTemporarily(object);
+    }
+
+    Handle(Graphic3d_Camera) previousCamera = new Graphic3d_Camera();
+    previousCamera->Copy(m_view->Camera());
+
+    m_view->SetProj(V3d_XposYnegZpos);
+    m_view->FitAll(0.01, false);
+    m_view->ZFitAll();
+    m_view->Redraw();
+
+    Image_AlienPixMap image;
+    const bool rendered = m_view->ToPixMap(image, width, height, Graphic3d_BT_RGB, Standard_True);
+    const bool saved = rendered
+        && image.Save(TCollection_AsciiString(filePath.toUtf8().constData()));
+
+    m_view->SetCamera(previousCamera);
+    for (const DisplayState& state : states) {
+        if (state.wasDisplayed && !state.object.IsNull() && !ctx->IsDisplayed(state.object))
+            ctx->Display(state.object, Standard_False);
+    }
+    m_view->Redraw();
+
+    return saved;
 }
 
 void GuiDocument::initGizmos()
