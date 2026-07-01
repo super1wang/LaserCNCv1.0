@@ -86,7 +86,46 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
         m_axisGuideAis.insert(QStringLiteral("head:cone"), coneAis);
     }
 
+    applyVisibility(gd);
     updateTransforms(gd, kin);
+}
+
+void MachineGuideRenderer::setRotaryAxisVisible(GuiDocument* gd, bool visible)
+{
+    if (m_rotaryAxisVisible == visible)
+        return;
+    m_rotaryAxisVisible = visible;
+    applyVisibility(gd);
+}
+
+void MachineGuideRenderer::setCutterHeadVisible(GuiDocument* gd, bool visible)
+{
+    if (m_cutterHeadVisible == visible)
+        return;
+    m_cutterHeadVisible = visible;
+    applyVisibility(gd);
+}
+
+void MachineGuideRenderer::applyVisibility(GuiDocument* gd)
+{
+    if (!gd)
+        return;
+    GraphicsScene* scene = gd->scene();
+    if (!scene)
+        return;
+
+    for (auto it = m_axisGuideAis.cbegin(); it != m_axisGuideAis.cend(); ++it) {
+        const bool isRotaryAxis = it.key().startsWith(QStringLiteral("axis:"));
+        const bool isHead = it.key().startsWith(QStringLiteral("head:"));
+        const bool visible = (isRotaryAxis && m_rotaryAxisVisible)
+            || (isHead && m_cutterHeadVisible);
+        if (visible)
+            scene->displayObject(it.value(), false);
+        else
+            scene->eraseObject(it.value(), false);
+    }
+    if (gd->hasView())
+        gd->view()->Redraw();
 }
 
 void MachineGuideRenderer::updateTransforms(GuiDocument* gd, MachineKinematics* kin)

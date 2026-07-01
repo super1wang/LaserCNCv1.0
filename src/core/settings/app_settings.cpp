@@ -365,6 +365,16 @@ void AppSettings::readFrom(const toml::value& root)
         colors.highlightDisplayMode = get_int(h, "display_mode", colors.highlightDisplayMode);
         colors.highlightLineWidth = get_double(h, "line_width", colors.highlightLineWidth);
     }
+
+    if (root.contains("view_state") && root.at("view_state").is_table()) {
+        const auto& v = root.at("view_state");
+        viewState.displayMode = get_int(v, "display_mode", viewState.displayMode);
+        viewState.faceBoundary = get_bool(v, "face_boundary", viewState.faceBoundary);
+        viewState.worldAxesVisible = get_bool(v, "world_axes_visible", viewState.worldAxesVisible);
+        viewState.rotaryAxisGuidesVisible = get_bool(v, "rotary_axis_guides_visible", viewState.rotaryAxisGuidesVisible);
+        viewState.cutterHeadGuideVisible = get_bool(v, "cutter_head_guide_visible", viewState.cutterHeadGuideVisible);
+        viewState.machineModelVisible = get_bool(v, "machine_model_visible", viewState.machineModelVisible);
+    }
 }
 
 void AppSettings::writeTo(toml::value& root) const
@@ -423,6 +433,15 @@ void AppSettings::writeTo(toml::value& root) const
         axisColors[qs(it.key())] = qs(colorToHex(it.value()));
     colorTable["axis_colors"] = axisColors;
     root["colors"] = colorTable;
+
+    toml::value viewStateTable(toml::table{});
+    viewStateTable["display_mode"] = viewState.displayMode;
+    viewStateTable["face_boundary"] = viewState.faceBoundary;
+    viewStateTable["world_axes_visible"] = viewState.worldAxesVisible;
+    viewStateTable["rotary_axis_guides_visible"] = viewState.rotaryAxisGuidesVisible;
+    viewStateTable["cutter_head_guide_visible"] = viewState.cutterHeadGuideVisible;
+    viewStateTable["machine_model_visible"] = viewState.machineModelVisible;
+    root["view_state"] = viewStateTable;
 }
 
 } // namespace lcnc

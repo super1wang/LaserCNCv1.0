@@ -26,6 +26,7 @@
 #include <Graphic3d_Camera.hxx>
 #include <Image_AlienPixMap.hxx>
 #include <TCollection_AsciiString.hxx>
+#include <TopAbs_ShapeEnum.hxx>
 #include <Aspect_TypeOfTriedronPosition.hxx>
 #include <V3d_Viewer.hxx>
 #include <V3d_TypeOfOrientation.hxx>
@@ -553,6 +554,34 @@ bool isCamContourEntry(const QString& entry, std::uint64_t* outId = nullptr)
     if (outId) *outId = id;
     return true;
 }
+
+void activateCamContourSelection(const Handle(AIS_InteractiveContext)& ctx,
+                                 const Handle(AIS_Shape)& ais)
+{
+    if (ctx.IsNull() || ais.IsNull())
+        return;
+
+    const int globalMode = AIS_Shape::SelectionMode(TopAbs_SHAPE);
+    const int wireMode = AIS_Shape::SelectionMode(TopAbs_WIRE);
+
+    ctx->SetDisplayMode(ais, AIS_WireFrame, Standard_False);
+    ctx->SetWidth(ais, 2.0, Standard_False);
+    ctx->Deactivate(ais);
+    ctx->SetSelectionModeActive(ais,
+                                globalMode,
+                                Standard_True,
+                                AIS_SelectionModesConcurrency_Multiple,
+                                Standard_False);
+    ctx->SetSelectionModeActive(ais,
+                                wireMode,
+                                Standard_True,
+                                AIS_SelectionModesConcurrency_Multiple,
+                                Standard_False);
+    ctx->SetSelectionSensitivity(ais, globalMode, 8);
+    ctx->SetSelectionSensitivity(ais, wireMode, 8);
+    ctx->SetPixelTolerance(qMax(ctx->PixelTolerance(), 6));
+    ctx->RecomputeSelectionOnly(ais);
+}
 }
 
 Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
@@ -576,6 +605,7 @@ Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
     Handle(AIS_Shape) ais = m_scene->displayShape(wire, /*fitAll=*/false, /*update=*/true, /*background=*/false);
     if (ais.IsNull())
         return {};
+    activateCamContourSelection(m_scene->context(), ais);
     DisplayObject obj;
     obj.domain     = lcnc::ProjectDomain::Cam;
     obj.documentId = camDoc->id();
@@ -645,6 +675,22 @@ QVector<std::uint64_t> GuiDocument::selectedContourIds() const
     return out;
 }
 
+void GuiDocument::restoreCamContourSelectionModes()
+{
+    if (!m_scene)
+        return;
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (ctx.IsNull())
+        return;
+
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        const DisplayObject& object = it.value();
+        if (object.domain != lcnc::ProjectDomain::Cam || !isCamContourEntry(object.entry))
+            continue;
+        activateCamContourSelection(ctx, object.ais);
+    }
+}
+
 void GuiDocument::setEntitySelectionMode(int selectionMode)
 {
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
@@ -657,7 +703,13 @@ void GuiDocument::setEntitySelectionMode(int selectionMode)
             continue;
 
         ctx->Deactivate(ais);
-        ctx->Activate(ais, selectionMode, Standard_False);
+        if (selectionMode == 0
+            && it.value().domain == lcnc::ProjectDomain::Cam
+            && isCamContourEntry(it.value().entry)) {
+            activateCamContourSelection(ctx, ais);
+        } else {
+            ctx->Activate(ais, selectionMode, Standard_False);
+        }
     }
 }
 

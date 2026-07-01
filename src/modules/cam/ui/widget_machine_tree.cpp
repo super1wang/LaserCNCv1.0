@@ -45,6 +45,16 @@ void WidgetMachineTree::setupUi()
         const bool checked = (item->checkState(0) == Qt::Checked);
         const QString entry = item->data(0, kRoleEntry).toString();
 
+        if (!m_machineModelVisible && checked) {
+            m_rebuilding = true;
+            item->setCheckState(0, Qt::Unchecked);
+            for (int i = 0; i < item->childCount(); ++i)
+                item->child(i)->setCheckState(0, Qt::Unchecked);
+            m_rebuilding = false;
+            return;
+        }
+
+        QList<QPair<QString, bool>> changes;
         if (isAxis) {
             // 轴节点：级联所有子 shape
             m_rebuilding = true;
@@ -53,12 +63,16 @@ void WidgetMachineTree::setupUi()
                 child->setCheckState(0, checked ? Qt::Checked : Qt::Unchecked);
                 const QString childEntry = child->data(0, kRoleEntry).toString();
                 if (!childEntry.isEmpty())
-                    emit shapeVisibilityChanged(childEntry, checked);
+                    changes.append({childEntry, checked});
             }
             m_rebuilding = false;
         } else if (!entry.isEmpty()) {
             // 单个 shape 节点
-            emit shapeVisibilityChanged(entry, checked);
+            changes.append({entry, checked});
+        }
+
+        for (const auto& change : std::as_const(changes)) {
+            emit shapeVisibilityChanged(change.first, change.second);
         }
     });
 }
@@ -66,6 +80,13 @@ void WidgetMachineTree::setupUi()
 void WidgetMachineTree::setWorkspace(lcnc::cam::MachineWorkspace* workspace)
 {
     m_workspace = workspace;
+    rebuild();
+}
+
+void WidgetMachineTree::setVisibilityState(bool machineModelVisible, const QStringList& visibleEntries)
+{
+    m_machineModelVisible = machineModelVisible;
+    m_visibleEntries = QSet<QString>(visibleEntries.cbegin(), visibleEntries.cend());
     rebuild();
 }
 
@@ -124,7 +145,9 @@ void WidgetMachineTree::rebuild()
             shapeNode->setData(0, kRoleEntry, it.key());
             shapeNode->setData(0, kRoleIsAxis, false);
             shapeNode->setFlags(shapeNode->flags() | Qt::ItemIsUserCheckable);
-            shapeNode->setCheckState(0, Qt::Checked);
+            shapeNode->setCheckState(0, m_machineModelVisible && m_visibleEntries.contains(it.key())
+                                        ? Qt::Checked
+                                        : Qt::Unchecked);
         }
         m_rebuilding = false;
         return;
@@ -159,8 +182,8 @@ QTreeWidgetItem* WidgetMachineTree::buildAxisNode(const QString& axisName,
     node->setText(0, tr("%1 轴").arg(axisName));
     node->setExpanded(true);
     node->setFlags(node->flags() | Qt::ItemIsUserCheckable);
-    node->setCheckState(0, Qt::Checked);
     node->setData(0, kRoleIsAxis, true);
+    bool allChildrenChecked = !entries.isEmpty();
 
     for (const QString& entry : entries) {
         auto* child = new QTreeWidgetItem(node);
@@ -168,8 +191,11 @@ QTreeWidgetItem* WidgetMachineTree::buildAxisNode(const QString& axisName,
         child->setData(0, kRoleEntry, entry);
         child->setData(0, kRoleIsAxis, false);
         child->setFlags(child->flags() | Qt::ItemIsUserCheckable);
-        child->setCheckState(0, Qt::Checked);
+        const bool checked = m_machineModelVisible && m_visibleEntries.contains(entry);
+        child->setCheckState(0, checked ? Qt::Checked : Qt::Unchecked);
+        allChildrenChecked = allChildrenChecked && checked;
     }
+    node->setCheckState(0, allChildrenChecked ? Qt::Checked : Qt::Unchecked);
     return node;
 }
 
@@ -188,8 +214,8 @@ QTreeWidgetItem* WidgetMachineTree::buildUnassignedNode(const QMap<QString, QStr
     node->setText(0, tr("未分配"));
     node->setExpanded(true);
     node->setFlags(node->flags() | Qt::ItemIsUserCheckable);
-    node->setCheckState(0, Qt::Checked);
     node->setData(0, kRoleIsAxis, true);
+    bool allChildrenChecked = !unplaced.isEmpty();
 
     for (const QString& entry : unplaced) {
         auto* child = new QTreeWidgetItem(node);
@@ -197,7 +223,10 @@ QTreeWidgetItem* WidgetMachineTree::buildUnassignedNode(const QMap<QString, QStr
         child->setData(0, kRoleEntry, entry);
         child->setData(0, kRoleIsAxis, false);
         child->setFlags(child->flags() | Qt::ItemIsUserCheckable);
-        child->setCheckState(0, Qt::Checked);
+        const bool checked = m_machineModelVisible && m_visibleEntries.contains(entry);
+        child->setCheckState(0, checked ? Qt::Checked : Qt::Unchecked);
+        allChildrenChecked = allChildrenChecked && checked;
     }
+    node->setCheckState(0, allChildrenChecked ? Qt::Checked : Qt::Unchecked);
     return node;
 }

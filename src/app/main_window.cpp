@@ -36,6 +36,7 @@
 #include "view/graphics_scene.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
+#include "view/rendering_manager.h"
 #include "view/sketch_overlay_renderer.h"
 #include "view/world_axes_renderer.h"
 #include "modules/cad/cad_module.h"
@@ -84,6 +85,7 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <functional>
+#include <AIS_InteractiveContext.hxx>
 #include <V3d_TypeOfOrientation.hxx>
 #include <TDF_LabelSequence.hxx>
 #include <TopoDS_Shape.hxx>
@@ -167,9 +169,10 @@ bool isActiveSketchOverlayKey(const QString& key)
 }
 
 constexpr int kRibbonFileIndex = 0;
-constexpr int kRibbonCadIndex = 1;
-constexpr int kRibbonCamIndex = 2;
-constexpr int kRibbonLaserIndex = 3;
+constexpr int kRibbonViewIndex = 1;
+constexpr int kRibbonCadIndex = 2;
+constexpr int kRibbonCamIndex = 3;
+constexpr int kRibbonLaserIndex = 4;
 
 bool isStepFile(const QString& filePath)
 {
@@ -222,6 +225,7 @@ MainWindow::MainWindow(QWidget* parent)
     }
 
     restorePersistedCamState();
+    applyPersistedViewState();
     showMachineView();
     refreshStartGuide();
     showStartGuide();
@@ -548,6 +552,9 @@ void MainWindow::createLeftPanel()
         // checkbox 勾选 → 显示/隐藏对应 AIS
         connect(m_machineTree, &WidgetMachineTree::shapeVisibilityChanged,
                 cam, &CamModule::setEntityVisible);
+        connect(cam, &CamModule::machineVisibilityChanged,
+                this, &MainWindow::syncMachineTreeVisibilityState);
+        syncMachineTreeVisibilityState();
     }
 
     m_leftTabs->addTab(m_projectExplorerTree, tr("项目"));
@@ -1238,6 +1245,7 @@ void MainWindow::createRibbon()
     ribbon->setRibbonStyle(SARibbonBar::RibbonStyleLooseThreeRow);
 
     buildFileTab(ribbon->addCategoryPage(tr("文件")));
+    buildViewTab(ribbon->addCategoryPage(tr("视图")));
     buildCadTab(ribbon->addCategoryPage(tr("CAD")));
     buildCamTab(ribbon->addCategoryPage(tr("CAM")));
     buildLaserTab(ribbon->addCategoryPage(tr("激光加工")));
@@ -1260,6 +1268,13 @@ void MainWindow::buildFileTab(SARibbonCategory* cat)
     panelIO->addSmallAction(m_cmdContainer->findAction(CmdExportStep::Name));
     panelIO->addSmallAction(m_cmdContainer->findAction(CmdCloseDocument::Name));
 
+    // ── 应用 — 选项按钮 ─────────────────────────────────────────────────
+    SARibbonPanel* panelApp = cat->addPanel(tr("应用"));
+    panelApp->addLargeAction(m_cmdContainer->findAction(CmdShowOptions::Name));
+}
+
+void MainWindow::buildViewTab(SARibbonCategory* cat)
+{
     SARibbonPanel* panelView = cat->addPanel(tr("视图"));
     panelView->addLargeAction(m_cmdContainer->findAction(CmdFitAll::Name));
 
@@ -1284,9 +1299,62 @@ void MainWindow::buildFileTab(SARibbonCategory* cat)
     panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name));
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleWorldAxes::Name));
 
-    // ── 应用 — 选项按钮 ─────────────────────────────────────────────────
-    SARibbonPanel* panelApp = cat->addPanel(tr("应用"));
-    panelApp->addLargeAction(m_cmdContainer->findAction(CmdShowOptions::Name));
+    QAction* aWire = m_cmdContainer->findAction(CmdToggleWireframe::Name);
+    QAction* aShade = m_cmdContainer->findAction(CmdToggleShaded::Name);
+    QAction* aEdges = m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name);
+    if (aWire) {
+        connect(aWire, &QAction::triggered, this, [this] {
+            persistViewDisplayMode(AIS_WireFrame, false);
+        });
+    }
+    if (aShade) {
+        connect(aShade, &QAction::triggered, this, [this] {
+            persistViewDisplayMode(AIS_Shaded, false);
+        });
+    }
+    if (aEdges) {
+        connect(aEdges, &QAction::triggered, this, [this] {
+            persistViewDisplayMode(AIS_Shaded, true);
+        });
+    }
+    if (QAction* worldAxes = m_cmdContainer->findAction(CmdToggleWorldAxes::Name)) {
+        connect(worldAxes, &QAction::triggered, this, [this] {
+            persistViewToggleState();
+        });
+    }
+
+    SARibbonPanel* panelMachineView = cat->addPanel(tr("机台显示"));
+    m_actRotaryAxisGuides = new QAction(QIcon(":/icons/machine.svg"), tr("旋转轴线"), this);
+    m_actRotaryAxisGuides->setCheckable(true);
+    m_actRotaryAxisGuides->setStatusTip(tr("显示/隐藏机台 A/C 旋转轴辅助线"));
+    panelMachineView->addLargeAction(m_actRotaryAxisGuides);
+
+    m_actCutterHeadGuide = new QAction(QIcon(":/icons/machine.svg"), tr("模拟刀头"), this);
+    m_actCutterHeadGuide->setCheckable(true);
+    m_actCutterHeadGuide->setStatusTip(tr("显示/隐藏模拟刀头辅助线和锥形指示"));
+    panelMachineView->addLargeAction(m_actCutterHeadGuide);
+
+    m_actMachineModelVisible = new QAction(QIcon(":/icons/machine.svg"), tr("机台模型"), this);
+    m_actMachineModelVisible->setCheckable(true);
+    m_actMachineModelVisible->setStatusTip(tr("显示/隐藏机台模型；开启后可在机台节点树中局部显示轴系"));
+    panelMachineView->addLargeAction(m_actMachineModelVisible);
+
+    connect(m_actRotaryAxisGuides, &QAction::toggled, this, [this](bool checked) {
+        if (auto* cam = m_appContext ? m_appContext->camModule() : nullptr)
+            cam->setRotaryAxisGuidesVisible(checked);
+        persistViewToggleState();
+    });
+    connect(m_actCutterHeadGuide, &QAction::toggled, this, [this](bool checked) {
+        if (auto* cam = m_appContext ? m_appContext->camModule() : nullptr)
+            cam->setCutterHeadGuideVisible(checked);
+        persistViewToggleState();
+    });
+    connect(m_actMachineModelVisible, &QAction::toggled, this, [this](bool checked) {
+        if (auto* cam = m_appContext ? m_appContext->camModule() : nullptr)
+            cam->setMachineModelVisible(checked);
+        syncMachineTreeVisibilityState();
+        persistViewToggleState();
+    });
 }
 
 void MainWindow::buildCadTab(SARibbonCategory* cat)
@@ -1979,6 +2047,7 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         if (rebuildTree)
             rebuildProjectExplorer();
         m_machinePanel->setDocument(nullptr);
+        syncMachineTreeVisibilityState();
         if (process)
             process->setAxisDefinitions(configuredAxes);
         if (m_laserControl)
@@ -1990,6 +2059,7 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         rebuildProjectExplorer();
 
     m_machinePanel->setDocument(machineDoc);
+    syncMachineTreeVisibilityState();
 
     const QList<MachineAxisDef> axes = configuredAxes.isEmpty()
         ? machineDoc->machineKinematics()->axes()
@@ -2004,6 +2074,94 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
         for (auto it = axisPositions.cbegin(); it != axisPositions.cend(); ++it)
             m_laserControl->updateAxisPosition(it.key(), it.value());
     }
+}
+
+void MainWindow::syncMachineTreeVisibilityState()
+{
+    if (!m_machineTree || !m_appContext || !m_appContext->camModule())
+        return;
+
+    CamModule* cam = m_appContext->camModule();
+    m_machineTree->setVisibilityState(cam->isMachineModelVisible(), cam->visibleMachineEntries());
+}
+
+void MainWindow::persistViewDisplayMode(int displayMode, bool faceBoundary)
+{
+    auto* settings = lcnc::Kernel::current().appSettings();
+    if (!settings)
+        return;
+
+    settings->viewState.displayMode = displayMode;
+    settings->viewState.faceBoundary = faceBoundary;
+    settings->saveDefault();
+}
+
+void MainWindow::persistViewToggleState()
+{
+    auto* settings = lcnc::Kernel::current().appSettings();
+    if (!settings)
+        return;
+
+    if (auto* worldAxes = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleWorldAxes::Name) : nullptr)
+        settings->viewState.worldAxesVisible = worldAxes->isChecked();
+    if (m_actRotaryAxisGuides)
+        settings->viewState.rotaryAxisGuidesVisible = m_actRotaryAxisGuides->isChecked();
+    if (m_actCutterHeadGuide)
+        settings->viewState.cutterHeadGuideVisible = m_actCutterHeadGuide->isChecked();
+    if (m_actMachineModelVisible)
+        settings->viewState.machineModelVisible = m_actMachineModelVisible->isChecked();
+    settings->saveDefault();
+}
+
+void MainWindow::applyPersistedViewState()
+{
+    auto* settings = lcnc::Kernel::current().appSettings();
+    if (!settings)
+        return;
+
+    const auto state = settings->viewState;
+    QAction* aWire = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleWireframe::Name) : nullptr;
+    QAction* aShade = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleShaded::Name) : nullptr;
+    QAction* aEdges = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name) : nullptr;
+    if (state.displayMode == AIS_WireFrame) {
+        if (aWire)
+            aWire->setChecked(true);
+    } else if (state.faceBoundary) {
+        if (aEdges)
+            aEdges->setChecked(true);
+    } else if (aShade) {
+        aShade->setChecked(true);
+    }
+    if (auto* gd = m_appContext && m_appContext->camModule()
+            ? m_appContext->camModule()->workspaceGuiDocument()
+            : nullptr) {
+        if (gd->renderingManager())
+            gd->renderingManager()->setRuntimeDisplayMode(state.displayMode, state.faceBoundary);
+    }
+
+    if (QAction* worldAxes = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleWorldAxes::Name) : nullptr) {
+        worldAxes->setChecked(state.worldAxesVisible);
+        auto& renderer = lcnc::view::WorldAxesRenderer::instance();
+        if (auto* guiApp = lcnc::Kernel::current().guiApp()) {
+            if (auto* workspace = guiApp->workspaceGuiDocument(); workspace && workspace->scene())
+                renderer.attach(workspace->scene());
+        }
+        renderer.setGloballyVisible(state.worldAxesVisible);
+    }
+
+    if (m_actRotaryAxisGuides)
+        m_actRotaryAxisGuides->setChecked(state.rotaryAxisGuidesVisible);
+    if (m_actCutterHeadGuide)
+        m_actCutterHeadGuide->setChecked(state.cutterHeadGuideVisible);
+    if (m_actMachineModelVisible)
+        m_actMachineModelVisible->setChecked(state.machineModelVisible);
+
+    if (auto* cam = m_appContext ? m_appContext->camModule() : nullptr) {
+        cam->setRotaryAxisGuidesVisible(state.rotaryAxisGuidesVisible);
+        cam->setCutterHeadGuideVisible(state.cutterHeadGuideVisible);
+        cam->setMachineModelVisible(state.machineModelVisible);
+    }
+    syncMachineTreeVisibilityState();
 }
 
 void MainWindow::showStartGuide()

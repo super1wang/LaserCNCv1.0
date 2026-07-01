@@ -72,6 +72,7 @@ private:
 
     // ── Ribbon tab builders ───────────────────────────────────────────────────
     void buildFileTab(class SARibbonCategory* cat);
+    void buildViewTab(class SARibbonCategory* cat);
     void buildCadTab(class SARibbonCategory* cat);
     void buildCamTab(class SARibbonCategory* cat);
     void buildLaserTab(class SARibbonCategory* cat);
@@ -106,6 +107,10 @@ private:
     void showWorkpieceView(DocumentId id = kInvalidDocumentId);
     /// Keep the right-side parameter page in sync with the active Ribbon page.
     void syncRightPanelForRibbonIndex(int index);
+    void applyPersistedViewState();
+    void persistViewDisplayMode(int displayMode, bool faceBoundary);
+    void persistViewToggleState();
+    void syncMachineTreeVisibilityState();
     void showStartGuide();
     void showViewTab();
     void refreshStartGuide();
@@ -149,6 +154,9 @@ private:
     WidgetLaserControl*    m_laserControl{nullptr};
     DialogTaskManager*     m_taskDialog{nullptr};
     GraphicsScene*         m_defaultScene{nullptr};
+    QAction*               m_actRotaryAxisGuides{nullptr};
+    QAction*               m_actCutterHeadGuide{nullptr};
+    QAction*               m_actMachineModelVisible{nullptr};
 
     // Status bar labels
     QLabel* m_sbDocName{nullptr};

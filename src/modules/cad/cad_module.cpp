@@ -490,8 +490,6 @@ CadModule::CadModule(QObject* parent)
         if (auto* gd = workspaceGuiDocument()) {
             gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
             if (auto* md = project->machineDocument())
-                gd->rebuildDomain(lcnc::ProjectDomain::Machine, md);
-            if (auto* md = project->machineDocument())
                 gd->updateMachineWorkspaceTransforms(md, project->workpieceDocument());
             gd->fitAll();
         }
@@ -535,22 +533,36 @@ DocumentId CadModule::openDocument(const QString& filePath)
 
     const QString ext = fileInfo.suffix().toLower();
     if (lcnc::LcncProjectPackage::isProjectPath(filePath)) {
-        QString err;
         auto* project = lcnc::Kernel::current().projectManager();
-        LcncDocument* doc = project->openProject(filePath, &err);
-        if (!doc) {
-            emit operationFailed(tr("打开失败"), err.isEmpty() ? tr("无法读取项目文件") : err);
-            return kInvalidDocumentId;
-        }
-        if (auto* gd = workspaceGuiDocument()) {
-            gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
-            gd->rebuildDomain(lcnc::ProjectDomain::Machine, project->machineDocument());
-            // Phase C：CAM AIS 由 CamModule 在加载 toolpath 缓存时按 ContourId 重建，
-            // 不再通过 GuiDocument::rebuildDomain(Cam, ...) 从 XCAF 还原。
-            gd->updateMachineWorkspaceTransforms(project->machineDocument(), project->workpieceDocument());
-            gd->fitAll();
-        }
-        return doc->id();
+        const DocumentId currentDocId = project->workpieceDocumentId();
+        auto error = std::make_shared<QString>();
+        const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
+            tr("打开工程: %1").arg(fileInfo.fileName()),
+            [filePath, project, error](TaskProgress* prog) {
+                prog->setRange(0, 100);
+                prog->setStepName(QStringLiteral("读取工程包..."));
+                prog->setValue(10);
+                LcncDocument* doc = project->openProject(filePath, error.get());
+                if (!doc)
+                    throw std::runtime_error("project open failed");
+                prog->setValue(100);
+            });
+
+        watchTask(this, taskId, [this, error](bool success) {
+            if (!success) {
+                emit operationFailed(tr("打开失败"),
+                                     error->isEmpty() ? tr("无法读取项目文件") : *error);
+                return;
+            }
+
+            auto* project = lcnc::Kernel::current().projectManager();
+            if (auto* gd = workspaceGuiDocument()) {
+                gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
+                gd->updateMachineWorkspaceTransforms(project->machineDocument(), project->workpieceDocument());
+                gd->fitAll();
+            }
+        });
+        return currentDocId;
     }
 
     if (ext != "stp" && ext != "step" &&

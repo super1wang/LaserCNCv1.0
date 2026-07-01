@@ -104,6 +104,8 @@ public:
     void              eraseAllContours();
     /// 反向：从当前选中 AIS 集中提取 contourId 列表（仅看 CAM 域 + 合成 entry 前缀）。
     QVector<std::uint64_t> selectedContourIds() const;
+    /// Re-applies CAM contour picking after display/visibility changes.
+    void restoreCamContourSelectionModes();
 
     /// Returns label entries of all currently selected AIS shapes.
     QStringList selectedEntries() const;

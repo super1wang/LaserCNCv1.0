@@ -85,6 +85,15 @@ struct ColorSettings {
     QHash<QString, QColor> machineAxisColors;
 };
 
+struct ViewStateSettings {
+    int displayMode = 1;              ///< AIS_Shaded by default
+    bool faceBoundary = false;        ///< shaded-with-edges
+    bool worldAxesVisible = false;
+    bool rotaryAxisGuidesVisible = true;
+    bool cutterHeadGuideVisible = true;
+    bool machineModelVisible = true;
+};
+
 /**
  * @brief Application shell settings (mainwindow.toml).
  *
@@ -124,6 +133,8 @@ public:
     RenderProfileSettings camViewRendering;
     /// 模型、背景和高亮颜色配置。
     ColorSettings colors;
+    /// Ribbon 视图页的运行时显示状态，启动时恢复。
+    ViewStateSettings viewState;
 
     /// 快捷查询：该模块是否被禁用（大小写敏感）。
     bool isModuleDisabled(const QString& moduleId) const;

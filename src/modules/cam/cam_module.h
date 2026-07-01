@@ -311,6 +311,14 @@ public:
 
     // ── Selection / Visibility ──────────────────────────────────────────
     void setEntityVisible(const QString& entry, bool visible);
+    bool isEntityVisible(const QString& entry) const;
+    QStringList visibleMachineEntries() const;
+    void setMachineModelVisible(bool visible);
+    bool isMachineModelVisible() const { return m_machineModelVisible; }
+    void setRotaryAxisGuidesVisible(bool visible);
+    bool rotaryAxisGuidesVisible() const;
+    void setCutterHeadGuideVisible(bool visible);
+    bool cutterHeadGuideVisible() const;
     void setSelectedEntries(const QStringList& entries);
     QStringList selectedEntries() const;
     void syncSelectionFromView();
@@ -338,6 +346,7 @@ signals:
     void toolpathLayersChanged();
     void selectionChanged(const QStringList& entries);
     void axisAssignmentsChanged();
+    void machineVisibilityChanged();
 
 private:
     struct WorkpieceShapeSource {
@@ -435,6 +444,9 @@ private:
     bool                        m_useFaceClassification{true};
     double                      m_deflection{0.1};
     lcnc::MachineConfigurationService* m_machineConfig{nullptr};
+    bool                        m_machineModelVisible{true};
+    QSet<QString>               m_visibleMachineEntries;
+    bool                        m_machineVisibilityInitialized{false};
 
     // ── Lead-in picking preview ────────────────────────────────────────
     int    m_previewLeadInContour{-1};

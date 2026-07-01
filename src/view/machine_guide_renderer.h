@@ -32,8 +32,18 @@ public:
     /// 仅刷新已存在 AIS 的局部变换（轴角/刀头位置变化时调用）。
     void updateTransforms(GuiDocument* gd, MachineKinematics* kin);
 
+    void setRotaryAxisVisible(GuiDocument* gd, bool visible);
+    void setCutterHeadVisible(GuiDocument* gd, bool visible);
+    bool rotaryAxisVisible() const { return m_rotaryAxisVisible; }
+    bool cutterHeadVisible() const { return m_cutterHeadVisible; }
+
+private:
+    void applyVisibility(GuiDocument* gd);
+
 private:
     QMap<QString, Handle(AIS_Shape)> m_axisGuideAis;
+    bool m_rotaryAxisVisible{true};
+    bool m_cutterHeadVisible{true};
 };
 
 } // namespace lcnc::view
