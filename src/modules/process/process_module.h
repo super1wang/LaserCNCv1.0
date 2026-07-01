@@ -84,6 +84,9 @@ public:
     void setAxisDefinitions(const QList<MachineAxisDef>& axes);
 
     void jog(const QString& axisName, int direction, int speedLevel, double distance = 0.0);
+    void moveAxisAbsolute(const QString& axisName, double position, int speedLevel);
+    void startContinuousJog(const QString& axisName, int direction, int speedLevel);
+    void stopContinuousJog(const QString& axisName);
     void setAxisEnabled(const QString& axisName, bool enabled);
     QMap<QString, bool> axisEnabledStates() const { return m_axisEnabled; }
     void setDigitalOutput(const QString& outputName, bool value);

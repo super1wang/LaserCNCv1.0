@@ -959,6 +959,18 @@ void MainWindow::createRightPanel()
             [process](const QString& axis, int direction, int speedLevel, double distance) {
             process->jog(axis, direction, speedLevel, distance);
             });
+        connect(m_laserControl, &WidgetLaserControl::absoluteMoveRequested, this,
+            [process](const QString& axis, double position, int speedLevel) {
+            process->moveAxisAbsolute(axis, position, speedLevel);
+            });
+        connect(m_laserControl, &WidgetLaserControl::continuousJogStarted, this,
+            [process](const QString& axis, int direction, int speedLevel) {
+            process->startContinuousJog(axis, direction, speedLevel);
+            });
+        connect(m_laserControl, &WidgetLaserControl::continuousJogStopped, this,
+            [process](const QString& axis) {
+            process->stopContinuousJog(axis);
+            });
         connect(m_laserControl, &WidgetLaserControl::axisEnableToggled,
             process, &ProcessModule::setAxisEnabled);
         connect(m_laserControl, &WidgetLaserControl::digitalOutputToggled,

@@ -14,7 +14,6 @@
 #include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTextEdit>
-#include <QTimer>
 
 namespace {
 
@@ -39,12 +38,6 @@ void clearLayout(QLayout* layout)
 WidgetLaserControl::WidgetLaserControl(QWidget* parent)
     : QWidget(parent)
 {
-    m_jogHoldTimer = new QTimer(this);
-    m_jogHoldTimer->setInterval(120);
-    connect(m_jogHoldTimer, &QTimer::timeout, this, [this] {
-        if (!m_activeJogAxis.isEmpty() && m_activeJogDirection != 0)
-            emitJogRequest(m_activeJogAxis, m_activeJogDirection);
-    });
     buildUi();
     refreshStatusBanner();
 }
@@ -271,6 +264,38 @@ void WidgetLaserControl::rebuildJogGroup()
 
     auto* vlay = new QVBoxLayout(m_jogGroup);
 
+    auto* modeRow = new QHBoxLayout();
+    modeRow->addWidget(new QLabel(tr("模式:"), m_jogGroup));
+    auto* btnRelative = new QPushButton(tr("相对"), m_jogGroup);
+    auto* btnAbsolute = new QPushButton(tr("绝对"), m_jogGroup);
+    auto* btnContinuous = new QPushButton(tr("连续"), m_jogGroup);
+    for (auto* b : {btnRelative, btnAbsolute, btnContinuous}) {
+        b->setCheckable(true);
+        b->setMaximumWidth(48);
+    }
+    btnRelative->setChecked(m_jogMode == JogMode::Relative);
+    btnAbsolute->setChecked(m_jogMode == JogMode::Absolute);
+    btnContinuous->setChecked(m_jogMode == JogMode::Continuous);
+    auto* modeGroup = new QButtonGroup(m_jogGroup);
+    modeGroup->setExclusive(true);
+    modeGroup->addButton(btnRelative, 0);
+    modeGroup->addButton(btnAbsolute, 1);
+    modeGroup->addButton(btnContinuous, 2);
+    connect(modeGroup, &QButtonGroup::idClicked, this, [this](int id) {
+        switch (id) {
+        case 1: m_jogMode = JogMode::Absolute; break;
+        case 2: m_jogMode = JogMode::Continuous; break;
+        case 0:
+        default: m_jogMode = JogMode::Relative; break;
+        }
+        updateJogModeUi();
+    });
+    modeRow->addWidget(btnRelative);
+    modeRow->addWidget(btnAbsolute);
+    modeRow->addWidget(btnContinuous);
+    modeRow->addStretch();
+    vlay->addLayout(modeRow);
+
     auto* speedRow = new QHBoxLayout();
     speedRow->addWidget(new QLabel(tr("速度:"), m_jogGroup));
     auto* btnSlow = new QPushButton(tr("慢"), m_jogGroup);
@@ -299,15 +324,18 @@ void WidgetLaserControl::rebuildJogGroup()
     vlay->addLayout(speedRow);
 
     auto* distanceRow = new QHBoxLayout();
-    distanceRow->addWidget(new QLabel(tr("距离:"), m_jogGroup));
+    m_jogValueLabel = new QLabel(tr("距离:"), m_jogGroup);
+    distanceRow->addWidget(m_jogValueLabel);
     m_jogDistanceSpin = new QDoubleSpinBox(m_jogGroup);
-    m_jogDistanceSpin->setRange(0.001, 1000.0);
+    m_jogDistanceSpin->setRange(-1000000.0, 1000000.0);
     m_jogDistanceSpin->setDecimals(3);
     m_jogDistanceSpin->setSingleStep(0.1);
-    m_jogDistanceSpin->setValue(1.0);
     m_jogDistanceSpin->setSuffix(QStringLiteral(" mm"));
+    if (m_jogDistanceSpin->value() == 0.0)
+        m_jogDistanceSpin->setValue(1.0);
     distanceRow->addWidget(m_jogDistanceSpin);
     vlay->addLayout(distanceRow);
+    updateJogModeUi();
 
     auto* jogGrid = new QGridLayout();
     int row = 0;
@@ -334,13 +362,13 @@ void WidgetLaserControl::rebuildJogGroup()
             emit axisEnableToggled(axisName, checked);
         });
         connect(btnPlus, &QPushButton::pressed,
-            this, [this, axisName]{ startJogHold(axisName, +1); });
+            this, [this, axisName]{ handleMotionPressed(axisName, +1); });
         connect(btnPlus, &QPushButton::released,
-            this, &WidgetLaserControl::stopJogHold);
+            this, &WidgetLaserControl::handleMotionReleased);
         connect(btnMinus, &QPushButton::pressed,
-            this, [this, axisName]{ startJogHold(axisName, -1); });
+            this, [this, axisName]{ handleMotionPressed(axisName, -1); });
         connect(btnMinus, &QPushButton::released,
-            this, &WidgetLaserControl::stopJogHold);
+            this, &WidgetLaserControl::handleMotionReleased);
 
         jogGrid->addWidget(btnAxis,  row, 0);
         jogGrid->addWidget(btnPlus,  row, 1);
@@ -440,19 +468,28 @@ void WidgetLaserControl::appendLogMessage(const QString& level, const QString& m
     m_logView->append(html);
 }
 
-void WidgetLaserControl::startJogHold(const QString& axis, int direction)
+void WidgetLaserControl::handleMotionPressed(const QString& axis, int direction)
 {
+    if (m_jogMode == JogMode::Relative) {
+        emitJogRequest(axis, direction);
+        return;
+    }
+
+    if (m_jogMode == JogMode::Absolute) {
+        const double target = m_jogDistanceSpin ? m_jogDistanceSpin->value() * (direction > 0 ? 1.0 : -1.0) : 0.0;
+        emit absoluteMoveRequested(axis, target, m_jogSpeedLevel);
+        return;
+    }
+
     m_activeJogAxis = axis;
     m_activeJogDirection = direction;
-    emitJogRequest(axis, direction);
-    if (m_jogHoldTimer)
-        m_jogHoldTimer->start();
+    emit continuousJogStarted(axis, direction, m_jogSpeedLevel);
 }
 
-void WidgetLaserControl::stopJogHold()
+void WidgetLaserControl::handleMotionReleased()
 {
-    if (m_jogHoldTimer)
-        m_jogHoldTimer->stop();
+    if (m_jogMode == JogMode::Continuous && !m_activeJogAxis.isEmpty())
+        emit continuousJogStopped(m_activeJogAxis);
     m_activeJogAxis.clear();
     m_activeJogDirection = 0;
 }
@@ -461,6 +498,33 @@ void WidgetLaserControl::emitJogRequest(const QString& axis, int direction)
 {
     const double distance = m_jogDistanceSpin ? m_jogDistanceSpin->value() : 1.0;
     emit jogRequested(axis, direction, m_jogSpeedLevel, distance);
+}
+
+void WidgetLaserControl::updateJogModeUi()
+{
+    if (!m_jogDistanceSpin || !m_jogValueLabel)
+        return;
+
+    switch (m_jogMode) {
+    case JogMode::Absolute:
+        m_jogValueLabel->setText(tr("位置:"));
+        m_jogDistanceSpin->setEnabled(true);
+        m_jogDistanceSpin->setMinimum(0.0);
+        m_jogDistanceSpin->setToolTip(tr("+ 按钮移动到正目标位置，- 按钮移动到负目标位置。"));
+        break;
+    case JogMode::Continuous:
+        m_jogValueLabel->setText(tr("距离:"));
+        m_jogDistanceSpin->setEnabled(false);
+        m_jogDistanceSpin->setToolTip(tr("连续模式按住 +/- 运动，松开停止。"));
+        break;
+    case JogMode::Relative:
+    default:
+        m_jogValueLabel->setText(tr("距离:"));
+        m_jogDistanceSpin->setEnabled(true);
+        m_jogDistanceSpin->setMinimum(0.001);
+        m_jogDistanceSpin->setToolTip(tr("相对模式每次点击按该距离运动。"));
+        break;
+    }
 }
 
 void WidgetLaserControl::updateAxisButtonStyle(const QString& axis, bool enabled)

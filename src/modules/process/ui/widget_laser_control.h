@@ -41,10 +41,19 @@ signals:
     void resumeRequested();
     void stopRequested();
     void jogRequested(const QString& axis, int direction, int speedLevel, double distance);
+    void absoluteMoveRequested(const QString& axis, double position, int speedLevel);
+    void continuousJogStarted(const QString& axis, int direction, int speedLevel);
+    void continuousJogStopped(const QString& axis);
     void axisEnableToggled(const QString& axis, bool enabled);
     void digitalOutputToggled(const QString& outputName, bool value);
 
 private:
+    enum class JogMode {
+        Relative,
+        Absolute,
+        Continuous
+    };
+
     void buildUi();
     void buildAxisGroup();
     void buildJogGroup();
@@ -55,9 +64,10 @@ private:
     void rebuildAxisGroup();
     void rebuildJogGroup();
     void refreshDeviceSummary();
-    void startJogHold(const QString& axis, int direction);
-    void stopJogHold();
+    void handleMotionPressed(const QString& axis, int direction);
+    void handleMotionReleased();
     void emitJogRequest(const QString& axis, int direction);
+    void updateJogModeUi();
     void updateAxisButtonStyle(const QString& axis, bool enabled);
     void updateIoButtonStyle(const QString& outputName, bool value);
     void refreshStatusBanner();
@@ -85,7 +95,8 @@ private:
     class QPushButton* m_btnResume{nullptr};
     class QPushButton* m_btnStop{nullptr};
     class QDoubleSpinBox* m_jogDistanceSpin{nullptr};
-    class QTimer* m_jogHoldTimer{nullptr};
+    class QLabel* m_jogValueLabel{nullptr};
+    JogMode        m_jogMode{JogMode::Relative};
     bool           m_connected{false};
     bool           m_simulationMode{true};
     lcnc::ProcessRunState m_runState{lcnc::ProcessRunState::Idle};

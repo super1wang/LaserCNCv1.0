@@ -113,6 +113,11 @@ double jogStepForLevel(int speedLevel)
     }
 }
 
+double jogVelocityForLevel(int speedLevel)
+{
+    return (speedLevel == 0) ? 1.0 : (speedLevel == 2 ? 20.0 : 5.0);
+}
+
 QStringList homeOrderForAxes(const QList<MachineAxisDef>& axes)
 {
     QStringList order;
@@ -762,7 +767,7 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
     const double step = distance > 1e-9 ? distance : jogStepForLevel(speedLevel);
     const double delta = step * (direction > 0 ? 1.0 : -1.0);
     // 速度按档位选取（mm/s），仿真器接受任意正值；实控时由参数表 + soft limit 兜底。
-    const double vel = (speedLevel == 0) ? 1.0 : (speedLevel == 2 ? 20.0 : 5.0);
+    const double vel = jogVelocityForLevel(speedLevel);
     if (!mc->MoveRelative(eAxis.value(), delta, vel)) {
         setStatusMessage(tr("%1 轴点动失败").arg(normalizedAxis));
         return;
@@ -770,6 +775,89 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
     setStatusMessage(tr("点动 %1 轴 %2").arg(
         normalizedAxis,
         direction > 0 ? tr("正向") : tr("负向")));
+}
+
+void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, int speedLevel)
+{
+    if (axisName.trimmed().isEmpty() || m_state == State::EmergencyStop)
+        return;
+
+    const QString normalizedAxis = axisName.trimmed().toUpper();
+    if (!m_axisEnabled.value(normalizedAxis, true)) {
+        setStatusMessage(tr("%1 轴未使能，绝对运动已忽略").arg(normalizedAxis));
+        return;
+    }
+
+    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+    if (!mc || !mc->IsConnected()) {
+        setStatusMessage(tr("未连接控制器，请先连接设备"));
+        return;
+    }
+
+    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
+    if (!eAxis.has_value() || !mc->IsMotorCreated(eAxis.value())) {
+        setStatusMessage(tr("%1 轴未注册，无法绝对运动").arg(normalizedAxis));
+        return;
+    }
+
+    if (!mc->MoveAbsolute(eAxis.value(), position, jogVelocityForLevel(speedLevel))) {
+        setStatusMessage(tr("%1 轴绝对运动失败").arg(normalizedAxis));
+        return;
+    }
+    setStatusMessage(tr("%1 轴移动到 %2").arg(normalizedAxis).arg(position, 0, 'f', 3));
+}
+
+void ProcessModule::startContinuousJog(const QString& axisName, int direction, int speedLevel)
+{
+    if (axisName.trimmed().isEmpty() || direction == 0 || m_state == State::EmergencyStop)
+        return;
+
+    const QString normalizedAxis = axisName.trimmed().toUpper();
+    if (!m_axisEnabled.value(normalizedAxis, true)) {
+        setStatusMessage(tr("%1 轴未使能，连续运动已忽略").arg(normalizedAxis));
+        return;
+    }
+
+    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+    if (!mc || !mc->IsConnected()) {
+        setStatusMessage(tr("未连接控制器，请先连接设备"));
+        return;
+    }
+
+    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
+    if (!eAxis.has_value() || !mc->IsMotorCreated(eAxis.value())) {
+        setStatusMessage(tr("%1 轴未注册，无法连续运动").arg(normalizedAxis));
+        return;
+    }
+
+    if (!mc->Jog(eAxis.value(), direction > 0, jogVelocityForLevel(speedLevel))) {
+        setStatusMessage(tr("%1 轴连续运动失败").arg(normalizedAxis));
+        return;
+    }
+    setStatusMessage(tr("连续点动 %1 轴 %2").arg(
+        normalizedAxis,
+        direction > 0 ? tr("正向") : tr("负向")));
+}
+
+void ProcessModule::stopContinuousJog(const QString& axisName)
+{
+    if (axisName.trimmed().isEmpty())
+        return;
+
+    const QString normalizedAxis = axisName.trimmed().toUpper();
+    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+    if (!mc || !mc->IsConnected())
+        return;
+
+    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
+    if (!eAxis.has_value() || !mc->IsMotorCreated(eAxis.value()))
+        return;
+
+    if (!mc->StopMotion(eAxis.value())) {
+        setStatusMessage(tr("%1 轴停止失败").arg(normalizedAxis));
+        return;
+    }
+    setStatusMessage(tr("%1 轴连续运动已停止").arg(normalizedAxis));
 }
 
 void ProcessModule::home()
