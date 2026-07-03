@@ -27,8 +27,8 @@ void autoDetectAxisNames(LcncDocument* doc, MachineKinematics* kin);
 /// 已经设置过有效原点的轴若希望仍被覆盖，调用方应自行过滤。
 void autoDetectAxisOrigins(LcncDocument* doc, MachineKinematics* kin);
 
-/// 从 CamConfig 中读取 machinePath 对应的轴原点 / 切割头位置 / 工件安装位置，
-/// 写回 kin 与传出参数。machinePath 为空直接返回。
+/// 从 CamConfig 中读取 machinePath 对应的切割头位置 / 工件安装位置。
+/// 旋转轴原点统一来自 MachineConfigurationService，不再由 per-machine profile 覆盖。
 struct StoredProfile {
     gp_Pnt cutterHeadModelPosition{0.0, 0.0, 0.0};
     gp_Pnt cutterHeadPhysicalPosition{0.0, 0.0, 0.0};

@@ -24,13 +24,15 @@ public:
     /// 重新创建所有引导 AIS（先 erase 再 display）。
     void refresh(GuiDocument* gd,
                  MachineKinematics* kin,
-                 const gp_Pnt& cutterHeadModelPos);
+                 const gp_Pnt& cutterHeadWorldTip);
 
     /// 擦除所有引导 AIS。
     void erase(GuiDocument* gd);
 
     /// 仅刷新已存在 AIS 的局部变换（轴角/刀头位置变化时调用）。
-    void updateTransforms(GuiDocument* gd, MachineKinematics* kin);
+    void updateTransforms(GuiDocument* gd,
+                          MachineKinematics* kin,
+                          const gp_Pnt& cutterHeadWorldTip);
 
     void setRotaryAxisVisible(GuiDocument* gd, bool visible);
     void setCutterHeadVisible(GuiDocument* gd, bool visible);
@@ -39,6 +41,7 @@ public:
 
 private:
     void applyVisibility(GuiDocument* gd);
+    gp_Pnt rotationCenter(MachineKinematics* kin) const;
 
 private:
     QMap<QString, Handle(AIS_Shape)> m_axisGuideAis;

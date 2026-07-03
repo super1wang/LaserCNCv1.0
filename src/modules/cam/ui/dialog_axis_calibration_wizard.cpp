@@ -48,23 +48,16 @@ DialogAxisCalibrationWizard::DialogAxisCalibrationWizard(CamModule* camModule, Q
     setAttribute(Qt::WA_DeleteOnClose, false);
     buildUi();
 
-    // 需求 1：若当前机台已有标定记录，回填物理 XYZ + AC 角度，方便用户校核或微调
+    // 旋转中心由“应用程序选项 / 机台构型”统一维护；向导只读取用于对齐提示。
     if (m_camModule) {
         gp_Pnt savedCenter;
-        if (m_camModule->physicalAcCenter(savedCenter)) {
+        if (m_camModule->currentAcRotationCenter(savedCenter)) {
             if (m_physX) m_physX->setValue(savedCenter.X());
             if (m_physY) m_physY->setValue(savedCenter.Y());
             if (m_physZ) m_physZ->setValue(savedCenter.Z());
             LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "Wizard prefill: physical center=({:.3f},{:.3f},{:.3f})",
+                       "Wizard prefill: configured rotation center=({:.3f},{:.3f},{:.3f})",
                        savedCenter.X(), savedCenter.Y(), savedCenter.Z());
-        }
-        double aOff = 0.0, cOff = 0.0;
-        if (m_camModule->acAngleOffset(aOff, cOff)) {
-            if (m_physAngleA) m_physAngleA->setValue(aOff);
-            if (m_physAngleC) m_physAngleC->setValue(cOff);
-            LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "Wizard prefill: AC angles A={:.3f}° C={:.3f}°", aOff, cOff);
         }
     }
 
@@ -85,8 +78,8 @@ void DialogAxisCalibrationWizard::buildUi()
     root->addWidget(m_lblCalibStatus);
 
     m_lblHint = new QLabel(
-        tr("依次拾取 A 轴、C 轴参考面，再拾取切割头下端面，最后填入物理 AC 中心后提交。\n"
-           "提交时将一次性写入轴心、切割头模型点，并把模型 AC 中心搬到物理坐标处。"),
+        tr("依次拾取 A 轴、C 轴参考面，再拾取切割头下端面。\n"
+           "提交时只平移机台模型几何，使拾取到的模型交点对齐到构型配置页填写的旋转中心。"),
         this);
     m_lblHint->setWordWrap(true);
     m_lblHint->setStyleSheet("color: #555; font-size: 11px;");
@@ -136,28 +129,19 @@ void DialogAxisCalibrationWizard::buildUi()
     poseLayout->addRow(tr("当前切割嘴 (世界):"), m_lblCurrentCutterHead);
     root->addWidget(groupPose);
 
-    auto* groupPhys = new QGroupBox(tr("第 4 步：物理 AC 中心 + 物理 AC 角度"), this);
+    auto* groupPhys = new QGroupBox(tr("第 4 步：确认构型旋转中心（只读）"), this);
     auto* physForm = new QFormLayout(groupPhys);
     m_physX = makeMillimeterSpin(groupPhys);
     m_physY = makeMillimeterSpin(groupPhys);
     m_physZ = makeMillimeterSpin(groupPhys);
-    m_physAngleA = new QDoubleSpinBox(groupPhys);
-    m_physAngleA->setRange(-360.0, 360.0);
-    m_physAngleA->setDecimals(3);
-    m_physAngleA->setSingleStep(1.0);
-    m_physAngleA->setSuffix(QStringLiteral(" °"));
-    m_physAngleC = new QDoubleSpinBox(groupPhys);
-    m_physAngleC->setRange(-360.0, 360.0);
-    m_physAngleC->setDecimals(3);
-    m_physAngleC->setSingleStep(1.0);
-    m_physAngleC->setSuffix(QStringLiteral(" °"));
-    physForm->addRow(tr("X:"), m_physX);
-    physForm->addRow(tr("Y:"), m_physY);
-    physForm->addRow(tr("Z:"), m_physZ);
-    physForm->addRow(tr("物理 A 角度:"), m_physAngleA);
-    physForm->addRow(tr("物理 C 角度:"), m_physAngleC);
+    m_physX->setEnabled(false);
+    m_physY->setEnabled(false);
+    m_physZ->setEnabled(false);
+    physForm->addRow(tr("旋转中心 X:"), m_physX);
+    physForm->addRow(tr("旋转中心 Y:"), m_physY);
+    physForm->addRow(tr("旋转中心 Z:"), m_physZ);
     auto* lblAngleHint = new QLabel(
-        tr("默认 0/0 表示该姿态对应物理机台 A=0, C=0；如标定时机台 AC 不为 0 请如实填写。"),
+        tr("如需修改旋转中心，请在“应用程序选项 / 机台构型”页填写；本向导不会修改物理中心。"),
         groupPhys);
     lblAngleHint->setWordWrap(true);
     lblAngleHint->setStyleSheet("color:#888;font-size:11px;");
@@ -252,7 +236,7 @@ void DialogAxisCalibrationWizard::refreshSummary()
                                .arg(stageDisplayName(m_awaitingStage)));
         m_lblHint->setStyleSheet("color: #c98512; font-size: 11px; font-weight: bold;");
     } else {
-        m_lblHint->setText(tr("依次拾取 A 轴、C 轴参考面，再拾取切割头下端面，最后填入物理 AC 中心后提交。"));
+        m_lblHint->setText(tr("依次拾取 A 轴、C 轴参考面，再拾取切割头下端面，然后提交模型对齐。"));
         m_lblHint->setStyleSheet("color: #555; font-size: 11px;");
     }
 
@@ -263,20 +247,14 @@ void DialogAxisCalibrationWizard::refreshSummary()
 
     // 顶部已/未标定徽章
     if (m_lblCalibStatus && m_camModule) {
-        if (m_camModule->isMachineCalibrated()) {
-            gp_Pnt c;
-            m_camModule->physicalAcCenter(c);
-            double aOff = 0.0, cOff = 0.0;
-            m_camModule->acAngleOffset(aOff, cOff);
+        gp_Pnt c;
+        if (m_camModule->currentAcRotationCenter(c)) {
             m_lblCalibStatus->setText(tr(
-                "● 已标定  物理 AC 中心: %1 ; 物理角度: A=%2°  C=%3°")
-                .arg(formatPoint(c))
-                .arg(aOff, 0, 'f', 3)
-                .arg(cOff, 0, 'f', 3));
+                "● 当前构型旋转中心: %1").arg(formatPoint(c)));
             m_lblCalibStatus->setStyleSheet(
                 "color:#fff;background:#1f7a1f;padding:4px 6px;border-radius:3px;font-weight:bold;");
         } else {
-            m_lblCalibStatus->setText(tr("○ 未标定  请依次完成拾取与提交以建立物理坐标系映射"));
+            m_lblCalibStatus->setText(tr("○ 尚未配置旋转中心  请先到应用程序选项 / 机台构型页填写"));
             m_lblCalibStatus->setStyleSheet(
                 "color:#fff;background:#a55;padding:4px 6px;border-radius:3px;font-weight:bold;");
         }
@@ -356,17 +334,15 @@ void DialogAxisCalibrationWizard::onSubmitClicked()
     inputs.cFaceCenter           = m_cCenter;
     inputs.cutterHeadFaceCenter  = m_headCenter;
     inputs.physicalAcCenter      = gp_Pnt(m_physX->value(), m_physY->value(), m_physZ->value());
-    inputs.hasPhysicalCenter     = true;
-    inputs.physicalAAngle        = m_physAngleA ? m_physAngleA->value() : 0.0;
-    inputs.physicalCAngle        = m_physAngleC ? m_physAngleC->value() : 0.0;
+    inputs.hasPhysicalCenter     = false;
+    inputs.physicalAAngle        = 0.0;
+    inputs.physicalCAngle        = 0.0;
 
     LCNC_INFO(lcnc::LogCode::Generic,
-              "DialogAxisCalibrationWizard submit: physical=({:.3f},{:.3f},{:.3f}) angles=(A={:.3f}°,C={:.3f}°)",
+              "DialogAxisCalibrationWizard submit: configuredCenter=({:.3f},{:.3f},{:.3f})",
               inputs.physicalAcCenter.X(),
               inputs.physicalAcCenter.Y(),
-              inputs.physicalAcCenter.Z(),
-              inputs.physicalAAngle,
-              inputs.physicalCAngle);
+              inputs.physicalAcCenter.Z());
 
     QString errorMessage;
     if (m_camModule->applyAxisCalibration(inputs, &errorMessage)) {

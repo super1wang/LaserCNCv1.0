@@ -79,11 +79,7 @@ StoredProfile applyStoredMachineProfile(MachineKinematics* kin,
     if (!kin || machinePath.isEmpty())
         return profile;
 
-    for (const MachineAxisDef& axis : kin->axes()) {
-        gp_Pnt storedOrigin;
-        if (config.axisOriginForMachine(machinePath, axis.name, &storedOrigin))
-            kin->setAxisOrigin(axis.name, storedOrigin);
-    }
+    Q_UNUSED(kin);
 
     gp_Pnt storedPosition;
     if (config.cutterHeadModelPositionForMachine(machinePath, &storedPosition)) {

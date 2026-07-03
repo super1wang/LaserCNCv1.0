@@ -886,6 +886,16 @@ int GuiDocument::displayObjectCount(lcnc::ProjectDomain domain) const
     return count;
 }
 
+QVector<Handle(AIS_Shape)> GuiDocument::displayShapesForDomains(const QSet<lcnc::ProjectDomain>& domains) const
+{
+    QVector<Handle(AIS_Shape)> out;
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        if (domains.contains(it.value().domain) && !it.value().ais.IsNull())
+            out.append(it.value().ais);
+    }
+    return out;
+}
+
 bool GuiDocument::eraseDomainObjects(lcnc::ProjectDomain domain, bool updateViewer)
 {
     QList<DisplayKey> keys;

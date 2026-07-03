@@ -224,7 +224,8 @@ public:
     /// @param wpcTransform  World transform of the workpiece (from kin->computeWpcTransform).
     static void computeMachineCoordinates(LaserContour& contour,
                                           MachineKinematics* kinematics,
-                                          const gp_Trsf& wpcTransform);
+                                          const gp_Trsf& wpcTransform,
+                                          MachineCoord* continuityState = nullptr);
 
 private:
     LaserToolpathBuilder() = delete;

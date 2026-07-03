@@ -24,6 +24,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -124,6 +125,67 @@ QTableWidgetItem* machineAxisTableItem(const QString& text, bool editable = true
     if (!editable)
         item->setFlags(item->flags() & ~Qt::ItemIsEditable);
     return item;
+}
+
+QDoubleSpinBox* machineCoordinateSpin(QWidget* parent)
+{
+    auto* spin = new QDoubleSpinBox(parent);
+    spin->setFocusPolicy(Qt::StrongFocus);
+    spin->setRange(-99999.0, 99999.0);
+    spin->setDecimals(3);
+    spin->setSingleStep(1.0);
+    spin->setSuffix(QStringLiteral(" mm"));
+    spin->setMinimumWidth(120);
+    return spin;
+}
+
+QStringList rotaryAxisNames(const QList<MachineAxisDef>& axes)
+{
+    QStringList names;
+    for (const MachineAxisDef& axis : axes) {
+        if (axis.motionType == MachineAxisDef::Rotary
+            && !axis.name.trimmed().isEmpty()
+            && !names.contains(axis.name.trimmed().toUpper())) {
+            names.append(axis.name.trimmed().toUpper());
+        }
+    }
+    return names;
+}
+
+gp_Pnt rotationCenterFromAxes(const QList<MachineAxisDef>& axes, const QString& preset)
+{
+    auto originOf = [&axes](const QString& axisName, gp_Pnt* out) {
+        for (const MachineAxisDef& axis : axes) {
+            if (axis.name == axisName && axis.motionType == MachineAxisDef::Rotary) {
+                if (out)
+                    *out = axis.origin;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const QString normalizedPreset = preset.trimmed().toUpper();
+    gp_Pnt first;
+    for (const MachineAxisDef& axis : axes) {
+        if (axis.motionType == MachineAxisDef::Rotary) {
+            first = axis.origin;
+            break;
+        }
+    }
+
+    gp_Pnt a, b, c;
+    if (normalizedPreset == QStringLiteral("VERTICAL_AC_TABLE")
+        && originOf(QStringLiteral("A"), &a)
+        && originOf(QStringLiteral("C"), &c)) {
+        return gp_Pnt(c.X(), a.Y(), a.Z());
+    }
+    if (normalizedPreset == QStringLiteral("VERTICAL_BC_TABLE")
+        && originOf(QStringLiteral("B"), &b)
+        && originOf(QStringLiteral("C"), &c)) {
+        return gp_Pnt(b.X(), c.Y(), b.Z());
+    }
+    return first;
 }
 
 bool sameMachineAxisDefinitions(const QVector<MachineAxisRuntimeConfig>& configs,
@@ -598,6 +660,29 @@ void DialogOptions::buildMachineConfigurationPage()
     form->addRow(tr("刀路算法"), m_lblMachineAlgorithm);
     root->addWidget(group);
 
+    auto* centerGroup = new QGroupBox(tr("旋转中心"), page);
+    auto* centerForm = new QFormLayout(centerGroup);
+    auto* centerRow = new QWidget(centerGroup);
+    auto* centerLayout = new QHBoxLayout(centerRow);
+    centerLayout->setContentsMargins(0, 0, 0, 0);
+    centerLayout->setSpacing(6);
+    m_spRotationCenterX = machineCoordinateSpin(centerRow);
+    m_spRotationCenterY = machineCoordinateSpin(centerRow);
+    m_spRotationCenterZ = machineCoordinateSpin(centerRow);
+    centerLayout->addWidget(new QLabel(QStringLiteral("X"), centerRow));
+    centerLayout->addWidget(m_spRotationCenterX);
+    centerLayout->addWidget(new QLabel(QStringLiteral("Y"), centerRow));
+    centerLayout->addWidget(m_spRotationCenterY);
+    centerLayout->addWidget(new QLabel(QStringLiteral("Z"), centerRow));
+    centerLayout->addWidget(m_spRotationCenterZ);
+    centerLayout->addStretch(1);
+    centerForm->addRow(tr("中心坐标"), centerRow);
+    m_lblRotationCenterHint = new QLabel(centerGroup);
+    m_lblRotationCenterHint->setWordWrap(true);
+    m_lblRotationCenterHint->setStyleSheet("color:#666;");
+    centerForm->addRow(m_lblRotationCenterHint);
+    root->addWidget(centerGroup);
+
     m_machineAxesTable = new QTableWidget(page);
     m_machineAxesTable->setColumnCount(9);
     m_machineAxesTable->setHorizontalHeaderLabels({
@@ -618,6 +703,18 @@ void DialogOptions::buildMachineConfigurationPage()
                     return;
                 populateMachineAxisTable(machineConfigsForPreset(m_cbMachinePreset->currentData().toString()));
             });
+    auto syncCenterToAxes = [this] {
+        if (m_loadingUi)
+            return;
+        applyRotationCenterToMachineAxisTable();
+        if (m_lblMachineAlgorithm && m_cbMachinePreset)
+            m_lblMachineAlgorithm->setText(
+                algorithmTextForAxes(m_cbMachinePreset->currentData().toString(),
+                                     collectMachineAxisDefinitions()));
+    };
+    connect(m_spRotationCenterX, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, syncCenterToAxes);
+    connect(m_spRotationCenterY, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, syncCenterToAxes);
+    connect(m_spRotationCenterZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, syncCenterToAxes);
     connect(m_btnBrowseMachineModel, &QPushButton::clicked, this,
             [this] {
                 const QString currentPath = m_editMachineModelPath
@@ -666,6 +763,7 @@ void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeCon
         typeCombo->setCurrentIndex(config.axis.motionType == MachineAxisDef::Rotary ? 1 : 0);
         connect(typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [this] {
+                    applyRotationCenterToMachineAxisTable();
                     if (m_lblMachineAlgorithm && m_cbMachinePreset)
                         m_lblMachineAlgorithm->setText(
                             algorithmTextForAxes(m_cbMachinePreset->currentData().toString(),
@@ -693,6 +791,12 @@ void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeCon
         m_machineAxesTable->setItem(row, 8, machineAxisTableItem(QString::number(config.axis.origin.Z(), 'g', 15)));
     }
 
+    QList<MachineAxisDef> rawAxes;
+    rawAxes.reserve(configs.size());
+    for (const MachineAxisRuntimeConfig& config : configs)
+        rawAxes.append(config.axis);
+    setRotationCenterUiFromAxes(rawAxes);
+    applyRotationCenterToMachineAxisTable();
     if (m_lblMachineAlgorithm && m_cbMachinePreset)
         m_lblMachineAlgorithm->setText(
             algorithmTextForAxes(m_cbMachinePreset->currentData().toString(), collectMachineAxisDefinitions()));
@@ -743,7 +847,91 @@ QList<MachineAxisDef> DialogOptions::collectMachineAxisDefinitions() const
         }
         axes.append(axis);
     }
+
+    if (m_spRotationCenterX && m_spRotationCenterY && m_spRotationCenterZ && hasRotaryAxisInTable()) {
+        const gp_Pnt center(m_spRotationCenterX->value(),
+                            m_spRotationCenterY->value(),
+                            m_spRotationCenterZ->value());
+        for (MachineAxisDef& axis : axes) {
+            if (axis.motionType == MachineAxisDef::Rotary)
+                axis.origin = center;
+        }
+    }
     return axes;
+}
+
+bool DialogOptions::hasRotaryAxisInTable() const
+{
+    if (!m_machineAxesTable)
+        return false;
+    for (int row = 0; row < m_machineAxesTable->rowCount(); ++row) {
+        if (auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 1))) {
+            if (static_cast<MachineAxisDef::MotionType>(combo->currentData().toInt())
+                == MachineAxisDef::Rotary) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void DialogOptions::setRotationCenterUiFromAxes(const QList<MachineAxisDef>& axes)
+{
+    if (!m_spRotationCenterX || !m_spRotationCenterY || !m_spRotationCenterZ)
+        return;
+
+    const QStringList rotaryNames = rotaryAxisNames(axes);
+    const bool enabled = !rotaryNames.isEmpty();
+    const gp_Pnt center = enabled
+        ? rotationCenterFromAxes(axes, m_cbMachinePreset ? m_cbMachinePreset->currentData().toString() : QString())
+        : gp_Pnt(0.0, 0.0, 0.0);
+
+    const QSignalBlocker blockX(m_spRotationCenterX);
+    const QSignalBlocker blockY(m_spRotationCenterY);
+    const QSignalBlocker blockZ(m_spRotationCenterZ);
+    m_spRotationCenterX->setEnabled(enabled);
+    m_spRotationCenterY->setEnabled(enabled);
+    m_spRotationCenterZ->setEnabled(enabled);
+    m_spRotationCenterX->setValue(center.X());
+    m_spRotationCenterY->setValue(center.Y());
+    m_spRotationCenterZ->setValue(center.Z());
+
+    if (m_lblRotationCenterHint) {
+        if (enabled) {
+            m_lblRotationCenterHint->setText(
+                tr("该坐标会写入旋转轴 %1 的原点；AC 转台请填写 A 轴与 C 轴的物理交点。")
+                    .arg(rotaryNames.join(QStringLiteral("/"))));
+        } else {
+            m_lblRotationCenterHint->setText(tr("当前构型没有旋转轴，不需要填写旋转中心。"));
+        }
+    }
+}
+
+void DialogOptions::applyRotationCenterToMachineAxisTable()
+{
+    if (!m_machineAxesTable || !m_spRotationCenterX || !m_spRotationCenterY || !m_spRotationCenterZ)
+        return;
+    const bool hasRotary = hasRotaryAxisInTable();
+    m_spRotationCenterX->setEnabled(hasRotary);
+    m_spRotationCenterY->setEnabled(hasRotary);
+    m_spRotationCenterZ->setEnabled(hasRotary);
+
+    if (!hasRotary)
+        return;
+
+    const QString x = QString::number(m_spRotationCenterX->value(), 'g', 15);
+    const QString y = QString::number(m_spRotationCenterY->value(), 'g', 15);
+    const QString z = QString::number(m_spRotationCenterZ->value(), 'g', 15);
+    for (int row = 0; row < m_machineAxesTable->rowCount(); ++row) {
+        auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 1));
+        if (!combo || static_cast<MachineAxisDef::MotionType>(combo->currentData().toInt())
+            != MachineAxisDef::Rotary) {
+            continue;
+        }
+        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 6)) item->setText(x);
+        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 7)) item->setText(y);
+        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 8)) item->setText(z);
+    }
 }
 
 void DialogOptions::loadFromSettings()
@@ -818,6 +1006,9 @@ void DialogOptions::loadFromSettings()
             m_machineAxesTable->setEnabled(false);
         if (m_cbMachinePreset)
             m_cbMachinePreset->setEnabled(false);
+        if (m_spRotationCenterX) m_spRotationCenterX->setEnabled(false);
+        if (m_spRotationCenterY) m_spRotationCenterY->setEnabled(false);
+        if (m_spRotationCenterZ) m_spRotationCenterZ->setEnabled(false);
     }
     applyTreeSelectionColor(m_colorDraft.treeSelectionColor);
     m_loadingUi = false;

@@ -81,6 +81,9 @@ private:
     void loadFromSettings();
     void populateMachineAxisTable(const QVector<MachineAxisRuntimeConfig>& configs);
     QList<MachineAxisDef> collectMachineAxisDefinitions() const;
+    void setRotationCenterUiFromAxes(const QList<MachineAxisDef>& axes);
+    void applyRotationCenterToMachineAxisTable();
+    bool hasRotaryAxisInTable() const;
     void setProfileToUi(const RenderProfileSettings& profile, const RenderControls& controls);
     RenderProfileSettings collectProfileFromUi(const RenderControls& controls) const;
     void wireRenderPresetBehavior(RenderControls& controls, bool camView);
@@ -112,6 +115,10 @@ private:
     QPushButton* m_btnBrowseMachineModel{nullptr};
     QCheckBox* m_chkAutoLoadMachineModel{nullptr};
     QLabel* m_lblMachineAlgorithm{nullptr};
+    QLabel* m_lblRotationCenterHint{nullptr};
+    QDoubleSpinBox* m_spRotationCenterX{nullptr};
+    QDoubleSpinBox* m_spRotationCenterY{nullptr};
+    QDoubleSpinBox* m_spRotationCenterZ{nullptr};
     QTableWidget* m_machineAxesTable{nullptr};
     MachineConfigurationService* m_machineConfig{nullptr};
 

@@ -48,9 +48,6 @@ void MachineWorkspace::clearMachineGeometry()
 {
     if (!m_document) return;
     m_document->clearEntityKind(LcncDocument::EntityKind::Machine);
-    m_document->clearEntityKind(LcncDocument::EntityKind::Workpiece);
-    if (auto* kin = m_document->machineKinematics())
-        kin->clear();
     emit machineModelChanged();
 }
 

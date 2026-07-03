@@ -93,7 +93,7 @@ public:
         gp_Pnt aFaceCenter{0.0, 0.0, 0.0};       ///< A 轴参考面中心（模型坐标）
         gp_Pnt cFaceCenter{0.0, 0.0, 0.0};       ///< C 轴参考面中心（模型坐标）
         gp_Pnt cutterHeadFaceCenter{0.0, 0.0, 0.0}; ///< 切割头下端面中心（模型坐标）
-        gp_Pnt physicalAcCenter{0.0, 0.0, 0.0};  ///< 物理机台 AC 中心目标坐标
+        gp_Pnt physicalAcCenter{0.0, 0.0, 0.0};  ///< 兼容字段：新流程中目标中心来自机台构型配置。
         bool   hasPhysicalCenter{true};          ///< 是否需要执行整机平移对齐
         double physicalAAngle{0.0};              ///< 标定位对应的物理 A 角度（度）
         double physicalCAngle{0.0};              ///< 标定位对应的物理 C 角度（度）
@@ -171,11 +171,11 @@ public:
                                  QString* errorMessage = nullptr) const;
     bool alignMachineToPhysicalCenter(const gp_Pnt& physicalCenter);
     bool alignMachineToPhysicalCutterHead();
-    /// 三段式标定：一次性写入 A/C 轴心、切割头模型点，并按物理 AC 中心整体平移。
-    /// C 轴原点会强制投影到 A 轴线上以保证父子轴几何一致。
+    /// 三段式模型对齐：用拾取到的模型参考交点平移机台几何，使其对齐到构型配置页
+    /// 中手动填写的旋转中心。此流程不写入/修改 A/C 物理旋转中心。
     bool applyAxisCalibration(const AxisCalibrationInputs& inputs, QString* errorMessage = nullptr);
-    /// 进入"机台标定位"：写入轴心与切割头模型点，并把 A=0/C=0、X/Y 调整为
-    /// 让切割头世界 XY 与 AC 中心 XY 对齐。不做整机平移、不持久化、不导出。
+    /// 进入"机台标定位"：记录切割头模型点，并把 A=0/C=0、X/Y 调整为
+    /// 让切割头世界 XY 与当前配置旋转中心 XY 对齐。不修改旋转中心、不持久化、不导出。
     /// 仅用于向导显示标定姿态下的当前 AC 中心 / 切割嘴位置。
     bool enterStandardCalibrationPose(const AxisCalibrationInputs& inputs,
                                       QString* errorMessage = nullptr);
@@ -375,6 +375,7 @@ private:
     bool ensureAcCenterCalibrationAvailable(QString* errorMessage = nullptr) const;
     bool currentWorkpieceRotationCenter(gp_Pnt& center) const;
     bool translateMachineWorkspace(const gp_Vec& translation, const QString& operationTitle);
+    bool translateMachineGeometryOnly(const gp_Vec& translation, const QString& operationTitle);
     void translateToolpathWorldData(const gp_Vec& translation);
     void autoDetectAxisOrigins();
     void applyStoredMachineProfile(const QString& machinePath);

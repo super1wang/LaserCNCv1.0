@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QString>
+
 #include <cstdint>
 
 namespace lcnc::process {
@@ -17,6 +19,8 @@ struct MachinePose5
     double z{0.0};
     double r1{0.0};
     double r2{0.0};
+    QString r1Name;
+    QString r2Name;
 
     /// 默认参与 X+Y，编排层可显式覆盖：
     ///   pose.mask = MachinePose5::X | MachinePose5::Y | MachinePose5::Z;

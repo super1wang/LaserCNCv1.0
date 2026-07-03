@@ -14,14 +14,16 @@ class QGroupBox;
 namespace lcnc::cam::ui {
 
 /**
- * @brief 三段式机台坐标系标定向导（VERTICAL_AC_TABLE）。
+ * @brief 三段式机台模型对齐向导（VERTICAL_AC_TABLE）。
  *
  * 流程：
  *   ① 拾取 A 轴参考面 → 记录中心
  *   ② 拾取 C 轴参考面 → 记录中心
  *   ③ 拾取切割头下端面 → 记录中心
- *   ④ 输入物理 AC 中心
- *   ⑤ 点击「提交」一次性写入轴心 + 切割头模型点 + 平移整机
+ *   ④ 读取应用程序选项 / 机台构型中手动填写的旋转中心
+ *   ⑤ 点击「提交」平移机台模型几何，使模型交点对齐到配置中心
+ *
+ * 物理旋转中心不在本向导中修改，统一由应用程序选项的构型配置页维护。
  *
  * 该对话框为非模态：拾取阶段由外部（MainWindow）驱动 OCC 视图取点，
  * 通过 @ref applyPickResult 回填本对话框对应阶段的结果。
@@ -94,13 +96,11 @@ private:
     QDoubleSpinBox* m_physX{nullptr};
     QDoubleSpinBox* m_physY{nullptr};
     QDoubleSpinBox* m_physZ{nullptr};
-    QDoubleSpinBox* m_physAngleA{nullptr};
-    QDoubleSpinBox* m_physAngleC{nullptr};
     QPushButton* m_btnSubmit{nullptr};
     QPushButton* m_btnReset{nullptr};
     QPushButton* m_btnCancel{nullptr};
     QLabel*      m_lblHint{nullptr};
-    QLabel*      m_lblCalibStatus{nullptr};  ///< 顶部“已/未标定”状态指示
+    QLabel*      m_lblCalibStatus{nullptr};  ///< 顶部“当前旋转中心”状态指示
     bool m_standardPoseEntered{false};  ///< 是否已进入"机台标定位"
 };
 

@@ -152,7 +152,7 @@ CmdUnloadMachine::CmdUnloadMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("卸载机台"), this);
-    a->setStatusTip(tr("删除当前机台模型和挂载工件，保留当前轴系配置"));
+    a->setStatusTip(tr("删除当前机台参考模型，保留工件、刀路和轴系配置"));
     setAction(a);
 }
 
@@ -166,7 +166,7 @@ bool CmdUnloadMachine::isEnabled() const
 void CmdUnloadMachine::execute()
 {
     if (QMessageBox::question(nullptr, tr("卸载机台"),
-            tr("确定要卸载当前机台模型吗？此操作会删除机台几何和挂载工件，但会保留当前轴系配置。"),
+            tr("确定要卸载当前机台参考模型吗？此操作仅删除机台几何，工件、刀路和轴系配置会保留。"),
             QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
         return;
     context()->camModule()->unloadMachine();

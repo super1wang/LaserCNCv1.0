@@ -211,13 +211,13 @@ void RenderingManager::setRuntimeDisplayMode(int displayMode, bool faceBoundary)
 
     m_runtimeDisplayMode = displayMode;
     m_runtimeFaceBoundary = faceBoundary;
-    ctx->DefaultDrawer()->SetFaceBoundaryDraw(faceBoundary);
-    ctx->SetDisplayMode(displayMode, Standard_False);
-
-    AIS_ListOfInteractive objects;
-    ctx->DisplayedObjects(objects);
-    for (AIS_ListIteratorOfListOfInteractive it(objects); it.More(); it.Next()) {
-        const Handle(AIS_Shape) shape = Handle(AIS_Shape)::DownCast(it.Value());
+    // 显示模式切换仅作用于工件与机台：按域取其 AIS，逐对象设 own mode + 面边线。
+    // 不再设置 context 默认显示模式/DefaultDrawer（那是“全局生效”的根源）——
+    // 其余对象（刀路/引导锥/球/gizmo/草绘/CAM 轮廓等）各自保持创建时确定的模式，
+    // 不被本次切换波及。
+    const auto targets = m_document->displayShapesForDomains(
+        { lcnc::ProjectDomain::Workpiece, lcnc::ProjectDomain::Machine });
+    for (const Handle(AIS_Shape)& shape : targets) {
         if (shape.IsNull())
             continue;
         ctx->SetDisplayMode(shape, displayMode, Standard_False);

@@ -51,6 +51,8 @@ MachinePose5 toPose5(const lcnc::cam::ToolpathExportPoint& p,
     pose.z  = p.machineZ;
     pose.r1 = p.machineR1;
     pose.r2 = p.machineR2;
+    pose.r1Name = p.rotaryAxis1Name;
+    pose.r2Name = p.rotaryAxis2Name;
     // 默认 X+Y 参与；下游 sink 还会与构型实际拥有的轴 & 即可。
     pose.mask = MachinePose5::Bx | MachinePose5::By
               | MachinePose5::Bz

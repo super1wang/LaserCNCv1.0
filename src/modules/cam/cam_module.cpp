@@ -559,8 +559,6 @@ void CamModule::configureMachine(const QString& presetName)
     if (!sameConfig)
         clearToolpath();
 
-    autoInstallCurrentWorkpieceInternal(m_config.autoInstallWorkpiece());
-
     displayAxisGuides();
     refreshMachineTransforms();
     emit axisAssignmentsChanged();
@@ -588,9 +586,6 @@ void CamModule::loadMachine(const QString& filePath)
             ShapeService::deleteShape(doc, e);
     }
 
-    // Clear mounted workpieces as well
-    unmountAllWorkpieces();
-
     TaskId taskId = lcnc::Kernel::current().taskManager()->run(tr("加载机台: %1").arg(fi.fileName()),
         [filePath, doc](TaskProgress* prog) {
             lcnc::cam::machine_io::loadMachineFromFile(doc, filePath, prog);
@@ -605,12 +600,7 @@ void CamModule::loadMachine(const QString& filePath)
         applyConfiguredMachineAxes(false);
         autoDetectAxes();
         applyStoredMachineProfile(m_machineModelPath);
-        const bool installed = autoInstallCurrentWorkpieceInternal(m_config.autoInstallWorkpiece());
-        // 无论如何都要刷新机台显示：机台几何已在 loadMachineFromFile 中导入 XCAF，
-        // 但 AIS 尚未在 GuiDocument 中注册。install 路径仅重建工件域，不会注册机台 AIS。
         refreshMachineDisplay();
-        if (installed)
-            refreshWorkpieceDisplay();
         emit machineLoaded();
     });
 }
@@ -628,10 +618,8 @@ void CamModule::unloadMachine()
     for (const QString& e : entries)
         ShapeService::deleteShape(doc, e);
 
-    // Remove mounted workpieces
-    unmountAllWorkpieces();
-
-    clearToolpath();
+    m_machineModelPath.clear();
+    m_config.setMachineModelPath(QString());
     refreshMachineDisplay();
     emit machineUnloaded();
 }
@@ -651,7 +639,6 @@ void CamModule::autoDetectAxes()
     if (!doc) return;
 
     lcnc::cam::machine_axis_detector::autoDetectAxisNames(doc, doc->machineKinematics());
-    autoDetectAxisOrigins();
     applyStoredMachineProfile(m_machineModelPath);
     if (m_machineConfig)
         m_machineConfig->syncFromKinematics(doc->machineKinematics());
@@ -997,40 +984,27 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
         return fail(tr("找不到机台轴系配置。"));
 
     try {
-        // 1) A 轴原点：保留当前 X，Y/Z 取 A 参考面中心
-        const gp_Pnt currentA = kin->axisOrigin(QStringLiteral("A"));
-        const gp_Pnt newA(currentA.X(),
-                          inputs.aFaceCenter.Y(),
-                          inputs.aFaceCenter.Z());
-        // 2) C 轴原点：X 取 C 参考面中心，Y/Z 投影到 A 轴线
-        const gp_Pnt newC(inputs.cFaceCenter.X(),
-                          newA.Y(),
-                          newA.Z());
+        gp_Pnt configuredCenter;
+        if (!currentAcRotationCenter(configuredCenter))
+            return fail(tr("请先在应用程序选项的机台构型页填写 A/C 旋转中心。"));
 
-        if (!kin->setAxisOrigin(QStringLiteral("A"), newA))
-            return fail(tr("写入 A 轴原点失败。"));
-        if (!kin->setAxisOrigin(QStringLiteral("C"), newC))
-            return fail(tr("写入 C 轴原点失败。"));
-
-        // 3) 切割头模型点（BASE 局部坐标），直接采用拾取面中心
+        // 切割头模型点（BASE 局部坐标），直接采用拾取面中心。
         m_cutterHeadModelPosition = inputs.cutterHeadFaceCenter;
 
-        // 4) 进入"机台标定位"：A=0, C=0；XY 调整为切割头世界 XY 与 AC 中心 XY 对齐
+        // 进入"机台标定位"：A=0, C=0；XY 调整为切割头世界 XY 与配置旋转中心 XY 对齐。
         kin->setAxisPosition(QStringLiteral("A"), 0.0);
         kin->setAxisPosition(QStringLiteral("C"), 0.0);
-        const gp_Pnt acCenter(newC.X(), newA.Y(), newA.Z());
         if (kin->findAxis(QStringLiteral("X")))
             kin->setAxisPosition(QStringLiteral("X"),
-                                 acCenter.X() - m_cutterHeadModelPosition.X());
+                                 configuredCenter.X() - m_cutterHeadModelPosition.X());
         if (kin->findAxis(QStringLiteral("Y")))
             kin->setAxisPosition(QStringLiteral("Y"),
-                                 acCenter.Y() - m_cutterHeadModelPosition.Y());
+                                 configuredCenter.Y() - m_cutterHeadModelPosition.Y());
 
         LCNC_INFO(lcnc::LogCode::Generic,
-                  "Standard pose entered: A.origin=({:.3f},{:.3f},{:.3f}) "
-                  "C.origin=({:.3f},{:.3f},{:.3f}) head.model=({:.3f},{:.3f},{:.3f})",
-                  newA.X(), newA.Y(), newA.Z(),
-                  newC.X(), newC.Y(), newC.Z(),
+                  "Standard pose entered: configuredCenter=({:.3f},{:.3f},{:.3f}) "
+                  "head.model=({:.3f},{:.3f},{:.3f})",
+                  configuredCenter.X(), configuredCenter.Y(), configuredCenter.Z(),
                   m_cutterHeadModelPosition.X(),
                   m_cutterHeadModelPosition.Y(),
                   m_cutterHeadModelPosition.Z());
@@ -1103,55 +1077,27 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
         return fail(reason);
 
     try {
-        // ── 2) 持久化轴心与切割头模型点 ────────────────────────────────
-        if (!m_machineModelPath.isEmpty()) {
-            MachineKinematics* kin = kinematics();
-            if (kin) {
-                m_config.setAxisOriginForMachine(m_machineModelPath, QStringLiteral("A"),
-                                                  kin->axisOrigin(QStringLiteral("A")));
-                m_config.setAxisOriginForMachine(m_machineModelPath, QStringLiteral("C"),
-                                                  kin->axisOrigin(QStringLiteral("C")));
-            }
+        gp_Pnt configuredCenter;
+        if (!currentAcRotationCenter(configuredCenter))
+            return fail(tr("请先在应用程序选项的机台构型页填写 A/C 旋转中心。"));
+
+        // A/C 拾取只用于推导“模型当前的 AC 交点”，不写入物理旋转中心。
+        const gp_Pnt pickedModelCenter(inputs.cFaceCenter.X(),
+                                       inputs.aFaceCenter.Y(),
+                                       inputs.aFaceCenter.Z());
+        const gp_Vec translation(pickedModelCenter, configuredCenter);
+        if (translation.SquareMagnitude() >= 1e-12) {
+            if (!translateMachineGeometryOnly(translation, tr("机台模型对齐")))
+                return false; // translateMachineGeometryOnly 已发 operationFailed
+        } else if (!m_machineModelPath.isEmpty()) {
             m_config.setCutterHeadModelPositionForMachine(m_machineModelPath,
                                                           m_cutterHeadModelPosition);
         }
 
-        // ── 3) 整机平移：将当前模型 AC 中心搬到物理 AC 中心 ───────────
-        if (inputs.hasPhysicalCenter) {
-            gp_Pnt currentCenter;
-            if (!currentAcRotationCenter(currentCenter))
-                return fail(tr("无法计算当前模型 AC 中心。"));
-
-            const gp_Vec translation(currentCenter, inputs.physicalAcCenter);
-            if (translation.SquareMagnitude() >= 1e-12) {
-                if (!translateMachineWorkspace(translation, tr("机台坐标系标定")))
-                    return false; // translateMachineWorkspace 已发 operationFailed
-            }
-        }
-
-        // ── 4) 持久化 AC 角度偏移（标定位 → 物理角度的映射） ─────────
-        m_hasAcAngleOffset = true;
-        m_acAngleOffsetA   = inputs.physicalAAngle;
-        m_acAngleOffsetC   = inputs.physicalCAngle;
-        // 物理 AC 中心 XYZ：作为标定记录持久化，向导回显时回填。
-        if (inputs.hasPhysicalCenter) {
-            m_hasPhysicalAcCenter = true;
-            m_physicalAcCenter    = inputs.physicalAcCenter;
-        }
-        if (!m_machineModelPath.isEmpty()) {
-            m_config.setAcAngleOffsetForMachine(m_machineModelPath,
-                                                inputs.physicalAAngle,
-                                                inputs.physicalCAngle);
-            if (inputs.hasPhysicalCenter) {
-                m_config.setPhysicalAcCenterForMachine(m_machineModelPath,
-                                                       inputs.physicalAcCenter);
-            }
-        }
-
-        // ── 5) 自动 STEP 回写：标定后的姿态作为下次启动的初始模型 ─────
+        // 自动 STEP 回写：对齐后的模型作为下次启动的初始模型。
         if (!m_machineModelPath.isEmpty()) {
             LCNC_INFO(lcnc::LogCode::Generic,
-                      "Saving calibrated machine model back to: {}",
+                      "Saving aligned machine model back to: {}",
                       m_machineModelPath.toStdString());
             LcncDocument* doc = machineDocument();
             if (doc && !lcnc::cam::machine_io::exportMachineToFile(
@@ -1176,7 +1122,7 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
         recalcToolpath();
 
     LCNC_INFO(lcnc::LogCode::Generic,
-              "CamModule::applyAxisCalibration done (origins/head/center/angles applied, model saved)");
+              "CamModule::applyAxisCalibration done (model geometry aligned; rotation center kept from machine config)");
     emit machineWorkspaceChanged();
     return true;
 }
@@ -1280,6 +1226,70 @@ bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QStri
     }
     translateToolpathWorldData(translation);
     refreshMachineDisplay();
+    if (hasToolpath() || m_previewLeadInValid)
+        refreshToolpathDisplay();
+
+    emit machineWorkspaceChanged();
+    return true;
+}
+
+bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QString& operationTitle)
+{
+    if (translation.SquareMagnitude() < 1e-12)
+        return true;
+
+    LcncDocument* doc = machineDocument();
+    if (!doc) {
+        emit operationFailed(operationTitle, tr("找不到机台项目文档。"));
+        return false;
+    }
+
+    const TDF_LabelSequence machineLabels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    const TDF_LabelSequence workpieceLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    const gp_Pnt cutterHeadSnapshot = m_cutterHeadModelPosition;
+    const gp_Pnt workpieceInstallSnapshot = m_workpieceInstallPosition;
+    QList<TDF_Label> movedLabels;
+
+    auto moveLabels = [&](const TDF_LabelSequence& labels) {
+        for (int i = 1; i <= labels.Length(); ++i) {
+            const TDF_Label label = labels.Value(i);
+            if (label.IsNull())
+                continue;
+
+            if (!ShapeService::moveShape(doc, label, translation))
+                return false;
+
+            movedLabels.append(label);
+        }
+        return true;
+    };
+
+    auto rollback = [&]() {
+        const gp_Vec reverse(-translation.X(), -translation.Y(), -translation.Z());
+        for (int i = movedLabels.size() - 1; i >= 0; --i)
+            ShapeService::moveShape(doc, movedLabels.at(i), reverse);
+        m_cutterHeadModelPosition = cutterHeadSnapshot;
+        m_workpieceInstallPosition = workpieceInstallSnapshot;
+    };
+
+    if (!moveLabels(machineLabels) || !moveLabels(workpieceLabels)) {
+        rollback();
+        emit operationFailed(operationTitle, tr("机台几何平移失败，当前模型已恢复原始位置。"));
+        return false;
+    }
+
+    m_cutterHeadModelPosition.Translate(translation);
+    m_workpieceInstallPosition.Translate(translation);
+    if (!m_machineModelPath.isEmpty()) {
+        m_config.setCutterHeadModelPositionForMachine(m_machineModelPath, m_cutterHeadModelPosition);
+        m_config.setWorkpieceInstallPositionForMachine(m_machineModelPath, m_workpieceInstallPosition);
+    }
+
+    translateToolpathWorldData(translation);
+    if (hasToolpath())
+        updateToolpathMachineCoordinates();
+    refreshMachineDisplay();
+    displayAxisGuides();
     if (hasToolpath() || m_previewLeadInValid)
         refreshToolpathDisplay();
 
@@ -1581,11 +1591,15 @@ bool CamModule::applyConfiguredMachineAxes(bool updateView)
     m_config.setMachinePreset(m_machineConfig->presetName());
     if (m_pose && m_pose->kinematics() != kin)
         m_pose->setKinematics(kin);
+    if (hasToolpath())
+        updateToolpathMachineCoordinates();
 
     if (!updateView)
         return true;
 
     displayAxisGuides();
+    if (hasToolpath())
+        refreshToolpathDisplay();
     refreshMachineTransforms();
     emit axisAssignmentsChanged();
     lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
@@ -2007,6 +2021,7 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     params.deflection = deflection;
 
     std::vector<LaserContour> allContours;
+    MachineCoord continuityState;
 
     for (const WorkpieceShapeSource& source : workpieceSources) {
         if (source.shape.IsNull())
@@ -2028,7 +2043,8 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
             if (contour.points.empty())
                 LaserToolpathBuilder::discretizeContour(contour, source.shape, deflection);
 
-            LaserToolpathBuilder::computeMachineCoordinates(contour, kinematics(), gp_Trsf());
+            LaserToolpathBuilder::computeMachineCoordinates(
+                contour, kinematics(), gp_Trsf(), &continuityState);
             allContours.push_back(std::move(contour));
         }
     }
@@ -2091,13 +2107,13 @@ bool CamModule::ensureAcCenterCalibrationAvailable(QString* errorMessage) const
 
     if (kin->configType() != QStringLiteral("VERTICAL_AC_TABLE")) {
         if (errorMessage)
-            *errorMessage = tr("当前仅 VERTICAL_AC_TABLE 构型支持 A/C 轴心快填与 AC 中心平移对齐。");
+            *errorMessage = tr("当前仅 VERTICAL_AC_TABLE 构型支持 A/C 模型对齐。");
         return false;
     }
 
     if (!kin->findAxis(QStringLiteral("A")) || !kin->findAxis(QStringLiteral("C"))) {
         if (errorMessage)
-            *errorMessage = tr("当前 AC 转台轴定义不完整，缺少 A 轴或 C 轴。\n请先完成机台构型配置。");
+            *errorMessage = tr("当前 AC 转台轴定义不完整，缺少 A 轴或 C 轴。\n请先在应用程序选项的机台构型页完成配置。");
         return false;
     }
 
@@ -2130,8 +2146,10 @@ void CamModule::translateToolpathWorldData(const gp_Vec& translation)
 
 void CamModule::updateToolpathMachineCoordinates()
 {
+    MachineCoord continuityState;
     for (LaserContour& contour : m_toolpath.contours()) {
-        LaserToolpathBuilder::computeMachineCoordinates(contour, kinematics(), gp_Trsf());
+        LaserToolpathBuilder::computeMachineCoordinates(
+            contour, kinematics(), gp_Trsf(), &continuityState);
     }
 }
 
@@ -2610,6 +2628,7 @@ void CamModule::recalcToolpath()
 {
     LcncDocument* machDoc = machineDocument();
     MachineKinematics* kin = machDoc ? machDoc->machineKinematics() : nullptr;
+    MachineCoord continuityState;
 
     for (int i = 0; i < m_toolpath.contourCount(); ++i) {
         LaserContour& contour = m_toolpath.contour(i);
@@ -2643,7 +2662,8 @@ void CamModule::recalcToolpath()
             LaserToolpathBuilder::discretizeContour(contour, sourceShape, m_deflection);
         }
 
-        LaserToolpathBuilder::computeMachineCoordinates(contour, kin, gp_Trsf());
+        LaserToolpathBuilder::computeMachineCoordinates(
+            contour, kin, gp_Trsf(), &continuityState);
     }
 
     refreshToolpathDisplay();
@@ -2696,12 +2716,12 @@ void CamModule::eraseAxisGuideDisplay()
 
 void CamModule::displayAxisGuides()
 {
-    m_guideRenderer->refresh(workspaceGuiDocument(), kinematics(), m_cutterHeadModelPosition);
+    m_guideRenderer->refresh(workspaceGuiDocument(), kinematics(), cutterHeadWorldPosition());
 }
 
 void CamModule::updateAxisGuideTransforms()
 {
-    m_guideRenderer->updateTransforms(workspaceGuiDocument(), kinematics());
+    m_guideRenderer->updateTransforms(workspaceGuiDocument(), kinematics(), cutterHeadWorldPosition());
 }
 
 void CamModule::refreshToolpathDisplay()
@@ -2735,9 +2755,10 @@ const QList<Handle(AIS_Shape)>& CamModule::contourAis() const
 
 void CamModule::setAxisPosition(const QString& axisName, double value, bool refreshNow)
 {
+    const QString normalizedAxis = axisName.trimmed().toUpper();
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "CamModule::setAxisPosition {}={} refreshNow={}",
-               axisName.toStdString(), value, refreshNow);
+               normalizedAxis.toStdString(), value, refreshNow);
     if (!m_pose || !kinematics()) {
         LCNC_DEBUG(lcnc::LogCode::Generic,
                    "CamModule::setAxisPosition: no pose/kinematics, skip");
@@ -2746,14 +2767,15 @@ void CamModule::setAxisPosition(const QString& axisName, double value, bool refr
     // 由 pose 统一写值；写入会同步回 kinematics 并 emit poseChanged。
     // 通过 m_inPoseSelfUpdate 抑制 coalescer，让本调用同步刷新（保留旧语义）。
     m_inPoseSelfUpdate = true;
-    const bool changed = m_pose->setAxisValue(axisName, value, /*emitChanged*/ false);
+    const bool changed = m_pose->setAxisValue(normalizedAxis, value, /*emitChanged*/ false);
     m_inPoseSelfUpdate = false;
     if (!changed)
         return;
     if (refreshNow) {
-        refreshMachineTransforms(QStringList{axisName});
+        refreshMachineTransforms(QStringList{normalizedAxis});
     } else {
-        m_pendingDirtyAxes.insert(axisName);
+        m_pendingDirtyAxes.insert(normalizedAxis);
+        updateAxisGuideTransforms();
         if (m_refreshCoalescer && !m_refreshCoalescer->isActive())
             m_refreshCoalescer->start();
     }
@@ -2828,6 +2850,7 @@ void CamModule::setMachineModelVisible(bool visible)
 
 void CamModule::setRotaryAxisGuidesVisible(bool visible)
 {
+    displayAxisGuides();
     m_guideRenderer->setRotaryAxisVisible(workspaceGuiDocument(), visible);
 }
 
@@ -2838,6 +2861,7 @@ bool CamModule::rotaryAxisGuidesVisible() const
 
 void CamModule::setCutterHeadGuideVisible(bool visible)
 {
+    displayAxisGuides();
     m_guideRenderer->setCutterHeadVisible(workspaceGuiDocument(), visible);
 }
 
@@ -2931,6 +2955,8 @@ void CamModule::refreshMachineTransforms()
         applyCamContourTransforms();
         m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
         updateAxisGuideTransforms();
+        if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
+            refreshTravelPath();
         if (gd->hasView())
             gd->view()->Redraw();
     }
@@ -2954,6 +2980,8 @@ void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
         applyCamContourTransforms();
         m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
         updateAxisGuideTransforms();
+        if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
+            refreshTravelPath();
         if (gd->hasView())
             gd->view()->Redraw();
     }

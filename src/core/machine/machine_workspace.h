@@ -23,7 +23,7 @@ namespace lcnc::cam {
  *    登记到 LcncProjectManager（attachMachineDocument），仅供视图/选择的域路由
  *    （`gd->domainForDocument` / `rebuildDomain(Machine, ...)`）识别机台文档。
  *  - **持有 MachineKinematics**：当前仍由机台 LcncDocument 持有，本工作台提供快捷访问；
- *    由于该 doc 已由工作台独占，运动学在语义上即归属"机台资产"。
+ *    运动学描述当前机床构型和物理旋转中心，不随参考模型加载/卸载而重置。
  *  - **机台模型路径**：全局来自 `CamConfig::machineModelPath()`，**不随 .lcnc 项目存档**；
  *    `loadModel(path)` 在用户切换机台或 CamModule::init 时调用一次。
  *  - **独立于工程**：机台几何不属于工程数据 —— 不进 .lcnc、不计入工程脏标记、
@@ -50,7 +50,7 @@ public:
     QString modelFilePath() const { return m_modelFilePath; }
     void    setModelFilePath(const QString& path);
 
-    /// 清空机台几何 + 卸载所有工件挂载；保留 MachineKinematics 的轴定义。
+    /// 仅清空机台参考几何；保留工件、刀路与 MachineKinematics 的轴定义。
     void clearMachineGeometry();
 
 signals:

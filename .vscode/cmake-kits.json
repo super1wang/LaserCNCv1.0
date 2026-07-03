@@ -1,10 +1,11 @@
 [
   {
-    "name": "VS 2026 Insiders x64",
-    "visualStudio": "ed5f41e6",
+    "name": "VS 2022 x64",
+    "visualStudio": "8580ef5c",
     "visualStudioArchitecture": "x64",
     "preferredGenerator": {
-      "name": "Ninja"
+      "name": "Visual Studio 17 2022",
+      "platform": "x64"
     },
     "isTrusted": true
   }

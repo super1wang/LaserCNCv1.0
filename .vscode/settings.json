@@ -1,15 +1,11 @@
 {
-  // CMake Tools defaults to Visual Studio generator + ALL_BUILD target. We
-  // overrode that to Ninja, but it must be paired with a kit that loads the
-  // VS Developer environment (cl.exe / rc.exe / mt.exe / Windows SDK INCLUDE
-  // and LIB env vars), otherwise configure fails with "rc not found" or
-  // links 64-bit project obj files against x86 SDK libs.
-  //
-  // The local cmake-kits.json defines a single x64 kit pointing at the same
-  // VS install we use from the command line. cmake.defaultKit pre-selects it
-  // so first-time `CMake: Configure` does not fall back to a global kit
-  // (which on this machine would be VS 2017 x86, the highest-priority match
-  // in the user-level kit list).
+  // Use the Visual Studio 17 2022 (MSBuild) generator with MSVC 14.44 from
+  // E:\vs2022IDE — matches the toolchain Qt 6.9.1 msvc2022_64 and OCC vc144
+  // were built with. Do NOT use the VS18 Insiders kit / Ninja generator: that
+  // pairs MSVC 14.51 with VS2022-built Qt/OCC and crashes at startup (ABI
+  // mismatch). cmake-kits.json defines the only kit (VS 2022 x64); pick it via
+  // the status bar so `CMake: Configure` does not fall back to a global kit.
+  // Command-line build (no vcvars) works because MSBuild brings its own env.
   "cmake.buildDirectory": "${workspaceFolder}/cmake-build-sdkcheck",
   "cmake.parallelJobs": 16,
   "cmake.buildBeforeRun": false,

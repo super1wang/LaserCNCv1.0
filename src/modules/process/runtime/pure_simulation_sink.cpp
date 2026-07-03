@@ -88,6 +88,8 @@ void PureSimulationSink::beginSegment(const MachinePose5& startPose, const Tool&
         p.machineZ  = startPose.z;
         p.machineR1 = startPose.r1;
         p.machineR2 = startPose.r2;
+        p.rotaryAxis1Name = startPose.r1Name;
+        p.rotaryAxis2Name = startPose.r2Name;
         m_pending.append(p);
     }
 }
@@ -100,6 +102,8 @@ void PureSimulationSink::lineTo(const MachinePose5& target, const Tool& /*tool*/
     p.machineZ  = target.z;
     p.machineR1 = target.r1;
     p.machineR2 = target.r2;
+    p.rotaryAxis1Name = target.r1Name;
+    p.rotaryAxis2Name = target.r2Name;
     m_pending.append(p);
 }
 

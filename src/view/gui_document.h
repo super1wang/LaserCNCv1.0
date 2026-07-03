@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QList>
 #include <QMap>
+#include <QSet>
 #include <QString>
 #include <QVector>
 #include <Standard_Handle.hxx>
@@ -86,6 +87,9 @@ public:
     void applyMachineDisplayStyle();
     Handle(AIS_Shape) aisShape(const QString& labelEntry) const;
     Handle(AIS_Shape) aisShape(DocumentId documentId, const QString& labelEntry) const;
+    /// 返回属于给定域集合的所有已注册 AIS（按 m_displayObjects 的 domain 过滤）。
+    /// 供 RenderingManager 把“显示模式”切换限定到工件+机台，不波及刀路/引导/gizmo 等。
+    QVector<Handle(AIS_Shape)> displayShapesForDomains(const QSet<lcnc::ProjectDomain>& domains) const;
 
     // ── CAM contour bodies (Phase C: ContourId-keyed AIS) ─────────────────
     // 工件/机台路径继续走 (DocumentId, entry) 键；CAM 轮廓本体改为以稳定的

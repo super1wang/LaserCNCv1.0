@@ -10,6 +10,37 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+namespace {
+
+gp_Trsf axisRotation(const MachineAxisDef& axis, double angleDeg)
+{
+    gp_Trsf trsf;
+    trsf.SetRotation(gp_Ax1(axis.origin, axis.direction), angleDeg * M_PI / 180.0);
+    return trsf;
+}
+
+double tableAxisJumpWeight(const QString& axisName)
+{
+    const QString n = axisName.trimmed().toUpper();
+    if (n == QStringLiteral("C"))
+        return 0.25;
+    if (n == QStringLiteral("A") || n == QStringLiteral("B"))
+        return 24.0;
+    return 1.0;
+}
+
+double tableAxisHomeWeight(const QString& axisName)
+{
+    const QString n = axisName.trimmed().toUpper();
+    if (n == QStringLiteral("C"))
+        return 0.02;
+    if (n == QStringLiteral("A") || n == QStringLiteral("B"))
+        return 12.0;
+    return 1.0;
+}
+
+} // namespace
+
 // =============================================================================
 // IKSolver — public entry point
 // =============================================================================
@@ -192,8 +223,7 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
 
     // 工具函数：给定 r1（度），返回最优 r2（度）及对齐误差。
     auto evalBranch = [&](double r1deg) {
-        gp_Trsf rotTry;
-        rotTry.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis1Dir), r1deg * M_PI / 180.0);
+        gp_Trsf rotTry = axisRotation(*ax1, r1deg);
         gp_Vec n_try = n;
         n_try.Transform(rotTry);
 
@@ -217,8 +247,7 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
         }
 
         // 真实对齐误差：施加 r2 后看 n_final 与 target 的夹角。
-        gp_Trsf rot2Try;
-        rot2Try.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis2Dir), r2deg * M_PI / 180.0);
+        gp_Trsf rot2Try = axisRotation(*ax2, r2deg);
         gp_Vec n_final = n_try;
         n_final.Transform(rot2Try);
         double err = (n_final - target).Magnitude();
@@ -286,11 +315,14 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
                     const double u1 = unwrapNear(r1v, previous->r1);
                     const double u2 = unwrapNear(r2v, previous->r2);
                     return err * 100000.0
-                         + std::abs(u1 - previous->r1)
-                         + std::abs(u2 - previous->r2) * 2.0;
+                         + std::abs(u1 - previous->r1) * tableAxisJumpWeight(r1Name)
+                         + std::abs(u2 - previous->r2) * tableAxisJumpWeight(r2Name);
                 }
-                // 首点没有上一姿态时，优先让父轴 r2 稳定，同时兼顾较小的 r1 起始跳转。
-                return err * 100000.0 + std::abs(r2v) * 10.0 + std::abs(r1v) * 0.01;
+                // 首点没有上一姿态时，仍按轴语义选分支：A/B 是摆角轴，尽量保持稳定；
+                // C 是管件夹持旋转轴，允许承担较大的绕管转角。
+                return err * 100000.0
+                     + std::abs(r1v) * tableAxisHomeWeight(r1Name)
+                     + std::abs(r2v) * tableAxisHomeWeight(r2Name);
             };
             const double costA = rotaryCost(a1deg_a, r2_a, err_a);
             const double costB = rotaryCost(a1deg_b, r2_b, err_b);
@@ -330,10 +362,8 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
     }
 
     // Step 3: Compute the actual rotation applied to the workpiece
-    gp_Trsf rot1Final;
-    rot1Final.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis1Dir), result.r1 * M_PI / 180.0);
-    gp_Trsf rot2Final;
-    rot2Final.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis2Dir), result.r2 * M_PI / 180.0);
+    gp_Trsf rot1Final = axisRotation(*ax1, result.r1);
+    gp_Trsf rot2Final = axisRotation(*ax2, result.r2);
     // 链路顺序与 MachineKinematics::chainTrsf(BASE→parent→child) 一致：
     // totalRot = T_parent * T_child（child=r1 先施加，parent=r2 后施加）。
     gp_Trsf totalRot = rot2Final.Multiplied(rot1Final);

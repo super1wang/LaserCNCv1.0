@@ -18,7 +18,11 @@ double segmentLength(const lcnc::cam::ToolpathExportPoint& a,
     const double dx = b.machineX - a.machineX;
     const double dy = b.machineY - a.machineY;
     const double dz = b.machineZ - a.machineZ;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
+    const double dr1 = b.machineR1 - a.machineR1;
+    const double dr2 = b.machineR2 - a.machineR2;
+    // Pure rotary cutting, such as a tube held on C, can have nearly fixed XYZ.
+    // Give rotary-only segments an equivalent display length so playback remains continuous.
+    return std::sqrt(dx * dx + dy * dy + dz * dz + dr1 * dr1 + dr2 * dr2);
 }
 
 lcnc::cam::ToolpathExportPoint interpolate(const lcnc::cam::ToolpathExportPoint& a,
