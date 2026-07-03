@@ -295,7 +295,10 @@ void MachineKinematics::setAxisPosition(const QString& axisName, double pos)
 {
     MachineAxisDef* def = findAxis(axisName);
     if (!def) return;
-    def->currentPos = qBound(def->minVal, pos, def->maxVal);
+    // currentPos mirrors live machine/controller feedback for display.
+    // Do not clamp it here: if the controller reports a value outside the
+    // configured planning limits, the view must still show the actual pose.
+    def->currentPos = pos;
     emit axisPositionChanged(axisName, def->currentPos);
 }
 

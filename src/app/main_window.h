@@ -21,7 +21,6 @@ class GraphicsScene;
 class QStackedWidget;
 class QSplitter;
 class QLabel;
-class QTimer;
 class QTabWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -162,7 +161,6 @@ private:
     QLabel* m_sbDocName{nullptr};
     QLabel* m_sbCoords{nullptr};
     QLabel* m_sbStatus{nullptr};
-    QTimer* m_machineRefreshTimer{nullptr};
     QString m_pendingCalibrationTarget;
     lcnc::cam::ui::DialogAxisCalibrationWizard* m_axisCalibWizard{nullptr};
     lcnc::app::ProjectExplorerSnapshot m_projectExplorerSnapshot;

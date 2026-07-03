@@ -10,11 +10,13 @@
  */
 
 #include <QVector>
+#include <QString>
 #include <AIS_Shape.hxx>
 
 #include <cstdint>
 
 class GuiDocument;
+class MachineKinematics;
 
 namespace lcnc::view {
 
@@ -26,6 +28,7 @@ public:
     struct Segment
     {
         std::uint64_t contourId{0};
+        QString workpieceEntry;
         double sx{0.0}, sy{0.0}, sz{0.0};
         double ex{0.0}, ey{0.0}, ez{0.0};
     };
@@ -42,12 +45,16 @@ public:
     /// visible == false 时只 erase。
     void refresh(GuiDocument* gd, const QVector<Segment>& segments);
 
+    /// 坐标变化时只更新整体局部变换，不重建 AIS。
+    void updateTransforms(GuiDocument* gd, MachineKinematics* kin);
+
     /// 强制擦除当前 AIS（gd 仍持有 ctx 时调用）。
     void erase(GuiDocument* gd);
 
 private:
     bool                m_visible{false};
     Handle(AIS_Shape)   m_ais;
+    QString             m_workpieceEntry;
 };
 
 } // namespace lcnc::view

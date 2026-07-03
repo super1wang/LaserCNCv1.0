@@ -593,13 +593,6 @@ void MainWindow::createRightPanel()
     m_toolpathPanel->setShowNormals(cam->showNormals());
     m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
 
-    m_machineRefreshTimer = new QTimer(this);
-    m_machineRefreshTimer->setSingleShot(true);
-    m_machineRefreshTimer->setInterval(0);
-    connect(m_machineRefreshTimer, &QTimer::timeout, this, [this] {
-        m_appContext->camModule()->refreshMachineTransforms();
-    });
-
     m_rightStack = new QStackedWidget(this);
 
     // CAM 右栏：两个 tab 页 —— 机床面板 / 刀路参数面板。
@@ -999,9 +992,6 @@ void MainWindow::createRightPanel()
             [this](const QString& axis, double value) {
             m_laserControl->updateAxisPosition(axis, value);
             m_appContext->camModule()->setAxisPosition(axis, value, false);
-
-            if (m_machineRefreshTimer && !m_machineRefreshTimer->isActive())
-                m_machineRefreshTimer->start();
 
             const auto positions = m_appContext->processModule()->currentAxisPositions();
             m_sbCoords->setText(

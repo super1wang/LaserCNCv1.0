@@ -1,6 +1,7 @@
 #include "view/travel_path_renderer.h"
 
 #include "view/gui_document.h"
+#include "core/kinematics/machine_kinematics.h"
 
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_TypeOfLine.hxx>
@@ -12,6 +13,7 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
 #include <algorithm>
@@ -36,6 +38,7 @@ void TravelPathRenderer::erase(GuiDocument* gd)
             ctx->Erase(m_ais, Standard_False);
     }
     m_ais.Nullify();
+    m_workpieceEntry.clear();
 }
 
 void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segments)
@@ -47,6 +50,14 @@ void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segmen
     }
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
     if (ctx.IsNull()) return;
+
+    m_workpieceEntry.clear();
+    for (const Segment& segment : segments) {
+        if (!segment.workpieceEntry.isEmpty()) {
+            m_workpieceEntry = segment.workpieceEntry;
+            break;
+        }
+    }
 
     // 先擦旧
     if (!m_ais.IsNull()) {
@@ -120,6 +131,22 @@ void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segmen
 
     ctx->Display(m_ais, AIS_WireFrame, -1, Standard_False);
     ctx->Deactivate(m_ais); // 禁拾取，避免干扰用户多选
+    updateTransforms(gd, nullptr);
+}
+
+void TravelPathRenderer::updateTransforms(GuiDocument* gd, MachineKinematics* kin)
+{
+    if (!gd || m_ais.IsNull())
+        return;
+
+    gp_Trsf transform;
+    if (kin && !m_workpieceEntry.isEmpty())
+        transform = kin->computeWpcTransform(m_workpieceEntry);
+
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    m_ais->SetLocalTransformation(transform);
+    if (!ctx.IsNull())
+        ctx->RecomputePrsOnly(m_ais, Standard_False);
 }
 
 } // namespace lcnc::view

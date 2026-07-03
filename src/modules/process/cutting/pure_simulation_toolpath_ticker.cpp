@@ -119,6 +119,8 @@ void PureSimulationToolpathTicker::onTick()
     m_lastTickMs = nowMs;
 
     double remainStep = m_speedMmPerSec * dtSec;
+    bool hasPositionToEmit = false;
+    lcnc::cam::ToolpathExportPoint positionToEmit;
     while (remainStep > 1e-9 && m_currentSegment + 1 < m_points.size()) {
         const auto& a = m_points[m_currentSegment];
         const auto& b = m_points[m_currentSegment + 1];
@@ -128,23 +130,29 @@ void PureSimulationToolpathTicker::onTick()
             m_segmentProgress += remainStep;
             remainStep = 0.0;
             const double t = (segLen > 1e-9) ? (m_segmentProgress / segLen) : 1.0;
-            emitPosition(interpolate(a, b, t));
+            positionToEmit = interpolate(a, b, t);
+            hasPositionToEmit = true;
         } else {
             // 走到段末，跳进下一段
             remainStep -= left;
             m_segmentProgress = 0.0;
             ++m_currentSegment;
-            emitPosition(m_points[m_currentSegment]);
+            positionToEmit = m_points[m_currentSegment];
+            hasPositionToEmit = true;
         }
     }
 
     if (m_currentSegment + 1 >= m_points.size()) {
         // 末端
         if (!m_points.isEmpty())
-            emitPosition(m_points.back());
+            positionToEmit = m_points.back();
+        hasPositionToEmit = !m_points.isEmpty();
         m_done = true;
         m_timer->stop();
     }
+
+    if (hasPositionToEmit)
+        emitPosition(positionToEmit);
 }
 
 void PureSimulationToolpathTicker::emitPosition(const lcnc::cam::ToolpathExportPoint& p)

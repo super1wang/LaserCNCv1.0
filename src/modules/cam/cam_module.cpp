@@ -2775,7 +2775,6 @@ void CamModule::setAxisPosition(const QString& axisName, double value, bool refr
         refreshMachineTransforms(QStringList{normalizedAxis});
     } else {
         m_pendingDirtyAxes.insert(normalizedAxis);
-        updateAxisGuideTransforms();
         if (m_refreshCoalescer && !m_refreshCoalescer->isActive())
             m_refreshCoalescer->start();
     }
@@ -2952,11 +2951,13 @@ void CamModule::refreshMachineTransforms()
 {
     if (auto* gd = workspaceGuiDocument()) {
         gd->updateMachineWorkspaceTransforms(machineDocument(), workpieceDocument());
-        applyCamContourTransforms();
-        m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
+        if (m_toolpathRenderer && m_toolpathRenderer->isVisible()) {
+            applyCamContourTransforms();
+            m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
+        }
         updateAxisGuideTransforms();
         if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
-            refreshTravelPath();
+            m_travelPathRenderer->updateTransforms(gd, kinematics());
         if (gd->hasView())
             gd->view()->Redraw();
     }
@@ -2977,11 +2978,13 @@ void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
     }
     if (auto* gd = workspaceGuiDocument()) {
         gd->updateMachineWorkspaceTransforms(machineDocument(), workpieceDocument());
-        applyCamContourTransforms();
-        m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
+        if (m_toolpathRenderer && m_toolpathRenderer->isVisible()) {
+            applyCamContourTransforms();
+            m_toolpathRenderer->updateTransforms(gd, m_toolpath, kinematics());
+        }
         updateAxisGuideTransforms();
         if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
-            refreshTravelPath();
+            m_travelPathRenderer->updateTransforms(gd, kinematics());
         if (gd->hasView())
             gd->view()->Redraw();
     }
@@ -3071,7 +3074,6 @@ void CamModule::applyCamContourTransforms()
 
         ais->SetLocalTransformation(transform);
         ctx->RecomputePrsOnly(ais, Standard_False);
-        ctx->RecomputeSelectionOnly(ais);
     }
 }
 
@@ -3345,25 +3347,44 @@ void CamModule::refreshTravelPath()
         return;
     }
 
-    const auto snapshot = exportToolpathSnapshot();
-    QHash<std::uint64_t, const lcnc::cam::ToolpathExportContour*> byId;
-    byId.reserve(snapshot.contours.size());
-    for (const auto& c : snapshot.contours) byId.insert(c.contourId, &c);
+    QHash<std::uint64_t, const LaserContour*> byId;
+    byId.reserve(m_toolpath.contourCount());
+    for (const LaserContour& contour : m_toolpath.contours()) {
+        if (contour.contourId != 0)
+            byId.insert(contour.contourId, &contour);
+    }
 
     QVector<lcnc::view::TravelPathRenderer::Segment> segments;
     segments.reserve(orderedIds.size());
+    const double leadInLen = m_toolpath.globalLeadInLength();
+    const double leadInNormalAng = m_toolpath.globalNormalAngle();
     for (auto id : orderedIds) {
         auto it = byId.find(id);
         if (it == byId.end()) continue;
-        const auto* c = it.value();
-        if (!c->endpointsValid) continue;
+        const LaserContour* c = it.value();
+        if (!c || c->points.empty())
+            continue;
+
+        const gp_Pnt cutStartLocal = c->points.front().position;
+        const gp_Pnt endLocal = c->points.back().position;
+        gp_Pnt startLocal = cutStartLocal;
+        if (c->leadIn.valid) {
+            bool ok = false;
+            const gp_Pnt leadStart = LaserToolpathBuilder::computeLeadInStartPoint(
+                *c, leadInLen, leadInNormalAng, &ok);
+            if (ok)
+                startLocal = leadStart;
+        }
+
         lcnc::view::TravelPathRenderer::Segment s;
         s.contourId = id;
-        s.sx = c->startX; s.sy = c->startY; s.sz = c->startZ;
-        s.ex = c->endX;   s.ey = c->endY;   s.ez = c->endZ;
+        s.workpieceEntry = c->workpieceEntry;
+        s.sx = startLocal.X(); s.sy = startLocal.Y(); s.sz = startLocal.Z();
+        s.ex = endLocal.X();   s.ey = endLocal.Y();   s.ez = endLocal.Z();
         segments.append(s);
     }
     m_travelPathRenderer->refresh(gd, segments);
+    m_travelPathRenderer->updateTransforms(gd, kinematics());
     if (gd->hasView()) gd->view()->Redraw();
 }
 
