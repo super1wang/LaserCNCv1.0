@@ -47,6 +47,8 @@ public:
 
     void setProvider(std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider);
     lcnc::cam::ToolpathExportSnapshot refreshSnapshot();
+    lcnc::cam::ToolpathExportSnapshot refreshSnapshotForOrder(
+        const QVector<std::uint64_t>& orderedContourIds);
     const lcnc::cam::ToolpathExportSnapshot& currentSnapshot() const { return m_snapshot; }
     ProcessJobPlan buildJobPlan() const;
 

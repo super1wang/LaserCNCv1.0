@@ -169,6 +169,7 @@ LcncDocument* LcncProjectManager::importWorkpieceModel(const QString& filePath, 
     if (!target)
         return nullptr;
 
+    clearDomain(ProjectDomain::Cam);
     target->clearEntityKind(LcncDocument::EntityKind::Workpiece);
     m_session.workpiece().clear();
     if (!importGeometryFile(target, filePath, errorMsg)) {
@@ -226,6 +227,8 @@ void LcncProjectManager::clearDomain(ProjectDomain domain)
         break;
     case ProjectDomain::Cam:
         target->clearEntityKind(LcncDocument::EntityKind::Cam);
+        if (m_camData)
+            m_camData->clearToolpath();
         m_session.cam().clear();
         break;
     case ProjectDomain::Project:
@@ -367,6 +370,8 @@ void LcncProjectManager::resetProjectDocuments(const QString& projectName)
     // 统一工程文档：clearProjectData 会清掉工件 + CAM 轮廓(EntityKind::Cam)；机台是
     // 独立参考资产，跨工程保留，不在此清空。
     workpieceDocument()->clearProjectData();
+    if (m_camData)
+        m_camData->clearToolpath();
     workpieceDocument()->setName(projectName);
     workpieceDocument()->setFilePath(QString());
     syncSessionFromDocuments();

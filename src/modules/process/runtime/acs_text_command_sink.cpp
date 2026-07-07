@@ -87,11 +87,47 @@ std::string poseCoordsText(const MachinePose5& pose, std::uint8_t effectiveMask)
     return s;
 }
 
-double unwrapNear(double value, double reference)
+double normalizeSigned180(double value)
 {
-    while (value - reference > 180.0) value -= 360.0;
-    while (value - reference < -180.0) value += 360.0;
-    return value;
+    while (value > 180.0) value -= 360.0;
+    while (value < -180.0) value += 360.0;
+    return std::abs(value) < 1e-10 ? 0.0 : value;
+}
+
+double normalizeRotaryForAxis(const AxisMap& axes, AxisMap::SemanticAxis axis, double value)
+{
+    return axes.axisName(axis).trimmed().toUpper() == QStringLiteral("C")
+        ? value
+        : normalizeSigned180(value);
+}
+
+QVector<AxisMap::SemanticAxis> rotaryJumpOrder(const AxisMap& axes)
+{
+    QVector<AxisMap::SemanticAxis> order;
+    auto appendIfPresent = [&](AxisMap::SemanticAxis axis) {
+        if (axes.isPresent(axis) && !order.contains(axis))
+            order.append(axis);
+    };
+
+    if (axes.axisName(AxisMap::R1).trimmed().toUpper() == QStringLiteral("C"))
+        appendIfPresent(AxisMap::R1);
+    if (axes.axisName(AxisMap::R2).trimmed().toUpper() == QStringLiteral("C"))
+        appendIfPresent(AxisMap::R2);
+
+    appendIfPresent(AxisMap::R1);
+    appendIfPresent(AxisMap::R2);
+    return order;
+}
+
+double rotaryPoseValue(const MachinePose5& pose, AxisMap::SemanticAxis axis)
+{
+    return axis == AxisMap::R1 ? pose.r1 : pose.r2;
+}
+
+double rotaryIdleVelocity(const Tool& tool, AxisMap::SemanticAxis axis)
+{
+    const double configured = axis == AxisMap::R1 ? tool.m_dIdleAVelocity : tool.m_dIdleA1Velocity;
+    return configured > 0 ? configured : 10.0;
 }
 
 // 按 axisMap + mask 取出 "APOSx, APOSy[, APOSz, APOSr1, APOSr2]"，
@@ -211,13 +247,18 @@ void AcsTextCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
         appendText(s);
     };
 
-    const double r1 = m_hasLastR1 ? unwrapNear(pose.r1, m_lastR1) : pose.r1;
-    const double r2 = m_hasLastR2 ? unwrapNear(pose.r2, m_lastR2) : pose.r2;
     emitPtp(AxisMap::Z,  pose.z,  tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0);
-    emitPtp(AxisMap::R1, r1,      tool.m_dIdleAVelocity > 0 ? tool.m_dIdleAVelocity : 10.0);
-    emitPtp(AxisMap::R2, r2,      tool.m_dIdleA1Velocity > 0 ? tool.m_dIdleA1Velocity : 10.0);
-    m_lastR1 = r1; m_hasLastR1 = true;
-    m_lastR2 = r2; m_hasLastR2 = true;
+    for (AxisMap::SemanticAxis axis : rotaryJumpOrder(m_axisMap)) {
+        const double value = normalizeRotaryForAxis(m_axisMap, axis, rotaryPoseValue(pose, axis));
+        emitPtp(axis, value, rotaryIdleVelocity(tool, axis));
+        if (axis == AxisMap::R1) {
+            m_lastR1 = value;
+            m_hasLastR1 = true;
+        } else if (axis == AxisMap::R2) {
+            m_lastR2 = value;
+            m_hasLastR2 = true;
+        }
+    }
 }
 
 void AcsTextCommandSink::jumpToCuttingZ(const Tool& tool)
@@ -323,12 +364,12 @@ void AcsTextCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
 
     MachinePose5 out = target;
     if (segMask & MachinePose5::Br1) {
-        out.r1 = m_hasLastR1 ? unwrapNear(target.r1, m_lastR1) : target.r1;
+        out.r1 = normalizeRotaryForAxis(m_axisMap, AxisMap::R1, target.r1);
         m_lastR1 = out.r1;
         m_hasLastR1 = true;
     }
     if (segMask & MachinePose5::Br2) {
-        out.r2 = m_hasLastR2 ? unwrapNear(target.r2, m_lastR2) : target.r2;
+        out.r2 = normalizeRotaryForAxis(m_axisMap, AxisMap::R2, target.r2);
         m_lastR2 = out.r2;
         m_hasLastR2 = true;
     }

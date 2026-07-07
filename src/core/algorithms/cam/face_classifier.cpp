@@ -15,6 +15,9 @@
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 
+#include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
+
 #include <cmath>
 #include <numeric>
 #include <unordered_map>
@@ -151,6 +154,81 @@ double bboxDiagonal(const std::vector<TopoDS_Face>& faces)
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     double dx = xmax - xmin, dy = ymax - ymin, dz = zmax - zmin;
     return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+std::vector<gp_Pnt> sampleOrderedEdges(const std::vector<TopoDS_Edge>& edges)
+{
+    std::vector<gp_Pnt> points;
+    constexpr int kSamplesPerEdge = 8;
+
+    for (const TopoDS_Edge& edge : edges) {
+        if (edge.IsNull() || BRep_Tool::Degenerated(edge))
+            continue;
+
+        BRepAdaptor_Curve curve(edge);
+        const double first = curve.FirstParameter();
+        const double last = curve.LastParameter();
+        const bool reversed = edge.Orientation() == TopAbs_REVERSED;
+
+        for (int i = 0; i <= kSamplesPerEdge; ++i) {
+            const double t = static_cast<double>(i) / static_cast<double>(kSamplesPerEdge);
+            const double u = reversed
+                ? last + (first - last) * t
+                : first + (last - first) * t;
+            const gp_Pnt p = curve.Value(u);
+            if (!points.empty() && points.back().SquareDistance(p) < 1e-12)
+                continue;
+            points.push_back(p);
+        }
+    }
+
+    return points;
+}
+
+double dominantProjectedSignedArea(const std::vector<gp_Pnt>& points)
+{
+    if (points.size() < 3)
+        return 0.0;
+
+    gp_Vec newell(0.0, 0.0, 0.0);
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const gp_Pnt& a = points[i];
+        const gp_Pnt& b = points[(i + 1) % points.size()];
+        newell.SetX(newell.X() + (a.Y() - b.Y()) * (a.Z() + b.Z()));
+        newell.SetY(newell.Y() + (a.Z() - b.Z()) * (a.X() + b.X()));
+        newell.SetZ(newell.Z() + (a.X() - b.X()) * (a.Y() + b.Y()));
+    }
+
+    const double ax = std::abs(newell.X());
+    const double ay = std::abs(newell.Y());
+    const double az = std::abs(newell.Z());
+    if (ax >= ay && ax >= az)
+        return newell.X();
+    if (ay >= ax && ay >= az)
+        return newell.Y();
+    return newell.Z();
+}
+
+bool shouldReverseForClockwise(const std::vector<TopoDS_Edge>& edges)
+{
+    const std::vector<gp_Pnt> points = sampleOrderedEdges(edges);
+    return dominantProjectedSignedArea(points) > 1e-9;
+}
+
+TopoDS_Wire makeWireFromOrderedEdges(const std::vector<TopoDS_Edge>& edges, bool reverseOrder)
+{
+    BRepBuilderAPI_MakeWire maker;
+    if (reverseOrder) {
+        for (auto it = edges.rbegin(); it != edges.rend(); ++it) {
+            TopoDS_Edge edge = *it;
+            edge.Reverse();
+            maker.Add(edge);
+        }
+    } else {
+        for (const TopoDS_Edge& edge : edges)
+            maker.Add(edge);
+    }
+    return maker.IsDone() ? maker.Wire() : TopoDS_Wire();
 }
 
 } // anonymous namespace
@@ -400,16 +478,14 @@ std::vector<TopoDS_Wire> FaceClassifier::chainEdgesToWires(
         if (entries[start].used)
             continue;
 
-        // Start a new chain
-        BRepBuilderAPI_MakeWire wireMaker;
-        std::vector<int> chain;
-        chain.push_back(start);
+        // Start a new chain.
+        std::vector<TopoDS_Edge> orderedEdges;
+        orderedEdges.push_back(entries[start].edge);
         entries[start].used = true;
 
-        // Determine orientation: keep the original start/end
-        gp_Pnt chainHead = entries[start].startPt;
+        // Determine orientation: keep the original start/end while chaining,
+        // then normalise the completed wire to clockwise in its dominant projection.
         gp_Pnt chainTail = entries[start].endPt;
-        wireMaker.Add(entries[start].edge);
 
         // Extend from tail
         for (;;) {
@@ -431,12 +507,16 @@ std::vector<TopoDS_Wire> FaceClassifier::chainEdgesToWires(
             } else {
                 chainTail = entries[next].endPt;
             }
-            wireMaker.Add(edgeToAdd);
-            chain.push_back(next);
+            orderedEdges.push_back(edgeToAdd);
         }
 
-        if (wireMaker.IsDone()) {
-            result.push_back(wireMaker.Wire());
+        TopoDS_Wire wire = makeWireFromOrderedEdges(
+            orderedEdges,
+            shouldReverseForClockwise(orderedEdges));
+        if (wire.IsNull())
+            wire = makeWireFromOrderedEdges(orderedEdges, false);
+        if (!wire.IsNull()) {
+            result.push_back(wire);
         }
     }
 

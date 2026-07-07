@@ -34,6 +34,24 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshot()
     return m_snapshot;
 }
 
+lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshotForOrder(
+    const QVector<std::uint64_t>& orderedContourIds)
+{
+    if (!m_provider) {
+        m_snapshot = {};
+        m_snapshot.description = QObject::tr("未连接 CAM 刀路提供者");
+        return m_snapshot;
+    }
+    m_snapshot = m_provider->exportToolpathSnapshotForOrder(orderedContourIds);
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "process.toolpath: ordered snapshot revision={} contours={} points={} orderSize={}",
+              m_snapshot.revision,
+              m_snapshot.contours.size(),
+              m_snapshot.totalPointCount(),
+              orderedContourIds.size());
+    return m_snapshot;
+}
+
 ProcessJobPlan ProcessToolpathService::buildJobPlan() const
 {
     ProcessJobPlan plan;

@@ -16,6 +16,8 @@ public:
     virtual bool hasToolpath() const = 0;
     virtual std::uint64_t toolpathRevision() const = 0;
     virtual ToolpathExportSnapshot exportToolpathSnapshot() const = 0;
+    virtual ToolpathExportSnapshot exportToolpathSnapshotForOrder(
+        const QVector<std::uint64_t>& orderedContourIds) const = 0;
 };
 
 } // namespace lcnc::cam

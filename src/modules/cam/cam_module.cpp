@@ -38,7 +38,11 @@
 #include <QFileInfo>
 #include <QPoint>
 #include <QSignalBlocker>
+#include <QByteArray>
 #include <QTimer>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -125,6 +129,14 @@ public:
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const override
     {
         return m_module ? m_module->exportToolpathSnapshot() : lcnc::cam::ToolpathExportSnapshot{};
+    }
+
+    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
+        const QVector<std::uint64_t>& orderedContourIds) const override
+    {
+        return m_module
+            ? m_module->exportToolpathSnapshotForOrder(orderedContourIds)
+            : lcnc::cam::ToolpathExportSnapshot{};
     }
 
 private:
@@ -346,7 +358,7 @@ bool CamModule::init(lcnc::IKernel& kernel)
         connect(pm, &lcnc::LcncProjectManager::projectOpened,
                 this, [this](const QString&) { onCamDataLoaded(); });
         connect(pm, &lcnc::LcncProjectManager::projectReset,
-                this, [this]() { clearToolpath(); });
+                this, [this]() { clearToolpathViewState(/*emitSignals=*/true); });
     }
 
     m_initialized = true;
@@ -426,6 +438,10 @@ CamModule::CamModule(QObject* parent)
                     if (m_pose && m_pose->kinematics() != kinematics())
                         m_pose->setKinematics(kinematics());
                     emit machineWorkspaceChanged();
+                } else if (domain == lcnc::ProjectDomain::Cam
+                           && !m_clearingToolpath
+                           && (!m_camData || !m_camData->hasToolpath())) {
+                    clearToolpathViewState(/*emitSignals=*/true);
                 }
             });
 
@@ -2021,7 +2037,6 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     params.deflection = deflection;
 
     std::vector<LaserContour> allContours;
-    MachineCoord continuityState;
 
     for (const WorkpieceShapeSource& source : workpieceSources) {
         if (source.shape.IsNull())
@@ -2044,7 +2059,7 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
                 LaserToolpathBuilder::discretizeContour(contour, source.shape, deflection);
 
             LaserToolpathBuilder::computeMachineCoordinates(
-                contour, kinematics(), gp_Trsf(), &continuityState);
+                contour, kinematics(), gp_Trsf(), nullptr);
             allContours.push_back(std::move(contour));
         }
     }
@@ -2055,6 +2070,7 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     m_toolpath.contours() = std::move(allContours);
     m_camData->ensureContourIds();
     m_camData->ensureToolpathLayers();
+    applyDefaultCuttingOrder();
     m_camData->commitToolpathStates();    // 把 signature → id 映射固化下来，跨次稳定
     pushGenerationParamsToCamData();       // 固化本次生成所用参数，随工程持久化
     writeContourGeometryToDocument();      // 轮廓 wire 写入统一工程文档(EntityKind::Cam)
@@ -2071,19 +2087,14 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 
 void CamModule::clearToolpath()
 {
-    eraseToolpathDisplay();
+    clearToolpathViewState(/*emitSignals=*/false);
     m_camData->clearToolpath();
     // 统一工程文档：清掉轮廓几何(EntityKind::Cam)实体。
     if (LcncDocument* doc = workpieceDocument())
         doc->clearEntityKind(LcncDocument::EntityKind::Cam);
-    // CAM AIS 按 ContourId 管理，eraseAllContours 删 GuiDocument 注册项。
-    if (GuiDocument* gd = workspaceGuiDocument())
-        gd->eraseAllContours();
+    m_clearingToolpath = true;
     lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
-    m_workpieceShape.Nullify();
-    m_previewLeadInContour = -1;
-    m_previewLeadInParam = 0.0;
-    m_previewLeadInValid = false;
+    m_clearingToolpath = false;
     emit toolpathCleared();
     emit toolpathLayersChanged();
 }
@@ -2146,11 +2157,147 @@ void CamModule::translateToolpathWorldData(const gp_Vec& translation)
 
 void CamModule::updateToolpathMachineCoordinates()
 {
-    MachineCoord continuityState;
     for (LaserContour& contour : m_toolpath.contours()) {
         LaserToolpathBuilder::computeMachineCoordinates(
-            contour, kinematics(), gp_Trsf(), &continuityState);
+            contour, kinematics(), gp_Trsf(), nullptr);
     }
+}
+
+QVector<lcnc::cam::ContourId> CamModule::defaultCuttingOrderByCAxis() const
+{
+    struct OrderItem
+    {
+        lcnc::cam::ContourId id{0};
+        double axial{0.0};
+        double angle{0.0};
+        int originalIndex{0};
+    };
+
+    QVector<OrderItem> items;
+    items.reserve(m_toolpath.contourCount());
+
+    const MachineKinematics* kin = kinematics();
+    const MachineAxisDef* cAxis = kin ? kin->findAxis(QStringLiteral("C")) : nullptr;
+    const bool hasCAxis = cAxis && cAxis->motionType == MachineAxisDef::Rotary;
+
+    gp_Pnt origin(0.0, 0.0, 0.0);
+    gp_Dir axisDir(0.0, 0.0, 1.0);
+    gp_Dir zeroDir(1.0, 0.0, 0.0);
+    if (hasCAxis) {
+        const gp_Trsf axisTrsf = kin->computeAxisTransform(cAxis->name);
+        origin = cAxis->origin.Transformed(axisTrsf);
+        axisDir = cAxis->direction.Transformed(axisTrsf);
+
+        const gp_Vec axisVec(axisDir);
+        gp_Vec zero(gp_Dir(1, 0, 0).Transformed(axisTrsf));
+        zero = zero - axisVec * zero.Dot(axisVec);
+        if (zero.Magnitude() <= 1e-9) {
+            zero = gp_Vec(gp_Dir(0, 1, 0).Transformed(axisTrsf));
+            zero = zero - axisVec * zero.Dot(axisVec);
+        }
+        if (zero.Magnitude() > 1e-9)
+            zeroDir = gp_Dir(zero);
+    }
+
+    auto appendStorageOrder = [&] {
+        QVector<lcnc::cam::ContourId> order;
+        order.reserve(m_toolpath.contourCount());
+        for (const LaserContour& contour : m_toolpath.contours()) {
+            if (contour.contourId != 0)
+                order.append(static_cast<lcnc::cam::ContourId>(contour.contourId));
+        }
+        return order;
+    };
+
+    if (!hasCAxis)
+        return appendStorageOrder();
+
+    const gp_Vec axisVec(axisDir);
+    const gp_Vec zeroVec(zeroDir);
+    int originalIndex = 0;
+    for (const LaserContour& contour : m_toolpath.contours()) {
+        if (contour.contourId == 0 || contour.points.empty()) {
+            ++originalIndex;
+            continue;
+        }
+
+        const bool omitClosingPoint = contour.points.size() > 2
+            && contour.points.front().position.SquareDistance(contour.points.back().position) < 1e-10;
+        const int pointCount = static_cast<int>(contour.points.size()) - (omitClosingPoint ? 1 : 0);
+        if (pointCount <= 0) {
+            ++originalIndex;
+            continue;
+        }
+
+        double sx = 0.0;
+        double sy = 0.0;
+        double sz = 0.0;
+        for (int i = 0; i < pointCount; ++i) {
+            const gp_Pnt& p = contour.points[static_cast<std::size_t>(i)].position;
+            sx += p.X();
+            sy += p.Y();
+            sz += p.Z();
+        }
+        const gp_Pnt center(sx / pointCount, sy / pointCount, sz / pointCount);
+        gp_Vec radial(origin, center);
+        const double axial = radial.Dot(axisVec);
+        radial = radial - axisVec * axial;
+
+        double angle = 0.0;
+        if (radial.Magnitude() > 1e-9) {
+            radial.Normalize();
+            angle = std::atan2(axisVec.Dot(zeroVec.Crossed(radial)),
+                               zeroVec.Dot(radial));
+        }
+
+        items.append({static_cast<lcnc::cam::ContourId>(contour.contourId),
+                      axial,
+                      angle,
+                      originalIndex});
+        ++originalIndex;
+    }
+
+    if (items.size() != m_toolpath.contourCount())
+        return appendStorageOrder();
+
+    std::stable_sort(items.begin(), items.end(),
+                     [](const OrderItem& a, const OrderItem& b) {
+                         if (std::abs(a.axial - b.axial) > 1e-6)
+                             return a.axial < b.axial;
+                         if (std::abs(a.angle - b.angle) > 1e-9)
+                             return a.angle < b.angle;
+                         return a.originalIndex < b.originalIndex;
+                     });
+
+    QVector<lcnc::cam::ContourId> order;
+    order.reserve(items.size());
+    for (const OrderItem& item : items)
+        order.append(item.id);
+    return order;
+}
+
+void CamModule::applyDefaultCuttingOrder()
+{
+    if (!m_camData || m_toolpath.contourCount() <= 0)
+        return;
+
+    const QVector<lcnc::cam::ContourId> order = defaultCuttingOrderByCAxis();
+    if (order.isEmpty())
+        return;
+
+    if (auto* mgr = m_camData->layerManager()) {
+        mgr->setManualContourOrder(order);
+        mgr->setSortStrategy(lcnc::cam::CuttingPlanSortStrategy::Manual);
+    } else {
+        auto& container = m_camData->layerContainer();
+        container.setManualContourOrder(order);
+        container.setSortStrategy(lcnc::cam::CuttingPlanSortStrategy::Manual);
+    }
+
+    m_camData->markDirty(true);
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "cam.toolpath: default cutting order set by C-axis axial position, contours={}",
+              order.size());
 }
 
 const LaserToolpath& CamModule::toolpath() const
@@ -2186,6 +2333,15 @@ std::uint64_t CamModule::toolpathRevision() const
     auto mix = [&revision](std::uint64_t value) {
         revision ^= value + 0x9e3779b97f4a7c15ull + (revision << 6) + (revision >> 2);
     };
+    auto mixRounded = [&mix](double value) {
+        mix(static_cast<std::uint64_t>(std::llround(value * 1000.0)));
+    };
+    auto mixString = [&mix](const QString& text) {
+        const QByteArray bytes = text.toUtf8();
+        mix(static_cast<std::uint64_t>(bytes.size()));
+        for (const char ch : bytes)
+            mix(static_cast<unsigned char>(ch));
+    };
 
     mix(static_cast<std::uint64_t>(m_toolpath.contourCount()));
     for (const LaserContour& contour : m_toolpath.contours()) {
@@ -2196,10 +2352,23 @@ std::uint64_t CamModule::toolpathRevision() const
         if (!contour.points.empty()) {
             const ToolpathPoint& first = contour.points.front();
             const ToolpathPoint& last = contour.points.back();
-            mix(static_cast<std::uint64_t>(std::llround(first.position.X() * 1000.0)));
-            mix(static_cast<std::uint64_t>(std::llround(first.position.Y() * 1000.0)));
-            mix(static_cast<std::uint64_t>(std::llround(last.position.X() * 1000.0)));
-            mix(static_cast<std::uint64_t>(std::llround(last.position.Y() * 1000.0)));
+            mixRounded(first.position.X());
+            mixRounded(first.position.Y());
+            mixRounded(last.position.X());
+            mixRounded(last.position.Y());
+        }
+        for (const ToolpathPoint& point : contour.points) {
+            mixRounded(point.position.X());
+            mixRounded(point.position.Y());
+            mixRounded(point.position.Z());
+            mixRounded(point.machineCoord.x);
+            mixRounded(point.machineCoord.y);
+            mixRounded(point.machineCoord.z);
+            mixRounded(point.machineCoord.r1);
+            mixRounded(point.machineCoord.r2);
+            mixString(point.machineCoord.r1Name);
+            mixString(point.machineCoord.r2Name);
+            mix(point.machineCoord.valid ? 1ull : 0ull);
         }
     }
     for (const ToolpathLayer& layer : m_toolpath.layers()) {
@@ -2212,11 +2381,52 @@ std::uint64_t CamModule::toolpathRevision() const
 
 lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshot() const
 {
+    return buildToolpathExportSnapshot(
+        m_toolpath.contours(),
+        toolpathRevision(),
+        hasToolpath() ? tr("CAM 刀路快照已导出") : tr("CAM 当前无刀路"));
+}
+
+lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
+    const QVector<std::uint64_t>& orderedContourIds) const
+{
+    if (orderedContourIds.isEmpty())
+        return exportToolpathSnapshot();
+
+    std::vector<LaserContour> orderedContours;
+    orderedContours.reserve(static_cast<std::size_t>(orderedContourIds.size()));
+    for (std::uint64_t id : orderedContourIds) {
+        const int contourIdx = contourIndexById(static_cast<lcnc::cam::ContourId>(id));
+        if (contourIdx < 0 || contourIdx >= m_toolpath.contourCount())
+            continue;
+        orderedContours.push_back(m_toolpath.contour(contourIdx));
+    }
+
+    MachineCoord continuityState;
+    MachineKinematics* kin = kinematics();
+    for (LaserContour& contour : orderedContours) {
+        LaserToolpathBuilder::computeMachineCoordinates(
+            contour, kin, gp_Trsf(), &continuityState);
+    }
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "cam.toolpath: exported ordered snapshot with continuous rotary planning, contours={}",
+              orderedContours.size());
+
+    return buildToolpathExportSnapshot(
+        orderedContours,
+        toolpathRevision(),
+        orderedContours.empty() ? tr("CAM 当前无刀路") : tr("CAM 有序规划刀路快照已导出"));
+}
+
+lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
+    const std::vector<LaserContour>& contours,
+    std::uint64_t revision,
+    const QString& description) const
+{
     lcnc::cam::ToolpathExportSnapshot snapshot;
-    snapshot.revision = toolpathRevision();
-    snapshot.description = hasToolpath()
-        ? tr("CAM 刀路快照已导出")
-        : tr("CAM 当前无刀路");
+    snapshot.revision = revision;
+    snapshot.description = description;
 
     auto layerForId = [this](std::uint64_t layerId) -> const ToolpathLayer* {
         for (const ToolpathLayer& layer : m_toolpath.layers()) {
@@ -2628,8 +2838,6 @@ void CamModule::recalcToolpath()
 {
     LcncDocument* machDoc = machineDocument();
     MachineKinematics* kin = machDoc ? machDoc->machineKinematics() : nullptr;
-    MachineCoord continuityState;
-
     for (int i = 0; i < m_toolpath.contourCount(); ++i) {
         LaserContour& contour = m_toolpath.contour(i);
         const TopoDS_Shape sourceShape = contour.sourceShape.IsNull()
@@ -2663,7 +2871,7 @@ void CamModule::recalcToolpath()
         }
 
         LaserToolpathBuilder::computeMachineCoordinates(
-            contour, kin, gp_Trsf(), &continuityState);
+            contour, kin, gp_Trsf(), nullptr);
     }
 
     refreshToolpathDisplay();
@@ -2735,6 +2943,25 @@ void CamModule::refreshToolpathDisplay()
 void CamModule::eraseToolpathDisplay()
 {
     m_toolpathRenderer->erase(workspaceGuiDocument());
+}
+
+void CamModule::clearToolpathViewState(bool emitSignals)
+{
+    eraseToolpathDisplay();
+    // CAM AIS 按 ContourId 管理，eraseAllContours 删 GuiDocument 注册项。
+    if (GuiDocument* gd = workspaceGuiDocument())
+        gd->eraseAllContours();
+
+    m_workpieceShape.Nullify();
+    m_previewLeadInContour = -1;
+    m_previewLeadInParam = 0.0;
+    m_previewLeadInValid = false;
+
+    if (emitSignals) {
+        emit toolpathCleared();
+        emit toolpathLayersChanged();
+        refreshTravelPath();
+    }
 }
 
 const QList<Handle(AIS_Shape)>& CamModule::contourAis() const
@@ -3291,6 +3518,13 @@ void CamModule::onCamDataLoaded()
     // core 已把刀路灌入 CamDataManager；此处先恢复工程级生成参数与轮廓 wire，
     // 再把数据映射到渲染层。
     applyGenerationParamsFromCamData();
+    if (!m_camData || !m_camData->hasToolpath()) {
+        clearToolpathViewState(/*emitSignals=*/true);
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "cam.toolpath: project has no cached CAM data; cleared view");
+        return;
+    }
+
     relinkContourGeometryFromDocument();
     syncCamDocumentContours();
     refreshToolpathDisplay();

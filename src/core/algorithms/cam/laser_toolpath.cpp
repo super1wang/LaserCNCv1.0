@@ -33,9 +33,11 @@
 #include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <utility>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -96,6 +98,252 @@ bool camToolpathTraceEnabled()
 const char* motionTypeText(MachineAxisDef::MotionType type)
 {
     return type == MachineAxisDef::Rotary ? "Rotary" : "Linear";
+}
+
+double normalizeSigned180(double deg)
+{
+    while (deg > 180.0) deg -= 360.0;
+    while (deg < -180.0) deg += 360.0;
+    return std::abs(deg) < 1e-10 ? 0.0 : deg;
+}
+
+double normalizeAxisReference(const QString& axisName, double deg)
+{
+    return axisName.trimmed().toUpper() == QStringLiteral("C")
+        ? deg
+        : normalizeSigned180(deg);
+}
+
+std::pair<QString, QString> orderedRotaryAxisNames(const MachineKinematics* kin)
+{
+    if (!kin)
+        return {};
+
+    QString rotaryAxes[2];
+    int rotaryCount = 0;
+    for (const auto& axis : kin->axes()) {
+        if (axis.motionType == MachineAxisDef::Rotary && rotaryCount < 2)
+            rotaryAxes[rotaryCount++] = axis.name;
+    }
+    if (rotaryCount == 0)
+        return {};
+    if (rotaryCount == 1)
+        return {rotaryAxes[0], QString()};
+
+    const MachineAxisDef* a0 = kin->findAxis(rotaryAxes[0]);
+    const MachineAxisDef* a1 = kin->findAxis(rotaryAxes[1]);
+    const MachineAxisDef* child = nullptr;
+    const MachineAxisDef* parent = nullptr;
+    if (a0 && a1) {
+        QString cur = a1->parentAxis;
+        while (!cur.isEmpty()) {
+            if (cur == a0->name) { child = a1; parent = a0; break; }
+            const MachineAxisDef* d = kin->findAxis(cur);
+            if (!d) break;
+            cur = d->parentAxis;
+        }
+        if (!child) {
+            cur = a0->parentAxis;
+            while (!cur.isEmpty()) {
+                if (cur == a1->name) { child = a0; parent = a1; break; }
+                const MachineAxisDef* d = kin->findAxis(cur);
+                if (!d) break;
+                cur = d->parentAxis;
+            }
+        }
+    }
+
+    if (child && parent)
+        return {child->name, parent->name};
+    return {rotaryAxes[0], rotaryAxes[1]};
+}
+
+MachineCoord currentRotaryReference(const MachineKinematics* kin)
+{
+    MachineCoord ref;
+    const auto [r1Name, r2Name] = orderedRotaryAxisNames(kin);
+    if (r1Name.isEmpty())
+        return ref;
+
+    const MachineAxisDef* r1 = kin->findAxis(r1Name);
+    const MachineAxisDef* r2 = r2Name.isEmpty() ? nullptr : kin->findAxis(r2Name);
+    if (!r1)
+        return ref;
+
+    ref.r1Name = r1Name;
+    ref.r2Name = r2Name;
+    ref.r1 = normalizeAxisReference(r1Name, r1->currentPos);
+    ref.r2 = r2 ? normalizeAxisReference(r2Name, r2->currentPos) : 0.0;
+    ref.valid = true;
+    return ref;
+}
+
+QString primaryRotaryTraversalAxis(const MachineKinematics* kin)
+{
+    if (!kin)
+        return {};
+
+    if (const MachineAxisDef* cAxis = kin->findAxis(QStringLiteral("C"))) {
+        if (cAxis->motionType == MachineAxisDef::Rotary)
+            return cAxis->name;
+    }
+
+    const auto [r1Name, r2Name] = orderedRotaryAxisNames(kin);
+    if (!r1Name.isEmpty())
+        return r1Name;
+    return r2Name;
+}
+
+bool rotaryAxisFrame(const MachineKinematics* kin,
+                     const QString& axisName,
+                     gp_Pnt& origin,
+                     gp_Dir& axisDir,
+                     gp_Dir& zeroDir)
+{
+    if (!kin || axisName.isEmpty())
+        return false;
+
+    const MachineAxisDef* axis = kin->findAxis(axisName);
+    if (!axis || axis->motionType != MachineAxisDef::Rotary)
+        return false;
+
+    const gp_Trsf axisTrsf = kin->computeAxisTransform(axisName);
+    origin = axis->origin.Transformed(axisTrsf);
+    axisDir = axis->direction.Transformed(axisTrsf);
+
+    const gp_Vec axisVec(axisDir);
+    gp_Vec ref(gp_Dir(1, 0, 0).Transformed(axisTrsf));
+    ref = ref - axisVec * ref.Dot(axisVec);
+    if (ref.Magnitude() <= 1e-9) {
+        ref = gp_Vec(gp_Dir(0, 1, 0).Transformed(axisTrsf));
+        ref = ref - axisVec * ref.Dot(axisVec);
+    }
+    if (ref.Magnitude() <= 1e-9) {
+        ref = gp_Vec(1, 0, 0) - axisVec * gp_Vec(1, 0, 0).Dot(axisVec);
+    }
+    if (ref.Magnitude() <= 1e-9) {
+        ref = gp_Vec(0, 1, 0) - axisVec * gp_Vec(0, 1, 0).Dot(axisVec);
+    }
+    if (ref.Magnitude() <= 1e-9)
+        return false;
+
+    zeroDir = gp_Dir(ref);
+    return true;
+}
+
+bool pointRotaryAngleDeg(const gp_Pnt& point,
+                         const gp_Pnt& origin,
+                         const gp_Dir& axisDir,
+                         const gp_Dir& zeroDir,
+                         double& angleDeg)
+{
+    const gp_Vec axisVec(axisDir);
+    gp_Vec radial(origin, point);
+    radial = radial - axisVec * radial.Dot(axisVec);
+    if (radial.Magnitude() <= 1e-8)
+        return false;
+
+    radial.Normalize();
+    const gp_Vec zeroVec(zeroDir);
+    const double sinV = axisVec.Dot(zeroVec.Crossed(radial));
+    const double cosV = zeroVec.Dot(radial);
+    angleDeg = normalizeSigned180(std::atan2(sinV, cosV) * 180.0 / M_PI);
+    return true;
+}
+
+void reverseToolpathPoints(std::vector<ToolpathPoint>& points)
+{
+    std::reverse(points.begin(), points.end());
+    for (ToolpathPoint& point : points)
+        point.tangent = gp_Dir(-point.tangent.X(), -point.tangent.Y(), -point.tangent.Z());
+}
+
+bool contourHasClosingPoint(const LaserContour& contour)
+{
+    return contour.points.size() > 2
+        && contour.points.front().position.SquareDistance(contour.points.back().position) < 1e-10;
+}
+
+void rotateClosedContourStart(std::vector<ToolpathPoint>& points,
+                              const std::vector<double>& angles)
+{
+    if (points.size() < 3 || points.size() != angles.size())
+        return;
+
+    auto bestIt = std::min_element(
+        angles.begin(), angles.end(),
+        [](double a, double b) {
+            const double aa = std::abs(normalizeSigned180(a));
+            const double bb = std::abs(normalizeSigned180(b));
+            if (std::abs(aa - bb) > 1e-9)
+                return aa < bb;
+            return a < b;
+        });
+    if (bestIt == angles.end())
+        return;
+
+    const auto start = static_cast<std::size_t>(std::distance(angles.begin(), bestIt));
+    std::rotate(points.begin(), points.begin() + static_cast<std::ptrdiff_t>(start), points.end());
+}
+
+void normalizeContourTraversal(LaserContour& contour,
+                               const MachineKinematics* kin,
+                               const gp_Trsf& wpcTransform)
+{
+    if (contour.points.size() < 2)
+        return;
+
+    const QString axisName = primaryRotaryTraversalAxis(kin);
+    gp_Pnt origin;
+    gp_Dir axisDir(0, 0, 1);
+    gp_Dir zeroDir(1, 0, 0);
+    if (!rotaryAxisFrame(kin, axisName, origin, axisDir, zeroDir))
+        return;
+
+    const bool closedByWire = !contour.wire.IsNull() && contour.wire.Closed();
+    const bool hadClosingPoint = contourHasClosingPoint(contour);
+    ToolpathPoint originalClosingPoint;
+    if (hadClosingPoint) {
+        originalClosingPoint = contour.points.back();
+        contour.points.pop_back();
+    }
+    auto restoreOriginalClosingPoint = [&] {
+        if (hadClosingPoint)
+            contour.points.push_back(originalClosingPoint);
+    };
+    if (contour.points.size() < 2) {
+        restoreOriginalClosingPoint();
+        return;
+    }
+
+    std::vector<double> angles;
+    angles.reserve(contour.points.size());
+    for (const ToolpathPoint& point : contour.points) {
+        const gp_Pnt worldPoint = point.position.Transformed(wpcTransform);
+        double angle = 0.0;
+        if (!pointRotaryAngleDeg(worldPoint, origin, axisDir, zeroDir, angle)) {
+            restoreOriginalClosingPoint();
+            return;
+        }
+        angles.push_back(angle);
+    }
+
+    double angularTravel = 0.0;
+    for (std::size_t i = 1; i < angles.size(); ++i)
+        angularTravel += normalizeSigned180(angles[i] - angles[i - 1]);
+    if (closedByWire && angles.size() > 2)
+        angularTravel += normalizeSigned180(angles.front() - angles.back());
+
+    if (angularTravel > 1e-6) {
+        reverseToolpathPoints(contour.points);
+        std::reverse(angles.begin(), angles.end());
+    }
+
+    if (closedByWire)
+        rotateClosedContourStart(contour.points, angles);
+
+    if (closedByWire || hadClosingPoint)
+        contour.points.push_back(contour.points.front());
 }
 
 gp_Pnt bboxCenter(const Bnd_Box& box)
@@ -753,6 +1001,8 @@ void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
 {
     if (!kinematics) return;
 
+    normalizeContourTraversal(contour, kinematics, wpcTransform);
+
     const bool tracePoints = camToolpathTraceEnabled();
     if (tracePoints) {
         LCNC_DEBUG(lcnc::LogCode::Generic,
@@ -783,8 +1033,10 @@ void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
     QString r1Name;
     QString r2Name;
 
-    MachineCoord previous = continuityState ? *continuityState : MachineCoord{};
-    bool hasPrevious = continuityState && continuityState->valid;
+    MachineCoord previous = (continuityState && continuityState->valid)
+        ? *continuityState
+        : currentRotaryReference(kinematics);
+    bool hasPrevious = previous.valid;
     int pointIndex = 0;
     for (auto& pt : contour.points) {
         // Transform from workpiece-local to world frame

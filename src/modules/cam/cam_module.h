@@ -7,6 +7,7 @@
 #include <QMap>
 #include <QSet>
 #include <QString>
+#include <QVector>
 
 #include <memory>
 
@@ -230,6 +231,8 @@ public:
     int toolpathContourPointCount(int contourIndex) const override;
     std::uint64_t toolpathRevision() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const;
+    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
+        const QVector<std::uint64_t>& orderedContourIds) const;
 
     /// Set lead-in entry point for a specific contour.
     void setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double entryParam);
@@ -380,6 +383,12 @@ private:
     void autoDetectAxisOrigins();
     void applyStoredMachineProfile(const QString& machinePath);
     bool applyConfiguredMachineAxes(bool updateView);
+    QVector<lcnc::cam::ContourId> defaultCuttingOrderByCAxis() const;
+    void applyDefaultCuttingOrder();
+    lcnc::cam::ToolpathExportSnapshot buildToolpathExportSnapshot(
+        const std::vector<LaserContour>& contours,
+        std::uint64_t revision,
+        const QString& description) const;
     gp_Pnt defaultWorkpieceInstallPosition() const;
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
@@ -408,6 +417,8 @@ private:
     void applyGenerationParamsFromCamData();
     /// core 完成工程 CAM 数据加载后，刷新 OCC 文档镜像 + 渲染 + 相关信号。
     void onCamDataLoaded();
+    /// 清理 CAM 视图侧状态；用于模块内清刀路和项目核心外部清 CAM 域两条路径。
+    void clearToolpathViewState(bool emitSignals);
 
     bool              m_initialized{false};
 
@@ -448,6 +459,7 @@ private:
     bool                        m_machineModelVisible{true};
     QSet<QString>               m_visibleMachineEntries;
     bool                        m_machineVisibilityInitialized{false};
+    bool                        m_clearingToolpath{false};
 
     // ── Lead-in picking preview ────────────────────────────────────────
     int    m_previewLeadInContour{-1};

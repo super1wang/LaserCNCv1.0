@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QVariantMap>
 #include <QVector>
+#include <cstdint>
 #include <memory>
 
 class ProcessModule;
@@ -75,12 +76,27 @@ private:
         double compensationOffsetY{0.0};
     };
 
+    struct CuttingListCacheKey
+    {
+        std::uint64_t snapshotRevision{0};
+        std::uint64_t planRevision{0};
+        int startNumber{1};
+        int endNumber{0};
+        double offsetX{0.0};
+        double offsetY{0.0};
+    };
+
     QVector<CuttingRow> buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& snapshot,
                                          int startNumber,
                                          int endNumber,
                                          double offsetX,
                                          double offsetY,
                                          QString* errorMessage);
+    void unwrapCuttingListCAxis(QVector<CuttingRow>& rows) const;
+    bool cacheKeyMatches(const CuttingListCacheKey& key) const;
+    QVector<CuttingRow> cachedCuttingListCopy();
+    void storeCuttingListCache(const CuttingListCacheKey& key, const QVector<CuttingRow>& rows);
+    void clearCuttingListCache();
 
     Tool* resolveTool(const QString& toolName, const QString& layerName, QStringList* warnings);
 
@@ -100,6 +116,10 @@ private:
     std::unique_ptr<PureSimulationToolpathTicker> m_simTicker;
     ProcessCuttingPlanService* m_planService{nullptr};
     Tool m_sanitizedDefaultTool;
+    bool m_hasCuttingListCache{false};
+    CuttingListCacheKey m_cuttingListCacheKey;
+    QVector<CuttingRow> m_cuttingListCacheRows;
+    QMetaObject::Connection m_planChangedConnection;
 };
 
 } // namespace lcnc::process

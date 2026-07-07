@@ -19,24 +19,142 @@ gp_Trsf axisRotation(const MachineAxisDef& axis, double angleDeg)
     return trsf;
 }
 
-double tableAxisJumpWeight(const QString& axisName)
+bool isCAxisName(const QString& axisName)
 {
-    const QString n = axisName.trimmed().toUpper();
-    if (n == QStringLiteral("C"))
-        return 0.25;
-    if (n == QStringLiteral("A") || n == QStringLiteral("B"))
-        return 24.0;
-    return 1.0;
+    return axisName.trimmed().toUpper() == QStringLiteral("C");
 }
 
-double tableAxisHomeWeight(const QString& axisName)
+double normalizeSigned180(double deg)
 {
-    const QString n = axisName.trimmed().toUpper();
-    if (n == QStringLiteral("C"))
-        return 0.02;
-    if (n == QStringLiteral("A") || n == QStringLiteral("B"))
-        return 12.0;
-    return 1.0;
+    while (deg > 180.0) deg -= 360.0;
+    while (deg < -180.0) deg += 360.0;
+    return std::abs(deg) < 1e-10 ? 0.0 : deg;
+}
+
+double normalizeAxisOutput(const QString& axisName, double deg)
+{
+    return isCAxisName(axisName)
+        ? deg
+        : normalizeSigned180(deg);
+}
+
+double equivalentAngleNear(double value, double ref)
+{
+    while (value - ref > 180.0) value -= 360.0;
+    while (value - ref < -180.0) value += 360.0;
+    return value;
+}
+
+struct RotaryBranchCost
+{
+    bool acceptable{false};
+    double err{0.0};
+    double tiltDelta{0.0};
+    double cDelta{0.0};
+};
+
+double axisComparableValue(const QString& axisName,
+                           double value,
+                           double reference,
+                           bool hasReference)
+{
+    const double comparable = hasReference
+        ? equivalentAngleNear(value, reference)
+        : normalizeAxisOutput(axisName, value);
+    return isCAxisName(axisName) ? comparable : normalizeSigned180(comparable);
+}
+
+RotaryBranchCost rotaryBranchCost(const QString& r1Name,
+                                  double r1Value,
+                                  const QString& r2Name,
+                                  double r2Value,
+                                  double err,
+                                  const MachineCoord* previous)
+{
+    RotaryBranchCost cost;
+    cost.acceptable = err <= 1e-5;
+    cost.err = err;
+
+    auto addDelta = [&](const QString& axisName,
+                        double value,
+                        double reference,
+                        bool hasReference) {
+        const double comparable = axisComparableValue(axisName, value, reference, hasReference);
+        const double delta = hasReference
+            ? std::abs(comparable - reference)
+            : std::abs(comparable);
+        if (isCAxisName(axisName))
+            cost.cDelta += delta;
+        else
+            cost.tiltDelta += delta;
+    };
+
+    const bool hasPrevious = previous && previous->valid
+        && previous->r1Name == r1Name
+        && previous->r2Name == r2Name;
+    addDelta(r1Name, r1Value, hasPrevious ? previous->r1 : 0.0, hasPrevious);
+    addDelta(r2Name, r2Value, hasPrevious ? previous->r2 : 0.0, hasPrevious);
+    return cost;
+}
+
+bool rotaryBranchBetter(const RotaryBranchCost& a, const RotaryBranchCost& b)
+{
+    constexpr double kErrEps = 1e-7;
+    constexpr double kAxisEps = 1e-6;
+    if (a.acceptable != b.acceptable)
+        return a.acceptable;
+    if (!a.acceptable && std::abs(a.err - b.err) > kErrEps)
+        return a.err < b.err;
+    if (std::abs(a.tiltDelta - b.tiltDelta) > kAxisEps)
+        return a.tiltDelta < b.tiltDelta;
+    if (std::abs(a.cDelta - b.cDelta) > kAxisEps)
+        return a.cDelta < b.cDelta;
+    return a.err < b.err;
+}
+
+bool withinAxisLimits(const MachineAxisDef& axis, double value)
+{
+    constexpr double kLimitEps = 1e-6;
+    return value >= axis.minVal - kLimitEps && value <= axis.maxVal + kLimitEps;
+}
+
+double tableAlignmentError(const MachineAxisDef& ax1,
+                           double r1Value,
+                           const MachineAxisDef& ax2,
+                           double r2Value,
+                           const gp_Vec& normal,
+                           const gp_Vec& target)
+{
+    gp_Trsf rot1 = axisRotation(ax1, r1Value);
+    gp_Trsf rot2 = axisRotation(ax2, r2Value);
+    gp_Trsf total = rot2.Multiplied(rot1);
+    gp_Vec finalNormal = normal;
+    finalNormal.Transform(total);
+    return (finalNormal - target).Magnitude();
+}
+
+bool solveRotationAboutAxis(const MachineAxisDef& axis,
+                            const gp_Vec& from,
+                            const gp_Vec& to,
+                            double& angleDeg)
+{
+    const gp_Vec axisVec(axis.direction);
+    gp_Vec fromPerp = from - axisVec * from.Dot(axisVec);
+    gp_Vec toPerp = to - axisVec * to.Dot(axisVec);
+    if (fromPerp.Magnitude() <= 1e-10 || toPerp.Magnitude() <= 1e-10)
+        return false;
+
+    fromPerp.Normalize();
+    toPerp.Normalize();
+    double dotV = fromPerp.Dot(toPerp);
+    if (dotV > 1.0) dotV = 1.0;
+    if (dotV < -1.0) dotV = -1.0;
+
+    double angle = std::acos(dotV);
+    if (fromPerp.Crossed(toPerp).Dot(axisVec) < 0.0)
+        angle = -angle;
+    angleDeg = normalizeSigned180(angle * 180.0 / M_PI);
+    return true;
 }
 
 } // namespace
@@ -303,30 +421,11 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
             r2_a = clampR2(r2_a);
             r2_b = clampR2(r2_b);
 
-            auto unwrapNear = [](double value, double ref) {
-                while (value - ref > 180.0) value -= 360.0;
-                while (value - ref < -180.0) value += 360.0;
-                return value;
-            };
-            auto rotaryCost = [&](double r1v, double r2v, double err) {
-                if (previous && previous->valid
-                    && previous->r1Name == r1Name
-                    && previous->r2Name == r2Name) {
-                    const double u1 = unwrapNear(r1v, previous->r1);
-                    const double u2 = unwrapNear(r2v, previous->r2);
-                    return err * 100000.0
-                         + std::abs(u1 - previous->r1) * tableAxisJumpWeight(r1Name)
-                         + std::abs(u2 - previous->r2) * tableAxisJumpWeight(r2Name);
-                }
-                // 首点没有上一姿态时，仍按轴语义选分支：A/B 是摆角轴，尽量保持稳定；
-                // C 是管件夹持旋转轴，允许承担较大的绕管转角。
-                return err * 100000.0
-                     + std::abs(r1v) * tableAxisHomeWeight(r1Name)
-                     + std::abs(r2v) * tableAxisHomeWeight(r2Name);
-            };
-            const double costA = rotaryCost(a1deg_a, r2_a, err_a);
-            const double costB = rotaryCost(a1deg_b, r2_b, err_b);
-            const bool pickB = costB < costA;
+            const RotaryBranchCost costA =
+                rotaryBranchCost(r1Name, a1deg_a, r2Name, r2_a, err_a, previous);
+            const RotaryBranchCost costB =
+                rotaryBranchCost(r1Name, a1deg_b, r2Name, r2_b, err_b, previous);
+            const bool pickB = rotaryBranchBetter(costB, costA);
             if (pickB) { result.r1 = a1deg_b; result.r2 = r2_b; }
             else       { result.r1 = a1deg_a; result.r2 = r2_a; }
         };
@@ -355,11 +454,98 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
     if (previous && previous->valid
         && previous->r1Name == r1Name
         && previous->r2Name == r2Name) {
-        while (result.r1 - previous->r1 > 180.0) result.r1 -= 360.0;
-        while (result.r1 - previous->r1 < -180.0) result.r1 += 360.0;
-        while (result.r2 - previous->r2 > 180.0) result.r2 -= 360.0;
-        while (result.r2 - previous->r2 < -180.0) result.r2 += 360.0;
+        result.r1 = equivalentAngleNear(result.r1, previous->r1);
+        result.r2 = equivalentAngleNear(result.r2, previous->r2);
     }
+
+    // If one rotary axis is C, first try a forced-tilt candidate: keep the
+    // previous A/B angle and solve the C angle from the current normal. This
+    // handles tube side holes where both normals are 90 degrees to the tool and
+    // the ordinary two-branch solve may flip A/B instead of rotating C.
+    if (previous && previous->valid
+        && previous->r1Name == r1Name
+        && previous->r2Name == r2Name
+        && (isCAxisName(r1Name) != isCAxisName(r2Name))) {
+        double forcedR1 = result.r1;
+        double forcedR2 = result.r2;
+        bool hasForced = false;
+
+        if (isCAxisName(r1Name)) {
+            forcedR2 = normalizeAxisOutput(r2Name, previous->r2);
+            if (withinAxisLimits(*ax2, forcedR2)) {
+                gp_Vec desired = target;
+                gp_Trsf invTilt = axisRotation(*ax2, -forcedR2);
+                desired.Transform(invTilt);
+                double solvedC = 0.0;
+                if (solveRotationAboutAxis(*ax1, n, desired, solvedC)) {
+                    forcedR1 = equivalentAngleNear(solvedC, previous->r1);
+                    hasForced = withinAxisLimits(*ax1, forcedR1);
+                }
+            }
+        } else {
+            forcedR1 = normalizeAxisOutput(r1Name, previous->r1);
+            if (withinAxisLimits(*ax1, forcedR1)) {
+                gp_Vec afterTilt = n;
+                gp_Trsf tilt = axisRotation(*ax1, forcedR1);
+                afterTilt.Transform(tilt);
+                double solvedC = 0.0;
+                if (solveRotationAboutAxis(*ax2, afterTilt, target, solvedC)) {
+                    forcedR2 = equivalentAngleNear(solvedC, previous->r2);
+                    hasForced = withinAxisLimits(*ax2, forcedR2);
+                }
+            }
+        }
+
+        if (hasForced) {
+            const double currentErr = tableAlignmentError(*ax1, result.r1, *ax2, result.r2, n, target);
+            const double forcedErr = tableAlignmentError(*ax1, forcedR1, *ax2, forcedR2, n, target);
+            const RotaryBranchCost currentCost =
+                rotaryBranchCost(r1Name, result.r1, r2Name, result.r2, currentErr, previous);
+            const RotaryBranchCost forcedCost =
+                rotaryBranchCost(r1Name, forcedR1, r2Name, forcedR2, forcedErr, previous);
+            if (rotaryBranchBetter(forcedCost, currentCost)) {
+                result.r1 = forcedR1;
+                result.r2 = forcedR2;
+            }
+        }
+    }
+
+    // For table AC/BC tube work, (C, tilt) and (C + 180, -tilt) are equivalent
+    // orientation branches. Add this branch explicitly so A/B can stay stable
+    // and the C axis absorbs opposite-side tube holes.
+    if (previous && previous->valid
+        && previous->r1Name == r1Name
+        && previous->r2Name == r2Name
+        && (isCAxisName(r1Name) != isCAxisName(r2Name))) {
+        double altR1 = result.r1;
+        double altR2 = result.r2;
+        if (isCAxisName(r1Name)) {
+            altR1 = result.r1 + 180.0;
+            altR2 = -result.r2;
+        } else {
+            altR1 = -result.r1;
+            altR2 = result.r2 + 180.0;
+        }
+
+        altR1 = axisComparableValue(r1Name, altR1, previous->r1, true);
+        altR2 = axisComparableValue(r2Name, altR2, previous->r2, true);
+
+        if (withinAxisLimits(*ax1, altR1) && withinAxisLimits(*ax2, altR2)) {
+            const double currentErr = tableAlignmentError(*ax1, result.r1, *ax2, result.r2, n, target);
+            const double alternateErr = tableAlignmentError(*ax1, altR1, *ax2, altR2, n, target);
+            const RotaryBranchCost currentCost =
+                rotaryBranchCost(r1Name, result.r1, r2Name, result.r2, currentErr, previous);
+            const RotaryBranchCost alternateCost =
+                rotaryBranchCost(r1Name, altR1, r2Name, altR2, alternateErr, previous);
+            if (rotaryBranchBetter(alternateCost, currentCost)) {
+                result.r1 = altR1;
+                result.r2 = altR2;
+            }
+        }
+    }
+
+    result.r1 = normalizeAxisOutput(r1Name, result.r1);
+    result.r2 = normalizeAxisOutput(r2Name, result.r2);
 
     // Step 3: Compute the actual rotation applied to the workpiece
     gp_Trsf rot1Final = axisRotation(*ax1, result.r1);
@@ -532,6 +718,9 @@ MachineCoord IKSolver::solveHeadType(const MachineKinematics* kin,
     // Clamp r2
     if (result.r2 > ax2->maxVal) result.r2 = ax2->maxVal;
     if (result.r2 < ax2->minVal) result.r2 = ax2->minVal;
+
+    result.r1 = normalizeAxisOutput(r1Name, result.r1);
+    result.r2 = normalizeAxisOutput(r2Name, result.r2);
 
     // Step 3: Linear axes = tool position (workpiece is fixed in head-type)
     result.x = toolPos.X();

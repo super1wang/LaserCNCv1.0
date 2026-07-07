@@ -25,6 +25,7 @@ public:
 
     struct PerAxis
     {
+        QString name;
         int    controllerIndex{-1};
         double velocity{0.0};
         double acceleration{0.0};
@@ -42,6 +43,7 @@ public:
 
     /// 查询。
     int  controllerIndex(SemanticAxis a) const { return m_axes[a].controllerIndex; }
+    QString axisName(SemanticAxis a) const      { return m_axes[a].name; }
     const PerAxis& axis(SemanticAxis a) const  { return m_axes[a]; }
     bool isPresent(SemanticAxis a) const       { return m_axes[a].controllerIndex >= 0; }
 

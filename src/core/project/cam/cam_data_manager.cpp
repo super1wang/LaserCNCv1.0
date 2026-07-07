@@ -19,6 +19,9 @@ CamDataManager::~CamDataManager() = default;
 void CamDataManager::clearToolpath(bool resetIds)
 {
     m_toolpath.clear();
+    m_layerContainer.clearManualOrder();
+    m_layerContainer.setSortStrategy(CuttingPlanSortStrategy::LayerThenContour);
+    m_layerContainer.setLastAutoSortAxis(AutoSortAxis::XPos);
     if (resetIds) {
         m_nextContourId = 1;
         m_nextLayerId = 1;
@@ -391,6 +394,9 @@ void CamDataManager::replaceToolpath(LaserToolpath&& toolpath,
                                       std::uint64_t nextLayer)
 {
     m_toolpath = std::move(toolpath);
+    m_layerContainer.clearManualOrder();
+    m_layerContainer.setSortStrategy(CuttingPlanSortStrategy::LayerThenContour);
+    m_layerContainer.setLastAutoSortAxis(AutoSortAxis::XPos);
     if (nextContour > m_nextContourId) m_nextContourId = nextContour;
     if (nextLayer   > m_nextLayerId)   m_nextLayerId   = nextLayer;
     // 把已加载的 signature 映射也填进缓存

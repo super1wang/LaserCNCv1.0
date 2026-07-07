@@ -586,6 +586,7 @@ DocumentId CadModule::openDocument(const QString& filePath)
     }
     const DocumentId docId = doc->id();
 
+    project->clearDomain(lcnc::ProjectDomain::Cam);
     doc->clearEntityKind(LcncDocument::EntityKind::Workpiece);
     project->session().workpiece().clear();
     LCNC_DEBUG(lcnc::LogCode::Generic,
@@ -873,8 +874,11 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
 
 void CadModule::closeDocument(DocumentId id)
 {
-    if (id == workpieceDocumentId())
-        lcnc::Kernel::current().projectManager()->clearDomain(lcnc::ProjectDomain::Workpiece);
+    if (id == workpieceDocumentId()) {
+        auto* project = lcnc::Kernel::current().projectManager();
+        project->clearDomain(lcnc::ProjectDomain::Cam);
+        project->clearDomain(lcnc::ProjectDomain::Workpiece);
+    }
 }
 
 DocumentId CadModule::importFile(const QString& filePath)

@@ -61,6 +61,43 @@ MachinePose5 toPose5(const lcnc::cam::ToolpathExportPoint& p,
     return pose;
 }
 
+bool isCAxisName(const QString& name)
+{
+    return name.trimmed().toUpper() == QStringLiteral("C");
+}
+
+double equivalentAngleNear(double value, double reference)
+{
+    while (value - reference > 180.0) value -= 360.0;
+    while (value - reference < -180.0) value += 360.0;
+    return std::abs(value) < 1e-10 ? 0.0 : value;
+}
+
+bool unwrapPointCAxis(lcnc::cam::ToolpathExportPoint& point,
+                      double& lastC,
+                      bool& hasLastC)
+{
+    double* cValue = nullptr;
+    if (isCAxisName(point.rotaryAxis1Name))
+        cValue = &point.machineR1;
+    else if (isCAxisName(point.rotaryAxis2Name))
+        cValue = &point.machineR2;
+
+    if (!cValue)
+        return false;
+
+    if (hasLastC)
+        *cValue = equivalentAngleNear(*cValue, lastC);
+    lastC = *cValue;
+    hasLastC = true;
+    return true;
+}
+
+bool sameCacheDouble(double a, double b)
+{
+    return std::abs(a - b) <= 1e-9;
+}
+
 } // namespace
 
 NormalCuttingManager::NormalCuttingManager(Service* service,
@@ -88,7 +125,21 @@ NormalCuttingManager::~NormalCuttingManager() = default;
 
 void NormalCuttingManager::setCuttingPlanService(ProcessCuttingPlanService* service)
 {
+    if (m_planChangedConnection)
+        QObject::disconnect(m_planChangedConnection);
+
     m_planService = service;
+    clearCuttingListCache();
+
+    if (m_planService) {
+        m_planChangedConnection = QObject::connect(
+            m_planService,
+            &ProcessCuttingPlanService::planChanged,
+            this,
+            [this]() { clearCuttingListCache(); });
+    } else {
+        m_planChangedConnection = {};
+    }
 }
 
 bool NormalCuttingManager::run(const QString& nodeId,
@@ -115,13 +166,45 @@ bool NormalCuttingManager::run(const QString& nodeId,
         if (errorMessage) *errorMessage = tr("CAM 刀路提供者未注册");
         return false;
     }
-    const auto snapshot = m_toolpathService->refreshSnapshot();
-    if (!snapshot.hasEnabledContours()) {
-        if (errorMessage) *errorMessage = tr("CAM 中没有可执行的启用轮廓");
-        return false;
+
+    QVector<CuttingRow> cuttingList;
+    const CuttingListCacheKey directCacheKey{
+        m_toolpathProvider->toolpathRevision(),
+        m_planService ? m_planService->planRevision() : 0ull,
+        startNumber,
+        endNumber,
+        compOffsetX,
+        compOffsetY
+    };
+    if (cacheKeyMatches(directCacheKey)) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "normal-cutting: using cached planned cutting list contours={} snapshotRev={} planRev={}",
+                  m_cuttingListCacheRows.size(),
+                  directCacheKey.snapshotRevision,
+                  directCacheKey.planRevision);
+        cuttingList = cachedCuttingListCopy();
+    } else {
+        lcnc::cam::ToolpathExportSnapshot snapshot;
+        if (m_planService) {
+            ProcessCuttingPlanService::CuttingListFilter filter;
+            filter.startSequence = startNumber;
+            filter.endSequence = endNumber;
+            const auto plan = m_planService->buildCuttingList(filter);
+            QVector<std::uint64_t> orderedContourIds;
+            orderedContourIds.reserve(plan.size());
+            for (const auto& entry : plan)
+                orderedContourIds.append(entry.contourId);
+            snapshot = m_toolpathService->refreshSnapshotForOrder(orderedContourIds);
+        } else {
+            snapshot = m_toolpathService->refreshSnapshot();
+        }
+        if (!snapshot.hasEnabledContours()) {
+            if (errorMessage) *errorMessage = tr("CAM 中没有可执行的启用轮廓");
+            return false;
+        }
+        cuttingList = buildCuttingList(snapshot, startNumber, endNumber, compOffsetX, compOffsetY, errorMessage);
     }
 
-    auto cuttingList = buildCuttingList(snapshot, startNumber, endNumber, compOffsetX, compOffsetY, errorMessage);
     if (cuttingList.isEmpty()) {
         if (errorMessage && errorMessage->isEmpty())
             *errorMessage = tr("筛选后的切割链表为空");
@@ -336,6 +419,80 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     return true;
 }
 
+void NormalCuttingManager::unwrapCuttingListCAxis(QVector<CuttingRow>& rows) const
+{
+    bool hasLastC = false;
+    double lastC = 0.0;
+    int adjustedContours = 0;
+
+    for (CuttingRow& row : rows) {
+        bool rowAdjusted = false;
+        for (lcnc::cam::ToolpathExportPoint& point : row.data.points)
+            rowAdjusted = unwrapPointCAxis(point, lastC, hasLastC) || rowAdjusted;
+        if (rowAdjusted)
+            ++adjustedContours;
+    }
+
+    if (adjustedContours > 0) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "normal-cutting: unwrapped C axis continuously across {} ordered contour(s), finalC={:.6f}",
+                  adjustedContours,
+                  lastC);
+    }
+}
+
+bool NormalCuttingManager::cacheKeyMatches(const CuttingListCacheKey& key) const
+{
+    return m_hasCuttingListCache
+        && m_cuttingListCacheKey.snapshotRevision == key.snapshotRevision
+        && m_cuttingListCacheKey.planRevision == key.planRevision
+        && m_cuttingListCacheKey.startNumber == key.startNumber
+        && m_cuttingListCacheKey.endNumber == key.endNumber
+        && sameCacheDouble(m_cuttingListCacheKey.offsetX, key.offsetX)
+        && sameCacheDouble(m_cuttingListCacheKey.offsetY, key.offsetY);
+}
+
+QVector<NormalCuttingManager::CuttingRow> NormalCuttingManager::cachedCuttingListCopy()
+{
+    QVector<CuttingRow> rows = m_cuttingListCacheRows;
+    for (CuttingRow& row : rows) {
+        QStringList warnings;
+        row.tool = resolveTool(row.data.contour.toolName,
+                               row.data.contour.layerName,
+                               &warnings);
+        for (const auto& w : warnings)
+            LCNC_WARN(lcnc::LogCode::Generic, "normal-cutting: {}", w.toStdString());
+    }
+    return rows;
+}
+
+void NormalCuttingManager::storeCuttingListCache(const CuttingListCacheKey& key,
+                                                const QVector<CuttingRow>& rows)
+{
+    m_cuttingListCacheKey = key;
+    m_cuttingListCacheRows = rows;
+    for (CuttingRow& row : m_cuttingListCacheRows)
+        row.tool = nullptr;
+    m_hasCuttingListCache = true;
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "normal-cutting: cached planned cutting list contours={} snapshotRev={} planRev={}",
+              rows.size(),
+              key.snapshotRevision,
+              key.planRevision);
+}
+
+void NormalCuttingManager::clearCuttingListCache()
+{
+    if (m_hasCuttingListCache) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "normal-cutting: invalidated planned cutting list cache");
+    }
+    m_hasCuttingListCache = false;
+    m_cuttingListCacheKey = {};
+    m_cuttingListCacheRows.clear();
+}
+
 QVector<NormalCuttingManager::CuttingRow>
 NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& snapshot,
                                        int startNumber,
@@ -344,6 +501,24 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
                                        double offsetY,
                                        QString* errorMessage)
 {
+    const CuttingListCacheKey cacheKey{
+        snapshot.revision,
+        m_planService ? m_planService->planRevision() : 0ull,
+        startNumber,
+        endNumber,
+        offsetX,
+        offsetY
+    };
+
+    if (cacheKeyMatches(cacheKey)) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "normal-cutting: using cached planned cutting list contours={} snapshotRev={} planRev={}",
+                  m_cuttingListCacheRows.size(),
+                  cacheKey.snapshotRevision,
+                  cacheKey.planRevision);
+        return cachedCuttingListCopy();
+    }
+
     QVector<CuttingRow> out;
 
     QHash<std::uint64_t, int> indexById;
@@ -378,7 +553,11 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             out.append(std::move(row));
         }
         if (!out.isEmpty())
+        {
+            unwrapCuttingListCAxis(out);
+            storeCuttingListCache(cacheKey, out);
             return out;
+        }
         // Phase F：掉落的 fallback 路径已删除。plan service 失败时直接返回空结果。
         if (errorMessage)
             *errorMessage = tr("无法生成切割链表: 加工链表服务未返回数据");

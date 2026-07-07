@@ -33,6 +33,7 @@ AxisMap AxisMap::from(lcnc::MachineConfigurationService* machineConfig)
         // 兜底：构型为空 / 调用方未注入 MachineConfigurationService。
         // 用 X=0,Y=1,Z=2,R1=3,R2=4 这套常见 5 轴序号，避免下游崩。
         for (int i = 0; i < Count; ++i) {
+            map.m_axes[i].name = QString::number(i);
             map.m_axes[i].controllerIndex = i;
             map.m_axes[i].velocity     = 10.0;
             map.m_axes[i].acceleration = 200.0;
@@ -67,6 +68,7 @@ AxisMap AxisMap::from(lcnc::MachineConfigurationService* machineConfig)
         auto it = rows.find(name);
         if (it == rows.end()) return;
         PerAxis& slot = map.m_axes[sa];
+        slot.name = name;
         slot.controllerIndex = it.value().controllerIndex;
         slot.velocity        = it.value().velocity;
         slot.acceleration    = it.value().acceleration;
