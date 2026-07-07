@@ -56,6 +56,7 @@
 #include <QTreeWidgetItemIterator>
 #include <QTabWidget>
 #include <QHeaderView>
+#include <QScrollBar>
 #include <QStatusBar>
 #include <QLabel>
 #include <QMenu>
@@ -103,6 +104,55 @@ constexpr int kRoleAxisName = lcnc::app::ProjectExplorerRoles::AxisName;
 constexpr int kRoleContourId = lcnc::app::ProjectExplorerRoles::ContourId;
 constexpr int kRoleLayerId = lcnc::app::ProjectExplorerRoles::LayerId;
 using lcnc::app::projectNodeKind;
+
+QString projectTreeNodeKey(const QTreeWidgetItem* item)
+{
+    return item ? item->data(0, kRoleNodeKey).toString() : QString();
+}
+
+QSet<QString> expandedProjectTreeNodeKeys(QTreeWidget* tree)
+{
+    QSet<QString> keys;
+    if (!tree)
+        return keys;
+
+    QTreeWidgetItemIterator it(tree);
+    while (*it) {
+        const QString key = projectTreeNodeKey(*it);
+        if (!key.isEmpty() && (*it)->isExpanded())
+            keys.insert(key);
+        ++it;
+    }
+    return keys;
+}
+
+QTreeWidgetItem* findProjectTreeItemByKey(QTreeWidget* tree, const QString& nodeKey)
+{
+    if (!tree || nodeKey.isEmpty())
+        return nullptr;
+
+    QTreeWidgetItemIterator it(tree);
+    while (*it) {
+        if (projectTreeNodeKey(*it) == nodeKey)
+            return *it;
+        ++it;
+    }
+    return nullptr;
+}
+
+void restoreProjectTreeExpandedState(QTreeWidget* tree, const QSet<QString>& expandedKeys)
+{
+    if (!tree)
+        return;
+
+    QTreeWidgetItemIterator it(tree);
+    while (*it) {
+        const QString key = projectTreeNodeKey(*it);
+        if (!key.isEmpty())
+            (*it)->setExpanded(expandedKeys.contains(key));
+        ++it;
+    }
+}
 
 QString primitiveToolId(int primitiveIndex)
 {
@@ -1779,6 +1829,12 @@ void MainWindow::rebuildProjectExplorer()
     if (!m_projectExplorerTree)
         return;
 
+    const QSet<QString> expandedKeys = expandedProjectTreeNodeKeys(m_projectExplorerTree);
+    const QString currentNodeKey = projectTreeNodeKey(m_projectExplorerTree->currentItem());
+    const int scrollValue = m_projectExplorerTree->verticalScrollBar()
+        ? m_projectExplorerTree->verticalScrollBar()->value()
+        : 0;
+
     m_projectExplorerSnapshot = lcnc::app::ProjectExplorerModel::build(
         m_appContext->cadModule(),
         m_appContext->camModule());
@@ -1786,6 +1842,11 @@ void MainWindow::rebuildProjectExplorer()
     m_blockProjectExplorerSignals = true;
     QSignalBlocker blocker(m_projectExplorerTree);
     lcnc::app::populateProjectExplorerTree(m_projectExplorerTree, m_projectExplorerSnapshot);
+    restoreProjectTreeExpandedState(m_projectExplorerTree, expandedKeys);
+    if (QTreeWidgetItem* currentItem = findProjectTreeItemByKey(m_projectExplorerTree, currentNodeKey))
+        m_projectExplorerTree->setCurrentItem(currentItem);
+    if (m_projectExplorerTree->verticalScrollBar())
+        m_projectExplorerTree->verticalScrollBar()->setValue(scrollValue);
     m_blockProjectExplorerSignals = false;
 
     if (!isMachineViewActive())
