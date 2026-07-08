@@ -615,6 +615,13 @@ void DialogOptions::buildApplicationPage()
     m_cbUnits->addItem(tr("英寸 (inch)"), QStringLiteral("inch"));
     form->addRow(tr("单位制:"), m_cbUnits);
 
+    m_cbDocumentOpenMode = new QComboBox(group);
+    m_cbDocumentOpenMode->addItem(tr("单文档（打开新文件时关闭当前文件）"),
+                                  static_cast<int>(DocumentOpenMode::SingleDocument));
+    m_cbDocumentOpenMode->addItem(tr("多文档（保留多个项目工作区）"),
+                                  static_cast<int>(DocumentOpenMode::MultiDocument));
+    form->addRow(tr("打开模式:"), m_cbDocumentOpenMode);
+
     m_spRecentLimit = noWheel(new QSpinBox(group));
     m_spRecentLimit->setRange(1, 50);
     form->addRow(tr("最近文件数:"), m_spRecentLimit);
@@ -952,6 +959,7 @@ void DialogOptions::loadFromSettings()
     m_originalLanguage = settings->language;
     m_originalTheme = settings->theme;
     m_originalUnitSystem = settings->unitSystem;
+    m_originalDocumentOpenMode = settings->documentOpenMode;
     m_originalRecentLimit = settings->recentLimit;
     if (auto* cam = lcnc::Kernel::current().service<CamModule>()) {
         m_originalMachineModelPath = cam->machineModelPath();
@@ -987,6 +995,7 @@ void DialogOptions::loadFromSettings()
     setComboByData(m_cbLanguage, settings->language);
     setComboByData(m_cbTheme, settings->theme);
     setComboByData(m_cbUnits, settings->unitSystem);
+    setComboByData(m_cbDocumentOpenMode, static_cast<int>(settings->documentOpenMode));
     m_spRecentLimit->setValue(settings->recentLimit);
     if (m_editMachineModelPath)
         m_editMachineModelPath->setText(m_originalMachineModelPath);
@@ -1172,6 +1181,9 @@ bool DialogOptions::applyChanges()
     const QString newLanguage = m_cbLanguage->currentData().toString();
     const QString newTheme = m_cbTheme->currentData().toString();
     const QString newUnits = m_cbUnits->currentData().toString();
+    const auto newDocumentOpenMode = static_cast<DocumentOpenMode>(
+        m_cbDocumentOpenMode ? m_cbDocumentOpenMode->currentData().toInt()
+                             : static_cast<int>(m_originalDocumentOpenMode));
     const int newRecentLimit = m_spRecentLimit->value();
     const QString newMachineModelPath = m_editMachineModelPath
         ? m_editMachineModelPath->text().trimmed()
@@ -1195,6 +1207,7 @@ bool DialogOptions::applyChanges()
     const bool applicationDirty = m_originalLanguage != newLanguage
         || m_originalTheme != newTheme
         || m_originalUnitSystem != newUnits
+        || m_originalDocumentOpenMode != newDocumentOpenMode
         || m_originalRecentLimit != newRecentLimit;
     const bool machineModelPathDirty = m_originalMachineModelPath != newMachineModelPath;
     const bool autoLoadMachineDirty = m_originalAutoLoadMachineModel != newAutoLoadMachineModel;
@@ -1216,6 +1229,7 @@ bool DialogOptions::applyChanges()
     settings->language = newLanguage;
     settings->theme = newTheme;
     settings->unitSystem = newUnits;
+    settings->documentOpenMode = newDocumentOpenMode;
     settings->recentLimit = newRecentLimit;
     if (!settings->saveDefault()) {
         LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
@@ -1286,6 +1300,7 @@ bool DialogOptions::applyChanges()
     m_originalLanguage = newLanguage;
     m_originalTheme = newTheme;
     m_originalUnitSystem = newUnits;
+    m_originalDocumentOpenMode = newDocumentOpenMode;
     m_originalRecentLimit = newRecentLimit;
 
     LCNC_INFO(lcnc::LogCode::Generic,

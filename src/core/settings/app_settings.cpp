@@ -71,6 +71,24 @@ RenderMethod methodFromString(const QString& text)
         : RenderMethod::Rasterization;
 }
 
+QString documentOpenModeToString(DocumentOpenMode mode)
+{
+    switch (mode) {
+    case DocumentOpenMode::MultiDocument:
+        return QStringLiteral("multi");
+    case DocumentOpenMode::SingleDocument:
+        return QStringLiteral("single");
+    }
+    return QStringLiteral("single");
+}
+
+DocumentOpenMode documentOpenModeFromString(const QString& text)
+{
+    return text.compare(QStringLiteral("multi"), Qt::CaseInsensitive) == 0
+        ? DocumentOpenMode::MultiDocument
+        : DocumentOpenMode::SingleDocument;
+}
+
 QString displayModeToString(StartupDisplayMode mode)
 {
     return mode == StartupDisplayMode::Wireframe
@@ -267,6 +285,8 @@ void AppSettings::readFrom(const toml::value& root)
         theme       = get_qstring(g, "theme",    theme);
         language    = get_qstring(g, "language", language);
         unitSystem  = get_qstring(g, "units",    unitSystem);
+        documentOpenMode = documentOpenModeFromString(
+            get_qstring(g, "document_open_mode", documentOpenModeToString(documentOpenMode)));
         recentLimit = get_int(g,    "recent_limit", recentLimit);
     }
 
@@ -385,6 +405,7 @@ void AppSettings::writeTo(toml::value& root) const
     general["theme"] = qs(theme);
     general["language"] = qs(language);
     general["units"] = qs(unitSystem);
+    general["document_open_mode"] = qs(documentOpenModeToString(documentOpenMode));
     general["recent_limit"] = recentLimit;
     root["general"] = general;
 

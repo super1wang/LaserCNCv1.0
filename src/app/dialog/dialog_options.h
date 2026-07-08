@@ -108,6 +108,7 @@ private:
     QComboBox* m_cbLanguage{nullptr};
     QComboBox* m_cbTheme{nullptr};
     QComboBox* m_cbUnits{nullptr};
+    QComboBox* m_cbDocumentOpenMode{nullptr};
     QSpinBox* m_spRecentLimit{nullptr};
 
     QComboBox* m_cbMachinePreset{nullptr};
@@ -130,6 +131,7 @@ private:
     QString m_originalLanguage;
     QString m_originalTheme;
     QString m_originalUnitSystem;
+    DocumentOpenMode m_originalDocumentOpenMode{DocumentOpenMode::SingleDocument};
     int m_originalRecentLimit{10};
     QString m_originalMachineModelPath;
     bool m_originalAutoLoadMachineModel{true};

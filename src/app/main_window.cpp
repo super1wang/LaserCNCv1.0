@@ -256,6 +256,7 @@ MainWindow::MainWindow(QWidget* parent)
                 m_skipNextSourceRecent = true;
                 addRecentFile(filePath);
                 showViewTab();
+                showWorkpieceView();
                 scheduleRecentThumbnailCapture(filePath);
             });
         connect(project, &lcnc::LcncProjectManager::projectSaved,
@@ -264,9 +265,24 @@ MainWindow::MainWindow(QWidget* parent)
                 scheduleRecentThumbnailCapture(filePath);
             });
 
-    // 世界坐标系渲染器：新建/关闭文档时自动 attach/detach 到该文档场景，
-    // 全局可见性由 ribbon 上的 CmdToggleWorldAxes 控制。
+    // 世界坐标系渲染器与活动 GuiDocument 生命周期绑定。
     if (auto* guiApp = lcnc::Kernel::current().guiApp()) {
+        connect(guiApp, &GuiApplication::workspaceGuiDocumentAboutToClose,
+            this, [this](GuiDocument* gd) {
+                if (!gd)
+                    return;
+                lcnc::view::WorldAxesRenderer::instance().detach(gd->scene());
+                if (m_occView && m_occView->activeDoc() == gd)
+                    m_occView->attachDefaultScene(m_defaultScene);
+            });
+        connect(guiApp, &GuiApplication::workspaceGuiDocumentChanged,
+            this, [](GuiDocument* gd) {
+                if (gd && gd->scene()) {
+                    LCNC_DEBUG(lcnc::LogCode::Generic,
+                               "WorldAxes attach for active workspace");
+                    lcnc::view::WorldAxesRenderer::instance().attach(gd->scene());
+                }
+            });
         if (auto* gd = guiApp->workspaceGuiDocument(); gd && gd->scene()) {
             LCNC_DEBUG(lcnc::LogCode::Generic,
                        "WorldAxes auto-attach for workspace");
@@ -2146,6 +2162,10 @@ void MainWindow::syncMachineTreeVisibilityState()
 
     CamModule* cam = m_appContext->camModule();
     m_machineTree->setVisibilityState(cam->isMachineModelVisible(), cam->visibleMachineEntries());
+    if (m_actMachineModelVisible) {
+        QSignalBlocker blocker(m_actMachineModelVisible);
+        m_actMachineModelVisible->setChecked(cam->isMachineModelVisible());
+    }
 }
 
 void MainWindow::persistViewDisplayMode(int displayMode, bool faceBoundary)
@@ -2171,8 +2191,7 @@ void MainWindow::persistViewToggleState()
         settings->viewState.rotaryAxisGuidesVisible = m_actRotaryAxisGuides->isChecked();
     if (m_actCutterHeadGuide)
         settings->viewState.cutterHeadGuideVisible = m_actCutterHeadGuide->isChecked();
-    if (m_actMachineModelVisible)
-        settings->viewState.machineModelVisible = m_actMachineModelVisible->isChecked();
+    settings->viewState.machineModelVisible = false;
     settings->saveDefault();
 }
 
@@ -2217,12 +2236,12 @@ void MainWindow::applyPersistedViewState()
     if (m_actCutterHeadGuide)
         m_actCutterHeadGuide->setChecked(state.cutterHeadGuideVisible);
     if (m_actMachineModelVisible)
-        m_actMachineModelVisible->setChecked(state.machineModelVisible);
+        m_actMachineModelVisible->setChecked(false);
 
     if (auto* cam = m_appContext ? m_appContext->camModule() : nullptr) {
         cam->setRotaryAxisGuidesVisible(state.rotaryAxisGuidesVisible);
         cam->setCutterHeadGuideVisible(state.cutterHeadGuideVisible);
-        cam->setMachineModelVisible(state.machineModelVisible);
+        cam->setMachineModelVisible(false);
     }
     syncMachineTreeVisibilityState();
 }

@@ -417,6 +417,8 @@ private:
     void applyGenerationParamsFromCamData();
     /// core 完成工程 CAM 数据加载后，刷新 OCC 文档镜像 + 渲染 + 相关信号。
     void onCamDataLoaded();
+    /// 重置跟随项目 view 的显示状态；机台数据本身仍由 MachineWorkspace 独立持有。
+    void resetProjectViewState();
     /// 清理 CAM 视图侧状态；用于模块内清刀路和项目核心外部清 CAM 域两条路径。
     void clearToolpathViewState(bool emitSignals);
 
@@ -456,7 +458,7 @@ private:
     bool                        m_useFaceClassification{true};
     double                      m_deflection{0.1};
     lcnc::MachineConfigurationService* m_machineConfig{nullptr};
-    bool                        m_machineModelVisible{true};
+    bool                        m_machineModelVisible{false};
     QSet<QString>               m_visibleMachineEntries;
     bool                        m_machineVisibilityInitialized{false};
     bool                        m_clearingToolpath{false};

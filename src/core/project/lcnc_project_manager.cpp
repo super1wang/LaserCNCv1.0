@@ -164,20 +164,20 @@ LcncDocument* LcncProjectManager::importWorkpieceModel(const QString& filePath, 
     if (LcncProjectPackage::isProjectPath(filePath))
         return openProject(filePath, errorMsg);
 
-    ensureProject();
+    QFileInfo fileInfo(filePath);
+    resetProjectDocuments(fileInfo.completeBaseName());
+    m_session.resetProjectState();
+    emit projectReset();
     LcncDocument* target = workpieceDocument();
     if (!target)
         return nullptr;
 
-    clearDomain(ProjectDomain::Cam);
-    target->clearEntityKind(LcncDocument::EntityKind::Workpiece);
     m_session.workpiece().clear();
     if (!importGeometryFile(target, filePath, errorMsg)) {
         target->clearEntityKind(LcncDocument::EntityKind::Workpiece);
         return nullptr;
     }
 
-    QFileInfo fileInfo(filePath);
     m_session.workpiece().displayName = fileInfo.completeBaseName();
     m_session.workpiece().sourceFilePath = fileInfo.absoluteFilePath();
     notifyDomainChanged(ProjectDomain::Workpiece);
@@ -366,10 +366,9 @@ LcncDocument* LcncProjectManager::createDomainDocument(ProjectDomain domain, con
 
 void LcncProjectManager::resetProjectDocuments(const QString& projectName)
 {
-    ensureProject();
-    // 统一工程文档：clearProjectData 会清掉工件 + CAM 轮廓(EntityKind::Cam)；机台是
-    // 独立参考资产，跨工程保留，不在此清空。
-    workpieceDocument()->clearProjectData();
+    // 统一工程文档：工件 + CAM 轮廓(EntityKind::Cam) 随工程生命周期重建。
+    // 机台是独立参考资产，跨工程保留，不在此清空。
+    m_workpieceDocument.reset(createDomainDocument(ProjectDomain::Workpiece, projectName));
     if (m_camData)
         m_camData->clearToolpath();
     workpieceDocument()->setName(projectName);

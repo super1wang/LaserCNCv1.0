@@ -1,6 +1,8 @@
 #include "view/gui_application.h"
 
+#include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
+#include "core/project/lcnc_project_manager.h"
 #include "view/graphics_scene.h"
 #include "view/gui_document.h"
 #include "view/rendering_manager.h"
@@ -15,18 +17,52 @@ GuiApplication* GuiApplication::s_instance = nullptr;
 
 GuiApplication::GuiApplication(QObject* parent)
     : QObject(parent)
-    , m_workspaceGuiDocument(new GuiDocument(this))
+    , m_workspaceGuiDocument(createWorkspaceGuiDocument())
 {
     Q_ASSERT_X(!s_instance, "GuiApplication",
                "second GuiApplication instance — must be Kernel-owned only");
     s_instance = this;
+    if (auto* project = lcnc::Kernel::current().projectManager()) {
+        connect(project, &lcnc::LcncProjectManager::projectReset,
+                this, &GuiApplication::resetWorkspaceGuiDocument);
+        connect(project, &lcnc::LcncProjectManager::projectOpened,
+                this, [this](const QString&) { resetWorkspaceGuiDocument(); });
+    }
     emit workspaceGuiDocumentReady();
+    emit workspaceGuiDocumentChanged(m_workspaceGuiDocument);
 }
 
 GuiApplication::~GuiApplication()
 {
     if (s_instance == this)
         s_instance = nullptr;
+}
+
+GuiDocument* GuiApplication::createWorkspaceGuiDocument()
+{
+    auto* document = new GuiDocument(this);
+    if (document && document->renderingManager()) {
+        document->renderingManager()->setRuntimeDisplayMode(m_currentDisplayMode,
+                                                            m_currentFaceBoundary);
+    }
+    return document;
+}
+
+void GuiApplication::resetWorkspaceGuiDocument()
+{
+    GuiDocument* oldDocument = m_workspaceGuiDocument;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "GuiApplication::resetWorkspaceGuiDocument old={}",
+               static_cast<void*>(oldDocument));
+    if (oldDocument)
+        emit workspaceGuiDocumentAboutToClose(oldDocument);
+
+    m_workspaceGuiDocument = createWorkspaceGuiDocument();
+    if (oldDocument)
+        oldDocument->deleteLater();
+
+    emit workspaceGuiDocumentReady();
+    emit workspaceGuiDocumentChanged(m_workspaceGuiDocument);
 }
 
 void GuiApplication::setCurrentDisplayMode(int displayMode, bool faceBoundary)

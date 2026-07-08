@@ -356,9 +356,15 @@ bool CamModule::init(lcnc::IKernel& kernel)
     // CAM 模块不再做项目文件 IO：仅在 core 完成加载后刷新视图，并在工程重置时清空展示。
     if (auto* pm = lcnc::Kernel::current().projectManager()) {
         connect(pm, &lcnc::LcncProjectManager::projectOpened,
-                this, [this](const QString&) { onCamDataLoaded(); });
+                this, [this](const QString&) {
+                    resetProjectViewState();
+                    onCamDataLoaded();
+                });
         connect(pm, &lcnc::LcncProjectManager::projectReset,
-                this, [this]() { clearToolpathViewState(/*emitSignals=*/true); });
+                this, [this]() {
+                    resetProjectViewState();
+                    clearToolpathViewState(/*emitSignals=*/true);
+                });
     }
 
     m_initialized = true;
@@ -2945,6 +2951,17 @@ void CamModule::eraseToolpathDisplay()
     m_toolpathRenderer->erase(workspaceGuiDocument());
 }
 
+void CamModule::resetProjectViewState()
+{
+    m_machineModelVisible = false;
+    m_machineVisibilityInitialized = false;
+    m_visibleMachineEntries.clear();
+    m_lastCamSelectionContourIds.clear();
+    if (m_guideRenderer)
+        m_guideRenderer->erase(nullptr);
+    emit machineVisibilityChanged();
+}
+
 void CamModule::clearToolpathViewState(bool emitSignals)
 {
     eraseToolpathDisplay();
@@ -3025,8 +3042,11 @@ void CamModule::setEntityVisible(const QString& entry, bool visible)
 
     if (auto* gd = workspaceGuiDocument()) {
         Handle(AIS_Shape) ais = gd->aisShape(machineDocumentId(), entry);
-        if (ais.IsNull())
+        if (ais.IsNull()) {
+            if (visible && m_machineModelVisible)
+                refreshMachineDisplay();
             return;
+        }
 
         if (visible && m_machineModelVisible)
             gd->scene()->displayObject(ais);
@@ -3054,20 +3074,13 @@ void CamModule::setMachineModelVisible(bool visible)
         return;
 
     m_machineModelVisible = visible;
+    if (visible) {
+        refreshMachineDisplay();
+        return;
+    }
+
     if (auto* gd = workspaceGuiDocument()) {
-        const TDF_LabelSequence labels = machineDocument()
-            ? machineDocument()->entityLabels(LcncDocument::EntityKind::Machine)
-            : TDF_LabelSequence{};
-        for (int i = 1; i <= labels.Length(); ++i) {
-            const QString entry = XcafUtils::entry(labels.Value(i));
-            Handle(AIS_Shape) ais = gd->aisShape(machineDocumentId(), entry);
-            if (ais.IsNull())
-                continue;
-            if (m_machineModelVisible && m_visibleMachineEntries.contains(entry))
-                gd->scene()->displayObject(ais, false);
-            else
-                gd->scene()->eraseObject(ais, false);
-        }
+        gd->eraseDomain(lcnc::ProjectDomain::Machine);
         if (gd->hasView())
             gd->view()->Redraw();
     }
@@ -3330,6 +3343,7 @@ void CamModule::refreshMachineDisplay()
         if (machineDocument()) {
             const TDF_LabelSequence labels = machineDocument()->entityLabels(LcncDocument::EntityKind::Machine);
             if (!m_machineVisibilityInitialized) {
+                m_visibleMachineEntries.clear();
                 for (int i = 1; i <= labels.Length(); ++i)
                     m_visibleMachineEntries.insert(XcafUtils::entry(labels.Value(i)));
                 m_machineVisibilityInitialized = true;

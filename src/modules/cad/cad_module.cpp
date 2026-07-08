@@ -534,7 +534,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
     const QString ext = fileInfo.suffix().toLower();
     if (lcnc::LcncProjectPackage::isProjectPath(filePath)) {
         auto* project = lcnc::Kernel::current().projectManager();
-        const DocumentId currentDocId = project->workpieceDocumentId();
+        LcncDocument* placeholder = project->newProject(fileInfo.completeBaseName());
+        const DocumentId currentDocId = placeholder ? placeholder->id() : kInvalidDocumentId;
         auto error = std::make_shared<QString>();
         const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
             tr("打开工程: %1").arg(fileInfo.fileName()),
@@ -576,7 +577,7 @@ DocumentId CadModule::openDocument(const QString& filePath)
     }
 
     auto* project = lcnc::Kernel::current().projectManager();
-    LcncDocument* doc = project->workpieceDocument();
+    LcncDocument* doc = project->newProject(fileInfo.completeBaseName());
     if (!doc) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::openDocument missing project document path={}",
@@ -586,9 +587,6 @@ DocumentId CadModule::openDocument(const QString& filePath)
     }
     const DocumentId docId = doc->id();
 
-    project->clearDomain(lcnc::ProjectDomain::Cam);
-    doc->clearEntityKind(LcncDocument::EntityKind::Workpiece);
-    project->session().workpiece().clear();
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "CadModule::openDocument replacing workpiece docId={} ext={} path={}",
                docId, ext.toStdString(), filePath.toStdString());
@@ -876,8 +874,7 @@ void CadModule::closeDocument(DocumentId id)
 {
     if (id == workpieceDocumentId()) {
         auto* project = lcnc::Kernel::current().projectManager();
-        project->clearDomain(lcnc::ProjectDomain::Cam);
-        project->clearDomain(lcnc::ProjectDomain::Workpiece);
+        project->newProject();
     }
 }
 

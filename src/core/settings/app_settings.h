@@ -36,6 +36,14 @@ enum class StartupDisplayMode {
 };
 
 /**
+ * @brief 打开新文件时的项目工作区策略。
+ */
+enum class DocumentOpenMode {
+    SingleDocument = 0,
+    MultiDocument = 1
+};
+
+/**
  * @brief 单个视图族（CAD View / CAM View）的渲染参数配置。
  *
  * 此结构只保存可序列化的轻量值，不包含 OCC 类型，便于放在 core/settings。
@@ -91,7 +99,7 @@ struct ViewStateSettings {
     bool worldAxesVisible = false;
     bool rotaryAxisGuidesVisible = true;
     bool cutterHeadGuideVisible = true;
-    bool machineModelVisible = true;
+    bool machineModelVisible = false;
 };
 
 /**
@@ -115,6 +123,7 @@ public:
     QString     theme       = QStringLiteral("light");   ///< "light" | "dark"
     QString     language    = QStringLiteral("zh_CN");
     QString     unitSystem  = QStringLiteral("mm");      ///< "mm" | "inch"
+    DocumentOpenMode documentOpenMode = DocumentOpenMode::SingleDocument;
     QStringList recentFiles;                             ///< most-recent first
     int         recentLimit = 10;
 
