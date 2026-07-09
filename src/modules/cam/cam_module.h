@@ -226,6 +226,7 @@ public:
     // （lcnc::cam::saveCamToolpath / loadCamToolpath，由 LcncProjectManager 统一调度）。
     const LaserToolpath& toolpath() const;
     LaserToolpath& toolpathRef();
+    const LaserToolpath& toolpathRef() const;
     bool hasToolpath() const override;
     int toolpathContourCount() const override;
     int toolpathContourPointCount(int contourIndex) const override;
@@ -274,8 +275,8 @@ public:
 
     /// CAM 运行时数据管理器（图层容器、轮廓 id 表、signature 表）。
     /// 由 CamLayerProviderAdapter / 部分命令路径使用；保持非空。
-    lcnc::cam::CamDataManager*       camData()       { return m_camData; }
-    const lcnc::cam::CamDataManager* camData() const { return m_camData; }
+    lcnc::cam::CamDataManager*       camData();
+    const lcnc::cam::CamDataManager* camData() const;
     lcnc::cam::MachineWorkspace*       machineWorkspace()       { return m_machineWorkspace; }
     const lcnc::cam::MachineWorkspace* machineWorkspace() const { return m_machineWorkspace; }
 
@@ -317,7 +318,7 @@ public:
     bool isEntityVisible(const QString& entry) const;
     QStringList visibleMachineEntries() const;
     void setMachineModelVisible(bool visible);
-    bool isMachineModelVisible() const { return m_machineModelVisible; }
+    bool isMachineModelVisible() const;
     void setRotaryAxisGuidesVisible(bool visible);
     bool rotaryAxisGuidesVisible() const;
     void setCutterHeadGuideVisible(bool visible);
@@ -406,7 +407,7 @@ private:
     QList<int> selectedCamContourIndexes() const;
 
     void refreshMachineDisplay();
-    void syncCamDocumentContours();
+    void syncCamDocumentContours(bool forceRebuild = false);
     /// 把当前刀路的轮廓 wire 作为 EntityKind::Cam 实体写入统一工程文档，记录 xcafEntry。
     void writeContourGeometryToDocument();
     /// 读档后按 xcafEntry 从工程文档的 Cam 实体重连每条轮廓的 wire 几何。
@@ -437,8 +438,6 @@ private:
     /// 借用自 Kernel（独立机台参考资产，core 拥有）；本模块不负责其生命周期。
     lcnc::cam::MachineWorkspace*                         m_machineWorkspace{nullptr};
 
-    // Temporary compatibility reference while callsites migrate to m_camData.
-    LaserToolpath&              m_toolpath;
     TopoDS_Shape                m_workpieceShape;
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
     mutable QList<Handle(AIS_Shape)> m_camContourAisCache;
@@ -459,6 +458,7 @@ private:
     double                      m_deflection{0.1};
     lcnc::MachineConfigurationService* m_machineConfig{nullptr};
     bool                        m_machineModelVisible{false};
+    QSet<ProjectWorkspaceId>    m_machineVisibleWorkspaceIds;
     QSet<QString>               m_visibleMachineEntries;
     bool                        m_machineVisibilityInitialized{false};
     bool                        m_clearingToolpath{false};

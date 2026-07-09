@@ -15,8 +15,8 @@ namespace lcnc::app {
 
 namespace {
 
-/// 注册"显示"分组命令并把 QAction triggered 连接到 OccView。
-void registerDisplayCommands(CommandContainer* container, WidgetOccView* occView)
+/// 注册"显示"分组命令；命令执行时通过 AppContext 动态取得当前 OccView。
+void registerDisplayCommands(CommandContainer* container, QObject* parent)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "lcnc::app::registerDisplayCommands begin");
@@ -28,15 +28,12 @@ void registerDisplayCommands(CommandContainer* container, WidgetOccView* occView
     container->addCommand<CmdToggleWorldAxes>(CmdToggleWorldAxes::Name);
     container->addCommand<CmdShowOptions>(CmdShowOptions::Name);
 
-    QObject::connect(container->findAction(CmdFitAll::Name),
-                     &QAction::triggered, occView, &WidgetOccView::fitAll);
-
     // 三个显示模式互斥：用 QActionGroup 自动维持 checked 状态唯一。
     QAction* aWire   = container->findAction(CmdToggleWireframe::Name);
     QAction* aShade  = container->findAction(CmdToggleShaded::Name);
     QAction* aEdges  = container->findAction(CmdToggleShadedWithEdges::Name);
     if (aWire && aShade && aEdges) {
-        auto* group = new QActionGroup(occView);
+        auto* group = new QActionGroup(parent);
         group->setExclusive(true);
         group->addAction(aWire);
         group->addAction(aShade);
@@ -55,7 +52,7 @@ void registerDisplayCommands(CommandContainer* container, WidgetOccView* occView
 void registerAllCommands(CommandContainer* container,
                          AppContext* /*context*/,
                          WidgetOccView* occView,
-                         QObject* /*parent*/)
+                         QObject* parent)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "lcnc::app::registerAllCommands begin");
@@ -69,7 +66,7 @@ void registerAllCommands(CommandContainer* container,
     lcnc::cad::registerCommands(container);
     lcnc::cam::registerCommands(container);
     lcnc::process::registerCommands(container);
-    registerDisplayCommands(container, occView);
+    registerDisplayCommands(container, parent ? parent : occView);
 
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "lcnc::app::registerAllCommands end");

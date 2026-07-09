@@ -102,6 +102,8 @@ public:
                                          const QString& name);
     /// 查找；不存在返回空 handle。
     Handle(AIS_Shape) aisShapeForContour(std::uint64_t contourId) const;
+    /// 返回当前 GuiDocument 已显示的 CAM 轮廓 id。
+    QVector<std::uint64_t> displayedContourIds() const;
     /// 删除单条；不存在则忽略。
     void              eraseContour(std::uint64_t contourId);
     /// 删除所有 CAM 域的 DisplayObject（替代 eraseDomain(ProjectDomain::Cam)）。

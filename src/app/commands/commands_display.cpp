@@ -46,8 +46,8 @@ CmdFitAll::CmdFitAll(IAppContext* ctx) : CommandBase(ctx)
 
 void CmdFitAll::execute()
 {
-    // Handled by WidgetOccView listening to this action's triggered() signal.
-    // Nothing else needed here — the connection is made in MainWindow.
+    if (auto* view = context() ? context()->occView() : nullptr)
+        view->fitAll();
 }
 
 // ── CmdViewOrient ─────────────────────────────────────────────────────────────
@@ -64,7 +64,8 @@ CmdViewOrient::CmdViewOrient(IAppContext* ctx,
 
 void CmdViewOrient::execute()
 {
-    // Handled by WidgetOccView.
+    if (auto* view = context() ? context()->occView() : nullptr)
+        view->setOrientation(m_orient);
 }
 
 // ── Helper: apply a given displayMode to current view only ───────────────────

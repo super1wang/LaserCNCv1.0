@@ -30,6 +30,7 @@
 #include "core/document/lcnc_document.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/project/lcnc_project_package.h"
+#include "core/project/project_workspace.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
@@ -54,6 +55,7 @@
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QHeaderView>
 #include <QScrollBar>
@@ -264,31 +266,57 @@ MainWindow::MainWindow(QWidget* parent)
                 addRecentFile(filePath);
                 scheduleRecentThumbnailCapture(filePath);
             });
+        connect(project, &lcnc::LcncProjectManager::workspaceAdded,
+            this, [this](ProjectWorkspaceId) { refreshDocumentTabs(); });
+        connect(project, &lcnc::LcncProjectManager::workspaceClosed,
+            this, [this](ProjectWorkspaceId) { refreshDocumentTabs(); });
+        connect(project, &lcnc::LcncProjectManager::activeWorkspaceChanged,
+            this, [this](ProjectWorkspaceId) {
+                refreshDocumentTabs();
+                rebuildProjectExplorer();
+                if (m_toolpathPanel && m_appContext && m_appContext->camModule()) {
+                    auto* cam = m_appContext->camModule();
+                    m_toolpathPanel->setToolpath(cam->hasToolpath() ? &cam->toolpathRef() : nullptr);
+                }
+                syncMachineTreeVisibilityState();
+                updateCommandStates();
+            });
 
-    // 世界坐标系渲染器与活动 GuiDocument 生命周期绑定。
+    // 世界坐标系渲染器与活动 GuiDocument 生命周期绑定；每个 workspace
+    // 拥有自己的 WidgetOccView，切换时只切 QStackedWidget 页面。
     if (auto* guiApp = lcnc::Kernel::current().guiApp()) {
-        connect(guiApp, &GuiApplication::workspaceGuiDocumentAboutToClose,
-            this, [this](GuiDocument* gd) {
+        connect(guiApp, &GuiApplication::guiDocumentReady,
+            this, [this](ProjectWorkspaceId id, GuiDocument* gd) {
+                WidgetOccView* view = ensureWorkspaceOccView(id);
+                if (view && gd)
+                    view->attachDocument(gd);
+            });
+        connect(guiApp, &GuiApplication::guiDocumentAboutToClose,
+            this, [this](ProjectWorkspaceId id, GuiDocument* gd) {
                 if (!gd)
                     return;
                 lcnc::view::WorldAxesRenderer::instance().detach(gd->scene());
-                if (m_occView && m_occView->activeDoc() == gd)
-                    m_occView->attachDefaultScene(m_defaultScene);
+                removeWorkspaceOccView(id);
             });
-        connect(guiApp, &GuiApplication::workspaceGuiDocumentChanged,
-            this, [](GuiDocument* gd) {
+        connect(guiApp, &GuiApplication::activeGuiDocumentChanged,
+            this, [this](ProjectWorkspaceId id, GuiDocument* gd) {
+                activateWorkspaceOccView(id, gd);
                 if (gd && gd->scene()) {
                     LCNC_DEBUG(lcnc::LogCode::Generic,
                                "WorldAxes attach for active workspace");
                     lcnc::view::WorldAxesRenderer::instance().attach(gd->scene());
                 }
             });
-        if (auto* gd = guiApp->workspaceGuiDocument(); gd && gd->scene()) {
+        if (auto* gd = guiApp->activeGuiDocument(); gd && gd->scene()) {
+            activateWorkspaceOccView(lcnc::Kernel::current().projectManager()->activeWorkspaceId(), gd);
             LCNC_DEBUG(lcnc::LogCode::Generic,
                        "WorldAxes auto-attach for workspace");
             lcnc::view::WorldAxesRenderer::instance().attach(gd->scene());
+        } else {
+            showDefaultOccView();
         }
     }
+    refreshDocumentTabs();
 
     restorePersistedCamState();
     applyPersistedViewState();
@@ -346,10 +374,41 @@ void MainWindow::createCentralLayout()
     connect(m_startGuide, &lcnc::app::StartGuideWidget::fileActivated,
             this, &MainWindow::openStartGuideFile);
 
+    auto* viewPage = new QWidget(this);
+    auto* viewLayout = new QVBoxLayout(viewPage);
+    viewLayout->setContentsMargins(0, 0, 0, 0);
+    viewLayout->setSpacing(0);
+    m_documentTabs = new QTabBar(viewPage);
+    m_documentTabs->setDocumentMode(true);
+    m_documentTabs->setExpanding(false);
+    m_documentTabs->setTabsClosable(true);
+    viewLayout->addWidget(m_documentTabs);
+    viewLayout->addWidget(m_viewStack, 1);
+    connect(m_documentTabs, &QTabBar::currentChanged, this, [this](int index) {
+        if (!m_documentTabs || index < 0)
+            return;
+        const auto id = static_cast<ProjectWorkspaceId>(m_documentTabs->tabData(index).toInt());
+        if (id != kInvalidProjectWorkspaceId) {
+            lcnc::Kernel::current().projectManager()->setActiveWorkspace(id);
+            showViewTab();
+            updateCadSketchOverlay();
+        }
+    });
+    connect(m_documentTabs, &QTabBar::tabCloseRequested, this, [this](int index) {
+        auto* project = lcnc::Kernel::current().projectManager();
+        if (!project)
+            return;
+        if (!m_documentTabs || index < 0)
+            return;
+        const auto id = static_cast<ProjectWorkspaceId>(m_documentTabs->tabData(index).toInt());
+        if (id != kInvalidProjectWorkspaceId)
+            project->closeWorkspace(id);
+    });
+
     m_centerTabs = new QTabWidget(this);
     m_centerTabs->setDocumentMode(true);
     m_centerTabs->addTab(m_startGuide, tr("开始"));
-    m_centerTabs->addTab(m_occView, tr("视图"));
+    m_centerTabs->addTab(viewPage, tr("视图"));
 
     // ── Left panel ─────────────────────────────────────────────────────────
     createLeftPanel();
@@ -380,96 +439,6 @@ void MainWindow::createCentralLayout()
             this, &MainWindow::showMachineView);
             connect(m_appContext->camModule(), &CamModule::machineWorkspaceChanged,
                 this, &MainWindow::syncMachineWorkspaceUi);
-
-    // ── 3D selection → module coordination ────────────────────────────────
-    connect(m_occView, &WidgetOccView::selectionChanged, this, [this] {
-        if (isMachineViewActive()) {
-            m_appContext->camModule()->syncSelectionFromView();
-            return;
-        }
-
-        m_appContext->cadModule()->syncSelectionFromView(
-            m_appContext->cadModule()->workpieceDocumentId());
-    });
-
-            connect(m_occView, &WidgetOccView::sketchOverlayPicked,
-                this, &MainWindow::handleCadSketchOverlayPicked);
-            connect(m_occView, &WidgetOccView::sketchOverlayDragMoved,
-                this, &MainWindow::handleCadSketchOverlayDrag);
-            connect(m_occView, &WidgetOccView::sketchOverlayDragCanceled,
-                this, &MainWindow::handleCadSketchOverlayDrag);
-            connect(m_occView, &WidgetOccView::transformGizmoDragMoved,
-                this, [this](int operation, int axis, double delta) {
-                    if (!m_cadTaskPanel || !m_cadTaskPanel->isTransformPageActive())
-                        return;
-                    m_cadTaskPanel->addTransformDragDelta(operation, axis, delta);
-                });
-
-    connect(m_occView, &WidgetOccView::leadInPickMoved, this,
-            [this](const QPoint& pos) {
-                m_appContext->camModule()->updateLeadInPreview(m_occView, pos);
-            });
-    connect(m_occView, &WidgetOccView::leadInPickConfirmed, this,
-            [this](const QPoint& pos) {
-                if (m_appContext->camModule()->commitLeadInPreview(m_occView, pos))
-                    m_occView->endLeadInPick();
-            });
-    connect(m_occView, &WidgetOccView::leadInPickCanceled, this,
-            [this]() {
-                m_occView->endLeadInPick();
-                m_appContext->camModule()->cancelLeadInPreview();
-            });
-
-    connect(m_occView, &WidgetOccView::facePickConfirmed, this,
-            [this](const QPoint& pos) {
-                if (m_pendingCalibrationTarget.isEmpty())
-                    return;
-
-                bool handled = false;
-                // 标定向导是唯一的拾取入口；旧的 A/C/CUTTER_HEAD 直传分支已移除。
-                if (m_pendingCalibrationTarget.startsWith(QStringLiteral("WIZARD_"))
-                    && m_axisCalibWizard) {
-                    using lcnc::cam::ui::DialogAxisCalibrationWizard;
-                    gp_Pnt center;
-                    QString errMsg;
-                    if (m_appContext->camModule()->pickReferenceFaceCenter(
-                            m_occView, pos, center, &errMsg)) {
-                        DialogAxisCalibrationWizard::Stage stage = DialogAxisCalibrationWizard::Stage::AAxis;
-                        if (m_pendingCalibrationTarget == QStringLiteral("WIZARD_C"))
-                            stage = DialogAxisCalibrationWizard::Stage::CAxis;
-                        else if (m_pendingCalibrationTarget == QStringLiteral("WIZARD_HEAD"))
-                            stage = DialogAxisCalibrationWizard::Stage::CutterHead;
-                        m_axisCalibWizard->applyPickResult(stage, center);
-                        m_axisCalibWizard->raise();
-                        m_axisCalibWizard->activateWindow();
-                        handled = true;
-                    } else {
-                        LCNC_WARN(lcnc::LogCode::Generic,
-                                  "Wizard face pick failed: {}", errMsg.toStdString());
-                        // 拾取失败时保持拾取模式，便于用户重试
-                        return;
-                    }
-                }
-
-                if (!handled)
-                    return;
-
-                m_occView->endFacePick();
-                m_pendingCalibrationTarget.clear();
-                m_machinePanel->setCalibrationPickAxis(QString());
-            });
-    connect(m_occView, &WidgetOccView::facePickCanceled, this,
-            [this]() {
-                m_occView->endFacePick();
-                if (m_pendingCalibrationTarget.startsWith(QStringLiteral("WIZARD_"))
-                    && m_axisCalibWizard) {
-                    m_axisCalibWizard->cancelPickInProgress();
-                    m_axisCalibWizard->raise();
-                    m_axisCalibWizard->activateWindow();
-                }
-                m_pendingCalibrationTarget.clear();
-                m_machinePanel->setCalibrationPickAxis(QString());
-            });
 
     connect(m_appContext->camModule(), &CamModule::selectionChanged, this,
             [this](const QStringList& entries) {
@@ -505,9 +474,175 @@ void MainWindow::createCentralLayout()
 
 void MainWindow::create3DView()
 {
-    m_occView = new WidgetOccView(this);
+    m_viewStack = new QStackedWidget(this);
     m_defaultScene = new GraphicsScene(this);
-    m_occView->attachDefaultScene(m_defaultScene);
+    m_defaultOccView = createOccView(m_viewStack);
+    m_defaultOccView->attachDefaultScene(m_defaultScene);
+    m_viewStack->addWidget(m_defaultOccView);
+    m_occView = m_defaultOccView;
+}
+
+WidgetOccView* MainWindow::createOccView(QWidget* parent)
+{
+    auto* view = new WidgetOccView(parent);
+    connectOccViewSignals(view);
+    return view;
+}
+
+void MainWindow::connectOccViewSignals(WidgetOccView* view)
+{
+    if (!view)
+        return;
+
+    // ── 3D selection → module coordination ────────────────────────────────
+    connect(view, &WidgetOccView::selectionChanged, this, [this] {
+        if (isMachineViewActive()) {
+            m_appContext->camModule()->syncSelectionFromView();
+            return;
+        }
+
+        m_appContext->cadModule()->syncSelectionFromView(
+            m_appContext->cadModule()->workpieceDocumentId());
+    });
+
+    connect(view, &WidgetOccView::sketchOverlayPicked,
+            this, &MainWindow::handleCadSketchOverlayPicked);
+    connect(view, &WidgetOccView::sketchOverlayDragMoved,
+            this, &MainWindow::handleCadSketchOverlayDrag);
+    connect(view, &WidgetOccView::sketchOverlayDragCanceled,
+            this, &MainWindow::handleCadSketchOverlayDrag);
+    connect(view, &WidgetOccView::transformGizmoDragMoved,
+            this, [this](int operation, int axis, double delta) {
+                if (!m_cadTaskPanel || !m_cadTaskPanel->isTransformPageActive())
+                    return;
+                m_cadTaskPanel->addTransformDragDelta(operation, axis, delta);
+            });
+
+    connect(view, &WidgetOccView::leadInPickMoved, this,
+            [this, view](const QPoint& pos) {
+                m_appContext->camModule()->updateLeadInPreview(view, pos);
+            });
+    connect(view, &WidgetOccView::leadInPickConfirmed, this,
+            [this, view](const QPoint& pos) {
+                if (m_appContext->camModule()->commitLeadInPreview(view, pos))
+                    view->endLeadInPick();
+            });
+    connect(view, &WidgetOccView::leadInPickCanceled, this,
+            [this, view]() {
+                view->endLeadInPick();
+                m_appContext->camModule()->cancelLeadInPreview();
+            });
+
+    connect(view, &WidgetOccView::facePickConfirmed, this,
+            [this, view](const QPoint& pos) {
+                if (m_pendingCalibrationTarget.isEmpty())
+                    return;
+
+                bool handled = false;
+                // 标定向导是唯一的拾取入口；旧的 A/C/CUTTER_HEAD 直传分支已移除。
+                if (m_pendingCalibrationTarget.startsWith(QStringLiteral("WIZARD_"))
+                    && m_axisCalibWizard) {
+                    using lcnc::cam::ui::DialogAxisCalibrationWizard;
+                    gp_Pnt center;
+                    QString errMsg;
+                    if (m_appContext->camModule()->pickReferenceFaceCenter(
+                            view, pos, center, &errMsg)) {
+                        DialogAxisCalibrationWizard::Stage stage = DialogAxisCalibrationWizard::Stage::AAxis;
+                        if (m_pendingCalibrationTarget == QStringLiteral("WIZARD_C"))
+                            stage = DialogAxisCalibrationWizard::Stage::CAxis;
+                        else if (m_pendingCalibrationTarget == QStringLiteral("WIZARD_HEAD"))
+                            stage = DialogAxisCalibrationWizard::Stage::CutterHead;
+                        m_axisCalibWizard->applyPickResult(stage, center);
+                        m_axisCalibWizard->raise();
+                        m_axisCalibWizard->activateWindow();
+                        handled = true;
+                    } else {
+                        LCNC_WARN(lcnc::LogCode::Generic,
+                                  "Wizard face pick failed: {}", errMsg.toStdString());
+                        // 拾取失败时保持拾取模式，便于用户重试
+                        return;
+                    }
+                }
+
+                if (!handled)
+                    return;
+
+                view->endFacePick();
+                m_pendingCalibrationTarget.clear();
+                if (m_machinePanel)
+                    m_machinePanel->setCalibrationPickAxis(QString());
+            });
+    connect(view, &WidgetOccView::facePickCanceled, this,
+            [this, view]() {
+                view->endFacePick();
+                if (m_pendingCalibrationTarget.startsWith(QStringLiteral("WIZARD_"))
+                    && m_axisCalibWizard) {
+                    m_axisCalibWizard->cancelPickInProgress();
+                    m_axisCalibWizard->raise();
+                    m_axisCalibWizard->activateWindow();
+                }
+                m_pendingCalibrationTarget.clear();
+                if (m_machinePanel)
+                    m_machinePanel->setCalibrationPickAxis(QString());
+            });
+}
+
+WidgetOccView* MainWindow::ensureWorkspaceOccView(ProjectWorkspaceId id)
+{
+    if (id == kInvalidProjectWorkspaceId || !m_viewStack)
+        return nullptr;
+    if (WidgetOccView* existing = m_workspaceOccViews.value(id, nullptr))
+        return existing;
+
+    WidgetOccView* view = createOccView(m_viewStack);
+    m_workspaceOccViews.insert(id, view);
+    m_viewStack->addWidget(view);
+    return view;
+}
+
+void MainWindow::activateWorkspaceOccView(ProjectWorkspaceId id, GuiDocument* document)
+{
+    if (!document || id == kInvalidProjectWorkspaceId) {
+        showDefaultOccView();
+        return;
+    }
+
+    WidgetOccView* view = ensureWorkspaceOccView(id);
+    if (!view) {
+        showDefaultOccView();
+        return;
+    }
+
+    m_occView = view;
+    if (m_viewStack && m_viewStack->currentWidget() != view)
+        m_viewStack->setCurrentWidget(view);
+    view->attachDocument(document);
+}
+
+void MainWindow::removeWorkspaceOccView(ProjectWorkspaceId id)
+{
+    WidgetOccView* view = m_workspaceOccViews.take(id);
+    if (!view)
+        return;
+
+    const bool wasActive = (m_occView == view);
+    view->attachDefaultScene(nullptr);
+    if (m_viewStack)
+        m_viewStack->removeWidget(view);
+    view->deleteLater();
+
+    if (wasActive)
+        showDefaultOccView();
+}
+
+void MainWindow::showDefaultOccView()
+{
+    if (!m_defaultOccView)
+        return;
+    m_occView = m_defaultOccView;
+    if (m_viewStack && m_viewStack->currentWidget() != m_defaultOccView)
+        m_viewStack->setCurrentWidget(m_defaultOccView);
+    m_defaultOccView->attachDefaultScene(m_defaultScene);
 }
 
 void MainWindow::createLeftPanel()
@@ -1356,8 +1491,11 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     };
     for (auto& info : orients) {
         auto* act = new QAction(info.label + " [" + info.key + "]", this);
-        connect(act, &QAction::triggered, m_occView,
-                [this, o = info.orient]{ m_occView->setOrientation(o); });
+        connect(act, &QAction::triggered, this,
+                [this, o = info.orient] {
+                    if (auto* view = occView())
+                        view->setOrientation(o);
+                });
         panelView->addSmallAction(act);
     }
 
@@ -1460,15 +1598,9 @@ void MainWindow::createStatusBar()
 // ── Slots ──────────────────────────────────────────────────────────────────────
 void MainWindow::onProjectReset()
 {
-    // 文档-视图生命周期：工程切换时统一释放"按工程"显示资源（工件 + CAM 轮廓），
-    // 但机台是独立常驻参考资产 —— 不擦除其显示，使其跨工程保持在视图中。
-    if (m_appContext && m_appContext->camModule()) {
-        if (auto* gd = m_appContext->camModule()->workspaceGuiDocument()) {
-            gd->eraseDomain(lcnc::ProjectDomain::Workpiece);
-            // CAM AIS 走 ContourId 注册，用 eraseAllContours 释放轮廓显示。
-            gd->eraseAllContours();
-        }
-    }
+    // Display resources are owned by each workspace GuiDocument/WidgetOccView.
+    // A reset only means no active project remains; workspace switching uses
+    // activeWorkspaceChanged and must not clear/rebuild the active view.
     // 清空跨模块的轮廓选择顺序（属当前工程的瞬态状态）。
     if (auto svc = lcnc::Kernel::current().services().getService<lcnc::core::SelectionService>())
         svc->clear();
@@ -1487,8 +1619,10 @@ void MainWindow::onProjectDomainChanged(lcnc::ProjectDomain domain)
         if (LcncDocument* doc = m_appContext->cadModule()->workpieceDocument())
             m_sbDocName->setText(doc->name());
         m_appContext->camModule()->autoInstallCurrentWorkpiece();
-        if (m_occView && m_appContext->camModule()->workspaceGuiDocument())
-            m_occView->attachDocument(m_appContext->camModule()->workspaceGuiDocument());
+        if (auto* gd = m_appContext->camModule()->workspaceGuiDocument()) {
+            auto* project = lcnc::Kernel::current().projectManager();
+            activateWorkspaceOccView(project ? project->activeWorkspaceId() : kInvalidProjectWorkspaceId, gd);
+        }
 
         const QString sourcePath = lcnc::Kernel::current()
             .projectManager()
@@ -2252,10 +2386,44 @@ void MainWindow::showStartGuide()
         m_centerTabs->setCurrentWidget(m_startGuide);
 }
 
+void MainWindow::refreshDocumentTabs()
+{
+    if (!m_documentTabs)
+        return;
+
+    auto* project = lcnc::Kernel::current().projectManager();
+    QSignalBlocker blocker(m_documentTabs);
+    while (m_documentTabs->count() > 0)
+        m_documentTabs->removeTab(0);
+    if (!project) {
+        m_documentTabs->setVisible(false);
+        return;
+    }
+
+    const ProjectWorkspaceId activeId = project->activeWorkspaceId();
+    int activeIndex = -1;
+    for (ProjectWorkspaceId id : project->workspaceIds()) {
+        auto* workspace = project->workspace(id);
+        QString title = workspace ? workspace->session().projectName() : QString();
+        if (title.trimmed().isEmpty() && workspace && workspace->workpieceDocument())
+            title = workspace->workpieceDocument()->name();
+        if (title.trimmed().isEmpty())
+            title = tr("未命名");
+        const int index = m_documentTabs->addTab(title);
+        m_documentTabs->setTabData(index, id);
+        if (id == activeId)
+            activeIndex = index;
+    }
+
+    m_documentTabs->setVisible(m_documentTabs->count() > 0);
+    if (activeIndex >= 0)
+        m_documentTabs->setCurrentIndex(activeIndex);
+}
+
 void MainWindow::showViewTab()
 {
-    if (m_centerTabs && m_occView)
-        m_centerTabs->setCurrentWidget(m_occView);
+    if (m_centerTabs && m_viewStack)
+        m_centerTabs->setCurrentIndex(1);
 }
 
 bool MainWindow::isStartGuideSupportedFile(const QString& filePath) const
@@ -2398,11 +2566,13 @@ void MainWindow::showMachineView()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "MainWindow::showMachineView");
     m_machineWorkspaceActive = true;
+    auto* project = lcnc::Kernel::current().projectManager();
     if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
-        m_occView->attachDocument(gd);
+        activateWorkspaceOccView(project ? project->activeWorkspaceId() : kInvalidProjectWorkspaceId, gd);
     else
-        m_occView->attachDefaultScene(m_defaultScene);
-    m_occView->clearSketchOverlay();
+        showDefaultOccView();
+    if (m_occView)
+        m_occView->clearSketchOverlay();
 
     syncMachineWorkspaceUiInternal(false);
 }
@@ -2416,10 +2586,11 @@ void MainWindow::showWorkpieceView(DocumentId id)
 
     m_machineWorkspaceActive = false;
 
+    auto* project = lcnc::Kernel::current().projectManager();
     if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
-        m_occView->attachDocument(gd);
+        activateWorkspaceOccView(project ? project->activeWorkspaceId() : kInvalidProjectWorkspaceId, gd);
     else
-        m_occView->attachDefaultScene(m_defaultScene);
+        showDefaultOccView();
     updateCadSketchOverlay();
 }
 
@@ -2469,8 +2640,12 @@ void MainWindow::closeEvent(QCloseEvent* e)
 
     // Detach rendering: stop the active ViewCube animation and unhook the
     // OCC view from the widget so no Redraw() fires during Qt teardown.
-    if (m_occView)
-        m_occView->attachDefaultScene(nullptr);
+    if (m_defaultOccView)
+        m_defaultOccView->attachDefaultScene(nullptr);
+    for (WidgetOccView* view : std::as_const(m_workspaceOccViews)) {
+        if (view)
+            view->attachDefaultScene(nullptr);
+    }
 
     // Accept; Qt's parent-child destructor chain cleans up all OCC resources.
     e->accept();

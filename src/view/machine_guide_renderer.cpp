@@ -29,15 +29,32 @@ namespace lcnc::view {
 MachineGuideRenderer::MachineGuideRenderer() = default;
 MachineGuideRenderer::~MachineGuideRenderer() = default;
 
+QMap<QString, Handle(AIS_Shape)>& MachineGuideRenderer::guideMap(GuiDocument* gd)
+{
+    return m_axisGuideAisByDocument[gd];
+}
+
+const QMap<QString, Handle(AIS_Shape)>* MachineGuideRenderer::guideMap(GuiDocument* gd) const
+{
+    const auto it = m_axisGuideAisByDocument.constFind(gd);
+    return it == m_axisGuideAisByDocument.cend() ? nullptr : &it.value();
+}
+
 void MachineGuideRenderer::erase(GuiDocument* gd)
 {
-    if (!gd) { m_axisGuideAis.clear(); return; }
+    if (!gd) { m_axisGuideAisByDocument.clear(); return; }
     GraphicsScene* scene = gd->scene();
-    if (!scene) { m_axisGuideAis.clear(); return; }
-    for (auto& ais : m_axisGuideAis) {
+    auto it = m_axisGuideAisByDocument.find(gd);
+    if (it == m_axisGuideAisByDocument.end())
+        return;
+    if (!scene) {
+        m_axisGuideAisByDocument.erase(it);
+        return;
+    }
+    for (auto& ais : it.value()) {
         if (!ais.IsNull()) scene->eraseObject(ais, false);
     }
-    m_axisGuideAis.clear();
+    m_axisGuideAisByDocument.erase(it);
 }
 
 void MachineGuideRenderer::refresh(GuiDocument* gd,
@@ -49,6 +66,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
     GraphicsScene* scene = gd->scene();
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
     if (!scene || ctx.IsNull()) return;
+    auto& axisGuideAis = guideMap(gd);
 
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "MachineGuideRenderer::refresh cfg='{}' axes={} headTip=({:.3f},{:.3f},{:.3f}) rotaryVisible={} headVisible={}",
@@ -87,7 +105,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
         ais->SetWidth(3.0);
         ctx->SetZLayer(ais, Graphic3d_ZLayerId_Topmost);
         ctx->Deactivate(ais);
-        m_axisGuideAis.insert(QStringLiteral("axis:%1").arg(axisName), ais);
+        axisGuideAis.insert(QStringLiteral("axis:%1").arg(axisName), ais);
     }
 
     if (hasRotaryAxis) {
@@ -99,7 +117,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
             scene->setShapeColor(sphereAis, Quantity_Color(0.95, 0.95, 0.15, Quantity_TOC_RGB), false);
             ctx->SetZLayer(sphereAis, Graphic3d_ZLayerId_Topmost);
             ctx->Deactivate(sphereAis);
-            m_axisGuideAis.insert(QStringLiteral("center:sphere"), sphereAis);
+            axisGuideAis.insert(QStringLiteral("center:sphere"), sphereAis);
         }
     }
 
@@ -118,7 +136,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
         coneAis->SetMaterial(Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_ShinyPlastified));
         ctx->Display(coneAis, AIS_Shaded, 0, Standard_False);
         ctx->Deactivate(coneAis);
-        m_axisGuideAis.insert(QStringLiteral("head:cone"), coneAis);
+        axisGuideAis.insert(QStringLiteral("head:cone"), coneAis);
     } else {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "MachineGuideRenderer::refresh failed to create cutter head cone");
@@ -145,7 +163,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
     wireAis->SetWidth(3.0);
     ctx->SetZLayer(wireAis, Graphic3d_ZLayerId_Topmost);
     ctx->Deactivate(wireAis);
-    m_axisGuideAis.insert(QStringLiteral("head:wire"), wireAis);
+    axisGuideAis.insert(QStringLiteral("head:wire"), wireAis);
 
     applyVisibility(gd);
     updateTransforms(gd, kin, cutterHeadWorldTip);
@@ -170,8 +188,12 @@ void MachineGuideRenderer::applyVisibility(GuiDocument* gd)
     GraphicsScene* scene = gd->scene();
     if (!scene)
         return;
+    const auto guideIt = m_axisGuideAisByDocument.constFind(gd);
+    if (guideIt == m_axisGuideAisByDocument.cend())
+        return;
 
-    for (auto it = m_axisGuideAis.cbegin(); it != m_axisGuideAis.cend(); ++it) {
+    const auto& axisGuideAis = guideIt.value();
+    for (auto it = axisGuideAis.cbegin(); it != axisGuideAis.cend(); ++it) {
         const bool isRotaryAxis = it.key().startsWith(QStringLiteral("axis:"));
         const bool isCenter = it.key().startsWith(QStringLiteral("center:"));
         const bool isHead = it.key().startsWith(QStringLiteral("head:"));
@@ -193,10 +215,14 @@ void MachineGuideRenderer::updateTransforms(GuiDocument* gd,
     if (!gd || !kin) return;
     const Handle(AIS_InteractiveContext)& ctx = gd->context();
     if (ctx.IsNull()) return;
+    const auto guideIt = m_axisGuideAisByDocument.constFind(gd);
+    if (guideIt == m_axisGuideAisByDocument.cend())
+        return;
+    const auto& axisGuideAis = guideIt.value();
 
     auto applyTransform = [&](const QString& key, const gp_Trsf& trsf) {
-        const auto it = m_axisGuideAis.constFind(key);
-        if (it == m_axisGuideAis.cend() || it.value().IsNull()) return;
+        const auto it = axisGuideAis.constFind(key);
+        if (it == axisGuideAis.cend() || it.value().IsNull()) return;
         it.value()->SetLocalTransformation(trsf);
         ctx->RecomputePrsOnly(it.value(), Standard_False);
     };

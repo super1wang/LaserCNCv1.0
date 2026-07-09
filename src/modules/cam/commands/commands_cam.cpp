@@ -86,11 +86,10 @@ bool CmdSetLeadIn::isEnabled() const
 void CmdSetLeadIn::execute()
 {
     CamModule* cam = context()->camModule();
+    cam->requestMachineView();
     WidgetOccView* occView = context()->occView();
     if (!occView)
         return;
-
-    cam->requestMachineView();
 
     if (occView->isLeadInPickActive()) {
         occView->endLeadInPick();

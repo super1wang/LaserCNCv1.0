@@ -2,6 +2,7 @@
 
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
+#include "core/project/lcnc_project_manager.h"
 #include "modules/cam/cam_module.h"
 #include "view/gui_application.h"
 #include "view/rendering_manager.h"
@@ -1230,6 +1231,8 @@ bool DialogOptions::applyChanges()
     settings->theme = newTheme;
     settings->unitSystem = newUnits;
     settings->documentOpenMode = newDocumentOpenMode;
+    if (auto* project = lcnc::Kernel::current().projectManager())
+        project->setDocumentOpenMode(newDocumentOpenMode);
     settings->recentLimit = newRecentLimit;
     if (!settings->saveDefault()) {
         LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QMap>
 #include <QString>
 #include <AIS_Shape.hxx>
@@ -42,9 +43,11 @@ public:
 private:
     void applyVisibility(GuiDocument* gd);
     gp_Pnt rotationCenter(MachineKinematics* kin) const;
+    QMap<QString, Handle(AIS_Shape)>& guideMap(GuiDocument* gd);
+    const QMap<QString, Handle(AIS_Shape)>* guideMap(GuiDocument* gd) const;
 
 private:
-    QMap<QString, Handle(AIS_Shape)> m_axisGuideAis;
+    QHash<GuiDocument*, QMap<QString, Handle(AIS_Shape)>> m_axisGuideAisByDocument;
     bool m_rotaryAxisVisible{true};
     bool m_cutterHeadVisible{true};
 };

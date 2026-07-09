@@ -123,7 +123,7 @@ public:
     QString     theme       = QStringLiteral("light");   ///< "light" | "dark"
     QString     language    = QStringLiteral("zh_CN");
     QString     unitSystem  = QStringLiteral("mm");      ///< "mm" | "inch"
-    DocumentOpenMode documentOpenMode = DocumentOpenMode::SingleDocument;
+    DocumentOpenMode documentOpenMode = DocumentOpenMode::MultiDocument;
     QStringList recentFiles;                             ///< most-recent first
     int         recentLimit = 10;
 

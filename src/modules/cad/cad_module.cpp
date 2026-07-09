@@ -15,6 +15,7 @@
 #include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/project/lcnc_project_package.h"
+#include "core/project/project_workspace.h"
 #include "core/task/task_manager.h"
 #include "core/document/xcaf_utils.h"
 #include "view/gui_application.h"
@@ -481,10 +482,27 @@ CadModule::CadModule(QObject* parent)
         m_documentRegistry->ensure(id);
         m_selectedSketchDocId = kInvalidDocumentId;
         m_selectedSketchId = 0;
+        if (auto* gd = workspaceGuiDocument()) {
+            gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
+            if (auto* md = project->machineDocument())
+                gd->updateMachineWorkspaceTransforms(md, project->workpieceDocument());
+            gd->fitAll();
+        }
         emit documentListChanged();
         emit workpieceStructureChanged();
         emit sketchSelectionChanged(0);
     });
+    connect(project, &lcnc::LcncProjectManager::activeWorkspaceChanged,
+            this, [this, project](ProjectWorkspaceId) {
+                const DocumentId id = project->workpieceDocumentId();
+                if (id != kInvalidDocumentId)
+                    m_documentRegistry->ensure(id);
+                m_selectedSketchDocId = kInvalidDocumentId;
+                m_selectedSketchId = 0;
+                emit documentListChanged();
+                emit workpieceStructureChanged();
+                emit sketchSelectionChanged(0);
+            });
     // 项目打开后刷新工件显示：确保无论通过哪个入口打开，视图都会重建。
     connect(project, &lcnc::LcncProjectManager::projectOpened, this, [this, project](const QString&) {
         if (auto* gd = workspaceGuiDocument()) {
@@ -532,41 +550,9 @@ DocumentId CadModule::openDocument(const QString& filePath)
     }
 
     const QString ext = fileInfo.suffix().toLower();
-    if (lcnc::LcncProjectPackage::isProjectPath(filePath)) {
-        auto* project = lcnc::Kernel::current().projectManager();
-        LcncDocument* placeholder = project->newProject(fileInfo.completeBaseName());
-        const DocumentId currentDocId = placeholder ? placeholder->id() : kInvalidDocumentId;
-        auto error = std::make_shared<QString>();
-        const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-            tr("打开工程: %1").arg(fileInfo.fileName()),
-            [filePath, project, error](TaskProgress* prog) {
-                prog->setRange(0, 100);
-                prog->setStepName(QStringLiteral("读取工程包..."));
-                prog->setValue(10);
-                LcncDocument* doc = project->openProject(filePath, error.get());
-                if (!doc)
-                    throw std::runtime_error("project open failed");
-                prog->setValue(100);
-            });
-
-        watchTask(this, taskId, [this, error](bool success) {
-            if (!success) {
-                emit operationFailed(tr("打开失败"),
-                                     error->isEmpty() ? tr("无法读取项目文件") : *error);
-                return;
-            }
-
-            auto* project = lcnc::Kernel::current().projectManager();
-            if (auto* gd = workspaceGuiDocument()) {
-                gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
-                gd->updateMachineWorkspaceTransforms(project->machineDocument(), project->workpieceDocument());
-                gd->fitAll();
-            }
-        });
-        return currentDocId;
-    }
-
-    if (ext != "stp" && ext != "step" &&
+    const bool isProjectPackage = lcnc::LcncProjectPackage::isProjectPath(filePath);
+    if (!isProjectPackage &&
+        ext != "stp" && ext != "step" &&
         ext != "igs" && ext != "iges" &&
         ext != "stl" && ext != "brep") {
         LCNC_WARN(lcnc::LogCode::Generic,
@@ -577,15 +563,71 @@ DocumentId CadModule::openDocument(const QString& filePath)
     }
 
     auto* project = lcnc::Kernel::current().projectManager();
-    LcncDocument* doc = project->newProject(fileInfo.completeBaseName());
-    if (!doc) {
-        LCNC_WARN(lcnc::LogCode::Generic,
-                  "CadModule::openDocument missing project document path={}",
-                  filePath.toStdString());
+    const std::uint64_t openGeneration = project->beginSingleDocumentOpen();
+    auto pendingWorkspace = project->createDetachedWorkspace(fileInfo.completeBaseName());
+    LcncDocument* pendingDoc = pendingWorkspace ? pendingWorkspace->workpieceDocument() : nullptr;
+    if (!pendingDoc) {
         emit operationFailed(tr("打开失败"), tr("无法创建目标文档"));
         return kInvalidDocumentId;
     }
-    const DocumentId docId = doc->id();
+    const DocumentId docId = pendingDoc->id();
+
+    if (isProjectPackage) {
+        auto error = std::make_shared<QString>();
+        auto loadResult = std::make_shared<lcnc::ProjectLoadResult>();
+        const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
+            tr("打开工程: %1").arg(fileInfo.fileName()),
+            [filePath, pendingWorkspace, error, loadResult](TaskProgress* prog) {
+                prog->setRange(0, 100);
+                prog->setStepName(QStringLiteral("读取工程包..."));
+                prog->setValue(10);
+                const QString packagePath = lcnc::LcncProjectPackage::packageDirectory(filePath);
+                if (!lcnc::LcncProjectPackage::load(*pendingWorkspace->workpieceDocument(),
+                                                     nullptr,
+                                                     pendingWorkspace->camDocument(),
+                                                     packagePath,
+                                                     loadResult.get(),
+                                                     error.get(),
+                                                     pendingWorkspace->camData())) {
+                    throw std::runtime_error("project open failed");
+                }
+                prog->setValue(100);
+            });
+
+        watchTask(this, taskId, [this, filePath, pendingWorkspace, loadResult, error, openGeneration](bool success) {
+            auto* project = lcnc::Kernel::current().projectManager();
+            if (!project->isSingleDocumentOpenCurrent(openGeneration))
+                return;
+            if (!success) {
+                emit operationFailed(tr("打开失败"),
+                                     error->isEmpty() ? tr("无法读取项目文件") : *error);
+                return;
+            }
+
+            const QString packagePath = lcnc::LcncProjectPackage::packageDirectory(filePath);
+            const QString projectName = loadResult->documentName.isEmpty()
+                ? QFileInfo(packagePath).completeBaseName()
+                : loadResult->documentName;
+            pendingWorkspace->workpieceDocument()->setName(projectName);
+            pendingWorkspace->workpieceDocument()->setFilePath(
+                loadResult->packagePath.isEmpty() ? packagePath : loadResult->packagePath);
+            pendingWorkspace->session().setProjectName(projectName);
+            pendingWorkspace->session().setProjectPath(pendingWorkspace->workpieceDocument()->filePath());
+            pendingWorkspace->session().setManifest(loadResult->manifest);
+            pendingWorkspace->session().workpiece().displayName = projectName;
+            pendingWorkspace->session().workpiece().sourceFilePath = loadResult->manifest.sourceFilePath;
+            pendingWorkspace->syncSessionFromDocuments();
+            pendingWorkspace->session().clearDirty();
+            project->adoptWorkspace(pendingWorkspace, true);
+
+            if (auto* gd = workspaceGuiDocument()) {
+                gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
+                gd->updateMachineWorkspaceTransforms(project->machineDocument(), project->workpieceDocument());
+                gd->fitAll();
+            }
+        });
+        return docId;
+    }
 
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "CadModule::openDocument replacing workpiece docId={} ext={} path={}",
@@ -594,7 +636,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
     auto error = std::make_shared<QString>();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
         tr("打开: %1").arg(fileInfo.fileName()),
-        [filePath, ext, doc, error](TaskProgress* prog) {
+        [filePath, ext, pendingWorkspace, error](TaskProgress* prog) {
+            LcncDocument* doc = pendingWorkspace ? pendingWorkspace->workpieceDocument() : nullptr;
             LCNC_DEBUG(lcnc::LogCode::Generic,
                        "CadModule::openDocument worker begin docId={} ext={} path={}",
                        doc ? doc->id() : kInvalidDocumentId,
@@ -664,23 +707,24 @@ DocumentId CadModule::openDocument(const QString& filePath)
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    watchTask(this, taskId, [this, docId, displayName, sourceFilePath, error](bool success) {
+    watchTask(this, taskId, [this, pendingWorkspace, docId, displayName, sourceFilePath, error, openGeneration](bool success) {
+        auto* project = lcnc::Kernel::current().projectManager();
+        if (!project->isSingleDocumentOpenCurrent(openGeneration))
+            return;
+
         LCNC_DEBUG(lcnc::LogCode::Generic,
                    "CadModule::openDocument task done docId={} success={}",
                    docId, success);
         if (!success) {
-            if (LcncDocument* doc = domainDocumentById(docId))
-                doc->clearEntityKind(LcncDocument::EntityKind::Workpiece);
-            lcnc::Kernel::current().projectManager()->session().workpiece().clear();
-            lcnc::Kernel::current().projectManager()->notifyDomainChanged(docId);
             emit operationFailed(tr("打开失败"),
                                  error->isEmpty() ? tr("打开文件失败") : *error);
             return;
         }
 
-        auto* project = lcnc::Kernel::current().projectManager();
-        project->session().workpiece().displayName = displayName;
-        project->session().workpiece().sourceFilePath = sourceFilePath;
+        pendingWorkspace->session().workpiece().displayName = displayName;
+        pendingWorkspace->session().workpiece().sourceFilePath = sourceFilePath;
+        pendingWorkspace->syncSessionFromDocuments();
+        project->adoptWorkspace(pendingWorkspace);
         refreshDisplay(docId);
     });
 
@@ -872,9 +916,15 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
 
 void CadModule::closeDocument(DocumentId id)
 {
-    if (id == workpieceDocumentId()) {
-        auto* project = lcnc::Kernel::current().projectManager();
-        project->newProject();
+    auto* project = lcnc::Kernel::current().projectManager();
+    for (ProjectWorkspaceId workspaceId : project->workspaceIds()) {
+        if (auto* workspace = project->workspace(workspaceId)) {
+            if (workspace->workpieceDocument()
+                && workspace->workpieceDocument()->id() == id) {
+                project->closeWorkspace(workspaceId);
+                return;
+            }
+        }
     }
 }
 

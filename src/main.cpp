@@ -6,6 +6,7 @@
 #include "app/main_window.h"
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
+#include "core/project/lcnc_project_manager.h"
 #include "core/settings/app_settings.h"
 #include "view/gui_application.h"
 #include "modules/cad/cad_module.h"
@@ -75,6 +76,8 @@ int main(int argc, char* argv[])
     lcnc::Kernel kernel;
     kernel.registerCoreServices();
     kernel.appSettings()->loadDefault();   // mainwindow.toml
+    if (auto* project = kernel.projectManager())
+        project->setDocumentOpenMode(kernel.appSettings()->documentOpenMode);
 
     // GuiApplication 不在 core/Kernel 内创建（避免 core 反向依赖 view），
     // 改在此处由 main 拥有并注入 Kernel。须在模块 init 之前完成，

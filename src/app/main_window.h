@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SARibbonMainWindow.h>
+#include <QHash>
 #include <QSet>
 #include <cstdint>
 #include "core/project/project_types.h"
@@ -8,6 +9,7 @@
 
 class AppContext;
 class CommandContainer;
+class GuiDocument;
 class WidgetOccView;
 class WidgetMachinePanel;
 class WidgetMachineTree;
@@ -21,6 +23,7 @@ class GraphicsScene;
 class QStackedWidget;
 class QSplitter;
 class QLabel;
+class QTabBar;
 class QTabWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -66,6 +69,12 @@ private:
     void createLeftPanel();
     void createRightPanel();
     void create3DView();
+    WidgetOccView* createOccView(QWidget* parent);
+    void connectOccViewSignals(WidgetOccView* view);
+    WidgetOccView* ensureWorkspaceOccView(ProjectWorkspaceId id);
+    void activateWorkspaceOccView(ProjectWorkspaceId id, GuiDocument* document);
+    void removeWorkspaceOccView(ProjectWorkspaceId id);
+    void showDefaultOccView();
     void createRibbon();
     void createStatusBar();
 
@@ -113,6 +122,7 @@ private:
     void showStartGuide();
     void showViewTab();
     void refreshStartGuide();
+    void refreshDocumentTabs();
     void openStartGuideFile(const QString& filePath);
     void addRecentFile(const QString& filePath);
     void scheduleRecentThumbnailCapture(const QString& filePath);
@@ -140,11 +150,15 @@ private:
     QSplitter*         m_splitter{nullptr};
     QTabWidget*        m_centerTabs{nullptr};
     lcnc::app::StartGuideWidget* m_startGuide{nullptr};
+    QTabBar*           m_documentTabs{nullptr};
+    QStackedWidget*    m_viewStack{nullptr};
     QTabWidget*        m_leftTabs{nullptr};
     QTreeWidget*       m_projectExplorerTree{nullptr};
     QWidget*           m_processLeftPanel{nullptr};
     WidgetMachineTree* m_machineTree{nullptr};
-    WidgetOccView*     m_occView{nullptr};
+    WidgetOccView*     m_occView{nullptr};        ///< Active OCC viewport; use occView() at call time.
+    WidgetOccView*     m_defaultOccView{nullptr};
+    QHash<ProjectWorkspaceId, WidgetOccView*> m_workspaceOccViews;
     QStackedWidget*    m_rightStack{nullptr};
     QTabWidget*        m_camRightTabs{nullptr};   // CAM ribbon 右栏：机床面板 / 刀路参数面板 两个 tab
     WidgetMachinePanel*   m_machinePanel{nullptr};

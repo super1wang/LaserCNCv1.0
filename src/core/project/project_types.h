@@ -7,6 +7,10 @@
 using DocumentId = int;
 constexpr DocumentId kInvalidDocumentId = -1;
 
+// Stable identifier for one open LaserCNC project workspace.
+using ProjectWorkspaceId = int;
+constexpr ProjectWorkspaceId kInvalidProjectWorkspaceId = -1;
+
 namespace lcnc {
 
 /**

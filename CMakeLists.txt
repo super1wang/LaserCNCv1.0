@@ -181,6 +181,7 @@ set(SRCS_CORE
     src/core/project/lcnc_project_manifest.cpp
     src/core/project/lcnc_project_package.cpp
     src/core/project/lcnc_project_session.cpp
+    src/core/project/project_workspace.cpp
     src/core/project/lcnc_project_manager.cpp
     src/core/project/cam/cam_data_manager.cpp
     src/core/project/cam/cam_toolpath_io.cpp

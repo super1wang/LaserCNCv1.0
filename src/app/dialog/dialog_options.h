@@ -131,7 +131,7 @@ private:
     QString m_originalLanguage;
     QString m_originalTheme;
     QString m_originalUnitSystem;
-    DocumentOpenMode m_originalDocumentOpenMode{DocumentOpenMode::SingleDocument};
+    DocumentOpenMode m_originalDocumentOpenMode{DocumentOpenMode::MultiDocument};
     int m_originalRecentLimit{10};
     QString m_originalMachineModelPath;
     bool m_originalAutoLoadMachineModel{true};

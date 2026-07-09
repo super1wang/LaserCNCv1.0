@@ -633,6 +633,21 @@ Handle(AIS_Shape) GuiDocument::aisShapeForContour(std::uint64_t contourId) const
     return {};
 }
 
+QVector<std::uint64_t> GuiDocument::displayedContourIds() const
+{
+    QVector<std::uint64_t> ids;
+    ids.reserve(m_displayObjects.size());
+    for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
+        const DisplayObject& object = it.value();
+        if (object.domain != lcnc::ProjectDomain::Cam)
+            continue;
+        std::uint64_t contourId = 0;
+        if (isCamContourEntry(object.entry, &contourId) && contourId != 0)
+            ids.push_back(contourId);
+    }
+    return ids;
+}
+
 void GuiDocument::eraseContour(std::uint64_t contourId)
 {
     if (contourId == 0) return;

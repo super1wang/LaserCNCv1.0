@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QObject>
+#include <QHash>
 
+#include "core/project/project_types.h"
 #include "core/settings/app_settings.h"
 #include "view/rendering_manager.h"
 
@@ -10,9 +12,9 @@ class GuiDocument;
 /**
  * @brief GUI workspace manager.
  *
- * Owns the active GuiDocument used by the current project workspace. Project
- * data remains in LcncProjectManager; this object manages view/context
- * lifecycle and render settings for the active workspace.
+ * Owns the GuiDocument map for open project workspaces. Project data remains
+ * in LcncProjectManager; this object manages display document/context
+ * lifecycle and render settings per workspace.
  */
 class GuiApplication : public QObject
 {
@@ -21,7 +23,11 @@ public:
     explicit GuiApplication(QObject* parent = nullptr);
     ~GuiApplication() override;
 
-    GuiDocument* workspaceGuiDocument() const { return m_workspaceGuiDocument; }
+    GuiDocument* workspaceGuiDocument() const { return activeGuiDocument(); }
+    GuiDocument* activeGuiDocument() const;
+    GuiDocument* guiDocument(ProjectWorkspaceId id) const;
+    GuiDocument* ensureGuiDocument(ProjectWorkspaceId id);
+    void closeGuiDocument(ProjectWorkspaceId id);
     void resetWorkspaceGuiDocument();
 
     int  currentDisplayMode() const { return m_currentDisplayMode; }
@@ -36,6 +42,9 @@ public:
                                        bool applyCamView);
 
 signals:
+    void guiDocumentAboutToClose(ProjectWorkspaceId id, GuiDocument* document);
+    void guiDocumentReady(ProjectWorkspaceId id, GuiDocument* document);
+    void activeGuiDocumentChanged(ProjectWorkspaceId id, GuiDocument* document);
     void workspaceGuiDocumentAboutToClose(GuiDocument* document);
     void workspaceGuiDocumentReady();
     void workspaceGuiDocumentChanged(GuiDocument* document);
@@ -44,8 +53,11 @@ private:
     static GuiApplication* s_instance;
 
     GuiDocument* createWorkspaceGuiDocument();
+    void setActiveWorkspace(ProjectWorkspaceId id);
+    void applyDisplayModeToDocument(GuiDocument* document) const;
 
-    GuiDocument* m_workspaceGuiDocument{nullptr};
+    QHash<ProjectWorkspaceId, GuiDocument*> m_guiDocuments;
+    ProjectWorkspaceId m_activeWorkspaceId{kInvalidProjectWorkspaceId};
     int  m_currentDisplayMode{1};
     bool m_currentFaceBoundary{false};
 };

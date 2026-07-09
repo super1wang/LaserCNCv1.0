@@ -19,11 +19,12 @@ class TopoDS_Shape;
 /**
  * @brief Qt widget that hosts an OpenCASCADE 3D view.
  *
- * Implements the Mayo-style per-document view pattern:
- *  - One Aspect_NeutralWindow (OS window handle) is created once for this widget.
- *  - Each GuiDocument owns its own V3d_View bound to this window.
- *  - Switching documents means swapping which V3d_View is rendered —
- *    no view teardown/recreation, so camera state is preserved per document.
+ * Implements the Mayo-style per-workspace view pattern:
+ *  - MainWindow creates one WidgetOccView per project workspace.
+ *  - Each widget owns one Aspect_NeutralWindow, and the matching GuiDocument
+ *    owns the V3d_View rendered into that native window.
+ *  - Switching documents is a QWidget stack switch, so the active viewport,
+ *    camera, selection, and display context stay with the project.
  *
  * Mouse interaction:
  *  - Left click      → toggle-select shape (additive; click again to deselect)

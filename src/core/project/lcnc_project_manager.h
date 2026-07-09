@@ -1,9 +1,13 @@
 #pragma once
 
 #include "core/project/lcnc_project_session.h"
+#include "core/settings/app_settings.h"
 
 #include <QObject>
 #include <QString>
+#include <QList>
+#include <cstdint>
+#include <map>
 #include <memory>
 
 class LcncDocument;
@@ -12,11 +16,13 @@ namespace lcnc::cam { class CamDataManager; }
 
 namespace lcnc {
 
+class ProjectWorkspace;
+
 /**
- * @brief Project lifecycle and data-domain coordinator for the single project.
+ * @brief Project lifecycle and data-domain coordinator for open workspaces.
  *
- * Owns the three persistent OCC-backed domain stores and keeps project identity,
- * dirty state, and package IO outside LcncDocument.
+ * Owns project workspaces in the core layer. CAD/CAM/Process modules borrow
+ * data through active or explicit workspace accessors; they do not own it.
  */
 class LcncProjectManager : public QObject
 {
@@ -25,10 +31,27 @@ public:
     explicit LcncProjectManager(QObject* parent = nullptr);
     ~LcncProjectManager() override;
 
-    LcncProjectSession& session() { return m_session; }
-    const LcncProjectSession& session() const { return m_session; }
+    LcncProjectSession& session();
+    const LcncProjectSession& session() const;
 
     void ensureProject();
+
+    DocumentOpenMode documentOpenMode() const { return m_documentOpenMode; }
+    void setDocumentOpenMode(DocumentOpenMode mode) { m_documentOpenMode = mode; }
+
+    ProjectWorkspaceId activeWorkspaceId() const { return m_activeWorkspaceId; }
+    ProjectWorkspace* activeWorkspace() const;
+    ProjectWorkspace* workspace(ProjectWorkspaceId id) const;
+    QList<ProjectWorkspaceId> workspaceIds() const;
+
+    std::shared_ptr<ProjectWorkspace> createDetachedWorkspace(const QString& name = QString());
+    ProjectWorkspaceId adoptWorkspace(const std::shared_ptr<ProjectWorkspace>& workspace,
+                                      bool emitProjectOpened = false);
+    bool closeWorkspace(ProjectWorkspaceId id);
+    void closeAllWorkspaces();
+    void setActiveWorkspace(ProjectWorkspaceId id);
+    std::uint64_t beginSingleDocumentOpen();
+    bool isSingleDocumentOpenCurrent(std::uint64_t generation) const;
 
     LcncDocument* newProject(const QString& name = QString());
     LcncDocument* openProject(const QString& filePath, QString* errorMsg = nullptr);
@@ -49,7 +72,7 @@ public:
 
     /// CAM 运行时数据（轮廓 + 刀路 + 图层 + 工艺参数）是工程核心数据，
     /// 由本管理器在 core 层拥有；CAM 模块仅借用此实例做业务计算与渲染。
-    lcnc::cam::CamDataManager* camData() const { return m_camData.get(); }
+    lcnc::cam::CamDataManager* camData() const;
     DocumentId workpieceDocumentId() const;
     DocumentId machineDocumentId() const;
     DocumentId camDocumentId() const;
@@ -68,6 +91,11 @@ public:
     void attachMachineDocument(LcncDocument* borrowed);
 
 signals:
+    void workspaceAdded(ProjectWorkspaceId id);
+    void workspaceAboutToClose(ProjectWorkspaceId id);
+    void workspaceClosed(ProjectWorkspaceId id);
+    void activeWorkspaceChanged(ProjectWorkspaceId id);
+    void workspaceDomainChanged(ProjectWorkspaceId id, lcnc::ProjectDomain domain);
     void projectReset();
     void projectOpened(const QString& filePath);
     void projectSaved(const QString& filePath);
@@ -76,17 +104,24 @@ signals:
 
 private:
     LcncDocument* createDomainDocument(ProjectDomain domain, const QString& name);
-    void resetProjectDocuments(const QString& projectName);
+    void resetWorkspace(ProjectWorkspace* workspace, const QString& projectName);
     bool importGeometryFile(LcncDocument* document, const QString& filePath, QString* errorMsg);
-    void syncSessionFromDocuments();
+    void syncWorkspaceSession(ProjectWorkspace* workspace) const;
     void markDomainDirty(ProjectDomain domain);
+    LcncProjectSession& fallbackSession();
+    const LcncProjectSession& fallbackSession() const;
+    std::shared_ptr<ProjectWorkspace> makeWorkspace(ProjectWorkspaceId id, const QString& name);
+    void bindMachineDocumentToWorkspaces();
 
-    std::unique_ptr<LcncDocument> m_workpieceDocument;     ///< 统一工程文档：工件 + CAM 轮廓(EntityKind::Cam)。
     std::unique_ptr<LcncDocument> m_machineDocument;       ///< 内部 owned 兜底；attachMachineDocument 后被借用指针取代。
     LcncDocument*                 m_machineBorrowed{nullptr}; ///< CAM 工作台登记的"借用"机台 doc（非拥有视图路由引用）。
-    std::unique_ptr<lcnc::cam::CamDataManager> m_camData; ///< 工程核心：CAM 运行时数据。
+    std::map<ProjectWorkspaceId, std::shared_ptr<ProjectWorkspace>> m_workspaces;
+    ProjectWorkspaceId m_activeWorkspaceId{kInvalidProjectWorkspaceId};
+    DocumentOpenMode m_documentOpenMode{DocumentOpenMode::MultiDocument};
+    std::uint64_t m_singleDocumentOpenGeneration{0};
     int m_nextDocumentId{0};
-    LcncProjectSession m_session;
+    ProjectWorkspaceId m_nextWorkspaceId{0};
+    mutable LcncProjectSession m_emptySession;
 };
 
 } // namespace lcnc
