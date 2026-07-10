@@ -355,6 +355,18 @@ ProcessCuttingPlanService::contoursInLayer(std::uint64_t layerId) const
 void ProcessCuttingPlanService::bumpRevisionAndNotify(bool manualOnly)
 {
     ++m_planRevision;
+    if (m_provider) {
+        const auto cuttingList = buildCuttingList();
+        QVector<std::uint64_t> orderedContourIds;
+        orderedContourIds.reserve(cuttingList.size());
+        for (const CuttingListEntry& entry : cuttingList)
+            orderedContourIds.append(entry.contourId);
+
+        if (!m_provider->solveToolpathForOrder(orderedContourIds)) {
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "process.cuttingPlan: five-axis toolpath solve failed after cutting order changed");
+        }
+    }
     if (manualOnly)
         emit manualOrderChanged();
     emit planChanged();

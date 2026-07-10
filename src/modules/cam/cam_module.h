@@ -231,6 +231,7 @@ public:
     int toolpathContourCount() const override;
     int toolpathContourPointCount(int contourIndex) const override;
     std::uint64_t toolpathRevision() const;
+    bool solveToolpathForOrder(const QVector<std::uint64_t>& orderedContourIds);
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds) const;

@@ -227,6 +227,17 @@ public:
                                           const gp_Trsf& wpcTransform,
                                           MachineCoord* continuityState = nullptr);
 
+    /// Compute machine coordinates for contours in their actual cutting order.
+    /// The final valid pose of one contour is the initial reference for the
+    /// next contour, so rotary branch selection is continuous across contours.
+    /// This is the only batch-level five-axis planning entry point; contour
+    /// extraction and discretisation must not independently solve IK.
+    static void computeMachineCoordinatesForOrder(
+        const std::vector<LaserContour*>& orderedContours,
+        MachineKinematics* kinematics,
+        const gp_Trsf& wpcTransform,
+        MachineCoord* initialState = nullptr);
+
 private:
     LaserToolpathBuilder() = delete;
 };

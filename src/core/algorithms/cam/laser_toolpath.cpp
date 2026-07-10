@@ -1117,3 +1117,26 @@ void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
               rangeMin(machineR2), rangeMax(machineR2),
               tracePoints);
 }
+
+void LaserToolpathBuilder::computeMachineCoordinatesForOrder(
+    const std::vector<LaserContour*>& orderedContours,
+    MachineKinematics* kinematics,
+    const gp_Trsf& wpcTransform,
+    MachineCoord* initialState)
+{
+    if (!kinematics)
+        return;
+
+    MachineCoord continuityState;
+    if (initialState && initialState->valid)
+        continuityState = *initialState;
+
+    for (LaserContour* contour : orderedContours) {
+        if (!contour)
+            continue;
+        computeMachineCoordinates(*contour, kinematics, wpcTransform, &continuityState);
+    }
+
+    if (initialState && continuityState.valid)
+        *initialState = continuityState;
+}

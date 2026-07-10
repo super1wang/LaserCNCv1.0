@@ -42,6 +42,11 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshotForOrde
         m_snapshot.description = QObject::tr("未连接 CAM 刀路提供者");
         return m_snapshot;
     }
+    if (!m_provider->solveToolpathForOrder(orderedContourIds)) {
+        m_snapshot = {};
+        m_snapshot.description = QObject::tr("CAM 五轴刀路求解失败");
+        return m_snapshot;
+    }
     m_snapshot = m_provider->exportToolpathSnapshotForOrder(orderedContourIds);
     LCNC_INFO(lcnc::LogCode::Generic,
               "process.toolpath: ordered snapshot revision={} contours={} points={} orderSize={}",
