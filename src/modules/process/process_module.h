@@ -24,6 +24,7 @@ class LegacyProcessIoService;
 class LegacyProcessMotionService;
 class NormalCuttingManager;
 class ProcessCuttingPlanService;
+class ProcessMonitorService;
 class ProcessWorkflowExecutor;
 }
 
@@ -169,6 +170,9 @@ private:
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
     void seedDefaultIOTables();
+    void startDeviceMonitoring();
+    void stopDeviceMonitoring();
+    bool validateProcessingEnvironment(QString* errorMessage);
 
     bool                  m_initialized{false};
     bool                  m_connected{false};
@@ -194,6 +198,7 @@ private:
     std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;
     std::unique_ptr<lcnc::process::ProcessCuttingPlanService> m_cuttingPlanService;
     std::unique_ptr<lcnc::process::NormalCuttingManager> m_normalCuttingManager;
+    std::unique_ptr<lcnc::process::ProcessMonitorService> m_monitorService;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
     std::atomic_bool      m_normalCuttingActive{false};  ///< 见 setNormalCuttingActive
 

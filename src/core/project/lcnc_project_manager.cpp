@@ -49,7 +49,6 @@ LcncProjectManager::~LcncProjectManager() = default;
 
 LcncProjectSession& LcncProjectManager::session()
 {
-    ensureProject();
     if (ProjectWorkspace* current = activeWorkspace())
         return current->session();
     return fallbackSession();

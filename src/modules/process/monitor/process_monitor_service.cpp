@@ -22,12 +22,15 @@ bool readDigitalValue(const ProcessMonitorPollContext& context,
     if (!value)
         return false;
 
-    Q_UNUSED(context);
+    if (context.readDigital)
+        return context.readDigital(channel, value, errorMessage);
+
     Q_UNUSED(channel);
-    // Simulation mode: always return default value.
     *value = false;
     if (errorMessage)
-        *errorMessage = QObject::tr("仿真模式：IO 不可用");
+        *errorMessage = context.simulationMode
+            ? QObject::tr("仿真模式：IO 不可用")
+            : QObject::tr("数字量读取器未配置");
     return false;
 }
 
@@ -39,12 +42,15 @@ bool readAnalogValue(const ProcessMonitorPollContext& context,
     if (!value)
         return false;
 
-    Q_UNUSED(context);
+    if (context.readAnalog)
+        return context.readAnalog(channel, value, errorMessage);
+
     Q_UNUSED(channel);
-    // Simulation mode: always return default value.
     *value = 0.0;
     if (errorMessage)
-        *errorMessage = QObject::tr("仿真模式：模拟量不可用");
+        *errorMessage = context.simulationMode
+            ? QObject::tr("仿真模式：模拟量不可用")
+            : QObject::tr("模拟量读取器未配置");
     return false;
 }
 

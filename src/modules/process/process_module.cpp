@@ -15,16 +15,20 @@
 #include "modules/process/cutting/normal_cutting_manager.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/execution/process_workflow_executor.h"
+#include "modules/process/monitor/process_monitor_service.h"
 #include "modules/process/Setting/BuiltinIODefs.h"
 #include "modules/process/Setting/Settings.h"
 #include "modules/process/steps/process_step_builtin_registration.h"
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/steps/services/legacy_process_services.h"
 #include "modules/process/System/Service.h"
+#include "modules/process/Tool/ToolFactory.h"
 #include "modules/process/workflow/process_flow_store.h"
 
 #include <QList>
 #include <QPointer>
+#include <QSet>
+#include <QStringList>
 #include <QTimer>
 #include <QVector>
 #include <QElapsedTimer>
@@ -100,6 +104,11 @@ QString logLevelForMessage(const QString& message)
     return QStringLiteral("info");
 }
 
+lcnc::ProcessMonitorSettings readMonitorSettings();
+QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels();
+QString configuredIoChannel(SettingSection section, const char* bucketName, const QString& fallback);
+QString enumNameFromTomlChannel(QString channel);
+
 double jogStepForLevel(int speedLevel)
 {
     switch (speedLevel) {
@@ -151,6 +160,18 @@ bool sameAxisDefinitions(const QList<MachineAxisDef>& lhs,
     }
 
     return true;
+}
+
+bool containsEnabledNodeType(const QVector<lcnc::process::ProcessNode>& nodes,
+                             lcnc::process::ProcessNodeType type)
+{
+    for (const auto& node : nodes) {
+        if (node.enabled && node.type == type)
+            return true;
+        if (containsEnabledNodeType(node.children, type))
+            return true;
+    }
+    return false;
 }
 
 double simulatedAxisValue(const MachineAxisDef& axis,
@@ -399,6 +420,90 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 emit processFlowChanged();
             });
 
+    // 设备监控服务：联机后周期性读取安全输入/模拟量，并在报警时按设置暂停或停止。
+    m_monitorService = std::make_unique<lcnc::process::ProcessMonitorService>(this);
+    m_monitorService->setContextProvider([this]() {
+        lcnc::process::ProcessMonitorPollContext context;
+        context.connected = m_connected;
+        context.simulationMode = m_simulationMode;
+        context.monitoringEnabled = m_connected && !m_simulationMode;
+        context.intervalMs = 500;
+        context.settings = readMonitorSettings();
+        context.cachedAxisPositions = m_axisPositions;
+        context.outputChannels = monitorOutputChannels();
+        context.interlockChannel = configuredIoChannel(
+            SettingSection::Digital, "DigitalIN", QStringLiteral("aInterLock"));
+        context.safetyLightCurtainChannel = configuredIoChannel(
+            SettingSection::Digital, "DigitalIN", QStringLiteral("aSafetyLightCurtain"));
+        context.pressureMonitorChannel = configuredIoChannel(
+            SettingSection::Digital, "DigitalIN", QStringLiteral("aPressureMonitor"));
+        context.waterLeakageChannel = configuredIoChannel(
+            SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterLeakageMonitor"));
+        context.waterTankChannel = configuredIoChannel(
+            SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterTankMonitor"));
+        context.waterPressureChannel = configuredIoChannel(
+            SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterPressure"));
+        context.waterLevelChannel = configuredIoChannel(
+            SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterLevel"));
+
+        MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+        context.readDigital = [mc](const QString& channel, bool* value, QString* errorMessage) {
+            if (!value)
+                return false;
+            if (!mc || !mc->IsConnected()) {
+                if (errorMessage) *errorMessage = QObject::tr("运动控制器未连接");
+                return false;
+            }
+            const QString enumName = enumNameFromTomlChannel(channel);
+            int raw = 0;
+            if (auto eIn = enum_cast<DigitalIN>(enumName.toStdString());
+                eIn.has_value() && mc->m_mapDigitalIN.count(eIn.value())
+                && mc->DigitalInputGet(eIn.value(), raw)) {
+                *value = raw != 0;
+                return true;
+            }
+            if (auto eOut = enum_cast<DigitalOUT>(enumName.toStdString());
+                eOut.has_value() && mc->m_mapDigitalOUT.count(eOut.value())
+                && mc->DigitalOutputGet(eOut.value(), raw)) {
+                *value = raw != 0;
+                return true;
+            }
+            if (errorMessage) *errorMessage = QObject::tr("通道未配置或读取失败: %1").arg(channel);
+            return false;
+        };
+        context.readAnalog = [mc](const QString& channel, double* value, QString* errorMessage) {
+            if (!value)
+                return false;
+            if (!mc || !mc->IsConnected()) {
+                if (errorMessage) *errorMessage = QObject::tr("运动控制器未连接");
+                return false;
+            }
+            const QString enumName = enumNameFromTomlChannel(channel);
+            if (auto eIn = enum_cast<AnalogIN>(enumName.toStdString());
+                eIn.has_value() && mc->m_mapAnalogIN.count(eIn.value())
+                && mc->AnalogInputGet(eIn.value(), *value)) {
+                return true;
+            }
+            if (errorMessage) *errorMessage = QObject::tr("模拟量通道未配置或读取失败: %1").arg(channel);
+            return false;
+        };
+        return context;
+    });
+    connect(m_monitorService.get(), &lcnc::process::ProcessMonitorService::alarmRaised,
+            this, [this](const lcnc::process::ProcessMonitorAlarm& alarm) {
+                setStatusMessage(tr("加工环境报警: %1").arg(alarm.message));
+                if (m_state != State::Running)
+                    return;
+                if (alarm.action == lcnc::ProcessMonitorFaultAction::Stop)
+                    runStop();
+                else if (alarm.action == lcnc::ProcessMonitorFaultAction::Pause)
+                    runPause();
+            });
+    connect(m_monitorService.get(), &lcnc::process::ProcessMonitorService::snapshotUpdated,
+            this, [this](const lcnc::process::ProcessMonitorSnapshot& snapshot) {
+                if (snapshot.hasActiveAlarm())
+                    setStatusMessage(tr("加工环境报警: %1").arg(snapshot.summary));
+            });
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 
@@ -419,9 +524,7 @@ void ProcessModule::stop()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::stop begin");
     if (!m_initialized) return;
-    if (m_hwStatusTimer)
-        m_hwStatusTimer->stop();
-    m_hwPollInFlight = false;
+    stopDeviceMonitoring();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
     m_initialized = false;
@@ -478,8 +581,7 @@ bool ProcessModule::connectController(const QString& endpoint)
 
     m_connected = true;
     emit connectionChanged(true);
-    if (m_hwStatusTimer && !m_hwStatusTimer->isActive())
-        m_hwStatusTimer->start();
+    startDeviceMonitoring();
     setStatusMessage(tr("控制器已连接: %1").arg(endpoint));
     return true;
 }
@@ -487,9 +589,7 @@ bool ProcessModule::connectController(const QString& endpoint)
 void ProcessModule::disconnectController()
 {
     triggerSafeStopOutputs();
-    if (m_hwStatusTimer)
-        m_hwStatusTimer->stop();
-    m_hwPollInFlight = false;
+    stopDeviceMonitoring();
     if (m_service) {
         if (auto* mc = m_service->GetMotionControl())
             mc->Disconnect();
@@ -600,9 +700,8 @@ void ProcessModule::connectAllDevices()
                 emit simulationModeChanged(false);
             }
             setStatusMessage(tr("设备已连接"));
-            // 启动硬件状态轮询：将控制器实际轴位/使能实时刷新到 UI。
-            if (m_hwStatusTimer && !m_hwStatusTimer->isActive())
-                m_hwStatusTimer->start();
+            // 启动硬件状态轮询和加工环境监控。
+            startDeviceMonitoring();
         } else {
             setStatusMessage(tr("设备连接失败"));
         }
@@ -637,9 +736,7 @@ void ProcessModule::disconnectAllDevices()
     // 已断开的情况下还有定时器/工作流继续触发指令。
     if (m_simTimer)
         m_simTimer->stop();
-    if (m_hwStatusTimer)
-        m_hwStatusTimer->stop();
-    m_hwPollInFlight = false;
+    stopDeviceMonitoring();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
     safeStopProcessOutputs();
@@ -962,15 +1059,265 @@ void ProcessModule::home()
     });
 }
 
+void ProcessModule::startDeviceMonitoring()
+{
+    if (!m_connected || m_simulationMode)
+        return;
+    if (m_hwStatusTimer && !m_hwStatusTimer->isActive())
+        m_hwStatusTimer->start();
+    pollHardwareStatus();
+    if (m_monitorService)
+        m_monitorService->start();
+}
+
+void ProcessModule::stopDeviceMonitoring()
+{
+    if (m_hwStatusTimer)
+        m_hwStatusTimer->stop();
+    m_hwPollInFlight = false;
+    if (m_monitorService)
+        m_monitorService->stop();
+}
+
+bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
+{
+    auto fail = [errorMessage](const QString& message) {
+        if (errorMessage)
+            *errorMessage = message;
+        return false;
+    };
+
+    if (m_state != State::Idle)
+        return fail(tr("当前状态机不是空闲待机状态，不能开始加工"));
+
+    const bool hasNormalCutting = containsEnabledNodeType(
+        m_processFlowDocument.rootNodes(), lcnc::process::ProcessNodeType::NormalCutting);
+    if (hasNormalCutting) {
+        if (!m_cuttingPlanService)
+            return fail(tr("切割计划服务未初始化"));
+
+        const auto cuttingList = m_cuttingPlanService->buildCuttingList();
+        if (cuttingList.isEmpty())
+            return fail(tr("没有可加工轮廓，请先生成刀路并启用需加工特征"));
+
+        QSet<QString> availableTools;
+        const QStringList toolNames = ToolFactory::toolNames();
+        for (const QString& toolName : toolNames)
+            availableTools.insert(toolName);
+        QStringList missingTools;
+        QStringList unknownTools;
+        QSet<std::uint64_t> reportedMissingLayers;
+        QSet<std::uint64_t> reportedUnknownLayers;
+        for (const auto& entry : cuttingList) {
+            const QString toolName = entry.toolName.trimmed();
+            const QString layerText = entry.layerName.trimmed().isEmpty()
+                ? tr("图层 %1").arg(entry.layerId)
+                : entry.layerName;
+            if (toolName.isEmpty()) {
+                if (!reportedMissingLayers.contains(entry.layerId)) {
+                    missingTools.append(layerText);
+                    reportedMissingLayers.insert(entry.layerId);
+                }
+                continue;
+            }
+            if (!availableTools.contains(toolName) && !reportedUnknownLayers.contains(entry.layerId)) {
+                unknownTools.append(tr("%1: %2").arg(layerText, toolName));
+                reportedUnknownLayers.insert(entry.layerId);
+            }
+        }
+        if (!missingTools.isEmpty())
+            return fail(tr("需加工特征对应图层未配置工具: %1").arg(missingTools.join(tr("，"))));
+        if (!unknownTools.isEmpty())
+            return fail(tr("图层配置了不存在的工具: %1").arg(unknownTools.join(tr("，"))));
+    }
+
+    if (m_simulationMode)
+        return true;
+
+    if (!m_connected)
+        return fail(tr("设备未连接，不能开始加工"));
+
+    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+    if (!mc || !mc->IsConnected())
+        return fail(tr("运动控制器未连接或连接已断开"));
+
+    startDeviceMonitoring();
+
+    if (mc->ErrorOccurred())
+        return fail(tr("运动控制器存在异常，请清除故障后再加工"));
+
+    int fault = 0;
+    if (!mc->IsAxisStatusNormal(fault))
+        return fail(tr("运动控制器状态读取失败，请检查控制器连接"));
+    if (fault != 0)
+        return fail(tr("运动控制器故障码: %1，请清除故障后再加工").arg(fault));
+
+    QStringList disabledAxes;
+    QStringList unregisteredAxes;
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        const QString name = axis.name.trimmed().toUpper();
+        if (name.isEmpty() || name == QStringLiteral("BASE"))
+            continue;
+        auto eAxis = enum_cast<Axis>(name.toStdString());
+        if (!eAxis.has_value())
+            continue;
+        if (!mc->IsMotorCreated(eAxis.value())) {
+            unregisteredAxes.append(name);
+            continue;
+        }
+        double pos = 0.0;
+        if (mc->GetActualPos(eAxis.value(), pos))
+            setAxisPosition(name, pos);
+        const bool enabled = mc->IsEnabled(eAxis.value());
+        if (m_axisEnabled.value(name, true) != enabled || !m_axisEnabled.contains(name)) {
+            m_axisEnabled.insert(name, enabled);
+            emit axisEnabledChanged(name, enabled);
+        }
+        if (!enabled)
+            disabledAxes.append(name);
+    }
+    if (!unregisteredAxes.isEmpty())
+        return fail(tr("运动控制器轴系未注册: %1").arg(unregisteredAxes.join(tr("，"))));
+    if (!disabledAxes.isEmpty())
+        return fail(tr("运动控制器轴系未使能: %1").arg(disabledAxes.join(tr("，"))));
+
+    LaserDevice* laser = m_service ? m_service->GetLaserDevice() : nullptr;
+    if (!laser)
+        return fail(tr("激光器未创建，请先连接设备"));
+    const QString laserName = QString::fromStdString(laser->GetName());
+    const bool analogLaser = laserName.compare(QStringLiteral("AnalogControl"), Qt::CaseInsensitive) == 0;
+    if (!analogLaser && !laser->IsConnected())
+        return fail(tr("激光器未连接或连接已断开"));
+    if (!laser->IsInited())
+        return fail(tr("激光器参数未初始化"));
+    if (!analogLaser) {
+        const QString laserFault = QString::fromStdString(laser->GetTroubleshooting()).trimmed();
+        if (!laserFault.isEmpty() && laserFault.compare(QStringLiteral("OK"), Qt::CaseInsensitive) != 0)
+            return fail(tr("激光器异常: %1").arg(laserFault));
+    }
+
+    const lcnc::ProcessMonitorSettings monitorSettings = readMonitorSettings();
+    auto readDigitalInput = [mc](const QString& channel, bool* value, QString* detail) {
+        if (!value)
+            return false;
+        const QString enumName = enumNameFromTomlChannel(channel);
+        auto eIn = enum_cast<DigitalIN>(enumName.toStdString());
+        if (!eIn.has_value() || !mc->m_mapDigitalIN.count(eIn.value())) {
+            if (detail) *detail = QObject::tr("通道未配置: %1").arg(channel);
+            return false;
+        }
+        int raw = 0;
+        if (!mc->DigitalInputGet(eIn.value(), raw)) {
+            if (detail) *detail = QObject::tr("通道读取失败: %1").arg(channel);
+            return false;
+        }
+        *value = raw != 0;
+        return true;
+    };
+    auto requireDigitalNormal = [&](bool enabled,
+                                    const QString& title,
+                                    const QString& channel,
+                                    bool alarmWhenTrue) {
+        if (!enabled)
+            return QString();
+        if (channel.trimmed().isEmpty())
+            return tr("%1监控通道未配置").arg(title);
+        bool value = false;
+        QString detail;
+        if (!readDigitalInput(channel, &value, &detail))
+            return tr("%1状态获取失败: %2").arg(title, detail);
+        if (value == alarmWhenTrue)
+            return tr("%1异常").arg(title);
+        return QString();
+    };
+
+    QString monitorError = requireDigitalNormal(
+        monitorSettings.interLockEnabled,
+        tr("门禁"),
+        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aInterLock")),
+        true);
+    if (!monitorError.isEmpty())
+        return fail(monitorError);
+    monitorError = requireDigitalNormal(
+        monitorSettings.safetyLightCurtainEnabled,
+        tr("安全光栅"),
+        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aSafetyLightCurtain")),
+        true);
+    if (!monitorError.isEmpty())
+        return fail(monitorError);
+    monitorError = requireDigitalNormal(
+        monitorSettings.pressureMonitorEnabled,
+        tr("气压监控"),
+        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aPressureMonitor")),
+        true);
+    if (!monitorError.isEmpty())
+        return fail(monitorError);
+    monitorError = requireDigitalNormal(
+        monitorSettings.waterLeakageMonitorEnabled,
+        tr("漏水监控"),
+        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterLeakageMonitor")),
+        true);
+    if (!monitorError.isEmpty())
+        return fail(monitorError);
+    monitorError = requireDigitalNormal(
+        monitorSettings.waterTankMonitorEnabled,
+        tr("水箱监控"),
+        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterTankMonitor")),
+        true);
+    if (!monitorError.isEmpty())
+        return fail(monitorError);
+
+    auto requireAnalogAtLeast = [&](bool enabled,
+                                    const QString& title,
+                                    const QString& channel,
+                                    double threshold,
+                                    const QString& unit) {
+        if (!enabled)
+            return QString();
+        if (channel.trimmed().isEmpty())
+            return tr("%1通道未配置").arg(title);
+        const QString enumName = enumNameFromTomlChannel(channel);
+        auto eIn = enum_cast<AnalogIN>(enumName.toStdString());
+        if (!eIn.has_value() || !mc->m_mapAnalogIN.count(eIn.value()))
+            return tr("%1通道未配置: %2").arg(title, channel);
+        double value = 0.0;
+        if (!mc->AnalogInputGet(eIn.value(), value))
+            return tr("%1状态获取失败: %2").arg(title, channel);
+        if (value < threshold) {
+            return tr("%1异常: 当前值 %2 %3，阈值 %4 %3")
+                .arg(title,
+                     QString::number(value, 'f', 3),
+                     unit,
+                     QString::number(threshold, 'f', 3));
+        }
+        return QString();
+    };
+    monitorError = requireAnalogAtLeast(
+        monitorSettings.waterPressureMonitorEnabled,
+        tr("水压监控"),
+        configuredIoChannel(SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterPressure")),
+        monitorSettings.waterPressureLimitMpa,
+        QStringLiteral("MPa"));
+    if (!monitorError.isEmpty())
+        return fail(monitorError);
+    monitorError = requireAnalogAtLeast(
+        monitorSettings.waterLevelMonitorEnabled,
+        tr("水位监控"),
+        configuredIoChannel(SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterLevel")),
+        monitorSettings.waterLevelLimitMm,
+        QStringLiteral("mm"));
+    if (!monitorError.isEmpty())
+        return fail(monitorError);
+
+    if (m_monitorService)
+        m_monitorService->requestPoll();
+    return true;
+}
+
 void ProcessModule::runStart()
 {
     if (m_state == State::EmergencyStop) {
         setStatusMessage(tr("急停状态，复位后才能运行"));
-        return;
-    }
-
-    if (!m_simulationMode && !m_connected) {
-        setState(State::Error, tr("未连接控制器，无法运行"));
         return;
     }
 
@@ -980,6 +1327,12 @@ void ProcessModule::runStart()
         if (m_simulationMode)
             m_simTimer->start(std::max(30, static_cast<int>(100.0 / std::max(0.1, m_feedOverride))));
         setState(State::Running, tr("运行继续"));
+        return;
+    }
+
+    QString environmentError;
+    if (!validateProcessingEnvironment(&environmentError)) {
+        setState(State::Error, tr("加工环境检查失败: %1").arg(environmentError));
         return;
     }
 
@@ -1334,6 +1687,92 @@ bool extractIOEntry(const std::string& tomlKey, const value& v, IOEntry& out)
         return true;
     }
     return false;
+}
+
+bool tableBool(const table& t, const char* group, const char* key, bool fallback = false)
+{
+    auto groupIt = t.find(group);
+    if (groupIt == t.end() || !groupIt->second.is_table())
+        return fallback;
+    const auto& sub = groupIt->second.as_table();
+    auto it = sub.find(key);
+    return it != sub.end() && it->second.is_boolean() ? it->second.as_boolean() : fallback;
+}
+
+double tableDouble(const table& t, const char* group, const char* key, double fallback = 0.0)
+{
+    auto groupIt = t.find(group);
+    if (groupIt == t.end() || !groupIt->second.is_table())
+        return fallback;
+    const auto& sub = groupIt->second.as_table();
+    auto it = sub.find(key);
+    if (it == sub.end())
+        return fallback;
+    if (it->second.is_floating())
+        return it->second.as_floating();
+    if (it->second.is_integer())
+        return static_cast<double>(it->second.as_integer());
+    return fallback;
+}
+
+QString configuredIoChannel(SettingSection section, const char* bucketName, const QString& fallback)
+{
+    const table io = SETTINGS->GetTable(section);
+    const std::string bucketKey(bucketName);
+    const std::string fallbackKey = fallback.toStdString();
+    if (!io.count(bucketKey) || !io.at(bucketKey).is_table())
+        return fallback;
+
+    const auto& bucket = io.at(bucketKey).as_table();
+    auto it = bucket.find(fallbackKey);
+    if (it == bucket.end())
+        return fallback;
+
+    IOEntry entry;
+    if (!extractIOEntry(fallbackKey, it->second, entry))
+        return fallback;
+    return entry.enabled ? entry.channel : QString();
+}
+
+QString enumNameFromTomlChannel(QString channel)
+{
+    channel = channel.trimmed();
+    if (channel.startsWith(QLatin1Char('a')) && channel.size() >= 2)
+        channel = channel.mid(1);
+    return channel;
+}
+
+lcnc::ProcessMonitorSettings readMonitorSettings()
+{
+    lcnc::ProcessMonitorSettings settings;
+    const table monitor = SETTINGS->GetTable(SettingSection::Monitor);
+    settings.interLockEnabled = tableBool(monitor, "Cutting", "bInterLock", false);
+    settings.safetyLightCurtainEnabled = tableBool(monitor, "Cutting", "bSafetyLightCurtain", false);
+    settings.pressureMonitorEnabled = tableBool(monitor, "Gas", "bPressureMonitor", false);
+    settings.waterLeakageMonitorEnabled = tableBool(monitor, "Water", "bWaterLeakageMonitor", false);
+    settings.waterTankMonitorEnabled = tableBool(monitor, "Water", "bWaterTankMonitor", false);
+    settings.waterPressureMonitorEnabled = tableBool(monitor, "Water", "bWaterPressureMonitor", false);
+    settings.waterPressureLimitMpa = tableDouble(monitor, "Water", "fWaterPressureLimit", 1.0);
+    settings.waterLevelMonitorEnabled = tableBool(monitor, "Water", "bWaterLevelMonitor", false);
+    settings.waterLevelLimitMm = tableDouble(monitor, "Water", "fWaterLevelLimit", 50.0);
+    return settings;
+}
+
+QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels()
+{
+    QList<lcnc::process::ProcessMonitorOutputChannel> out;
+    const table digital = SETTINGS->GetTable(SettingSection::Digital);
+    if (!digital.count("DigitalOUT") || !digital.at("DigitalOUT").is_table())
+        return out;
+    for (const auto& kv : digital.at("DigitalOUT").as_table()) {
+        IOEntry entry;
+        if (!extractIOEntry(kv.first.data(), kv.second, entry))
+            continue;
+        if (!entry.enabled || entry.name.isEmpty())
+            continue;
+        out.append({entry.name, entry.channel});
+    }
+    return out;
 }
 
 } // namespace

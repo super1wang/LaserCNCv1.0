@@ -19,6 +19,9 @@ struct ProcessMonitorOutputChannel
 
 struct ProcessMonitorPollContext
 {
+    using DigitalReader = std::function<bool(const QString&, bool*, QString*)>;
+    using AnalogReader = std::function<bool(const QString&, double*, QString*)>;
+
     bool connected{false};
     bool simulationMode{true};
     bool monitoringEnabled{true};
@@ -33,6 +36,8 @@ struct ProcessMonitorPollContext
     QString waterTankChannel;
     QString waterPressureChannel;
     QString waterLevelChannel;
+    DigitalReader readDigital;
+    AnalogReader readAnalog;
 };
 
 class ProcessMonitorService : public QObject
