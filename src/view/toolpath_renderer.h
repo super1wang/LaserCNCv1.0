@@ -25,6 +25,7 @@ public:
     /// 引入线预览（与 picking 服务共享的瞬态状态，由 CamModule 在调用前填好）。
     struct LeadInPreview {
         int    contourIndex{-1};
+        int    pointIndex{-1};
         gp_Pnt entryPoint;
         double entryParam{0.0};
         bool   valid{false};

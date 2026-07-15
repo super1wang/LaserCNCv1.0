@@ -73,8 +73,8 @@ void CmdGenerateToolpath::execute()
 CmdSetLeadIn::CmdSetLeadIn(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/toolpath_32.svg"), tr("选择引刀位置"), this);
-    a->setStatusTip(tr("在3D视图中点击轮廓边缘选择引刀线起始位置"));
+    auto* a = new QAction(QIcon(":/icons/toolpath_32.svg"), tr("选择轮廓起点"), this);
+    a->setStatusTip(tr("在3D视图中点击轮廓采样点设置真实加工起点"));
     setAction(a);
 }
 
@@ -99,7 +99,7 @@ void CmdSetLeadIn::execute()
 
     occView->beginLeadInPick();
     QToolTip::showText(occView->mapToGlobal(QPoint(24, 24)),
-                       tr("移动鼠标预览引刀线，左键确认，右键或 Esc 取消"),
+                       tr("移动鼠标预览下刀线，左键确认轮廓起点，右键或 Esc 取消"),
                        occView);
 }
 

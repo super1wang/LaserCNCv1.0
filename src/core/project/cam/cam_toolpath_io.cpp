@@ -28,11 +28,11 @@ namespace {
 
 constexpr char kCamToolpathTomlFile[]   = "cam_toolpath.toml";
 constexpr char kCamToolpathPointsFile[] = "cam_toolpath_points.bin";
-constexpr int  kCamToolpathSchemaVersion = 1;
+constexpr int  kCamToolpathSchemaVersion = 2;
 
 // 二进制点集 magic 头（"LCNCTPT1"）。
 constexpr quint64 kPointsBinMagic = 0x315450434E434C00ull;
-constexpr quint32 kPointsBinVersion = 1;
+constexpr quint32 kPointsBinVersion = 3;
 
 // v1 process_cutting_plan.toml 字段（仅用于一次性迁移）。
 constexpr char kLegacyPlanFile[]        = "process_cutting_plan.toml";
@@ -124,6 +124,26 @@ bool writePointsBin(const QString& filePath,
         for (const ToolpathPoint& p : c.points) {
             ds << p.position.X() << p.position.Y() << p.position.Z();
             ds << p.normal.X()   << p.normal.Y()   << p.normal.Z();
+            ds << p.crossSectionNormal.X()
+               << p.crossSectionNormal.Y()
+               << p.crossSectionNormal.Z();
+            ds << static_cast<quint8>(p.crossSectionNormalValid ? 1 : 0);
+            ds << p.tangent.X()  << p.tangent.Y()  << p.tangent.Z();
+            ds << p.param;
+            ds << p.machineCoord.x << p.machineCoord.y << p.machineCoord.z;
+            ds << p.machineCoord.r1 << p.machineCoord.r2;
+            ds << p.machineCoord.r1Name << p.machineCoord.r2Name;
+            ds << static_cast<quint8>(p.machineCoord.valid ? 1 : 0);
+        }
+        ds << static_cast<quint8>(c.leadInSolution.valid ? 1 : 0);
+        if (c.leadInSolution.valid) {
+            const ToolpathPoint& p = c.leadInSolution.point;
+            ds << p.position.X() << p.position.Y() << p.position.Z();
+            ds << p.normal.X()   << p.normal.Y()   << p.normal.Z();
+            ds << p.crossSectionNormal.X()
+               << p.crossSectionNormal.Y()
+               << p.crossSectionNormal.Z();
+            ds << static_cast<quint8>(p.crossSectionNormalValid ? 1 : 0);
             ds << p.tangent.X()  << p.tangent.Y()  << p.tangent.Z();
             ds << p.param;
             ds << p.machineCoord.x << p.machineCoord.y << p.machineCoord.z;
@@ -137,6 +157,7 @@ bool writePointsBin(const QString& filePath,
 
 bool readPointsBin(const QString& filePath,
                    QHash<std::uint64_t, std::vector<ToolpathPoint>>& pointsByContourId,
+                   QHash<std::uint64_t, LeadInSolution>& leadInsByContourId,
                    QString* errorMsg)
 {
     QFile f(filePath);
@@ -156,7 +177,7 @@ bool readPointsBin(const QString& filePath,
         if (errorMsg) *errorMsg = QStringLiteral("点集文件 magic 不匹配");
         return false;
     }
-    if (version != kPointsBinVersion) {
+    if (version < 1 || version > kPointsBinVersion) {
         if (errorMsg) *errorMsg = QStringLiteral("点集文件版本 %1 不支持").arg(version);
         return false;
     }
@@ -169,14 +190,21 @@ bool readPointsBin(const QString& filePath,
         pts.reserve(pointCount);
         for (quint32 k = 0; k < pointCount; ++k) {
             double px, py, pz, nx, ny, nz, tx, ty, tz, par;
+            double cnx = 0.0, cny = 0.0, cnz = 1.0;
             double mx, my, mz, r1, r2;
             QString r1Name, r2Name;
             quint8 valid = 0;
-            ds >> px >> py >> pz >> nx >> ny >> nz >> tx >> ty >> tz >> par;
+            quint8 crossValid = 0;
+            ds >> px >> py >> pz >> nx >> ny >> nz;
+            if (version >= 2)
+                ds >> cnx >> cny >> cnz >> crossValid;
+            ds >> tx >> ty >> tz >> par;
             ds >> mx >> my >> mz >> r1 >> r2 >> r1Name >> r2Name >> valid;
             ToolpathPoint tp;
             tp.position = gp_Pnt(px, py, pz);
             tp.normal   = gp_Dir(nx, ny, nz);
+            tp.crossSectionNormal = gp_Dir(cnx, cny, cnz);
+            tp.crossSectionNormalValid = (crossValid != 0);
             tp.tangent  = gp_Dir(tx, ty, tz);
             tp.param    = par;
             tp.machineCoord.x = mx;
@@ -190,6 +218,39 @@ bool readPointsBin(const QString& filePath,
             pts.push_back(std::move(tp));
         }
         pointsByContourId.insert(static_cast<std::uint64_t>(contourId), std::move(pts));
+
+        if (version >= 3) {
+            quint8 leadValid = 0;
+            ds >> leadValid;
+            if (leadValid != 0) {
+                double px, py, pz, nx, ny, nz, tx, ty, tz, par;
+                double cnx, cny, cnz, mx, my, mz, r1, r2;
+                QString r1Name, r2Name;
+                quint8 crossValid = 0, machineValid = 0;
+                ds >> px >> py >> pz >> nx >> ny >> nz;
+                ds >> cnx >> cny >> cnz >> crossValid;
+                ds >> tx >> ty >> tz >> par;
+                ds >> mx >> my >> mz >> r1 >> r2 >> r1Name >> r2Name >> machineValid;
+                LeadInSolution solution;
+                solution.point.position = gp_Pnt(px, py, pz);
+                solution.point.normal = gp_Dir(nx, ny, nz);
+                solution.point.crossSectionNormal = gp_Dir(cnx, cny, cnz);
+                solution.point.crossSectionNormalValid = (crossValid != 0);
+                solution.point.tangent = gp_Dir(tx, ty, tz);
+                solution.point.param = par;
+                solution.point.machineCoord.x = mx;
+                solution.point.machineCoord.y = my;
+                solution.point.machineCoord.z = mz;
+                solution.point.machineCoord.r1 = r1;
+                solution.point.machineCoord.r2 = r2;
+                solution.point.machineCoord.r1Name = r1Name;
+                solution.point.machineCoord.r2Name = r2Name;
+                solution.point.machineCoord.valid = (machineValid != 0);
+                solution.valid = true;
+                leadInsByContourId.insert(static_cast<std::uint64_t>(contourId),
+                                          std::move(solution));
+            }
+        }
     }
     return ds.status() == QDataStream::Ok;
 }
@@ -284,14 +345,13 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
         entry["sourceInfo"]     = c.sourceInfo.toStdString();
         entry["contourType"]    = static_cast<std::int64_t>(c.contourType);
         entry["leadInLength"]      = c.leadIn.length;
-        entry["leadInNormalAngle"] = c.leadIn.normalAngle;
         entry["leadInValid"]       = c.leadIn.valid;
         if (c.leadIn.valid) {
             entry["leadInEntryX"]    = c.leadIn.entryPoint.X();
             entry["leadInEntryY"]    = c.leadIn.entryPoint.Y();
             entry["leadInEntryZ"]    = c.leadIn.entryPoint.Z();
             entry["leadInEntryParam"]= c.leadIn.entryParam;
-            entry["leadInEntryEdge"] = static_cast<std::int64_t>(c.leadIn.entryEdgeIndex);
+            entry["leadInEntryPointIndex"] = static_cast<std::int64_t>(c.leadIn.entryPointIndex);
         }
         contoursArr.push_back(entry);
     }
@@ -310,7 +370,6 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
     const CamDataManager::GenerationParams& gp = cam.generationParams();
     toml::value gen(toml::table{});
     gen["leadInLength"]         = gp.leadInLength;
-    gen["normalAngle"]          = gp.normalAngle;
     gen["deflection"]           = gp.deflection;
     gen["smoothAngle"]          = gp.smoothAngle;
     gen["useFaceClassification"] = gp.useFaceClassification;
@@ -361,7 +420,8 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
 
     // 2. 读点集（先于 LaserContour，确保按 contourId 关联）。
     QHash<std::uint64_t, std::vector<ToolpathPoint>> pointsByContourId;
-    if (!readPointsBin(pointsPath, pointsByContourId, errorMsg))
+    QHash<std::uint64_t, LeadInSolution> leadInsByContourId;
+    if (!readPointsBin(pointsPath, pointsByContourId, leadInsByContourId, errorMsg))
         return false;
 
     // 3. 装配 LaserToolpath
@@ -407,7 +467,6 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             if (e.contains("sourceInfo"))     c.sourceInfo     = QString::fromStdString(e.at("sourceInfo").as_string());
             if (e.contains("contourType"))    c.contourType    = static_cast<int>(e.at("contourType").as_integer());
             if (e.contains("leadInLength"))   c.leadIn.length      = e.at("leadInLength").as_floating();
-            if (e.contains("leadInNormalAngle")) c.leadIn.normalAngle = e.at("leadInNormalAngle").as_floating();
             if (e.contains("leadInValid"))    c.leadIn.valid       = e.at("leadInValid").as_boolean();
             if (c.leadIn.valid) {
                 if (e.contains("leadInEntryX") && e.contains("leadInEntryY") && e.contains("leadInEntryZ")) {
@@ -417,12 +476,25 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
                         e.at("leadInEntryZ").as_floating());
                 }
                 if (e.contains("leadInEntryParam")) c.leadIn.entryParam = e.at("leadInEntryParam").as_floating();
-                if (e.contains("leadInEntryEdge"))  c.leadIn.entryEdgeIndex = static_cast<int>(e.at("leadInEntryEdge").as_integer());
+                if (e.contains("leadInEntryPointIndex"))
+                    c.leadIn.entryPointIndex = static_cast<int>(e.at("leadInEntryPointIndex").as_integer());
+                else
+                    c.leadIn.entryPointIndex = 0;
             }
 
             auto it = pointsByContourId.find(c.contourId);
             if (it != pointsByContourId.end())
                 c.points = std::move(it.value());
+            auto leadIt = leadInsByContourId.find(c.contourId);
+            if (leadIt != leadInsByContourId.end()) {
+                c.leadInSolution = std::move(leadIt.value());
+                if (!c.points.empty()) {
+                    gp_Vec direction(c.points.front().position,
+                                     c.leadInSolution.point.position);
+                    if (direction.Magnitude() > 1e-9)
+                        c.leadInSolution.direction = gp_Dir(direction);
+                }
+            }
             toolpath.contours().push_back(std::move(c));
         }
     }
@@ -484,7 +556,6 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         const toml::value& gen = root.at("generation");
         CamDataManager::GenerationParams gp = cam.generationParams();
         if (gen.contains("leadInLength"))         gp.leadInLength         = gen.at("leadInLength").as_floating();
-        if (gen.contains("normalAngle"))          gp.normalAngle          = gen.at("normalAngle").as_floating();
         if (gen.contains("deflection"))           gp.deflection           = gen.at("deflection").as_floating();
         if (gen.contains("smoothAngle"))          gp.smoothAngle          = gen.at("smoothAngle").as_floating();
         if (gen.contains("useFaceClassification")) gp.useFaceClassification = gen.at("useFaceClassification").as_boolean();

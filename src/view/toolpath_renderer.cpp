@@ -288,8 +288,7 @@ void ToolpathRenderer::rebuildLeadInAis(GuiDocument* gd,
     if (!contour.enabled || !contour.leadIn.valid)
         return;
 
-    TopoDS_Edge leadEdge = LaserToolpathBuilder::computeLeadInEdge(
-        contour, tp.globalLeadInLength(), tp.globalNormalAngle());
+    TopoDS_Edge leadEdge = LaserToolpathBuilder::computeLeadInEdge(contour);
     if (leadEdge.IsNull())
         return;
 
@@ -376,11 +375,9 @@ void ToolpathRenderer::rebuildPreviewAis(GuiDocument* gd,
         return;
 
     LaserContour previewContour = source;
-    previewContour.leadIn.entryPoint = preview.entryPoint;
-    previewContour.leadIn.entryParam = preview.entryParam;
-    previewContour.leadIn.valid = true;
-    TopoDS_Edge previewEdge = LaserToolpathBuilder::computeLeadInEdge(
-        previewContour, tp.globalLeadInLength(), tp.globalNormalAngle());
+    if (!LaserToolpathBuilder::setContourStart(previewContour, preview.pointIndex))
+        return;
+    TopoDS_Edge previewEdge = LaserToolpathBuilder::computeLeadInEdge(previewContour);
     if (previewEdge.IsNull())
         return;
 

@@ -40,14 +40,6 @@ void WidgetToolpathPanel::buildUi()
     m_spinLeadInLength->setSingleStep(0.5);
     paramForm->addRow(tr("引刀长度:"), m_spinLeadInLength);
 
-    m_spinNormalAngle = new QDoubleSpinBox(paramGroup);
-    m_spinNormalAngle->setRange(-90.0, 90.0);
-    m_spinNormalAngle->setValue(0.0);
-    m_spinNormalAngle->setDecimals(1);
-    m_spinNormalAngle->setSuffix(tr(" °"));
-    m_spinNormalAngle->setSingleStep(1.0);
-    paramForm->addRow(tr("法线角度:"), m_spinNormalAngle);
-
     m_spinDeflection = new QDoubleSpinBox(paramGroup);
     m_spinDeflection->setRange(0.01, 50.0);
     m_spinDeflection->setValue(0.1);
@@ -106,7 +98,7 @@ void WidgetToolpathPanel::buildUi()
     auto* opsLayout = new QVBoxLayout(opsGroup);
 
     m_btnGenerate  = new QPushButton(tr("生成刀路"), opsGroup);
-    m_btnPickLeadIn = new QPushButton(tr("选择引刀位置"), opsGroup);
+    m_btnPickLeadIn = new QPushButton(tr("选择轮廓起点"), opsGroup);
     m_btnRecalc    = new QPushButton(tr("重新计算"), opsGroup);
     m_btnPreview   = new QPushButton(tr("刀路预览"), opsGroup);
     m_btnPreview->setCheckable(true);
@@ -150,8 +142,6 @@ void WidgetToolpathPanel::buildUi()
 
     connect(m_spinLeadInLength, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::leadInLengthChanged);
-    connect(m_spinNormalAngle,  QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &WidgetToolpathPanel::normalAngleChanged);
     connect(m_spinDeflection,   QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::discretizationIntervalChanged);
 
@@ -176,7 +166,6 @@ void WidgetToolpathPanel::setToolpath(LaserToolpath* tp)
 
     if (tp) {
         setLeadInLength(tp->globalLeadInLength());
-        setNormalAngle(tp->globalNormalAngle());
     }
 }
 
@@ -190,18 +179,6 @@ void WidgetToolpathPanel::setLeadInLength(double mm)
 
     const QSignalBlocker blocker(m_spinLeadInLength);
     m_spinLeadInLength->setValue(mm);
-}
-
-void WidgetToolpathPanel::setNormalAngle(double deg)
-{
-    if (!m_spinNormalAngle)
-        return;
-
-    if (qFuzzyCompare(m_spinNormalAngle->value() + 1.0, deg + 1.0))
-        return;
-
-    const QSignalBlocker blocker(m_spinNormalAngle);
-    m_spinNormalAngle->setValue(deg);
 }
 
 void WidgetToolpathPanel::setDiscretizationInterval(double mm)
@@ -266,11 +243,6 @@ void WidgetToolpathPanel::setNormalSampleStep(double mm)
 double WidgetToolpathPanel::leadInLength() const
 {
     return m_spinLeadInLength ? m_spinLeadInLength->value() : 5.0;
-}
-
-double WidgetToolpathPanel::normalAngle() const
-{
-    return m_spinNormalAngle ? m_spinNormalAngle->value() : 0.0;
 }
 
 double WidgetToolpathPanel::discretizationInterval() const

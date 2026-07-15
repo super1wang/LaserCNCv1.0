@@ -49,7 +49,7 @@ struct ToolpathExportContour
     int pointCount{0};
 
     // 世界坐标系下的几何端点，给空程规划/虚线绘制直接消费。
-    // startX/Y/Z = leadIn.valid ? lead-in 起点 : points.front()
+    // startX/Y/Z = lead-in 解有效 ? 下刀点 : points.front()
     // endX/Y/Z   = points.back()
     // cutStartX/Y/Z 始终是 points.front()，即真正的切割切入点
     double startX{0.0};
@@ -61,6 +61,8 @@ struct ToolpathExportContour
     double cutStartX{0.0};
     double cutStartY{0.0};
     double cutStartZ{0.0};
+    ToolpathExportPoint leadInPoint;
+    QString leadInError;
     bool hasLeadIn{false};
     bool endpointsValid{false};
 };

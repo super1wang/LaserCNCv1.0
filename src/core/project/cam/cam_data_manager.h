@@ -53,7 +53,6 @@ public:
     /// 新建工程时由 CAM 模块用全局 cam.toml 默认值播种。
     struct GenerationParams {
         double leadInLength{5.0};
-        double normalAngle{0.0};
         double deflection{0.1};
         double smoothAngle{5.0};
         bool   useFaceClassification{true};

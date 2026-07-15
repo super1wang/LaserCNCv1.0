@@ -38,6 +38,8 @@ struct ToolpathPoint
 {
     gp_Pnt position;      ///< 3D point on the contour
     gp_Dir normal;        ///< Surface normal at this point (laser beam direction)
+    gp_Dir crossSectionNormal{0, 0, 1}; ///< Normal of the cross-section owning this point
+    bool   crossSectionNormalValid{false};
     gp_Dir tangent;       ///< Tangent direction along the contour (for 5-axis)
     double param{0.0};    ///< Curve parameter on the source edge
     MachineCoord machineCoord; ///< Computed machine coordinates (filled by IK)
@@ -49,11 +51,21 @@ struct ToolpathPoint
 struct LeadInParams
 {
     double  length{5.0};       ///< Lead-in length in mm
-    double  normalAngle{0.0};  ///< Normal angle offset in degrees
     gp_Pnt  entryPoint;        ///< Entry point on the contour where lead-in meets the path
     double  entryParam{0.0};   ///< Curve parameter at the entry point
-    int     entryEdgeIndex{-1};///< Index of the edge within the wire (-1 = not set)
+    int     entryPointIndex{-1};///< Selected sampled point (-1 = not set)
     bool    valid{false};      ///< True when the user has picked an entry point
+};
+
+/**
+ * @brief Derived lead-in pose. It is rebuilt from the selected contour start.
+ */
+struct LeadInSolution
+{
+    ToolpathPoint point;
+    gp_Dir direction{1, 0, 0}; ///< From contour start towards the lead-in point
+    QString error;
+    bool valid{false};
 };
 
 /**
@@ -69,6 +81,7 @@ struct LaserContour
     TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
     LeadInParams               leadIn;   ///< Lead-in parameters for this contour
+    LeadInSolution             leadInSolution; ///< Derived geometry and machine pose
     bool                       enabled{true};
     QString                    name;
     QString                    workpieceEntry; ///< Mounted workpiece entry owning this contour
@@ -123,16 +136,13 @@ public:
 
     // Global parameters applied to all contours
     double globalLeadInLength()  const { return m_globalLeadInLength; }
-    double globalNormalAngle()   const { return m_globalNormalAngle; }
 
     void setGlobalLeadInLength(double mm)  { m_globalLeadInLength = mm; }
-    void setGlobalNormalAngle(double deg)  { m_globalNormalAngle = deg; }
 
 private:
     std::vector<LaserContour> m_contours;
     std::vector<ToolpathLayer> m_layers;
     double m_globalLeadInLength{5.0};
-    double m_globalNormalAngle{0.0};
 };
 
 /**
@@ -141,7 +151,7 @@ private:
  * Responsibilities:
  *  - Extract contour wires from a workpiece shape.
  *  - Discretise contours into sampled points with surface normals.
- *  - Compute lead-in geometry (approach line that enters from non-vertical direction).
+ *  - Compute a lead-in in the machining face's tangent plane towards free space.
  */
 /**
  * @brief Parameters for face-classification-based contour extraction.
@@ -176,20 +186,20 @@ public:
 
     /// Compute the lead-in approach edge for one contour.
     /// The lead-in line goes from the approach start to the entry point on the contour.
-    /// Direction is ensured to NOT come from directly above the workpiece.
     /// @return A TopoDS_Edge representing the lead-in line, or a null edge if invalid.
-    static TopoDS_Edge computeLeadInEdge(const LaserContour& contour,
-                                         double length,
-                                         double normalAngleDeg);
+    static TopoDS_Edge computeLeadInEdge(const LaserContour& contour);
 
-    /// Compute the lead-in approach start point for one contour, without building an Edge.
-    /// Same semantics as the first vertex of computeLeadInEdge().
-    /// @param success Optional output flag: true when the result is meaningful, false when
-    ///                the contour has no valid lead-in or the geometry degenerates.
-    static gp_Pnt computeLeadInStartPoint(const LaserContour& contour,
-                                          double length,
-                                          double normalAngleDeg,
-                                          bool* success = nullptr);
+    /// Build a lead-in in the machining face's tangent plane. Two nearby points
+    /// normal to the contour tangent determine which side leaves the trimmed
+    /// machining face; the configured length is not validated against solids.
+    static LeadInSolution computeLeadInSolution(const LaserContour& contour,
+                                                double length);
+
+    /// Make a sampled point the real cutting start. Closed contours are
+    /// rotated; open contours only accept either endpoint.
+    static bool setContourStart(LaserContour& contour,
+                                int pointIndex,
+                                QString* error = nullptr);
 
     /// Find the surface normal at a point on the workpiece.
     /// Iterates all faces and finds the one closest to the query point.
@@ -211,12 +221,6 @@ public:
         const std::vector<TopoDS_Face>& outerFaces,
         const std::vector<TopoDS_Face>& crossFaces,
         double deflection = 0.1);
-
-    /// Adjust an approach direction so it does not come from directly above.
-    /// If the angle between the approach direction and +Z is less than the
-    /// threshold (default 15°), the direction is rotated away from vertical.
-    static gp_Dir ensureNotFromAbove(const gp_Dir& approachDir,
-                                     double thresholdDeg = 15.0);
 
     /// Compute machine coordinates (IK) for all points in a contour.
     /// @param contour       The contour whose points will be updated with machine coords.

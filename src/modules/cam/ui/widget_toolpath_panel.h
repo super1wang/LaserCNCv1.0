@@ -29,7 +29,6 @@ public:
     void setToolpath(LaserToolpath* tp);
 
     void setLeadInLength(double mm);
-    void setNormalAngle(double deg);
     void setDiscretizationInterval(double mm);
     void setSmoothAngle(double deg);
     void setUseFaceClassification(bool enabled);
@@ -40,7 +39,6 @@ public:
     void showContourCoordinates(int contourIndex);
 
     double leadInLength()  const;
-    double normalAngle()   const;
     double discretizationInterval() const;
     double smoothAngle()   const;
     bool   useFaceClassification() const;
@@ -51,7 +49,6 @@ signals:
     void recalcRequested();
     void previewToggled(bool visible);
     void leadInLengthChanged(double mm);
-    void normalAngleChanged(double deg);
     void discretizationIntervalChanged(double mm);
     void smoothAngleChanged(double deg);
     void classificationModeChanged(int mode);
@@ -63,7 +60,6 @@ private:
 
     // Parameter widgets
     QDoubleSpinBox* m_spinLeadInLength{nullptr};
-    QDoubleSpinBox* m_spinNormalAngle{nullptr};
     QDoubleSpinBox* m_spinDeflection{nullptr};
 
     // Face classification widgets

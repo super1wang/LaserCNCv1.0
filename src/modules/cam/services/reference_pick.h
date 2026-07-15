@@ -30,6 +30,7 @@ bool resolveLeadInHit(WidgetOccView* occView,
                       const QPoint& screenPos,
                       const LaserToolpath& toolpath,
                       int& contourIdx,
+                      int& pointIdx,
                       gp_Pnt& entryPoint,
                       double& entryParam);
 

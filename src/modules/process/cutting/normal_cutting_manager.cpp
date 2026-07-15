@@ -348,9 +348,11 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     const double ox = row.compensationOffsetX;
     const double oy = row.compensationOffsetY;
     const auto& p0 = pts.front();
-    const double p0x = p0.machineX + ox;
-    const double p0y = p0.machineY + oy;
-    const MachinePose5 startPose = toPose5(p0, ox, oy);
+    const auto& lead = row.data.contour.leadInPoint;
+    const double leadX = lead.machineX + ox;
+    const double leadY = lead.machineY + oy;
+    const MachinePose5 leadPose = toPose5(lead, ox, oy);
+    const MachinePose5 contourStartPose = toPose5(p0, ox, oy);
 
     // ——— 程序起始（与遗留 buildContourACS / executeContourGTN 等价的语义序列）———
     sink.resetProgram();
@@ -362,18 +364,18 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
         if (tool.m_bCrossBridge) {
             sink.stopCuttingHead();
             sink.jumpToIdleZ(tool);
-            sink.jumpToXY(p0x, p0y, tool);
-            sink.jumpToPose(startPose, tool);
+            sink.jumpToXY(leadX, leadY, tool);
+            sink.jumpToPose(leadPose, tool);
             sink.startCuttingHead(tool);
         } else {
-            sink.jumpToXY(p0x, p0y, tool);
-            sink.jumpToPose(startPose, tool);
+            sink.jumpToXY(leadX, leadY, tool);
+            sink.jumpToPose(leadPose, tool);
             sink.startCuttingHead(tool);
         }
     } else {
         sink.jumpToIdleZ(tool);
-        sink.jumpToXY(p0x, p0y, tool);
-        sink.jumpToPose(startPose, tool);
+        sink.jumpToXY(leadX, leadY, tool);
+        sink.jumpToPose(leadPose, tool);
     }
 
     sink.setShutterTimings(tool.m_dBeforeOn, tool.m_dAfterOn,
@@ -381,7 +383,8 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     sink.laserOn(tool);
 
     // ——— 协调插补段：beginSegment → lineTo*  → endSegment ———
-    sink.beginSegment(startPose, tool);
+    sink.beginSegment(leadPose, tool);
+    sink.lineTo(contourStartPose, tool);
 
     for (int j = 1; j < pts.size(); ++j) {
         if ((j % kTokenPollEvery) == 0) {
@@ -429,6 +432,14 @@ void NormalCuttingManager::unwrapCuttingListCAxis(QVector<CuttingRow>& rows) con
         bool rowAdjusted = false;
         for (lcnc::cam::ToolpathExportPoint& point : row.data.points)
             rowAdjusted = unwrapPointCAxis(point, lastC, hasLastC) || rowAdjusted;
+        if (!row.data.points.isEmpty()) {
+            const auto& start = row.data.points.front();
+            auto& lead = row.data.contour.leadInPoint;
+            lead.machineR1 = start.machineR1;
+            lead.machineR2 = start.machineR2;
+            lead.rotaryAxis1Name = start.rotaryAxis1Name;
+            lead.rotaryAxis2Name = start.rotaryAxis2Name;
+        }
         if (rowAdjusted)
             ++adjustedContours;
     }
@@ -535,6 +546,20 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             const int srcIdx = indexById.value(e.contourId, -1);
             if (srcIdx < 0) continue;
             const auto& contour = snapshot.contours.at(srcIdx);
+            if (!contour.hasLeadIn || !contour.leadInPoint.machineCoordValid) {
+                if (errorMessage) {
+                    const QString reason = contour.leadInError.trimmed().isEmpty()
+                        ? tr("下刀位姿无效")
+                        : contour.leadInError;
+                    *errorMessage = tr("轮廓 \"%1\" 无法加工：%2")
+                                        .arg(contour.contourName, reason);
+                }
+                LCNC_ERR(lcnc::LogCode::ToolpathLeadInInvalid,
+                         "normal-cutting: contour {} has invalid lead-in: {}",
+                         contour.contourId,
+                         contour.leadInError.toStdString());
+                return {};
+            }
             CuttingRow row;
             row.data.contour = contour;
             row.data.points  = snapshot.pointsByContourId.value(contour.contourId);
@@ -545,6 +570,18 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
                           "normal-cutting: contour {} skipped (only {} point(s))",
                           contour.contourId, row.data.points.size());
                 continue;
+            }
+            for (const auto& point : row.data.points) {
+                if (point.machineCoordValid)
+                    continue;
+                if (errorMessage) {
+                    *errorMessage = tr("轮廓 \"%1\" 无法加工：存在未求解的五轴刀路点")
+                                        .arg(contour.contourName);
+                }
+                LCNC_ERR(lcnc::LogCode::Generic,
+                         "normal-cutting: contour {} contains invalid machine coordinates",
+                         contour.contourId);
+                return {};
             }
             QStringList warnings;
             row.tool = resolveTool(e.toolName, e.layerName, &warnings);

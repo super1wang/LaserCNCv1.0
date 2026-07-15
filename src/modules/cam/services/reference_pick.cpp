@@ -82,6 +82,7 @@ bool resolveLeadInHit(WidgetOccView* occView,
                       const QPoint& screenPos,
                       const LaserToolpath& toolpath,
                       int& contourIdx,
+                      int& pointIdx,
                       gp_Pnt& entryPoint,
                       double& entryParam)
 {
@@ -122,6 +123,7 @@ bool resolveLeadInHit(WidgetOccView* occView,
 
     const ToolpathPoint& hitPoint = toolpath.contour(bestContour).points[bestPoint];
     contourIdx = bestContour;
+    pointIdx = bestPoint;
     entryPoint = hitPoint.position;
     entryParam = hitPoint.param;
     return true;

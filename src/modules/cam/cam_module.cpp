@@ -436,7 +436,6 @@ CamModule::CamModule(QObject* parent)
     m_machineModelPath = config.machineModelPath();
     m_machineRenderQualityPreset = config.machineRenderQualityPreset();
     toolpathRef().setGlobalLeadInLength(config.leadInLength());
-    toolpathRef().setGlobalNormalAngle(config.normalAngle());
     m_deflection = config.deflection();
     m_smoothAngle = config.smoothAngle();
     m_useFaceClassification = config.useFaceClassification();
@@ -2045,9 +2044,11 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     if (workpieceSources.isEmpty())
         return false;
 
+    const double leadInLength = toolpathRef().globalLeadInLength();
     // 用 resetIds=false 清理：保留 signature → id 映射，使重新生成的 id 与原项目对齐。
     eraseToolpathDisplay();
     m_camData->clearToolpath(/*resetIds=*/false);
+    toolpathRef().setGlobalLeadInLength(leadInLength);
     // Phase C：CAM 已不再镜像到 XCAF，AIS 在 syncCamDocumentContours 中按 contourId 重建。
     m_workpieceShape = collectWorkpieceShape();
     bool effectiveUseFaceClassification = useFaceClassification;
@@ -2086,6 +2087,7 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
             continue;
 
         for (auto& contour : contours) {
+            contour.leadIn.length = leadInLength;
             contour.workpieceEntry = source.workpieceEntry;
             contour.sourceShape = source.shape;
             if (workpieceSources.size() > 1) {
@@ -2096,6 +2098,21 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 
             if (contour.points.empty())
                 LaserToolpathBuilder::discretizeContour(contour, source.shape, deflection);
+
+            if (!contour.points.empty()) {
+                QString leadInError;
+                if (!LaserToolpathBuilder::setContourStart(contour, 0, &leadInError)
+                    || !contour.leadInSolution.valid) {
+                    if (leadInError.isEmpty())
+                        leadInError = contour.leadInSolution.error;
+                    contour.leadIn.valid = false;
+                    contour.leadInSolution = {};
+                    contour.leadInSolution.error = leadInError;
+                    LCNC_WARN(lcnc::LogCode::ToolpathLeadInInvalid,
+                              "cam.toolpath: contour '{}' has no valid generated lead-in: {}",
+                              contour.name.toStdString(), leadInError.toStdString());
+                }
+            }
 
             allContours.push_back(std::move(contour));
         }
@@ -2186,6 +2203,8 @@ void CamModule::translateToolpathWorldData(const gp_Vec& translation)
 
         if (contour.leadIn.valid)
             contour.leadIn.entryPoint.Translate(translation);
+        if (contour.leadInSolution.valid)
+            contour.leadInSolution.point.position.Translate(translation);
     }
 
     m_workpieceShape = translatedShapeCopy(m_workpieceShape, translation);
@@ -2411,10 +2430,24 @@ std::uint64_t CamModule::toolpathRevision() const
     };
 
     mix(static_cast<std::uint64_t>(toolpathRef().contourCount()));
+    mixRounded(toolpathRef().globalLeadInLength());
     for (const LaserContour& contour : toolpathRef().contours()) {
         mix(contour.contourId);
         mix(contour.layerId);
         mix(contour.enabled ? 1ull : 0ull);
+        mix(contour.leadIn.valid ? 1ull : 0ull);
+        mix(contour.leadInSolution.valid ? 1ull : 0ull);
+        if (contour.leadInSolution.valid) {
+            const ToolpathPoint& lead = contour.leadInSolution.point;
+            mixRounded(lead.position.X());
+            mixRounded(lead.position.Y());
+            mixRounded(lead.position.Z());
+            mixRounded(lead.machineCoord.x);
+            mixRounded(lead.machineCoord.y);
+            mixRounded(lead.machineCoord.z);
+            mixRounded(lead.machineCoord.r1);
+            mixRounded(lead.machineCoord.r2);
+        }
         mix(static_cast<std::uint64_t>(contour.points.size()));
         if (!contour.points.empty()) {
             const ToolpathPoint& first = contour.points.front();
@@ -2460,6 +2493,8 @@ bool CamModule::solveToolpathForOrder(
     for (LaserContour& contour : contours) {
         for (ToolpathPoint& point : contour.points)
             point.machineCoord = {};
+        if (contour.leadInSolution.valid)
+            contour.leadInSolution.point.machineCoord = {};
     }
 
     QSet<std::uint64_t> seenIds;
@@ -2548,10 +2583,8 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
     };
 
     MachineKinematics* kin = kinematics();
-    const double leadInLen = toolpathRef().globalLeadInLength();
-    const double leadInNormalAng = toolpathRef().globalNormalAngle();
 
-    for (const LaserContour& contour : toolpathRef().contours()) {
+    for (const LaserContour& contour : contours) {
         const ToolpathLayer* layer = layerForId(contour.layerId);
         lcnc::cam::ToolpathExportContour exportedContour;
         exportedContour.contourId = contour.contourId;
@@ -2581,17 +2614,11 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             cutStartWorld.Transform(wpc);
             endWorld.Transform(wpc);
 
-            if (contour.leadIn.valid) {
-                bool ok = false;
-                gp_Pnt leadStartLocal = LaserToolpathBuilder::computeLeadInStartPoint(
-                    contour, leadInLen, leadInNormalAng, &ok);
-                if (ok) {
-                    leadStartLocal.Transform(wpc);
-                    startWorld = leadStartLocal;
-                    hasLeadIn = true;
-                } else {
-                    startWorld = cutStartWorld;
-                }
+            if (contour.leadInSolution.valid) {
+                gp_Pnt leadStartWorld = contour.leadInSolution.point.position;
+                leadStartWorld.Transform(wpc);
+                startWorld = leadStartWorld;
+                hasLeadIn = contour.leadInSolution.point.machineCoord.valid;
             } else {
                 startWorld = cutStartWorld;
             }
@@ -2606,6 +2633,31 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             exportedContour.startY    = startWorld.Y();
             exportedContour.startZ    = startWorld.Z();
             exportedContour.hasLeadIn = hasLeadIn;
+            exportedContour.leadInError = contour.leadInSolution.error;
+            if (contour.leadInSolution.valid && !hasLeadIn
+                && exportedContour.leadInError.isEmpty()) {
+                exportedContour.leadInError = tr("下刀点尚未重新计算五轴坐标");
+            }
+            if (hasLeadIn) {
+                const ToolpathPoint& lead = contour.leadInSolution.point;
+                exportedContour.leadInPoint.x = lead.position.X();
+                exportedContour.leadInPoint.y = lead.position.Y();
+                exportedContour.leadInPoint.z = lead.position.Z();
+                exportedContour.leadInPoint.normalX = lead.normal.X();
+                exportedContour.leadInPoint.normalY = lead.normal.Y();
+                exportedContour.leadInPoint.normalZ = lead.normal.Z();
+                exportedContour.leadInPoint.tangentX = lead.tangent.X();
+                exportedContour.leadInPoint.tangentY = lead.tangent.Y();
+                exportedContour.leadInPoint.tangentZ = lead.tangent.Z();
+                exportedContour.leadInPoint.machineX = lead.machineCoord.x;
+                exportedContour.leadInPoint.machineY = lead.machineCoord.y;
+                exportedContour.leadInPoint.machineZ = lead.machineCoord.z;
+                exportedContour.leadInPoint.machineR1 = lead.machineCoord.r1;
+                exportedContour.leadInPoint.machineR2 = lead.machineCoord.r2;
+                exportedContour.leadInPoint.rotaryAxis1Name = lead.machineCoord.r1Name;
+                exportedContour.leadInPoint.rotaryAxis2Name = lead.machineCoord.r2Name;
+                exportedContour.leadInPoint.machineCoordValid = lead.machineCoord.valid;
+            }
             exportedContour.endpointsValid = true;
         }
 
@@ -2641,47 +2693,25 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
     return snapshot;
 }
 
-void CamModule::setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double entryParam)
-{
-    if (contourIdx < 0 || contourIdx >= toolpathRef().contourCount()) return;
-
-    LaserContour& c = toolpathRef().contour(contourIdx);
-    c.leadIn.entryPoint = entryPoint;
-    c.leadIn.entryParam = entryParam;
-    c.leadIn.valid = true;
-
-    lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
-    };
-    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), toolpathRef(), kinematics(), preview);
-}
-
 void CamModule::setLeadInLength(double mm)
 {
+    if (mm <= 0.0)
+        return;
     toolpathRef().setGlobalLeadInLength(mm);
-    lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
-    };
-    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), toolpathRef(), kinematics(), preview);
+    m_config.setLeadInLength(mm);
+    // 参数只记录为待应用值；已持久化/显示的下刀点仅在“重新计算”时重建。
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "cam.toolpath: lead-in length changed to {:.3f} mm; apply on explicit recalculation",
+              mm);
+    pushGenerationParamsToCamData();
+    if (m_camData)
+        m_camData->markDirty(true);
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
 }
 
 double CamModule::leadInLength() const
 {
     return toolpathRef().globalLeadInLength();
-}
-
-void CamModule::setNormalAngle(double deg)
-{
-    toolpathRef().setGlobalNormalAngle(deg);
-    lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
-    };
-    m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), toolpathRef(), kinematics(), preview);
-}
-
-double CamModule::normalAngle() const
-{
-    return toolpathRef().globalNormalAngle();
 }
 
 void CamModule::setDeflection(double mm)
@@ -2730,20 +2760,22 @@ void CamModule::setNormalSampleStep(double mm)
 bool CamModule::resolveLeadInHit(WidgetOccView* occView,
                                  const QPoint& screenPos,
                                  int& contourIdx,
+                                 int& pointIdx,
                                  gp_Pnt& entryPoint,
                                  double& entryParam) const
 {
     return lcnc::cam::reference_pick::resolveLeadInHit(occView, screenPos, toolpathRef(),
-                                                       contourIdx, entryPoint, entryParam);
+                                                       contourIdx, pointIdx, entryPoint, entryParam);
 }
 
 bool CamModule::updateLeadInPreview(WidgetOccView* occView, const QPoint& screenPos)
 {
     int contourIdx = -1;
+    int pointIdx = -1;
     gp_Pnt entryPoint;
     double entryParam = 0.0;
 
-    if (!resolveLeadInHit(occView, screenPos, contourIdx, entryPoint, entryParam)) {
+    if (!resolveLeadInHit(occView, screenPos, contourIdx, pointIdx, entryPoint, entryParam)) {
         if (m_previewLeadInValid)
             cancelLeadInPreview();
         return false;
@@ -2751,17 +2783,19 @@ bool CamModule::updateLeadInPreview(WidgetOccView* occView, const QPoint& screen
 
     if (m_previewLeadInValid
         && m_previewLeadInContour == contourIdx
+        && m_previewLeadInPointIndex == pointIdx
         && m_previewLeadInPoint.Distance(entryPoint) < 1e-6
         && std::abs(m_previewLeadInParam - entryParam) < 1e-6) {
         return true;
     }
 
     m_previewLeadInContour = contourIdx;
+    m_previewLeadInPointIndex = pointIdx;
     m_previewLeadInPoint = entryPoint;
     m_previewLeadInParam = entryParam;
     m_previewLeadInValid = true;
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+        m_previewLeadInContour, m_previewLeadInPointIndex, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
     m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), toolpathRef(), kinematics(), preview);
     return true;
@@ -2776,14 +2810,29 @@ bool CamModule::commitLeadInPreview(WidgetOccView* occView, const QPoint& screen
         return false;
 
     LaserContour& contour = toolpathRef().contour(m_previewLeadInContour);
-    contour.leadIn.entryPoint = m_previewLeadInPoint;
-    contour.leadIn.entryParam = m_previewLeadInParam;
-    contour.leadIn.valid = true;
+    LaserContour updated = contour;
+    QString startError;
+    if (!LaserToolpathBuilder::setContourStart(
+            updated, m_previewLeadInPointIndex, &startError)) {
+        emit operationFailed(tr("设置轮廓起点失败"), startError);
+        return false;
+    }
+    if (!updated.leadInSolution.valid) {
+        emit operationFailed(tr("设置轮廓起点失败"), updated.leadInSolution.error);
+        return false;
+    }
+    contour = std::move(updated);
 
     m_previewLeadInContour = -1;
+    m_previewLeadInPointIndex = -1;
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
+    // 仅更新当前轮廓的下刀几何；五轴解算留给用户显式点击“重新计算”。
     m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), toolpathRef(), kinematics());
+    refreshTravelPath();
+    if (m_camData)
+        m_camData->markDirty(true);
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
     return true;
 }
 
@@ -2793,6 +2842,7 @@ void CamModule::cancelLeadInPreview()
         return;
 
     m_previewLeadInContour = -1;
+    m_previewLeadInPointIndex = -1;
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
     m_toolpathRenderer->refreshLeadIns(workspaceGuiDocument(), toolpathRef(), kinematics());
@@ -2810,7 +2860,7 @@ void CamModule::setContourEnabled(int contourIdx, bool enabled)
     contour.enabled = enabled;
     setCamContourVisible(contourIdx, enabled && m_toolpathRenderer->isVisible(), false);
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+        m_previewLeadInContour, m_previewLeadInPointIndex, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
     m_toolpathRenderer->refreshContour(workspaceGuiDocument(), toolpathRef(), kinematics(), contourIdx, preview);
     emit toolpathLayersChanged();
@@ -2832,7 +2882,7 @@ void CamModule::setAllContoursEnabled(bool enabled)
 
     setCamContoursVisible(m_toolpathRenderer->isVisible(), false);
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+        m_previewLeadInContour, m_previewLeadInPointIndex, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
     m_toolpathRenderer->refresh(workspaceGuiDocument(), toolpathRef(), kinematics(), preview);
     emit toolpathLayersChanged();
@@ -2939,7 +2989,7 @@ bool CamModule::setToolpathLayerEnabled(std::uint64_t layerId, bool enabled)
 
     setCamContoursVisible(m_toolpathRenderer->isVisible(), false);
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+        m_previewLeadInContour, m_previewLeadInPointIndex, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
     m_toolpathRenderer->refresh(workspaceGuiDocument(), toolpathRef(), kinematics(), preview);
     emit toolpathLayersChanged();
@@ -2981,9 +3031,33 @@ void CamModule::recalcToolpath()
             LaserToolpathBuilder::discretizeContour(contour, sourceShape, m_deflection);
         }
 
+        contour.leadIn.length = toolpathRef().globalLeadInLength();
+        if (contour.leadIn.valid && !contour.points.empty()) {
+            auto closest = std::min_element(
+                contour.points.begin(), contour.points.end(),
+                [&contour](const ToolpathPoint& a, const ToolpathPoint& b) {
+                    return a.position.SquareDistance(contour.leadIn.entryPoint)
+                        < b.position.SquareDistance(contour.leadIn.entryPoint);
+                });
+            const int pointIndex = closest == contour.points.end()
+                ? -1
+                : static_cast<int>(std::distance(contour.points.begin(), closest));
+            QString startError;
+            if (!LaserToolpathBuilder::setContourStart(contour, pointIndex, &startError)
+                || !contour.leadInSolution.valid) {
+                if (startError.isEmpty())
+                    startError = contour.leadInSolution.error;
+                contour.leadIn.valid = false;
+                contour.leadInSolution = {};
+                contour.leadInSolution.error = startError;
+            }
+        }
+
     }
 
     updateToolpathMachineCoordinates();
+    pushGenerationParamsToCamData();
+    m_camData->markDirty(true);
 
     refreshToolpathDisplay();
     m_camData->ensureContourIds();
@@ -3047,7 +3121,7 @@ void CamModule::updateAxisGuideTransforms()
 void CamModule::refreshToolpathDisplay()
 {
     lcnc::view::ToolpathRenderer::LeadInPreview preview{
-        m_previewLeadInContour, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
+        m_previewLeadInContour, m_previewLeadInPointIndex, m_previewLeadInPoint, m_previewLeadInParam, m_previewLeadInValid
     };
     m_toolpathRenderer->refresh(workspaceGuiDocument(), toolpathRef(), kinematics(), preview);
 }
@@ -3082,6 +3156,7 @@ void CamModule::clearToolpathViewState(bool emitSignals)
 
     m_workpieceShape.Nullify();
     m_previewLeadInContour = -1;
+    m_previewLeadInPointIndex = -1;
     m_previewLeadInParam = 0.0;
     m_previewLeadInValid = false;
 
@@ -3641,7 +3716,6 @@ void CamModule::pushGenerationParamsToCamData()
         return;
     auto& gp = m_camData->generationParams();
     gp.leadInLength         = toolpathRef().globalLeadInLength();
-    gp.normalAngle          = toolpathRef().globalNormalAngle();
     gp.deflection           = m_deflection;
     gp.smoothAngle          = m_smoothAngle;
     gp.useFaceClassification = m_useFaceClassification;
@@ -3657,7 +3731,6 @@ void CamModule::applyGenerationParamsFromCamData()
         return;
     const auto& gp = m_camData->generationParams();
     toolpathRef().setGlobalLeadInLength(gp.leadInLength);
-    toolpathRef().setGlobalNormalAngle(gp.normalAngle);
     m_deflection            = gp.deflection;
     m_smoothAngle           = gp.smoothAngle;
     m_useFaceClassification = gp.useFaceClassification;
@@ -3678,6 +3751,28 @@ void CamModule::onCamDataLoaded()
     }
 
     relinkContourGeometryFromDocument();
+    m_workpieceShape = collectWorkpieceShape();
+    const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
+    bool needsCrossSectionUpgrade = false;
+    for (LaserContour& contour : toolpathRef().contours()) {
+        for (const WorkpieceShapeSource& source : sources) {
+            if (source.workpieceEntry == contour.workpieceEntry) {
+                contour.sourceShape = source.shape;
+                break;
+            }
+        }
+        contour.leadIn.length = toolpathRef().globalLeadInLength();
+        if (contour.leadIn.valid
+            && !contour.points.empty()
+            && (!contour.points.front().crossSectionNormalValid
+                || !contour.leadInSolution.valid)) {
+            needsCrossSectionUpgrade = true;
+        }
+    }
+    if (needsCrossSectionUpgrade)
+        recalcToolpath();
+    else
+        updateToolpathMachineCoordinates();
     syncCamDocumentContours();
     refreshToolpathDisplay();
     emit toolpathGenerated();
@@ -3742,8 +3837,6 @@ void CamModule::refreshTravelPath()
 
     QVector<lcnc::view::TravelPathRenderer::Segment> segments;
     segments.reserve(orderedIds.size());
-    const double leadInLen = toolpathRef().globalLeadInLength();
-    const double leadInNormalAng = toolpathRef().globalNormalAngle();
     for (auto id : orderedIds) {
         auto it = byId.find(id);
         if (it == byId.end()) continue;
@@ -3754,13 +3847,8 @@ void CamModule::refreshTravelPath()
         const gp_Pnt cutStartLocal = c->points.front().position;
         const gp_Pnt endLocal = c->points.back().position;
         gp_Pnt startLocal = cutStartLocal;
-        if (c->leadIn.valid) {
-            bool ok = false;
-            const gp_Pnt leadStart = LaserToolpathBuilder::computeLeadInStartPoint(
-                *c, leadInLen, leadInNormalAng, &ok);
-            if (ok)
-                startLocal = leadStart;
-        }
+        if (c->leadInSolution.valid)
+            startLocal = c->leadInSolution.point.position;
 
         lcnc::view::TravelPathRenderer::Segment s;
         s.contourId = id;

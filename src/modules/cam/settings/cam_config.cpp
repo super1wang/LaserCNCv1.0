@@ -160,7 +160,6 @@ bool CamConfig::importLegacyJson(const QString& jsonPath)
 
     const auto tp = root.value(QStringLiteral("toolpath")).toObject();
     m_leadInLength          = tp.value(QStringLiteral("leadInLength")).toDouble(m_leadInLength);
-    m_normalAngle           = tp.value(QStringLiteral("normalAngle")).toDouble(m_normalAngle);
     m_deflection            = tp.value(QStringLiteral("deflection")).toDouble(m_deflection);
     m_smoothAngle           = tp.value(QStringLiteral("smoothAngle")).toDouble(m_smoothAngle);
     m_useFaceClassification = tp.value(QStringLiteral("useFaceClassification")).toBool(m_useFaceClassification);
@@ -208,7 +207,6 @@ void CamConfig::readFrom(const toml::value& root)
     if (root.contains("toolpath") && root.at("toolpath").is_table()) {
         const auto& tp = root.at("toolpath");
         m_leadInLength          = get_double(tp, "leadInLength",          m_leadInLength);
-        m_normalAngle           = get_double(tp, "normalAngle",           m_normalAngle);
         m_deflection            = get_double(tp, "deflection",            m_deflection);
         m_smoothAngle           = get_double(tp, "smoothAngle",           m_smoothAngle);
         m_useFaceClassification = get_bool  (tp, "useFaceClassification", m_useFaceClassification);
@@ -268,7 +266,6 @@ void CamConfig::writeTo(toml::value& root) const
 
     toml::value tp(toml::table{});
     tp["leadInLength"]          = m_leadInLength;
-    tp["normalAngle"]           = m_normalAngle;
     tp["deflection"]            = m_deflection;
     tp["smoothAngle"]           = m_smoothAngle;
     tp["useFaceClassification"] = m_useFaceClassification;
@@ -347,13 +344,6 @@ void CamConfig::setLeadInLength(double mm)
 {
     if (nearlyEqual(m_leadInLength, mm)) return;
     m_leadInLength = mm;
-    saveDefault();
-}
-
-void CamConfig::setNormalAngle(double deg)
-{
-    if (nearlyEqual(m_normalAngle, deg)) return;
-    m_normalAngle = deg;
     saveDefault();
 }
 

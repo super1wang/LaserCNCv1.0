@@ -30,7 +30,6 @@
 #include <Bnd_Box.hxx>
 
 #include <gp_Vec.hxx>
-#include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
@@ -52,7 +51,6 @@ void LaserToolpath::clear()
     m_contours.clear();
     m_layers.clear();
     m_globalLeadInLength = 5.0;
-    m_globalNormalAngle  = 0.0;
 }
 
 namespace {
@@ -302,6 +300,7 @@ void normalizeContourTraversal(LaserContour& contour,
 
     const bool closedByWire = !contour.wire.IsNull() && contour.wire.Closed();
     const bool hadClosingPoint = contourHasClosingPoint(contour);
+    const bool isClosed = closedByWire || hadClosingPoint;
     ToolpathPoint originalClosingPoint;
     if (hadClosingPoint) {
         originalClosingPoint = contour.points.back();
@@ -331,7 +330,7 @@ void normalizeContourTraversal(LaserContour& contour,
     double angularTravel = 0.0;
     for (std::size_t i = 1; i < angles.size(); ++i)
         angularTravel += normalizeSigned180(angles[i] - angles[i - 1]);
-    if (closedByWire && angles.size() > 2)
+    if (isClosed && angles.size() > 2)
         angularTravel += normalizeSigned180(angles.front() - angles.back());
 
     if (angularTravel > 1e-6) {
@@ -339,11 +338,35 @@ void normalizeContourTraversal(LaserContour& contour,
         std::reverse(angles.begin(), angles.end());
     }
 
-    if (closedByWire)
-        rotateClosedContourStart(contour.points, angles);
+    if (isClosed) {
+        if (contour.leadIn.valid) {
+            auto selected = std::min_element(
+                contour.points.begin(), contour.points.end(),
+                [&contour](const ToolpathPoint& a, const ToolpathPoint& b) {
+                    return a.position.SquareDistance(contour.leadIn.entryPoint)
+                        < b.position.SquareDistance(contour.leadIn.entryPoint);
+                });
+            if (selected != contour.points.end())
+                std::rotate(contour.points.begin(), selected, contour.points.end());
+        } else {
+            rotateClosedContourStart(contour.points, angles);
+        }
+    } else if (contour.leadIn.valid && contour.points.size() > 1) {
+        const double frontDistance = contour.points.front().position.SquareDistance(
+            contour.leadIn.entryPoint);
+        const double backDistance = contour.points.back().position.SquareDistance(
+            contour.leadIn.entryPoint);
+        if (backDistance < frontDistance)
+            reverseToolpathPoints(contour.points);
+    }
 
-    if (closedByWire || hadClosingPoint)
+    if (isClosed)
         contour.points.push_back(contour.points.front());
+    if (contour.leadIn.valid && !contour.points.empty()) {
+        contour.leadIn.entryPoint = contour.points.front().position;
+        contour.leadIn.entryParam = contour.points.front().param;
+        contour.leadIn.entryPointIndex = 0;
+    }
 }
 
 gp_Pnt bboxCenter(const Bnd_Box& box)
@@ -429,6 +452,75 @@ bool findClosestFaceNormal(const gp_Pnt& pt,
     }
 
     return found;
+}
+
+constexpr double kLeadInDirectionProbeDistance = 0.01;
+
+struct MachiningFaceProbe
+{
+    TopoDS_Face face;
+    Handle(Geom_Surface) surface;
+    double tolerance{1e-7};
+};
+
+bool classifyPointOnFace(const MachiningFaceProbe& probe, const gp_Pnt& point)
+{
+    ShapeAnalysis_Surface analysis(probe.surface);
+    const gp_Pnt2d uv = analysis.ValueOfUV(point, probe.tolerance);
+    BRepClass_FaceClassifier classifier(probe.face, uv, probe.tolerance);
+    return classifier.State() == TopAbs_IN || classifier.State() == TopAbs_ON;
+}
+
+std::vector<MachiningFaceProbe> findMachiningFacesAtStart(
+    const LaserContour& contour,
+    const ToolpathPoint& start)
+{
+    std::vector<MachiningFaceProbe> result;
+    if (contour.sourceShape.IsNull())
+        return result;
+
+    constexpr double kNormalAlignment = 0.9;
+    constexpr double kStartDistanceTolerance = 1e-4;
+    for (TopExp_Explorer exp(contour.sourceShape, TopAbs_FACE); exp.More(); exp.Next()) {
+        const TopoDS_Face face = TopoDS::Face(exp.Current());
+        Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+        if (surface.IsNull())
+            continue;
+
+        const double tolerance = std::max(kStartDistanceTolerance,
+                                          static_cast<double>(BRep_Tool::Tolerance(face)));
+        ShapeAnalysis_Surface analysis(surface);
+        const gp_Pnt2d uv = analysis.ValueOfUV(start.position, tolerance);
+
+        gp_Pnt surfacePoint;
+        surface->D0(uv.X(), uv.Y(), surfacePoint);
+        if (surfacePoint.Distance(start.position) > tolerance)
+            continue;
+
+        GeomLProp_SLProps props(surface, uv.X(), uv.Y(), 1, tolerance);
+        if (!props.IsNormalDefined())
+            continue;
+        gp_Dir faceNormal = props.Normal();
+        if (face.Orientation() == TopAbs_REVERSED)
+            faceNormal.Reverse();
+        if (gp_Vec(faceNormal).Dot(gp_Vec(start.normal)) < kNormalAlignment)
+            continue;
+
+        BRepClass_FaceClassifier classifier(face, uv, tolerance);
+        if (classifier.State() != TopAbs_IN && classifier.State() != TopAbs_ON)
+            continue;
+
+        result.push_back({face, surface, tolerance});
+    }
+    return result;
+}
+
+bool liesOnMachiningFace(const std::vector<MachiningFaceProbe>& faces,
+                         const gp_Pnt& point)
+{
+    return std::any_of(faces.begin(), faces.end(), [&](const MachiningFaceProbe& face) {
+        return classifyPointOnFace(face, point);
+    });
 }
 
 gp_Dir avoidCrossSectionDirection(const gp_Pnt& point,
@@ -777,6 +869,10 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
                 outerCenter,
                 crossFaces);
 
+            double crossDistance = 0.0;
+            tp.crossSectionNormalValid = findClosestFaceNormal(
+                tp.position, crossFaces, tp.crossSectionNormal, crossDistance);
+
             // Compute tangent along the curve
             gp_Pnt pDummy;
             gp_Vec tangentVec;
@@ -884,110 +980,125 @@ gp_Dir LaserToolpathBuilder::findSurfaceNormal(const TopoDS_Shape& workpiece,
 // LaserToolpathBuilder — lead-in computation
 // =============================================================================
 
-gp_Dir LaserToolpathBuilder::ensureNotFromAbove(const gp_Dir& approachDir,
-                                                double thresholdDeg)
+bool LaserToolpathBuilder::setContourStart(LaserContour& contour,
+                                           int pointIndex,
+                                           QString* error)
 {
-    const gp_Dir zUp(0, 0, 1);
-    double angle = approachDir.Angle(zUp);  // radians
-
-    double thresholdRad = thresholdDeg * M_PI / 180.0;
-
-    // If the approach direction is nearly aligned with +Z (coming from above)
-    // or nearly aligned with -Z (coming from below, which means going upward
-    // toward the workpiece top), rotate it away from vertical.
-    if (angle < thresholdRad) {
-        // Nearly parallel to +Z → project onto XY and use that direction
-        gp_Vec v(approachDir);
-        gp_Vec projected(v.X(), v.Y(), 0.0);
-
-        if (projected.Magnitude() < 1e-6) {
-            // Approach is exactly along Z — pick an arbitrary horizontal direction
-            projected = gp_Vec(1, 0, 0);
-        }
-        projected.Normalize();
-
-        // Tilt slightly downward from horizontal (at the threshold angle from Z)
-        double zComp = std::cos(thresholdRad);
-        double xyComp = std::sin(thresholdRad);
-        return gp_Dir(projected.X() * xyComp,
-                      projected.Y() * xyComp,
-                      zComp);
+    if (pointIndex < 0 || pointIndex >= static_cast<int>(contour.points.size())) {
+        if (error) *error = QStringLiteral("轮廓起点索引无效");
+        return false;
     }
 
-    return approachDir;
+    const bool hadClosingPoint = contourHasClosingPoint(contour);
+    const bool closed = hadClosingPoint || (!contour.wire.IsNull() && contour.wire.Closed());
+    if (hadClosingPoint) {
+        if (pointIndex == static_cast<int>(contour.points.size()) - 1)
+            pointIndex = 0;
+        contour.points.pop_back();
+    }
+    if (contour.points.empty()) {
+        if (error) *error = QStringLiteral("轮廓没有可用采样点");
+        return false;
+    }
+
+    if (closed) {
+        std::rotate(contour.points.begin(),
+                    contour.points.begin() + pointIndex,
+                    contour.points.end());
+        contour.points.push_back(contour.points.front());
+    } else if (pointIndex == static_cast<int>(contour.points.size()) - 1) {
+        reverseToolpathPoints(contour.points);
+    } else if (pointIndex != 0) {
+        if (error) *error = QStringLiteral("开放轮廓只能选择端点作为加工起点");
+        return false;
+    }
+
+    contour.leadIn.entryPoint = contour.points.front().position;
+    contour.leadIn.entryParam = contour.points.front().param;
+    contour.leadIn.entryPointIndex = 0;
+    contour.leadIn.valid = true;
+    contour.leadInSolution = computeLeadInSolution(contour, contour.leadIn.length);
+    return true;
 }
 
-TopoDS_Edge LaserToolpathBuilder::computeLeadInEdge(const LaserContour& contour,
-                                                    double length,
-                                                    double normalAngleDeg)
+TopoDS_Edge LaserToolpathBuilder::computeLeadInEdge(const LaserContour& contour)
 {
-    bool ok = false;
-    const gp_Pnt startPt = computeLeadInStartPoint(contour, length, normalAngleDeg, &ok);
-    if (!ok)
+    if (!contour.leadInSolution.valid || contour.points.empty())
         return TopoDS_Edge();
 
-    BRepBuilderAPI_MakeEdge edgeMaker(startPt, contour.leadIn.entryPoint);
+    BRepBuilderAPI_MakeEdge edgeMaker(contour.leadInSolution.point.position,
+                                     contour.points.front().position);
     if (!edgeMaker.IsDone())
         return TopoDS_Edge();
 
     return edgeMaker.Edge();
 }
 
-gp_Pnt LaserToolpathBuilder::computeLeadInStartPoint(const LaserContour& contour,
-                                                     double length,
-                                                     double normalAngleDeg,
-                                                     bool* success)
+LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
+    const LaserContour& contour,
+    double length)
 {
-    if (success) *success = false;
-    if (!contour.leadIn.valid || length <= 0.0)
-        return gp_Pnt();
-
-    const gp_Pnt& entryPt = contour.leadIn.entryPoint;
-
-    // Find the machining normal near the entry point; the lead-in start should stay
-    // outside the outer contour instead of landing on another surface.
-    gp_Dir normal(0, 0, 1);
-    gp_Dir tangent(1, 0, 0);
-    double leadStartZ = entryPt.Z();
-    if (!contour.points.empty()) {
-        leadStartZ = contour.points.front().position.Z();
-        double bestDist = std::numeric_limits<double>::max();
-        for (const auto& tp : contour.points) {
-            double d = entryPt.Distance(tp.position);
-            if (d < bestDist) {
-                bestDist = d;
-                normal = tp.normal;
-                tangent = tp.tangent;
-            }
-        }
+    LeadInSolution result;
+    if (!contour.leadIn.valid) {
+        result.error = QStringLiteral("未选择轮廓起点");
+        return result;
+    }
+    if (length <= 0.0) {
+        result.error = QStringLiteral("下刀长度必须大于 0");
+        return result;
+    }
+    if (contour.points.empty()) {
+        result.error = QStringLiteral("轮廓没有采样点");
+        return result;
     }
 
-    gp_Vec approachVec(normal.X(), normal.Y(), 0.0);
-    if (approachVec.Magnitude() <= 1e-6) {
-        const gp_Vec tangentVec(tangent.X(), tangent.Y(), 0.0);
-        if (tangentVec.Magnitude() > 1e-6)
-            approachVec = gp_Vec(-tangentVec.Y(), tangentVec.X(), 0.0);
-    }
-    if (approachVec.Magnitude() <= 1e-6)
-        approachVec = gp_Vec(1.0, 0.0, 0.0);
-    approachVec.Normalize();
-
-    // Apply normal angle offset in the machining plane, preserving the lead-in height.
-    if (std::abs(normalAngleDeg) > 0.01) {
-        gp_Trsf rot;
-        rot.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
-                        normalAngleDeg * M_PI / 180.0);
-        approachVec.Transform(rot);
-        if (approachVec.Magnitude() > 1e-6)
-            approachVec.Normalize();
+    const ToolpathPoint& start = contour.points.front();
+    if (contour.sourceShape.IsNull()) {
+        result.error = QStringLiteral("无法判断悬空方向：缺少工件几何");
+        return result;
     }
 
-    if (success) *success = true;
-    return gp_Pnt(
-        entryPt.X() + approachVec.X() * length,
-        entryPt.Y() + approachVec.Y() * length,
-        leadStartZ
-    );
+    const gp_Vec outer(start.normal);
+    const gp_Vec tangent(start.tangent);
+    // 由加工面法线和轮廓切线构造面内左右方向。只用起点附近的两个
+    // 测试点区分实体外表面与孔洞悬空侧，不用当前下刀长度做实体分类。
+    gp_Vec direction = outer.Crossed(tangent);
+    if (direction.Magnitude() <= 1e-9) {
+        result.error = QStringLiteral("轮廓切线与加工面法线无法确定面内方向");
+        return result;
+    }
+    direction.Normalize();
+
+    const std::vector<MachiningFaceProbe> machiningFaces =
+        findMachiningFacesAtStart(contour, start);
+    if (machiningFaces.empty()) {
+        result.error = QStringLiteral("无法找到轮廓起点所在的加工外表面");
+        return result;
+    }
+
+    const gp_Pnt forwardProbe = start.position.Translated(
+        direction * kLeadInDirectionProbeDistance);
+    const gp_Pnt reverseProbe = start.position.Translated(
+        direction * -kLeadInDirectionProbeDistance);
+    const bool forwardOnSurface = liesOnMachiningFace(machiningFaces, forwardProbe);
+    const bool reverseOnSurface = liesOnMachiningFace(machiningFaces, reverseProbe);
+    if (forwardOnSurface == reverseOnSurface) {
+        result.error = forwardOnSurface
+            ? QStringLiteral("轮廓起点两侧近点均落在加工外表面，无法确定悬空侧")
+            : QStringLiteral("轮廓起点两侧近点均未落在加工外表面，无法确定悬空侧");
+        return result;
+    }
+
+    if (forwardOnSurface)
+        direction.Reverse();
+
+    ToolpathPoint point = start;
+    point.position = start.position.Translated(direction * length);
+    point.machineCoord = {};
+    result.direction = gp_Dir(direction);
+    result.point = std::move(point);
+    result.valid = true;
+    return result;
 }
 
 // =============================================================================
@@ -1037,6 +1148,22 @@ void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
         ? *continuityState
         : currentRotaryReference(kinematics);
     bool hasPrevious = previous.valid;
+
+    if (contour.leadInSolution.valid) {
+        ToolpathPoint& leadPoint = contour.leadInSolution.point;
+        const gp_Pnt leadWorldPos = leadPoint.position.Transformed(wpcTransform);
+        const gp_Dir leadWorldDir = leadPoint.normal.Transformed(wpcTransform);
+        leadPoint.machineCoord = IKSolver::solveContinuous(
+            kinematics, leadWorldPos, leadWorldDir, hasPrevious ? &previous : nullptr);
+        if (leadPoint.machineCoord.valid) {
+            previous = leadPoint.machineCoord;
+            hasPrevious = true;
+        } else {
+            contour.leadInSolution.valid = false;
+            contour.leadInSolution.error = QStringLiteral("下刀点五轴坐标求解失败");
+        }
+    }
+
     int pointIndex = 0;
     for (auto& pt : contour.points) {
         // Transform from workpiece-local to world frame
@@ -1086,6 +1213,18 @@ void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
                        pt.machineCoord.r2Name.toStdString());
         }
         ++pointIndex;
+    }
+
+    if (contour.leadInSolution.valid
+        && contour.leadInSolution.point.machineCoord.valid
+        && !contour.points.empty()
+        && contour.points.front().machineCoord.valid) {
+        MachineCoord& leadCoord = contour.leadInSolution.point.machineCoord;
+        const MachineCoord& startCoord = contour.points.front().machineCoord;
+        leadCoord.r1 = startCoord.r1;
+        leadCoord.r2 = startCoord.r2;
+        leadCoord.r1Name = startCoord.r1Name;
+        leadCoord.r2Name = startCoord.r2Name;
     }
 
     if (continuityState && previous.valid)

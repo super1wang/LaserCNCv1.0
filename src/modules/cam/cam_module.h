@@ -236,12 +236,8 @@ public:
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds) const;
 
-    /// Set lead-in entry point for a specific contour.
-    void setLeadInEntry(int contourIdx, const gp_Pnt& entryPoint, double entryParam);
     void setLeadInLength(double mm);
     double leadInLength() const;
-    void setNormalAngle(double deg);
-    double normalAngle() const;
     void setDeflection(double mm);
     double deflection() const;
     void setContourEnabled(int contourIdx, bool enabled);
@@ -371,6 +367,7 @@ private:
     bool resolveLeadInHit(WidgetOccView* occView,
                           const QPoint& screenPos,
                           int& contourIdx,
+                          int& pointIdx,
                           gp_Pnt& entryPoint,
                           double& entryParam) const;
     bool resolveReferencePlaneCenter(WidgetOccView* occView,
@@ -466,6 +463,7 @@ private:
 
     // ── Lead-in picking preview ────────────────────────────────────────
     int    m_previewLeadInContour{-1};
+    int    m_previewLeadInPointIndex{-1};
     gp_Pnt m_previewLeadInPoint;
     double m_previewLeadInParam{0.0};
     bool   m_previewLeadInValid{false};

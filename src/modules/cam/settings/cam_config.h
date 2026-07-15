@@ -13,7 +13,7 @@
  *
  * 字段：
  *   - 全局：machineModelPath / autoLoadMachineModel / machinePreset / machineRenderQualityPreset
- *   - [toolpath]：leadInLength / normalAngle / deflection / smoothAngle /
+ *   - [toolpath]：leadInLength / deflection / smoothAngle /
  *     useFaceClassification / showNormals / normalSampleStep
  *   - machineProfile（按机台 absolute 路径分组，array of tables）：
  *     axisOrigins、cutterHeadModelPosition、cutterHeadPhysicalPosition、
@@ -54,9 +54,6 @@ public:
 
     double leadInLength() const { return m_leadInLength; }
     void setLeadInLength(double mm);
-
-    double normalAngle() const { return m_normalAngle; }
-    void setNormalAngle(double deg);
 
     double deflection() const { return m_deflection; }
     void setDeflection(double mm);
@@ -149,7 +146,6 @@ private:
     lcnc::RenderQualityPreset m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     bool m_autoInstallWorkpiece{true};
     double m_leadInLength{5.0};
-    double m_normalAngle{0.0};
     double m_deflection{0.1};
     double m_smoothAngle{5.0};
     bool m_useFaceClassification{true};

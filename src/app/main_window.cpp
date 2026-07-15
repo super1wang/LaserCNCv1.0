@@ -787,7 +787,6 @@ void MainWindow::createRightPanel()
     CamModule* cam = m_appContext->camModule();
     CadModule* cad = m_appContext->cadModule();
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
-    m_toolpathPanel->setNormalAngle(cam->normalAngle());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
     m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
     m_toolpathPanel->setUseFaceClassification(cam->useFaceClassification());
@@ -1120,10 +1119,6 @@ void MainWindow::createRightPanel()
     connect(m_toolpathPanel, &WidgetToolpathPanel::leadInLengthChanged, this,
             [this](double v) {
             m_appContext->camModule()->setLeadInLength(v);
-            });
-    connect(m_toolpathPanel, &WidgetToolpathPanel::normalAngleChanged, this,
-            [this](double v) {
-            m_appContext->camModule()->setNormalAngle(v);
             });
         connect(m_toolpathPanel, &WidgetToolpathPanel::discretizationIntervalChanged, this,
             [this](double v) { m_appContext->camModule()->setDeflection(v); });
@@ -2230,7 +2225,6 @@ void MainWindow::restorePersistedCamState()
         cam->configureMachine(presetName);
 
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
-    m_toolpathPanel->setNormalAngle(cam->normalAngle());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
     m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
     m_toolpathPanel->setUseFaceClassification(cam->useFaceClassification());

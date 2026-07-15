@@ -29,11 +29,10 @@ public:
 };
 
 /**
- * @brief Interactive pick of lead-in entry point on a contour edge.
+ * @brief Interactive pick of the real cutting start on a contour.
  *
- * Activates edge-level selection mode on the toolpath contour shapes.
- * The user clicks an edge; the closest point becomes the lead-in entry.
- * After picking, the lead-in line is computed and displayed.
+ * The closest sampled point becomes points.front(); closed contours are
+ * rotated while open contours accept endpoints only.
  */
 class CmdSetLeadIn : public CommandBase
 {
