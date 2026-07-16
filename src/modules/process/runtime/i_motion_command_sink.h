@@ -49,14 +49,12 @@ public:
     virtual bool flush(QString* errorMessage = nullptr) = 0;
 
     // —— 空程跳转（用各轴自己的速度，X/Y 协调）——
-    /// 跳到空程 Z 高度。
-    virtual void jumpToIdleZ(const Tool& tool) = 0;
-    /// XY 跳到目标位置。
-    virtual void jumpToXY(double x, double y, const Tool& tool) = 0;
-    /// 进入切割前跳到首个完整五轴位姿（XYZ + 旋转轴）。
+    /// 跳到相对于轮廓 Z 坐标的空程高度。
+    virtual void jumpToIdleZ(const MachinePose5& pose, const Tool& tool) = 0;
+    /// 进入切割前跳到首个 XYAC 位姿（Z 保持在空程高度）。
     virtual void jumpToPose(const MachinePose5& pose, const Tool& tool) = 0;
-    /// 下到切割 Z 高度。
-    virtual void jumpToCuttingZ(const Tool& tool) = 0;
+    /// 下到相对于轮廓 Z 坐标的切割高度。
+    virtual void jumpToCuttingZ(const MachinePose5& pose, const Tool& tool) = 0;
     /// 启动 / 停止跟随头（仅切割头模式）。
     virtual void startCuttingHead(const Tool& tool) = 0;
     virtual void stopCuttingHead() = 0;

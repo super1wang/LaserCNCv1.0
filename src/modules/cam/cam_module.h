@@ -240,6 +240,13 @@ public:
     double leadInLength() const;
     void setDeflection(double mm);
     double deflection() const;
+    void setActiveContourId(lcnc::cam::ContourId contourId);
+    lcnc::cam::ContourId activeContourId() const { return m_activeContourId; }
+    int activeContourIndex() const;
+    bool setActiveContourLeadInLength(double mm);
+    bool setActiveContourDeflection(double mm);
+    ContourGenerationParams activeContourPendingParams() const;
+    bool activeContourNeedsRecalculation() const;
     void setContourEnabled(int contourIdx, bool enabled);
     void setAllContoursEnabled(bool enabled);
     lcnc::cam::ContourId contourIdAt(int contourIdx) const;
@@ -263,8 +270,8 @@ public:
                              const QString& toolName);
     bool setToolpathLayerEnabled(std::uint64_t layerId, bool enabled);
 
-    /// Recalculate all lead-in lines and machine coordinates with current parameters.
-    void recalcToolpath();
+    /// Apply pending parameters and rebuild/solve only the active contour.
+    bool recalcToolpath();
 
     /// Toggle toolpath display visibility.
     void setToolpathVisible(bool visible);
@@ -345,6 +352,8 @@ signals:
     void toolpathContourSelected(int contourIndex);
     void toolpathContoursSelected(const QList<int>& contourIndexes);
     void toolpathLayersChanged();
+    void activeToolpathContourChanged(std::uint64_t contourId, int contourIndex);
+    void activeContourParametersChanged();
     void selectionChanged(const QStringList& entries);
     void axisAssignmentsChanged();
     void machineVisibilityChanged();
@@ -460,6 +469,7 @@ private:
     QSet<QString>               m_visibleMachineEntries;
     bool                        m_machineVisibilityInitialized{false};
     bool                        m_clearingToolpath{false};
+    lcnc::cam::ContourId        m_activeContourId{0};
 
     // ── Lead-in picking preview ────────────────────────────────────────
     int    m_previewLeadInContour{-1};

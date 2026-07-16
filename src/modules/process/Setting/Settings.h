@@ -53,6 +53,7 @@ public:
 	void				SetKeyValue(string Key, double  Value, SettingSection Section, string TableName = "");
 	void				SetKeyValue(string Key, string  Value, SettingSection Section, string TableName = "");
 	void				SetKeyValue(string Key, value	Value, SettingSection Section, string TableName = "");
+	void				DelKey(string Key, SettingSection Section, string TableName = "");
 
 private:
 	void				LoadTable(bool bOverride, table& Value_Original, const table& Value_Input);

@@ -58,26 +58,35 @@ bool GtnBufferedCommandSink::flush(QString* errorMessage)
     return true;
 }
 
-void GtnBufferedCommandSink::jumpToIdleZ(const Tool& tool)
+void GtnBufferedCommandSink::jumpToIdleZ(const MachinePose5& pose, const Tool& tool)
 {
-    if (m_gtn) m_gtn->JumpToIdleHeight(tool);
-}
-
-void GtnBufferedCommandSink::jumpToXY(double x, double y, const Tool& tool)
-{
-    if (m_gtn) m_gtn->JumpToIdleXYPosition(x, y, tool);
+    if (!m_gtn) return;
+    m_gtn->MovePostion(Axis::Z,
+                        tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0,
+                        pose.z + tool.m_dIdleZHeight);
 }
 
 void GtnBufferedCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
 {
     if (!m_gtn) return;
-    m_gtn->JumpToIdleXYPosition(pose.x, pose.y, tool);
-    // GTN 的旋转轴首点定位由后续缓冲插补段完成；这里保持与旧链路一致。
+    auto move = [this](AxisMap::SemanticAxis axis, double position, double velocity) {
+        const auto name = m_axisMap.axisName(axis).toStdString();
+        const auto physicalAxis = enum_cast<Axis>(name);
+        if (m_axisMap.isPresent(axis) && physicalAxis)
+            m_gtn->MovePostion(*physicalAxis, velocity > 0 ? velocity : 10.0, position);
+    };
+    move(AxisMap::X, pose.x, tool.m_dIdleXVelocity);
+    move(AxisMap::Y, pose.y, tool.m_dIdleYVelocity);
+    move(AxisMap::R1, pose.r1, tool.m_dIdleAVelocity);
+    move(AxisMap::R2, pose.r2, tool.m_dIdleA1Velocity);
 }
 
-void GtnBufferedCommandSink::jumpToCuttingZ(const Tool& tool)
+void GtnBufferedCommandSink::jumpToCuttingZ(const MachinePose5& pose, const Tool& tool)
 {
-    if (m_gtn) m_gtn->JumpToCuttingHeight(tool);
+    if (!m_gtn) return;
+    m_gtn->MovePostion(Axis::Z,
+                        tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0,
+                        pose.z + tool.m_dCuttingHeight);
 }
 
 void GtnBufferedCommandSink::startCuttingHead(const Tool& tool)

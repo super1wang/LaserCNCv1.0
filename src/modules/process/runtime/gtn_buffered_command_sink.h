@@ -36,9 +36,9 @@ public:
     void resetProgram() override;
     bool flush(QString* errorMessage = nullptr) override;
 
-    void jumpToIdleZ(const Tool& tool) override;
+    void jumpToIdleZ(const MachinePose5& pose, const Tool& tool) override;
     void jumpToPose(const MachinePose5& pose, const Tool& tool) override;
-    void jumpToCuttingZ(const Tool& tool) override;
+    void jumpToCuttingZ(const MachinePose5& pose, const Tool& tool) override;
     void startCuttingHead(const Tool& tool) override;
     void stopCuttingHead() override;
     void setShutterTimings(double beforeOn, double afterOn,

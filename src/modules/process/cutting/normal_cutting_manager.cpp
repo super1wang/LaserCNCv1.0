@@ -113,8 +113,6 @@ NormalCuttingManager::NormalCuttingManager(Service* service,
 {
     // 兜底 Tool —— 当 ToolFactory 找不到匹配工具时 resolveTool() 返回这个。
     // 由 Fix #1 (Tool 类内默认初始化) 保证非赋值字段不再是 0xCD…。这里仅显式覆盖几个最关键的。
-    m_sanitizedDefaultTool.m_strDirectionX  = "X";
-    m_sanitizedDefaultTool.m_strDirectionY  = "Y";
     m_sanitizedDefaultTool.m_strName        = "__fallback__";
     m_sanitizedDefaultTool.m_dLineVelocity  = 600.0;
     m_sanitizedDefaultTool.m_dIdleZHeight   = 5.0;
@@ -221,15 +219,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
     }
     sink->setCancellation(&ic);
     const QString backendLabel = sink->id();
-
-    // 联机硬件路径强依赖 Tool::m_strDirectionX/Y（ACS 坐标系轴名）。空字段补回 X/Y，避免崩。
-    if (backendLabel != QStringLiteral("PureSimulation")) {
-        for (auto& row : cuttingList) {
-            if (!row.tool) continue;
-            if (row.tool->m_strDirectionX.empty()) row.tool->m_strDirectionX = "X";
-            if (row.tool->m_strDirectionY.empty()) row.tool->m_strDirectionY = "Y";
-        }
-    }
 
     // 旁路 ProcessModule 的 Lissajous 正弦波。
     if (m_processModule)
@@ -363,20 +352,20 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     if (tool.m_bCuttingHead) {
         if (tool.m_bCrossBridge) {
             sink.stopCuttingHead();
-            sink.jumpToIdleZ(tool);
-            sink.jumpToXY(leadX, leadY, tool);
+            sink.jumpToIdleZ(leadPose, tool);
             sink.jumpToPose(leadPose, tool);
             sink.startCuttingHead(tool);
         } else {
-            sink.jumpToXY(leadX, leadY, tool);
+            sink.jumpToIdleZ(leadPose, tool);
             sink.jumpToPose(leadPose, tool);
             sink.startCuttingHead(tool);
         }
     } else {
-        sink.jumpToIdleZ(tool);
-        sink.jumpToXY(leadX, leadY, tool);
+        sink.jumpToIdleZ(leadPose, tool);
         sink.jumpToPose(leadPose, tool);
     }
+
+    sink.jumpToCuttingZ(leadPose, tool);
 
     sink.setShutterTimings(tool.m_dBeforeOn, tool.m_dAfterOn,
                             tool.m_dBeforeOff, tool.m_dAfterOff, tool.m_dBlowDelay);
@@ -546,6 +535,18 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             const int srcIdx = indexById.value(e.contourId, -1);
             if (srcIdx < 0) continue;
             const auto& contour = snapshot.contours.at(srcIdx);
+            if (contour.needsRecalculation) {
+                if (errorMessage) {
+                    const QString reason = contour.recalculationReason.trimmed().isEmpty()
+                        ? tr("刀路尚未重新计算") : contour.recalculationReason;
+                    *errorMessage = tr("轮廓 \"%1\" 无法加工：%2")
+                                        .arg(contour.contourName, reason);
+                }
+                LCNC_ERR(lcnc::LogCode::Generic,
+                         "normal-cutting: contour {} requires CAM recalculation",
+                         contour.contourId);
+                return {};
+            }
             if (!contour.hasLeadIn || !contour.leadInPoint.machineCoordValid) {
                 if (errorMessage) {
                     const QString reason = contour.leadInError.trimmed().isEmpty()

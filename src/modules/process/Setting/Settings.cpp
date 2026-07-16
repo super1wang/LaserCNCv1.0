@@ -687,6 +687,21 @@ void Settings::DelTable(SettingSection Section, string TableName)
 	}
 }
 
+void Settings::DelKey(string Key, SettingSection Section, string TableName)
+{
+	try
+	{
+		const string section = enum_name(Section).data();
+		table& target = TableName.empty()
+			? UserSetting["Setting"][section].as_table()
+			: UserSetting["Setting"][section][TableName].as_table();
+		target.erase(Key);
+	}
+	catch (const std::exception&)
+	{
+	}
+}
+
 // 读写指定参数，返回值用于判定Key值正确性
 void Settings::GetKeyValue(string Key, bool& Value, SettingSection Section, string TableName)
 {

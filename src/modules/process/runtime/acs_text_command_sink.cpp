@@ -124,9 +124,12 @@ double rotaryPoseValue(const MachinePose5& pose, AxisMap::SemanticAxis axis)
     return axis == AxisMap::R1 ? pose.r1 : pose.r2;
 }
 
-double rotaryIdleVelocity(const Tool& tool, AxisMap::SemanticAxis axis)
+double rotaryIdleVelocity(const Tool& tool, const AxisMap& axes, AxisMap::SemanticAxis axis)
 {
-    const double configured = axis == AxisMap::R1 ? tool.m_dIdleAVelocity : tool.m_dIdleA1Velocity;
+    const QString axisName = axes.axisName(axis).trimmed().toUpper();
+    const double configured = axisName == QStringLiteral("C")
+        ? tool.m_dIdleCVelocity
+        : (axis == AxisMap::R1 ? tool.m_dIdleAVelocity : tool.m_dIdleA1Velocity);
     return configured > 0 ? configured : 10.0;
 }
 
@@ -217,22 +220,18 @@ bool AcsTextCommandSink::flush(QString* errorMessage)
     return true;
 }
 
-void AcsTextCommandSink::jumpToIdleZ(const Tool& tool)
+void AcsTextCommandSink::jumpToIdleZ(const MachinePose5& pose, const Tool& tool)
 {
-    if (m_acs) m_acs->JumpToIdleHeight(tool);
-}
-
-void AcsTextCommandSink::jumpToXY(double x, double y, const Tool& tool)
-{
-    if (m_acs) m_acs->JumpToIdleXYPosition(x, y, tool);
+    const int index = m_axisMap.controllerIndex(AxisMap::Z);
+    if (index < 0) return;
+    appendText("PTP/EV " + I(index) + ", " + D(pose.z + tool.m_dIdleZHeight)
+               + ", " + D(tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0) + "\n");
+    appendText("TILL ^MST(" + I(index) + ").#MOVE\n");
 }
 
 void AcsTextCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
 {
     if (!m_acs) return;
-    // 先用遗留 XY 定位逻辑保留扩展定位轴行为，再补齐 Z/C/A 到首点位姿。
-    m_acs->JumpToIdleXYPosition(pose.x, pose.y, tool);
-
     auto emitPtp = [this](AxisMap::SemanticAxis axis, double pos, double vel) {
         const int idx = m_axisMap.controllerIndex(axis);
         if (idx < 0) return;
@@ -245,12 +244,14 @@ void AcsTextCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
         s += D(vel);
         s += "\n";
         appendText(s);
+        appendText("TILL ^MST(" + I(idx) + ").#MOVE\n");
     };
 
-    emitPtp(AxisMap::Z,  pose.z,  tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0);
+    emitPtp(AxisMap::X, pose.x, tool.m_dIdleXVelocity > 0 ? tool.m_dIdleXVelocity : 10.0);
+    emitPtp(AxisMap::Y, pose.y, tool.m_dIdleYVelocity > 0 ? tool.m_dIdleYVelocity : 10.0);
     for (AxisMap::SemanticAxis axis : rotaryJumpOrder(m_axisMap)) {
         const double value = normalizeRotaryForAxis(m_axisMap, axis, rotaryPoseValue(pose, axis));
-        emitPtp(axis, value, rotaryIdleVelocity(tool, axis));
+        emitPtp(axis, value, rotaryIdleVelocity(tool, m_axisMap, axis));
         if (axis == AxisMap::R1) {
             m_lastR1 = value;
             m_hasLastR1 = true;
@@ -261,9 +262,13 @@ void AcsTextCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
     }
 }
 
-void AcsTextCommandSink::jumpToCuttingZ(const Tool& tool)
+void AcsTextCommandSink::jumpToCuttingZ(const MachinePose5& pose, const Tool& tool)
 {
-    if (m_acs) m_acs->JumpToCuttingHeight(tool);
+    const int index = m_axisMap.controllerIndex(AxisMap::Z);
+    if (index < 0) return;
+    appendText("PTP/EV " + I(index) + ", " + D(pose.z + tool.m_dCuttingHeight)
+               + ", " + D(tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0) + "\n");
+    appendText("TILL ^MST(" + I(index) + ").#MOVE\n");
 }
 
 void AcsTextCommandSink::startCuttingHead(const Tool& tool)

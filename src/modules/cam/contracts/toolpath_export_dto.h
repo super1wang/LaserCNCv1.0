@@ -46,6 +46,8 @@ struct ToolpathExportContour
     QString workpieceEntry;
     bool enabled{false};
     bool layerEnabled{false};
+    bool needsRecalculation{false};
+    QString recalculationReason;
     int pointCount{0};
 
     // 世界坐标系下的几何端点，给空程规划/虚线绘制直接消费。

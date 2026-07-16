@@ -60,6 +60,10 @@ public:
     };
     GenerationParams&       generationParams()       { return m_generationParams; }
     const GenerationParams& generationParams() const { return m_generationParams; }
+    GenerationParams&       appliedGenerationParams()       { return m_appliedGenerationParams; }
+    const GenerationParams& appliedGenerationParams() const { return m_appliedGenerationParams; }
+    bool generationParamsDirty() const { return m_generationParamsDirty; }
+    void setGenerationParamsDirty(bool dirty) { m_generationParamsDirty = dirty; }
 
     /// Phase A: 新引入的图层容器与 Qt 信号源。
     /// 现阶段是 LaserToolpath 上层的薄包装，Phase B 起逐步成为图层级状态的唯一权威。
@@ -126,6 +130,8 @@ private:
 
     LaserToolpath m_toolpath;
     GenerationParams m_generationParams;
+    GenerationParams m_appliedGenerationParams;
+    bool m_generationParamsDirty{false};
     ContourId m_nextContourId{1};
     std::uint64_t m_nextLayerId{1};
     bool m_dirty{false};

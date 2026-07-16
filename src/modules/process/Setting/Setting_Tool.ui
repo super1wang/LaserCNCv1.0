@@ -447,6 +447,16 @@
           <item row="6" column="1">
            <widget class="QLineEdit" name="lineEdit_Idel_fZVel"/>
           </item>
+          <item row="8" column="0">
+           <widget class="QLabel" name="label_Idel_CVel">
+            <property name="text">
+             <string>CVel(deg/s)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="8" column="1">
+           <widget class="QLineEdit" name="lineEdit_Idel_fCVel"/>
+          </item>
           <item row="7" column="0">
            <widget class="QLabel" name="label_Idel_Acc">
             <property name="text">
@@ -457,14 +467,14 @@
           <item row="7" column="1">
            <widget class="QLineEdit" name="lineEdit_Idel_fIdelAcc"/>
           </item>
-          <item row="8" column="0">
+          <item row="9" column="0">
            <widget class="QLabel" name="label_Idel_Jerk">
             <property name="text">
              <string>Jerk(mm/s^3)</string>
             </property>
            </widget>
           </item>
-          <item row="8" column="1">
+          <item row="9" column="1">
            <widget class="QLineEdit" name="lineEdit_Idel_fIdelJerk"/>
           </item>
          </layout>

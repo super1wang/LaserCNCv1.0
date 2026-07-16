@@ -16,7 +16,7 @@ Dialog_Setting_MotionControl::Dialog_Setting_MotionControl(QWidget* parent)
 	tw->setColumnCount(Col_Count);
 	QStringList headers;
 	headers << tr("Axis") << tr("Index") << tr("HomeIndex") << tr("Resolution")
-			<< tr("LowSpeed\n(mm/s)") << tr("MediumSpeed\n(mm/s)") << tr("HighSpeed\n(mm/s)")
+			<< tr("MotionSpeed\n(mm/s)")
 			<< tr("Acc\n(mm/s^2)") << tr("Jerk\n(mm/s^3)")
 			<< tr("LeftLimit\n(mm)") << tr("RightLimit\n(mm)");
 	tw->setHorizontalHeaderLabels(headers);
@@ -118,18 +118,6 @@ void Dialog_Setting_MotionControl::InitSetting()
 	}
 	SETTINGS->SetTable(true, SettingSection::MotionControl, t_MC_Init);
 
-	// Init Axis section defaults (speed tiers, kept in Axis section for backward compat)
-	table t_Axis_Init;
-	t_Axis_Init["Axis"]["sAxis"] = m_axisNames.isEmpty() ? "X" : m_axisNames.first().toStdString();
-	for (const QString& axisName : m_axisNames)
-	{
-		string strAxis = axisName.toStdString();
-		t_Axis_Init[strAxis]["fLowSpeed"]     = 3.0;
-		t_Axis_Init[strAxis]["fMediumSpeed"]  = 5.0;
-		t_Axis_Init[strAxis]["fHighSpeed"]    = 10.0;
-		t_Axis_Init[strAxis]["fPipeDiameter"] = 1.6;
-	}
-	SETTINGS->SetTable(true, SettingSection::Axis, t_Axis_Init);
 }
 
 void Dialog_Setting_MotionControl::SetPage(table table_Set)
@@ -152,8 +140,6 @@ void Dialog_Setting_MotionControl::SetPage(table table_Set)
 
 void Dialog_Setting_MotionControl::populateAxisTable(const table& table_Set)
 {
-	table table_Axis = SETTINGS->GetTable(SettingSection::Axis);
-
 	QTableWidget* tw = ui.tableWidget_AxisConfig;
 	tw->blockSignals(true);
 	tw->setRowCount(0);
@@ -197,23 +183,8 @@ void Dialog_Setting_MotionControl::populateAxisTable(const table& table_Set)
 		// Resolution (double)
 		tw->setItem(row, Col_Resolution, new QTableWidgetItem(QString::number(getDouble("fResolution", 2000.0), 'g', 16)));
 
-		// LowSpeed (from Axis section)
-		double fLowSpeed = 3.0;
-		if (table_Axis.count(strAxis) && table_Axis.at(strAxis).contains("fLowSpeed"))
-			fLowSpeed = table_Axis.at(strAxis).at("fLowSpeed").as_floating();
-		tw->setItem(row, Col_LowSpeed, new QTableWidgetItem(QString::number(fLowSpeed, 'g', 16)));
-
-		// MediumSpeed (from Axis section)
-		double fMediumSpeed = 5.0;
-		if (table_Axis.count(strAxis) && table_Axis.at(strAxis).contains("fMediumSpeed"))
-			fMediumSpeed = table_Axis.at(strAxis).at("fMediumSpeed").as_floating();
-		tw->setItem(row, Col_MediumSpeed, new QTableWidgetItem(QString::number(fMediumSpeed, 'g', 16)));
-
-		// HighSpeed (from Axis section)
-		double fHighSpeed = 10.0;
-		if (table_Axis.count(strAxis) && table_Axis.at(strAxis).contains("fHighSpeed"))
-			fHighSpeed = table_Axis.at(strAxis).at("fHighSpeed").as_floating();
-		tw->setItem(row, Col_HighSpeed, new QTableWidgetItem(QString::number(fHighSpeed, 'g', 16)));
+		// Controller motion speed.  Low/medium/high manual speeds belong to Axis.
+		tw->setItem(row, Col_MotionSpeed, new QTableWidgetItem(QString::number(getDouble("fVel", 10.0), 'g', 16)));
 
 		// Acceleration (from MotionControl section)
 		tw->setItem(row, Col_Acceleration, new QTableWidgetItem(QString::number(getDouble("fAcc", 1000.0), 'g', 16)));
@@ -262,15 +233,12 @@ void Dialog_Setting_MotionControl::GetPage(table& table_Page)
 		table_Temp[strAxis]["iIndex"]      = cellText(Col_Index).toInt();
 		table_Temp[strAxis]["iHomeIndex"]  = cellText(Col_HomeIndex).toInt();
 		table_Temp[strAxis]["fResolution"] = cellText(Col_Resolution).toDouble();
+		table_Temp[strAxis]["fVel"]        = cellText(Col_MotionSpeed).toDouble();
 		table_Temp[strAxis]["fAcc"]        = cellText(Col_Acceleration).toDouble();
 		table_Temp[strAxis]["fJerk"]       = cellText(Col_Jerk).toDouble();
 		table_Temp[strAxis]["fLeftLimit"]  = cellText(Col_LeftLimit).toDouble();
 		table_Temp[strAxis]["fRightLimit"] = cellText(Col_RightLimit).toDouble();
 
-		// Axis section params (speed tiers)
-		table_Temp["Axis_Speed"][strAxis]["fLowSpeed"]    = cellText(Col_LowSpeed).toDouble();
-		table_Temp["Axis_Speed"][strAxis]["fMediumSpeed"]  = cellText(Col_MediumSpeed).toDouble();
-		table_Temp["Axis_Speed"][strAxis]["fHighSpeed"]    = cellText(Col_HighSpeed).toDouble();
 	}
 
 	table_Page = table_Temp;
@@ -286,17 +254,6 @@ bool Dialog_Setting_MotionControl::GetChanged(table table_Page, table& table_Cha
 		string	strTable = it->first;
 		string	strKey   = it->second;
 
-		bool bAxisSection = (strTable.size() > 5 && strTable.compare(0, 5, "Axis:") == 0);
-		if (bAxisSection)
-		{
-			string axisName = strTable.substr(5);
-			value Value = table_Page["Axis_Speed"][axisName][strKey];
-			table_Changed["Axis"][axisName][strKey] = Value;
-			SETTINGS->SetKeyValue(strKey, Value, SettingSection::Axis, axisName);
-			LOG_OPER_INFO(tr("Setting [Axis][%1][%2] %3").arg(tr(axisName.c_str()))
-				.arg(tr(strKey.c_str())).arg(toml::format(Value).c_str()).toUtf8().data());
-		}
-		else
 		{
 			value Value;
 			if (table_Page.count(strTable) && table_Page.at(strTable).contains(strKey))
@@ -333,26 +290,16 @@ void Dialog_Setting_MotionControl::onTableCellChanged(int row, int column)
 		"iIndex",       // Col_Index
 		"iHomeIndex",   // Col_HomeIndex
 		"fResolution",  // Col_Resolution
-		nullptr,        // Col_LowSpeed → Axis section
-		nullptr,        // Col_MediumSpeed → Axis section
-		nullptr,        // Col_HighSpeed → Axis section
+		"fVel",        // Col_MotionSpeed
 		"fAcc",         // Col_Acceleration
 		"fJerk",        // Col_Jerk
 		"fLeftLimit",   // Col_LeftLimit
 		"fRightLimit",  // Col_RightLimit
 	};
 
-	static const char* axisKeys[] = {
-		nullptr, nullptr, nullptr, nullptr,
-		"fLowSpeed", "fMediumSpeed", "fHighSpeed",
-		nullptr, nullptr, nullptr, nullptr,
-	};
-
 	if (column >= 0 && column < Col_Count)
 	{
-		if (axisKeys[column])
-			set_Changed.insert(make_pair("Axis:" + strAxis, string(axisKeys[column])));
-		else if (mcKeys[column])
+		if (mcKeys[column])
 			set_Changed.insert(make_pair(strAxis, string(mcKeys[column])));
 	}
 }

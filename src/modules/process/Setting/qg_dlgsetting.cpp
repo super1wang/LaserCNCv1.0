@@ -15,6 +15,7 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 
 	// 右侧设置页
 	dlgMotionControlSetting = new Dialog_Setting_MotionControl	(this);
+	dlgAxisSetting			= new Dialog_Setting_Axis			(this);
 	dlgDigitalSetting		= new Dialog_Setting_Digital		(this);
 	dlgAnalogSetting		= new Dialog_Setting_Analog			(this);
 	dlgLaserSetting			= new Dialog_Setting_Laser			(this);
@@ -29,6 +30,7 @@ QG_dlgSetting::QG_dlgSetting(QWidget *parent)
 	dlgCameraSetting		= new Dialog_Setting_Camera			(this);
 
 	ui.stackedWidget_Setting_Content->insertWidget(Page::MotionController,	dlgMotionControlSetting);
+	ui.stackedWidget_Setting_Content->insertWidget(Page::Axis,				dlgAxisSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Digital, 			dlgDigitalSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Analog,			dlgAnalogSetting);
 	ui.stackedWidget_Setting_Content->insertWidget(Page::Laser,				dlgLaserSetting);
@@ -330,7 +332,7 @@ void QG_dlgSetting::SwitchItem(QTreeWidgetItem* item, int column)
 		break;
 	}
 	case Menu::MOTION_CONTROLLER:	ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);	break;
-	case Menu::AXIS_SPEED:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::MotionController);				break;
+	case Menu::AXIS_SPEED:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Axis);				break;
 	case Menu::IO_INDEX:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Digital);			break;	// 兼容旧菜单
 	case Menu::DIGITAL_IO:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Digital);			break;
 	case Menu::ANALOG_IO:			ui.stackedWidget_Setting_Content->setCurrentIndex(Page::Analog);			break;
@@ -363,6 +365,7 @@ void QG_dlgSetting::InitSetting()
 	try {
 		dlgMotionControlSetting	->InitSetting();
 		dlgMotionControlSetting->setUI();
+		dlgAxisSetting			->InitSetting();
 		dlgDigitalSetting		->InitSetting();
 		dlgAnalogSetting		->InitSetting();
 		dlgLaserSetting			->InitSetting();
@@ -397,6 +400,7 @@ static void SafeSetPage(const char* name, std::function<void()> fn)
 void QG_dlgSetting::UpdatePage()
 {
 	SafeSetPage("MotionControl",	[&]{ dlgMotionControlSetting	->SetPage(); });
+	SafeSetPage("Axis",			[&]{ dlgAxisSetting			->SetPage(); });
 	SafeSetPage("Digital",			[&]{ dlgDigitalSetting		->SetPage(); });
 	SafeSetPage("Analog",			[&]{ dlgAnalogSetting		->SetPage(); });
 	SafeSetPage("Laser",			[&]{ dlgLaserSetting			->SetPage(); });
@@ -417,21 +421,9 @@ void QG_dlgSetting::GetChanged()
 {
 	bool bMotionControlChanged = false;
 	dlgMotionControlSetting->GetPage(m_tableSettings["MotionControl"].as_table());
-	// MotionControl page now handles both MotionControl and Axis sections.
-	// GetChanged writes to both m_tableChanged["MotionControl"] and m_tableChanged["Axis"].
 	{
 		table& mcChanged  = m_tableChanged["MotionControl"].as_table();
-		table& axisChanged = m_tableChanged["Axis"].as_table();
 		bool hasMCChanges = dlgMotionControlSetting->GetChanged(m_tableSettings["MotionControl"].as_table(), mcChanged);
-		// Axis section changes are already written to SETTINGS by GetChanged;
-		// collect them from mcChanged's "Axis" sub-table if present.
-		if (mcChanged.count("Axis"))
-		{
-			table& axisSub = mcChanged.at("Axis").as_table();
-			for (const auto& kv : axisSub)
-				axisChanged[kv.first] = kv.second;
-			mcChanged.erase("Axis");
-		}
 
 		if (hasMCChanges && m_pService->GetMotionControl())
 		{
@@ -448,8 +440,9 @@ void QG_dlgSetting::GetChanged()
 		}
 	}
 
-	// PipeDiameter / axis speed changes are now written to SettingSection::Axis
-	// by the MotionControl page's GetChanged.
+	dlgAxisSetting->GetPage(m_tableSettings["Axis"].as_table());
+	dlgAxisSetting->GetChanged(m_tableSettings["Axis"].as_table(), m_tableChanged["Axis"].as_table());
+
 	if (m_tableChanged["Axis"].as_table().size() || bMotionControlChanged)
 	{
 		if (m_pService->GetMotionControl() && m_pService->GetMotionControl()->IsConnected())

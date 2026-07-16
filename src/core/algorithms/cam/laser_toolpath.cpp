@@ -365,6 +365,7 @@ void normalizeContourTraversal(LaserContour& contour,
     if (contour.leadIn.valid && !contour.points.empty()) {
         contour.leadIn.entryPoint = contour.points.front().position;
         contour.leadIn.entryParam = contour.points.front().param;
+        contour.leadIn.entryEdgeIndex = contour.points.front().sourceEdgeIndex;
         contour.leadIn.entryPointIndex = 0;
     }
 }
@@ -653,11 +654,15 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(const TopoDS_Sha
 
 std::vector<LaserContour> LaserToolpathBuilder::extractContours(
     const TopoDS_Shape& workpiece,
-    const ContourExtractionParams& params)
+    const ContourExtractionParams& params,
+    FaceClassification* classificationOut)
 {
     // If face classification is disabled, use the legacy method directly.
-    if (!params.useFaceClassification)
+    if (!params.useFaceClassification) {
+        if (classificationOut)
+            *classificationOut = {};
         return extractContours(workpiece);
+    }
 
     if (workpiece.IsNull())
         return {};
@@ -665,6 +670,8 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
     // ── Step 1: classify faces by smooth connectivity ────────────────────
     FaceClassification classification =
         FaceClassifier::classifyFaces(workpiece, params.smoothAngleThresholdDeg);
+    if (classificationOut)
+        *classificationOut = classification;
 
     // Fallback: if no meaningful classification (no outer or no cross-section),
     // use the legacy OuterWire-based extraction but filter out inner surfaces.
@@ -771,6 +778,8 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
                                              const TopoDS_Shape& workpiece,
                                              double deflection)
 {
+    const int anchoredEdgeIndex = contour.leadIn.valid ? contour.leadIn.entryEdgeIndex : -1;
+    const double anchoredParam = contour.leadIn.entryParam;
     contour.points.clear();
     if (contour.wire.IsNull())
         return;
@@ -778,7 +787,8 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
     const gp_Pnt workpieceCenter = shapeCenter(workpiece);
 
     // 必须按 WireExplorer 的连接顺序遍历边，不能用 TopExp_Explorer（拓扑集合顺序不保证连贯）。
-    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next()) {
+    int edgeIndex = 0;
+    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next(), ++edgeIndex) {
         const TopoDS_Edge edge = exp.Current();
         if (BRep_Tool::Degenerated(edge))
             continue;
@@ -789,15 +799,30 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             continue;
 
         const bool reversed = edge.Orientation() == TopAbs_REVERSED;
-        const int n = sampler.NbPoints();
-        for (int k = 1; k <= n; ++k) {
-            const int i = reversed ? (n - k + 1) : k;
+        std::vector<double> parameters;
+        parameters.reserve(static_cast<std::size_t>(sampler.NbPoints() + 1));
+        for (int i = 1; i <= sampler.NbPoints(); ++i)
+            parameters.push_back(sampler.Parameter(i));
+        if (edgeIndex == anchoredEdgeIndex)
+            parameters.push_back(anchoredParam);
+        std::sort(parameters.begin(), parameters.end());
+        parameters.erase(std::unique(parameters.begin(), parameters.end(), [](double a, double b) {
+            return std::abs(a - b) <= 1e-12;
+        }), parameters.end());
+        if (reversed)
+            std::reverse(parameters.begin(), parameters.end());
+
+        for (double parameter : parameters) {
             ToolpathPoint tp;
-            tp.param    = sampler.Parameter(i);
-            tp.position = sampler.Value(i);
+            tp.param = parameter;
+            tp.sourceEdgeIndex = edgeIndex;
+            curve.D0(tp.param, tp.position);
 
             if (!contour.points.empty()
                 && contour.points.back().position.SquareDistance(tp.position) < 1e-12) {
+                if (edgeIndex == anchoredEdgeIndex
+                    && std::abs(tp.param - anchoredParam) <= 1e-12)
+                    contour.points.back() = tp;
                 continue; // 去除相邻边连接处重复点
             }
 
@@ -831,6 +856,8 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
     const std::vector<TopoDS_Face>& crossFaces,
     double deflection)
 {
+    const int anchoredEdgeIndex = contour.leadIn.valid ? contour.leadIn.entryEdgeIndex : -1;
+    const double anchoredParam = contour.leadIn.entryParam;
     contour.points.clear();
     if (contour.wire.IsNull())
         return;
@@ -839,7 +866,8 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
 
     // 必须按 WireExplorer 的连接顺序遍历边，并尊重每条边的 Orientation。
     // TopExp_Explorer 只是拓扑枚举，会导致矩形孔等多边轮廓边之间顺序错乱。
-    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next()) {
+    int edgeIndex = 0;
+    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next(), ++edgeIndex) {
         const TopoDS_Edge edge = exp.Current();
         if (BRep_Tool::Degenerated(edge))
             continue;
@@ -850,15 +878,30 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             continue;
 
         const bool reversed = edge.Orientation() == TopAbs_REVERSED;
-        const int n = sampler.NbPoints();
-        for (int k = 1; k <= n; ++k) {
-            const int i = reversed ? (n - k + 1) : k;
+        std::vector<double> parameters;
+        parameters.reserve(static_cast<std::size_t>(sampler.NbPoints() + 1));
+        for (int i = 1; i <= sampler.NbPoints(); ++i)
+            parameters.push_back(sampler.Parameter(i));
+        if (edgeIndex == anchoredEdgeIndex)
+            parameters.push_back(anchoredParam);
+        std::sort(parameters.begin(), parameters.end());
+        parameters.erase(std::unique(parameters.begin(), parameters.end(), [](double a, double b) {
+            return std::abs(a - b) <= 1e-12;
+        }), parameters.end());
+        if (reversed)
+            std::reverse(parameters.begin(), parameters.end());
+
+        for (double parameter : parameters) {
             ToolpathPoint tp;
-            tp.param    = sampler.Parameter(i);
-            tp.position = sampler.Value(i);
+            tp.param = parameter;
+            tp.sourceEdgeIndex = edgeIndex;
+            curve.D0(tp.param, tp.position);
 
             if (!contour.points.empty()
                 && contour.points.back().position.SquareDistance(tp.position) < 1e-12) {
+                if (edgeIndex == anchoredEdgeIndex
+                    && std::abs(tp.param - anchoredParam) <= 1e-12)
+                    contour.points.back() = tp;
                 continue; // 去除相邻边连接处重复点，避免插补重复点和角度突跳
             }
 
@@ -1015,6 +1058,7 @@ bool LaserToolpathBuilder::setContourStart(LaserContour& contour,
 
     contour.leadIn.entryPoint = contour.points.front().position;
     contour.leadIn.entryParam = contour.points.front().param;
+    contour.leadIn.entryEdgeIndex = contour.points.front().sourceEdgeIndex;
     contour.leadIn.entryPointIndex = 0;
     contour.leadIn.valid = true;
     contour.leadInSolution = computeLeadInSolution(contour, contour.leadIn.length);

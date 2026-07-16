@@ -31,6 +31,7 @@ void Dialog_Setting_Axis::InitSetting()
 	t_Init["Axis"]["sAxis"] = "X";
 
 	ui.comboBox_Axis_sAxis->blockSignals(true);
+	ui.comboBox_Axis_sAxis->clear();
 	for (int i = 0; i < 8; i++)
 	{
 		if (DT::IsAxisUse((Axis)i))
@@ -50,7 +51,10 @@ void Dialog_Setting_Axis::SetPage(table table_Set)
 	if (!table_Set.size())
 		table_Set = SETTINGS->GetTable(SettingSection::Axis);
 
+	rebuildAxisChoices(table_Set);
 	str_Axis = table_Set["Axis"]["sAxis"].as_string();
+	if (ui.comboBox_Axis_sAxis->findText(QString::fromStdString(str_Axis)) < 0)
+		str_Axis = ui.comboBox_Axis_sAxis->currentText().toStdString();
 	table_Temp["Axis"]["sAxis"] = str_Axis;
 	
 	ui.comboBox_Axis_sAxis	->setCurrentText(QString::fromStdString(str_Axis));
@@ -71,6 +75,40 @@ void Dialog_Setting_Axis::SetPage(table table_Set)
 		ui.groupBox_PipeDiameter->setHidden(false);
 	else
 		ui.groupBox_PipeDiameter->setHidden(true);
+}
+
+void Dialog_Setting_Axis::rebuildAxisChoices(const table& table_Set)
+{
+	QStringList axisNames;
+	for (const auto& eAxis : magic_enum::enum_values<Axis>())
+	{
+		if (DT::IsAxisUse(eAxis))
+			axisNames.append(QString::fromStdString(enum_name(eAxis).data()));
+	}
+
+	string extensions;
+	SETTINGS->GetKeyValue("ExtensionAxes", extensions, SettingSection::MotionControl, "MotionControl");
+	for (const QString& axisName : QString::fromStdString(extensions).split(',', Qt::SkipEmptyParts))
+	{
+		const QString normalized = axisName.trimmed().toUpper();
+		if (!normalized.isEmpty() && !axisNames.contains(normalized))
+			axisNames.append(normalized);
+	}
+	axisNames.removeDuplicates();
+
+	QString selected = QString::fromStdString(str_Axis);
+	const auto axisTable = table_Set.find("Axis");
+	if (axisTable != table_Set.cend() && axisTable->second.is_table())
+	{
+		const auto selectedAxis = axisTable->second.as_table().find("sAxis");
+		if (selectedAxis != axisTable->second.as_table().cend() && selectedAxis->second.is_string())
+			selected = QString::fromStdString(selectedAxis->second.as_string());
+	}
+	ui.comboBox_Axis_sAxis->blockSignals(true);
+	ui.comboBox_Axis_sAxis->clear();
+	ui.comboBox_Axis_sAxis->addItems(axisNames);
+	ui.comboBox_Axis_sAxis->setCurrentText(selected);
+	ui.comboBox_Axis_sAxis->blockSignals(false);
 }
 
 void Dialog_Setting_Axis::GetPage(table& table_Page)

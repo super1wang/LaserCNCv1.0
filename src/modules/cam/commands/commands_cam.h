@@ -60,10 +60,7 @@ public:
 };
 
 /**
- * @brief Recalculate toolpath lead-in geometry using current parameters.
- *
- * Reads length and normal angle from the global LaserToolpath state,
- * recomputes all lead-in edges, and refreshes the 3D display.
+ * @brief Apply pending parameters and rebuild only the active contour.
  */
 class CmdRecalcToolpath : public CommandBase
 {

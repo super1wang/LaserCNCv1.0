@@ -21,6 +21,7 @@ public:
 
 private:
 	void CreatAxis(string strAxis, table& table);
+	void rebuildAxisChoices(const table& table_Set);
 	void setupLineEditValidators(QWidget* dialog);
 
 private slots:

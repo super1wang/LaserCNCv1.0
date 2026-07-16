@@ -97,6 +97,7 @@ int Tool::SetFromTable(const ::toml::table& t)
 	if (tryGetDouble(t, "fYVel",   m_dIdleYVelocity))  ++n;
 	if (tryGetDouble(t, "fAVel",   m_dIdleAVelocity))  ++n;
 	if (tryGetDouble(t, "fA1Vel",  m_dIdleA1Velocity)) ++n;
+	if (tryGetDouble(t, "fCVel",   m_dIdleCVelocity))  ++n;
 	if (tryGetDouble(t, "fX1Vel",  m_dIdleX1Velocity)) ++n;
 	if (tryGetDouble(t, "fY1Vel",  m_dIdleY1Velocity)) ++n;
 	if (tryGetDouble(t, "fZVel",   m_dIdleZVelocity))  ++n;
@@ -139,10 +140,6 @@ int Tool::SetFromTable(const ::toml::table& t)
 	// 高度
 	if (tryGetDouble(t, "fCuttingHeight", m_dCuttingHeight)) ++n;
 	if (tryGetDouble(t, "fIdleHeight",    m_dIdleZHeight))   ++n;
-
-	// 方向
-	if (tryGetString(t, "sDirectionsX", m_strDirectionX)) ++n;
-	if (tryGetString(t, "sDirectionsY", m_strDirectionY)) ++n;
 
 	// 通用开关
 	if (tryGetBool(t, "bPunch",    m_bPunch))    ++n;

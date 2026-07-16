@@ -28,6 +28,7 @@ public:
 		m_dIdleXVelocity			= _Tool.m_dIdleXVelocity;			// X轴空程速度（Add）
 		m_dIdleAVelocity			= _Tool.m_dIdleAVelocity;			// A轴空程速度
 		m_dIdleA1Velocity			= _Tool.m_dIdleA1Velocity;			// A1轴空程速度
+		m_dIdleCVelocity			= _Tool.m_dIdleCVelocity;
 		m_dIdleYVelocity			= _Tool.m_dIdleYVelocity;			// Y轴空程速度
 		m_dIdleZVelocity			= _Tool.m_dIdleZVelocity;			// Z轴空程速度
 		m_dIdleX1Velocity			= _Tool.m_dIdleX1Velocity;			// X1轴空程速度
@@ -138,6 +139,7 @@ public:
 	double m_dIdleXVelocity{0.0};			// X轴空程速度（Add）
 	double m_dIdleAVelocity{0.0};			// A轴空程速度
 	double m_dIdleA1Velocity{0.0};			// A1轴空程速度
+	double m_dIdleCVelocity{0.0};			// C轴空程速度
 	double m_dIdleYVelocity{0.0};			// Y轴空程速度
 	double m_dIdleZVelocity{0.0};			// Z轴空程速度
 	double m_dIdleX1Velocity{0.0};			// X1轴空程速度

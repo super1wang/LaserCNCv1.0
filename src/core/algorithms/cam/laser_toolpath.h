@@ -42,7 +42,14 @@ struct ToolpathPoint
     bool   crossSectionNormalValid{false};
     gp_Dir tangent;       ///< Tangent direction along the contour (for 5-axis)
     double param{0.0};    ///< Curve parameter on the source edge
+    int sourceEdgeIndex{-1}; ///< Stable wire-edge index owning this sample
     MachineCoord machineCoord; ///< Computed machine coordinates (filled by IK)
+};
+
+struct ContourGenerationParams
+{
+    double leadInLength{5.0};
+    double deflection{0.1};
 };
 
 /**
@@ -53,6 +60,7 @@ struct LeadInParams
     double  length{5.0};       ///< Lead-in length in mm
     gp_Pnt  entryPoint;        ///< Entry point on the contour where lead-in meets the path
     double  entryParam{0.0};   ///< Curve parameter at the entry point
+    int     entryEdgeIndex{-1};///< Stable wire-edge index of the selected start
     int     entryPointIndex{-1};///< Selected sampled point (-1 = not set)
     bool    valid{false};      ///< True when the user has picked an entry point
 };
@@ -82,6 +90,9 @@ struct LaserContour
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
     LeadInParams               leadIn;   ///< Lead-in parameters for this contour
     LeadInSolution             leadInSolution; ///< Derived geometry and machine pose
+    ContourGenerationParams    appliedParams; ///< Parameters matching the stored points
+    ContourGenerationParams    pendingParams; ///< Explicitly edited, not yet applied values
+    bool                       needsRecalculation{false};
     bool                       enabled{true};
     QString                    name;
     QString                    workpieceEntry; ///< Mounted workpiece entry owning this contour
@@ -174,7 +185,8 @@ public:
     /// Falls back to the legacy method if face classification yields no result.
     static std::vector<LaserContour> extractContours(
         const TopoDS_Shape& workpiece,
-        const ContourExtractionParams& params);
+        const ContourExtractionParams& params,
+        FaceClassification* classificationOut = nullptr);
 
     /// Discretise a contour wire into sampled ToolpathPoints.
     /// @param contour    The contour to populate with sampled points.

@@ -454,6 +454,7 @@ void MainWindow::createCentralLayout()
     connect(m_appContext->camModule(), &CamModule::toolpathContourSelected, this,
             [this](int contourIndex) {
                 const auto contourId = m_appContext->camModule()->contourIdAt(contourIndex);
+                m_appContext->camModule()->setActiveContourId(contourId);
                 selectProjectExplorerContourById(contourId, contourIndex);
                 m_toolpathPanel->showContourCoordinates(contourIndex);
             });
@@ -1097,7 +1098,21 @@ void MainWindow::createRightPanel()
             m_appContext->camModule()->cancelLeadInPreview();
             m_toolpathPanel->setToolpath(&m_appContext->camModule()->toolpathRef());
             rebuildProjectExplorer();
-            selectProjectExplorerContourById(m_appContext->camModule()->contourIdAt(0), 0);
+            const auto activeId = m_appContext->camModule()->activeContourId();
+            selectProjectExplorerContourById(activeId != 0
+                ? activeId : m_appContext->camModule()->contourIdAt(0), 0);
+            });
+        connect(m_appContext->camModule(), &CamModule::activeToolpathContourChanged, this,
+            [this](std::uint64_t contourId, int contourIndex) {
+                m_toolpathPanel->setActiveContour(contourIndex);
+                if (contourId != 0)
+                    selectProjectExplorerContourById(contourId, contourIndex);
+                updateCommandStates();
+            });
+        connect(m_appContext->camModule(), &CamModule::activeContourParametersChanged, this,
+            [this]() {
+                const int index = m_appContext->camModule()->activeContourIndex();
+                m_toolpathPanel->showContourCoordinates(index);
             });
         connect(m_appContext->camModule(), &CamModule::toolpathCleared, this,
             [this]() {
@@ -1118,10 +1133,28 @@ void MainWindow::createRightPanel()
             [this](bool) { m_cmdContainer->findCommand(CmdToolpathPreview::Name)->execute(); });
     connect(m_toolpathPanel, &WidgetToolpathPanel::leadInLengthChanged, this,
             [this](double v) {
-            m_appContext->camModule()->setLeadInLength(v);
+            if (m_toolpathPanel->parameterScope() == WidgetToolpathPanel::ParameterScope::CurrentContour)
+                m_appContext->camModule()->setActiveContourLeadInLength(v);
+            else
+                m_appContext->camModule()->setLeadInLength(v);
             });
-        connect(m_toolpathPanel, &WidgetToolpathPanel::discretizationIntervalChanged, this,
-            [this](double v) { m_appContext->camModule()->setDeflection(v); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::discretizationIntervalChanged, this,
+            [this](double v) {
+            if (m_toolpathPanel->parameterScope() == WidgetToolpathPanel::ParameterScope::CurrentContour)
+                m_appContext->camModule()->setActiveContourDeflection(v);
+            else
+                m_appContext->camModule()->setDeflection(v);
+            });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::parameterScopeChanged, this,
+            [this](bool currentContour) {
+            CamModule* cam = m_appContext->camModule();
+            if (currentContour) {
+                m_toolpathPanel->refreshParameterEditors();
+            } else {
+                m_toolpathPanel->setLeadInLength(cam->leadInLength());
+                m_toolpathPanel->setDiscretizationInterval(cam->deflection());
+            }
+            });
     connect(m_toolpathPanel, &WidgetToolpathPanel::smoothAngleChanged, this,
             [this](double v) { m_appContext->camModule()->setSmoothAngle(v); });
 
@@ -1690,8 +1723,14 @@ void MainWindow::onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current,
         m_appContext->camModule()->setSelectedEntries(entries);
     } else if (lcnc::app::isToolpathProjectNode(kind)) {
         m_appContext->camModule()->requestMachineView();
-        m_toolpathPanel->showContourCoordinates(contourIndex);
-        highlightContourInView(contourIndex);
+        if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
+            m_appContext->camModule()->setActiveContourId(contourId);
+            m_toolpathPanel->showContourCoordinates(contourIndex);
+            highlightContourInView(contourIndex);
+        } else {
+            m_appContext->camModule()->setActiveContourId(0);
+            m_toolpathPanel->showContourCoordinates(-1);
+        }
     }
 
     updateCommandStates();

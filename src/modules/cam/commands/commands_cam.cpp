@@ -43,8 +43,8 @@
 CmdGenerateToolpath::CmdGenerateToolpath(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/toolpath.svg"), tr("生成刀路"), this);
-    a->setStatusTip(tr("从当前工件中提取轮廓并生成激光刀路"));
+    auto* a = new QAction(QIcon(":/icons/toolpath.svg"), tr("全局生成刀路"), this);
+    a->setStatusTip(tr("使用全局待应用参数重建全部激光刀路"));
     setAction(a);
 }
 
@@ -137,14 +137,15 @@ void CmdToolpathPreview::execute()
 CmdRecalcToolpath::CmdRecalcToolpath(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/toolpath_5x.svg"), tr("重新计算"), this);
-    a->setStatusTip(tr("使用当前参数重新计算刀路引刀线"));
+    auto* a = new QAction(QIcon(":/icons/toolpath_5x.svg"), tr("重新计算当前轮廓"), this);
+    a->setStatusTip(tr("应用当前轮廓的待应用参数并仅重建该轮廓"));
     setAction(a);
 }
 
 bool CmdRecalcToolpath::isEnabled() const
 {
-    return context()->camModule()->hasToolpath();
+    return context()->camModule()->hasToolpath()
+        && context()->camModule()->activeContourIndex() >= 0;
 }
 
 void CmdRecalcToolpath::execute()

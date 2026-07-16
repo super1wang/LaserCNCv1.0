@@ -32,6 +32,14 @@ void WidgetToolpathPanel::buildUi()
     auto* paramGroup = new QGroupBox(tr("参数"), this);
     auto* paramForm  = new QFormLayout(paramGroup);
 
+    m_comboParameterScope = new QComboBox(paramGroup);
+    m_comboParameterScope->addItem(tr("全局"), static_cast<int>(ParameterScope::Global));
+    m_comboParameterScope->addItem(tr("当前轮廓"), static_cast<int>(ParameterScope::CurrentContour));
+    paramForm->addRow(tr("作用域:"), m_comboParameterScope);
+
+    m_labelCurrentContour = new QLabel(tr("未选择轮廓"), paramGroup);
+    paramForm->addRow(tr("当前轮廓:"), m_labelCurrentContour);
+
     m_spinLeadInLength = new QDoubleSpinBox(paramGroup);
     m_spinLeadInLength->setRange(0.1, 100.0);
     m_spinLeadInLength->setValue(5.0);
@@ -52,7 +60,8 @@ void WidgetToolpathPanel::buildUi()
     mainLayout->addWidget(paramGroup);
 
     // ── 面分类 group ───────────────────────────────────────────────────────
-    auto* classGroup = new QGroupBox(tr("面分类"), this);
+    auto* classGroup = new QGroupBox(tr("全局面分类"), this);
+    m_classificationGroup = classGroup;
     auto* classForm  = new QFormLayout(classGroup);
 
     m_spinSmoothAngle = new QDoubleSpinBox(classGroup);
@@ -97,9 +106,9 @@ void WidgetToolpathPanel::buildUi()
     auto* opsGroup  = new QGroupBox(tr("操作"), this);
     auto* opsLayout = new QVBoxLayout(opsGroup);
 
-    m_btnGenerate  = new QPushButton(tr("生成刀路"), opsGroup);
+    m_btnGenerate  = new QPushButton(tr("全局生成刀路"), opsGroup);
     m_btnPickLeadIn = new QPushButton(tr("选择轮廓起点"), opsGroup);
-    m_btnRecalc    = new QPushButton(tr("重新计算"), opsGroup);
+    m_btnRecalc    = new QPushButton(tr("重新计算当前轮廓"), opsGroup);
     m_btnPreview   = new QPushButton(tr("刀路预览"), opsGroup);
     m_btnPreview->setCheckable(true);
     m_btnPreview->setChecked(true);
@@ -144,6 +153,11 @@ void WidgetToolpathPanel::buildUi()
             this, &WidgetToolpathPanel::leadInLengthChanged);
     connect(m_spinDeflection,   QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::discretizationIntervalChanged);
+    connect(m_comboParameterScope, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+                refreshParameterEditors();
+                emit parameterScopeChanged(parameterScope() == ParameterScope::CurrentContour);
+            });
 
     connect(m_spinSmoothAngle,  QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::smoothAngleChanged);
@@ -162,11 +176,51 @@ void WidgetToolpathPanel::buildUi()
 void WidgetToolpathPanel::setToolpath(LaserToolpath* tp)
 {
     m_toolpath = tp;
+    m_activeContourIndex = -1;
     showContourCoordinates(-1);
+    refreshParameterEditors();
+}
 
-    if (tp) {
-        setLeadInLength(tp->globalLeadInLength());
+WidgetToolpathPanel::ParameterScope WidgetToolpathPanel::parameterScope() const
+{
+    if (!m_comboParameterScope)
+        return ParameterScope::Global;
+    return static_cast<ParameterScope>(m_comboParameterScope->currentData().toInt());
+}
+
+void WidgetToolpathPanel::setActiveContour(int contourIndex)
+{
+    m_activeContourIndex = m_toolpath && contourIndex >= 0
+        && contourIndex < m_toolpath->contourCount() ? contourIndex : -1;
+    refreshParameterEditors();
+}
+
+void WidgetToolpathPanel::refreshParameterEditors()
+{
+    const bool currentScope = parameterScope() == ParameterScope::CurrentContour;
+    const bool hasContour = m_toolpath && m_activeContourIndex >= 0
+        && m_activeContourIndex < m_toolpath->contourCount();
+    if (m_labelCurrentContour) {
+        if (hasContour) {
+            const LaserContour& contour = m_toolpath->contour(m_activeContourIndex);
+            m_labelCurrentContour->setText(contour.needsRecalculation
+                ? tr("%1（待重新计算）").arg(contour.name)
+                : contour.name);
+        } else {
+            m_labelCurrentContour->setText(tr("未选择轮廓"));
+        }
     }
+    if (currentScope && hasContour) {
+        const auto& params = m_toolpath->contour(m_activeContourIndex).pendingParams;
+        setLeadInLength(params.leadInLength);
+        setDiscretizationInterval(params.deflection);
+    } else if (!currentScope && m_toolpath) {
+        setLeadInLength(m_toolpath->globalLeadInLength());
+    }
+    if (m_spinLeadInLength) m_spinLeadInLength->setEnabled(!currentScope || hasContour);
+    if (m_spinDeflection) m_spinDeflection->setEnabled(!currentScope || hasContour);
+    if (m_btnRecalc) m_btnRecalc->setEnabled(currentScope && hasContour);
+    if (m_classificationGroup) m_classificationGroup->setEnabled(!currentScope);
 }
 
 void WidgetToolpathPanel::setLeadInLength(double mm)
@@ -264,6 +318,7 @@ bool WidgetToolpathPanel::useFaceClassification() const
 void WidgetToolpathPanel::showContourCoordinates(int contourIndex)
 {
     m_coordTable->setRowCount(0);
+    setActiveContour(contourIndex);
     if (!m_toolpath) return;
     if (contourIndex < 0 || contourIndex >= m_toolpath->contourCount()) return;
 

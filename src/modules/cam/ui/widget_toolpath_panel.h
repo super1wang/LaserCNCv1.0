@@ -9,20 +9,22 @@ class QComboBox;
 class QTableWidget;
 class QPushButton;
 class QGroupBox;
+class QLabel;
 
 /**
  * @brief Right-panel widget for laser toolpath parameters.
  *
  * Sections:
- *  1. 参数   — Lead-in length, normal angle, discretisation interval.
+ *  1. 参数   — Explicit global/current-contour scope, lead-in length and deflection.
  *  2. 面分类 — Smooth angle threshold and classification mode.
- *  3. 操作   — Buttons: 生成刀路 / 选择引刀位置 / 重新计算 / 刀路预览.
+ *  3. 操作   — Global generation, contour-start picking and active-contour rebuild.
  *  4. 坐标   — Machine coordinate table for the selected contour.
  */
 class WidgetToolpathPanel : public QWidget
 {
     Q_OBJECT
 public:
+    enum class ParameterScope { Global, CurrentContour };
     explicit WidgetToolpathPanel(QWidget* parent = nullptr);
 
     /// Bind the current toolpath for parameter display and coordinate lookup.
@@ -37,6 +39,9 @@ public:
 
     /// Show machine coordinates for contour at given index in the table.
     void showContourCoordinates(int contourIndex);
+    void setActiveContour(int contourIndex);
+    void refreshParameterEditors();
+    ParameterScope parameterScope() const;
 
     double leadInLength()  const;
     double discretizationInterval() const;
@@ -52,6 +57,7 @@ signals:
     void discretizationIntervalChanged(double mm);
     void smoothAngleChanged(double deg);
     void classificationModeChanged(int mode);
+    void parameterScopeChanged(bool currentContour);
 
 private:
     void buildUi();
@@ -61,6 +67,9 @@ private:
     // Parameter widgets
     QDoubleSpinBox* m_spinLeadInLength{nullptr};
     QDoubleSpinBox* m_spinDeflection{nullptr};
+    QComboBox*      m_comboParameterScope{nullptr};
+    QLabel*         m_labelCurrentContour{nullptr};
+    QGroupBox*      m_classificationGroup{nullptr};
 
     // Face classification widgets
     QDoubleSpinBox* m_spinSmoothAngle{nullptr};
@@ -79,6 +88,7 @@ private:
 
     // Coordinate table
     QTableWidget*   m_coordTable{nullptr};
+    int             m_activeContourIndex{-1};
 
 signals:
     void showNormalsToggled(bool on);

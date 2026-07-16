@@ -28,6 +28,7 @@ Dialog_Setting_Tool::Dialog_Setting_Tool(QWidget* parent)
 	connect(ui.lineEdit_Idel_fXVel,						SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
 	connect(ui.lineEdit_Idel_fYVel,						SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
 	connect(ui.lineEdit_Idel_fAVel,						SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
+	connect(ui.lineEdit_Idel_fCVel,						SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
 	connect(ui.lineEdit_Idel_fAVel,						SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
 	connect(ui.lineEdit_Idel_fA1Vel,					SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
 	connect(ui.lineEdit_Idel_fX1Vel,					SIGNAL(editingFinished()),	this, SLOT(lineEditChanged()));
@@ -140,6 +141,9 @@ void Dialog_Setting_Tool::SetPage(table table_Set)
 		table_Set = SETTINGS->GetTable(SettingSection::Tool);
 
 	str_ToolName = table_Set["ToolIndex"]["sToolIndex"].as_string();
+	// 方向选择由机台构型决定，清理旧版工具表中的遗留字段。
+	SETTINGS->DelKey("sDirectionsX", SettingSection::Tool, str_ToolName);
+	SETTINGS->DelKey("sDirectionsY", SettingSection::Tool, str_ToolName);
 	
 	ui.comboBox_Tool_sToolIndex				->setCurrentText(QString::fromUtf8(str_ToolName.c_str()));
 
@@ -150,6 +154,7 @@ void Dialog_Setting_Tool::SetPage(table table_Set)
 	ui.lineEdit_Idel_fXVel					->setText		(QString::number(		table_Set[str_ToolName]["fXVel"]			.as_floating(), 'g', 16));
 	ui.lineEdit_Idel_fYVel					->setText		(QString::number(		table_Set[str_ToolName]["fYVel"]			.as_floating(), 'g', 16));
 	ui.lineEdit_Idel_fAVel					->setText		(QString::number(		table_Set[str_ToolName]["fAVel"]			.as_floating(), 'g', 16));
+	ui.lineEdit_Idel_fCVel					->setText		(QString::number(		table_Set[str_ToolName]["fCVel"]			.as_floating(), 'g', 16));
 	ui.lineEdit_Idel_fA1Vel					->setText		(QString::number(		table_Set[str_ToolName]["fA1Vel"]			.as_floating(), 'g', 16));
 	ui.lineEdit_Idel_fX1Vel					->setText		(QString::number(		table_Set[str_ToolName]["fX1Vel"]			.as_floating(), 'g', 16));
 	ui.lineEdit_Idel_fY1Vel					->setText		(QString::number(		table_Set[str_ToolName]["fY1Vel"]			.as_floating(), 'g', 16));
@@ -257,6 +262,7 @@ void Dialog_Setting_Tool::GetPage(table& table_Page)
 	table_Temp[str_ToolName]["fXVel"]				= ui.lineEdit_Idel_fXVel					->text().toDouble();
 	table_Temp[str_ToolName]["fYVel"]				= ui.lineEdit_Idel_fYVel					->text().toDouble();
 	table_Temp[str_ToolName]["fAVel"]				= ui.lineEdit_Idel_fAVel					->text().toDouble();
+	table_Temp[str_ToolName]["fCVel"]				= ui.lineEdit_Idel_fCVel					->text().toDouble();
 	table_Temp[str_ToolName]["fA1Vel"]				= ui.lineEdit_Idel_fA1Vel					->text().toDouble();
 	table_Temp[str_ToolName]["fX1Vel"]				= ui.lineEdit_Idel_fX1Vel					->text().toDouble();
 	table_Temp[str_ToolName]["fY1Vel"]				= ui.lineEdit_Idel_fY1Vel					->text().toDouble();
@@ -285,8 +291,6 @@ void Dialog_Setting_Tool::GetPage(table& table_Page)
 	
 	table_Temp[str_ToolName]["fCuttingHeight"]		= ui.lineEdit_Height_fCuttingHeight			->text().toDouble();
 	table_Temp[str_ToolName]["fIdleHeight"]			= ui.lineEdit_Height_fIdleHeight			->text().toDouble();
-	table_Temp[str_ToolName]["sDirectionsX"]		= ui.comboBox_Directions_sDirectionsX		->currentText().toStdString();
-	table_Temp[str_ToolName]["sDirectionsY"]		= ui.comboBox_Directions_sDirectionsY		->currentText().toStdString();
 	table_Temp[str_ToolName]["bPunch"]				= ui.checkBox_General_bPunch				->isChecked();
 	table_Temp[str_ToolName]["bStopBlow"]			= ui.checkBox_General_bStopBlow				->isChecked();
 	table_Temp[str_ToolName]["bSetPosA"]			= ui.checkBox_SetPos_bSetPosA				->isChecked();
@@ -587,6 +591,7 @@ void Dialog_Setting_Tool::CreatTool(string strToolName)
 	t_Init["fXVel"]				= 20.0;
 	t_Init["fYVel"]				= 20.0;
 	t_Init["fAVel"]				= 10.0;
+	t_Init["fCVel"]				= 10.0;
 	t_Init["fA1Vel"] = 10.0;
 	t_Init["fX1Vel"]			= 20.0;
 	t_Init["fY1Vel"]			= 20.0;
@@ -615,9 +620,6 @@ void Dialog_Setting_Tool::CreatTool(string strToolName)
 	
 	t_Init["fCuttingHeight"]	= 0.0;
 	t_Init["fIdleHeight"]		= 0.0;
-	t_Init["sDirectionsX"]		= "X";
-	if (DT::IsAxisUse(Axis::Y))	t_Init["sDirectionsY"] = "Y";
-	else						t_Init["sDirectionsY"] = "A";
 	t_Init["bStopBlow"]			= false;
 	t_Init["bPunch"]			= false;
 	t_Init["bSetPosA"]			= false;
@@ -873,6 +875,8 @@ void Dialog_Setting_Tool::setupLineEditValidators(QWidget* dialog)
 
 void Dialog_Setting_Tool::setUI()
 {
+	// 坐标方向由当前机台构型的 AxisMap 决定，不再作为工具参数配置。
+	ui.groupBox_Directions->hide();
 	string strName;
 	SETTINGS->GetKeyValue("sType", strName, SettingSection::MotionControl, "MotionControl");
 	if (strName == "GTN")
@@ -1011,6 +1015,11 @@ void Dialog_Setting_Tool::setUI()
 	{
 		ui.label_Idel_ZVel->hide();
 		ui.lineEdit_Idel_fZVel->hide();
+	}
+	if (!DT::IsAxisUse(Axis::C))
+	{
+		ui.label_Idel_CVel->hide();
+		ui.lineEdit_Idel_fCVel->hide();
 	}
 }
 
