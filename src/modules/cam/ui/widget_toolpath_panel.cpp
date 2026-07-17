@@ -41,19 +41,19 @@ void WidgetToolpathPanel::buildUi()
     paramForm->addRow(tr("当前轮廓:"), m_labelCurrentContour);
 
     m_spinLeadInLength = new QDoubleSpinBox(paramGroup);
-    m_spinLeadInLength->setRange(0.1, 100.0);
+    m_spinLeadInLength->setRange(0.001, 100.0);
     m_spinLeadInLength->setValue(5.0);
-    m_spinLeadInLength->setDecimals(2);
+    m_spinLeadInLength->setDecimals(3);
     m_spinLeadInLength->setSuffix(tr(" mm"));
-    m_spinLeadInLength->setSingleStep(0.5);
+    m_spinLeadInLength->setSingleStep(0.001);
     paramForm->addRow(tr("引刀长度:"), m_spinLeadInLength);
 
     m_spinDeflection = new QDoubleSpinBox(paramGroup);
-    m_spinDeflection->setRange(0.01, 50.0);
+    m_spinDeflection->setRange(0.001, 50.0);
     m_spinDeflection->setValue(0.1);
     m_spinDeflection->setDecimals(3);
     m_spinDeflection->setSuffix(tr(" mm"));
-    m_spinDeflection->setSingleStep(0.01);
+    m_spinDeflection->setSingleStep(0.001);
     m_spinDeflection->setToolTip(tr("轮廓离散采样间隔，越小越精细但计算越慢"));
     paramForm->addRow(tr("离散间隔:"), m_spinDeflection);
 

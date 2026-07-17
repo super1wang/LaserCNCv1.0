@@ -79,18 +79,15 @@ void ProcessWorkflowExecutor::setControllerAccessor(ControllerAccessor accessor)
 void ProcessWorkflowExecutor::pause()
 {
     if (m_state == State::Running) {
+        // 暂停只在步骤的 checkpoint 生效。对于普通切割，当前完整轮廓已经
+        // 下发到控制器后必须自然执行结束；禁止暂停 ACS buffer，否则继续时
+        // 无法可靠地恢复同一缓冲程序。
         m_token.requestPause();
-        if (m_controllerAccessor) {
-            if (auto* mc = m_controllerAccessor()) {
-                if (mc->IsConnected())
-                    mc->PauseBuffer(9);
-            }
-        }
         m_stepTimer->stop();
         if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
             setNodeState(m_plan.at(m_currentIndex).nodeId, ProcessNodeState::Paused);
         setState(State::Paused);
-        emit messageLogged(tr("流程已暂停"));
+        emit messageLogged(tr("已请求暂停，当前轮廓完成后暂停"));
     }
 }
 

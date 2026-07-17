@@ -1360,15 +1360,12 @@ void ProcessModule::runPause()
     if (m_state != State::Running)
         return;
 
-    if (!m_simulationMode && m_service) {
-        if (auto* mc = m_service->GetMotionControl())
-            mc->PauseBuffer(9);
-    }
-
     m_simTimer->stop();
     if (m_workflowExecutor)
         m_workflowExecutor->pause();
-    setState(State::Paused, tr("运行已暂停"));
+    // 普通切割通过工作流 checkpoint 在轮廓边界暂停。不要暂停 ACS buffer：
+    // 已下发的当前轮廓需完整执行，恢复时继续使用同一个连续缓冲流。
+    setState(State::Paused, tr("已请求暂停，当前轮廓完成后暂停"));
 }
 
 void ProcessModule::runStop()

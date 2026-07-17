@@ -658,6 +658,14 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
 {
     if (m_view.IsNull() || m_context.IsNull()) return;
 
+    // Convert 返回鼠标屏幕位置在当前 OCC 视图投影平面上的世界坐标。
+    // 无论当前处于拾取、旋转或平移状态，状态栏都应反映鼠标所在位置。
+    Standard_Real x = 0.0;
+    Standard_Real y = 0.0;
+    Standard_Real z = 0.0;
+    m_view->Convert(e->pos().x(), e->pos().y(), x, y, z);
+    emit cursorPositionChanged(x, y, z);
+
     if (m_leadInPickActive) {
         emit leadInPickMoved(e->pos());
         m_prevPos = e->pos();

@@ -495,6 +495,37 @@ void MainWindow::connectOccViewSignals(WidgetOccView* view)
     if (!view)
         return;
 
+    connect(view, &WidgetOccView::cursorPositionChanged, this,
+            [this](double x, double y, double z) {
+                if (!m_sbCoords)
+                    return;
+
+                const auto* machineConfig =
+                    lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
+                const QList<MachineAxisDef> axes = machineConfig
+                    ? machineConfig->axisDefinitions()
+                    : QList<MachineAxisDef>{};
+                const auto axisCoordinate = [&axes, x, y, z](const QString& name,
+                                                               double fallback) {
+                    for (const MachineAxisDef& axis : axes) {
+                        if (axis.motionType == MachineAxisDef::Linear
+                            && axis.name.compare(name, Qt::CaseInsensitive) == 0) {
+                            // 机台线性轴坐标以其配置的正方向为基准；与刀路
+                            // 坐标求解保持同一投影语义。
+                            return x * axis.direction.X()
+                                + y * axis.direction.Y()
+                                + z * axis.direction.Z();
+                        }
+                    }
+                    return fallback;
+                };
+                m_sbCoords->setText(
+                    tr("X: %1  Y: %2  Z: %3")
+                        .arg(axisCoordinate(QStringLiteral("X"), x), 0, 'f', 3)
+                        .arg(axisCoordinate(QStringLiteral("Y"), y), 0, 'f', 3)
+                        .arg(axisCoordinate(QStringLiteral("Z"), z), 0, 'f', 3));
+            });
+
     // ── 3D selection → module coordination ────────────────────────────────
     connect(view, &WidgetOccView::selectionChanged, this, [this] {
         if (isMachineViewActive()) {
@@ -1221,13 +1252,6 @@ void MainWindow::createRightPanel()
             [this](const QString& axis, double value) {
             m_laserControl->updateAxisPosition(axis, value);
             m_appContext->camModule()->setAxisPosition(axis, value, false);
-
-            const auto positions = m_appContext->processModule()->currentAxisPositions();
-            m_sbCoords->setText(
-                tr("X: %1  Y: %2  Z: %3")
-                .arg(positions.value(QStringLiteral("X"), 0.0), 0, 'f', 3)
-                .arg(positions.value(QStringLiteral("Y"), 0.0), 0, 'f', 3)
-                .arg(positions.value(QStringLiteral("Z"), 0.0), 0, 'f', 3));
             });
 
         if (auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>()) {

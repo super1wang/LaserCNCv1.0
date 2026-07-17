@@ -97,6 +97,8 @@ public:
 
 signals:
     void selectionChanged();
+    /// 当前鼠标位置对应的 OCC 视图坐标。
+    void cursorPositionChanged(double x, double y, double z);
     void leadInPickMoved(const QPoint& pos);
     void leadInPickConfirmed(const QPoint& pos);
     void leadInPickCanceled();
