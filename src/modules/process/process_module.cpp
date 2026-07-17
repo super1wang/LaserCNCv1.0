@@ -281,6 +281,11 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::contourStarted,
             this, [this](int index, int total, const QString& desc) {
                 setStatusMessage(tr("切割中 %1/%2: %3").arg(index).arg(total).arg(desc));
+                emit processingProgressChanged(index - 1, total);
+            });
+    connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::contourFinished,
+            this, [this](int index, int total) {
+                emit processingProgressChanged(index, total);
             });
 
     // 加工链表服务：项目级图层 → 工具映射、切割顺序、补偿索引等工艺数据。
@@ -1327,6 +1332,8 @@ void ProcessModule::runStart()
         setState(State::Running, tr("运行继续"));
         return;
     }
+
+    emit processingRunStarted();
 
     QString environmentError;
     if (!validateProcessingEnvironment(&environmentError)) {

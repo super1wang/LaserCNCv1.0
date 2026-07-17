@@ -1233,6 +1233,10 @@ void MainWindow::createRightPanel()
             m_laserControl, &WidgetLaserControl::updateConnectionStatus);
         connect(process, &ProcessModule::stateChanged,
             m_laserControl, &WidgetLaserControl::updateRunState);
+        connect(process, &ProcessModule::processingRunStarted,
+            m_laserControl, &WidgetLaserControl::beginProcessingRun);
+        connect(process, &ProcessModule::processingProgressChanged,
+            m_laserControl, &WidgetLaserControl::updateProcessingProgress);
         connect(process, &ProcessModule::simulationModeChanged,
             m_laserControl, &WidgetLaserControl::updateSimulationMode);
         connect(process, &ProcessModule::statusMessageChanged,

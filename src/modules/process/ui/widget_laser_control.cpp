@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QDoubleSpinBox>
 #include <QPushButton>
+#include <QProgressBar>
 #include <QLabel>
 #include <QFrame>
 #include <QGridLayout>
@@ -14,6 +15,7 @@
 #include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTextEdit>
+#include <QTimer>
 
 namespace {
 
@@ -68,11 +70,10 @@ void WidgetLaserControl::buildUi()
     mainLayout->addWidget(m_tabs);
 
     buildProcessGroup();
+    buildStatusGroup();
+    buildIoGroup();
     buildAxisGroup();
     buildJogGroup();
-    buildIoGroup();
-    buildStatusGroup();
-    buildDeviceGroup();
 
     m_controlLayout->addStretch();
 }
@@ -185,19 +186,6 @@ void WidgetLaserControl::setDigitalOutputDescriptors(const QList<DigitalOutputDe
     }
 }
 
-void WidgetLaserControl::buildDeviceGroup()
-{
-    m_deviceGroup = new QGroupBox(tr("设备状态"), this);
-    auto* layout = new QVBoxLayout(m_deviceGroup);
-
-    m_deviceSummaryLabel = new QLabel(tr("等待设备状态刷新"), m_deviceGroup);
-    m_deviceSummaryLabel->setWordWrap(true);
-    layout->addWidget(m_deviceSummaryLabel);
-
-    m_controlLayout->addWidget(m_deviceGroup);
-    refreshDeviceSummary();
-}
-
 void WidgetLaserControl::buildStatusGroup()
 {
     auto* group = new QGroupBox(tr("状态显示"), this);
@@ -207,6 +195,30 @@ void WidgetLaserControl::buildStatusGroup()
     m_statusLabel->setWordWrap(true);
     m_statusLabel->setMinimumHeight(36);
     layout->addWidget(m_statusLabel);
+
+    m_processingProgressBar = new QProgressBar(group);
+    m_processingProgressBar->setRange(0, 100);
+    m_processingProgressBar->setValue(0);
+    m_processingProgressBar->setFormat(tr("加工进度: %p%"));
+    layout->addWidget(m_processingProgressBar);
+
+    auto* stats = new QGridLayout();
+    stats->addWidget(new QLabel(tr("加工时间:"), group), 0, 0);
+    m_processingTimeLabel = new QLabel(group);
+    stats->addWidget(m_processingTimeLabel, 0, 1);
+    stats->addWidget(new QLabel(tr("总轮廓数:"), group), 1, 0);
+    m_totalContoursLabel = new QLabel(group);
+    stats->addWidget(m_totalContoursLabel, 1, 1);
+    stats->addWidget(new QLabel(tr("已加工轮廓数:"), group), 2, 0);
+    m_completedContoursLabel = new QLabel(group);
+    stats->addWidget(m_completedContoursLabel, 2, 1);
+    layout->addLayout(stats);
+
+    m_processingTimer = new QTimer(this);
+    m_processingTimer->setInterval(250);
+    connect(m_processingTimer, &QTimer::timeout,
+            this, &WidgetLaserControl::refreshProcessingStats);
+    refreshProcessingStats();
     m_controlLayout->addWidget(group);
 }
 
@@ -226,6 +238,7 @@ void WidgetLaserControl::rebuildAxisGroup()
     delete m_axisGroup->layout();
 
     m_posLabels.clear();
+    m_axisButtons.clear();
 
     auto* grid = new QGridLayout(m_axisGroup);
     int row = 0;
@@ -233,13 +246,25 @@ void WidgetLaserControl::rebuildAxisGroup()
         if (axis.name == QStringLiteral("BASE"))
             continue;
 
-        auto* lbl  = new QLabel(axis.name + ":", m_axisGroup);
+        // 使能控件放在坐标前；运动行只保留静态轴名，避免点击 +/- 时
+        // 误触紧邻的使能按钮。
+        auto* btnAxis = new QPushButton(axis.name, m_axisGroup);
+        btnAxis->setCheckable(true);
+        btnAxis->setChecked(true);
+        btnAxis->setMinimumWidth(46);
         auto* val  = new QLabel("  0.000", m_axisGroup);
         val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         val->setMinimumWidth(70);
         val->setStyleSheet("font-family: Consolas, monospace; color: #00FF88;");
         auto* unit = new QLabel(axis.motionType == MachineAxisDef::Linear ? "mm" : "°", m_axisGroup);
-        grid->addWidget(lbl,  row, 0);
+        const QString axisName = axis.name.trimmed().toUpper();
+        m_axisButtons.insert(axisName, btnAxis);
+        updateAxisButtonStyle(axisName, true);
+        connect(btnAxis, &QPushButton::toggled, this, [this, axisName](bool checked) {
+            updateAxisButtonStyle(axisName, checked);
+            emit axisEnableToggled(axisName, checked);
+        });
+        grid->addWidget(btnAxis, row, 0);
         grid->addWidget(val,  row, 1);
         grid->addWidget(unit, row, 2);
         m_posLabels[axis.name] = val;
@@ -260,7 +285,6 @@ void WidgetLaserControl::rebuildJogGroup()
 
     clearLayout(m_jogGroup->layout());
     delete m_jogGroup->layout();
-    m_axisButtons.clear();
 
     auto* vlay = new QVBoxLayout(m_jogGroup);
 
@@ -343,10 +367,8 @@ void WidgetLaserControl::rebuildJogGroup()
         if (axis.name == QStringLiteral("BASE"))
             continue;
 
-        auto* btnAxis = new QPushButton(axis.name, m_jogGroup);
-        btnAxis->setCheckable(true);
-        btnAxis->setChecked(true);
-        btnAxis->setMinimumWidth(46);
+        auto* lblAxis = new QLabel(axis.name + ":", m_jogGroup);
+        lblAxis->setMinimumWidth(46);
         auto* btnPlus  = new QPushButton("+", m_jogGroup);
         auto* btnMinus = new QPushButton("-", m_jogGroup);
         btnPlus->setFixedWidth(46);
@@ -355,12 +377,6 @@ void WidgetLaserControl::rebuildJogGroup()
         btnMinus->setAutoRepeat(false);
 
         const QString axisName = axis.name.trimmed().toUpper();
-        m_axisButtons.insert(axisName, btnAxis);
-        updateAxisButtonStyle(axisName, true);
-        connect(btnAxis, &QPushButton::toggled, this, [this, axisName](bool checked) {
-            updateAxisButtonStyle(axisName, checked);
-            emit axisEnableToggled(axisName, checked);
-        });
         connect(btnPlus, &QPushButton::pressed,
             this, [this, axisName]{ handleMotionPressed(axisName, +1); });
         connect(btnPlus, &QPushButton::released,
@@ -370,7 +386,7 @@ void WidgetLaserControl::rebuildJogGroup()
         connect(btnMinus, &QPushButton::released,
             this, &WidgetLaserControl::handleMotionReleased);
 
-        jogGrid->addWidget(btnAxis,  row, 0);
+        jogGrid->addWidget(lblAxis,  row, 0);
         jogGrid->addWidget(btnPlus,  row, 1);
         jogGrid->addWidget(btnMinus, row, 2);
         ++row;
@@ -396,25 +412,32 @@ void WidgetLaserControl::updateConnectionStatus(bool connected)
 {
     m_connected = connected;
     refreshStatusBanner();
-    refreshDeviceSummary();
 }
 
 void WidgetLaserControl::updateSimulationMode(bool enabled)
 {
     m_simulationMode = enabled;
     refreshStatusBanner();
-    refreshDeviceSummary();
 }
 
 void WidgetLaserControl::updateSystemStatus(const QString& status)
 {
     m_statusText = status;
     refreshStatusBanner();
-    refreshDeviceSummary();
 }
 
 void WidgetLaserControl::updateRunState(lcnc::ProcessRunState state)
 {
+    if (state == lcnc::ProcessRunState::Running) {
+        startProcessingClock();
+    } else if (state == lcnc::ProcessRunState::Paused) {
+        pauseProcessingClock();
+    } else if (state == lcnc::ProcessRunState::Idle
+               || state == lcnc::ProcessRunState::Error
+               || state == lcnc::ProcessRunState::EmergencyStop) {
+        pauseProcessingClock();
+    }
+
     m_runState = state;
     if (!m_btnRun || !m_btnPause || !m_btnResume)
         return;
@@ -427,7 +450,19 @@ void WidgetLaserControl::updateRunState(lcnc::ProcessRunState state)
     if (m_btnStop)
         m_btnStop->setVisible(true);
     refreshStatusBanner();
-    refreshDeviceSummary();
+}
+
+void WidgetLaserControl::beginProcessingRun()
+{
+    resetProcessingProgress();
+    startProcessingClock();
+}
+
+void WidgetLaserControl::updateProcessingProgress(int completedContours, int totalContours)
+{
+    m_totalContours = qMax(0, totalContours);
+    m_completedContours = qBound(0, completedContours, m_totalContours);
+    refreshProcessingStats();
 }
 
 void WidgetLaserControl::updateAxisEnabled(const QString& axis, bool enabled)
@@ -591,35 +626,63 @@ QString WidgetLaserControl::stateText(lcnc::ProcessRunState state) const
     return tr("未知");
 }
 
-void WidgetLaserControl::refreshDeviceSummary()
+void WidgetLaserControl::resetProcessingProgress()
 {
-    if (!m_deviceSummaryLabel)
-        return;
-
-    const QString modeText = m_simulationMode ? tr("纯仿真") : tr("控制器联机");
-    QString summary = tr("模式: %1  流程: %2").arg(modeText, stateText(m_runState));
-    summary += tr("  已连接: %1").arg(m_connected ? tr("是") : tr("否"));
-    if (!m_statusText.trimmed().isEmpty())
-        summary += tr("\n%1").arg(m_statusText.trimmed());
-
-    QString style = QStringLiteral("background: #E2E8F0; color: #0F172A; padding: 4px 6px; border-radius: 4px;");
-    if (m_runState == lcnc::ProcessRunState::EmergencyStop || m_runState == lcnc::ProcessRunState::Error) {
-        style = QStringLiteral("background: #7F1D1D; color: white; padding: 4px 6px; border-radius: 4px;");
-    } else if (m_runState == lcnc::ProcessRunState::Paused) {
-        style = QStringLiteral("background: #B45309; color: white; padding: 4px 6px; border-radius: 4px;");
-    } else if (m_connected && !m_simulationMode) {
-        style = QStringLiteral("background: #14532D; color: #DCFCE7; padding: 4px 6px; border-radius: 4px;");
-    }
-
-    m_deviceSummaryLabel->setText(summary);
-    m_deviceSummaryLabel->setStyleSheet(style);
+    m_totalContours = 0;
+    m_completedContours = 0;
+    m_processingElapsedMs = 0;
+    m_processingElapsedTimer.invalidate();
+    if (m_processingTimer)
+        m_processingTimer->stop();
+    refreshProcessingStats();
 }
 
-QString WidgetLaserControl::deviceStateStyle(bool connected) const
+void WidgetLaserControl::startProcessingClock()
 {
-    return connected
-        ? QStringLiteral("color: #15803D; font-weight: 700;")
-        : QStringLiteral("color: #64748B; font-weight: 600;");
+    if (!m_processingElapsedTimer.isValid())
+        m_processingElapsedTimer.start();
+    if (m_processingTimer && !m_processingTimer->isActive())
+        m_processingTimer->start();
+    refreshProcessingStats();
+}
+
+void WidgetLaserControl::pauseProcessingClock()
+{
+    if (m_processingElapsedTimer.isValid()) {
+        m_processingElapsedMs += m_processingElapsedTimer.elapsed();
+        m_processingElapsedTimer.invalidate();
+    }
+    if (m_processingTimer)
+        m_processingTimer->stop();
+    refreshProcessingStats();
+}
+
+void WidgetLaserControl::refreshProcessingStats()
+{
+    const qint64 elapsedMs = m_processingElapsedMs
+        + (m_processingElapsedTimer.isValid() ? m_processingElapsedTimer.elapsed() : 0);
+    const qint64 totalSeconds = elapsedMs / 1000;
+    const qint64 hours = totalSeconds / 3600;
+    const qint64 minutes = (totalSeconds % 3600) / 60;
+    const qint64 seconds = totalSeconds % 60;
+
+    if (m_processingProgressBar) {
+        const int percent = m_totalContours > 0
+            ? (m_completedContours * 100) / m_totalContours
+            : 0;
+        m_processingProgressBar->setValue(qBound(0, percent, 100));
+    }
+    if (m_processingTimeLabel) {
+        m_processingTimeLabel->setText(
+            QStringLiteral("%1:%2:%3")
+                .arg(hours, 2, 10, QLatin1Char('0'))
+                .arg(minutes, 2, 10, QLatin1Char('0'))
+                .arg(seconds, 2, 10, QLatin1Char('0')));
+    }
+    if (m_totalContoursLabel)
+        m_totalContoursLabel->setText(QString::number(m_totalContours));
+    if (m_completedContoursLabel)
+        m_completedContoursLabel->setText(QString::number(m_completedContours));
 }
 
 QString WidgetLaserControl::logColor(const QString& level) const

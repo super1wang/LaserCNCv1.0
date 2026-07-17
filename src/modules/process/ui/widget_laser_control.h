@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QString>
 #include <QVector>
+#include <QElapsedTimer>
 
 #include "core/kinematics/machine_kinematics.h"
 #include "modules/process/i_process_facade.h"
@@ -29,6 +30,9 @@ public:
     void updateSimulationMode(bool enabled);
     void updateSystemStatus(const QString& status);
     void updateRunState(lcnc::ProcessRunState state);
+    /// 新加工运行开始时清零进度和计时；暂停恢复不调用此接口。
+    void beginProcessingRun();
+    void updateProcessingProgress(int completedContours, int totalContours);
     void updateAxisEnabled(const QString& axis, bool enabled);
     void updateDigitalOutput(const QString& outputName, const QString& channel, bool value);
     /// 根据 ProcessModule 推送的描述符列表重建 IO 栏按钮。
@@ -59,11 +63,13 @@ private:
     void buildJogGroup();
     void buildProcessGroup();
     void buildIoGroup();
-    void buildDeviceGroup();
     void buildStatusGroup();
     void rebuildAxisGroup();
     void rebuildJogGroup();
-    void refreshDeviceSummary();
+    void resetProcessingProgress();
+    void startProcessingClock();
+    void pauseProcessingClock();
+    void refreshProcessingStats();
     void handleMotionPressed(const QString& axis, int direction);
     void handleMotionReleased();
     void emitJogRequest(const QString& axis, int direction);
@@ -73,7 +79,6 @@ private:
     void refreshStatusBanner();
     QString stateText(lcnc::ProcessRunState state) const;
     QString logColor(const QString& level) const;
-    QString deviceStateStyle(bool connected) const;
 
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, class QLabel*> m_posLabels;    ///< axis → position label
@@ -87,9 +92,12 @@ private:
     class QGroupBox* m_axisGroup{nullptr};
     class QGroupBox* m_jogGroup{nullptr};
     class QGroupBox* m_ioGroup{nullptr};
-    class QGroupBox* m_deviceGroup{nullptr};
-    class QLabel* m_deviceSummaryLabel{nullptr};
     class QLabel* m_statusLabel{nullptr};
+    class QProgressBar* m_processingProgressBar{nullptr};
+    class QLabel* m_processingTimeLabel{nullptr};
+    class QLabel* m_totalContoursLabel{nullptr};
+    class QLabel* m_completedContoursLabel{nullptr};
+    class QTimer* m_processingTimer{nullptr};
     class QPushButton* m_btnRun{nullptr};
     class QPushButton* m_btnPause{nullptr};
     class QPushButton* m_btnResume{nullptr};
@@ -104,4 +112,8 @@ private:
     int            m_jogSpeedLevel{1};
     QString        m_activeJogAxis;
     int            m_activeJogDirection{0};
+    int            m_totalContours{0};
+    int            m_completedContours{0};
+    qint64         m_processingElapsedMs{0};
+    QElapsedTimer  m_processingElapsedTimer;
 };

@@ -151,6 +151,10 @@ signals:
     void digitalOutputChanged(const QString& outputName, const QString& channel, bool value);
     void feedOverrideChanged(double factor);
     void statusMessageChanged(const QString& message);
+    /// 新加工运行已开始；暂停恢复不会发射此信号。
+    void processingRunStarted();
+    /// 普通切割轮廓进度：已完成轮廓数、总轮廓数。
+    void processingProgressChanged(int completedContours, int totalContours);
     void processLogMessage(const QString& level, const QString& message);
     void processFlowChanged();
     /// 单个外设连接进度（设备名、百分比、当前步骤描述）。
