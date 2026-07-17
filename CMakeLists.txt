@@ -67,8 +67,9 @@ set(LCNC_PROCESS_SDK_LIB_RELEASE_DIR "${LCNC_PROCESS_SDK_ROOT}/lib_3rd/release" 
 
 set(LCNC_ACS_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "ACS SDK include directory")
 set(LCNC_ACS_LIB "${LCNC_PROCESS_SDK_LIB_DEBUG_DIR}/ACSCL_x64.LIB" CACHE FILEPATH "ACS controller import library")
-set(LCNC_GTN_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "GTN SDK include directory")
-set(LCNC_GTN_LIB "" CACHE FILEPATH "GTN controller import library")
+set(LCNC_GTN_INCLUDE_DIR "${LCNC_PROCESS_SDK_ROOT}/gts" CACHE PATH "GTN SDK include directory")
+set(LCNC_GTN_LIB "${LCNC_PROCESS_SDK_ROOT}/gts/gts.lib" CACHE FILEPATH "GTN controller import library")
+set(LCNC_GTN_RUNTIME_DLL "${LCNC_PROCESS_SDK_ROOT}/gts/gts.dll" CACHE FILEPATH "GTN controller runtime DLL")
 set(LCNC_BDAQ_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "BDAQ SDK include directory")
 set(LCNC_BDAQ_LIB "" CACHE FILEPATH "BDAQ import library")
 set(LCNC_REAL_LASER_SDK_ROOT "${LCNC_PROCESS_SDK_ROOT}" CACHE PATH "Real laser SDK root or protocol support root")
@@ -94,6 +95,7 @@ endif()
 if(LCNC_WITH_GTN)
     lcnc_require_existing("${LCNC_GTN_INCLUDE_DIR}/gts.h" "LCNC_WITH_GTN requires gts.h")
     lcnc_require_existing("${LCNC_GTN_LIB}" "LCNC_WITH_GTN requires LCNC_GTN_LIB")
+    lcnc_require_existing("${LCNC_GTN_RUNTIME_DLL}" "LCNC_WITH_GTN requires LCNC_GTN_RUNTIME_DLL")
 endif()
 if(LCNC_WITH_BDAQ)
     lcnc_require_existing("${LCNC_BDAQ_INCLUDE_DIR}" "LCNC_WITH_BDAQ requires LCNC_BDAQ_INCLUDE_DIR")
@@ -548,6 +550,14 @@ add_custom_command(TARGET LaserCNC POST_BUILD
         "$<TARGET_FILE_DIR:LaserCNC>"
     COMMENT "Copying runtime DLLs from 3rd/runtime/bin_<config> to output directory"
 )
+if(LCNC_WITH_GTN)
+    add_custom_command(TARGET LaserCNC POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LCNC_GTN_RUNTIME_DLL}"
+            "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMENT "Copying GTN runtime DLL to output directory"
+    )
+endif()
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")
 message(STATUS "OpenCASCADE version: ${OpenCASCADE_MAJOR_VERSION}.${OpenCASCADE_MINOR_VERSION}.${OpenCASCADE_MAINTENANCE_VERSION}")

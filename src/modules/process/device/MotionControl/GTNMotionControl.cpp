@@ -12,6 +12,8 @@ GTNMotionControl::GTNMotionControl(void)
 	, m_dPreX(0)
 	, m_dPreY(0)
 	, m_dPreZ(0)
+	, m_dPreR1(0)
+	, m_dPreR2(0)
 	, m_bErrorOccurred(false)
 	, m_dLaserOnBWait(0)
 	, m_dLaserOnAWait(0)
@@ -235,12 +237,13 @@ bool GTNMotionControl::Reboot()
 
 bool GTNMotionControl::Home()
 {
-	// 顺序 Z -> Z1 -> Y1 -> X1 -> Y -> X -> A1 -> A
-	int arr[] = { 2, 6, 5, 4, 1, 0, 7, 3 };
+	// 顺序 Z -> Y -> X -> B -> C -> A。Axis 枚举只包含标准六轴，
+	// 不再引用已移除的 X1/Y1/A1 扩展轴。
+	int arr[] = { 2, 1, 0, 4, 5, 3 };
 
-	for (const auto& eAxis : magic_enum::enum_values<Axis>()) { if (!DT::IsAxisUse(eAxis)) continue;
+	for (const int axisValue : arr)
 	{
-		Axis eAxis = static_cast<Axis>(arr[i]);
+		Axis eAxis = static_cast<Axis>(axisValue);
 		if (!DT::IsAxisUse(eAxis))
 			continue;
 
@@ -1496,21 +1499,41 @@ bool GTNMotionControl::IsBufferRunning(int iBufferIndex)
 	return run;
 }
 
-void GTNMotionControl::OffsetLineTo(double dEndX, double dEndY, double dEndZ, const Tool& tool)
+void GTNMotionControl::ConfigureCuttingAxes(Axis x, Axis y, Axis z, Axis r1, Axis r2)
 {
+	m_cuttingAxes = {x, y, z, r1, r2};
+	m_cuttingCoordinateReady = false;
+}
+
+bool GTNMotionControl::MoveToPosition(Axis axis, double velocity, double position)
+{
+	return MovePostion(axis, velocity, position);
+}
+
+void GTNMotionControl::OffsetLineTo(double dEndX, double dEndY, double dEndZ,
+	                                 double dEndR1, double dEndR2, const Tool& tool)
+{
+	if (!m_cuttingCoordinateReady) {
+		LogError("OffsetLineTo", "five-axis coordinate system is not ready", "", -1);
+		return;
+	}
 	double dVelocity = tool.m_dLineVelocity;
 	double LineAcc = tool.m_dLineAcc;
 
-	if ((m_dPreX == dEndX) && (m_dPreY == dEndY) && (m_dPreZ == dEndZ))
+	if (m_hasPreviousCuttingPose
+		&& (m_dPreX == dEndX) && (m_dPreY == dEndY) && (m_dPreZ == dEndZ)
+		&& (m_dPreR1 == dEndR1) && (m_dPreR2 == dEndR2))
 		return;
+	double position[5] = {dEndX, dEndY, dEndZ, dEndR1, dEndR2};
 	short sRtn;
 	const int MAX_RETRY = 10;
 	for (int retry = 0; retry < MAX_RETRY; retry++)
 	{
-		sRtn = GTN_LnXYZEx(
+		sRtn = GTN_LnXYZACEx(
 			m_iCore,
 			1, // 该插补段的坐标系是坐标系1
-			dEndX, dEndY, dEndZ, // 该插补段的终点坐标 mm
+			position, // XYZ + R1 + R2 的机床轴坐标（RTCP 关闭）
+			0x1f, // 五个坐标系维度均参与插补
 			dVelocity, // 合成速度mm/s
 			LineAcc, // 插补段的加速度：mm/s^2
 			0,
@@ -1521,10 +1544,13 @@ void GTNMotionControl::OffsetLineTo(double dEndX, double dEndY, double dEndZ, co
 		FlushToFifo();
 	}
 	if (sRtn)
-		LogError("OffsetLineTo", "GTN_LnXYZEx", "", sRtn);
+		LogError("OffsetLineTo", "GTN_LnXYZACEx", "", sRtn);
 	m_dPreX = dEndX;
 	m_dPreY = dEndY;
 	m_dPreZ = dEndZ;
+	m_dPreR1 = dEndR1;
+	m_dPreR2 = dEndR2;
+	m_hasPreviousCuttingPose = true;
 }
 
 // [P3 removed] GTNMotionControl::OffsetArcTo
@@ -1544,32 +1570,17 @@ void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	{
 		MovePostion(Axis::X, curTool.m_dIdleXVelocity, curTool.m_dXPosition);
 	}
-	//X1 定位轴
-	if (curTool.m_bX1IsMove && DT::isExtensionAxis("X1"))
-	{
-		MovePostion(Axis::X1, curTool.m_dIdleX1Velocity, curTool.m_dX1Position);
-	}
 	//A 定位轴
 	if (curTool.m_bAIsMove && eDirectionY != Axis::A && DT::IsAxisUse(Axis::A))
 	{
 		MovePostion(Axis::A, curTool.m_dIdleAVelocity, curTool.m_dAPosition / 360 * PI * m_dDiameter);
 		
 	}
-	//A1 定位轴
-	if (curTool.m_bA1IsMove && DT::isExtensionAxis("A1"))
-	{
-		MovePostion(Axis::A1, curTool.m_dIdleA1Velocity, curTool.m_dA1Position / 360 * PI * m_dDiameter);
-	}
 	//Y 定位轴
 	if (curTool.m_bYIsMove && eDirectionY != Axis::Y && DT::IsAxisUse(Axis::Y))
 	{
 		MovePostion(Axis::Y, curTool.m_dIdleYVelocity, curTool.m_dYPosition);
 		
-	}
-	//Y1 定位轴
-	if (curTool.m_bY1IsMove && DT::isExtensionAxis("Y1"))
-	{
-		MovePostion(Axis::Y1, curTool.m_dIdleY1Velocity, curTool.m_dY1Position);
 	}
 	
 	//空程起点坐标
@@ -1653,18 +1664,25 @@ bool GTNMotionControl::FlushToFifo()
 bool GTNMotionControl::InitCrd(const Tool& curTool)
 {
 	m_bCrdStarted = false; // 每次重新初始化前瞻时，重置启动状态
-	int i;
+	m_hasPreviousCuttingPose = false;
+	m_cuttingCoordinateReady = false;
 	short sRtn;
 	short crd = 1, fifo = 0;
 
-	Axis eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
-
-	int iXIndex = m_mapMotorValue[eDirectionX].AxisIndex;
-	int iYIndex = m_mapMotorValue[eDirectionY].AxisIndex;
-	int iZIndex = m_mapMotorValue[Axis::Z].AxisIndex;
-	if (iZIndex <= 0)
-		return LogError("InitCrd", "Z axis not configured", "", -1), false;
+	int axisIndex[5] = {};
+	for (int dimension = 0; dimension < 5; ++dimension) {
+		const Axis axis = m_cuttingAxes[dimension];
+		auto it = m_mapMotorValue.find(axis);
+		if (it == m_mapMotorValue.end() || it->second.AxisIndex < 1 || it->second.AxisIndex > 8)
+			return LogError("InitCrd", "five-axis cutting axis not configured", enum_name(axis).data(), -1), false;
+		axisIndex[dimension] = it->second.AxisIndex;
+	}
+	for (int lhs = 0; lhs < 5; ++lhs) {
+		for (int rhs = lhs + 1; rhs < 5; ++rhs) {
+			if (axisIndex[lhs] == axisIndex[rhs])
+				return LogError("InitCrd", "duplicate five-axis cutting axis", "", -1), false;
+		}
+	}
 	//确保创建前瞻前没有轴系运动
 	do 
 	{
@@ -1674,30 +1692,30 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	TCrdPrm crdPrm;
 	memset(&crdPrm, 0, sizeof(crdPrm));
 	//sRtn = GTN_GetCrdPrm(core,crd,&crdPrm);
-	crdPrm.dimension = 3; // 坐标系为 XYZ 三维坐标系
+	crdPrm.dimension = 5; // 坐标系为 XYZ + R1 + R2 五维坐标系
 	crdPrm.synVelMax = 500; // 最大合成速度：pulse/ms
 	crdPrm.synAccMax = 10; // 最大加速度：pulse/ms^2
 	crdPrm.evenTime = 50; // 最小匀速时间：ms
-	crdPrm.profile[iXIndex - 1] = 1; // 物理轴iXIndex 映射到坐标系第1维(X)
-	crdPrm.profile[iYIndex - 1] = 2; // 物理轴iYIndex 映射到坐标系第2维(Y)
-	crdPrm.profile[iZIndex - 1] = 3; // 物理轴iZIndex 映射到坐标系第3维(Z)
+	for (int dimension = 0; dimension < 5; ++dimension)
+		crdPrm.profile[axisIndex[dimension] - 1] = dimension + 1;
 	crdPrm.setOriginFlag = 1; // 通过originPos指定坐标系原点
 
-	crdPrm.originPos[iXIndex - 1] = 0; // 坐标系的原点坐标的规划位置为(, 0)
-	crdPrm.originPos[iYIndex - 1] = 0;
-	crdPrm.originPos[iZIndex - 1] = 0;
+	for (int dimension = 0; dimension < 5; ++dimension)
+		crdPrm.originPos[axisIndex[dimension] - 1] = 0;
 	sRtn = GTN_SetCrdPrm(m_iCore, crd, &crdPrm);
 	if(sRtn)
 	{
 		LOG_SYS_ERROR(fmt::format(
-			"GTN_SetCrdPrm failed({}): core={} crd={} dimension={} profile=[{},{},{}] "
+			"GTN_SetCrdPrm failed({}): core={} crd={} dimension={} profile=[{},{},{},{},{}] "
 			"synVelMax={} synAccMax={} evenTime={} setOriginFlag={} "
-			"originPos=[{},{},{}] iXIndex={} iYIndex={} iZIndex={}",
+			"originPos=[{},{},{},{},{}] axisIndex=[{},{},{},{},{}]",
 			sRtn, m_iCore, crd,
 			crdPrm.dimension, crdPrm.profile[0], crdPrm.profile[1], crdPrm.profile[2],
+			crdPrm.profile[3], crdPrm.profile[4],
 			crdPrm.synVelMax, crdPrm.synAccMax, crdPrm.evenTime, crdPrm.setOriginFlag,
 			crdPrm.originPos[0], crdPrm.originPos[1], crdPrm.originPos[2],
-			iXIndex, iYIndex, iZIndex));
+			crdPrm.originPos[3], crdPrm.originPos[4],
+			axisIndex[0], axisIndex[1], axisIndex[2], axisIndex[3], axisIndex[4]));
 		return LogError("InitCrd", "GTN_SetCrdPrm", "", sRtn), false;
 	}
 
@@ -1706,7 +1724,7 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	if (sRtn) return LogError("InitCrd", "GTN_CrdClear", "", sRtn), false;
 
 	// ---- 初始化多轴前瞻模块 ----
-	// 始终使用 NORMAL_THREE_AXIS；第三轴固定为已验证的 Z 插补轴。
+	// 五轴机床模式：CAM 已提供五个轴的连续机床坐标，RTCP 保持关闭。
 	int axisLimitMode[8] = {0};
 
 	TLookAheadParameter lookAheadPara;
@@ -1729,11 +1747,13 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	{
 		bool used[8] = {};
 		int slotIdx = 0;
-		// slot 0: X插补轴；slot 1: Y插补轴；slot 2: 第三轴（NORMAL_THREE_AXIS要求前3个非零）
-		lookAheadPara.axisRelation[slotIdx++] = (short)iXIndex; used[iXIndex - 1] = true;
-		lookAheadPara.axisRelation[slotIdx++] = (short)iYIndex; used[iYIndex - 1] = true;
-		lookAheadPara.axisRelation[slotIdx++] = (short)iZIndex; used[iZIndex - 1] = true;
-		// slot 3~N: 剩余已配置轴（m_vecMotors 中非X/Y/Z的其它电机）
+		// 前五槽位严格对应坐标系 XYZ/R1/R2，保证 GTN_LnXYZACEx 的 pPos 顺序一致。
+		for (int dimension = 0; dimension < 5; ++dimension) {
+			const int index = axisIndex[dimension];
+			lookAheadPara.axisRelation[slotIdx++] = static_cast<short>(index);
+			used[index - 1] = true;
+		}
+		// 剩余槽位填写其它已配置轴。
 		for (Axis axis : m_vecMotors)
 		{
 			if (slotIdx >= 8) break;
@@ -1753,9 +1773,9 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 		}
 	}
 
-	// scale：所有槽位填相同值，参考X插补轴分辨率
+	// scale：固高当前前瞻库要求各槽一致；按 X 轴的脉冲当量填充。
 	{
-		double dRes = m_mapMotorValue[eDirectionX].Resolution;
+		double dRes = m_mapMotorValue[m_cuttingAxes[0]].Resolution;
 		for (int k = 0; k < 8; k++)
 			lookAheadPara.scale[k] = dRes;
 	}
@@ -1769,7 +1789,7 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	}
 
 	// 对齐C#示例：SetupLookAheadCrd → InitLookAheadEx 之间不插入任何其它调用
-	sRtn = GTN_SetupLookAheadCrd(m_iCore, crd, NORMAL_THREE_AXIS);
+	sRtn = GTN_SetupLookAheadCrd(m_iCore, crd, FIVE_AXIS);
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_SetupLookAheadCrd", "", sRtn), false;
 
 	sRtn = GTN_InitLookAheadEx(m_iCore, crd, &lookAheadPara, fifo, 0);
@@ -1778,7 +1798,9 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	// InitLookAheadEx 成功后再配置轴限制和速度有效模式
 	sRtn = GTN_SetAxisLimitModeLa(m_iCore, crd, axisLimitMode);
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_SetAxisLimitModeLa", "", sRtn), false;
-	long velValidMask = (1L << (iXIndex - 1)) | (1L << (iYIndex - 1));
+	long velValidMask = 0;
+	for (int dimension = 0; dimension < 5; ++dimension)
+		velValidMask |= (1L << (axisIndex[dimension] - 1));
 	sRtn = GTN_SetAxisVelValidModeLa(m_iCore, crd, velValidMask);
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_SetAxisVelValidModeLa", "", sRtn), false;
 
@@ -1786,6 +1808,7 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_SetCrdJerkTime", "", sRtn), false;
 	sRtn = GTN_CrdHsOn(m_iCore, 1, 0, 1, 300, 0);
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_CrdHsOn", "", sRtn), false;
+	m_cuttingCoordinateReady = true;
 	return true;
 }
 
@@ -2125,7 +2148,7 @@ void GTNMotionControl::ResetProgramCommand()
 }
 
 // Sink 入口：把工具的切割加速度/Jerk 推到坐标系前瞻 —— GTN 通过 GTN_SetCrdJerkTime
-// 已在 InitCrd 里设置一次，每段刀路本身的 ACC/JERK 由 GTN_LnXYZEx 内部按已建立的轨迹规划处理，
+// 已在 InitCrd 里设置一次，每段刀路本身的 ACC/JERK 由 GTN_LnXYZACEx 内部按已建立的轨迹规划处理，
 // 这里保留方法签名以匹配 IMotionCommandSink::applyToolMotionParams 调用入口，no-op 即可。
 void GTNMotionControl::SetCuttingAccJerk(const Tool& tool)
 {

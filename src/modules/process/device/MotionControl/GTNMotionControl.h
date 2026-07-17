@@ -10,6 +10,7 @@
 #include <cmath>
 #include <time.h>
 #include <map>
+#include <array>
 #include <string>
 
 //#define     deviceDescription L"PCI-1730,BID#0"
@@ -105,6 +106,13 @@ protected:
 	double					m_dPreX;					//上一个X的位置
 	double					m_dPreY;					//上一个Y的位置
 	double					m_dPreZ;					//上一个Z的位置
+	double					m_dPreR1;					//上一个第一旋转轴的位置
+	double					m_dPreR2;					//上一个第二旋转轴的位置
+	bool                    m_hasPreviousCuttingPose{false};
+	bool                    m_cuttingCoordinateReady{false};
+	// 五维坐标系的维度顺序。由 GtnBufferedCommandSink 按 AxisMap 注入，
+	// 因而可覆盖 AC / BC 转台及摆头，而非硬编码物理轴号。
+	std::array<Axis, 5>     m_cuttingAxes{Axis::X, Axis::Y, Axis::Z, Axis::A, Axis::C};
 
 	double					m_dFrameLLX;
 	double					m_dFrameLLY;
@@ -207,7 +215,13 @@ public:
 	virtual bool InitCrd(const Tool& curTool);
 	bool FlushToFifo();
 	virtual bool PrfTrapAxis();
-	virtual void OffsetLineTo(double dEndX, double dEndY, double dEndZ, const Tool& tool);
+	virtual void OffsetLineTo(double dEndX, double dEndY, double dEndZ,
+	                          double dEndR1, double dEndR2, const Tool& tool);
+	/// Configure the XYZ/R1/R2-to-controller-axis mapping used by the five-axis
+	/// interpolation coordinate system. Must be called before InitCrd().
+	void ConfigureCuttingAxes(Axis x, Axis y, Axis z, Axis r1, Axis r2);
+	/// 点位移动并等待到位，供 GTN 命令汇执行切割前的空程定位。
+	bool MoveToPosition(Axis axis, double velocity, double position);
 	virtual void EndProgramCommand(const Tool&) {};
 	virtual bool SendCommand();
 	virtual bool IsBufferRunning(int iBufferIndex);
@@ -238,9 +252,9 @@ private:
 
 public:
 	// 指令汇所需的"切割管线"方法 —— 仅 GtnBufferedCommandSink 调用。
-	// 这些方法把 GTN_BufXxx / GTN_LnXYZEx / GTN_CrdDataEx 等写入 FIFO；mid-stream 不触发执行。
-	void ResetProgramCommand() {}
-	void SetCuttingAccJerk(const Tool&) {}
+	// 这些方法把 GTN_BufXxx / GTN_LnXYZACEx / GTN_CrdDataEx 等写入 FIFO；mid-stream 不触发执行。
+	void ResetProgramCommand();
+	void SetCuttingAccJerk(const Tool&);
 
 	// 实现在父类的"无调用"/"未用到"槽（保留以满足旧基类语义，但都是 no-op）。
 	bool IsAxisStatusNormal(int& iFault);

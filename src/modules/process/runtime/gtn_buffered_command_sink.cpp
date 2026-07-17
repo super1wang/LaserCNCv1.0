@@ -3,6 +3,7 @@
 #include "core/logging/logger.h"
 #include "modules/process/Tool/Tool.h"
 #include "modules/process/device/MotionControl/GTNMotionControl.h"
+#include "modules/process/runtime/process_interrupt_context.h"
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -16,6 +17,21 @@ GtnBufferedCommandSink::GtnBufferedCommandSink(GTNMotionControl* gtn, AxisMap ax
     : m_gtn(gtn)
     , m_axisMap(std::move(axisMap))
 {
+	if (!m_gtn)
+		return;
+
+	auto configuredAxis = [this](AxisMap::SemanticAxis axis, Axis fallback) {
+		if (!m_axisMap.isPresent(axis))
+			return fallback;
+		const auto value = enum_cast<Axis>(m_axisMap.axisName(axis).toStdString());
+		return value ? *value : fallback;
+	};
+	m_gtn->ConfigureCuttingAxes(
+		configuredAxis(AxisMap::X, Axis::X),
+		configuredAxis(AxisMap::Y, Axis::Y),
+		configuredAxis(AxisMap::Z, Axis::Z),
+		configuredAxis(AxisMap::R1, Axis::A),
+		configuredAxis(AxisMap::R2, Axis::C));
 }
 
 void GtnBufferedCommandSink::resetProgram()
@@ -61,7 +77,7 @@ bool GtnBufferedCommandSink::flush(QString* errorMessage)
 void GtnBufferedCommandSink::jumpToIdleZ(const MachinePose5& pose, const Tool& tool)
 {
     if (!m_gtn) return;
-    m_gtn->MovePostion(Axis::Z,
+	m_gtn->MoveToPosition(Axis::Z,
                         tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0,
                         pose.z + tool.m_dIdleZHeight);
 }
@@ -73,7 +89,7 @@ void GtnBufferedCommandSink::jumpToPose(const MachinePose5& pose, const Tool& to
         const auto name = m_axisMap.axisName(axis).toStdString();
         const auto physicalAxis = enum_cast<Axis>(name);
         if (m_axisMap.isPresent(axis) && physicalAxis)
-            m_gtn->MovePostion(*physicalAxis, velocity > 0 ? velocity : 10.0, position);
+			m_gtn->MoveToPosition(*physicalAxis, velocity > 0 ? velocity : 10.0, position);
     };
     move(AxisMap::X, pose.x, tool.m_dIdleXVelocity);
     move(AxisMap::Y, pose.y, tool.m_dIdleYVelocity);
@@ -84,7 +100,7 @@ void GtnBufferedCommandSink::jumpToPose(const MachinePose5& pose, const Tool& to
 void GtnBufferedCommandSink::jumpToCuttingZ(const MachinePose5& pose, const Tool& tool)
 {
     if (!m_gtn) return;
-    m_gtn->MovePostion(Axis::Z,
+	m_gtn->MoveToPosition(Axis::Z,
                         tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0,
                         pose.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate);
 }
@@ -126,12 +142,14 @@ void GtnBufferedCommandSink::beginSegment(const MachinePose5& /*startPose*/, con
 
 void GtnBufferedCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
 {
-    // 仅写入 GTN_LnXYZEx 到 FIFO；Z 以实际刀路点为基准叠加切割高度，
-    // 绝不在中途 SendCommand。
-    if (m_gtn)
-        m_gtn->OffsetLineTo(target.x, target.y,
-                            target.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate,
-                            tool);
+	// 仅写入 GTN_LnXYZACEx 到 FIFO；CAM 已完成软件 IK，因此 RTCP 保持关闭。
+	// Z 以实际刀路点为基准叠加切割高度，
+	// 绝不在中途 SendCommand。
+	if (m_gtn)
+		m_gtn->OffsetLineTo(target.x, target.y,
+		                    target.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate,
+		                    target.r1, target.r2,
+		                    tool);
 }
 
 void GtnBufferedCommandSink::endSegment(const Tool& /*tool*/)
