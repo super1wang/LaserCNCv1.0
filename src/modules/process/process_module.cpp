@@ -17,7 +17,7 @@
 #include "modules/process/execution/process_workflow_executor.h"
 #include "modules/process/monitor/process_monitor_service.h"
 #include "modules/process/Setting/BuiltinIODefs.h"
-#include "modules/process/Setting/Settings.h"
+#include "modules/process/settings/process_settings_service.h"
 #include "modules/process/steps/process_step_builtin_registration.h"
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/steps/services/legacy_process_services.h"
@@ -40,6 +40,10 @@
 #include <cmath>
 #include <fstream>
 #include <stdexcept>
+
+#include "toml.hpp"
+using toml::table;
+using toml::value;
 
 namespace {
 
@@ -106,7 +110,7 @@ QString logLevelForMessage(const QString& message)
 
 lcnc::ProcessMonitorSettings readMonitorSettings();
 QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels();
-QString configuredIoChannel(SettingSection section, const char* bucketName, const QString& fallback);
+QString configuredIoChannel(lcnc::process::ProcessIoBucket bucket, const QString& fallback);
 QString enumNameFromTomlChannel(QString channel);
 
 double jogStepForLevel(int speedLevel)
@@ -225,16 +229,15 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
     kernel.services().registerService<lcnc::IProcessFacade>(facade);
 
-    // 加载外设/工艺参数（连接控制器与构造轴系/IO 表都依赖这些 toml）。
-    // qg_dlgsetting 在打开时会再次加载，幂等。
-    SETTINGS->EnsureDefaultFiles("./Peripheral.toml", "./config.toml");
-    SETTINGS->LoadSettings("./Peripheral.toml");
-    SETTINGS->LoadSettings("./config.toml");
+    // The Process store never reads Peripheral.toml/config.toml.  Missing
+    // current-schema files are created by the typed repository.
+    m_settingsService = std::make_unique<lcnc::process::ProcessSettingsService>();
+    if (!m_settingsService->initialize()) {
+        LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
+                 "process.settings: typed settings initialization failed");
+        return false;
+    }
     m_service->SetToolTable();
-
-    // 用静态预设清单填充 settings 中缺失的 IO 子表（已存在的不动），保证
-    // 即使旧 toml 没有新字段也能开箱即用。
-    seedDefaultIOTables();
 
     // 注册自定义信号类型，跨线程发射 / Qt::QueuedConnection 时需要。
     qRegisterMetaType<DigitalOutputDescriptor>("DigitalOutputDescriptor");
@@ -246,7 +249,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 
     // 从 settings 恢复插件启用/禁用状态。
     {
-        const table specialTable = SETTINGS->GetTable(SettingSection::Special);
+        const table specialTable = m_settingsService->rawTable(lcnc::process::ProcessConfigArea::Workflow);
         if (specialTable.count("ProcessPlugins") && specialTable.at("ProcessPlugins").is_table()) {
             const auto& plugins = specialTable.at("ProcessPlugins").as_table();
             for (const auto& kv : plugins) {
@@ -431,20 +434,13 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
         context.settings = readMonitorSettings();
         context.cachedAxisPositions = m_axisPositions;
         context.outputChannels = monitorOutputChannels();
-        context.interlockChannel = configuredIoChannel(
-            SettingSection::Digital, "DigitalIN", QStringLiteral("aInterLock"));
-        context.safetyLightCurtainChannel = configuredIoChannel(
-            SettingSection::Digital, "DigitalIN", QStringLiteral("aSafetyLightCurtain"));
-        context.pressureMonitorChannel = configuredIoChannel(
-            SettingSection::Digital, "DigitalIN", QStringLiteral("aPressureMonitor"));
-        context.waterLeakageChannel = configuredIoChannel(
-            SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterLeakageMonitor"));
-        context.waterTankChannel = configuredIoChannel(
-            SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterTankMonitor"));
-        context.waterPressureChannel = configuredIoChannel(
-            SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterPressure"));
-        context.waterLevelChannel = configuredIoChannel(
-            SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterLevel"));
+        context.interlockChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aInterLock"));
+        context.safetyLightCurtainChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aSafetyLightCurtain"));
+        context.pressureMonitorChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aPressureMonitor"));
+        context.waterLeakageChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterLeakageMonitor"));
+        context.waterTankChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterTankMonitor"));
+        context.waterPressureChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterPressure"));
+        context.waterLevelChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterLevel"));
 
         MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
         context.readDigital = [mc](const QString& channel, bool* value, QString* errorMessage) {
@@ -549,6 +545,8 @@ ProcessModule::ProcessModule(QObject* parent)
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 }
+
+ProcessModule::~ProcessModule() = default;
 
 bool ProcessModule::connectController(const QString& endpoint)
 {
@@ -1234,35 +1232,35 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
     QString monitorError = requireDigitalNormal(
         monitorSettings.interLockEnabled,
         tr("门禁"),
-        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aInterLock")),
+        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aInterLock")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.safetyLightCurtainEnabled,
         tr("安全光栅"),
-        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aSafetyLightCurtain")),
+        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aSafetyLightCurtain")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.pressureMonitorEnabled,
         tr("气压监控"),
-        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aPressureMonitor")),
+        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aPressureMonitor")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.waterLeakageMonitorEnabled,
         tr("漏水监控"),
-        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterLeakageMonitor")),
+        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterLeakageMonitor")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.waterTankMonitorEnabled,
         tr("水箱监控"),
-        configuredIoChannel(SettingSection::Digital, "DigitalIN", QStringLiteral("aWaterTankMonitor")),
+        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterTankMonitor")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
@@ -1295,7 +1293,7 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
     monitorError = requireAnalogAtLeast(
         monitorSettings.waterPressureMonitorEnabled,
         tr("水压监控"),
-        configuredIoChannel(SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterPressure")),
+        configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterPressure")),
         monitorSettings.waterPressureLimitMpa,
         QStringLiteral("MPa"));
     if (!monitorError.isEmpty())
@@ -1303,7 +1301,7 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
     monitorError = requireAnalogAtLeast(
         monitorSettings.waterLevelMonitorEnabled,
         tr("水位监控"),
-        configuredIoChannel(SettingSection::Analog, "AnalogIN", QStringLiteral("aWaterLevel")),
+        configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterLevel")),
         monitorSettings.waterLevelLimitMm,
         QStringLiteral("mm"));
     if (!monitorError.isEmpty())
@@ -1715,23 +1713,13 @@ double tableDouble(const table& t, const char* group, const char* key, double fa
     return fallback;
 }
 
-QString configuredIoChannel(SettingSection section, const char* bucketName, const QString& fallback)
+QString configuredIoChannel(lcnc::process::ProcessIoBucket bucket, const QString& fallback)
 {
-    const table io = SETTINGS->GetTable(section);
-    const std::string bucketKey(bucketName);
-    const std::string fallbackKey = fallback.toStdString();
-    if (!io.count(bucketKey) || !io.at(bucketKey).is_table())
-        return fallback;
-
-    const auto& bucket = io.at(bucketKey).as_table();
-    auto it = bucket.find(fallbackKey);
-    if (it == bucket.end())
-        return fallback;
-
-    IOEntry entry;
-    if (!extractIOEntry(fallbackKey, it->second, entry))
-        return fallback;
-    return entry.enabled ? entry.channel : QString();
+    auto* settings = lcnc::process::ProcessSettingsService::current();
+    if (!settings) return fallback;
+    for (const auto& channel : settings->ioChannels(bucket))
+        if (channel.id == fallback) return channel.enabled ? channel.id : QString();
+    return fallback;
 }
 
 QString enumNameFromTomlChannel(QString channel)
@@ -1745,33 +1733,29 @@ QString enumNameFromTomlChannel(QString channel)
 lcnc::ProcessMonitorSettings readMonitorSettings()
 {
     lcnc::ProcessMonitorSettings settings;
-    const table monitor = SETTINGS->GetTable(SettingSection::Monitor);
-    settings.interLockEnabled = tableBool(monitor, "Cutting", "bInterLock", false);
-    settings.safetyLightCurtainEnabled = tableBool(monitor, "Cutting", "bSafetyLightCurtain", false);
-    settings.pressureMonitorEnabled = tableBool(monitor, "Gas", "bPressureMonitor", false);
-    settings.waterLeakageMonitorEnabled = tableBool(monitor, "Water", "bWaterLeakageMonitor", false);
-    settings.waterTankMonitorEnabled = tableBool(monitor, "Water", "bWaterTankMonitor", false);
-    settings.waterPressureMonitorEnabled = tableBool(monitor, "Water", "bWaterPressureMonitor", false);
-    settings.waterPressureLimitMpa = tableDouble(monitor, "Water", "fWaterPressureLimit", 1.0);
-    settings.waterLevelMonitorEnabled = tableBool(monitor, "Water", "bWaterLevelMonitor", false);
-    settings.waterLevelLimitMm = tableDouble(monitor, "Water", "fWaterLevelLimit", 50.0);
+    auto* config = lcnc::process::ProcessSettingsService::current();
+    if (!config) return settings;
+    const auto v = [config](const QString& table, const QString& key, const QVariant& fallback) {
+        return config->rawValue(lcnc::process::ProcessConfigArea::Operations, table, key, fallback);
+    };
+    settings.interLockEnabled = v("Cutting", "bInterLock", false).toBool();
+    settings.safetyLightCurtainEnabled = v("Cutting", "bSafetyLightCurtain", false).toBool();
+    settings.pressureMonitorEnabled = v("Gas", "bPressureMonitor", false).toBool();
+    settings.waterLeakageMonitorEnabled = v("Water", "bWaterLeakageMonitor", false).toBool();
+    settings.waterTankMonitorEnabled = v("Water", "bWaterTankMonitor", false).toBool();
+    settings.waterPressureMonitorEnabled = v("Water", "bWaterPressureMonitor", false).toBool();
+    settings.waterPressureLimitMpa = v("Water", "fWaterPressureLimit", 1.0).toDouble();
+    settings.waterLevelMonitorEnabled = v("Water", "bWaterLevelMonitor", false).toBool();
+    settings.waterLevelLimitMm = v("Water", "fWaterLevelLimit", 50.0).toDouble();
     return settings;
 }
 
 QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels()
 {
     QList<lcnc::process::ProcessMonitorOutputChannel> out;
-    const table digital = SETTINGS->GetTable(SettingSection::Digital);
-    if (!digital.count("DigitalOUT") || !digital.at("DigitalOUT").is_table())
-        return out;
-    for (const auto& kv : digital.at("DigitalOUT").as_table()) {
-        IOEntry entry;
-        if (!extractIOEntry(kv.first.data(), kv.second, entry))
-            continue;
-        if (!entry.enabled || entry.name.isEmpty())
-            continue;
-        out.append({entry.name, entry.channel});
-    }
+    if (auto* config = lcnc::process::ProcessSettingsService::current())
+        for (const auto& channel : config->ioChannels(lcnc::process::ProcessIoBucket::DigitalOutput))
+            if (channel.enabled && !channel.name.isEmpty()) out.append({channel.name, channel.id});
     return out;
 }
 
@@ -1801,19 +1785,9 @@ void ProcessModule::pollHardwareStatus()
     // 数字量输出：所有 enabled 的 DigitalOUT 通道，全部扫描，便于硬件端
     // 直接驱动输出时界面也能同步刷新。
     QVector<QPair<QString, QString>> digitalOutputs; // <channel, display>
-    {
-        const table digital = SETTINGS->GetTable(SettingSection::Digital);
-        if (digital.count("DigitalOUT") && digital.at("DigitalOUT").is_table()) {
-            for (const auto& kv : digital.at("DigitalOUT").as_table()) {
-                IOEntry entry;
-                if (!extractIOEntry(kv.first.data(), kv.second, entry))
-                    continue;
-                if (!entry.enabled || entry.name.isEmpty())
-                    continue;
-                digitalOutputs.append(qMakePair(entry.channel, entry.name));
-            }
-        }
-    }
+    if (auto* config = lcnc::process::ProcessSettingsService::current())
+        for (const auto& channel : config->ioChannels(lcnc::process::ProcessIoBucket::DigitalOutput))
+            if (channel.enabled && !channel.name.isEmpty()) digitalOutputs.append(qMakePair(channel.id, channel.name));
 
     if (axisNames.isEmpty() && digitalOutputs.isEmpty())
         return;
@@ -1900,57 +1874,20 @@ namespace {
 
 void ProcessModule::seedDefaultIOTables()
 {
-    using lcnc::process::BuiltinIODefList;
-
-    auto seed = [](SettingSection section, const BuiltinIODefList& list) {
-        table sectionTable = SETTINGS->GetTable(section);
-        bool changed = false;
-        for (int i = 0; i < list.count; ++i) {
-            const auto& def = list.items[i];
-            const std::string sub = def.sectionKey;
-            if (!sectionTable.count(sub))
-                sectionTable[sub] = table{};
-            table& bucket = sectionTable[sub].as_table();
-            // 已有该 key（不论 array 还是 sub-table）就保留用户值。
-            if (bucket.count(def.tomlKey))
-                continue;
-            table entry;
-            entry["name"]        = std::string(def.nameZh);
-            entry["index"]       = std::string(def.defaultIndex);
-            entry["active"]      = def.defaultActive;
-            entry["enabled"]     = def.defaultEnabled;
-            entry["showInMain"]  = def.defaultShowInMain;
-            entry["builtin"]     = true;
-            bucket[def.tomlKey] = entry;
-            changed = true;
-        }
-        if (changed)
-            SETTINGS->SetTable(true, section, sectionTable);
-    };
-
-    seed(SettingSection::Digital, lcnc::process::builtinDigitalOUT());
-    seed(SettingSection::Digital, lcnc::process::builtinDigitalIN());
-    seed(SettingSection::Analog,  lcnc::process::builtinAnalogOUT());
-    seed(SettingSection::Analog,  lcnc::process::builtinAnalogIN());
+    // Built-in IO is seeded by ProcessSettingsService before the runtime is started.
 }
 
 QList<DigitalOutputDescriptor> ProcessModule::mainPanelDigitalOutputs() const
 {
     QList<DigitalOutputDescriptor> out;
-    table tableDigital = SETTINGS->GetTable(SettingSection::Digital);
-    if (!tableDigital.count("DigitalOUT"))
-        return out;
-    const auto& bucket = tableDigital.at("DigitalOUT").as_table();
-    for (const auto& kv : bucket) {
-        IOEntry entry;
-        if (!extractIOEntry(kv.first.data(), kv.second, entry))
-            continue;
-        if (!entry.enabled || !entry.showInMain || entry.name.isEmpty())
-            continue;
+    auto* config = lcnc::process::ProcessSettingsService::current();
+    if (!config) return out;
+    for (const auto& entry : config->ioChannels(lcnc::process::ProcessIoBucket::DigitalOutput)) {
+        if (!entry.enabled || !entry.showInMain || entry.name.isEmpty()) continue;
         DigitalOutputDescriptor d;
-        d.channel = entry.channel;
+        d.channel = entry.id;
         d.name    = entry.name;
-        d.active  = entry.active;
+        d.active  = entry.activeHigh;
         out.push_back(d);
     }
     return out;

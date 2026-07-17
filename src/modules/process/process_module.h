@@ -26,6 +26,7 @@ class NormalCuttingManager;
 class ProcessCuttingPlanService;
 class ProcessMonitorService;
 class ProcessWorkflowExecutor;
+class ProcessSettingsService;
 }
 
 namespace lcnc {
@@ -36,8 +37,7 @@ class MachineConfigurationService;
 /**
  * @brief Process module — manages execution process, peripherals, and parameters.
  *
- * 使用旧 System/Service 类作为外设和参数统一管理器，
- * 通过唯一的 qg_dlgsetting 对话框提供共同参数界面。
+ * 使用 System/Service 作为现有设备适配器，参数界面由动态属性表提供。
  * 运动指令统一走 service->GetMotionControl()（仿真模式下由 MCFactory
  * 返回 SimulatorCMHP / ACS 仿真器）。
  */
@@ -60,6 +60,7 @@ class ProcessModule : public QObject, public lcnc::IModule, public lcnc::IProces
     Q_OBJECT
 public:
     explicit ProcessModule(QObject* parent = nullptr);
+    ~ProcessModule() override;
 
     /// IProcessFacade：用于让调用方挂接 ProcessModule 的 Qt 信号。
     QObject* asQObject() override { return this; }
@@ -115,6 +116,7 @@ public:
     lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
     const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
     Service* service() const { return m_service.get(); }
+    lcnc::process::ProcessSettingsService* settingsService() const { return m_settingsService.get(); }
     QString statusMessage() const override;
 
     /// 主界面 IO 栏要显示的数字量输出列表（来自 settings + 当前缓存值）。
@@ -193,6 +195,7 @@ private:
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
     lcnc::process::ProcessStepContext m_stepContext;
     std::unique_ptr<Service> m_service;
+    std::unique_ptr<lcnc::process::ProcessSettingsService> m_settingsService;
     std::unique_ptr<lcnc::process::LegacyProcessMotionService> m_motionStepService;
     std::unique_ptr<lcnc::process::LegacyProcessIoService> m_ioStepService;
     std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;

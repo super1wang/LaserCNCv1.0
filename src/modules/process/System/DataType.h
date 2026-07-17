@@ -77,52 +77,6 @@ enum class RunMode
 	ProcessTest = 2,	// 流程测试，测试流程节点逻辑
 };
 
-// 总设置页
-enum class SettingSection
-{	
-	// 添加新枚举需要在对应分类同步添加
-
-	// 外设 Peripheral.toml
-	MotionControl,
-	Digital,
-	Analog,
-	Laser,
-	Internet,
-	Special,
-
-	// 工艺 config.toml
-	Tool,
-	Axis,
-	Gas,
-	Water,
-	Monitor,
-	LoadingPos,
-	Camera
-};
-
-enum class Peripheral
-{
-	// 外设 Peripheral.toml
-	MotionControl,
-	Digital,
-	Analog,
-	Laser,
-	Internet,
-	Special
-};
-
-enum class Technology
-{
-	// 工艺 config.toml
-	Tool,
-	Axis,
-	Gas,
-	Water,
-	Monitor,
-	LoadingPos,
-	Camera
-};
-
 // 节点类型
 enum class ItemType
 {

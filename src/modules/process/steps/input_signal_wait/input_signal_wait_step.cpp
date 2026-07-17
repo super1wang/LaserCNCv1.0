@@ -1,6 +1,6 @@
 #include "modules/process/steps/input_signal_wait/input_signal_wait_step.h"
 
-#include "modules/process/Setting/Settings.h"
+#include "modules/process/settings/process_settings_service.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -15,8 +15,7 @@ namespace lcnc::process {
 namespace {
 constexpr char kSignalType[]="signalType"; constexpr char kIoName[]="ioName"; constexpr char kTarget[]="targetValue"; constexpr char kTimeout[]="timeoutMs"; constexpr char kPoll[]="pollIntervalMs"; constexpr char kTypeCombo[]="signalTypeBox"; constexpr char kIoCombo[]="ioNameBox"; constexpr char kTargetCheck[]="targetCheck"; constexpr char kTimeoutSpin[]="timeoutSpin"; constexpr char kPollSpin[]="pollSpin";
 QString ioKeyFromDisplay(const QString& display){ const int l=display.lastIndexOf('('), r=display.lastIndexOf(')'); return (l>=0&&r>l)?display.mid(l+1,r-l-1):display; }
-QStringList ioNames(SettingSection section, const QString& bucketName){ QStringList result; const table root=SETTINGS->GetTable(section); const std::string bucketKey=bucketName.toStdString(); if(!root.count(bucketKey)||!root.at(bucketKey).is_table()) return result; for(const auto& kv: root.at(bucketKey).as_table()){ QString key=QString::fromStdString(kv.first.data()); QString label=key; if(kv.second.is_table()){ const table& e=kv.second.as_table(); if(e.count("enabled")&&e.at("enabled").is_boolean()&&!e.at("enabled").as_boolean()) continue; if(e.count("name")&&e.at("name").is_string()) label=QString::fromStdString(e.at("name").as_string()); } result.append(QStringLiteral("%1 (%2)").arg(label,key)); } return result; }
-void refill(QComboBox* box, const QString& type){ box->clear(); box->addItems(type==QStringLiteral("analog")?ioNames(SettingSection::Analog, QStringLiteral("AnalogIN")):ioNames(SettingSection::Digital, QStringLiteral("DigitalIN"))); }
+void refill(QComboBox* box, const QString& type){ box->clear(); if (auto* settings=ProcessSettingsService::current()) box->addItems(settings->ioDisplayNames(type==QStringLiteral("analog")?ProcessIoBucket::AnalogInput:ProcessIoBucket::DigitalInput)); }
 }
 
 ProcessNodeDescriptor InputSignalWaitStep::descriptor() const{ ProcessNodeDescriptor d; d.type=ProcessNodeType::InputSignalWait; d.displayName=QObject::tr("输入信号"); d.category=QObject::tr("IO"); d.executorKey=QStringLiteral("inputSignalWait"); d.defaultParameters.insert(QString::fromLatin1(kSignalType), QStringLiteral("digital")); d.defaultParameters.insert(QString::fromLatin1(kIoName), QStringLiteral("aStart")); d.defaultParameters.insert(QString::fromLatin1(kTarget), true); d.defaultParameters.insert(QString::fromLatin1(kTimeout), 5000); d.defaultParameters.insert(QString::fromLatin1(kPoll), 100); return d; }

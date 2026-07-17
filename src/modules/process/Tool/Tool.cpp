@@ -3,8 +3,7 @@
 #include <cmath>
 #include <string>
 
-// 从 Setting_Tool 的 GetPage/CreatTool 反推的 TOML 字段名映射，详见
-// src/modules/process/Setting/Setting_Tool.cpp。每个键如果不存在或类型不匹配
+// 动态参数注册表所使用的工具字段映射。每个键如果不存在或类型不匹配
 // 都保留 Tool 成员的默认值（已在类内 = 0/false 初始化）。
 
 namespace {

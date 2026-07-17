@@ -23,7 +23,7 @@ ErrorCode RaycusQCWLaserDevice::SetLaserTable(const table& tableLaser)
 	ErrorCode eCode = ErrorCode::ERROR_NONE;
 	if (tableLaser.count("ComSetting"))
 	{
-		table tCom = SETTINGS->GetTable(SettingSection::Laser, "ComSetting");
+        table tCom = processLaserTable(QStringLiteral("ComSetting"));
 		eCode = SetComTable(tCom, bConnectChange);
 		if (eCode != ErrorCode::ERROR_NONE)
 			return ErrorCode::ERROR_LASER_CONNECTIONFAILED;
@@ -39,7 +39,7 @@ ErrorCode RaycusQCWLaserDevice::SetLaserTable(const table& tableLaser)
 
 		table tLaser;
 		if (bConnectChange)
-			tLaser = SETTINGS->GetTable(SettingSection::Laser, "Laser");
+            tLaser = processLaserTable(QStringLiteral("Laser"));
 		else
 			tLaser = tableLaser.at("Laser").as_table();
 

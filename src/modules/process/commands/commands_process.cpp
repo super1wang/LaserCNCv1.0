@@ -16,7 +16,7 @@
 #include "modules/process/i_process_facade.h"
 #include "modules/process/process_module.h"
 #include "modules/process/runtime/process_events.h"
-#include "modules/process/Setting/qg_dlgsetting.h"
+#include "modules/process/settings/process_settings_dialog.h"
 
 namespace lcnc::process {
 
@@ -128,18 +128,11 @@ bool CmdOpenProcessSettings::isEnabled() const
 void CmdOpenProcessSettings::execute()
 {
     try {
-        auto* dlg = QG_dlgSetting::instance();
-        if (!dlg) {
-            dlg = new QG_dlgSetting(nullptr);
-            QG_dlgSetting::instance(dlg);
-        }
-
         auto* mod = lcnc::Kernel::current().service<ProcessModule>();
-        if (mod && mod->service())
-            dlg->SetService(mod->service());
-
-        dlg->InitSetting();
-        dlg->exec();
+        if (!mod || !mod->settingsService())
+            return;
+        ProcessSettingsDialog dlg(mod->settingsService(), mod->service());
+        dlg.exec();
 
         // 设置对话框关闭后刷新主界面 IO 栏（showInMain 列可能改过）。
         if (mod)

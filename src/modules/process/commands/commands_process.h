@@ -42,7 +42,7 @@ public:
     bool isEnabled() const override;
 };
 
-/// 打开统一参数设置对话框（qg_dlgsetting）。
+/// 打开动态属性表参数对话框。
 class CmdOpenProcessSettings : public CommandBase {
     Q_OBJECT
 public:

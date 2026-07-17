@@ -37,6 +37,6 @@ bool LaserDevice::IsChanged(const LaserParameter& parameter)
 
 ErrorCode LaserDevice::SetLaserTable()
 {
-	table tableLaser = SETTINGS->GetTable(SettingSection::Laser);
+    table tableLaser = processLaserTable();
 	return SetLaserTable(tableLaser);
 }

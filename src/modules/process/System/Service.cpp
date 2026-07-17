@@ -1,6 +1,7 @@
 #include "RegexPatterns.h"
 #include "Service.h"
 #include "DataType.h"
+#include "modules/process/settings/process_settings_service.h"
 #include "modules/process/device/MotionControl/ACSMotionControl.h"
 #include "modules/process/device/MotionControl/SimulateCMHPMotionControl.h"
 #if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
@@ -29,7 +30,8 @@ void Service::SetMotionControl(string strName)
 
     if (strDevice.empty())
     {
-        SETTINGS->GetKeyValue("sType", strDevice, SettingSection::MotionControl, "MotionControl");
+        strDevice = lcnc::process::ProcessSettingsService::current()
+            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "MotionControl", "sType", "SimulatorCMHP").toString().toStdString() : "SimulatorCMHP";
     }
 
     // 直接构造控制器实例（P3：MCFactory 已删除）。
@@ -67,7 +69,8 @@ void Service::SetLaserDevice(string strName)
 
     if (strDevice.empty())
     {
-        SETTINGS->GetKeyValue("sType", strDevice, SettingSection::Laser, "Laser");
+        strDevice = lcnc::process::ProcessSettingsService::current()
+            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "sType", "Simulator").toString().toStdString() : "Simulator";
     }
     m_pLaserDevice = m_LDFactory.GetLaserDevice(strDevice);
     m_strLaserDevice = strDevice;
@@ -80,7 +83,8 @@ void Service::SetToolTable()
 
     // 从 TOOL 的 "ToolIndex" 子表中按 sTool_0, sTool_1, ... 键依次读取工具名，
     // 然后加载对应子表。规避 GetTable 返回表的大小受 sToolIndex / 其他杂键干扰。
-    const table tabToolIndex = SETTINGS->GetTable(SettingSection::Tool, "ToolIndex");
+    const table tabToolIndex = lcnc::process::ProcessSettingsService::current()
+        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Tools, "ToolIndex") : table{};
     int i = 0;
     while (true)
     {
@@ -94,7 +98,8 @@ void Service::SetToolTable()
         if (strToolName.empty())
             continue;
 
-        const table tabTool = SETTINGS->GetTable(SettingSection::Tool, strToolName);
+        const table tabTool = lcnc::process::ProcessSettingsService::current()
+            ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Tools, QString::fromStdString(strToolName)) : table{};
         Tool curtool;
         curtool.m_strName = strToolName;
         curtool.SetFromTable(tabTool);
@@ -134,7 +139,8 @@ void Service::SetMotionControlTable(const table& table_MotionControl)
     if (!table_MotionControl.size())
     {
         string strMotionControl;
-        SETTINGS->GetKeyValue("sType", strMotionControl, SettingSection::MotionControl, "MotionControl");
+        strMotionControl = lcnc::process::ProcessSettingsService::current()
+            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "MotionControl", "sType", "SimulatorCMHP").toString().toStdString() : "SimulatorCMHP";
         if (m_strMotionControl != strMotionControl)
         {
             if (m_pMotionControl)
@@ -170,7 +176,8 @@ void Service::SetLaserTable(const table& table_Laser)
     if (!table_Laser.size())
     {
         string strLaserDevice;
-        SETTINGS->GetKeyValue("sType", strLaserDevice, SettingSection::Laser, "Laser");
+        strLaserDevice = lcnc::process::ProcessSettingsService::current()
+            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "sType", "Simulator").toString().toStdString() : "Simulator";
         if (m_strLaserDevice != strLaserDevice)
         {
             if (m_pLaserDevice)
@@ -181,11 +188,11 @@ void Service::SetLaserTable(const table& table_Laser)
         if (m_pLaserDevice->GetName() == "AnalogControl")
         {
             double dResolution;
-            SETTINGS->GetKeyValue("fResolution", dResolution, SettingSection::Laser, "Laser");
+            dResolution = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "fResolution", 0.0).toDouble();
             if (dResolution > 0)
             {
                 double dEnergy = 0;
-                SETTINGS->GetKeyValue("fEnergy", dEnergy, SettingSection::Laser, "Laser");
+                dEnergy = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "fEnergy", 0.0).toDouble();
                 double dValue = dEnergy / 100.0 * dResolution;
                 m_pMotionControl->AnalogOutputSet(AnalogOUT::Laser, dValue, true);
             }
@@ -203,14 +210,15 @@ void Service::SetGasTable(const table& table_Gas)
 {
     table tGas = table_Gas;
     if (!table_Gas.size())
-        tGas = SETTINGS->GetTable(SettingSection::Gas);
+        tGas = lcnc::process::ProcessSettingsService::current()
+            ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Operations) : table{};
 
     if (tGas.count("Gas") || tGas.count("GasSetting"))
     {
         double dPressure;
         int iConversions;
-        SETTINGS->GetKeyValue("fPressure", dPressure, SettingSection::Gas, "Gas");
-        SETTINGS->GetKeyValue("iConversions", iConversions, SettingSection::Gas, "GasSetting");
+        dPressure = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Operations, "Gas", "fPressure", 0.0).toDouble();
+        iConversions = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Operations, "GasSetting", "iConversions", 0).toInt();
         if (m_pMotionControl)
             m_pMotionControl->AnalogOutputSet(AnalogOUT::Pressure, iConversions / 2.0 * dPressure);
     }

@@ -1,5 +1,5 @@
 #pragma once
-#include <xstring>
+#include <string>
 #include "toml.hpp"
 using std::string;
 using std::wstring;

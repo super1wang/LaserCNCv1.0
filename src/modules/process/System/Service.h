@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Settings.h"
 #include "LDFactory.h"
 #include "ToolFactory.h"
 
@@ -21,8 +20,6 @@ class Service
 {
 public:
     Service(void);
-
-    Settings* GetSETTING() { return &m_Settings; };
 
     void SetMotionControl(string strName = "");
     MotionControl* GetMotionControl() { return m_pMotionControl; };
@@ -67,8 +64,6 @@ public:
     void RedrawDrawing();
 
 private:
-    Settings        m_Settings;
-
     MotionControl*  m_pMotionControl{nullptr};
 
     LDFactory       m_LDFactory;

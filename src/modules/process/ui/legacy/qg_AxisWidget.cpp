@@ -1,6 +1,10 @@
 #include "qg_AxisWidget.h"
+#include "core/kernel/kernel.h"
+#include "core/kinematics/machine_configuration_service.h"
+#include "RegexPatterns.h"
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QRegularExpressionValidator>
 
 string m_strSpeedMode = "fMediumSpeed";
 QG_AxisWidget* QG_AxisWidget::uniqueInstance = nullptr;
@@ -22,7 +26,7 @@ QG_AxisWidget::QG_AxisWidget(QWidget *parent, const char* name)
 	connect(ui.radioButton_AxisMove_HighSpeed,		SIGNAL(clicked()), this, SLOT(OnClickedradioButtonSpeedModelHigh()));
 	
 	ui.radioButton_AxisMove_MediumSpeed->setChecked(true);
-	ui.lineEdit_AxisMove_dPos->setValidator(new QRegExpValidator(Regex_Nonnegative_Double));
+	ui.lineEdit_AxisMove_dPos->setValidator(new QRegularExpressionValidator(Regex_Nonnegative_Double(), this));
 
 	QTimer* timer = new QTimer(this);
 	connect(timer, &QTimer::timeout, this, &QG_AxisWidget::UpdateAxisState);
@@ -193,7 +197,15 @@ void QG_AxisWidget::OnClickedAxisMove(int iType, QPushButton* PushButton)
 		dPos = -dPos;
 		bDirection = false;
 	}
-	SETTINGS->GetKeyValue(m_strSpeedMode, dVel, SettingSection::Axis, strAxis);
+	dVel = 10.0;
+	if (auto machine = lcnc::Kernel::current().services().getService<lcnc::MachineConfigurationService>()) {
+		for (const auto& axis : machine->axisConfigurations()) {
+			if (axis.axis.name.compare(QString::fromStdString(strAxis), Qt::CaseInsensitive) != 0) continue;
+			dVel = m_strSpeedMode == "fLowSpeed" ? axis.lowSpeed
+				: (m_strSpeedMode == "fHighSpeed" ? axis.highSpeed : axis.mediumSpeed);
+			break;
+		}
+	}
 
 	switch (iType)
 	{
@@ -383,4 +395,3 @@ void QG_AxisWidget::SetupUI()
 		}
 	}
 }
-

@@ -1,6 +1,6 @@
 #include "modules/process/steps/output_signal/output_signal_step.h"
 
-#include "modules/process/Setting/Settings.h"
+#include "modules/process/settings/process_settings_service.h"
 
 #include <QComboBox>
 #include <QFormLayout>
@@ -12,8 +12,7 @@ namespace lcnc::process {
 namespace {
 constexpr char kSignalType[]="signalType"; constexpr char kIoName[]="ioName"; constexpr char kValue[]="value"; constexpr char kTypeCombo[]="signalTypeBox"; constexpr char kIoCombo[]="ioNameBox"; constexpr char kValueEdit[]="valueEdit";
 QString ioKeyFromDisplay(const QString& display){ const int l=display.lastIndexOf('('), r=display.lastIndexOf(')'); return (l>=0&&r>l)?display.mid(l+1,r-l-1):display; }
-QStringList ioNames(SettingSection section, const QString& bucketName){ QStringList result; const table root=SETTINGS->GetTable(section); const std::string bucketKey=bucketName.toStdString(); if(!root.count(bucketKey)||!root.at(bucketKey).is_table()) return result; for(const auto& kv: root.at(bucketKey).as_table()){ QString key=QString::fromStdString(kv.first.data()); QString label=key; if(kv.second.is_table()){ const table& e=kv.second.as_table(); if(e.count("enabled")&&e.at("enabled").is_boolean()&&!e.at("enabled").as_boolean()) continue; if(e.count("name")&&e.at("name").is_string()) label=QString::fromStdString(e.at("name").as_string()); } else if(kv.second.is_array()){ const auto& a=kv.second.as_array(); if(!a.empty()&&a.at(0).is_string()) label=QString::fromStdString(a.at(0).as_string()); } result.append(QStringLiteral("%1 (%2)").arg(label,key)); } return result; }
-void refill(QComboBox* box, const QString& type){ box->clear(); box->addItems(type==QStringLiteral("analog")?ioNames(SettingSection::Analog, QStringLiteral("AnalogOUT")):ioNames(SettingSection::Digital, QStringLiteral("DigitalOUT"))); }
+void refill(QComboBox* box, const QString& type){ box->clear(); if (auto* settings=ProcessSettingsService::current()) box->addItems(settings->ioDisplayNames(type==QStringLiteral("analog")?ProcessIoBucket::AnalogOutput:ProcessIoBucket::DigitalOutput)); }
 }
 
 ProcessNodeDescriptor OutputSignalStep::descriptor() const{ ProcessNodeDescriptor d; d.type=ProcessNodeType::OutputSignal; d.displayName=QObject::tr("输出信号"); d.category=QObject::tr("IO"); d.executorKey=QStringLiteral("outputSignal"); d.defaultParameters.insert(QString::fromLatin1(kSignalType), QStringLiteral("digital")); d.defaultParameters.insert(QString::fromLatin1(kIoName), QStringLiteral("aLaser")); d.defaultParameters.insert(QString::fromLatin1(kValue), true); return d; }

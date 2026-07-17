@@ -118,7 +118,11 @@ public:
         int endSequence{0};     ///< 0 = 不限
     };
     /// 按当前策略 + filter 生成一条已排序、已过滤、已绑工具的切割链表。
-    QVector<CuttingListEntry> buildCuttingList(const CuttingListFilter& filter = {}) const;
+    QVector<CuttingListEntry> buildCuttingList(const CuttingListFilter& filter) const;
+    QVector<CuttingListEntry> buildCuttingList() const
+    {
+        return buildCuttingList(CuttingListFilter{});
+    }
 
     // ── 手动轮廓顺序（Manual 策略生效）─────────────────────────────────────
     QVector<lcnc::cam::ContourId> manualContourOrder() const;

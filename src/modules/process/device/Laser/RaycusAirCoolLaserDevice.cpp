@@ -24,7 +24,7 @@ ErrorCode RaycusAirCoolLaserDevice::SetLaserTable(const table& tableLaser)
 	ErrorCode eCode = ErrorCode::ERROR_NONE;
 	if (tableLaser.count("ComSetting"))
 	{
-		table tCom = SETTINGS->GetTable(SettingSection::Laser, "ComSetting");
+        table tCom = processLaserTable(QStringLiteral("ComSetting"));
 		eCode = SetComTable(tCom, bConnectChange);
 		if (eCode != ErrorCode::ERROR_NONE)
 			return ErrorCode::ERROR_LASER_CONNECTIONFAILED;
@@ -35,7 +35,7 @@ ErrorCode RaycusAirCoolLaserDevice::SetLaserTable(const table& tableLaser)
 	{
 		table tLaser;
 		if (bConnectChange)
-			tLaser = SETTINGS->GetTable(SettingSection::Laser, "Laser");
+            tLaser = processLaserTable(QStringLiteral("Laser"));
 		else
 			tLaser = tableLaser.at("Laser").as_table();
 
@@ -46,7 +46,7 @@ ErrorCode RaycusAirCoolLaserDevice::SetLaserTable(const table& tableLaser)
 				eCode = ErrorCode::ERROR_LASER_SETTINGFAILED;
 		}
 		bool bSignalSource = false;
-		SETTINGS->GetKeyValue("bSignal", bSignalSource, SettingSection::Laser, "SignalSource");
+        bSignalSource = processLaserValue(QStringLiteral("SignalSource"), QStringLiteral("bSignal"), false).toBool();
 		if (!bSignalSource && tLaser.count("fFrequency"))
 		{
 			double dFrequency = tLaser["fFrequency"].as_floating();

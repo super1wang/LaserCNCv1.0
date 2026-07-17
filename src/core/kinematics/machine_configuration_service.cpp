@@ -40,17 +40,22 @@ bool sameAxisConfig(const MachineAxisRuntimeConfig& lhs, const MachineAxisRuntim
         && std::abs(lhs.axis.maxVal - rhs.axis.maxVal) < 1e-9
         && lhs.controllerIndex == rhs.controllerIndex
         && lhs.homeIndex == rhs.homeIndex
+        && std::abs(lhs.resolution - rhs.resolution) < 1e-9
+        && std::abs(lhs.motionSpeed - rhs.motionSpeed) < 1e-9
         && std::abs(lhs.lowSpeed - rhs.lowSpeed) < 1e-9
         && std::abs(lhs.mediumSpeed - rhs.mediumSpeed) < 1e-9
         && std::abs(lhs.highSpeed - rhs.highSpeed) < 1e-9
         && std::abs(lhs.acceleration - rhs.acceleration) < 1e-9
-        && std::abs(lhs.jerk - rhs.jerk) < 1e-9;
+        && std::abs(lhs.jerk - rhs.jerk) < 1e-9
+        && std::abs(lhs.pipeDiameter - rhs.pipeDiameter) < 1e-9;
 }
 
 void copyHardwareConfig(MachineAxisRuntimeConfig& target, const MachineAxisRuntimeConfig& source)
 {
     target.controllerIndex = source.controllerIndex;
     target.homeIndex = source.homeIndex;
+    target.resolution = source.resolution;
+    target.motionSpeed = source.motionSpeed;
     target.axis.minVal = source.axis.minVal;
     target.axis.maxVal = source.axis.maxVal;
     target.lowSpeed = source.lowSpeed;
@@ -58,6 +63,7 @@ void copyHardwareConfig(MachineAxisRuntimeConfig& target, const MachineAxisRunti
     target.highSpeed = source.highSpeed;
     target.acceleration = source.acceleration;
     target.jerk = source.jerk;
+    target.pipeDiameter = source.pipeDiameter;
 }
 
 } // namespace
@@ -295,6 +301,8 @@ MachineAxisRuntimeConfig MachineConfigurationService::defaultRuntimeConfig(const
     config.axis = axis;
     config.controllerIndex = index;
     config.homeIndex = index;
+    config.resolution = 2000.0;
+    config.motionSpeed = 10.0;
     config.acceleration = 200.0;
     config.jerk = 0.0;
     if (axis.motionType == MachineAxisDef::Rotary) {
@@ -379,11 +387,14 @@ void MachineConfigurationService::readFrom(const toml::value& root)
         config.axis.maxVal = get_double(item, "max", config.axis.maxVal);
         config.controllerIndex = get_int(item, "controllerIndex", loaded.size());
         config.homeIndex = get_int(item, "homeIndex", config.controllerIndex);
+        config.resolution = get_double(item, "resolution", config.resolution);
+        config.motionSpeed = get_double(item, "motionSpeed", config.motionSpeed);
         config.lowSpeed = get_double(item, "lowSpeed", config.lowSpeed);
         config.mediumSpeed = get_double(item, "mediumSpeed", config.mediumSpeed);
         config.highSpeed = get_double(item, "highSpeed", config.highSpeed);
         config.acceleration = get_double(item, "acceleration", config.acceleration);
         config.jerk = get_double(item, "jerk", config.jerk);
+        config.pipeDiameter = get_double(item, "pipeDiameter", config.pipeDiameter);
         config.axis.direction = gp_Dir(get_double(item, "directionX", config.axis.direction.X()),
                            get_double(item, "directionY", config.axis.direction.Y()),
                            get_double(item, "directionZ", config.axis.direction.Z()));
@@ -416,6 +427,8 @@ void MachineConfigurationService::writeTo(toml::value& root) const
         item["originZ"] = config.axis.origin.Z();
         item["controllerIndex"] = config.controllerIndex;
         item["homeIndex"] = config.homeIndex;
+        item["resolution"] = config.resolution;
+        item["motionSpeed"] = config.motionSpeed;
         item["min"] = config.axis.minVal;
         item["max"] = config.axis.maxVal;
         item["lowSpeed"] = config.lowSpeed;
@@ -423,6 +436,7 @@ void MachineConfigurationService::writeTo(toml::value& root) const
         item["highSpeed"] = config.highSpeed;
         item["acceleration"] = config.acceleration;
         item["jerk"] = config.jerk;
+        item["pipeDiameter"] = config.pipeDiameter;
         axes.emplace_back(item);
     }
     root["axes"] = axes;

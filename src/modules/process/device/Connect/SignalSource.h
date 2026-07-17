@@ -2,10 +2,11 @@
 #define SIGNALSOURCE
 
 #include "SerialPort.h"
-#include "Settings.h"
+#include "toml.hpp"
 #include "MessageModule.h"
 #include <string>
 using namespace std;
+using toml::table;
 
 class SignalSource : public SerialPort
 {

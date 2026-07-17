@@ -57,18 +57,5 @@
     <file alias="icons/laser_param.svg">icons/laser_param.svg</file>
     <file alias="icons/motion_param.svg">icons/motion_param.svg</file>
     <file alias="icons/process_param.svg">icons/process_param.svg</file>
-    <file alias="process/setting/Setting_Tool.ui">../src/modules/process/Setting/Setting_Tool.ui</file>
-    <file alias="process/setting/Setting_Laser.ui">../src/modules/process/Setting/Setting_Laser.ui</file>
-    <file alias="process/setting/Setting_MotionControl.ui">../src/modules/process/Setting/Setting_MotionControl.ui</file>
-    <file alias="process/setting/Setting_Axis.ui">../src/modules/process/Setting/Setting_Axis.ui</file>
-    <file alias="process/setting/Setting_Analog.ui">../src/modules/process/Setting/Setting_Analog.ui</file>
-    <file alias="process/setting/Setting_Digital.ui">../src/modules/process/Setting/Setting_Digital.ui</file>
-    <file alias="process/setting/Setting_Gas.ui">../src/modules/process/Setting/Setting_Gas.ui</file>
-    <file alias="process/setting/Setting_Water.ui">../src/modules/process/Setting/Setting_Water.ui</file>
-    <file alias="process/setting/Setting_Monitor.ui">../src/modules/process/Setting/Setting_Monitor.ui</file>
-    <file alias="process/setting/Setting_LoadingPos.ui">../src/modules/process/Setting/Setting_LoadingPos.ui</file>
-    <file alias="process/setting/Setting_Camera.ui">../src/modules/process/Setting/Setting_Camera.ui</file>
-    <file alias="process/setting/Setting_Internet.ui">../src/modules/process/Setting/Setting_Internet.ui</file>
-    <file alias="process/setting/qg_dlgsetting.ui">../src/modules/process/Setting/qg_dlgsetting.ui</file>
   </qresource>
 </RCC>

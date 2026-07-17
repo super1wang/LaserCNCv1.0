@@ -1,4 +1,5 @@
 #include "SignalSource.h"
+#include "modules/process/settings/process_settings_service.h"
 #include <stdlib.h>
 #include <boost/lexical_cast.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -10,7 +11,8 @@ SignalSource::SignalSource() : m_strPulseWidth("30.0"), m_strFrequency("8000.0")
 
 ErrorCode SignalSource::SetSignalSourceTable()
 {
-	table tableLaser = SETTINGS->GetTable(SettingSection::Laser);
+    table tableLaser = lcnc::process::ProcessSettingsService::current()
+        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Devices) : table{};
 	return SetSignalSourceTable(tableLaser);
 }
 
@@ -22,7 +24,8 @@ ErrorCode SignalSource::SetSignalSourceTable(const table& tableLaser)
 	ErrorCode eCode = ErrorCode::ERROR_NONE;
 	if (tableLaser.count("SignalSource"))
 	{
-		table tCom = SETTINGS->GetTable(SettingSection::Laser, "SignalSource");
+        table tCom = lcnc::process::ProcessSettingsService::current()
+            ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Devices, "SignalSource") : table{};
 		eCode = SetComTable(tCom, bConnectChange);
 		if (eCode != ErrorCode::ERROR_NONE)
 			return ErrorCode::ERROR_SIGNALSOURCE_CONNECTIONFAILED;
@@ -37,7 +40,8 @@ ErrorCode SignalSource::SetSignalSourceTable(const table& tableLaser)
 		
 		table tLaser;
 		if (bConnectChange)
-			tLaser = SETTINGS->GetTable(SettingSection::Laser, "Laser");
+            tLaser = lcnc::process::ProcessSettingsService::current()
+                ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Devices, "Laser") : table{};
 		else
 			tLaser = tableLaser.at("Laser").as_table();
 

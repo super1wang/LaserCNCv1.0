@@ -1,4 +1,5 @@
 #include "MotionControl.h"
+#include "modules/process/settings/process_settings_service.h"
 
 const std::regex MotionControl::regex_DigitalIO("^(-)?(N)?\\d\\.\\d(\\d)?$");	// 匹配格式：(-) （N） 数字 . 数字 (数字)	，如N0.1、N1.23、-N0.1
 const std::regex MotionControl::regex_AnalogIO("^(-)?(N)?\\d(\\d)?$");		// 匹配格式：(-) （N） 数字 (数字)		，如N1、N12、-N1
@@ -14,7 +15,8 @@ void MotionControl::rebuildAxes()
 		if (!IsMotorCreated(eAxis))
 		{
 			string strAxis = enum_name(eAxis).data();
-			table tableAxis = SETTINGS->GetTable(SettingSection::MotionControl, strAxis);
+            table tableAxis = lcnc::process::ProcessSettingsService::current()
+                ? lcnc::process::ProcessSettingsService::current()->axisRuntimeTable(QString::fromStdString(strAxis)) : table{};
 			CreateMotor(eAxis, tableAxis);
 		}
 	}
@@ -36,7 +38,6 @@ bool MotionControl::IsMotorCreated(Axis eAxis)
 //	for (Axis eAxis : m_vecMotors)
 //	{
 //		string strAxis = enum_name(eAxis).data();
-//		tableAxisHome = SETTINGS->GetTable(SettingSection::MotionControl, strAxis);
 //		if (tableAxisHome.count("Home") && tableAxisHome.at("Home").is_table())
 //			SetAxisHomePrm(eAxis, tableAxisHome.at("Home").as_table());
 //	}
@@ -44,7 +45,9 @@ bool MotionControl::IsMotorCreated(Axis eAxis)
 
 void MotionControl::SetMotionControlTable()
 {
-	table tableMotion = SETTINGS->GetTable(SettingSection::MotionControl);
+    table tableMotion;
+    if (auto* settings = lcnc::process::ProcessSettingsService::current())
+        for (const Axis axis : m_vecMotors) tableMotion[enum_name(axis).data()] = settings->axisRuntimeTable(QString::fromStdString(enum_name(axis).data()));
 	SetMotionControlTable(tableMotion);
 }
 
@@ -64,7 +67,8 @@ void MotionControl::SetMotionControlTable(const table& tableMotion)
 void MotionControl::SetAxisTable(Axis eAxis, const table& tableAxis)
 {
 	string strAxis = enum_name(eAxis).data();
-	table t_Axis = SETTINGS->GetTable(SettingSection::MotionControl, strAxis);
+    table t_Axis = lcnc::process::ProcessSettingsService::current()
+        ? lcnc::process::ProcessSettingsService::current()->axisRuntimeTable(QString::fromStdString(strAxis)) : table{};
 
 	if (tableAxis.count("iIndex"))
 	{
@@ -119,8 +123,8 @@ void MotionControl::SetAxisTable(Axis eAxis, const table& tableAxis)
 	
 	bool bLimitChange = false;
 	double fLeftLimit, fRightLimit;
-	SETTINGS->GetKeyValue("fLeftLimit",  fLeftLimit,  SettingSection::MotionControl, strAxis);
-	SETTINGS->GetKeyValue("fRightLimit", fRightLimit, SettingSection::MotionControl, strAxis);
+    fLeftLimit = 0.0;
+    fRightLimit = 0.0;
 
 	if (tableAxis.count("fLeftLimit"))
 	{
@@ -144,7 +148,8 @@ void MotionControl::SetAxisTable(Axis eAxis, const table& tableAxis)
 
 void MotionControl::SetPipeDiameterTable()
 {
-	table tableAxis = SETTINGS->GetTable(SettingSection::Axis);
+    table tableAxis = lcnc::process::ProcessSettingsService::current()
+        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Operations, "Axis") : table{};
 	SetPipeDiameterTable(tableAxis);
 }
 
@@ -223,10 +228,26 @@ void MotionControl::rebuildIOMap(int iType)
 
 void MotionControl::SetDigitalTable()
 {
-	table tableDigital = SETTINGS->GetTable(SettingSection::Digital);
+    table tableDigital = lcnc::process::ProcessSettingsService::current()
+        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::DigitalIo) : table{};
 	SetDigitalTable(tableDigital);
 	rebuildIOMap(11);
 	rebuildIOMap(10);
+	// Custom channels have no legacy enum value.  Keep them in the string-keyed
+	// map so workflow and UI references use their stable channel id directly.
+	if (auto* settings = lcnc::process::ProcessSettingsService::current()) {
+		auto append = [](map<QString, DigitalIOData>& destination, const lcnc::process::ProcessIoChannel& channel, bool input) {
+			if (!channel.enabled || !std::regex_match(channel.hardwareIndex.toStdString(), MotionControl::regex_DigitalIO)) return;
+			std::string index = channel.hardwareIndex.toStdString(); DigitalIOData data; data.qstrID = channel.id;
+			if (!channel.activeHigh && !index.empty() && index.front() != '-') index.insert(index.begin(), '-');
+			if (!index.empty() && index.front() == '-') { data.bInversion = true; index.erase(index.begin()); }
+			if (!index.empty() && index.front() == 'N') { data.bExpand = true; index.erase(index.begin()); }
+			data.iPort = std::stoi(index.substr(0, 1)); data.iIO = std::stoi(index.substr(2));
+			data.strIndex = (input ? "IN" : "OUT") + index; destination[channel.id] = data;
+		};
+		for (const auto& channel : settings->ioChannels(lcnc::process::ProcessIoBucket::DigitalInput)) if (!channel.builtin) append(m_mapqDigitalIN, channel, true);
+		for (const auto& channel : settings->ioChannels(lcnc::process::ProcessIoBucket::DigitalOutput)) if (!channel.builtin) append(m_mapqDigitalOUT, channel, false);
+	}
 }
 
 
@@ -245,7 +266,7 @@ namespace
 		bool   bEnabled { true };
 	};
 
-	bool extractIORecord(const value& v, IORecordFields& out)
+	bool extractIORecord(const toml::value& v, IORecordFields& out)
 	{
 		if (v.is_table())
 		{
@@ -422,10 +443,21 @@ void MotionControl::SetDigitalTable(const table& tableDigital)
 
 void MotionControl::SetAnalogTable()
 {
-	table tableAnalog = SETTINGS->GetTable(SettingSection::Analog);
+    table tableAnalog = lcnc::process::ProcessSettingsService::current()
+        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::AnalogIo) : table{};
 	SetAnalogTable(tableAnalog);
 	rebuildIOMap(21);
 	rebuildIOMap(20);
+	if (auto* settings = lcnc::process::ProcessSettingsService::current()) {
+		auto append = [](map<QString, AnalogIOData>& destination, const lcnc::process::ProcessIoChannel& channel, bool input) {
+			if (!channel.enabled || !std::regex_match(channel.hardwareIndex.toStdString(), MotionControl::regex_AnalogIO)) return;
+			std::string index = channel.hardwareIndex.toStdString(); AnalogIOData data; data.qstrID = channel.id;
+			if (!index.empty() && index.front() == 'N') { data.bExpand = true; index.erase(index.begin()); }
+			data.iPort = std::stoi(index); data.strIndex = (input ? "AIN" : "AOUT") + index; destination[channel.id] = data;
+		};
+		for (const auto& channel : settings->ioChannels(lcnc::process::ProcessIoBucket::AnalogInput)) if (!channel.builtin) append(m_mapqAnalogIN, channel, true);
+		for (const auto& channel : settings->ioChannels(lcnc::process::ProcessIoBucket::AnalogOutput)) if (!channel.builtin) append(m_mapqAnalogOUT, channel, false);
+	}
 }
 
 void MotionControl::SetAnalogTable(const table& tableAnalog)
@@ -559,7 +591,8 @@ void MotionControl::SetAnalogTable(const table& tableAnalog)
 
 ErrorCode MotionControl::SetLaserParameterTable()
 {
-	table tableLaser = SETTINGS->GetTable(SettingSection::Laser);
+    table tableLaser = lcnc::process::ProcessSettingsService::current()
+        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Devices, "Laser") : table{};
 	return SetLaserParameterTable(tableLaser);
 }
 
@@ -702,4 +735,3 @@ bool MotionControl::AnalogInputGet(QString	qstrName, double& dValue, bool bLogEr
 		return false;
 	}
 }
-

@@ -16,7 +16,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 
-#include "modules/process/Setting/Settings.h"
+#include "modules/process/settings/process_settings_service.h"
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/workflow/process_node_registry.h"
 
@@ -24,31 +24,10 @@ namespace lcnc::process {
 
 namespace {
 
-QStringList ioNames(SettingSection section, const QString& bucketName)
+QStringList ioNames(ProcessIoBucket bucket)
 {
-    QStringList result;
-    const table root = SETTINGS->GetTable(section);
-    const std::string bucketKey = bucketName.toStdString();
-    if (!root.count(bucketKey) || !root.at(bucketKey).is_table())
-        return result;
-    const table& bucket = root.at(bucketKey).as_table();
-    for (const auto& kv : bucket) {
-        const QString key = QString::fromStdString(kv.first.data());
-        QString label = key;
-        if (kv.second.is_table()) {
-            const table& entry = kv.second.as_table();
-            if (entry.count("name") && entry.at("name").is_string())
-                label = QString::fromStdString(entry.at("name").as_string());
-            if (entry.count("enabled") && entry.at("enabled").is_boolean() && !entry.at("enabled").as_boolean())
-                continue;
-        } else if (kv.second.is_array()) {
-            const auto& arr = kv.second.as_array();
-            if (!arr.empty() && arr.at(0).is_string())
-                label = QString::fromStdString(arr.at(0).as_string());
-        }
-        result.append(QStringLiteral("%1 (%2)").arg(label, key));
-    }
-    return result;
+    if (auto* settings = ProcessSettingsService::current()) return settings->ioDisplayNames(bucket);
+    return {};
 }
 
 QString ioKeyFromDisplay(const QString& display)
@@ -235,24 +214,24 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
         break;
     case ProcessNodeType::IO: {
         auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("输出类型"), { QStringLiteral("digital"), QStringLiteral("analog") });
-        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("IO 名"), ioNames(SettingSection::Digital, QStringLiteral("DigitalOUT")));
+        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("IO 名"), ioNames(ProcessIoBucket::DigitalOutput));
         connect(typeCombo, &QComboBox::currentTextChanged, this, [ioCombo](const QString& text) {
             ioCombo->clear();
             ioCombo->addItems(text == QStringLiteral("analog")
-                ? ioNames(SettingSection::Analog, QStringLiteral("AnalogOUT"))
-                : ioNames(SettingSection::Digital, QStringLiteral("DigitalOUT")));
+                ? ioNames(ProcessIoBucket::AnalogOutput)
+                : ioNames(ProcessIoBucket::DigitalOutput));
         });
         addText(QStringLiteral("value"), tr("值"), QStringLiteral("true"));
         break;
     }
     case ProcessNodeType::Monitor: {
         auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("输入类型"), { QStringLiteral("digital"), QStringLiteral("analog") });
-        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("输入 IO"), ioNames(SettingSection::Digital, QStringLiteral("DigitalIN")));
+        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("输入 IO"), ioNames(ProcessIoBucket::DigitalInput));
         connect(typeCombo, &QComboBox::currentTextChanged, this, [ioCombo](const QString& text) {
             ioCombo->clear();
             ioCombo->addItems(text == QStringLiteral("analog")
-                ? ioNames(SettingSection::Analog, QStringLiteral("AnalogIN"))
-                : ioNames(SettingSection::Digital, QStringLiteral("DigitalIN")));
+                ? ioNames(ProcessIoBucket::AnalogInput)
+                : ioNames(ProcessIoBucket::DigitalInput));
         });
         addBool(QStringLiteral("targetValue"), tr("目标为 true"));
         addInt(QStringLiteral("timeoutMs"), tr("超时"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));

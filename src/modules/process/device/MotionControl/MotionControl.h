@@ -4,11 +4,13 @@
 #include <windows.h>
 #include <regex>
 #include "ToolFactory.h"
-#include "Settings.h"
+#include "DataType.h"
+#include "toml.hpp"
 #include "MessageModule.h"
 
 using std::vector;
 using std::string;
+using toml::table;
 
 // 设备运行时层 —— 仅暴露 IO/jog/home/connect/axis-table 等设备控制面。
 // 切割指令（buffer 文本拼装、ProLaserControl、JumpTo*、ACS XSEG/LINE/GTN crd 等）

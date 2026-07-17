@@ -24,7 +24,7 @@ ErrorCode ULTRONLaserDevice::SetLaserTable(const table& tableLaser)
 	ErrorCode eCode = ErrorCode::ERROR_NONE;
 	if (tableLaser.count("ComSetting"))
 	{
-		table tCom = SETTINGS->GetTable(SettingSection::Laser, "ComSetting");
+        table tCom = processLaserTable(QStringLiteral("ComSetting"));
 		eCode = SetComTable(tCom, bConnectChange);
 		if (eCode != ErrorCode::ERROR_NONE)
 			return ErrorCode::ERROR_LASER_CONNECTIONFAILED;
@@ -41,7 +41,7 @@ ErrorCode ULTRONLaserDevice::SetLaserTable(const table& tableLaser)
 
 		table tLaser;
 		if (bConnectChange)
-			tLaser = SETTINGS->GetTable(SettingSection::Laser, "Laser");
+            tLaser = processLaserTable(QStringLiteral("Laser"));
 		else
 			tLaser = tableLaser.at("Laser").as_table();
 
@@ -350,7 +350,7 @@ string ULTRONLaserDevice::GetEnergy()
 	else
 	{
 		int iSize = str112.size();
-		string sResult = strOut.mid(i + iSize, 4);
+		string sResult = strOut.mid(i + iSize, 4).toStdString();
 		string str = hexStrToDecString(sResult);
 		return str;
 	}
@@ -427,7 +427,7 @@ bool ULTRONLaserDevice::InitLaser()
 				return false;
 			}
 			int itest = str112.size();
-			std::string sResult = strOut.mid(i + itest, 4);
+			std::string sResult = strOut.mid(i + itest, 4).toStdString();
 			string str = hexStrToDecString(sResult);
 			int ivalue = stoi(str);
 		}

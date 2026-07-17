@@ -25,11 +25,18 @@ struct MachineAxisRuntimeConfig
     MachineAxisDef axis;
     int controllerIndex{-1};
     int homeIndex{-1};
+    // Controller-facing conversion and motion values.  Keeping them here makes
+    // MachineConfigurationService the one source of truth for every configured axis.
+    double resolution{2000.0};
+    double motionSpeed{10.0};
     double lowSpeed{1.0};
     double mediumSpeed{5.0};
     double highSpeed{20.0};
     double acceleration{200.0};
     double jerk{0.0};
+    // Only meaningful for rotary tube axes.  It remains harmless for linear axes
+    // and avoids a second, name-indexed Axis settings store.
+    double pipeDiameter{0.0};
 };
 
 class MachineConfigurationService : public QObject, public IService, public TomlConfig

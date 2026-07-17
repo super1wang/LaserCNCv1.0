@@ -1,5 +1,6 @@
 #include "qg_IOWidget.h"
-#include "ProcessModule.h"
+#include "modules/process/process_module.h"
+#include "modules/process/settings/process_settings_service.h"
 #include <QTimer>
 #include <QElapsedTimer>
 
@@ -245,7 +246,8 @@ void QG_IOWidget::OnClickedIOState(int iType, QPushButton* PushButton)
 			//bool bError;
 			if (strIO == "Laser" && m_pService->GetMotionControl()->GetName() == "GTN")
 			{
-				table t_Laser = SETTINGS->GetTable(SettingSection::Laser, "Laser");
+                table t_Laser = lcnc::process::ProcessSettingsService::current()
+                    ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Devices, "Laser") : table{};
 				double dFrequency = t_Laser["fFrequency"].as_floating();
 				double dPulseWidth = t_Laser["fPulseWidth"].as_floating();
 				m_pService->GetMotionControl()->GSN_SetLaserParameterApplication(dFrequency, dPulseWidth, 0.0);
@@ -266,7 +268,8 @@ void QG_IOWidget::OnClickedIOState(int iType, QPushButton* PushButton)
 			{
 				if (PushButton->isChecked())
 				{
-					table t_Laser = SETTINGS->GetTable(SettingSection::Laser, "Laser");
+                    table t_Laser = lcnc::process::ProcessSettingsService::current()
+                        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Devices, "Laser") : table{};
 					double dFrequency = t_Laser["fFrequency"].as_floating();
 					double dPulseWidth = t_Laser["fPulseWidth"].as_floating();
 					m_pService->GetMotionControl()->GSN_SetLaserParameterApplication(dFrequency, dPulseWidth, 0.0);

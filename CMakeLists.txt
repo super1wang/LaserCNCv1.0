@@ -278,25 +278,15 @@ set(SRCS_MODULE_CAM
 
 set(SRCS_MODULE_PROCESS
     src/modules/process/process_module.cpp
+    src/modules/process/settings/process_settings_service.cpp
+    src/modules/process/settings/process_parameter_registry.cpp
+    src/modules/process/settings/process_property_model.cpp
+    src/modules/process/settings/process_io_table_model.cpp
+    src/modules/process/settings/process_settings_dialog.cpp
     src/modules/process/System/Service.cpp
     src/modules/process/System/LogModule.cpp
     src/modules/process/System/MessageModule.cpp
-    src/modules/process/Setting/Settings.cpp
-    src/modules/process/Setting/qg_dlgsetting.cpp
-    src/modules/process/Setting/Setting_MotionControl.cpp
-    src/modules/process/Setting/Setting_Axis.cpp
     src/modules/process/Setting/BuiltinIODefs.cpp
-    src/modules/process/Setting/Setting_Digital.cpp
-    src/modules/process/Setting/Setting_Analog.cpp
-    src/modules/process/Setting/Setting_Laser.cpp
-    src/modules/process/Setting/Setting_Internet.cpp
-    src/modules/process/Setting/Setting_ProcessPlugins.cpp
-    src/modules/process/Setting/Setting_Tool.cpp
-    src/modules/process/Setting/Setting_Gas.cpp
-    src/modules/process/Setting/Setting_Water.cpp
-    src/modules/process/Setting/Setting_Monitor.cpp
-    src/modules/process/Setting/Setting_LoadingPos.cpp
-    src/modules/process/Setting/Setting_Camera.cpp
     src/modules/process/device/MotionControl/MotionControl.cpp
     src/modules/process/device/MotionControl/ACSMotionControl.cpp
     src/modules/process/device/MotionControl/SimulateCMHPMotionControl.cpp
@@ -457,12 +447,9 @@ target_link_libraries(lcnc_module_cam PUBLIC
     SARibbonBar::SARibbonBar
 )
 
-# process module — only target with .ui files, hence the only one with AUTOUIC.
 add_library(lcnc_module_process STATIC ${SRCS_MODULE_PROCESS})
 set_target_properties(lcnc_module_process PROPERTIES
     AUTOMOC ON
-    AUTOUIC ON
-    AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting;${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/ui/legacy"
 )
 target_include_directories(lcnc_module_process PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/System

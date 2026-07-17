@@ -285,7 +285,7 @@ string PharosLaserDevice::GetTroubleshooting()
 
 table PharosLaserDevice::MergeLaserTable(const table& tableLaser) const
 {
-	table tableMerged = SETTINGS->GetTable(SettingSection::Laser);
+    table tableMerged = processLaserTable();
 	for (const auto& section : tableLaser)
 	{
 		if (!section.second.is_table())
