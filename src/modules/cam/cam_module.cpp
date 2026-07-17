@@ -2048,7 +2048,8 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     if (workpieceSources.isEmpty())
         return false;
 
-    const double leadInLength = toolpathRef().globalLeadInLength();
+    // LaserToolpath::clear() 会复位运行时值；全局生成始终以程序配置为准。
+    const double leadInLength = m_config.leadInLength();
     const LaserToolpath previousToolpath = toolpathRef();
     const QVector<lcnc::cam::ContourId> previousOrder =
         m_camData->layerContainer().manualContourOrder();
@@ -2119,6 +2120,8 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
                 if (contour.leadIn.entryEdgeIndex < 0 && !oldContour->points.empty())
                     contour.leadIn.entryEdgeIndex = oldContour->points.front().sourceEdgeIndex;
             }
+            // 全局生成以当前程序级全局参数统一重建所有轮廓；轮廓级参数仅由
+            // “重新计算当前轮廓”写入和随工程保存，下一次全局生成会被此处覆盖。
             contour.leadIn.length = leadInLength;
             contour.appliedParams = {leadInLength, deflection};
             contour.pendingParams = contour.appliedParams;
@@ -2827,7 +2830,7 @@ void CamModule::setLeadInLength(double mm)
 
 double CamModule::leadInLength() const
 {
-    return toolpathRef().globalLeadInLength();
+    return m_config.leadInLength();
 }
 
 void CamModule::setDeflection(double mm)
@@ -2860,6 +2863,7 @@ void CamModule::setShowNormals(bool on)
     if (m_toolpathRenderer->showNormals() == on)
         return;
     m_toolpathRenderer->setShowNormals(on);
+    m_config.setShowNormals(on);
     m_toolpathRenderer->refreshNormals(workspaceGuiDocument(), toolpathRef(), kinematics());
 }
 
@@ -2876,6 +2880,7 @@ void CamModule::setNormalSampleStep(double mm)
     if (qFuzzyCompare(current + 1.0, mm + 1.0))
         return;
     m_toolpathRenderer->setNormalSampleStep(mm);
+    m_config.setNormalSampleStep(mm);
     if (m_toolpathRenderer->showNormals())
         m_toolpathRenderer->refreshNormals(workspaceGuiDocument(), toolpathRef(), kinematics());
 }
@@ -4001,22 +4006,21 @@ void CamModule::pushGenerationParamsToCamData()
 
 void CamModule::applyGenerationParamsFromCamData()
 {
-    // 读档后把工程级生成参数应用到运行时（直接赋值，不触发重算以免覆盖已加载的
-    // 每轮廓引刀线/采样点）。
-    if (!m_camData)
-        return;
-    const auto& gp = m_camData->generationParams();
-    toolpathRef().setGlobalLeadInLength(gp.leadInLength);
-    m_deflection            = gp.deflection;
-    m_smoothAngle           = gp.smoothAngle;
-    m_useFaceClassification = gp.useFaceClassification;
-    if (m_toolpathRenderer)
-        m_toolpathRenderer->setNormalSampleStep(gp.normalSampleStep);
+    // 全局生成/显示参数归程序配置所有，不能被工程缓存反向覆盖。
+    // 工程只保存每个轮廓自己的 applied/pending 参数与已生成结果。
+    toolpathRef().setGlobalLeadInLength(m_config.leadInLength());
+    m_deflection            = m_config.deflection();
+    m_smoothAngle           = m_config.smoothAngle();
+    m_useFaceClassification = m_config.useFaceClassification();
+    if (m_toolpathRenderer) {
+        m_toolpathRenderer->setShowNormals(m_config.showNormals());
+        m_toolpathRenderer->setNormalSampleStep(m_config.normalSampleStep());
+    }
 }
 
 void CamModule::onCamDataLoaded()
 {
-    // core 已把刀路灌入 CamDataManager；此处先恢复工程级生成参数与轮廓 wire，
+    // core 已把刀路灌入 CamDataManager；此处恢复程序级全局参数与工程轮廓 wire，
     // 再把数据映射到渲染层。
     applyGenerationParamsFromCamData();
     if (!m_camData || !m_camData->hasToolpath()) {
