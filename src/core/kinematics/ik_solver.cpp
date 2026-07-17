@@ -118,6 +118,31 @@ bool withinAxisLimits(const MachineAxisDef& axis, double value)
     return value >= axis.minVal - kLimitEps && value <= axis.maxVal + kLimitEps;
 }
 
+double linearAxisCoordinate(const MachineKinematics* kin,
+                            const QString& axisName,
+                            const gp_Pnt& worldPoint,
+                            double fallback)
+{
+    const MachineAxisDef* axis = kin ? kin->findAxis(axisName) : nullptr;
+    if (!axis || axis->motionType != MachineAxisDef::Linear)
+        return fallback;
+
+    // MachineKinematics applies a linear axis as direction * coordinate. Its
+    // inverse is therefore the scalar projection of the world point onto the
+    // configured positive axis direction. In particular, Z=(0,0,-1) maps a
+    // negative world-space Z cutting point to a positive machine Z value.
+    return gp_Vec(gp_Pnt(0.0, 0.0, 0.0), worldPoint).Dot(gp_Vec(axis->direction));
+}
+
+void setLinearMachineCoordinates(MachineCoord& result,
+                                 const MachineKinematics* kin,
+                                 const gp_Pnt& worldPoint)
+{
+    result.x = linearAxisCoordinate(kin, QStringLiteral("X"), worldPoint, worldPoint.X());
+    result.y = linearAxisCoordinate(kin, QStringLiteral("Y"), worldPoint, worldPoint.Y());
+    result.z = linearAxisCoordinate(kin, QStringLiteral("Z"), worldPoint, worldPoint.Z());
+}
+
 double tableAlignmentError(const MachineAxisDef& ax1,
                            double r1Value,
                            const MachineAxisDef& ax2,
@@ -232,9 +257,7 @@ MachineCoord IKSolver::solveContinuous(const MachineKinematics* kin,
 
     if (r1Name.isEmpty() || r2Name.isEmpty()) {
         // No two rotary axes found — return 3-axis solution
-        result.x = toolPos.X();
-        result.y = toolPos.Y();
-        result.z = toolPos.Z();
+        setLinearMachineCoordinates(result, kin, toolPos);
         result.r1 = 0;   result.r2 = 0;
         result.r1Name = "A"; result.r2Name = "C";
         result.valid = true;
@@ -558,9 +581,7 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
     // The workpiece point P rotates with the table → P_world = totalRot * P
     // The gantry must go to P_world, so XYZ = P_world.
     gp_Pnt rotatedPos = toolPos.Transformed(totalRot);
-    result.x = rotatedPos.X();
-    result.y = rotatedPos.Y();
-    result.z = rotatedPos.Z();
+    setLinearMachineCoordinates(result, kin, rotatedPos);
     result.valid = true;
 
     return result;
@@ -723,9 +744,7 @@ MachineCoord IKSolver::solveHeadType(const MachineKinematics* kin,
     result.r2 = normalizeAxisOutput(r2Name, result.r2);
 
     // Step 3: Linear axes = tool position (workpiece is fixed in head-type)
-    result.x = toolPos.X();
-    result.y = toolPos.Y();
-    result.z = toolPos.Z();
+    setLinearMachineCoordinates(result, kin, toolPos);
     result.valid = true;
 
     return result;

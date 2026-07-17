@@ -4,6 +4,7 @@
 #include <QHash>
 
 #include "core/project/project_types.h"
+#include "core/kinematics/machine_kinematics.h"
 #include "core/settings/app_settings.h"
 #include "view/rendering_manager.h"
 
@@ -33,6 +34,8 @@ public:
     int  currentDisplayMode() const { return m_currentDisplayMode; }
     bool currentFaceBoundaryDraw() const { return m_currentFaceBoundary; }
     void setCurrentDisplayMode(int displayMode, bool faceBoundary);
+    /// Push the machine-coordinate frame to every workspace view.
+    void setMachineCoordinateFrame(const QList<MachineAxisDef>& axes);
 
     void requestApplyRenderingSettings(const lcnc::RenderProfileSettings& cadProfile,
                                        const lcnc::RenderProfileSettings& camProfile,
@@ -60,4 +63,5 @@ private:
     ProjectWorkspaceId m_activeWorkspaceId{kInvalidProjectWorkspaceId};
     int  m_currentDisplayMode{1};
     bool m_currentFaceBoundary{false};
+    QList<MachineAxisDef> m_machineCoordinateAxes;
 };

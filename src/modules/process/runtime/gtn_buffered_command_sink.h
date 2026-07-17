@@ -14,7 +14,7 @@ namespace lcnc::process {
  *
  * GTN 与 ACS 的"批量执行"语义一致，只是缓存机制不同：
  *   - ACS：拼成 ACSPL+ 文本 → acsc_LoadBuffer + acsc_RunBuffer 一次提交。
- *   - GTN：每次 GTN_BufXxx / GTN_LnXYEx 入控制器的运动 FIFO → GTN_CrdDataEx 提交 →
+ *   - GTN：每次 GTN_BufXxx / GTN_LnXYZEx 入控制器的运动 FIFO → GTN_CrdDataEx 提交 →
  *          GTN_CrdStart 启动整段插补一次性执行。
  *
  * 因此 sink 在 lineTo / laserOn / laserOff 阶段 **只** 调用底层 OffsetLineTo /

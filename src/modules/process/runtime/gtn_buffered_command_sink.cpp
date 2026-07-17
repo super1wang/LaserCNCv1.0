@@ -86,7 +86,7 @@ void GtnBufferedCommandSink::jumpToCuttingZ(const MachinePose5& pose, const Tool
     if (!m_gtn) return;
     m_gtn->MovePostion(Axis::Z,
                         tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0,
-                        pose.z + tool.m_dCuttingHeight);
+                        pose.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate);
 }
 
 void GtnBufferedCommandSink::startCuttingHead(const Tool& tool)
@@ -126,9 +126,12 @@ void GtnBufferedCommandSink::beginSegment(const MachinePose5& /*startPose*/, con
 
 void GtnBufferedCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
 {
-    // 仅写入 GTN_LnXYEx 到 FIFO；绝不在中途 SendCommand。
+    // 仅写入 GTN_LnXYZEx 到 FIFO；Z 以实际刀路点为基准叠加切割高度，
+    // 绝不在中途 SendCommand。
     if (m_gtn)
-        m_gtn->OffsetLineTo(target.x, target.y, tool);
+        m_gtn->OffsetLineTo(target.x, target.y,
+                            target.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate,
+                            tool);
 }
 
 void GtnBufferedCommandSink::endSegment(const Tool& /*tool*/)

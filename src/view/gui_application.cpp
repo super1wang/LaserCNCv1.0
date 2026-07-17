@@ -100,6 +100,8 @@ GuiDocument* GuiApplication::createWorkspaceGuiDocument()
 {
     auto* document = new GuiDocument(this);
     applyDisplayModeToDocument(document);
+    if (!m_machineCoordinateAxes.isEmpty())
+        document->setMachineCoordinateFrame(m_machineCoordinateAxes);
     return document;
 }
 
@@ -181,6 +183,15 @@ void GuiApplication::setCurrentDisplayMode(int displayMode, bool faceBoundary)
             }
         }
         ctx->UpdateCurrentViewer();
+    }
+}
+
+void GuiApplication::setMachineCoordinateFrame(const QList<MachineAxisDef>& axes)
+{
+    m_machineCoordinateAxes = axes;
+    for (GuiDocument* document : m_guiDocuments) {
+        if (document)
+            document->setMachineCoordinateFrame(axes);
     }
 }
 

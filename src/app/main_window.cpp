@@ -1236,11 +1236,18 @@ void MainWindow::createRightPanel()
                         const QList<MachineAxisDef> axes = machineConfig->axisDefinitions();
                         process->setAxisDefinitions(axes);
                         m_laserControl->setAxisDefinitions(axes);
+                        if (auto* guiApp = lcnc::Kernel::current().guiApp())
+                            guiApp->setMachineCoordinateFrame(axes);
+                        lcnc::view::WorldAxesRenderer::instance().setMachineAxisDirections(axes);
                         const auto enabledStates = process->axisEnabledStates();
                         for (auto it = enabledStates.cbegin(); it != enabledStates.cend(); ++it)
                             m_laserControl->updateAxisEnabled(it.key(), it.value());
                     });
-            m_laserControl->setAxisDefinitions(machineConfig->axisDefinitions());
+            const QList<MachineAxisDef> axes = machineConfig->axisDefinitions();
+            m_laserControl->setAxisDefinitions(axes);
+            if (auto* guiApp = lcnc::Kernel::current().guiApp())
+                guiApp->setMachineCoordinateFrame(axes);
+            lcnc::view::WorldAxesRenderer::instance().setMachineAxisDirections(axes);
         }
 
         m_laserControl->updateConnectionStatus(process->isConnected());

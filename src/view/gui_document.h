@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include "core/project/project_types.h"
+#include "core/kinematics/machine_kinematics.h"
 #include "core/settings/app_settings.h"
 #include "view/graphics_scene.h"
 
@@ -61,6 +62,9 @@ public:
 
     void resizeView(int w, int h);
     void fitAll();
+    /// Sync the view-coordinate indicators with
+    /// the configured machine's linear X/Y/Z axes.
+    void setMachineCoordinateFrame(const QList<MachineAxisDef>& axes);
     bool dumpWorkpiecePreview(const QString& filePath, int width, int height);
 
     // Gizmo accessors used by WidgetOccView for ViewCube click handling
@@ -175,4 +179,8 @@ private:
     Handle(AIS_ViewCube)  m_viewCube;
     Handle(AIS_Trihedron) m_trihedron;
     QTimer*               m_animTimer{nullptr};
+    gp_Dir m_machineViewX{1.0, 0.0, 0.0};
+    gp_Dir m_machineViewY{0.0, 1.0, 0.0};
+    gp_Dir m_machineViewZ{0.0, 0.0, 1.0};
+    bool m_hasMachineCoordinateFrame{false};
 };

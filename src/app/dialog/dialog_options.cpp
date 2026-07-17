@@ -704,6 +704,13 @@ void DialogOptions::buildMachineConfigurationPage()
     m_machineAxesTable->setSelectionMode(QAbstractItemView::SingleSelection);
     m_machineAxesTable->setAlternatingRowColors(true);
     root->addWidget(m_machineAxesTable, 1);
+    auto* coordinateHint = new QLabel(
+        tr("线性 X/Y/Z 轴的方向同时用于机台模型运动和视图坐标提示。"
+           "例如 Z 轴零点在上方且向下为正时，将 Z 方向设为 (0, 0, -1)。"
+           "坐标三轴提示需要 X/Y/Z 构成正交右手系。"), page);
+    coordinateHint->setWordWrap(true);
+    coordinateHint->setStyleSheet("color:#666;");
+    root->addWidget(coordinateHint);
 
     connect(m_cbMachinePreset, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this] {

@@ -266,7 +266,8 @@ void AcsTextCommandSink::jumpToCuttingZ(const MachinePose5& pose, const Tool& to
 {
     const int index = m_axisMap.controllerIndex(AxisMap::Z);
     if (index < 0) return;
-    appendText("PTP/EV " + I(index) + ", " + D(pose.z + tool.m_dCuttingHeight)
+    appendText("PTP/EV " + I(index) + ", "
+               + D(pose.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate)
                + ", " + D(tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0) + "\n");
     appendText("TILL ^MST(" + I(index) + ").#MOVE\n");
 }
@@ -368,6 +369,9 @@ void AcsTextCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
         target.mask & segmentMaskFor(m_axisMap));
 
     MachinePose5 out = target;
+    // 切割高度是相对轮廓 Z 的有符号增量；加工段中的每个目标点都必须
+    // 使用同一偏移，不能仅在切入前 PTP 一次后又回到原始轮廓高度。
+    out.z += tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate;
     if (segMask & MachinePose5::Br1) {
         out.r1 = normalizeRotaryForAxis(m_axisMap, AxisMap::R1, target.r1);
         m_lastR1 = out.r1;

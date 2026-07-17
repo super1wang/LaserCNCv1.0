@@ -104,6 +104,7 @@ protected:
 	//string					m_strCommand;
 	double					m_dPreX;					//上一个X的位置
 	double					m_dPreY;					//上一个Y的位置
+	double					m_dPreZ;					//上一个Z的位置
 
 	double					m_dFrameLLX;
 	double					m_dFrameLLY;
@@ -206,7 +207,7 @@ public:
 	virtual bool InitCrd(const Tool& curTool);
 	bool FlushToFifo();
 	virtual bool PrfTrapAxis();
-	virtual void OffsetLineTo(double dEndX, double dEndY, const Tool& tool);
+	virtual void OffsetLineTo(double dEndX, double dEndY, double dEndZ, const Tool& tool);
 	virtual void EndProgramCommand(const Tool&) {};
 	virtual bool SendCommand();
 	virtual bool IsBufferRunning(int iBufferIndex);
@@ -237,7 +238,7 @@ private:
 
 public:
 	// 指令汇所需的"切割管线"方法 —— 仅 GtnBufferedCommandSink 调用。
-	// 这些方法把 GTN_BufXxx / GTN_LnXYEx / GTN_CrdDataEx 等写入 FIFO；mid-stream 不触发执行。
+	// 这些方法把 GTN_BufXxx / GTN_LnXYZEx / GTN_CrdDataEx 等写入 FIFO；mid-stream 不触发执行。
 	void ResetProgramCommand() {}
 	void SetCuttingAccJerk(const Tool&) {}
 

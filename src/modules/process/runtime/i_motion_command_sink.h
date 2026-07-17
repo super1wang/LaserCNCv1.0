@@ -7,7 +7,7 @@
  * 设计要点：
  *  - 编排层（NormalCuttingManager 等）不再 if-branch 控制器类型。
  *  - ACS sink 内部把指令拼成 ACSPL+ 文本，flush() 时一次性 Load+Run。
- *  - GTN sink 内部把指令累积到 GTN buffer（GTN_BufXxx / GTN_LnXYEx 等），
+ *  - GTN sink 内部把指令累积到 GTN buffer（GTN_BufXxx / GTN_LnXYZEx 等），
  *    flush() 时调用 GTN_CrdStart 启动整段加工。
  *  - PureSimulation sink 仅驱动 PureSimulationToolpathTicker，无 IO 落地。
  *

@@ -2,6 +2,8 @@
 
 #include <QObject>
 
+#include "core/kinematics/machine_kinematics.h"
+
 #include <AIS_InteractiveObject.hxx>
 #include <AIS_Shape.hxx>
 #include <TopoDS_Shape.hxx>
@@ -50,6 +52,11 @@ public:
     /// 三轴长度（毫米）。变更后会重建所有 AIS。默认 200。
     void setAxisLength(double mm);
 
+    /// Use the configured linear machine axes for the displayed world axes.
+    /// This is display-only; machine motion continues to use the same source
+    /// definitions in MachineKinematics.
+    void setMachineAxisDirections(const QList<MachineAxisDef>& axes);
+
 private:
     explicit WorldAxesRenderer(QObject* parent = nullptr);
     ~WorldAxesRenderer() override;
@@ -81,6 +88,9 @@ private:
 
     bool   m_globallyVisible{false};
     double m_axisLength{200.0};
+    gp_Dir m_axisX{1.0, 0.0, 0.0};
+    gp_Dir m_axisY{0.0, 1.0, 0.0};
+    gp_Dir m_axisZ{0.0, 0.0, 1.0};
     AxisShapes m_shapes;
     bool   m_shapesBuilt{false};
     std::unordered_map<GraphicsScene*, SceneEntry> m_perScene;

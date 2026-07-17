@@ -11,6 +11,7 @@
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <Quantity_Color.hxx>
 #include <Standard_Failure.hxx>
+#include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 
 namespace lcnc::view {
@@ -85,6 +86,56 @@ void WorldAxesRenderer::setAxisLength(double mm)
                      "WorldAxesRenderer::setAxisLength erase failed");
         }
         entry.objects.clear();
+    }
+    if (m_globallyVisible) {
+        for (auto& [scene, _] : m_perScene)
+            applyVisibilityForScene(scene, true);
+    }
+}
+
+void WorldAxesRenderer::setMachineAxisDirections(const QList<MachineAxisDef>& axes)
+{
+    auto linearAxis = [&axes](const QString& name, gp_Dir* result) {
+        for (const MachineAxisDef& axis : axes) {
+            if (axis.motionType == MachineAxisDef::Linear
+                && axis.name.compare(name, Qt::CaseInsensitive) == 0) {
+                *result = axis.direction;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    gp_Dir nextX = m_axisX;
+    gp_Dir nextY = m_axisY;
+    gp_Dir nextZ = m_axisZ;
+    if (!linearAxis(QStringLiteral("X"), &nextX)
+        || !linearAxis(QStringLiteral("Y"), &nextY)
+        || !linearAxis(QStringLiteral("Z"), &nextZ)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "WorldAxesRenderer: machine coordinate axes require linear X, Y and Z definitions");
+        return;
+    }
+
+    if (m_axisX.IsEqual(nextX, 1e-9) && m_axisY.IsEqual(nextY, 1e-9)
+        && m_axisZ.IsEqual(nextZ, 1e-9)) {
+        return;
+    }
+
+    m_axisX = nextX;
+    m_axisY = nextY;
+    m_axisZ = nextZ;
+    m_shapesBuilt = false;
+    for (auto& [scene, entry] : m_perScene) {
+        if (!scene)
+            continue;
+        const auto& ctx = scene->context();
+        for (auto& object : entry.objects) {
+            if (!object.IsNull() && ctx->IsDisplayed(object))
+                ctx->Erase(object, false);
+        }
+        entry.objects.clear();
+        scene->viewer()->Redraw();
     }
     if (m_globallyVisible) {
         for (auto& [scene, _] : m_perScene)
@@ -171,11 +222,11 @@ void WorldAxesRenderer::rebuildShapes()
     try {
         const gp_Pnt o(0.0, 0.0, 0.0);
         m_shapes.edgeX = BRepBuilderAPI_MakeEdge(
-            o, gp_Pnt(m_axisLength, 0.0, 0.0)).Edge();
+            o, o.Translated(gp_Vec(m_axisX) * m_axisLength)).Edge();
         m_shapes.edgeY = BRepBuilderAPI_MakeEdge(
-            o, gp_Pnt(0.0, m_axisLength, 0.0)).Edge();
+            o, o.Translated(gp_Vec(m_axisY) * m_axisLength)).Edge();
         m_shapes.edgeZ = BRepBuilderAPI_MakeEdge(
-            o, gp_Pnt(0.0, 0.0, m_axisLength)).Edge();
+            o, o.Translated(gp_Vec(m_axisZ) * m_axisLength)).Edge();
         const double r = m_axisLength * 0.012;
         m_shapes.sphere = BRepPrimAPI_MakeSphere(o, r).Shape();
         m_shapesBuilt = true;

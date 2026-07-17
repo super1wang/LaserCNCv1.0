@@ -32,9 +32,13 @@
 #include <Aspect_TypeOfTriedronPosition.hxx>
 #include <V3d_Viewer.hxx>
 #include <V3d_TypeOfOrientation.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Vec.hxx>
 #include <QTimer>
 #include <QSet>
 #include <QList>
+
+#include <cmath>
 
 namespace {
 
@@ -55,6 +59,14 @@ Quantity_Color axisDisplayColor(const QString& axisName)
     if (axisName == QStringLiteral("C"))
         return Quantity_Color(0.76, 0.23, 0.79, Quantity_TOC_RGB);
     return Quantity_Color(0.78, 0.78, 0.80, Quantity_TOC_RGB);
+}
+
+bool isOrthogonalRightHandedFrame(const gp_Dir& x, const gp_Dir& y, const gp_Dir& z)
+{
+    return std::abs(gp_Vec(x).Dot(gp_Vec(y))) <= 1e-6
+        && std::abs(gp_Vec(y).Dot(gp_Vec(z))) <= 1e-6
+        && std::abs(gp_Vec(z).Dot(gp_Vec(x))) <= 1e-6
+        && gp_Vec(x).Crossed(gp_Vec(y)).Dot(gp_Vec(z)) >= 1.0 - 1e-6;
 }
 
 } // namespace
@@ -142,6 +154,54 @@ void GuiDocument::resizeView(int w, int h)
     auto win = Handle(Aspect_NeutralWindow)::DownCast(m_view->Window());
     if (!win.IsNull()) win->SetSize(w, h);
     m_view->MustBeResized();
+}
+
+void GuiDocument::setMachineCoordinateFrame(const QList<MachineAxisDef>& axes)
+{
+    auto linearAxis = [&axes](const QString& name, gp_Dir* result) {
+        for (const MachineAxisDef& axis : axes) {
+            if (axis.motionType == MachineAxisDef::Linear
+                && axis.name.compare(name, Qt::CaseInsensitive) == 0) {
+                *result = axis.direction;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    gp_Dir x = m_machineViewX;
+    gp_Dir y = m_machineViewY;
+    gp_Dir z = m_machineViewZ;
+    if (!linearAxis(QStringLiteral("X"), &x)
+        || !linearAxis(QStringLiteral("Y"), &y)
+        || !linearAxis(QStringLiteral("Z"), &z)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "GuiDocument: machine view frame requires linear X, Y and Z axes");
+        return;
+    }
+
+    m_machineViewX = x;
+    m_machineViewY = y;
+    m_machineViewZ = z;
+    m_hasMachineCoordinateFrame = true;
+
+    if (m_trihedron.IsNull())
+        return;
+
+    if (!isOrthogonalRightHandedFrame(x, y, z)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "GuiDocument: corner trihedron needs an orthogonal right-handed XYZ frame; "
+                  "configured world axes remain available");
+        return;
+    }
+
+    Handle(Geom_Axis2Placement) coordSys = new Geom_Axis2Placement(gp_Ax2(gp::Origin(), z, x));
+    m_trihedron->SetComponent(coordSys);
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (!ctx.IsNull())
+        ctx->RecomputePrsOnly(m_trihedron, Standard_False);
+    if (!m_view.IsNull())
+        m_view->Redraw();
 }
 
 void GuiDocument::fitAll()
@@ -232,6 +292,9 @@ void GuiDocument::initGizmos()
 
     // ── RGB Coordinate Axis Trihedron (lower-left corner) ────────────────
     Handle(Geom_Axis2Placement) coordSys = new Geom_Axis2Placement(gp::XOY());
+    if (m_hasMachineCoordinateFrame
+        && isOrthogonalRightHandedFrame(m_machineViewX, m_machineViewY, m_machineViewZ))
+        coordSys = new Geom_Axis2Placement(gp_Ax2(gp::Origin(), m_machineViewZ, m_machineViewX));
     m_trihedron = new AIS_Trihedron(coordSys);
     m_trihedron->SetDatumDisplayMode(Prs3d_DM_WireFrame);
     m_trihedron->SetDatumPartColor(Prs3d_DatumParts_XAxis,  Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB));
