@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/project/lcnc_project_manifest.h"
+#include "core/project/project_package_extension.h"
 #include "core/project/project_save_options.h"
 
 #include <QString>
@@ -26,6 +27,9 @@ struct ProjectLoadResult {
 class LcncProjectPackage
 {
 public:
+    /// Register module-owned project data hooks. The hooks run inside the core
+    /// staging transaction and must not retain staging paths after returning.
+    static void setExtension(ProjectPackageExtension extension);
      /// Returns true for .lcnc package files, package directories, and project.toml paths.
     static bool isProjectPath(const QString& path);
 
@@ -75,6 +79,26 @@ public:
                      ProjectLoadResult* result = nullptr,
                      QString* errorMsg = nullptr,
                      lcnc::cam::CamDataManager* camData = nullptr);
+
+    /// Offline migration entry point. The desktop application must use load(),
+    /// which accepts only the current project format.
+    static bool loadForMigration(LcncDocument& workpieceDocument,
+                                 LcncDocument* machineDocument,
+                                 LcncDocument* camDocument,
+                                 const QString& path,
+                                 ProjectLoadResult* result = nullptr,
+                                 QString* errorMsg = nullptr,
+                                 lcnc::cam::CamDataManager* camData = nullptr);
+
+private:
+    static bool loadInternal(LcncDocument& workpieceDocument,
+                             LcncDocument* machineDocument,
+                             LcncDocument* camDocument,
+                             const QString& path,
+                             ProjectLoadResult* result,
+                             QString* errorMsg,
+                             lcnc::cam::CamDataManager* camData,
+                             bool allowLegacyFormat);
 };
 
 } // namespace lcnc

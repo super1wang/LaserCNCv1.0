@@ -8,6 +8,8 @@
 
 namespace lcnc::process {
 
+class ProcessSettingsService;
+
 class ProcessStepRegistry
 {
 public:
@@ -21,12 +23,15 @@ public:
     QVector<ProcessNodeDescriptor> descriptorsAll() const;
     bool setPluginEnabled(const QString& pluginKey, bool enabled);
     bool isPluginEnabled(const QString& pluginKey) const;
+    void setSettingsService(const ProcessSettingsService* settings);
+    const ProcessSettingsService* settingsService() const { return m_settingsService; }
     void clear();
 
 private:
     QMap<ProcessNodeType, std::shared_ptr<IProcessWorkflowStep>> m_stepsByType;
     QMap<QString, std::shared_ptr<IProcessWorkflowStep>> m_stepsByExecutorKey;
     QSet<QString> m_disabledPluginKeys;
+    const ProcessSettingsService* m_settingsService{nullptr};
 };
 
 } // namespace lcnc::process

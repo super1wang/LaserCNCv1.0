@@ -3,6 +3,7 @@
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
 #include "core/kinematics/machine_configuration_service.h"
+#include "core/project/lcnc_project_package.h"
 #include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/project/lcnc_project_package.h"
@@ -18,6 +19,7 @@
 #include "modules/process/monitor/process_monitor_service.h"
 #include "modules/process/Setting/BuiltinIODefs.h"
 #include "modules/process/settings/process_settings_service.h"
+#include "modules/process/runtime/process_axis_utilities.h"
 #include "modules/process/steps/process_step_builtin_registration.h"
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/steps/services/legacy_process_services.h"
@@ -30,6 +32,8 @@
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
+#include <QFile>
+#include <QSaveFile>
 #include <QVector>
 #include <QElapsedTimer>
 #include <QThread>
@@ -108,9 +112,25 @@ QString logLevelForMessage(const QString& message)
     return QStringLiteral("info");
 }
 
-lcnc::ProcessMonitorSettings readMonitorSettings();
-QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels();
-QString configuredIoChannel(lcnc::process::ProcessIoBucket bucket, const QString& fallback);
+// `simulationMode` normally means pure software playback.  SimulatorCMHP is
+// different: it is an ACS Simulator session that executes controller commands
+// and must therefore be polled for its live axis positions.
+bool usesAcsSimulator(Service* service)
+{
+#if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
+    if (!service)
+        return false;
+    const MotionControl* controller = service->GetMotionControl();
+    return controller && controller->GetName() == "SimulatorCMHP";
+#else
+    Q_UNUSED(service);
+    return false;
+#endif
+}
+
+lcnc::ProcessMonitorSettings readMonitorSettings(const lcnc::process::ProcessSettingsService* settings);
+QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels(const lcnc::process::ProcessSettingsService* settings);
+QString configuredIoChannel(const lcnc::process::ProcessSettingsService* settings, lcnc::process::ProcessIoBucket bucket, const QString& fallback);
 QString enumNameFromTomlChannel(QString channel);
 
 double jogStepForLevel(int speedLevel)
@@ -131,41 +151,6 @@ double jogVelocityForLevel(int speedLevel)
     return (speedLevel == 0) ? 1.0 : (speedLevel == 2 ? 20.0 : 5.0);
 }
 
-QStringList homeOrderForAxes(const QList<MachineAxisDef>& axes)
-{
-    QStringList order;
-    auto appendAxis = [&order](const QString& axis) {
-        const QString key = axis.trimmed().toUpper();
-        if (!key.isEmpty() && key != QStringLiteral("BASE") && !order.contains(key))
-            order.append(key);
-    };
-    appendAxis(QStringLiteral("Z"));
-    for (const MachineAxisDef& axis : axes)
-        appendAxis(axis.name);
-    return order;
-}
-
-bool sameAxisDefinitions(const QList<MachineAxisDef>& lhs,
-                         const QList<MachineAxisDef>& rhs)
-{
-    if (lhs.size() != rhs.size())
-        return false;
-
-    for (int i = 0; i < lhs.size(); ++i) {
-        const MachineAxisDef& a = lhs.at(i);
-        const MachineAxisDef& b = rhs.at(i);
-        if (a.name != b.name ||
-            a.motionType != b.motionType ||
-            a.parentAxis != b.parentAxis ||
-            std::abs(a.minVal - b.minVal) > 1e-9 ||
-            std::abs(a.maxVal - b.maxVal) > 1e-9) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 bool containsEnabledNodeType(const QVector<lcnc::process::ProcessNode>& nodes,
                              lcnc::process::ProcessNodeType type)
 {
@@ -176,31 +161,6 @@ bool containsEnabledNodeType(const QVector<lcnc::process::ProcessNode>& nodes,
             return true;
     }
     return false;
-}
-
-double simulatedAxisValue(const MachineAxisDef& axis,
-                          double phase,
-                          int linearIndex,
-                          int rotaryIndex)
-{
-    const double axisLimit = std::max(std::abs(axis.minVal), std::abs(axis.maxVal));
-
-    if (axis.motionType == MachineAxisDef::Linear) {
-        const double amplitude = axisLimit > 1e-6
-            ? std::clamp(axisLimit * 0.12, 5.0, 60.0)
-            : 20.0;
-        const double freq = 0.55 + 0.18 * linearIndex;
-        const double wave = std::sin(phase * freq + linearIndex * 0.8);
-        if (axis.name == QStringLiteral("Z"))
-            return amplitude + wave * amplitude * 0.7;
-        return wave * amplitude;
-    }
-
-    const double amplitude = axisLimit >= 9000.0
-        ? 90.0
-        : std::max(10.0, axisLimit * 0.35);
-    const double freq = 0.35 + 0.12 * rotaryIndex;
-    return std::sin(phase * freq + rotaryIndex * 0.6) * amplitude;
 }
 
 } // namespace
@@ -220,15 +180,6 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::init begin");
     m_kernel = &kernel;
-    m_service = std::make_unique<Service>();
-    m_motionStepService = std::make_unique<lcnc::process::LegacyProcessMotionService>(m_service.get());
-    m_ioStepService = std::make_unique<lcnc::process::LegacyProcessIoService>(m_service.get());
-    m_cuttingStepService = std::make_unique<lcnc::process::CallbackProcessCuttingService>();
-    auto svc = std::shared_ptr<ProcessModule>(this, [](ProcessModule*) {});
-    kernel.services().registerService<ProcessModule>(svc);
-    auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
-    kernel.services().registerService<lcnc::IProcessFacade>(facade);
-
     // The Process store never reads Peripheral.toml/config.toml.  Missing
     // current-schema files are created by the typed repository.
     m_settingsService = std::make_unique<lcnc::process::ProcessSettingsService>();
@@ -237,7 +188,15 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                  "process.settings: typed settings initialization failed");
         return false;
     }
-    m_service->SetToolTable();
+    m_runtimeConfiguration.setSimulationMode(m_simulationMode);
+    m_service = std::make_shared<Service>(*m_settingsService, m_runtimeConfiguration);
+    m_motionStepService = std::make_unique<lcnc::process::LegacyProcessMotionService>(m_service.get());
+    m_ioStepService = std::make_unique<lcnc::process::LegacyProcessIoService>(m_service.get());
+    m_cuttingStepService = std::make_unique<lcnc::process::CallbackProcessCuttingService>();
+    auto svc = std::shared_ptr<ProcessModule>(this, [](ProcessModule*) {});
+    kernel.services().registerService<ProcessModule>(svc);
+    auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
+    kernel.services().registerService<lcnc::IProcessFacade>(facade);
 
     // 注册自定义信号类型，跨线程发射 / Qt::QueuedConnection 时需要。
     qRegisterMetaType<DigitalOutputDescriptor>("DigitalOutputDescriptor");
@@ -245,6 +204,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 
     // 注册内置流程步骤插件（执行器只通过插件分发，不再有业务 fallback）。
     auto& stepRegistry = lcnc::process::ProcessStepRegistry::instance();
+    stepRegistry.clear();
+    stepRegistry.setSettingsService(m_settingsService.get());
     registerBuiltinProcessSteps(stepRegistry);
 
     // 从 settings 恢复插件启用/禁用状态。
@@ -338,6 +299,36 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     // 由 LcncProjectManager + cam_toolpath_io 统一读写。Process 不再做任何项目文件 IO，
     // 仅在工程重置时清空派生状态、在 open 后从 CAM 容器重新派生切割链表。
     if (auto* pm = lcnc::Kernel::current().projectManager()) {
+        lcnc::LcncProjectPackage::setExtension({
+            [](const QString& stagingDirectory, const lcnc::LcncProjectManifest& manifest, QString* error) {
+                QSaveFile file(QDir(stagingDirectory).filePath(manifest.toolSnapshotPath));
+                if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    if (error) *error = QStringLiteral("无法写入工具快照");
+                    return false;
+                }
+                toml::value root(ToolFactory::snapshot());
+                if (file.write(QByteArray::fromStdString(toml::format(root))) < 0 || !file.commit()) {
+                    if (error) *error = QStringLiteral("提交工具快照失败");
+                    return false;
+                }
+                return true;
+            },
+            [](const QString& stagingDirectory, const lcnc::LcncProjectManifest& manifest, QString* error) {
+                const QString path = QDir(stagingDirectory).filePath(manifest.toolSnapshotPath);
+                if (!QFileInfo::exists(path)) return true;
+                try {
+                    const toml::value root = toml::parse(path.toStdString());
+                    if (!root.is_table() || !ToolFactory::restoreSnapshot(root.as_table())) {
+                        if (error) *error = QStringLiteral("项目工具快照无效");
+                        return false;
+                    }
+                    return true;
+                } catch (const std::exception& exception) {
+                    if (error) *error = QStringLiteral("解析项目工具快照失败: %1").arg(exception.what());
+                    return false;
+                }
+            }
+        });
         connect(pm, &lcnc::LcncProjectManager::projectOpened,
                 this, [this](const QString&) {
                     if (m_cuttingPlanService)
@@ -387,8 +378,15 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_stepContext.requestDigitalOutput = [this](const QString& channel, bool value) { setDigitalOutput(channel, value); };
     m_workflowExecutor->setStepRegistry(&stepRegistry);
     m_workflowExecutor->setStepContext(&m_stepContext);
-    m_workflowExecutor->setControllerAccessor([this]() -> MotionControl* {
-        return m_service ? m_service->GetMotionControl() : nullptr;
+    m_workflowExecutor->setDeviceStopper([this](bool emergency) {
+        const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                          : Service::DeviceLock{};
+        if (auto* mc = m_service ? m_service->GetMotionControl() : nullptr; mc && mc->IsConnected()) {
+            mc->StopMotion();
+            mc->StopAllBuffer();
+        }
+        if (emergency && !triggerSafeStopOutputs())
+            setStatusMessage(tr("急停触发后安全输出复位失败"));
     });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::messageLogged,
             this, &ProcessModule::setStatusMessage);
@@ -410,6 +408,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 // 兼容信号路径；正常流程通过 OutputSignalStep + LegacyProcessIoService 走枚举接口。
                 if (!m_service)
                     return;
+                const auto deviceLock = m_service->lockDeviceAccess();
                 auto* mc = m_service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
                     return;
@@ -423,7 +422,10 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::workflowFinished,
             this, [this] {
                 m_simTimer->stop();
-                safeStopProcessOutputs();
+                if (!safeStopProcessOutputs()) {
+                    setState(State::Error, tr("流程完成后安全输出复位失败"));
+                    return;
+                }
                 setState(State::Idle, tr("流程运行完成"));
                 emit processFlowChanged();
             });
@@ -436,21 +438,24 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
         context.simulationMode = m_simulationMode;
         context.monitoringEnabled = m_connected && !m_simulationMode;
         context.intervalMs = 500;
-        context.settings = readMonitorSettings();
+        context.settings = readMonitorSettings(m_settingsService.get());
         context.cachedAxisPositions = m_axisPositions;
-        context.outputChannels = monitorOutputChannels();
-        context.interlockChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aInterLock"));
-        context.safetyLightCurtainChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aSafetyLightCurtain"));
-        context.pressureMonitorChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aPressureMonitor"));
-        context.waterLeakageChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterLeakageMonitor"));
-        context.waterTankChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterTankMonitor"));
-        context.waterPressureChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterPressure"));
-        context.waterLevelChannel = configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterLevel"));
+        context.outputChannels = monitorOutputChannels(m_settingsService.get());
+        context.interlockChannel = configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aInterLock"));
+        context.safetyLightCurtainChannel = configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aSafetyLightCurtain"));
+        context.pressureMonitorChannel = configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aPressureMonitor"));
+        context.waterLeakageChannel = configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterLeakageMonitor"));
+        context.waterTankChannel = configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterTankMonitor"));
+        context.waterPressureChannel = configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterPressure"));
+        context.waterLevelChannel = configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterLevel"));
 
-        MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
-        context.readDigital = [mc](const QString& channel, bool* value, QString* errorMessage) {
+        Service* service = m_service.get();
+        context.readDigital = [service](const QString& channel, bool* value, QString* errorMessage) {
             if (!value)
                 return false;
+            const auto deviceLock = service ? service->lockDeviceAccess()
+                                            : Service::DeviceLock{};
+            MotionControl* mc = service ? service->GetMotionControl() : nullptr;
             if (!mc || !mc->IsConnected()) {
                 if (errorMessage) *errorMessage = QObject::tr("运动控制器未连接");
                 return false;
@@ -472,9 +477,12 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
             if (errorMessage) *errorMessage = QObject::tr("通道未配置或读取失败: %1").arg(channel);
             return false;
         };
-        context.readAnalog = [mc](const QString& channel, double* value, QString* errorMessage) {
+        context.readAnalog = [service](const QString& channel, double* value, QString* errorMessage) {
             if (!value)
                 return false;
+            const auto deviceLock = service ? service->lockDeviceAccess()
+                                            : Service::DeviceLock{};
+            MotionControl* mc = service ? service->GetMotionControl() : nullptr;
             if (!mc || !mc->IsConnected()) {
                 if (errorMessage) *errorMessage = QObject::tr("运动控制器未连接");
                 return false;
@@ -525,10 +533,40 @@ void ProcessModule::stop()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::stop begin");
     if (!m_initialized) return;
+
+    // Process workers borrow Service and controller objects.  They must leave
+    // before this module tears down monitoring or its device ownership.
+    const bool tasksFinished = cancelOwnedTasks(10000);
+    if (!tasksFinished) {
+        const bool outputsSafe = safeStopProcessOutputs();
+        setState(outputsSafe ? State::Error : State::EmergencyStop,
+                 outputsSafe
+                     ? tr("Process 后台任务取消超时，已停止发新命令")
+                     : tr("Process 后台任务取消超时且安全输出复位失败"));
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "ProcessModule::stop: owned task cancellation timed out");
+    }
+    m_deviceOperation = DeviceOperation::None;
     stopDeviceMonitoring();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
+
+    // Kernel shutdown is the only unconditional device lifecycle boundary.
+    // Do not destroy or disconnect under an unfinished SDK call; the shared
+    // Service lease keeps those objects alive until the worker exits.
+    if (tasksFinished && m_service) {
+        const auto deviceLock = m_service->lockDeviceAccess();
+        const bool outputsSafe = triggerSafeStopOutputs();
+        const bool disconnectOk = m_service->shutdownDevices() && outputsSafe;
+        m_connected = false;
+        if (!disconnectOk) {
+            setState(State::Error, tr("关闭设备时安全停机或断开失败"));
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "ProcessModule::stop: safe shutdown did not complete");
+        }
+    }
     m_initialized = false;
+    lcnc::process::ProcessStepRegistry::instance().clear();
     LCNC_INFO(lcnc::LogCode::Generic, "ProcessModule stop done");
 }
 
@@ -543,67 +581,69 @@ ProcessModule::ProcessModule(QObject* parent)
     m_simTimer->setInterval(100);
     connect(m_simTimer, &QTimer::timeout, this, &ProcessModule::onSimulationTick);
 
-    // 硬件状态轮询定时器：联机后启动，断开/停机时停止。
+    m_controllerPollPool.setMaxThreadCount(1);
+    m_controllerPollPool.setExpiryTimeout(-1);
+    m_controllerPollPool.setObjectName(QStringLiteral("ProcessControllerPoll"));
+    m_peripheralPollPool.setMaxThreadCount(1);
+    m_peripheralPollPool.setExpiryTimeout(-1);
+    m_peripheralPollPool.setObjectName(QStringLiteral("ProcessPeripheralPoll"));
+
+    // 控制器通过网口以较高频率采集；定时器只负责调度，SDK 调用由专用
+    // 单线程池执行，绝不在 GUI 线程运行。
     m_hwStatusTimer = new QTimer(this);
     m_hwStatusTimer->setInterval(150);
     connect(m_hwStatusTimer, &QTimer::timeout, this, &ProcessModule::pollHardwareStatus);
+
+    // 激光器等外设通常为串口，限制为低频且禁止任务堆积。
+    m_peripheralStatusTimer = new QTimer(this);
+    m_peripheralStatusTimer->setInterval(2000);
+    connect(m_peripheralStatusTimer, &QTimer::timeout,
+            this, &ProcessModule::pollPeripheralStatus);
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 }
 
 ProcessModule::~ProcessModule() = default;
 
-bool ProcessModule::connectController(const QString& endpoint)
+void ProcessModule::trackOwnedTask(TaskId taskId)
 {
-    if (endpoint.trimmed().isEmpty()) {
-        setState(State::Error, tr("控制器地址不能为空"));
-        return false;
-    }
-
-    if (m_simulationMode) {
-        m_simulationMode = false;
-        emit simulationModeChanged(false);
-    }
-
-    MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
-    if (!mc) {
-        m_service->SetMotionControl();
-        mc = m_service->GetMotionControl();
-    }
-    if (!mc || !mc->IsConnected()) {
-        if (!mc || !mc->Connect()) {
-            setState(State::Error, tr("运动控制器连接失败"));
-            return false;
-        }
-        // 连接后构建轴系（同 connectAllDevices 路径）。
-        mc->rebuildAxes();
-        mc->SetMotionControlTable();
-        mc->SetDigitalTable();
-        mc->SetAnalogTable();
-    }
-
-    m_connected = true;
-    emit connectionChanged(true);
-    startDeviceMonitoring();
-    setStatusMessage(tr("控制器已连接: %1").arg(endpoint));
-    return true;
+    if (taskId != kInvalidTaskId)
+        m_ownedTaskIds.insert(taskId);
 }
 
-void ProcessModule::disconnectController()
+void ProcessModule::releaseOwnedTask(TaskId taskId)
 {
-    triggerSafeStopOutputs();
-    stopDeviceMonitoring();
-    if (m_service) {
-        if (auto* mc = m_service->GetMotionControl())
-            mc->Disconnect();
+    m_ownedTaskIds.remove(taskId);
+}
+
+bool ProcessModule::cancelOwnedTasks(int timeoutMs)
+{
+    auto* taskMgr = lcnc::Kernel::current().taskManager();
+    if (!taskMgr || m_ownedTaskIds.isEmpty())
+        return true;
+
+    const QSet<TaskId> taskIds = m_ownedTaskIds;
+    for (TaskId taskId : taskIds) {
+        if (taskMgr->isRunning(taskId))
+            taskMgr->requestAbort(taskId);
     }
 
-    m_simTimer->stop();
-    m_connected = false;
-    m_state = State::Idle;
-    emit connectionChanged(false);
-    emit stateChanged(m_state);
-    setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
+    QElapsedTimer timeout;
+    timeout.start();
+    bool allFinished = true;
+    for (TaskId taskId : taskIds) {
+        if (!taskMgr->isRunning(taskId)) {
+            releaseOwnedTask(taskId);
+            continue;
+        }
+        const int remainingMs = std::max(0, timeoutMs - static_cast<int>(timeout.elapsed()));
+        if (!taskMgr->waitForDone(taskId, remainingMs) && taskMgr->isRunning(taskId)) {
+            allFinished = false;
+            continue;
+        }
+        releaseOwnedTask(taskId);
+    }
+    return allFinished;
 }
 
 bool ProcessModule::isConnected() const
@@ -613,6 +653,10 @@ bool ProcessModule::isConnected() const
 
 void ProcessModule::connectAllDevices()
 {
+    if (m_deviceOperation != DeviceOperation::None) {
+        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        return;
+    }
     if (m_connected) {
         setStatusMessage(tr("设备已连接，无需重复连接"));
         return;
@@ -624,89 +668,98 @@ void ProcessModule::connectAllDevices()
         return;
     }
 
-    // 捕获 Service 裸指针（Service 生命周期由 ProcessModule::m_service 保证）
-    auto* service = m_service.get();
-    const bool simMode = m_simulationMode;
+    // 后台连接任务持有 Service，超时关机时也不会析构仍被 SDK 使用的对象。
+    const auto service = m_service;
 
-    // 兜底：若 setAxisDefinitions 还未把 AxisGroup 写入 DT（如启动早期连接），
-    // 这里依据当前轴定义重算一次，确保 mc->rebuildAxes() 能拿到正确的 IsAxisUse。
-    if (DT::getAxisGroup() == 0 && !m_axisDefinitions.isEmpty()) {
-        int axisGroup = 0;
-        for (const MachineAxisDef& axis : m_axisDefinitions) {
-            if (axis.name == QStringLiteral("BASE"))
-                continue;
-            auto eAxis = enum_cast<Axis>(axis.name.toStdString());
-            if (eAxis.has_value())
-                axisGroup |= (1 << static_cast<int>(eAxis.value()));
-        }
-        DT::setAxisGroup(axisGroup);
+    if (!m_runtimeConfiguration.hasEnabledAxes() && !m_axisDefinitions.isEmpty()) {
+        QStringList axes;
+        for (const MachineAxisDef& axis : m_axisDefinitions)
+            if (axis.name != QStringLiteral("BASE")) axes.append(axis.name);
+        m_runtimeConfiguration.setEnabledAxes(std::move(axes));
     }
 
+    m_deviceOperation = DeviceOperation::Connecting;
+    const bool pureSimulation = m_simulationMode;
     const TaskId taskId = taskMgr->run(tr("连接设备"),
-        [service, simMode](TaskProgress* progress) {
+        [service, pureSimulation](TaskProgress* progress) {
+            const auto deviceLock = service->lockDeviceAccess();
+            const auto throwIfAborted = [progress]() {
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("设备连接已取消");
+            };
             progress->setRange(0, 100);
 
-            // ── Step 1: 创建并连接运动控制器 ──
-            progress->setStepName(QObject::tr("正在连接运动控制器..."));
-            progress->setValue(0);
-            {
-                service->SetMotionControl();  // 空字符串 → 从 settings 读取 sType
-                auto* mc = service->GetMotionControl();
-                if (!mc) {
-                    throw std::runtime_error(
-                        QObject::tr("运动控制器实例化失败").toStdString());
+            try {
+                // ── Step 1: 创建并连接运动控制器 ──
+                progress->setStepName(pureSimulation
+                    ? QObject::tr("正在初始化纯软件仿真...")
+                    : QObject::tr("正在连接运动控制器..."));
+                progress->setValue(0);
+                throwIfAborted();
+                {
+                    if (pureSimulation)
+                        service->SetMotionControl("Simulator");
+                    else
+                        service->SetMotionControl();  // 从 settings 读取实体控制器
+                    auto* mc = service->GetMotionControl();
+                    if (!mc) {
+                        throw std::runtime_error(
+                            QObject::tr("运动控制器实例化失败；当前构建未启用所选控制器").toStdString());
+                    }
+                    if (!mc->Connect()) {
+                        throw std::runtime_error(
+                            QObject::tr("运动控制器连接失败；禁止回退到纯软件仿真").toStdString());
+                    }
+                    mc->rebuildAxes();
                 }
-                if (!mc->Connect()) {
-                    throw std::runtime_error(
-                        QObject::tr("运动控制器连接失败").toStdString());
-                }
-                // 连接成功后构建轴系：根据 DT::AxisGroup 从 settings 读取每个轴的
-                // 参数表，调用 CreateMotor 填充 m_vecMotors / m_mapMotorValue，
-                // 此后 IsMotorCreated/MoveRelative/Home 才有数据可用。
-                mc->rebuildAxes();
-            }
-            progress->setValue(30);
+                progress->setValue(30);
+                throwIfAborted();
 
             // ── Step 2: 创建并连接激光器 ──
-            progress->setStepName(QObject::tr("正在连接激光器..."));
-            {
-                service->SetLaserDevice();  // 空字符串 → 从 settings 读取 sType
-                auto* ld = service->GetLaserDevice();
-                if (ld && !ld->Connect()) {
-                    // 激光器连接失败不阻断整体流程，但记录错误
-                    throw std::runtime_error(
-                        QObject::tr("激光器连接失败").toStdString());
+                progress->setStepName(QObject::tr("正在连接激光器..."));
+                {
+                    service->SetLaserDevice();
+                    auto* ld = service->GetLaserDevice();
+                    if (!ld || !ld->Connect()) {
+                        throw std::runtime_error(
+                            QObject::tr("激光器连接失败；已取消本次设备连接").toStdString());
+                    }
                 }
+                progress->setValue(60);
+                throwIfAborted();
+
+                // ── Step 3: 下发参数表 ──
+                progress->setStepName(QObject::tr("正在下发运动控制器参数..."));
+                if (!pureSimulation) {
+                    service->SetMotionControlTable();
+                    service->SetDigitalTable();
+                    service->SetAnalogTable();
+                }
+                progress->setValue(80);
+                throwIfAborted();
+
+                progress->setStepName(QObject::tr("正在下发激光器参数..."));
+                service->SetLaserTable();
+                progress->setValue(100);
+            } catch (...) {
+                (void)service->shutdownDevices();
+                throw;
             }
-            progress->setValue(60);
-
-            // ── Step 3: 下发参数表 ──
-            progress->setStepName(QObject::tr("正在下发运动控制器参数..."));
-            service->SetMotionControlTable();
-            service->SetDigitalTable();
-            service->SetAnalogTable();
-            progress->setValue(80);
-
-            progress->setStepName(QObject::tr("正在下发激光器参数..."));
-            service->SetLaserTable();
-            progress->setValue(100);
         });
 
-    watchTask(this, taskId, [this, simMode](bool success) {
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId](bool success) {
+        releaseOwnedTask(taskId);
+        m_deviceOperation = DeviceOperation::None;
         m_connected = success;
         emit connectionChanged(success);
 
         if (success) {
-            // 非仿真模式下关闭仿真标志
-            if (simMode) {
-                m_simulationMode = false;
-                emit simulationModeChanged(false);
-            }
-            setStatusMessage(tr("设备已连接"));
+            setState(State::Idle, tr("设备已连接"));
             // 启动硬件状态轮询和加工环境监控。
             startDeviceMonitoring();
         } else {
-            setStatusMessage(tr("设备连接失败"));
+            setState(State::Error, tr("设备连接失败；未切换到纯软件仿真"));
         }
 
         emit deviceConnectFinished(success,
@@ -716,6 +769,10 @@ void ProcessModule::connectAllDevices()
 
 void ProcessModule::disconnectAllDevices()
 {
+    if (m_deviceOperation != DeviceOperation::None) {
+        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        return;
+    }
     if (!m_connected) {
         setStatusMessage(tr("设备未连接"));
         return;
@@ -742,19 +799,28 @@ void ProcessModule::disconnectAllDevices()
     stopDeviceMonitoring();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
-    safeStopProcessOutputs();
+    const bool outputsSafe = safeStopProcessOutputs();
+    if (!outputsSafe)
+        setState(State::Error, tr("设备断开前安全输出复位失败"));
 
     setStatusMessage(tr("正在断开设备..."));
 
-    auto* service = m_service.get();
+    const auto service = m_service;
 
+    m_deviceOperation = DeviceOperation::Disconnecting;
     const TaskId taskId = taskMgr->run(tr("断开设备"),
         [service](TaskProgress* progress) {
+            const auto deviceLock = service->lockDeviceAccess();
+            const auto throwIfAborted = [progress]() {
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("设备断开已取消");
+            };
             progress->setRange(0, 100);
 
             // ── Step 1: 断开激光器 ──
             progress->setStepName(QObject::tr("正在断开激光器..."));
             progress->setValue(0);
+            throwIfAborted();
             {
                 auto* ld = service->GetLaserDevice();
                 if (ld) {
@@ -762,6 +828,7 @@ void ProcessModule::disconnectAllDevices()
                 }
             }
             progress->setValue(40);
+            throwIfAborted();
 
             // ── Step 2: 断开运动控制器 ──
             progress->setStepName(QObject::tr("正在断开运动控制器..."));
@@ -774,7 +841,10 @@ void ProcessModule::disconnectAllDevices()
             progress->setValue(100);
         });
 
-    watchTask(this, taskId, [this](bool success) {
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId](bool success) {
+        releaseOwnedTask(taskId);
+        m_deviceOperation = DeviceOperation::None;
         m_connected = false;
         if (m_simTimer)
             m_simTimer->stop();
@@ -803,13 +873,18 @@ void ProcessModule::setSimulationMode(bool on)
     if (m_simulationMode == on)
         return;
 
-    m_simulationMode = on;
-    emit simulationModeChanged(on);
-
-    if (on && m_state == State::Error) {
-        m_state = State::Idle;
-        emit stateChanged(m_state);
+    if (on && m_service && m_service->configuredControllerRequiresDevice()) {
+        const QString controller = QString::fromStdString(
+            m_service->configuredMotionControllerName());
+        setState(State::Error,
+                 tr("当前已选择控制器 %1，禁止切换到纯软件仿真；请先在设备设置中显式选择 Simulator")
+                     .arg(controller));
+        return;
     }
+
+    m_simulationMode = on;
+    m_runtimeConfiguration.setSimulationMode(on);
+    emit simulationModeChanged(on);
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 }
@@ -821,7 +896,7 @@ bool ProcessModule::simulationMode() const
 
 void ProcessModule::setAxisDefinitions(const QList<MachineAxisDef>& axes)
 {
-    if (sameAxisDefinitions(m_axisDefinitions, axes))
+    if (lcnc::process::sameAxisDefinitions(m_axisDefinitions, axes))
         return;
 
     m_axisDefinitions = axes;
@@ -829,20 +904,16 @@ void ProcessModule::setAxisDefinitions(const QList<MachineAxisDef>& axes)
     initializeAxisPositions();
     initializeAxisEnabledStates();
 
-	// 桥接机台构型到 DT::AxisGroup
-	int axisGroup = 0;
-	for (const MachineAxisDef& axis : axes) {
-		if (axis.name == QStringLiteral("BASE"))
-			continue;
-		auto eAxis = enum_cast<Axis>(axis.name.toStdString());
-		if (eAxis.has_value())
-			axisGroup |= (1 << static_cast<int>(eAxis.value()));
-	}
-	DT::setAxisGroup(axisGroup);
+	QStringList runtimeAxes;
+	for (const MachineAxisDef& axis : axes)
+		if (axis.name != QStringLiteral("BASE")) runtimeAxes.append(axis.name);
+	m_runtimeConfiguration.setEnabledAxes(std::move(runtimeAxes));
 }
 
 void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, double distance)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     if (axisName.trimmed().isEmpty() || direction == 0 || m_state == State::EmergencyStop)
         return;
 
@@ -879,6 +950,8 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
 
 void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, int speedLevel)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     if (axisName.trimmed().isEmpty() || m_state == State::EmergencyStop)
         return;
 
@@ -909,6 +982,8 @@ void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, i
 
 void ProcessModule::startContinuousJog(const QString& axisName, int direction, int speedLevel)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     if (axisName.trimmed().isEmpty() || direction == 0 || m_state == State::EmergencyStop)
         return;
 
@@ -941,6 +1016,8 @@ void ProcessModule::startContinuousJog(const QString& axisName, int direction, i
 
 void ProcessModule::stopContinuousJog(const QString& axisName)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     if (axisName.trimmed().isEmpty())
         return;
 
@@ -974,11 +1051,15 @@ void ProcessModule::home()
         setStatusMessage(tr("回零正在进行中"));
         return;
     }
+    if (m_deviceOperation != DeviceOperation::None) {
+        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        return;
+    }
 
     // 合并预设轴系（按 Z 优先顺序）+ 用户扩展轴系；扩展轴系无对应 Axis 枚举，
     // 实控阶段只能跳过硬件回零，但仍参与位姿清零，与仿真保持一致。
-    QStringList axes = homeOrderForAxes(m_axisDefinitions);
-    for (const QString& ext : DT::getExtensionAxes()) {
+    QStringList axes = lcnc::process::homeOrderForAxes(m_axisDefinitions);
+    for (const QString& ext : m_runtimeConfiguration.extensionAxes()) {
         const QString key = ext.trimmed().toUpper();
         if (!key.isEmpty() && key != QStringLiteral("BASE") && !axes.contains(key))
             axes.append(key);
@@ -995,15 +1076,18 @@ void ProcessModule::home()
     }
 
     m_homing = true;
+    m_deviceOperation = DeviceOperation::Homing;
     setStatusMessage(tr("开始回零（共 %1 个轴）").arg(axes.size()));
 
-    const bool          connected      = m_connected;
-    auto*               service        = m_service.get();
+    const bool connected = m_connected;
+    const auto service = m_service;
 
     // 在后台线程依次回零；失败不再继续后续轴，但已成功的轴保持回零状态。
     const TaskId taskId = taskMgr->run(tr("回零"),
         [axes, connected, service]
         (TaskProgress* progress) {
+            const auto deviceLock = service ? service->lockDeviceAccess()
+                                            : Service::DeviceLock{};
             progress->setRange(0, axes.size());
             progress->setValue(0);
 
@@ -1013,6 +1097,8 @@ void ProcessModule::home()
                 : nullptr;
 
             for (int i = 0; i < axes.size(); ++i) {
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("回零已取消");
                 const QString& axis = axes.at(i);
                 progress->setStepName(QObject::tr("正在回零 %1 轴").arg(axis));
 
@@ -1037,6 +1123,8 @@ void ProcessModule::home()
                 }
 
                 progress->setValue(i + 1);
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("回零已取消");
                 if (!ok) {
                     throw std::runtime_error(
                         QObject::tr("%1 轴回零失败").arg(axis).toStdString());
@@ -1044,8 +1132,11 @@ void ProcessModule::home()
             }
         });
 
-    watchTask(this, taskId, [this, axes](bool success) {
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, axes](bool success) {
+        releaseOwnedTask(taskId);
         m_homing = false;
+        m_deviceOperation = DeviceOperation::None;
         // 无论成功失败，都把 GUI 端的轴位置归零（硬件状态轮询会很快用控制器
         // 实际位置覆盖回来；这里仅同步逻辑缓存避免短暂残留旧值）。
         for (const QString& axis : axes)
@@ -1064,12 +1155,18 @@ void ProcessModule::home()
 
 void ProcessModule::startDeviceMonitoring()
 {
-    if (!m_connected || m_simulationMode)
+    const bool acsSimulator = usesAcsSimulator(m_service.get());
+    if (!m_connected || (m_simulationMode && !acsSimulator))
         return;
     if (m_hwStatusTimer && !m_hwStatusTimer->isActive())
         m_hwStatusTimer->start();
+    if (m_peripheralStatusTimer && !m_peripheralStatusTimer->isActive())
+        m_peripheralStatusTimer->start();
     pollHardwareStatus();
-    if (m_monitorService)
+    pollPeripheralStatus();
+    // ACS Simulator has live motion positions but no real safety IO; do not
+    // start the physical monitor service for that simulated session.
+    if (m_monitorService && !acsSimulator)
         m_monitorService->start();
 }
 
@@ -1077,6 +1174,8 @@ void ProcessModule::stopDeviceMonitoring()
 {
     if (m_hwStatusTimer)
         m_hwStatusTimer->stop();
+    if (m_peripheralStatusTimer)
+        m_peripheralStatusTimer->stop();
     if (m_monitorService)
         m_monitorService->stop();
     if (m_hwPollWatcher) {
@@ -1086,10 +1185,19 @@ void ProcessModule::stopDeviceMonitoring()
         m_hwPollWatcher = nullptr;
     }
     m_hwPollInFlight = false;
+    if (m_peripheralPollWatcher) {
+        m_peripheralPollWatcher->waitForFinished();
+        disconnect(m_peripheralPollWatcher, nullptr, this, nullptr);
+        delete m_peripheralPollWatcher;
+        m_peripheralPollWatcher = nullptr;
+    }
+    m_peripheralPollInFlight = false;
 }
 
 bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     auto fail = [errorMessage](const QString& message) {
         if (errorMessage)
             *errorMessage = message;
@@ -1098,6 +1206,13 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
 
     if (m_state != State::Idle)
         return fail(tr("当前状态机不是空闲待机状态，不能开始加工"));
+
+    if (!m_simulationMode) {
+        const auto* project = lcnc::Kernel::current().projectManager();
+        if (project && !project->session().machineConfigurationCompatible()) {
+            return fail(tr("当前工程的机台构型与本机不匹配；请确认机台、轴映射和安全 IO 后重新保存工程"));
+        }
+    }
 
     const bool hasNormalCutting = containsEnabledNodeType(
         m_processFlowDocument.rootNodes(), lcnc::process::ProcessNodeType::NormalCutting);
@@ -1205,7 +1320,7 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
             return fail(tr("激光器异常: %1").arg(laserFault));
     }
 
-    const lcnc::ProcessMonitorSettings monitorSettings = readMonitorSettings();
+    const lcnc::ProcessMonitorSettings monitorSettings = readMonitorSettings(m_settingsService.get());
     auto readDigitalInput = [mc](const QString& channel, bool* value, QString* detail) {
         if (!value)
             return false;
@@ -1243,35 +1358,35 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
     QString monitorError = requireDigitalNormal(
         monitorSettings.interLockEnabled,
         tr("门禁"),
-        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aInterLock")),
+        configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aInterLock")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.safetyLightCurtainEnabled,
         tr("安全光栅"),
-        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aSafetyLightCurtain")),
+        configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aSafetyLightCurtain")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.pressureMonitorEnabled,
         tr("气压监控"),
-        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aPressureMonitor")),
+        configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aPressureMonitor")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.waterLeakageMonitorEnabled,
         tr("漏水监控"),
-        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterLeakageMonitor")),
+        configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterLeakageMonitor")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
     monitorError = requireDigitalNormal(
         monitorSettings.waterTankMonitorEnabled,
         tr("水箱监控"),
-        configuredIoChannel(lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterTankMonitor")),
+        configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::DigitalInput, QStringLiteral("aWaterTankMonitor")),
         true);
     if (!monitorError.isEmpty())
         return fail(monitorError);
@@ -1304,7 +1419,7 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
     monitorError = requireAnalogAtLeast(
         monitorSettings.waterPressureMonitorEnabled,
         tr("水压监控"),
-        configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterPressure")),
+        configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterPressure")),
         monitorSettings.waterPressureLimitMpa,
         QStringLiteral("MPa"));
     if (!monitorError.isEmpty())
@@ -1312,7 +1427,7 @@ bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
     monitorError = requireAnalogAtLeast(
         monitorSettings.waterLevelMonitorEnabled,
         tr("水位监控"),
-        configuredIoChannel(lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterLevel")),
+        configuredIoChannel(m_settingsService.get(), lcnc::process::ProcessIoBucket::AnalogInput, QStringLiteral("aWaterLevel")),
         monitorSettings.waterLevelLimitMm,
         QStringLiteral("mm"));
     if (!monitorError.isEmpty())
@@ -1383,6 +1498,8 @@ void ProcessModule::runPause()
 
 void ProcessModule::runStop()
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     m_simTimer->stop();
     if (m_workflowExecutor)
         m_workflowExecutor->stop();
@@ -1392,13 +1509,17 @@ void ProcessModule::runStop()
             mc->StopAllBuffer();
         }
     }
-    safeStopProcessOutputs();
-    setState(State::Idle,
-             m_simulationMode ? tr("仿真已停止") : tr("运行已停止"));
+    const bool outputsSafe = safeStopProcessOutputs();
+    setState(outputsSafe ? State::Idle : State::Error,
+             outputsSafe
+                 ? (m_simulationMode ? tr("仿真已停止") : tr("运行已停止"))
+                 : tr("运行已停止，但安全输出复位失败"));
 }
 
 void ProcessModule::emergencyStop()
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     m_simTimer->stop();
     if (m_workflowExecutor)
         m_workflowExecutor->emergencyStop();
@@ -1408,8 +1529,9 @@ void ProcessModule::emergencyStop()
             mc->StopAllBuffer();
         }
     }
-    safeStopProcessOutputs();
-    setState(State::EmergencyStop, tr("急停已触发"));
+    const bool outputsSafe = safeStopProcessOutputs();
+    setState(State::EmergencyStop,
+             outputsSafe ? tr("急停已触发") : tr("急停已触发，但安全输出复位失败"));
 }
 
 void ProcessModule::resetEmergencyStop()
@@ -1478,6 +1600,8 @@ QMap<QString, double> ProcessModule::currentAxisPositions() const
 
 void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     const QString normalizedAxis = axisName.trimmed().toUpper();
     if (normalizedAxis.isEmpty())
         return;
@@ -1505,6 +1629,8 @@ void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
 
 void ProcessModule::setDigitalOutput(const QString& outputName, bool value)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     const QString name = outputName.trimmed();
     if (name.isEmpty())
         return;
@@ -1589,7 +1715,7 @@ void ProcessModule::onSimulationTick()
         if (axis.name == QStringLiteral("BASE"))
             continue;
 
-        const double value = simulatedAxisValue(axis, m_simPhase, linearIndex, rotaryIndex);
+        const double value = lcnc::process::simulatedAxisValue(axis, m_simPhase, linearIndex, rotaryIndex);
         setAxisPosition(axis.name, value);
 
         if (axis.motionType == MachineAxisDef::Linear)
@@ -1665,6 +1791,15 @@ struct HardwareIoBatch
     QVector<HardwareDigitalOutputSample> digitalOutputs;
 };
 
+struct PeripheralStatusSample
+{
+    QString deviceName;
+    bool connected{false};
+    bool initialized{false};
+    QString diagnostic;
+    bool valid{false};
+};
+
 // 从 settings 一条 IO 子表里读取四个用得着的字段；兼容旧版 array 写法。
 struct IOEntry
 {
@@ -1723,9 +1858,8 @@ double tableDouble(const table& t, const char* group, const char* key, double fa
     return fallback;
 }
 
-QString configuredIoChannel(lcnc::process::ProcessIoBucket bucket, const QString& fallback)
+QString configuredIoChannel(const lcnc::process::ProcessSettingsService* settings, lcnc::process::ProcessIoBucket bucket, const QString& fallback)
 {
-    auto* settings = lcnc::process::ProcessSettingsService::current();
     if (!settings) return fallback;
     for (const auto& channel : settings->ioChannels(bucket))
         if (channel.id == fallback) return channel.enabled ? channel.id : QString();
@@ -1740,10 +1874,9 @@ QString enumNameFromTomlChannel(QString channel)
     return channel;
 }
 
-lcnc::ProcessMonitorSettings readMonitorSettings()
+lcnc::ProcessMonitorSettings readMonitorSettings(const lcnc::process::ProcessSettingsService* config)
 {
     lcnc::ProcessMonitorSettings settings;
-    auto* config = lcnc::process::ProcessSettingsService::current();
     if (!config) return settings;
     const auto v = [config](const QString& table, const QString& key, const QVariant& fallback) {
         return config->rawValue(lcnc::process::ProcessConfigArea::Operations, table, key, fallback);
@@ -1760,10 +1893,10 @@ lcnc::ProcessMonitorSettings readMonitorSettings()
     return settings;
 }
 
-QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels()
+QList<lcnc::process::ProcessMonitorOutputChannel> monitorOutputChannels(const lcnc::process::ProcessSettingsService* config)
 {
     QList<lcnc::process::ProcessMonitorOutputChannel> out;
-    if (auto* config = lcnc::process::ProcessSettingsService::current())
+    if (config)
         for (const auto& channel : config->ioChannels(lcnc::process::ProcessIoBucket::DigitalOutput))
             if (channel.enabled && !channel.name.isEmpty()) out.append({channel.name, channel.id});
     return out;
@@ -1775,13 +1908,9 @@ void ProcessModule::pollHardwareStatus()
 {
     if (m_hwPollInFlight)
         return;
-    if (!m_connected || m_simulationMode)
+    if (!m_connected || (m_simulationMode && !usesAcsSimulator(m_service.get())))
         return;
     if (!m_service)
-        return;
-
-    MotionControl* hwMc = m_service->GetMotionControl();
-    if (!hwMc || !hwMc->IsConnected())
         return;
 
     // 仅采集已注册的预设轴；BASE 与扩展轴在硬件层无对应 Axis 枚举，跳过。
@@ -1795,7 +1924,7 @@ void ProcessModule::pollHardwareStatus()
     // 数字量输出：所有 enabled 的 DigitalOUT 通道，全部扫描，便于硬件端
     // 直接驱动输出时界面也能同步刷新。
     QVector<QPair<QString, QString>> digitalOutputs; // <channel, display>
-    if (auto* config = lcnc::process::ProcessSettingsService::current())
+    if (auto* config = m_settingsService.get())
         for (const auto& channel : config->ioChannels(lcnc::process::ProcessIoBucket::DigitalOutput))
             if (channel.enabled && !channel.name.isEmpty()) digitalOutputs.append(qMakePair(channel.id, channel.name));
 
@@ -1841,8 +1970,15 @@ void ProcessModule::pollHardwareStatus()
         }
     });
 
-    watcher->setFuture(QtConcurrent::run([axisNames, digitalOutputs, hwMc]() {
+    const auto service = m_service;
+    watcher->setFuture(QtConcurrent::run(&m_controllerPollPool,
+                                         [axisNames, digitalOutputs, service]() {
+        const auto deviceLock = service ? service->lockDeviceAccess()
+                                        : Service::DeviceLock{};
         HardwareIoBatch batch;
+        MotionControl* hwMc = service ? service->GetMotionControl() : nullptr;
+        if (!hwMc || !hwMc->IsConnected())
+            return batch;
         batch.axes.reserve(axisNames.size());
         for (const QString& name : axisNames) {
             HardwareAxisSample sample;
@@ -1882,10 +2018,71 @@ void ProcessModule::pollHardwareStatus()
     }));
 }
 
+void ProcessModule::pollPeripheralStatus()
+{
+    if (m_peripheralPollInFlight || !m_connected || m_simulationMode || !m_service)
+        return;
+
+    m_peripheralPollInFlight = true;
+    QPointer<ProcessModule> self(this);
+    auto* watcher = new QFutureWatcher<PeripheralStatusSample>(this);
+    m_peripheralPollWatcher = watcher;
+    connect(watcher, &QFutureWatcher<PeripheralStatusSample>::finished, this,
+            [this, self, watcher] {
+        const PeripheralStatusSample sample = watcher->result();
+        if (m_peripheralPollWatcher == watcher)
+            m_peripheralPollWatcher = nullptr;
+        watcher->deleteLater();
+        m_peripheralPollInFlight = false;
+        if (!self || !m_initialized || !m_connected || !sample.valid)
+            return;
+
+        emit peripheralStatusChanged(sample.deviceName,
+                                     sample.connected,
+                                     sample.initialized,
+                                     sample.diagnostic);
+        if (!sample.connected || !sample.initialized) {
+            const QString diagnostic = sample.diagnostic.isEmpty()
+                ? tr("外设未连接或未初始化") : sample.diagnostic;
+            if (diagnostic != m_lastPeripheralDiagnostic) {
+                m_lastPeripheralDiagnostic = diagnostic;
+                LCNC_WARN(lcnc::LogCode::Generic,
+                          "Process peripheral '{}' health check: {}",
+                          sample.deviceName.toStdString(), diagnostic.toStdString());
+            }
+        } else {
+            m_lastPeripheralDiagnostic.clear();
+        }
+    });
+
+    const auto service = m_service;
+    watcher->setFuture(QtConcurrent::run(&m_peripheralPollPool, [service] {
+        PeripheralStatusSample sample;
+        const auto deviceLock = service ? service->lockDeviceAccess()
+                                        : Service::DeviceLock{};
+        LaserDevice* laser = service ? service->GetLaserDevice() : nullptr;
+        if (!laser)
+            return sample;
+
+        sample.deviceName = QString::fromStdString(laser->GetName());
+        sample.connected = laser->IsConnected();
+        sample.initialized = laser->IsInited();
+        sample.valid = true;
+
+        // Simulator/AnalogControl have no serial health command.  Real laser
+        // protocols are queried only on this 2 s low-frequency worker.
+        if (sample.connected && sample.deviceName != QStringLiteral("Simulator")
+            && sample.deviceName != QStringLiteral("AnalogControl")) {
+            sample.diagnostic = QString::fromStdString(laser->GetTroubleshooting());
+        }
+        return sample;
+    }));
+}
+
 QList<DigitalOutputDescriptor> ProcessModule::mainPanelDigitalOutputs() const
 {
     QList<DigitalOutputDescriptor> out;
-    auto* config = lcnc::process::ProcessSettingsService::current();
+    auto* config = m_settingsService.get();
     if (!config) return out;
     for (const auto& entry : config->ioChannels(lcnc::process::ProcessIoBucket::DigitalOutput)) {
         if (!entry.enabled || !entry.showInMain || entry.name.isEmpty()) continue;
@@ -1900,6 +2097,8 @@ QList<DigitalOutputDescriptor> ProcessModule::mainPanelDigitalOutputs() const
 
 void ProcessModule::refreshIOFromSettings()
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     // 设置对话框关闭后：
     //   1. 把最新 settings 中的 IO 表重新下发到运动控制器（连接状态下立即生效）。
     //   2. 重新发射主界面 IO 描述符列表，让按钮按新 showInMain 重建。
@@ -1914,10 +2113,10 @@ void ProcessModule::refreshIOFromSettings()
     emit digitalOutputDescriptorsChanged(mainPanelDigitalOutputs());
 }
 
-void ProcessModule::safeStopProcessOutputs()
+bool ProcessModule::safeStopProcessOutputs()
 {
     // 兼容旧调用：除了清 UI 缓存外，强制写硬件 0。
-    triggerSafeStopOutputs();
+    const bool outputsSafe = triggerSafeStopOutputs();
     const QStringList commonOutputs = {
         QStringLiteral("激光"), QStringLiteral("吹气"),
         QStringLiteral("夹头"), QStringLiteral("水冷"), QStringLiteral("气泵")
@@ -1928,23 +2127,32 @@ void ProcessModule::safeStopProcessOutputs()
             emit digitalOutputChanged(name, name, false);
         }
     }
+    return outputsSafe;
 }
 
-void ProcessModule::triggerSafeStopOutputs()
+bool ProcessModule::triggerSafeStopOutputs()
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     // 任何中断流程的路径都必须强制关闭激光与吹气。
     struct SafeChannel { QString channel; DigitalOUT eIndex; };
     static const QVector<SafeChannel> kSafeChannels = {
         { QStringLiteral("aLaser"), DigitalOUT::Laser },
         { QStringLiteral("aBlow"),  DigitalOUT::Blow  }
     };
+    bool outputsSafe = true;
     if (m_service) {
         if (auto* mc = m_service->GetMotionControl()) {
             if (mc->IsConnected()) {
                 for (const SafeChannel& sc : kSafeChannels) {
                     // 先 guard 是否已注册，避免触发 WARN_MC_NONEINDEX 弹窗。
-                    if (mc->m_mapDigitalOUT.count(sc.eIndex))
-                        mc->DigitalOutputSet(sc.eIndex, 0);
+                    if (mc->m_mapDigitalOUT.count(sc.eIndex)
+                        && !mc->DigitalOutputSet(sc.eIndex, 0)) {
+                        outputsSafe = false;
+                        LCNC_ERR(lcnc::LogCode::Generic,
+                                 "Process safe-stop: failed to reset output '{}'",
+                                 sc.channel.toStdString());
+                    }
                 }
             }
         }
@@ -1956,6 +2164,7 @@ void ProcessModule::triggerSafeStopOutputs()
             emit digitalOutputChanged(sc.channel, sc.channel, false);
         }
     }
+    return outputsSafe;
 }
 
 void ProcessModule::setState(State state, const QString& statusMessage)
@@ -1968,7 +2177,7 @@ void ProcessModule::setState(State state, const QString& statusMessage)
         if (m_state == State::Paused
             || m_state == State::Error
             || m_state == State::EmergencyStop) {
-            triggerSafeStopOutputs();
+            (void)triggerSafeStopOutputs();
         }
     }
 

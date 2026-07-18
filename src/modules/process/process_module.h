@@ -3,17 +3,21 @@
 #include <QObject>
 #include <QList>
 #include <QMap>
+#include <QSet>
 #include <QString>
+#include <QThreadPool>
 #include <atomic>
 #include <memory>
 
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
+#include "core/task/task_manager.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/steps/process_step_context.h"
 #include "modules/process/workflow/process_flow_document.h"
+#include "modules/process/runtime/process_runtime_configuration.h"
 
 class QTimer;
 class QFutureWatcherBase;
@@ -74,8 +78,6 @@ public:
     bool start() override;
     void stop() override;
 
-    bool connectController(const QString& endpoint) override;
-    void disconnectController() override;
     bool isConnected() const override;
 
     void connectAllDevices() override;
@@ -164,25 +166,43 @@ signals:
     void deviceConnectFinished(bool allSuccess, const QString& summary);
     /// 主界面 IO 栏的数字量输出按钮列表已变更（settings 修改、初次加载等）。
     void digitalOutputDescriptorsChanged(const QList<DigitalOutputDescriptor>& descriptors);
+    /// Low-frequency serial/peripheral health snapshot.  Emitted on the GUI
+    /// thread after polling completes on the peripheral worker.
+    void peripheralStatusChanged(const QString& deviceName,
+                                 bool connected,
+                                 bool initialized,
+                                 const QString& diagnostic);
 
 private slots:
     void onSimulationTick();
     void pollHardwareStatus();          // 联机后周期性采集硬件轴位/使能
+    void pollPeripheralStatus();        // 低频采集串口外设状态
 
 private:
+    enum class DeviceOperation { None, Connecting, Disconnecting, Homing };
+
     void initializeAxisPositions();
     void initializeAxisEnabledStates();
-    void safeStopProcessOutputs();
-    void triggerSafeStopOutputs();
+    [[nodiscard]] bool safeStopProcessOutputs();
+    [[nodiscard]] bool triggerSafeStopOutputs();
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
     void startDeviceMonitoring();
     void stopDeviceMonitoring();
     bool validateProcessingEnvironment(QString* errorMessage);
+    void trackOwnedTask(TaskId taskId);
+    void releaseOwnedTask(TaskId taskId);
+    /// 请求本模块任务取消并等待；false 表示仍有 worker 未在期限内退出。
+    bool cancelOwnedTasks(int timeoutMs);
 
     bool                  m_initialized{false};
     bool                  m_connected{false};
+#if (defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS) || \
+    (defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN)
+    bool                  m_simulationMode{false};
+#else
     bool                  m_simulationMode{true};
+#endif
     bool                  m_homing{false};
     State                 m_state{State::Idle};
     QList<MachineAxisDef> m_axisDefinitions;
@@ -193,14 +213,27 @@ private:
     QTimer*               m_hwStatusTimer{nullptr};   ///< 硬件状态轮询（联机模式下生效）
     QFutureWatcherBase*    m_hwPollWatcher{nullptr};  ///< shutdown 前必须等待，保护控制器借用指针
     bool                  m_hwPollInFlight{false};    ///< 防止后台采集任务堆积
+    QThreadPool           m_controllerPollPool;       ///< 单线程控制器轮询池，禁止在 GUI 线程访问 SDK
+    QTimer*               m_peripheralStatusTimer{nullptr}; ///< 串口外设低频轮询
+    QFutureWatcherBase*    m_peripheralPollWatcher{nullptr};
+    bool                  m_peripheralPollInFlight{false};
+    QThreadPool           m_peripheralPollPool;       ///< 与控制器轮询分离的低频工作池
+    QString               m_lastPeripheralDiagnostic;
     double                m_feedOverride{1.0};
     double                m_simPhase{0.0};
     QString               m_statusMessage;
     lcnc::IKernel*        m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
     lcnc::process::ProcessStepContext m_stepContext;
-    std::unique_ptr<Service> m_service;
+    // Background connect/disconnect/home tasks retain a shared Service lease so
+    // a bounded module shutdown cannot destroy vendor objects while an SDK call
+    // is still returning.
     std::unique_ptr<lcnc::process::ProcessSettingsService> m_settingsService;
+    // Must outlive Service and every controller which borrows these runtime facts.
+    lcnc::process::ProcessRuntimeConfiguration m_runtimeConfiguration;
+    // Declared before Service so reverse member destruction releases the
+    // Service (which borrows this settings object) first.
+    std::shared_ptr<Service> m_service;
     std::unique_ptr<lcnc::process::LegacyProcessMotionService> m_motionStepService;
     std::unique_ptr<lcnc::process::LegacyProcessIoService> m_ioStepService;
     std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;
@@ -209,6 +242,8 @@ private:
     std::unique_ptr<lcnc::process::ProcessMonitorService> m_monitorService;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
     std::atomic_bool      m_normalCuttingActive{false};  ///< 见 setNormalCuttingActive
+    QSet<TaskId>          m_ownedTaskIds;
+    DeviceOperation       m_deviceOperation{DeviceOperation::None};
 
     // ── Ribbon「加工顺序」状态镜像 ────────────────────────────────────────
     lcnc::process::AutoSortAxis m_autoSortAxis{lcnc::process::AutoSortAxis::XPos};

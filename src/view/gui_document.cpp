@@ -89,7 +89,7 @@ GuiDocument::~GuiDocument() = default;
 
 void GuiDocument::setSourceDocument(LcncDocument* document)
 {
-    m_sourceDocument = document;
+    m_document = document;
 }
 
 const Handle(AIS_InteractiveContext)& GuiDocument::context() const
@@ -362,7 +362,7 @@ Handle(AIS_Shape) GuiDocument::displayShape(const TopoDS_Shape& shape,
                                              const QString&      name,
                                              bool                fitAll)
 {
-    return displayShape(domainForDocument(m_sourceDocument), m_sourceDocument, shape, name, fitAll);
+    return displayShape(domainForDocument(m_document), m_document, shape, name, fitAll);
 }
 
 Handle(AIS_Shape) GuiDocument::displayShape(lcnc::ProjectDomain domain,
@@ -438,7 +438,7 @@ void GuiDocument::eraseDomain(lcnc::ProjectDomain domain)
 
 void GuiDocument::rebuildDisplay(LcncDocument* document)
 {
-    LcncDocument* doc = document ? document : m_sourceDocument;
+    LcncDocument* doc = document ? document : m_document;
     if (!doc) {
         LCNC_DEBUG(lcnc::LogCode::Generic,
                    "GuiDocument::rebuildDisplay no source document");
@@ -465,7 +465,7 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
         return;
     }
 
-    m_sourceDocument = document;
+    m_document = document;
 
     // 统一工程文档可同时持有工件与 CAM 轮廓实体（按 EntityKind 区分）。按本次请求的
     // 域只取对应 EntityKind 的实体，避免把 CAM 轮廓当作工件域显示（或反之）。
@@ -563,12 +563,12 @@ void GuiDocument::applyMachineDisplayStyle()
             shapesByDocument[object.documentId].insert(object.entry, object.ais);
         }
 
-        LcncDocument* previousSource = m_sourceDocument;
+        LcncDocument* previousSource = m_document;
         for (auto it = shapesByDocument.cbegin(); it != shapesByDocument.cend(); ++it) {
-            m_sourceDocument = documents.value(it.key(), nullptr);
+            m_document = documents.value(it.key(), nullptr);
             m_renderingManager->applyDocumentStyles(it.value());
         }
-        m_sourceDocument = previousSource;
+        m_document = previousSource;
     }
 }
 
@@ -577,8 +577,8 @@ Handle(AIS_Shape) GuiDocument::aisShape(const QString& labelEntry) const
     if (labelEntry.isEmpty())
         return {};
 
-    if (m_sourceDocument) {
-        Handle(AIS_Shape) ais = aisShape(m_sourceDocument->id(), labelEntry);
+    if (m_document) {
+        Handle(AIS_Shape) ais = aisShape(m_document->id(), labelEntry);
         if (!ais.IsNull())
             return ais;
     }
@@ -825,7 +825,7 @@ QStringList GuiDocument::selectedEntries(DocumentId documentId) const
 
 void GuiDocument::updateAxisTransforms(LcncDocument* document)
 {
-    LcncDocument* doc = document ? document : m_sourceDocument;
+    LcncDocument* doc = document ? document : m_document;
     if (!doc) return;
 
     MachineKinematics* kin = doc->machineKinematics();

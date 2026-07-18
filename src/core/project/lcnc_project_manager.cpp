@@ -1,6 +1,8 @@
 #include "core/project/lcnc_project_manager.h"
 
 #include "core/document/lcnc_document.h"
+#include "core/kernel/kernel.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "core/logging/logger.h"
 #include "core/project/cam/cam_data_manager.h"
 #include "core/project/cam/cam_toolpath_io.h"
@@ -234,12 +236,29 @@ LcncDocument* LcncProjectManager::openProject(const QString& filePath, QString* 
     workspace->session().setProjectName(projectName);
     workspace->session().setProjectPath(workspace->workpieceDocument()->filePath());
     workspace->session().setManifest(result.manifest);
+    QString expectedFingerprint;
+    QString actualFingerprint;
+    if (auto* machineConfig = Kernel::current().service<MachineConfigurationService>()) {
+        expectedFingerprint = result.manifest.machineConfigurationFingerprint;
+        actualFingerprint = machineConfig->configurationFingerprint();
+        if (!expectedFingerprint.isEmpty() && expectedFingerprint != actualFingerprint) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "Project machine configuration fingerprint mismatch project='{}' expected={} actual={}",
+                      filePath.toStdString(), expectedFingerprint.toStdString(), actualFingerprint.toStdString());
+        }
+    }
+    workspace->session().setMachineConfigurationCompatible(
+        expectedFingerprint.isEmpty() || expectedFingerprint == actualFingerprint);
     workspace->session().workpiece().displayName = projectName;
     workspace->session().workpiece().sourceFilePath = result.manifest.sourceFilePath;
     workspace->syncSessionFromDocuments();
     workspace->session().clearDirty();
 
     adoptWorkspace(workspace, true);
+    if (!expectedFingerprint.isEmpty() && expectedFingerprint != actualFingerprint) {
+        emit projectMachineConfigurationMismatch(workspace->session().projectPath(),
+                                                 expectedFingerprint, actualFingerprint);
+    }
     emit domainDataChanged(ProjectDomain::Workpiece);
     emit domainDataChanged(ProjectDomain::Cam);
     return workspace->workpieceDocument();
@@ -271,6 +290,10 @@ bool LcncProjectManager::saveProject(const QString& filePath, QString* errorMsg)
     manifest.documentName = manifest.projectName;
     manifest.sourceFilePath = currentSession.workpiece().sourceFilePath;
     manifest.saveOptions = options;
+    if (auto* machineConfig = Kernel::current().service<MachineConfigurationService>()) {
+        manifest.machineConfigurationFingerprint = machineConfig->configurationFingerprint();
+        manifest.toolpathAlgorithmVersion = machineConfig->toolpathAlgorithmText() + QStringLiteral(":1");
+    }
 
     LcncProjectManifest savedManifest;
     const bool ok = LcncProjectPackage::save(*current->workpieceDocument(), nullptr, current->camDocument(),

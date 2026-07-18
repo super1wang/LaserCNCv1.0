@@ -1,7 +1,6 @@
 #include "modules/process/execution/process_workflow_executor.h"
 
 #include "core/logging/logger.h"
-#include "modules/process/device/MotionControl/MotionControl.h"
 #include "modules/process/steps/process_step_context.h"
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/workflow/process_flow_document.h"
@@ -71,9 +70,9 @@ void ProcessWorkflowExecutor::setStepContext(ProcessStepContext* context)
     }
 }
 
-void ProcessWorkflowExecutor::setControllerAccessor(ControllerAccessor accessor)
+void ProcessWorkflowExecutor::setDeviceStopper(DeviceStopper stopper)
 {
-    m_controllerAccessor = std::move(accessor);
+    m_deviceStopper = std::move(stopper);
 }
 
 void ProcessWorkflowExecutor::pause()
@@ -119,14 +118,8 @@ void ProcessWorkflowExecutor::stop()
     if (m_state == State::Idle)
         return;
     m_token.requestStop();
-    if (m_controllerAccessor) {
-        if (auto* mc = m_controllerAccessor()) {
-            if (mc->IsConnected()) {
-                mc->StopMotion();
-                mc->StopAllBuffer();
-            }
-        }
-    }
+    if (m_deviceStopper)
+        m_deviceStopper(false);
     m_stepTimer->stop();
     setState(State::Stopped);
     if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
@@ -138,14 +131,8 @@ void ProcessWorkflowExecutor::stop()
 void ProcessWorkflowExecutor::emergencyStop()
 {
     m_token.requestEmergencyStop();
-    if (m_controllerAccessor) {
-        if (auto* mc = m_controllerAccessor()) {
-            if (mc->IsConnected()) {
-                mc->StopMotion();
-                mc->StopAllBuffer();
-            }
-        }
-    }
+    if (m_deviceStopper)
+        m_deviceStopper(true);
     m_stepTimer->stop();
     if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
         failCurrentStep(tr("急停中断"));

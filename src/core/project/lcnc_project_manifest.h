@@ -13,7 +13,7 @@ namespace lcnc {
 class LcncProjectManifest : public TomlConfig
 {
 public:
-    static constexpr int kCurrentFormatVersion = 3;
+    static constexpr int kCurrentFormatVersion = 4;
 
     QString schema{QStringLiteral("lcnc.project")};
     int formatVersion{kCurrentFormatVersion};
@@ -22,13 +22,19 @@ public:
     QString sourceFilePath;
     QString createdUtc;
     QString savedUtc;
-    QString projectXcafPath{QStringLiteral("project.xbf")};   ///< v1 legacy; v2 uses workpieceXcafPath
-    QString workpieceXcafPath{QStringLiteral("workpiece.xbf")}; ///< v2 workpiece only; v3 workpiece + CAM entities
+    QString softwareVersion;
+    QString machineConfigurationFingerprint;
+    QString configurationSchemaVersion;
+    QString toolpathAlgorithmVersion;
+    QString toolSnapshotPath{QStringLiteral("tools.toml")};
+    QString projectXcafPath{QStringLiteral("project.xbf")};   ///< Legacy v1 migration input only.
+    QString workpieceXcafPath{QStringLiteral("workpiece.xbf")}; ///< v4 unified workpiece + CAM entities.
     QString camCacheDirectory{QStringLiteral("cam/cache")};
     ProjectSaveOptions saveOptions;
 
-    /// Returns true when the manifest can be consumed by this build.
-    bool validate(QString* errorMsg = nullptr) const;
+    /// Returns true when the manifest can be consumed by this build.  Legacy
+    /// formats are intentionally reserved for the offline migration utility.
+    bool validate(QString* errorMsg = nullptr, bool allowLegacyFormat = false) const;
 
 protected:
     void readFrom(const toml::value& root) override;

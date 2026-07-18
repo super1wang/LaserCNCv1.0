@@ -33,7 +33,7 @@ GuiDocument* contextualGuiDocument(IAppContext* ctx)
 {
     if (!ctx)
         return nullptr;
-    return ctx->workspaceGuiDocument();
+    return ctx->activeGuiDocument();
 }
 
 QList<EntityInfo> collectEntities(LcncDocument* doc, LcncDocument::EntityKind kind)

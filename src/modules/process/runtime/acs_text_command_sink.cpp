@@ -11,6 +11,7 @@
 
 #include <boost/lexical_cast.hpp>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 namespace lcnc::process {
@@ -133,6 +134,26 @@ double rotaryIdleVelocity(const Tool& tool, const AxisMap& axes, AxisMap::Semant
     return configured > 0 ? configured : 10.0;
 }
 
+std::optional<Axis> deviceAxisFor(const AxisMap& axes, AxisMap::SemanticAxis semanticAxis)
+{
+    switch (semanticAxis) {
+    case AxisMap::X: return Axis::X;
+    case AxisMap::Y: return Axis::Y;
+    case AxisMap::Z: return Axis::Z;
+    case AxisMap::R1:
+    case AxisMap::R2: {
+        const QString name = axes.axisName(semanticAxis).trimmed().toUpper();
+        if (name == QStringLiteral("A")) return Axis::A;
+        if (name == QStringLiteral("B")) return Axis::B;
+        if (name == QStringLiteral("C")) return Axis::C;
+        return std::nullopt;
+    }
+    case AxisMap::Count:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
 // 按 axisMap + mask 取出 "APOSx, APOSy[, APOSz, APOSr1, APOSr2]"，
 // 用作 XSEG 起点（控制器侧已有的实时位置）。
 std::string aposListText(const AxisMap& axes, std::uint8_t effectiveMask)
@@ -160,10 +181,42 @@ std::string aposListText(const AxisMap& axes, std::uint8_t effectiveMask)
 
 } // namespace
 
-AcsTextCommandSink::AcsTextCommandSink(ACSMotionControl* acs, AxisMap axisMap)
+AcsTextCommandSink::AcsTextCommandSink(ACSMotionControl* acs, AxisMap axisMap,
+                                       PositionObserver positionObserver)
     : m_acs(acs)
     , m_axisMap(std::move(axisMap))
+    , m_positionObserver(std::move(positionObserver))
 {
+}
+
+void AcsTextCommandSink::publishControllerPositions()
+{
+    if (!m_acs || !m_positionObserver)
+        return;
+
+    // Buffer-state polling can run every few milliseconds.  Publishing each
+    // axis on every pass would flood the GUI event queue, so cap view updates
+    // at 10 Hz while retaining controller-side completion polling frequency.
+    constexpr qint64 kPositionPublishIntervalMs = 100;
+    if (m_positionPublishTimer.isValid()
+        && m_positionPublishTimer.elapsed() < kPositionPublishIntervalMs) {
+        return;
+    }
+    m_positionPublishTimer.restart();
+
+    static constexpr AxisMap::SemanticAxis kAxes[] = {
+        AxisMap::X, AxisMap::Y, AxisMap::Z, AxisMap::R1, AxisMap::R2
+    };
+    for (const AxisMap::SemanticAxis semanticAxis : kAxes) {
+        if (!m_axisMap.isPresent(semanticAxis))
+            continue;
+        const auto deviceAxis = deviceAxisFor(m_axisMap, semanticAxis);
+        if (!deviceAxis)
+            continue;
+        double position = 0.0;
+        if (m_acs->GetActualPos(*deviceAxis, position))
+            m_positionObserver(m_axisMap.axisName(semanticAxis), position);
+    }
 }
 
 QString AcsTextCommandSink::id() const
@@ -204,6 +257,11 @@ bool AcsTextCommandSink::flush(QString* errorMessage)
     constexpr int kAcsProgramBuffer = 9;
     constexpr int kPollSliceMs      = 20;
     while (m_acs->IsBufferRunning(kAcsProgramBuffer)) {
+        // The cutting manager holds the device lease while an ACS buffer runs,
+        // so background polling intentionally waits. Read positions here on
+        // that same owner thread to keep the machine view live without a
+        // concurrent SDK call.
+        publishControllerPositions();
         if (m_token) {
             while (m_token->isPaused()) {
                 QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
@@ -217,6 +275,7 @@ bool AcsTextCommandSink::flush(QString* errorMessage)
         QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
         QThread::msleep(2);
     }
+    publishControllerPositions();
     return true;
 }
 

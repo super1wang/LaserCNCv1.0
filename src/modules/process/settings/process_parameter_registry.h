@@ -9,6 +9,8 @@
 
 namespace lcnc::process {
 
+class ProcessSettingsService;
+
 enum class ParameterValueType { Bool, Int, Double, String, Enum, AxisRef, IoRef, ToolRef };
 
 struct ParameterDescriptor
@@ -48,7 +50,11 @@ struct ParameterObjectDescriptor
 class ProcessParameterRegistry
 {
 public:
+    explicit ProcessParameterRegistry(const ProcessSettingsService& settings);
     QVector<ParameterObjectDescriptor> buildObjects() const;
+
+private:
+    const ProcessSettingsService& m_settings;
 };
 
 } // namespace lcnc::process

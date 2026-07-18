@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QList>
+#include <memory>
 
 #include "core/kinematics/machine_kinematics.h"
 
@@ -29,6 +30,9 @@ class LcncDocument : public TDocStd_Document
 {
 public:
     DEFINE_STANDARD_RTTI_INLINE(LcncDocument, TDocStd_Document)
+    /// Creates an isolated document for offline tools. Project ownership still
+    /// belongs to LcncProjectManager in the desktop application.
+    static std::unique_ptr<LcncDocument> createStandalone(int id, const QString& name);
     // Entity categories for the left-side tree panel
     enum class EntityKind : int {
         Workpiece  = 0,

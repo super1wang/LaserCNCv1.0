@@ -4,6 +4,8 @@
 #include "modules/process/runtime/axis_map.h"
 
 #include <QString>
+#include <QElapsedTimer>
+#include <functional>
 #include <string>
 
 class ACSMotionControl;
@@ -23,7 +25,10 @@ namespace lcnc::process {
 class AcsTextCommandSink final : public IMotionCommandSink
 {
 public:
-    AcsTextCommandSink(ACSMotionControl* acs, AxisMap axisMap);
+    using PositionObserver = std::function<void(const QString&, double)>;
+
+    AcsTextCommandSink(ACSMotionControl* acs, AxisMap axisMap,
+                       PositionObserver positionObserver = {});
     ~AcsTextCommandSink() override = default;
 
     QString id() const override;
@@ -56,14 +61,17 @@ private:
     /// 把 sink 拼出的 ACSPL+ 片段追加到底层 m_strCommand。
     /// 不能命名为 `emit` —— 那是 Qt 关键字（#define emit）。
     void appendText(const std::string& text);
+    void publishControllerPositions();
 
     ACSMotionControl*  m_acs{nullptr};
     AxisMap            m_axisMap;
+    PositionObserver   m_positionObserver;
     ProcessInterruptContext* m_token{nullptr};
     double m_lastR1{0.0};
     double m_lastR2{0.0};
     bool   m_hasLastR1{false};
     bool   m_hasLastR2{false};
+    QElapsedTimer m_positionPublishTimer;
 };
 
 } // namespace lcnc::process

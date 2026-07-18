@@ -261,6 +261,13 @@ MainWindow::MainWindow(QWidget* parent)
                 showWorkpieceView();
                 scheduleRecentThumbnailCapture(filePath);
             });
+        connect(project, &lcnc::LcncProjectManager::projectMachineConfigurationMismatch,
+            this, [this](const QString& filePath, const QString&, const QString&) {
+                QMessageBox::warning(this, tr("机台构型不匹配"),
+                    tr("工程“%1”保存时使用的机台构型与当前机台不一致。"
+                       "可以继续查看或仿真，但真实加工已被禁止；请确认机台、轴映射和安全 IO 后重新保存工程。")
+                        .arg(QFileInfo(filePath).fileName()));
+            });
         connect(project, &lcnc::LcncProjectManager::projectSaved,
             this, [this](const QString& filePath) {
                 addRecentFile(filePath);
@@ -298,7 +305,7 @@ MainWindow::MainWindow(QWidget* parent)
                 lcnc::view::WorldAxesRenderer::instance().detach(gd->scene());
                 removeWorkspaceOccView(id);
             });
-        connect(guiApp, &GuiApplication::activeGuiDocumentChanged,
+        connect(guiApp, &GuiApplication::activeWorkspaceDocumentChanged,
             this, [this](ProjectWorkspaceId id, GuiDocument* gd) {
                 activateWorkspaceOccView(id, gd);
                 if (gd && gd->scene()) {
@@ -1682,7 +1689,7 @@ void MainWindow::onProjectDomainChanged(lcnc::ProjectDomain domain)
         if (LcncDocument* doc = m_appContext->cadModule()->workpieceDocument())
             m_sbDocName->setText(doc->name());
         m_appContext->camModule()->autoInstallCurrentWorkpiece();
-        if (auto* gd = m_appContext->camModule()->workspaceGuiDocument()) {
+        if (auto* gd = m_appContext->camModule()->activeGuiDocument()) {
             auto* project = lcnc::Kernel::current().projectManager();
             activateWorkspaceOccView(project ? project->activeWorkspaceId() : kInvalidProjectWorkspaceId, gd);
         }
@@ -2269,7 +2276,7 @@ void MainWindow::selectProjectExplorerEntries(DocumentId docId, const QStringLis
 void MainWindow::highlightContourInView(int contourIndex)
 {
     CamModule* cam = m_appContext ? m_appContext->camModule() : nullptr;
-    GuiDocument* gd = cam ? cam->workspaceGuiDocument() : nullptr;
+    GuiDocument* gd = cam ? cam->activeGuiDocument() : nullptr;
     if (!gd || gd->context().IsNull())
         return;
 
@@ -2417,7 +2424,7 @@ void MainWindow::applyPersistedViewState()
         aShade->setChecked(true);
     }
     if (auto* gd = m_appContext && m_appContext->camModule()
-            ? m_appContext->camModule()->workspaceGuiDocument()
+            ? m_appContext->camModule()->activeGuiDocument()
             : nullptr) {
         if (gd->renderingManager())
             gd->renderingManager()->setRuntimeDisplayMode(state.displayMode, state.faceBoundary);
@@ -2427,7 +2434,7 @@ void MainWindow::applyPersistedViewState()
         worldAxes->setChecked(state.worldAxesVisible);
         auto& renderer = lcnc::view::WorldAxesRenderer::instance();
         if (auto* guiApp = lcnc::Kernel::current().guiApp()) {
-            if (auto* workspace = guiApp->workspaceGuiDocument(); workspace && workspace->scene())
+            if (auto* workspace = guiApp->activeGuiDocument(); workspace && workspace->scene())
                 renderer.attach(workspace->scene());
         }
         renderer.setGloballyVisible(state.worldAxesVisible);
@@ -2620,7 +2627,7 @@ void MainWindow::captureRecentThumbnail(const QString& filePath)
 
     const QString path = recentThumbnailPath(filePath);
     auto* gd = m_appContext && m_appContext->camModule()
-        ? m_appContext->camModule()->workspaceGuiDocument()
+        ? m_appContext->camModule()->activeGuiDocument()
         : nullptr;
     const bool saved = gd && gd->dumpWorkpiecePreview(path, 336, 236);
     if (saved) {
@@ -2635,7 +2642,7 @@ void MainWindow::showMachineView()
     LCNC_DEBUG(lcnc::LogCode::Generic, "MainWindow::showMachineView");
     m_machineWorkspaceActive = true;
     auto* project = lcnc::Kernel::current().projectManager();
-    if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
+    if (auto* gd = m_appContext->camModule()->activeGuiDocument())
         activateWorkspaceOccView(project ? project->activeWorkspaceId() : kInvalidProjectWorkspaceId, gd);
     else
         showDefaultOccView();
@@ -2655,7 +2662,7 @@ void MainWindow::showWorkpieceView(DocumentId id)
     m_machineWorkspaceActive = false;
 
     auto* project = lcnc::Kernel::current().projectManager();
-    if (auto* gd = m_appContext->camModule()->workspaceGuiDocument())
+    if (auto* gd = m_appContext->camModule()->activeGuiDocument())
         activateWorkspaceOccView(project ? project->activeWorkspaceId() : kInvalidProjectWorkspaceId, gd);
     else
         showDefaultOccView();

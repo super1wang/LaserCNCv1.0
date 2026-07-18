@@ -4,7 +4,9 @@
 #include <QString>
 #include <QVector>
 #include <QMutex>
+#include <QThread>
 #include "windows.h"
+#include <atomic>
 #include <string>
 #include "MessageCode.h"
 #include "toml.hpp"
@@ -66,7 +68,7 @@ public:
 
 
 protected:
-	bool                m_bConnected;
+	std::atomic_bool    m_bConnected{false};
 	QString             m_qstrPort;
 	DWORD               m_dwBaudRate;
 	int                 m_iDataBits;
@@ -78,4 +80,5 @@ protected:
 
 private:
 	QSerialPort*		port;
+	QThread             m_ioThread;
 };

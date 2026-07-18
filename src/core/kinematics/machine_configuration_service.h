@@ -59,6 +59,8 @@ public:
 
     MachineToolpathAlgorithm toolpathAlgorithm() const;
     QString toolpathAlgorithmText() const { return machineToolpathAlgorithmName(toolpathAlgorithm()); }
+    /// Stable SHA-256 identity of the effective preset and axis runtime configuration.
+    QString configurationFingerprint() const;
 
     void syncFromKinematics(const MachineKinematics* kinematics);
 

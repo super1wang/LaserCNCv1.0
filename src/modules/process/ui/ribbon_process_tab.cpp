@@ -26,8 +26,8 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdSaveProcess>(CmdSaveProcess::Name);
     container->addCommand<CmdOpenProcessSettings>(CmdOpenProcessSettings::Name);
 
-    container->addCommand<CmdConnectController>(CmdConnectController::Name);
-    container->addCommand<CmdDisconnectController>(CmdDisconnectController::Name);
+    container->addCommand<CmdConnectDevices>(CmdConnectDevices::Name);
+    container->addCommand<CmdDisconnectDevices>(CmdDisconnectDevices::Name);
 
     container->addCommand<CmdRunStart>(CmdRunStart::Name);
     container->addCommand<CmdRunPause>(CmdRunPause::Name);
@@ -52,9 +52,9 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     // ── 连接 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelConn = cat->addPanel(QObject::tr("连接"));
-    panelConn->addLargeAction(container->findAction(CmdConnectController::Name));
+    panelConn->addLargeAction(container->findAction(CmdConnectDevices::Name));
     panelConn->addLargeAction(container->findAction(CmdHome::Name));
-    panelConn->addLargeAction(container->findAction(CmdDisconnectController::Name));
+    panelConn->addLargeAction(container->findAction(CmdDisconnectDevices::Name));
 
     // ── 流程 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelProc = cat->addPanel(QObject::tr("流程"));

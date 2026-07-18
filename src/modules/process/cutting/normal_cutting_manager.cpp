@@ -145,6 +145,10 @@ bool NormalCuttingManager::run(const QString& nodeId,
                                 ProcessInterruptContext* interrupt,
                                 QString* errorMessage)
 {
+    // ACS/GTN buffered execution must not race status polling, reconnect, or
+    // interactive motion. The recursive lease also permits Service helpers.
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     ProcessInterruptContext localFallback;
     ProcessInterruptContext& ic = interrupt ? *interrupt : localFallback;
 

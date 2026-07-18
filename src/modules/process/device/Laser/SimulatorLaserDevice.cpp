@@ -1,6 +1,6 @@
 #include "SimulatorLaserDevice.h"
 
-SimulatorLaserDevice::SimulatorLaserDevice() : m_strName("Simulator"), m_bIsInited(false)
+SimulatorLaserDevice::SimulatorLaserDevice(lcnc::process::ProcessSettingsService& settings) : LaserDevice(settings), m_strName("Simulator"), m_bIsInited(false)
 											, m_dMaxCurrent(0), m_dSimmerCurrent(0), m_iWaveShape(0)
 {
 	m_qstrPort		= "COM1";
@@ -61,22 +61,22 @@ bool SimulatorLaserDevice::IsInited()
 
 bool SimulatorLaserDevice::StartLaser()
 {
-	return WriteData("StartLaser");
+	return IsConnected();
 }
 
 bool SimulatorLaserDevice::StopLaser()
 {
-	return WriteData("StopLaser");
+	return IsConnected();
 }
 
 bool SimulatorLaserDevice::StartAimingBeam()
 {
-	return WriteData("StartAimingBeam");
+	return IsConnected();
 }
 
 bool SimulatorLaserDevice::StopAimingBeam()
 {
-	return WriteData("StopAimingBeam");
+	return IsConnected();
 }
 
 bool SimulatorLaserDevice::SetEnergy(double dEnergy)

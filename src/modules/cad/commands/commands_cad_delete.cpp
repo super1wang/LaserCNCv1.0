@@ -174,11 +174,11 @@ void CmdExplodeShape::execute()
 
     Hit hit = tryFind(context()->machineDocument(),
                       LcncDocument::EntityKind::Machine,
-                      context()->workspaceGuiDocument());
+                      context()->activeGuiDocument());
     if (!hit.doc) {
         hit = tryFind(context()->workpieceDocument(),
                       LcncDocument::EntityKind::Workpiece,
-                      context()->workspaceGuiDocument());
+                      context()->activeGuiDocument());
     }
 
     if (!hit.doc) {

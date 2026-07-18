@@ -1,0 +1,34 @@
+[CmdletBinding()]
+param([Parameter(Mandatory = $true)][string]$Root)
+
+$ErrorActionPreference = 'Stop'
+$rootPath = (Resolve-Path -LiteralPath $Root).Path
+$srcPath = Join-Path $rootPath 'src'
+$violations = [System.Collections.Generic.List[string]]::new()
+
+function Find-ForbiddenInclude([string]$Path, [string]$Pattern, [string]$Rule) {
+    Get-ChildItem -LiteralPath $Path -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
+        foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern $Pattern)) {
+            $violations.Add("${Rule}: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+        }
+    }
+}
+
+Find-ForbiddenInclude (Join-Path $srcPath 'core') '#\s*include\s*[<"](?:view|modules|app)/' 'core may not depend on view/modules/app'
+Find-ForbiddenInclude (Join-Path $srcPath 'view') '#\s*include\s*[<"](?:modules|app)/' 'view may not depend on modules/app'
+Find-ForbiddenInclude (Join-Path $srcPath 'modules/process') '#\s*include\s*[<"](?:TopoDS|AIS_|gp_|Geom_|BRep|XCAF)' 'Process may not include OCC types'
+
+Get-ChildItem -LiteralPath $srcPath -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
+    foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern '\b(projectDocument|workspaceGuiDocument|ensureProjectDocument|sourceDocument)\s*\(')) {
+        $violations.Add("retired document API: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+    }
+}
+
+$cmake = Get-Content -LiteralPath (Join-Path $rootPath 'CMakeLists.txt') -Raw
+Get-ChildItem -LiteralPath $srcPath -Recurse -File -Filter *.cpp | ForEach-Object {
+    $relative = $_.FullName.Substring($rootPath.Length + 1).Replace('\', '/')
+    if (-not $cmake.Contains($relative)) { $violations.Add("orphan source not listed in CMakeLists.txt: $relative") }
+}
+
+if ($violations.Count -gt 0) { $violations | ForEach-Object { Write-Error $_ }; exit 1 }
+Write-Host 'Architecture checks passed.'

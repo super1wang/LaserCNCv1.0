@@ -57,6 +57,11 @@ public:
     const LcncProjectManifest& manifest() const { return m_manifest; }
     void setManifest(const LcncProjectManifest& manifest) { m_manifest = manifest; }
 
+    /// A project opened on a different machine may be inspected or simulated,
+    /// but real machining must be gated until its configuration is reviewed.
+    bool machineConfigurationCompatible() const { return m_machineConfigurationCompatible; }
+    void setMachineConfigurationCompatible(bool compatible) { m_machineConfigurationCompatible = compatible; }
+
     ProjectSaveOptions& saveOptions() { return m_saveOptions; }
     const ProjectSaveOptions& saveOptions() const { return m_saveOptions; }
     void setSaveOptions(const ProjectSaveOptions& options) { m_saveOptions = options; }
@@ -82,6 +87,7 @@ private:
     QString m_projectPath;
     LcncProjectManifest m_manifest;
     ProjectSaveOptions m_saveOptions;
+    bool m_machineConfigurationCompatible{true};
 
     WorkpieceProjectState m_workpiece;
     CamProjectState m_cam;

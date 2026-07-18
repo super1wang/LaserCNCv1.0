@@ -26,7 +26,8 @@ namespace {
 
 QStringList ioNames(ProcessIoBucket bucket)
 {
-    if (auto* settings = ProcessSettingsService::current()) return settings->ioDisplayNames(bucket);
+    if (const auto* settings = ProcessStepRegistry::instance().settingsService())
+        return settings->ioDisplayNames(bucket);
     return {};
 }
 

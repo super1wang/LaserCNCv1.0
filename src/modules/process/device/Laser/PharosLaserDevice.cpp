@@ -1,5 +1,5 @@
 #include "PharosLaserDevice.h"
-#include "LogModule.h"
+#include "process_log_compat.h"
 
 #include <QDateTime>
 #include <QJsonDocument>
@@ -34,8 +34,9 @@ namespace
 	}
 }
 
-PharosLaserDevice::PharosLaserDevice()
-	: m_httpClient()
+PharosLaserDevice::PharosLaserDevice(lcnc::process::ProcessSettingsService& settings)
+	: LaserDevice(settings)
+	, m_httpClient()
 	, m_strName("Pharos")
 	, m_bIsInited(false)
 	, m_communicationConfig()

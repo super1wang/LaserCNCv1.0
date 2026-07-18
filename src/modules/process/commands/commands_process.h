@@ -113,21 +113,21 @@ public:
 };
 
 /// 异步连接当前已启用的全部外设（运动控制器、激光器等）。
-class CmdConnectController : public CommandBase {
+class CmdConnectDevices : public CommandBase {
     Q_OBJECT
 public:
-    inline static const QString Name = "process.connectController";
-    explicit CmdConnectController(IAppContext* ctx);
+    inline static const QString Name = "process.connectDevices";
+    explicit CmdConnectDevices(IAppContext* ctx);
     void execute() override;
     bool isEnabled() const override;
 };
 
 /// 异步断开当前已连接的全部外设。
-class CmdDisconnectController : public CommandBase {
+class CmdDisconnectDevices : public CommandBase {
     Q_OBJECT
 public:
-    inline static const QString Name = "process.disconnectController";
-    explicit CmdDisconnectController(IAppContext* ctx);
+    inline static const QString Name = "process.disconnectDevices";
+    explicit CmdDisconnectDevices(IAppContext* ctx);
     void execute() override;
     bool isEnabled() const override;
 };

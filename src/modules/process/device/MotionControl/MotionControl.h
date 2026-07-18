@@ -6,7 +6,8 @@
 #include "ToolFactory.h"
 #include "DataType.h"
 #include "toml.hpp"
-#include "MessageModule.h"
+
+namespace lcnc::process { class ProcessSettingsService; class ProcessRuntimeConfiguration; }
 
 using std::vector;
 using std::string;
@@ -38,6 +39,11 @@ struct AnalogIOData
 
 class MotionControl
 {
+protected:
+    MotionControl(lcnc::process::ProcessSettingsService& settings,
+                  lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
+        : m_settings(settings), m_runtimeConfiguration(runtimeConfiguration) {}
+
 public:
 	vector<Axis>					m_vecMotors;
 
@@ -58,6 +64,8 @@ public:
 	virtual ~MotionControl() = default;
 
 protected:
+	lcnc::process::ProcessSettingsService& m_settings;
+	lcnc::process::ProcessRuntimeConfiguration& m_runtimeConfiguration;
 	void rebuildIOMap(int iType);
 
 public:

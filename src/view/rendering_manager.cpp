@@ -233,7 +233,7 @@ void RenderingManager::applyDocumentStyles(const QMap<QString, Handle(AIS_Shape)
     if (!m_document || !m_document->scene())
         return;
 
-    LcncDocument* doc = m_document->sourceDocument();
+    LcncDocument* doc = m_document->document();
     if (!doc)
         return;
 

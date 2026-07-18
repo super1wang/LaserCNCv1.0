@@ -18,7 +18,8 @@ param(
     [ValidateSet("debug","release")]
     [string]$Config = "debug",
     [string]$AcsDllDebug   = "F:\wangchao\Axis4-3D\trunk\bin\Debug\ACSCL_x64.dll",
-    [string]$AcsDllRelease = "F:\wangchao\Axis4-3D\trunk\bin\Release\ACSCL_x64.dll"
+    [string]$AcsDllRelease = "F:\wangchao\Axis4-3D\trunk\bin\Release\ACSCL_x64.dll",
+    [string]$TbbBinDir     = "C:\work\occt\3rdparty-vc14-64\tbb-2021.13.0-x64\bin"
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +54,16 @@ if (Test-Path $AcsDll) {
     Copy-Item -Force $AcsDll $BuildDir
 } else {
     Write-Warning "ACSCL_x64.dll not found at $AcsDll — skipping"
+}
+
+Write-Host "== Step 3b: ensure OpenCASCADE TBB runtime present in $BuildDir =="
+$tbbNames = if ($IsDebug) { @("tbb12_debug.dll", "tbbmalloc_debug.dll") } else { @("tbb12.dll", "tbbmalloc.dll") }
+foreach ($tbbName in $tbbNames) {
+    $tbbSource = Join-Path $TbbBinDir $tbbName
+    if (-not (Test-Path $tbbSource)) {
+        throw "OpenCASCADE runtime dependency not found: $tbbSource. Set -TbbBinDir to the matching TBB bin directory."
+    }
+    Copy-Item -Force $tbbSource $BuildDir
 }
 
 Write-Host "== Step 4: mirror DLLs and Qt plugin subdirs into 3rd/runtime/bin_$Config =="

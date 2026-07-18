@@ -37,7 +37,6 @@ struct ProcessLayerJob
     QString       layerName;        ///< 从 CAM 拷过来的镜像名，作为 fallback / 显示
     QString       toolName;         ///< 绑定的工具名（ToolFactory::GetTool 可识别）
     bool          enabled{true};    ///< 是否参与本次切割（独立于 CAM 的图层 enabled）
-    int           order{0};         ///< @deprecated Phase B：保留字段供旧调用方读，不参与排序。
     QString       compensationIndex;///< 该图层默认的补偿索引（可被节点参数覆盖）
     /// 该图层中要参与切割的轮廓子集。
     /// 空 = 全选（兼容老配置 + 默认行为）；非空 = 仅包含集合内的 contourId。
@@ -59,7 +58,7 @@ CuttingPlanSortStrategy sortStrategyFromString(const QString& s,
  * @brief Process 模块的项目级"加工链表管理服务"。
  *
  * Phase B 起：本服务**不再持有任何图层级状态**，所有 toolName/enabled/manual
- * order/sort strategy/included contours 都从 ICamLayerProvider 拉取或写回，
+ * sort strategy/included contours 都从 ICamLayerProvider 拉取或写回，
  * 切割链表的构建逻辑（buildCuttingList）仍留在 Process 侧，但只是 CAM 视图。
  *
  * 持久化策略：本服务不写任何项目文件。CAM 工艺/排序状态由 core 的 cam_toolpath_io

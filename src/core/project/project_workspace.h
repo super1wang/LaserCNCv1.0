@@ -26,8 +26,6 @@ public:
 
     ProjectWorkspaceId id() const { return m_id; }
 
-    LcncDocument*       projectDocument() { return m_projectDocument.get(); }
-    const LcncDocument* projectDocument() const { return m_projectDocument.get(); }
     LcncDocument*       workpieceDocument() { return m_projectDocument.get(); }
     const LcncDocument* workpieceDocument() const { return m_projectDocument.get(); }
     LcncDocument*       camDocument() { return m_projectDocument.get(); }

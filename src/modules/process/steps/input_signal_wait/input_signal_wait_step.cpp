@@ -1,6 +1,7 @@
 #include "modules/process/steps/input_signal_wait/input_signal_wait_step.h"
 
 #include "modules/process/settings/process_settings_service.h"
+#include "modules/process/steps/process_step_registry.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -15,7 +16,7 @@ namespace lcnc::process {
 namespace {
 constexpr char kSignalType[]="signalType"; constexpr char kIoName[]="ioName"; constexpr char kTarget[]="targetValue"; constexpr char kTimeout[]="timeoutMs"; constexpr char kPoll[]="pollIntervalMs"; constexpr char kTypeCombo[]="signalTypeBox"; constexpr char kIoCombo[]="ioNameBox"; constexpr char kTargetCheck[]="targetCheck"; constexpr char kTimeoutSpin[]="timeoutSpin"; constexpr char kPollSpin[]="pollSpin";
 QString ioKeyFromDisplay(const QString& display){ const int l=display.lastIndexOf('('), r=display.lastIndexOf(')'); return (l>=0&&r>l)?display.mid(l+1,r-l-1):display; }
-void refill(QComboBox* box, const QString& type){ box->clear(); if (auto* settings=ProcessSettingsService::current()) box->addItems(settings->ioDisplayNames(type==QStringLiteral("analog")?ProcessIoBucket::AnalogInput:ProcessIoBucket::DigitalInput)); }
+void refill(QComboBox* box, const QString& type){ box->clear(); if (const auto* settings=ProcessStepRegistry::instance().settingsService()) box->addItems(settings->ioDisplayNames(type==QStringLiteral("analog")?ProcessIoBucket::AnalogInput:ProcessIoBucket::DigitalInput)); }
 }
 
 ProcessNodeDescriptor InputSignalWaitStep::descriptor() const{ ProcessNodeDescriptor d; d.type=ProcessNodeType::InputSignalWait; d.displayName=QObject::tr("输入信号"); d.category=QObject::tr("IO"); d.executorKey=QStringLiteral("inputSignalWait"); d.defaultParameters.insert(QString::fromLatin1(kSignalType), QStringLiteral("digital")); d.defaultParameters.insert(QString::fromLatin1(kIoName), QStringLiteral("aStart")); d.defaultParameters.insert(QString::fromLatin1(kTarget), true); d.defaultParameters.insert(QString::fromLatin1(kTimeout), 5000); d.defaultParameters.insert(QString::fromLatin1(kPoll), 100); return d; }

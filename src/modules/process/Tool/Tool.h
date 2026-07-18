@@ -12,6 +12,8 @@ public:
 	/// 从工具的 TOML 表反序列化到本对象。表中找不到的键保持成员的默认值（已在类内初始化）。
 	/// 返回写入字段数，便于排查未匹配的键。
 	int SetFromTable(const ::toml::table& tab);
+	/// Serialize all parameters consumed by SetFromTable for project snapshots.
+	::toml::table toTable() const;
 
 	Tool & operator = (const Tool& _Tool){
 		m_strName					= _Tool.m_strName;					// 工具名
@@ -45,6 +47,7 @@ public:
 		m_dLaserAttenuatorPercentage = _Tool.m_dLaserAttenuatorPercentage;
 		m_dLaserPpDivider		= _Tool.m_dLaserPpDivider;
 		m_iLaserDelay			= _Tool.m_iLaserDelay;
+		m_dAnalogValue			= _Tool.m_dAnalogValue;
 		m_dRadius					= _Tool.m_dRadius;					// 光斑补偿半径
 		m_strOffsetType				= _Tool.m_strOffsetType;			//补偿类型
 		m_dOffsetDiameter			= _Tool.m_dOffsetDiameter;			//补偿光斑直径

@@ -11,7 +11,7 @@
 using std::ostringstream;
 using namespace std;
 
-AnalogLaserDevice::AnalogLaserDevice() : m_strName("AnalogControl"), m_bIsInited(false), m_dMaxCurrent(0),
+AnalogLaserDevice::AnalogLaserDevice(lcnc::process::ProcessSettingsService& settings) : LaserDevice(settings), m_strName("AnalogControl"), m_bIsInited(false), m_dMaxCurrent(0),
                                    m_dSimmerCurrent(0), m_iWaveShape(0), m_strTemperature("")
 {
 }

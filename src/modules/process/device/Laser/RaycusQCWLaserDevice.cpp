@@ -3,6 +3,7 @@
 /************************************************************************/
 
 #include "RaycusQCWLaserDevice.h"
+#include "MessageModule.h"
 #include <string>
 #include <stdlib.h>
 #include <sstream>
@@ -10,7 +11,7 @@
 using std::ostringstream;
 using namespace std;
 
-RaycusQCWLaserDevice::RaycusQCWLaserDevice() : m_strName("RaycusQCW"), m_bIsInited(false),
+RaycusQCWLaserDevice::RaycusQCWLaserDevice(lcnc::process::ProcessSettingsService& settings) : LaserDevice(settings), m_strName("RaycusQCW"), m_bIsInited(false),
 m_dMaxCurrent(0), m_dSimmerCurrent(0), m_iWaveShape(0)
 {
 }

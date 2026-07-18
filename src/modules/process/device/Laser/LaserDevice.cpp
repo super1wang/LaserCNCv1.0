@@ -5,6 +5,8 @@
 
 #include "LaserDevice.h"
 
+// Configuration access is provided by LaserDevice's injected settings reference.
+
 double LaserDevice::m_dEnergy		= 0.0;
 double LaserDevice::m_dFrequency	= 0.0;
 double LaserDevice::m_dPulseWidth	= 0.0;

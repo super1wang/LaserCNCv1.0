@@ -3,6 +3,7 @@
 #include "core/logging/logger.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 
@@ -247,6 +248,34 @@ MachineToolpathAlgorithm MachineConfigurationService::toolpathAlgorithm() const
     if (preset.contains(QStringLiteral("HEAD")))
         return MachineToolpathAlgorithm::FiveAxisHead;
     return MachineToolpathAlgorithm::FiveAxisTable;
+}
+
+QString MachineConfigurationService::configurationFingerprint() const
+{
+    QByteArray payload = m_presetName.toUtf8();
+    for (const MachineAxisRuntimeConfig& config : m_axisConfigs) {
+        const MachineAxisDef& axis = config.axis;
+        payload += '|';
+        payload += axis.name.toUtf8();
+        payload += QByteArray::number(static_cast<int>(axis.motionType));
+        payload += axis.parentAxis.toUtf8();
+        payload += QByteArray::number(axis.direction.X(), 'g', 17);
+        payload += QByteArray::number(axis.direction.Y(), 'g', 17);
+        payload += QByteArray::number(axis.direction.Z(), 'g', 17);
+        payload += QByteArray::number(axis.origin.X(), 'g', 17);
+        payload += QByteArray::number(axis.origin.Y(), 'g', 17);
+        payload += QByteArray::number(axis.origin.Z(), 'g', 17);
+        payload += QByteArray::number(axis.minVal, 'g', 17);
+        payload += QByteArray::number(axis.maxVal, 'g', 17);
+        payload += QByteArray::number(config.controllerIndex);
+        payload += QByteArray::number(config.homeIndex);
+        payload += QByteArray::number(config.resolution, 'g', 17);
+        payload += QByteArray::number(config.motionSpeed, 'g', 17);
+        payload += QByteArray::number(config.acceleration, 'g', 17);
+        payload += QByteArray::number(config.jerk, 'g', 17);
+        payload += QByteArray::number(config.pipeDiameter, 'g', 17);
+    }
+    return QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex());
 }
 
 void MachineConfigurationService::syncFromKinematics(const MachineKinematics* kinematics)

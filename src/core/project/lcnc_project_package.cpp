@@ -7,10 +7,16 @@
 #include "core/project/cam/cam_toolpath_io.h"
 
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 #include <JlCompress.h>
 
@@ -27,6 +33,12 @@
 #include <XmlXCAFDrivers.hxx>
 
 namespace {
+
+lcnc::ProjectPackageExtension& packageExtension()
+{
+    static lcnc::ProjectPackageExtension extension;
+    return extension;
+}
 
 bool isManifestFile(const QFileInfo& info)
 {
@@ -56,30 +68,59 @@ bool archiveDirectoryToZip(const QString& sourceDir, const QString& archivePath,
         return false;
     }
 
-    // 覆盖式写入：先删旧包，避免 QuaZip 追加/残留。
-    if (QFileInfo::exists(archivePath) && !QFile::remove(archivePath)) {
-        if (errorMsg)
-            *errorMsg = QStringLiteral("无法覆盖已有项目包: %1").arg(archivePath);
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "Failed to remove existing package '{}'",
-                 archivePath.toStdString());
-        return false;
+    QString stagingPath;
+    {
+        // QTemporaryFile retains a Windows handle until destruction.  Merely
+        // calling close() is insufficient for the subsequent MoveFileExW on
+        // some filesystems, so destroy it before QuaZip creates the archive.
+        QTemporaryFile staging(QDir(targetInfo.absolutePath()).filePath(
+            QStringLiteral(".%1.staging.XXXXXX").arg(targetInfo.fileName())));
+        staging.setAutoRemove(false);
+        if (!staging.open()) {
+            if (errorMsg)
+                *errorMsg = QStringLiteral("无法创建项目包临时文件: %1").arg(archivePath);
+            return false;
+        }
+        stagingPath = staging.fileName();
+        staging.close();
     }
+    QFile::remove(stagingPath); // QuaZip requires a path it can create itself.
 
     LCNC_DEBUG(lcnc::LogCode::Generic,
-               "Archiving .lcnc staging dir source='{}' target='{}' (QuaZip)",
+               "Archiving .lcnc staging dir source='{}' staging='{}' (QuaZip)",
                sourceDir.toStdString(),
-               archivePath.toStdString());
+               stagingPath.toStdString());
 
-    if (!JlCompress::compressDir(archivePath, sourceDir, /*recursive=*/true)) {
+    if (!JlCompress::compressDir(stagingPath, sourceDir, /*recursive=*/true)) {
         if (errorMsg)
             *errorMsg = QStringLiteral("打包 .lcnc 项目失败: %1").arg(archivePath);
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "QuaZip compressDir failed source='{}' target='{}'",
-                 sourceDir.toStdString(), archivePath.toStdString());
-        QFile::remove(archivePath); // 清理可能的半成品
+                 "QuaZip compressDir failed source='{}' staging='{}'",
+                 sourceDir.toStdString(), stagingPath.toStdString());
+        QFile::remove(stagingPath);
         return false;
     }
+#ifdef Q_OS_WIN
+    if (!MoveFileExW(reinterpret_cast<LPCWSTR>(stagingPath.utf16()),
+                     reinterpret_cast<LPCWSTR>(archivePath.utf16()),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const DWORD error = GetLastError();
+        QFile::remove(stagingPath);
+        if (errorMsg)
+            *errorMsg = QStringLiteral("原子替换项目包失败(win32=%1): %2").arg(error).arg(archivePath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Atomic project package replace failed target='{}' win32={}",
+                 archivePath.toStdString(), error);
+        return false;
+    }
+#else
+    if (QFileInfo::exists(archivePath) || !QFile::rename(stagingPath, archivePath)) {
+        QFile::remove(stagingPath);
+        if (errorMsg)
+            *errorMsg = QStringLiteral("原子替换项目包失败: %1").arg(archivePath);
+        return false;
+    }
+#endif
     return true;
 }
 
@@ -123,8 +164,9 @@ lcnc::LcncProjectManifest prepareSaveManifest(const LcncDocument& workpieceDocum
 
     if (manifest.schema.trimmed().isEmpty())
         manifest.schema = QStringLiteral("lcnc.project");
-    if (manifest.formatVersion <= 0)
-        manifest.formatVersion = lcnc::LcncProjectManifest::kCurrentFormatVersion;
+    // Every write uses the current format. Older manifests are accepted only by the
+    // standalone upgrader and must not preserve their on-disk format.
+    manifest.formatVersion = lcnc::LcncProjectManifest::kCurrentFormatVersion;
     if (manifest.projectName.trimmed().isEmpty())
         manifest.projectName = fallbackName;
     if (manifest.documentName.trimmed().isEmpty())
@@ -139,6 +181,13 @@ lcnc::LcncProjectManifest prepareSaveManifest(const LcncDocument& workpieceDocum
     if (manifest.createdUtc.trimmed().isEmpty())
         manifest.createdUtc = now;
     manifest.savedUtc = now;
+    if (manifest.softwareVersion.trimmed().isEmpty())
+        manifest.softwareVersion = QCoreApplication::applicationVersion().isEmpty()
+            ? QStringLiteral("1.0.0") : QCoreApplication::applicationVersion();
+    if (manifest.configurationSchemaVersion.trimmed().isEmpty())
+        manifest.configurationSchemaVersion = QStringLiteral("1");
+    if (manifest.toolpathAlgorithmVersion.trimmed().isEmpty())
+        manifest.toolpathAlgorithmVersion = QStringLiteral("1");
     return manifest;
 }
 
@@ -246,7 +295,12 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
     const PCDM_ReaderStatus status = app->Open(occPath(xcafPath), xdeDoc);
     if (status != PCDM_RS_OK || xdeDoc.IsNull()) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("读取项目 XCAF 失败: %1").arg(xcafPath);
+            *errorMsg = QStringLiteral("读取项目 XCAF 失败(status=%1): %2")
+                            .arg(static_cast<int>(status))
+                            .arg(xcafPath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Failed to open XCAF snapshot '{}' status={}",
+                 xcafPath.toStdString(), static_cast<int>(status));
         return false;
     }
 
@@ -295,12 +349,22 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
                   "loadXcafSnapshot: v1 migration machine={} cam_discarded={}",
                   migratedMachine, discardedCam);
     }
+    // Open() registers a temporary document with the XCAF application. All
+    // shapes above have been copied into project-owned documents, so retaining
+    // this handle would leak application state and eventually make repeated
+    // project loads fail.
+    app->Close(xdeDoc);
     return true;
 }
 
 } // namespace
 
 namespace lcnc {
+
+void LcncProjectPackage::setExtension(ProjectPackageExtension extension)
+{
+    packageExtension() = std::move(extension);
+}
 
 bool LcncProjectPackage::isProjectPath(const QString& path)
 {
@@ -437,6 +501,18 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
                       "Failed to save CAM toolpath into package '{}': {}",
                       packagePath.toStdString(), camErr.toStdString());
     }
+    if (const auto& extension = packageExtension(); extension.write
+        && !extension.write(packagePath, manifest, errorMsg))
+        return false;
+    if (manifest.formatVersion >= 4
+        && !QFileInfo::exists(packageDir.filePath(manifest.toolSnapshotPath))) {
+        if (errorMsg)
+            *errorMsg = QStringLiteral("v4 工程缺少项目工具快照: %1").arg(manifest.toolSnapshotPath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Refusing to save v4 package without tool snapshot path='{}'",
+                 manifest.toolSnapshotPath.toStdString());
+        return false;
+    }
 
     if (writeArchive && !archiveDirectoryToZip(packagePath, targetInfo.absoluteFilePath(), errorMsg))
         return false;
@@ -467,6 +543,31 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
                               QString* errorMsg,
                               lcnc::cam::CamDataManager* camData)
 {
+    return loadInternal(workpieceDocument, machineDocument, camDocument,
+                        path, result, errorMsg, camData, false);
+}
+
+bool LcncProjectPackage::loadForMigration(LcncDocument& workpieceDocument,
+                                          LcncDocument* machineDocument,
+                                          LcncDocument* camDocument,
+                                          const QString& path,
+                                          ProjectLoadResult* result,
+                                          QString* errorMsg,
+                                          lcnc::cam::CamDataManager* camData)
+{
+    return loadInternal(workpieceDocument, machineDocument, camDocument,
+                        path, result, errorMsg, camData, true);
+}
+
+bool LcncProjectPackage::loadInternal(LcncDocument& workpieceDocument,
+                                      LcncDocument* machineDocument,
+                                      LcncDocument* camDocument,
+                                      const QString& path,
+                                      ProjectLoadResult* result,
+                                      QString* errorMsg,
+                                      lcnc::cam::CamDataManager* camData,
+                                      bool allowLegacyFormat)
+{
     const QFileInfo inputInfo(path);
     const bool readArchive = isArchiveFile(inputInfo);
 
@@ -495,10 +596,19 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
                  manifestFile.toStdString());
         return false;
     }
-    if (!manifest.validate(errorMsg)) {
+    if (!manifest.validate(errorMsg, allowLegacyFormat)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Invalid .lcnc manifest '{}'",
                  manifestFile.toStdString());
+        return false;
+    }
+    if (manifest.formatVersion >= 4
+        && !QFileInfo::exists(QDir(packagePath).filePath(manifest.toolSnapshotPath))) {
+        if (errorMsg)
+            *errorMsg = QStringLiteral("项目缺少 v4 工具快照: %1").arg(manifest.toolSnapshotPath);
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Missing required v4 tool snapshot '{}' in package '{}'",
+                 manifest.toolSnapshotPath.toStdString(), packagePath.toStdString());
         return false;
     }
 
@@ -526,12 +636,16 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
             LCNC_INFO(lcnc::LogCode::Generic,
                       "No CAM toolpath in package '{}' ({})",
                       packagePath.toStdString(), camErr.toStdString());
-        // v1 旧档 process_cutting_plan.toml → CAM 容器的一次性迁移（包内）。
-        if (!lcnc::cam::migrateLegacyProcessCuttingPlan(*camData, packagePath, &camErr))
+        // Legacy cutting plans are migration-only input and must never be
+        // consumed by the desktop application.
+        if (allowLegacyFormat && !lcnc::cam::migrateLegacyProcessCuttingPlan(*camData, packagePath, &camErr))
             LCNC_WARN(lcnc::LogCode::Generic,
                       "v1 cutting-plan migration failed in '{}': {}",
                       packagePath.toStdString(), camErr.toStdString());
     }
+    if (const auto& extension = packageExtension(); extension.read
+        && !extension.read(packagePath, manifest, errorMsg))
+        return false;
 
     if (result) {
         result->manifest = manifest;

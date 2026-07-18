@@ -250,38 +250,38 @@ void CmdHome::execute()
     if (auto* p = processFacade()) p->home();
 }
 
-// ── CmdConnectController ────────────────────────────────────────────────────
-CmdConnectController::CmdConnectController(IAppContext* ctx) : CommandBase(ctx)
+// ── CmdConnectDevices ───────────────────────────────────────────────────────
+CmdConnectDevices::CmdConnectDevices(IAppContext* ctx) : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/connect.svg"), tr("连接设备"), this);
     a->setStatusTip(tr("异步连接全部已配置外设（运动控制器、激光器等）"));
     setAction(a);
 }
-bool CmdConnectController::isEnabled() const
+bool CmdConnectDevices::isEnabled() const
 {
     auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
     return p && !p->isConnected();
 }
-void CmdConnectController::execute()
+void CmdConnectDevices::execute()
 {
     auto* p = processFacade();
     if (!p) return;
     p->connectAllDevices();
 }
 
-// ── CmdDisconnectController ─────────────────────────────────────────────────
-CmdDisconnectController::CmdDisconnectController(IAppContext* ctx) : CommandBase(ctx)
+// ── CmdDisconnectDevices ────────────────────────────────────────────────────
+CmdDisconnectDevices::CmdDisconnectDevices(IAppContext* ctx) : CommandBase(ctx)
 {
     auto* a = new QAction(QIcon(":/icons/disconnect.svg"), tr("断开设备"), this);
     a->setStatusTip(tr("异步断开全部已连接外设"));
     setAction(a);
 }
-bool CmdDisconnectController::isEnabled() const
+bool CmdDisconnectDevices::isEnabled() const
 {
     auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
     return p && p->isConnected();
 }
-void CmdDisconnectController::execute()
+void CmdDisconnectDevices::execute()
 {
     if (auto* p = processFacade()) p->disconnectAllDevices();
 }

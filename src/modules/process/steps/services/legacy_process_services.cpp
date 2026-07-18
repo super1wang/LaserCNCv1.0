@@ -74,6 +74,8 @@ bool LegacyProcessMotionService::moveAxis(const QString& axis,
                                           int timeoutMs,
                                           QString* errorMessage)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     Q_UNUSED(timeoutMs);
     MotionControl* mc = motionControl(m_service, errorMessage);
     if (!mc)
@@ -94,6 +96,8 @@ bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
                                           int timeoutMs,
                                           QString* errorMessage)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     Q_UNUSED(timeoutMs);
     MotionControl* mc = motionControl(m_service, errorMessage);
     if (!mc)
@@ -146,6 +150,8 @@ bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
 
 bool LegacyProcessMotionService::stopMotion(QString* errorMessage)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     MotionControl* mc = motionControl(m_service, errorMessage);
     if (!mc)
         return false;
@@ -197,6 +203,8 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
                                        int pollIntervalMs,
                                        QString* errorMessage)
 {
+    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                      : Service::DeviceLock{};
     MotionControl* mc = motionControl(m_service, errorMessage);
     if (!mc)
         return false;
@@ -213,16 +221,20 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
     timer.start();
     const int interval = std::clamp(pollIntervalMs, 10, 1000);
     while (timeoutMs <= 0 || timer.elapsed() <= timeoutMs) {
-        if (analog) {
-            double value = 0.0;
-            if (mc->AnalogInputGet(analogEnum.value(), value)
-                && std::abs(value - targetValue.toDouble()) < 1e-6)
-                return true;
-        } else {
-            int value = 0;
-            if (mc->DigitalInputGet(digitalEnum.value(), value)
-                && (value != 0) == targetValue.toBool())
-                return true;
+        {
+            const auto deviceLock = m_service ? m_service->lockDeviceAccess()
+                                              : Service::DeviceLock{};
+            if (analog) {
+                double value = 0.0;
+                if (mc->AnalogInputGet(analogEnum.value(), value)
+                    && std::abs(value - targetValue.toDouble()) < 1e-6)
+                    return true;
+            } else {
+                int value = 0;
+                if (mc->DigitalInputGet(digitalEnum.value(), value)
+                    && (value != 0) == targetValue.toBool())
+                    return true;
+            }
         }
         QThread::msleep(static_cast<unsigned long>(interval));
     }

@@ -98,6 +98,12 @@ signals:
     void workspaceDomainChanged(ProjectWorkspaceId id, lcnc::ProjectDomain domain);
     void projectReset();
     void projectOpened(const QString& filePath);
+    /// Emitted after opening a project saved against a different machine
+    /// configuration. The core does not display UI; consumers decide how to
+    /// present it while Process uses the session compatibility gate.
+    void projectMachineConfigurationMismatch(const QString& filePath,
+                                             const QString& expectedFingerprint,
+                                             const QString& actualFingerprint);
     void projectSaved(const QString& filePath);
     void domainDataChanged(lcnc::ProjectDomain domain);
     void projectDirtyChanged(bool dirty);

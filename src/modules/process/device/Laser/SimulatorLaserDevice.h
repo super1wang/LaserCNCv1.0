@@ -5,7 +5,7 @@
 class   SimulatorLaserDevice : public LaserDevice
 {
 public:
-	SimulatorLaserDevice();
+	explicit SimulatorLaserDevice(lcnc::process::ProcessSettingsService& settings);
 
 	// 仿真激光器不打开真实串口，仅维护连接标志
 	virtual bool			Connect() override;

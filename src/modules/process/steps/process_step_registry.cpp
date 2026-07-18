@@ -81,11 +81,17 @@ bool ProcessStepRegistry::isPluginEnabled(const QString& pluginKey) const
     return pluginKey.trimmed().isEmpty() || !m_disabledPluginKeys.contains(pluginKey.trimmed());
 }
 
+void ProcessStepRegistry::setSettingsService(const ProcessSettingsService* settings)
+{
+    m_settingsService = settings;
+}
+
 void ProcessStepRegistry::clear()
 {
     m_stepsByType.clear();
     m_stepsByExecutorKey.clear();
     m_disabledPluginKeys.clear();
+    m_settingsService = nullptr;
 }
 
 } // namespace lcnc::process

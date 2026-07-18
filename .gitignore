@@ -41,6 +41,7 @@ Makefile
 
 # Runtime scratch files
 /logs/
+/artifacts/
 *.tmp
 *.bak
 .qoder/repowiki/knowledge/zh/_index.yaml

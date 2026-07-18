@@ -30,13 +30,6 @@ public:
     /// 用于让调用方挂接 ProcessModule 的 Qt 信号（statusMessageChanged 等）。
     virtual QObject* asQObject() = 0;
 
-    /// 连接到指定控制器端点（形如 "tcp://127.0.0.1:5000"）。
-    /// 返回是否连接成功。
-    /// @deprecated 请使用 connectAllDevices() 异步连接全部外设。
-    virtual bool connectController(const QString& endpoint) = 0;
-    /// 断开当前控制器连接。
-    /// @deprecated 请使用 disconnectAllDevices() 异步断开全部外设。
-    virtual void disconnectController() = 0;
     virtual bool isConnected() const = 0;
 
     /// 异步连接全部已配置的外设（运动控制器、激光器等）。

@@ -106,7 +106,8 @@ protected:
 private:
 	//string FindAxisSign(MotionControl::Axis);
 public:
-	ACSMotionControl(void);
+	ACSMotionControl(lcnc::process::ProcessSettingsService& settings,
+	                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration);
 	~ACSMotionControl(void);
 
 	//MotionControl基类函数重写

@@ -5,7 +5,8 @@
 #include <fstream>
 //#include "CoreUtils.h"
 #include "bdaqctrl.h"
-#include "LogModule.h"
+#include "process_log_compat.h"
+#include "modules/process/runtime/process_runtime_configuration.h"
 
 using namespace Automation::BDaq;
 
@@ -37,8 +38,10 @@ bool resolveDigital(const std::map<K, DigitalIOData>& m, K key,
 
 } // namespace
 
-ACSMotionControl::ACSMotionControl(void)
-	: m_bConnectFlag(false)
+ACSMotionControl::ACSMotionControl(lcnc::process::ProcessSettingsService& settings,
+	                                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
+	: MotionControl(settings, runtimeConfiguration)
+	, m_bConnectFlag(false)
 	, m_strName("ACS")
 	, m_hHandle(ACSC_INVALID)
 	, m_dPreX(0)
@@ -58,6 +61,8 @@ ACSMotionControl::ACSMotionControl(void)
 
 ACSMotionControl::~ACSMotionControl(void)
 {
+	// Service 正常销毁路径会先断开；析构兜底不能让 SDK 会话遗留。
+	Disconnect();
 }
 
 const string& ACSMotionControl::GetName() const
@@ -112,14 +117,24 @@ bool ACSMotionControl::Connect()
 
 	DeleteOtherConnections();
 	m_hHandle = acsc_OpenCommEthernetTCP((char*)"10.0.0.100", ACSC_SOCKET_STREAM_PORT);
-	acsc_StopBuffer(m_hHandle, ACSC_NONE, NULL);
 	if (m_hHandle == ACSC_INVALID)
 	{
 		LogError();
 		return false;
 	}
-	if (!AfterOpenComm())
+	if (!acsc_StopBuffer(m_hHandle, ACSC_NONE, NULL))
+	{
+		LogError();
+		acsc_CloseComm(m_hHandle);
+		m_hHandle = ACSC_INVALID;
 		return false;
+	}
+	if (!AfterOpenComm())
+	{
+		acsc_CloseComm(m_hHandle);
+		m_hHandle = ACSC_INVALID;
+		return false;
+	}
 
 	setlocale(LC_ALL, "Chinese-simplified");
 	setlocale(LC_ALL, "C");
@@ -130,17 +145,33 @@ bool ACSMotionControl::Connect()
 
 bool ACSMotionControl::Disconnect()
 {
+	if (m_hHandle == ACSC_INVALID)
+	{
+		m_bConnectFlag = false;
+		return true;
+	}
+
+	bool success = true;
 	// 关闭激光
 	if (!acsc_SetOutput(m_hHandle, 0, 4, 0, NULL))
 	{
 		LogError();
-		return false;
+		success = false;
 	}
 
-	StopMotion();
-	do {
+	if (!StopMotion())
+		success = false;
+	constexpr int kStopTimeoutMs = 30000;
+	int waitedMs = 0;
+	while (IsAxisMoving() && waitedMs < kStopTimeoutMs) {
 		Sleep(100);
-	} while (IsAxisMoving());
+		waitedMs += 100;
+	}
+	if (waitedMs >= kStopTimeoutMs)
+	{
+		LOG_SYS_ERROR("ACS Disconnect timed out waiting for axis motion to stop.");
+		success = false;
+	}
 
 	if (!acsc_CloseComm(m_hHandle))
 	{
@@ -150,7 +181,7 @@ bool ACSMotionControl::Disconnect()
 	m_bConnectFlag = false;
 	m_hHandle = ACSC_INVALID;
 	m_mapMotorValue.clear();
-	return true;
+	return success;
 }
 
 bool ACSMotionControl::IsConnected()
@@ -197,7 +228,7 @@ bool ACSMotionControl::Home()
 	for (int i = 0; i < 4; ++i)
 	{
 		Axis eAxis = static_cast<Axis>(arr[i]);
-		if (!DT::IsAxisUse(eAxis))
+		if (!m_runtimeConfiguration.isAxisEnabled(eAxis))
 			continue;
 
 		if (!RunBufferTillEnd(m_mapMotorValue[eAxis].HomeBufferIndex, 300000))
@@ -475,8 +506,8 @@ bool ACSMotionControl::StopMotion()
 	}
 	delete[] iAxisM;
 	//借用此处位置复位EnergySwitch的标志位
-	bool bEnergySwitchUse = DT::getCustomerID() == "MaiTong"
-		|| int(DT::getPermission()) > (int)PermissionLevel::Factory;
+	bool bEnergySwitchUse = m_runtimeConfiguration.customerId() == "MaiTong"
+		|| int(m_runtimeConfiguration.permission()) > int(PermissionLevel::Factory);
 	if (bEnergySwitchUse)
 		AcscWriteInt("EnergySwitch", 0);
 	return true;
@@ -1254,8 +1285,8 @@ void ACSMotionControl::EndProgramCommand(const Tool& tool)
 		if (resolveDigital(m_mapDigitalOUT, key, io, "EndProgramCommand Blow OFF"))
 			m_strCommand += io.strIndex + "=0;\n";
 	}
-	bool bEnergySwitchUse = DT::getCustomerID() == "MaiTong"
-		|| int(DT::getPermission()) > (int)PermissionLevel::Factory;
+	bool bEnergySwitchUse = m_runtimeConfiguration.customerId() == "MaiTong"
+		|| int(m_runtimeConfiguration.permission()) > int(PermissionLevel::Factory);
 	if (bEnergySwitchUse && tool.m_bEnergySwitch)
 		m_strCommand += "EnergySwitch=0\n";
 	m_strCommand += "STOP\n";
@@ -1280,7 +1311,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	Axis eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
 
 	//X 定位轴
-	if (curTool.m_bXIsMove && eDirectionX != Axis::X && DT::IsAxisUse(Axis::X))
+	if (curTool.m_bXIsMove && eDirectionX != Axis::X && m_runtimeConfiguration.isAxisEnabled(Axis::X))
 	{
 		string strXIndex	= boost::lexical_cast<string>(m_mapMotorValue[Axis::X].AxisIndex);
 		string strXPosition = boost::lexical_cast<string>(curTool.m_dXPosition);
@@ -1288,7 +1319,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strXIndex + "," + strXPosition + "," + strXVel + "\n";
 	}
 	//X1 定位轴
-	if (curTool.m_bX1IsMove && DT::isExtensionAxis("X1"))
+	if (curTool.m_bX1IsMove && m_runtimeConfiguration.isExtensionAxis("X1"))
 	{
 		string strX1Index	 = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("X").value_or(Axis::X)].AxisIndex);
 		string strX1Position = boost::lexical_cast<string>(curTool.m_dX1Position);
@@ -1296,7 +1327,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strX1Index + "," + strX1Position + "," + strX1Vel + "\n";
 	}
 	//A 定位轴
-	if (curTool.m_bAIsMove && eDirectionY != Axis::A && DT::IsAxisUse(Axis::A))
+	if (curTool.m_bAIsMove && eDirectionY != Axis::A && m_runtimeConfiguration.isAxisEnabled(Axis::A))
 	{
 		string strAIndex	= boost::lexical_cast<string>(m_mapMotorValue[Axis::A].AxisIndex);
 		string strAPosition = boost::lexical_cast<string>(curTool.m_dAPosition / 360 * PI * m_dDiameter);
@@ -1304,7 +1335,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strAIndex + "," + strAPosition + "," + strAVel + "\n";
 	}
 	//A1 定位轴
-	if (curTool.m_bA1IsMove && DT::isExtensionAxis("A1"))
+	if (curTool.m_bA1IsMove && m_runtimeConfiguration.isExtensionAxis("A1"))
 	{
 		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
 		string strA1Position = boost::lexical_cast<string>(curTool.m_dA1Position / 360 * PI * m_dDiameter);
@@ -1312,7 +1343,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strA1Index + "," + strA1Position + "," + strA1Vel + "\n";
 	}
 	//Y 定位轴
-	if (curTool.m_bYIsMove && eDirectionY != Axis::Y && DT::IsAxisUse(Axis::Y))
+	if (curTool.m_bYIsMove && eDirectionY != Axis::Y && m_runtimeConfiguration.isAxisEnabled(Axis::Y))
 	{
 		string strYIndex	= boost::lexical_cast<string>(m_mapMotorValue[Axis::Y].AxisIndex);
 		string strYPosition = boost::lexical_cast<string>(curTool.m_dYPosition);
@@ -1320,7 +1351,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 		m_strCommand += "PTP/EV " + strYIndex + "," + strYPosition + "," + strYVel + "\n";
 	}
 	//Y1 定位轴
-	if (curTool.m_bY1IsMove && DT::isExtensionAxis("Y1"))
+	if (curTool.m_bY1IsMove && m_runtimeConfiguration.isExtensionAxis("Y1"))
 	{
 		string strY1Index	 = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("Y").value_or(Axis::Y)].AxisIndex);
 		string strY1Position = boost::lexical_cast<string>(curTool.m_dY1Position);
@@ -1361,8 +1392,8 @@ void ACSMotionControl::JumpToCuttingHeight(const Tool& curTool, double dCompensa
 
 	m_strCommand += "PTP/EV " + strZIndex + "," + strZPosition + "," + strZVel + "\n";
 	m_strCommand += "TILL ^MST(" + strZIndex + ").#MOVE" + "\n";
-	bool bEnergySwitchUse = DT::getCustomerID() == "MaiTong"
-		|| int(DT::getPermission()) > (int)PermissionLevel::Factory;
+	bool bEnergySwitchUse = m_runtimeConfiguration.customerId() == "MaiTong"
+		|| int(m_runtimeConfiguration.permission()) > int(PermissionLevel::Factory);
 	if (bEnergySwitchUse && curTool.m_bEnergySwitch)
 		m_strCommand += "EnergySwitch=1\n";
 }

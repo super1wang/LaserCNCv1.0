@@ -106,14 +106,12 @@ QVector<ProcessLayerJob> ProcessCuttingPlanService::layerJobs() const
         return out;
     const auto layers = m_layerProvider->layers();
     out.reserve(layers.size());
-    int seq = 1;
     for (const auto& s : layers) {
         ProcessLayerJob job;
         job.layerId           = s.layerId;
         job.layerName         = s.name;
         job.toolName          = s.toolName;
         job.enabled           = s.enabled;
-        job.order             = seq++; // deprecated 字段，仅做次序提示
         job.compensationIndex = s.compensationIndex;
         job.includedContours  = s.includedContours;
         out.append(job);
@@ -132,7 +130,6 @@ bool ProcessCuttingPlanService::layerJob(std::uint64_t layerId, ProcessLayerJob*
             out->layerName         = s.name;
             out->toolName          = s.toolName;
             out->enabled           = s.enabled;
-            out->order             = 0;
             out->compensationIndex = s.compensationIndex;
             out->includedContours  = s.includedContours;
         }

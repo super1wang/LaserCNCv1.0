@@ -53,6 +53,7 @@ void LcncProjectSession::resetProjectState()
     m_projectPath.clear();
     m_manifest = LcncProjectManifest{};
     m_saveOptions = ProjectSaveOptions{};
+    m_machineConfigurationCompatible = true;
     m_workpiece.clear();
     m_cam.clear();
     clearDirty();

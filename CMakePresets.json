@@ -1,0 +1,83 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base-ninja",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LCNC_WITH_ACS": "OFF",
+        "LCNC_WITH_GTN": "OFF",
+        "LCNC_WITH_BDAQ": "OFF",
+        "LCNC_WITH_REAL_LASER": "OFF"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (all device SDKs off)",
+      "inherits": "base-ninja"
+    },
+    {
+      "name": "asan",
+      "displayName": "Debug with MSVC AddressSanitizer",
+      "inherits": "base-ninja",
+      "cacheVariables": {
+        "LCNC_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "acs",
+      "displayName": "Debug with ACS adapter",
+      "inherits": "base-ninja",
+      "cacheVariables": {
+        "LCNC_WITH_ACS": "ON"
+      }
+    },
+    {
+      "name": "gtn",
+      "displayName": "Debug with GTN adapter",
+      "inherits": "base-ninja",
+      "cacheVariables": {
+        "LCNC_WITH_GTN": "ON"
+      }
+    },
+    {
+      "name": "acs-gtn",
+      "displayName": "Debug with ACS and GTN adapters",
+      "inherits": "base-ninja",
+      "cacheVariables": {
+        "LCNC_WITH_ACS": "ON",
+        "LCNC_WITH_GTN": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "acs",
+      "configurePreset": "acs"
+    },
+    {
+      "name": "gtn",
+      "configurePreset": "gtn"
+    },
+    {
+      "name": "acs-gtn",
+      "configurePreset": "acs-gtn"
+    }
+  ]
+}

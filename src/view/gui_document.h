@@ -46,7 +46,7 @@ public:
     ~GuiDocument() override;
 
     void setSourceDocument(LcncDocument* document);
-    LcncDocument*  sourceDocument() const { return m_sourceDocument; }
+    LcncDocument*  document() const { return m_document; }
     GraphicsScene* scene()      const { return m_scene; }
     /// Returns the per-document rendering parameter manager.
     lcnc::view::RenderingManager* renderingManager() const { return m_renderingManager; }
@@ -168,7 +168,7 @@ private:
                                const Handle(AIS_Shape)& ais);
     bool fitDisplayObjects(int priority, bool update);
 
-    LcncDocument*  m_sourceDocument{nullptr};
+    LcncDocument*  m_document{nullptr};
     GraphicsScene* m_scene{nullptr};
     lcnc::view::RenderingManager* m_renderingManager{nullptr};
     QMap<DisplayKey, DisplayObject> m_displayObjects;

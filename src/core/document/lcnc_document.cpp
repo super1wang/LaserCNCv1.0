@@ -42,6 +42,11 @@ LcncDocument::LcncDocument(int id, const QString& name)
     initXcaf();
 }
 
+std::unique_ptr<LcncDocument> LcncDocument::createStandalone(int id, const QString& name)
+{
+    return std::unique_ptr<LcncDocument>(new LcncDocument(id, name));
+}
+
 void LcncDocument::initXcaf()
 {
     // Initialise XDE tools at the document root

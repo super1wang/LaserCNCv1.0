@@ -28,4 +28,7 @@ public:
 
 	/// 枚举当前注册过的工具名（按 map 索引升序），用于 UI 下拉。
 	static QStringList toolNames();
+	/// Stable snapshot keyed by factory index for project-local persistence.
+	static ::toml::table snapshot();
+	static bool restoreSnapshot(const ::toml::table& snapshot);
 };

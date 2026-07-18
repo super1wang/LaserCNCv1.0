@@ -1,6 +1,7 @@
 #include "modules/process/steps/output_signal/output_signal_step.h"
 
 #include "modules/process/settings/process_settings_service.h"
+#include "modules/process/steps/process_step_registry.h"
 
 #include <QComboBox>
 #include <QFormLayout>
@@ -12,7 +13,7 @@ namespace lcnc::process {
 namespace {
 constexpr char kSignalType[]="signalType"; constexpr char kIoName[]="ioName"; constexpr char kValue[]="value"; constexpr char kTypeCombo[]="signalTypeBox"; constexpr char kIoCombo[]="ioNameBox"; constexpr char kValueEdit[]="valueEdit";
 QString ioKeyFromDisplay(const QString& display){ const int l=display.lastIndexOf('('), r=display.lastIndexOf(')'); return (l>=0&&r>l)?display.mid(l+1,r-l-1):display; }
-void refill(QComboBox* box, const QString& type){ box->clear(); if (auto* settings=ProcessSettingsService::current()) box->addItems(settings->ioDisplayNames(type==QStringLiteral("analog")?ProcessIoBucket::AnalogOutput:ProcessIoBucket::DigitalOutput)); }
+void refill(QComboBox* box, const QString& type){ box->clear(); if (const auto* settings=ProcessStepRegistry::instance().settingsService()) box->addItems(settings->ioDisplayNames(type==QStringLiteral("analog")?ProcessIoBucket::AnalogOutput:ProcessIoBucket::DigitalOutput)); }
 }
 
 ProcessNodeDescriptor OutputSignalStep::descriptor() const{ ProcessNodeDescriptor d; d.type=ProcessNodeType::OutputSignal; d.displayName=QObject::tr("输出信号"); d.category=QObject::tr("IO"); d.executorKey=QStringLiteral("outputSignal"); d.defaultParameters.insert(QString::fromLatin1(kSignalType), QStringLiteral("digital")); d.defaultParameters.insert(QString::fromLatin1(kIoName), QStringLiteral("aLaser")); d.defaultParameters.insert(QString::fromLatin1(kValue), true); return d; }

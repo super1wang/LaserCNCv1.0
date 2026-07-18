@@ -23,7 +23,7 @@
 static Handle(V3d_View) activeView(IAppContext* ctx)
 {
     // GuiDocument → scene → viewer → first active view
-    if (auto* gd = ctx->workspaceGuiDocument()) {
+    if (auto* gd = ctx->activeGuiDocument()) {
         auto& viewer = gd->scene()->viewer();
         if (!viewer.IsNull()) {
             viewer->InitActiveLights();
@@ -80,7 +80,7 @@ static void applyDisplayModeToCurrentView(IAppContext* ctx, int displayMode, boo
         return;
     }
 
-    GuiDocument* gd = ctx->workspaceGuiDocument();
+    GuiDocument* gd = ctx->activeGuiDocument();
     if (!gd || !gd->renderingManager()) {
         LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
                   "applyDisplayModeToCurrentView: no active GuiDocument");
@@ -157,7 +157,7 @@ void CmdToggleWorldAxes::execute()
             action()->setChecked(false);
         return;
     }
-    if (auto* workspace = guiApp->workspaceGuiDocument(); workspace && workspace->scene())
+    if (auto* workspace = guiApp->activeGuiDocument(); workspace && workspace->scene())
         renderer.attach(workspace->scene());
 
     const bool wantVisible = action() && action()->isChecked();

@@ -6,7 +6,7 @@
 class PharosLaserDevice : public LaserDevice
 {
 	public:
-	PharosLaserDevice();
+	explicit PharosLaserDevice(lcnc::process::ProcessSettingsService& settings);
 
 	virtual ErrorCode		SetLaserTable(const table& tableLaser = table{});
 

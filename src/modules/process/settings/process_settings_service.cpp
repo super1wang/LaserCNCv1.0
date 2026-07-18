@@ -71,15 +71,10 @@ toml::value tomlFromVariant(const QVariant& value, ParameterValueType type)
 
 } // namespace
 
-ProcessSettingsService* ProcessSettingsService::s_current = nullptr;
-
-ProcessSettingsService::~ProcessSettingsService()
+ProcessSettingsService::ProcessSettingsService()
+    : m_registry(*this)
 {
-    if (s_current == this)
-        s_current = nullptr;
 }
-
-ProcessSettingsService* ProcessSettingsService::current() { return s_current; }
 
 QString ProcessSettingsService::rootDir() const
 {
@@ -160,7 +155,14 @@ void ProcessSettingsService::seedBuiltinIo()
 void ProcessSettingsService::seedDefaults()
 {
     m_draft = toml::value(toml::table{});
-    ensureChildTable(sectionRef(ProcessConfigArea::Devices, QStringLiteral("MotionControl")), "MotionControl")["sType"] = "SimulatorCMHP";
+#if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
+    constexpr const char* defaultController = "SimulatorCMHP";
+#elif defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    constexpr const char* defaultController = "GTN";
+#else
+    constexpr const char* defaultController = "Simulator";
+#endif
+    ensureChildTable(sectionRef(ProcessConfigArea::Devices, QStringLiteral("MotionControl")), "MotionControl")["sType"] = defaultController;
     table& laser = ensureChildTable(sectionRef(ProcessConfigArea::Devices, QStringLiteral("Laser")), "Laser");
     laser["sType"] = "Simulator";
     laser["fResolution"] = 0.0;
@@ -218,7 +220,6 @@ bool ProcessSettingsService::loadDomain(const QString& fileName, QString* error)
 
 bool ProcessSettingsService::initialize()
 {
-    s_current = this;
     seedDefaults();
     QDir().mkpath(QDir(rootDir()).filePath(QStringLiteral("tools")));
     QString error;

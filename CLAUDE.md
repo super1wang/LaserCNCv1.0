@@ -15,6 +15,7 @@ cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tool
 - Vendored 3rd-party libs in `3rd/`: spdlog (logging), toml11 (config).
 - OCC and SARibbon DLLs are copied to the output directory via POST_BUILD commands.
 - Conditional Process device SDKs (ACS, GTN, BDAQ, real laser) are OFF by default; enable with CMake `-D` options (`LCNC_WITH_ACS`, etc.).
+- Use `CMakePresets.json` for the verified `debug` (all-off), `acs`, `gtn`, and `asan` variants. A disabled SDK must not leak headers or link libraries into Process.
 - If build fails with `LNK1168`, the previous `LaserCNC.exe` is still running — kill it and retry.
 
 ## Architecture
@@ -29,7 +30,7 @@ The application is a single-process, multi-workspace desktop app for 5-axis lase
 
 **The machine model is an independent reference asset owned by `core/`, NOT project data.** `lcnc::cam::MachineWorkspace` (now in `core/machine/`) is **owned by the `Kernel`**, holds the machine `LcncDocument` (+ kinematics), is **preloaded at startup** from `CamConfig::machineModelPath` (via `MainWindow`), stays **resident in the view across project switches** (project reset erases only Workpiece + CAM display, never Machine), and is **never written into `.lcnc` / never dirties the project**. `CamModule` borrows it (`Kernel::current().machineWorkspace()`) for load/axis/calibration business logic. `LcncProjectManager` keeps only a non-owning machine-doc *reference* (`attachMachineDocument`) so `GuiDocument::domainForDocument` can route by domain.
 
-**Persistence is a single transactional writer in `core` (`formatVersion` 3).** `LcncProjectManager::saveProject`/`openProject` write/read manifest + `workpiece.xbf` (now containing Workpiece **and** Cam-kind entities) + CAM data (`lcnc::cam::saveCamToolpath`/`loadCamToolpath` in `core/project/cam/cam_toolpath_io.*`) together. After load, `CamModule::onCamDataLoaded` relinks each contour's wire from the XCAF Cam entity by `xcafEntry` (no runtime re-extraction). Modules do **no** project-file IO. The legacy `process_cutting_plan.toml` v1 migration runs in core (`migrateLegacyProcessCuttingPlan`).
+**Persistence is a single transactional writer in `core` (`formatVersion` 4).** `LcncProjectManager::saveProject`/`openProject` write/read manifest + `workpiece.xbf` (now containing Workpiece **and** Cam-kind entities) + CAM data (`lcnc::cam::saveCamToolpath`/`loadCamToolpath` in `core/project/cam/cam_toolpath_io.*`) together. After load, `CamModule::onCamDataLoaded` relinks each contour's wire from the XCAF Cam entity by `xcafEntry` (no runtime re-extraction). Modules do **no** project-file IO. Desktop loading accepts only v4; only `lcnc_project_upgrade` may invoke `loadForMigration()` for v1/v2/v3 and the legacy cutting-plan input.
 
 **`GuiDocument` domain routing is `EntityKind`-aware.** Because one document carries multiple domains, `rebuildDomain(domain, doc)` registers only the labels whose `EntityKind` maps to that domain (Workpiece→Workpiece+Auxiliary, Cam→Cam, Machine→Machine). CAM contour bodies are displayed by stable `ContourId` (`displayContourBody`), not re-shown via `rebuildDomain(Cam)`.
 
@@ -38,7 +39,7 @@ The application is a single-process, multi-workspace desktop app for 5-axis lase
 - **CAM** runs algorithms (extract / discretise / IK), writes results into the core-owned `CamDataManager` (borrowed via `projectManager()->camData()`), manages layers (`addToolpathLayer`/`removeToolpathLayer` → `CamDataManager::addLayer`/`removeLayer`), and keeps only renderers + transient UI/preview state.
 - **Process** consumes CAM data read-only via the OCC-free `ToolpathExportSnapshot` DTO.
 
-> Remaining cleanup (not yet done): `MachineKinematics` still physically lives in the (Kernel-owned `MachineWorkspace`'s) machine `LcncDocument` rather than in the workspace object itself; `LcncProjectManager` still exposes `machineDocument()`/`machineDocumentId()` as the view-routing reference accessor; and **per-project tool snapshots are not yet embedded** in `.lcnc` (layers still reference tools by name only, resolved against the global `ToolFactory`/`config.toml` — projects are not yet self-contained for tool params). `Tool` has only `SetFromTable` (no serializer), so embedding tools needs a safe `Tool`↔toml round-trip in the process layer + project-scoped `ToolFactory` registration — deferred because these drive laser/motion on real hardware.
+> Remaining cleanup (not yet done): `MachineKinematics` still physically lives in the Kernel-owned `MachineWorkspace` machine `LcncDocument` rather than in the workspace object itself, and `LcncProjectManager` still exposes `machineDocument()`/`machineDocumentId()` as view-routing reference accessors. Project tool snapshots are already embedded as required `tools.toml` in v4 packages.
 
 ### Layer Dependency (strict, top-down only)
 
@@ -60,6 +61,8 @@ Hard rules:
 
 Modules implement `IModule` (`src/core/kernel/i_module.h`): `info()`, `init(kernel)`, `start()`, `stop()`.
 Dependency order is `cad → cam → process`, enforced by topological sort in `ModuleRegistry`.
+Modules that start `TaskManager` jobs must retain their task ids, request cancellation in `stop()`, and wait before destroying borrowed runtime state. A timeout must safe-stop and retain SDK-owned objects rather than freeing them under an active call.
+`init()`, `start()` and `stop()` must not leak either standard or unknown exceptions. `stop()` must be idempotent because ModuleRegistry uses it for init/start rollback as well as normal shutdown.
 In `main.cpp`: construct Kernel → registerCoreServices → load settings → inject GuiApplication → add modules → kernel.bootstrap() → MainWindow → app.exec().
 
 ### Startup Order (in `main.cpp`)
@@ -93,6 +96,11 @@ the caller must still return, throw, or terminate explicitly.
 ### Banned Legacy APIs
 New code must not use: `projectDocument()`, `workspaceGuiDocument()`, `ensureProjectDocument()`, or the `sourceDocument()` path on `GuiDocument`. Use `workpieceDocument()`, `machineDocument()`, `camDocument()` and document/domain-aware display APIs.
 
+`SimulatorCMHP` belongs to ACS. In ACS-enabled builds its option-gated controller header/implementation restores the ACS Simulator connect/load/stop/close lifecycle and loads the CMake-deployed `Simulator.prg`; all-off exposes only the SDK-free `Simulator` identity. ACS/GTN types must not leak into public facades or DTOs. PureSimulation is explicit-only, defaults off when ACS or GTN is enabled, and is never a connection-failure fallback.
+Public device interfaces must not include `MessageModule` or legacy logging headers.
+`MessageModule` notification logging must route directly to `lcnc::Logger`; `LogModule` is removed and must not be reintroduced.
+ProcessModule must use its injected settings service rather than `ProcessSettingsService::current()`.
+
 ### Algorithms (`core/algorithms/`)
 Pure OCC/math, no UI or document ownership. Free functions preferred. Namespaces: `lcnc::cad_algo`, `lcnc::cam_algo`, `lcnc::kinematics`. OCC `Standard_Failure` caught by caller and logged.
 
@@ -105,8 +113,10 @@ Current runtime structure:
 - `ProcessCuttingPlanService` + `ProcessToolpathService` + `NormalCuttingManager` — prepare and execute the CAM snapshot.
 - `MotionSinkFactory` — selects PureSimulation, ACS text, or GTN buffered execution.
 - `ProcessWorkflowExecutor` + step registry — executes the editable process flow.
+- `ProcessDeviceCoordinator` — a shared recursive device lease owned by `Service`; every vendor SDK read/write/connect/disconnect path must acquire it.
 
-`ProcessDeviceCoordinator` is still planned work; until it exists, do not add new direct SDK access paths. Track the remaining safety work in `todo.md`.
+The coordinator is currently a serial lease, not yet a dedicated device-thread command queue. Do not add direct SDK access paths or retain a `MotionControl*` across a worker boundary. Track the remaining safety work in `todo.md`.
+Polling is split by transport: controller state uses a 150 ms dedicated single-thread pool, safety IO uses a separate 500 ms pool, and serial peripherals use a 2 s low-frequency pool. `QSerialPort` itself lives on a dedicated IO thread so blocking protocol waits cannot execute on the GUI thread.
 
 Controller adapters (`PureSimulation`, `SimulatorCMHP`, ACS, GTN) are behind `IMotionController`. Vendor SDK headers (ACSC.h, gts.h) must NEVER appear in public interfaces — they stay in option-gated private `.cpp` files.
 
@@ -117,11 +127,26 @@ Zip archive packed/unpacked via **QuaZip** (`JlCompress::compressDir`/`extractDi
 - `workpiece.xbf` — OCC/XCAF binary snapshot holding **both** workpiece geometry (`EntityKind::Workpiece`/`Auxiliary`) and CAM contour wires (`EntityKind::Cam`); load routes by stored kind
 - `cam_toolpath.toml` + `cam_toolpath_points.bin` — project-core CAM data: layers, contours (incl. `xcafEntry` linking each to its Cam wire label), signature tables, dense sampled points, container sort state, and the project-level `[generation]` params
 
-v2→v3 is forward-compatible: a v2 project (no Cam wires) loads fine; re-saving writes v3. Tool definitions are **not** embedded yet (referenced by name; see Architecture note). The machine model is **not** in the package. Save/load is one transaction in `core`: `LcncProjectManager::saveProject`/`openProject` → `LcncProjectPackage` (geometry) + `lcnc::cam::saveCamToolpath`/`loadCamToolpath` (CAM data). Modules never read/write the package.
+Desktop only accepts v4 and core rejects a package without `tools.toml`. v1/v2/v3 projects must be copied through `lcnc_project_upgrade <input.lcnc> <output.lcnc> [--tools <tools.toml>]`; the tool is the only caller of `loadForMigration()` and always saves v4. It preserves an embedded snapshot, and requires `--tools` when an old package has none. `tools.toml` embeds project tool parameters and is restored ahead of global names. The machine model is **not** in the package. Save/load is one transaction in `core`: `LcncProjectManager::saveProject`/`openProject` → `LcncProjectPackage` (geometry, CAM and staged extension resources). Modules provide extension data but never own package IO.
+Machine fingerprint mismatch is stored in the project session and signalled by core. UI shows a warning; `ProcessModule::validateProcessingEnvironment()` must reject real machining but not PureSimulation until the project is re-saved against the verified machine.
+Process `Service` is constructed only after the typed settings repository initializes and receives it by reference. `MotionControl`, `LaserDevice`, `LDFactory`, `ProcessParameterRegistry` and the SimulatorCMHP/ACS/GTN/laser adapters receive and forward the same reference. The `ProcessSettingsService::current()` singleton is removed; do not reintroduce fallback global reads.
+`ToolFactory` lookup must not insert a missing entry; configuration reloads replace an existing tool at the same index.
+`ProcessRuntimeConfiguration` is ProcessModule-owned and is borrowed by Service/controllers. ACS/GTN standard-axis, extension-axis and simulation decisions must read it; normalize and deduplicate configured axes and filter the `BASE` pseudo-axis before device access. Do not reintroduce the deleted `DT` static runtime state.
+`lcnc_project_package_test` verifies v4 package round-trip, required `tools.toml`, preservation of an existing package after a failed save, and v1/v2/v3 structural migration through `lcnc_project_upgrade.exe`; the staging `QTemporaryFile` must be destroyed before QuaZip writes, or Windows may reject the final replacement with Win32 error 32.
+`lcnc_task_manager_test` verifies cooperative abort, finite timeout and exception failure conversion; task lifecycle changes must keep it passing.
+`lcnc_process_runtime_configuration_test` verifies axis normalization, `BASE` filtering, extension-axis matching, simulation state and permission state; changes to ACS/GTN runtime configuration must keep it passing.
+Do not reintroduce synchronous single-controller connection methods or the obsolete `ProcessLayerJob::order` field.
+Keep pure Process axis helpers in `runtime/process_axis_utilities`, without UI or device SDK dependencies.
+Final device teardown must use `Service::shutdownDevices()` so laser shutdown precedes motion/controller disconnection.
+ASan CTest must be self-contained: CMake deploys `clang_rt.asan_dynamic-x86_64.dll` plus the selected OCCT TBB runtime beside every executable target.
+Runtime-baseline collection must retain CSV evidence on early exit and may enforce private-memory/handle-growth thresholds. Evaluate startup separately from stable-state drift; Application Verifier remains an independent gate.
+Archive writes use a sibling staging zip followed by a Windows atomic replacement; save code must never delete the existing `.lcnc` before the new archive is complete.
 
 ## Pre-Commit Verification
 
 1. Build passes using the command in the Build section.
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
-3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument`
+3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument\|sourceDocument`
+4. Run the CTest architecture gate: `ctest --test-dir build/debug --output-on-failure`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)
+5. Memory-sensitive changes additionally build `cmake --preset asan && cmake --build --preset asan`; do not enable Application Verifier without explicit user/test-run authority.

@@ -75,6 +75,7 @@ int main(int argc, char* argv[])
     //    [modules].disabled = [...] 可在 mainwindow.toml 中关闭某些模块；
     //    被关闭的模块连同依赖它的下游模块都不会加入 Kernel。
     int rc = -1;
+    try {
     {
     lcnc::Kernel kernel;
     kernel.registerCoreServices();
@@ -114,8 +115,9 @@ int main(int argc, char* argv[])
     tryAdd("process", {"cam"},     std::make_unique<ProcessModule>());
 
     if (!kernel.bootstrap()) {
-        LCNC_CRIT(lcnc::LogCode::InternalUnexpectedState,
-                  "Kernel bootstrap failed; aborting startup");
+        LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                 "Kernel bootstrap failed; aborting startup");
+        rc = 1;
     } else {
         LCNC_INFO(lcnc::LogCode::Generic,
                   "Kernel ready: services={}",
@@ -134,6 +136,15 @@ int main(int argc, char* argv[])
     // 作用域销毁顺序：mainWin → guiAppOwner → kernel（声明顺序的反序），
     // 满足 "UI → GuiApplication → ProjectManager/TaskManager" 的依赖
     // 反向释放，无需在此处手动 reset。
+    }
+    } catch (const std::exception& e) {
+        rc = 1;
+        LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                 "Unhandled std::exception in main: {}", e.what());
+    } catch (...) {
+        rc = 1;
+        LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                 "Unhandled unknown exception in main");
     }
 
     // 旧消息桥接线程可能由任一 Process 路径惰性创建；必须在 QApplication

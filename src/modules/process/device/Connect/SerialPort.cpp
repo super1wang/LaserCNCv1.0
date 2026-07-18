@@ -4,7 +4,7 @@
 #include <QCoreApplication>
 #include <QThread>
 #include "boost/thread.hpp"
-#include "LogModule.h"
+#include "process_log_compat.h"
 
 
 SerialPort::SerialPort(QObject* parent)
@@ -16,12 +16,27 @@ SerialPort::SerialPort(QObject* parent)
 	, m_iStopBits(1)
 {
 	port = new QSerialPort();
+	port->moveToThread(&m_ioThread);
+	m_ioThread.setObjectName(QStringLiteral("ProcessSerialIo"));
+	m_ioThread.start();
 }
 
 SerialPort::~SerialPort()
 {
 	Disconnect();
-	port->deleteLater();
+	if (port) {
+		if (QThread::currentThread() == port->thread()) {
+			delete port;
+			port = nullptr;
+		} else {
+			QMetaObject::invokeMethod(port, [this] {
+				delete port;
+				port = nullptr;
+			}, Qt::BlockingQueuedConnection);
+		}
+	}
+	m_ioThread.quit();
+	m_ioThread.wait();
 }
 
 ErrorCode SerialPort::SetComTable(const table& tableCom, bool& bConnectChange)
@@ -48,40 +63,52 @@ ErrorCode SerialPort::SetComTable(const table& tableCom, bool& bConnectChange)
 
 bool SerialPort::Connect()
 {
-	if (!m_bConnected)
-	{
+	if (m_bConnected.load())
+		return true;
+
+	bool connected = false;
+	auto connectPort = [this, &connected] {
 		port->setPortName(m_qstrPort);
 		port->setBaudRate(m_dwBaudRate);
 		port->setDataBits(static_cast<QSerialPort::DataBits>(m_iDataBits));
 		port->setStopBits(static_cast<QSerialPort::StopBits>(m_iStopBits));
 		port->setParity(static_cast<QSerialPort::Parity>(m_iParity));
 		port->setFlowControl(QSerialPort::NoFlowControl);
-
-		if (port->open(QIODevice::ReadWrite))
-		{
-			m_bConnected = true;
-			connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData);
+		connected = port->open(QIODevice::ReadWrite);
+		m_bConnected.store(connected);
+		if (connected) {
+			QObject::connect(port, &QSerialPort::readyRead, port,
+			                 [this] { slotReadData(); });
 		}
-		else
-		{
-			m_bConnected = false;
-		}
-	}
-	return m_bConnected;
+	};
+	if (QThread::currentThread() == port->thread())
+		connectPort();
+	else
+		QMetaObject::invokeMethod(port, connectPort, Qt::BlockingQueuedConnection);
+	return connected;
 }
 
 void SerialPort::Disconnect()
 {
-	if (port->isOpen())
-	{
-		port->close();
+	if (!port) {
+		m_bConnected.store(false);
+		return;
 	}
-	m_bConnected = false;
+	auto disconnectPort = [this] {
+		QObject::disconnect(port, nullptr, port, nullptr);
+		if (port->isOpen())
+			port->close();
+		m_bConnected.store(false);
+	};
+	if (QThread::currentThread() == port->thread())
+		disconnectPort();
+	else
+		QMetaObject::invokeMethod(port, disconnectPort, Qt::BlockingQueuedConnection);
 }
 
 bool SerialPort::IsConnected()
 {
-	return m_bConnected;
+	return m_bConnected.load();
 }
 
 bool SerialPort::IsAvailableData(const QByteArray& data)
@@ -91,9 +118,15 @@ bool SerialPort::IsAvailableData(const QByteArray& data)
 
 void SerialPort::ClearBuffer()
 {
-	QMutexLocker locker(&m_mutex);
-	m_qbDataBuffer.clear();
-	port->clear();
+	auto clearPort = [this] {
+		QMutexLocker locker(&m_mutex);
+		m_qbDataBuffer.clear();
+		port->clear();
+	};
+	if (QThread::currentThread() == port->thread())
+		clearPort();
+	else
+		QMetaObject::invokeMethod(port, clearPort, Qt::BlockingQueuedConnection);
 }
 
 void SerialPort::slotReadData()
@@ -127,7 +160,7 @@ bool SerialPort::WriteData(const QByteArray& data, int iTimeOut)
 
         // 使用Qt的invokeMethod在正确的线程中执行实际的写操作
         QMetaObject::invokeMethod(
-            this, 
+            port,
             [this, &result]() {
                 QMutexLocker locker(&m_mutex);
                 if (port->isOpen() && port->isWritable()) {
@@ -220,7 +253,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
         } result = {false, send, QByteArray(), iTimeOut};
 
         // 使用Qt的invokeMethod在正确的线程中执行实际的操作
-        QMetaObject::invokeMethod(this, [this, &result]() {
+        QMetaObject::invokeMethod(port, [this, &result]() {
                 QMutexLocker locker(&m_mutex);
                 if (!IsConnected()) {
                     result.success = false;
@@ -229,7 +262,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
                 }
 
                 // 保存当前的readyRead连接状态
-                bool isConnected = disconnect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData);
+                const bool isConnected = QObject::disconnect(port, nullptr, port, nullptr);
 
                 // 清空所有缓冲区
 				port->clear(QSerialPort::Input | QSerialPort::Output);
@@ -247,7 +280,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
                 if (bytesWritten != result.sendData.size()) {
                     // 恢复信号连接
                     if (isConnected) {
-                        QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+                        QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
                     }
                     // 添加50ms延迟帮助设备恢复
                     if (QCoreApplication::instance()) {
@@ -264,7 +297,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
                 if (QCoreApplication::instance()) {
                     if (!port->waitForBytesWritten(result.timeout)) {
                         if (isConnected) {
-                            QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+                            QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
                         }
                         // 添加50ms延迟帮助设备恢复
                         QThread::msleep(20);
@@ -297,7 +330,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
                         if (IsAvailableData(result.recvData)) {
                             // 恢复信号连接
                             if (isConnected) {
-                                QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+                                QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
                             }
                             result.success = true;
                             return;
@@ -308,7 +341,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
 
                 // 超时，恢复信号连接
                 if (isConnected) {
-                    QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+                    QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
                 }
                 result.success = false;
                 LOG_SYS_ERROR("ONCE Q waitForReadyRead timeout");
@@ -329,7 +362,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
     }
 
     // 保存当前的readyRead连接状态
-    bool isConnected = disconnect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData);
+    const bool isConnected = QObject::disconnect(port, nullptr, port, nullptr);
 
     // 清空所有缓冲区
     port->clear(QSerialPort::Input | QSerialPort::Output);
@@ -340,7 +373,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
     if (bytesWritten != send.size()) {
         // 恢复信号连接
         if (isConnected) {
-            QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+            QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
         }
         // 添加50ms延迟帮助设备恢复
         if (QCoreApplication::instance()) {
@@ -356,7 +389,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
     if (QCoreApplication::instance()) {
         if (!port->waitForBytesWritten(iTimeOut)) {
             if (isConnected) {
-                QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+                QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
             }
             // 添加50ms延迟帮助设备恢复
             QThread::msleep(50);
@@ -387,7 +420,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
             if (IsAvailableData(recv)) {
                 // 恢复信号连接
                 if (isConnected) {
-                    QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+                    QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
                 }
                 return true;
             }
@@ -397,7 +430,7 @@ bool SerialPort::OnceData(const QByteArray& send, QByteArray& recv, int iTimeOut
 
     // 恢复信号连接
     if (isConnected) {
-        QObject::connect(port, &QSerialPort::readyRead, this, &SerialPort::slotReadData, Qt::UniqueConnection);
+        QObject::connect(port, &QSerialPort::readyRead, port, [this] { slotReadData(); });
     }
 
     LOG_SYS_ERROR("ONCE B waitForReadyRead timeout");

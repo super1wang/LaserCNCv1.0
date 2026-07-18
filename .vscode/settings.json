@@ -1,16 +1,25 @@
 {
-  // Use the Visual Studio 17 2022 (MSBuild) generator with MSVC 14.44 from
-  // E:\vs2022IDE — matches the toolchain Qt 6.9.1 msvc2022_64 and OCC vc144
-  // were built with. Do NOT use the VS18 Insiders kit / Ninja generator: that
-  // pairs MSVC 14.51 with VS2022-built Qt/OCC and crashes at startup (ABI
-  // mismatch). cmake-kits.json defines the only kit (VS 2022 x64); pick it via
-  // the status bar so `CMake: Configure` does not fall back to a global kit.
-  // Command-line build (no vcvars) works because MSBuild brings its own env.
+  // This workspace uses the existing Ninja directory.  Keep CMake Tools and
+  // launch.json on the same artifact; do not point debugging at the stale
+  // Visual Studio Debug subdirectory.
   "cmake.buildDirectory": "${workspaceFolder}/cmake-build-sdkcheck",
+  "cmake.generator": "Ninja",
+  "cmake.configureSettings": {
+    "CMAKE_BUILD_TYPE": "Debug",
+    "LCNC_WITH_ACS": "ON",
+    "LCNC_WITH_GTN": "ON",
+    "LCNC_WITH_BDAQ": "OFF",
+    "LCNC_WITH_REAL_LASER": "OFF",
+    "LCNC_ACS_INCLUDE_DIR": "${workspaceFolder}/3rd/include_3rd",
+    "LCNC_ACS_LIB": "${workspaceFolder}/3rd/lib_3rd/debug/ACSCL_x64.LIB",
+    "LCNC_GTN_INCLUDE_DIR": "${workspaceFolder}/3rd/gts",
+    "LCNC_GTN_LIB": "${workspaceFolder}/3rd/gts/gts.lib",
+    "LCNC_GTN_RUNTIME_DLL": "${workspaceFolder}/3rd/gts/gts.dll"
+  },
   "cmake.parallelJobs": 16,
   "cmake.buildBeforeRun": false,
   "cmake.debugConfig": {
     "console": "integratedTerminal",
-    "cwd": "${workspaceFolder}/cmake-build-sdkcheck/Debug"
+    "cwd": "${workspaceFolder}/cmake-build-sdkcheck"
   }
 }

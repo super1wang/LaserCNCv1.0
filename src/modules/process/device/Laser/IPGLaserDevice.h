@@ -12,7 +12,7 @@ using namespace std;
 class IPGLaserDevice : public LaserDevice
 {
 public:
-	IPGLaserDevice();
+	explicit IPGLaserDevice(lcnc::process::ProcessSettingsService& settings);
 	virtual ErrorCode		SetLaserTable(const table& tableLaser = table{});
 
 	virtual const string&	GetName();

@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QList>
+#include <QSet>
 #include <QStringList>
 #include <QVector>
 #include <QVariantMap>
@@ -13,6 +14,7 @@
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "core/project/project_types.h"
+#include "core/task/task_manager.h"
 #include "modules/cad/i_cad_facade.h"
 #include "modules/cad/selection/cad_selection.h"
 
@@ -142,7 +144,7 @@ public:
     // ── Project Domain Access ────────────────────────────────────────────
     DocumentId    workpieceDocumentId() const override;
     LcncDocument* workpieceDocument() const;
-    GuiDocument*  workspaceGuiDocument() const;
+    GuiDocument*  activeGuiDocument() const;
     LcncDocument* domainDocumentById(DocumentId id) const;
     void          requestWorkpieceView(DocumentId id = kInvalidDocumentId) override;
 
@@ -295,6 +297,9 @@ signals:
 
 private:
     void refreshDisplay(DocumentId docId);
+    void trackOwnedTask(TaskId taskId);
+    void releaseOwnedTask(TaskId taskId);
+    bool cancelOwnedTasks(int timeoutMs);
 
     /// 标记 init() 是否已成功执行（避免重复注册）。
     bool m_initialized{false};
@@ -303,4 +308,5 @@ private:
     std::unique_ptr<lcnc::cad::CadModelingSession> m_modelingSession;
     std::unique_ptr<lcnc::cad::CadDocumentRegistry> m_documentRegistry;
     std::unique_ptr<lcnc::cad::task::CadCommandDispatcher> m_commandDispatcher;
+    QSet<TaskId> m_ownedTaskIds;
 };

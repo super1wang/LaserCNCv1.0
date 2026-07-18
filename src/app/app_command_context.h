@@ -28,7 +28,7 @@ public:
     virtual GuiApplication*  guiApp()   const = 0;
     virtual TaskManager*     taskMgr()  const = 0;
 
-    virtual GuiDocument*      workspaceGuiDocument() const = 0;
+    virtual GuiDocument*      activeGuiDocument() const = 0;
 
     virtual DocumentId        workpieceDocumentId() const = 0;
     virtual DocumentId        machineDocumentId()   const = 0;

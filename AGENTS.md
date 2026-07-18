@@ -16,6 +16,7 @@ cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tool
 - Vendored 3rd-party libs in `3rd/`: spdlog (logging), toml11 (config).
 - OCC and SARibbon DLLs are copied to the output directory via POST_BUILD commands.
 - Conditional Process device SDKs (ACS, GTN, BDAQ, real laser) are OFF by default; enable with CMake `-D` options (`LCNC_WITH_ACS`, etc.).
+- Use `CMakePresets.json` for the verified `debug` (all-off), `acs`, `gtn`, and `asan` variants. A disabled SDK must not leak headers or link libraries into Process.
 - If build fails with `LNK1168`, the previous `LaserCNC.exe` is still running — kill it and retry.
 
 ## Architecture
@@ -52,6 +53,8 @@ Hard rules:
 
 Modules implement `IModule` (`src/core/kernel/i_module.h`): `info()`, `init(kernel)`, `start()`, `stop()`.
 Dependency order is `cad → cam → process`, enforced by topological sort in `ModuleRegistry`.
+Modules that start `TaskManager` jobs must retain their task ids, request cancellation in `stop()`, and wait before destroying borrowed runtime state. A timeout must safe-stop and retain SDK-owned objects rather than freeing them under an active call.
+`init()`, `start()` and `stop()` must not leak either standard or unknown exceptions. `stop()` must be idempotent because ModuleRegistry uses it for init/start rollback as well as normal shutdown.
 In `main.cpp`: construct Kernel → registerCoreServices → load settings → inject GuiApplication → add modules → kernel.bootstrap() → MainWindow → app.exec().
 
 ### Startup Order (in `main.cpp`)
@@ -97,10 +100,20 @@ Current runtime structure:
 - `ProcessCuttingPlanService` + `ProcessToolpathService` + `NormalCuttingManager` — prepare and execute the CAM snapshot.
 - `MotionSinkFactory` — selects PureSimulation, ACS text, or GTN buffered execution.
 - `ProcessWorkflowExecutor` + step registry — executes the editable process flow.
+- `ProcessDeviceCoordinator` — a shared recursive device lease owned by `Service`; every vendor SDK read/write/connect/disconnect path must acquire it.
 
-`ProcessDeviceCoordinator` is still planned work; until it exists, do not add new direct SDK access paths. Track the remaining safety work in `todo.md`.
+The coordinator is currently a serial lease, not yet a dedicated device-thread command queue. Do not add direct SDK access paths or retain a `MotionControl*` across a worker boundary. Track the remaining safety work in `todo.md`.
 
-Controller adapters (`PureSimulation`, `SimulatorCMHP`, ACS, GTN) are behind `IMotionController`. Vendor SDK headers (ACSC.h, gts.h) must NEVER appear in public interfaces — they stay in option-gated private `.cpp` files.
+Controller adapters (`PureSimulation`, `SimulatorCMHP`, ACS, GTN) are behind `IMotionController`. `SimulatorCMHP` belongs to ACS: the ACS-gated controller header/implementation opens ACS Simulator and loads the deployed `Simulator.prg`; all-off uses the SDK-free `Simulator` identity. Vendor SDK types must never appear in public facades or DTOs. PureSimulation is explicit-only, defaults OFF when ACS or GTN is compiled, and must never be used as a failed-controller fallback.
+Controller status polling runs at 150 ms on its own single-thread pool, safety IO monitoring at 500 ms on a separate pool, and serial peripherals at 2 s on a low-frequency pool. `QSerialPort` owns a dedicated IO thread; no hardware wait may run on the GUI thread.
+Device public headers must not include `MessageModule` or legacy logging headers; implementation files own any temporary compatibility include.
+Message notifications and compatibility logging must write through `lcnc::Logger`; `LogModule` must not be reintroduced.
+ProcessModule code must use its injected settings service, not `ProcessSettingsService::current()`.
+`ToolFactory` lookup must be side-effect free: never synthesize an empty fallback tool, and replace existing entries when loading the same index.
+`ProcessRuntimeConfiguration` is owned by ProcessModule and borrowed by Service/controllers; ACS/GTN axis selection, extension-axis checks and simulation selection must use it. Normalize and deduplicate axis names at this boundary, and never pass the `BASE` pseudo-axis to a device adapter; do not reintroduce `DT` static runtime state and keep `lcnc_process_runtime_configuration_test` green.
+Do not reintroduce synchronous single-controller connection methods or `ProcessLayerJob::order`; UI commands must use asynchronous all-device operations.
+Keep pure axis helpers in `runtime/process_axis_utilities`; they must not access UI or device SDKs.
+Use `Service::shutdownDevices()` for final device teardown; do not duplicate or reorder laser/motion shutdown in callers.
 
 ## `.lcnc` Project Package
 
@@ -110,10 +123,20 @@ QuaZip archive (format v3) containing:
 - `cam_toolpath.toml` + `cam_toolpath_points.bin` — CAM metadata and dense points
 
 Save/load goes through `LcncProjectManager` → `LcncProjectPackage`.
+Desktop loading accepts only v4 and requires `tools.toml`. `lcnc_project_upgrade` alone may call `loadForMigration()` for v1/v2/v3 and legacy cutting-plan input; every migration save writes v4 and must use a distinct output path. It preserves an embedded snapshot, while a historical package without one must be supplied as `--tools <tools.toml>`. Project tools are restored from `tools.toml`, not resolved only by global names.
+Machine-fingerprint mismatch is a project-session safety gate: core emits the mismatch event, UI warns the operator, and Process must refuse real machining while still allowing PureSimulation.
+`Service`, `MotionControl`, `LaserDevice`, `LDFactory` and `ProcessParameterRegistry` receive `ProcessSettingsService` by constructor injection only. Initialize settings before constructing Service; SimulatorCMHP, ACS, GTN and laser adapters must forward that dependency. The settings `current()` singleton is removed.
+Archive saves must retain the existing package until the staging archive is complete and atomically replaced; do not reintroduce delete-then-write behavior.
+`lcnc_project_package_test` must remain green: it covers v4 snapshot round-trip, required-resource rejection, staging archive replacement, preservation of the existing package after a failed save, and v1/v2/v3 structural fixtures through the actual `lcnc_project_upgrade.exe`. Destroy the staging `QTemporaryFile` before QuaZip writes the archive, otherwise Windows can reject `MoveFileExW` with sharing violation 32.
+`lcnc_task_manager_test` must remain green for task-lifecycle changes: it covers cooperative abort, finite wait timeout, and exception-to-failure conversion.
+The `asan` preset must deploy `clang_rt.asan_dynamic-x86_64.dll` and the selected OCCT TBB DLL to every executable/test target; do not rely on developer-machine PATH or manual deployment for CTest.
+`collect_runtime_baseline.ps1` writes its CSV even after an early process exit and supports optional private-byte/handle-growth gates. Separate startup initialization from stable-window trends; Application Verifier is a separate interactive-environment gate, not a substitute for ASan.
 
 ## Pre-Commit Verification
 
 1. Build passes using the command in the Build section.
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
-3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument`
+3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument\|sourceDocument`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)
+5. CTest architecture gate: `ctest --test-dir build/debug --output-on-failure`
+5. Memory-sensitive changes additionally build `cmake --preset asan && cmake --build --preset asan`; do not enable Application Verifier without explicit user/test-run authority.

@@ -1,71 +1,129 @@
 #include "RegexPatterns.h"
 #include "Service.h"
 #include "DataType.h"
+#include "core/logging/logger.h"
 #include "modules/process/settings/process_settings_service.h"
-#include "modules/process/device/MotionControl/ACSMotionControl.h"
+#include "modules/process/runtime/process_runtime_configuration.h"
 #include "modules/process/device/MotionControl/SimulateCMHPMotionControl.h"
+#if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
+#include "modules/process/device/MotionControl/ACSMotionControl.h"
+#endif
 #if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
 #include "modules/process/device/MotionControl/GTNMotionControl.h"
 #endif
 
-Service::Service(void)
+Service::Service(lcnc::process::ProcessSettingsService& settings,
+                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
+    : m_settings(settings)
+	, m_runtimeConfiguration(runtimeConfiguration)
+	, m_LDFactory(settings)
 {
     SetToolTable();
 }
 
+Service::~Service()
+{
+    (void)shutdownDevices();
+}
+
+bool Service::shutdownDevices()
+{
+    const auto lock = lockDeviceAccess();
+    bool success = true;
+    if (m_pLaserDevice && m_pLaserDevice->IsConnected()) {
+        success = m_pLaserDevice->StopLaser() && success;
+        success = m_pLaserDevice->StopAimingBeam() && success;
+        m_pLaserDevice->Disconnect();
+    }
+    if (m_motionControl && m_motionControl->IsConnected()) {
+        success = m_motionControl->StopMotion() && success;
+        success = m_motionControl->StopAllBuffer() && success;
+        success = m_motionControl->Disconnect() && success;
+    }
+    return success;
+}
+
 void Service::SetMotionControl(string strName)
 {
+    const auto lock = lockDeviceAccess();
     string strDevice = strName;
-    if (DT::IsSimulatMode())
-    {
-        strDevice = "Simulator";
-    }
-
     if (strDevice.empty())
-    {
-        strDevice = lcnc::process::ProcessSettingsService::current()
-            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "MotionControl", "sType", "SimulatorCMHP").toString().toStdString() : "SimulatorCMHP";
+        strDevice = configuredMotionControllerName();
+
+    // 控制器必须随 Service 生命期销毁：禁止函数内 static
+    // 让 ACS/GTN SDK 句柄活过 Process 的停机顺序。切换类型时先断开旧实例，再创建新实例。
+    if (m_motionControl && m_strMotionControl == strDevice)
+        return;
+    if (m_motionControl && m_motionControl->IsConnected())
+        m_motionControl->Disconnect();
+    m_motionControl.reset();
+
+    if (strDevice == "Simulator") {
+		m_motionControl = std::make_unique<SimulateCMHPMotionControl>(m_settings, m_runtimeConfiguration);
     }
-
-    // 直接构造控制器实例（P3：MCFactory 已删除）。
-    // ACSMotionControl → 真实控制器 TCP 连接；SimulateCMHPMotionControl → 本地模拟器。
-    static ACSMotionControl          s_AcsMotion;          // ACS / 兜底
-    static SimulateCMHPMotionControl s_SimMotion;          // 仿真器
-#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
-    static GTNMotionControl          s_GtnMotion;
-#endif
-
-    if (strDevice == "Simulator" || strDevice == "SimulatorCMHP") {
-        m_pMotionControl = &s_SimMotion;
+#if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
+    else if (strDevice == "SimulatorCMHP") {
+		m_motionControl = std::make_unique<SimulateCMHPMotionControl>(m_settings, m_runtimeConfiguration);
     }
     else if (strDevice == "ACS") {
-        m_pMotionControl = &s_AcsMotion;
+		m_motionControl = std::make_unique<ACSMotionControl>(m_settings, m_runtimeConfiguration);
     }
+#endif
 #if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
     else if (strDevice == "GTN") {
-        m_pMotionControl = &s_GtnMotion;
+		m_motionControl = std::make_unique<GTNMotionControl>(m_settings, m_runtimeConfiguration);
     }
 #endif
     else {
-        m_pMotionControl = &s_SimMotion;    // 兜底：未知控制器名落到仿真器，避免 null
+        LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                 "Process Service: controller '{}' is unavailable in this build; fallback is forbidden",
+                 strDevice);
+		m_strMotionControl.clear();
+		return;
     }
     m_strMotionControl = strDevice;
 }
 
+string Service::configuredMotionControllerName() const
+{
+#if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
+    constexpr const char* fallback = "SimulatorCMHP";
+#elif defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    constexpr const char* fallback = "GTN";
+#else
+    constexpr const char* fallback = "Simulator";
+#endif
+    return m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices,
+                               "MotionControl", "sType", fallback)
+        .toString().trimmed().toStdString();
+}
+
+bool Service::configuredControllerRequiresDevice() const
+{
+    return configuredMotionControllerName() != "Simulator";
+}
+
 void Service::SetLaserDevice(string strName)
 {
+    const auto lock = lockDeviceAccess();
     string strDevice = strName;
-    if (DT::IsSimulatMode())
+    if (m_runtimeConfiguration.simulationMode())
     {
         strDevice = "Simulator";
     }
 
     if (strDevice.empty())
     {
-        strDevice = lcnc::process::ProcessSettingsService::current()
-            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "sType", "Simulator").toString().toStdString() : "Simulator";
+        strDevice = m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "sType", "Simulator").toString().toStdString();
     }
     m_pLaserDevice = m_LDFactory.GetLaserDevice(strDevice);
+    if (!m_pLaserDevice) {
+        LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                 "Process Service: laser device '{}' is unavailable in this build; fallback is forbidden",
+                 strDevice);
+        m_strLaserDevice.clear();
+        return;
+    }
     m_strLaserDevice = strDevice;
 }
 
@@ -76,8 +134,7 @@ void Service::SetToolTable()
 
     // 从 TOOL 的 "ToolIndex" 子表中按 sTool_0, sTool_1, ... 键依次读取工具名，
     // 然后加载对应子表。规避 GetTable 返回表的大小受 sToolIndex / 其他杂键干扰。
-    const table tabToolIndex = lcnc::process::ProcessSettingsService::current()
-        ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Tools, "ToolIndex") : table{};
+    const table tabToolIndex = m_settings.rawTable(lcnc::process::ProcessConfigArea::Tools, "ToolIndex");
     int i = 0;
     while (true)
     {
@@ -91,8 +148,7 @@ void Service::SetToolTable()
         if (strToolName.empty())
             continue;
 
-        const table tabTool = lcnc::process::ProcessSettingsService::current()
-            ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Tools, QString::fromStdString(strToolName)) : table{};
+        const table tabTool = m_settings.rawTable(lcnc::process::ProcessConfigArea::Tools, QString::fromStdString(strToolName));
         Tool curtool;
         curtool.m_strName = strToolName;
         curtool.SetFromTable(tabTool);
@@ -129,48 +185,70 @@ void Service::ClearToolDate()
 
 void Service::SetMotionControlTable(const table& table_MotionControl)
 {
+    const auto lock = lockDeviceAccess();
     if (!table_MotionControl.size())
     {
         string strMotionControl;
-        strMotionControl = lcnc::process::ProcessSettingsService::current()
-            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "MotionControl", "sType", "SimulatorCMHP").toString().toStdString() : "SimulatorCMHP";
+        strMotionControl = m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices, "MotionControl", "sType", "SimulatorCMHP").toString().toStdString();
         if (m_strMotionControl != strMotionControl)
         {
-            if (m_pMotionControl)
-                m_pMotionControl->Disconnect();
+            if (m_motionControl)
+                m_motionControl->Disconnect();
             SetMotionControl(strMotionControl);
         }
-        m_pMotionControl->SetMotionControlTable();
+        if (!m_motionControl) {
+            LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                     "Process Service: cannot apply motion table without a controller");
+            return;
+        }
+        m_motionControl->SetMotionControlTable();
     }
     else
     {
-        m_pMotionControl->SetMotionControlTable(table_MotionControl);
+        if (!m_motionControl) {
+            LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                     "Process Service: cannot apply explicit motion table without a controller");
+            return;
+        }
+        m_motionControl->SetMotionControlTable(table_MotionControl);
     }
 }
 
 void Service::SetDigitalTable(const table& table_Digital)
 {
+    const auto lock = lockDeviceAccess();
+    if (!m_motionControl) {
+        LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
+                  "Process Service: ignored digital IO table because no controller is available");
+        return;
+    }
     if (!table_Digital.size())
-        m_pMotionControl->SetDigitalTable();
+        m_motionControl->SetDigitalTable();
     else
-        m_pMotionControl->SetDigitalTable(table_Digital);
+        m_motionControl->SetDigitalTable(table_Digital);
 }
 
 void Service::SetAnalogTable(const table& table_Analog)
 {
+    const auto lock = lockDeviceAccess();
+    if (!m_motionControl) {
+        LCNC_WARN(lcnc::LogCode::InternalUnexpectedState,
+                  "Process Service: ignored analog IO table because no controller is available");
+        return;
+    }
     if (!table_Analog.size())
-        m_pMotionControl->SetAnalogTable();
+        m_motionControl->SetAnalogTable();
     else
-        m_pMotionControl->SetAnalogTable(table_Analog);
+        m_motionControl->SetAnalogTable(table_Analog);
 }
 
 void Service::SetLaserTable(const table& table_Laser)
 {
+    const auto lock = lockDeviceAccess();
     if (!table_Laser.size())
     {
         string strLaserDevice;
-        strLaserDevice = lcnc::process::ProcessSettingsService::current()
-            ? lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "sType", "Simulator").toString().toStdString() : "Simulator";
+        strLaserDevice = m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "sType", "Simulator").toString().toStdString();
         if (m_strLaserDevice != strLaserDevice)
         {
             if (m_pLaserDevice)
@@ -178,16 +256,23 @@ void Service::SetLaserTable(const table& table_Laser)
             SetLaserDevice(strLaserDevice);
         }
 
+        if (!m_pLaserDevice) {
+            LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                     "Process Service: cannot apply laser table without a laser device");
+            return;
+        }
+
         if (m_pLaserDevice->GetName() == "AnalogControl")
         {
             double dResolution;
-            dResolution = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "fResolution", 0.0).toDouble();
+            dResolution = m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "fResolution", 0.0).toDouble();
             if (dResolution > 0)
             {
                 double dEnergy = 0;
-                dEnergy = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "fEnergy", 0.0).toDouble();
+                dEnergy = m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices, "Laser", "fEnergy", 0.0).toDouble();
                 double dValue = dEnergy / 100.0 * dResolution;
-                m_pMotionControl->AnalogOutputSet(AnalogOUT::Laser, dValue, true);
+                if (m_motionControl)
+                    m_motionControl->AnalogOutputSet(AnalogOUT::Laser, dValue, true);
             }
         }
         else
@@ -195,24 +280,29 @@ void Service::SetLaserTable(const table& table_Laser)
     }
     else
     {
+        if (!m_pLaserDevice) {
+            LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                     "Process Service: ignored explicit laser table because no laser device is available");
+            return;
+        }
         m_pLaserDevice->SetLaserTable(table_Laser);
     }
 }
 
 void Service::SetGasTable(const table& table_Gas)
 {
+    const auto lock = lockDeviceAccess();
     table tGas = table_Gas;
     if (!table_Gas.size())
-        tGas = lcnc::process::ProcessSettingsService::current()
-            ? lcnc::process::ProcessSettingsService::current()->rawTable(lcnc::process::ProcessConfigArea::Operations) : table{};
+        tGas = m_settings.rawTable(lcnc::process::ProcessConfigArea::Operations);
 
     if (tGas.count("Gas") || tGas.count("GasSetting"))
     {
         double dPressure;
         int iConversions;
-        dPressure = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Operations, "Gas", "fPressure", 0.0).toDouble();
-        iConversions = lcnc::process::ProcessSettingsService::current()->rawValue(lcnc::process::ProcessConfigArea::Operations, "GasSetting", "iConversions", 0).toInt();
-        if (m_pMotionControl)
-            m_pMotionControl->AnalogOutputSet(AnalogOUT::Pressure, iConversions / 2.0 * dPressure);
+        dPressure = m_settings.rawValue(lcnc::process::ProcessConfigArea::Operations, "Gas", "fPressure", 0.0).toDouble();
+        iConversions = m_settings.rawValue(lcnc::process::ProcessConfigArea::Operations, "GasSetting", "iConversions", 0).toInt();
+        if (m_motionControl)
+            m_motionControl->AnalogOutputSet(AnalogOUT::Pressure, iConversions / 2.0 * dPressure);
     }
 }

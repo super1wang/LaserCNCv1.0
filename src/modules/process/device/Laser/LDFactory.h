@@ -16,19 +16,20 @@
 class	LDFactory
 {
 public:
-	static LaserDevice *		GetLaserDevice(const string & sLaserDeviceName);
-	static void					GetAll_LDName(vector<string> & vecName);
+	explicit LDFactory(lcnc::process::ProcessSettingsService& settings);
+	LaserDevice *		GetLaserDevice(const string & sLaserDeviceName);
+	void					GetAll_LDName(vector<string> & vecName);
 	
 private:
-	static SimulatorLaserDevice s_Simulator;
+	SimulatorLaserDevice m_simulator;
 	#if defined(LCNC_PROCESS_HAS_REAL_LASER) && LCNC_PROCESS_HAS_REAL_LASER
-	static IPGLaserDevice		s_IPG;
-	static PharosLaserDevice	s_Pharos;
-	static RaycusLaserDevice	s_Raycus;
-	static RaycusAirCoolLaserDevice s_RaycusAirCool;
-	static ULTRONLaserDevice	s_ULTRON;
-	static RaycusQCWLaserDevice s_RaycusQCW;
+	IPGLaserDevice		m_ipg;
+	PharosLaserDevice	m_pharos;
+	RaycusLaserDevice	m_raycus;
+	RaycusAirCoolLaserDevice m_raycusAirCool;
+	ULTRONLaserDevice	m_ultron;
+	RaycusQCWLaserDevice m_raycusQCW;
 	#endif
-	static AnalogLaserDevice	s_Analog;
+	AnalogLaserDevice	m_analog;
 };
 #endif

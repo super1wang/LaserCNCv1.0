@@ -19,6 +19,7 @@
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "core/project/project_types.h"
+#include "core/task/task_manager.h"
 
 #include <AIS_Shape.hxx>
 #include <TopoDS_Shape.hxx>
@@ -120,7 +121,7 @@ public:
     DocumentId         machineDocumentId() const;
     LcncDocument*      camDocument() const;
     DocumentId         camDocumentId() const;
-    GuiDocument*       workspaceGuiDocument() const;
+    GuiDocument*       activeGuiDocument() const;
     MachineKinematics* kinematics() const;
     void               requestMachineView() override;
     QString            machineModelPath() const;
@@ -429,8 +430,12 @@ private:
     void resetProjectViewState();
     /// 清理 CAM 视图侧状态；用于模块内清刀路和项目核心外部清 CAM 域两条路径。
     void clearToolpathViewState(bool emitSignals);
+    void trackOwnedTask(TaskId taskId);
+    void releaseOwnedTask(TaskId taskId);
+    bool cancelOwnedTasks(int timeoutMs);
 
     bool              m_initialized{false};
+    QSet<TaskId>      m_ownedTaskIds;
 
     CamConfig         m_config;
 

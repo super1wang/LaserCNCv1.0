@@ -224,6 +224,8 @@ ProcessMonitorService::ProcessMonitorService(QObject* parent)
     qRegisterMetaType<ProcessMonitorAlarmList>();
 
     m_timer->setInterval(500);
+    m_pollPool.setMaxThreadCount(1);
+    m_pollPool.setExpiryTimeout(-1);
     connect(m_timer, &QTimer::timeout, this, &ProcessMonitorService::pollAsync);
 }
 
@@ -296,7 +298,7 @@ void ProcessMonitorService::pollAsync()
         m_lastSnapshot = snapshot;
         emit snapshotUpdated(m_lastSnapshot);
     });
-    watcher->setFuture(QtConcurrent::run([context]() {
+    watcher->setFuture(QtConcurrent::run(&m_pollPool, [context]() {
         return buildSnapshot(context);
     }));
 }

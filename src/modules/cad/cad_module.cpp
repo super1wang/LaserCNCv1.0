@@ -21,6 +21,7 @@
 #include "view/gui_application.h"
 #include "view/gui_document.h"
 
+#include <QElapsedTimer>
 #include <QFileInfo>
 
 #include <BRep_Builder.hxx>
@@ -41,6 +42,7 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 
@@ -465,8 +467,52 @@ void CadModule::stop()
     if (!m_initialized) {
         return;
     }
+    if (!cancelOwnedTasks(10000)) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "CadModule::stop: file task cancellation timed out; retaining task-owned documents");
+    }
     m_initialized = false;
     LCNC_INFO(lcnc::LogCode::Generic, "CadModule stop done");
+}
+
+void CadModule::trackOwnedTask(TaskId taskId)
+{
+    if (taskId != kInvalidTaskId)
+        m_ownedTaskIds.insert(taskId);
+}
+
+void CadModule::releaseOwnedTask(TaskId taskId)
+{
+    m_ownedTaskIds.remove(taskId);
+}
+
+bool CadModule::cancelOwnedTasks(int timeoutMs)
+{
+    auto* taskMgr = lcnc::Kernel::current().taskManager();
+    if (!taskMgr || m_ownedTaskIds.isEmpty())
+        return true;
+
+    const QSet<TaskId> taskIds = m_ownedTaskIds;
+    for (TaskId taskId : taskIds)
+        if (taskMgr->isRunning(taskId))
+            taskMgr->requestAbort(taskId);
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+    bool allFinished = true;
+    for (TaskId taskId : taskIds) {
+        if (!taskMgr->isRunning(taskId)) {
+            releaseOwnedTask(taskId);
+            continue;
+        }
+        const int remainingMs = std::max(0, timeoutMs - static_cast<int>(elapsed.elapsed()));
+        if (!taskMgr->waitForDone(taskId, remainingMs) && taskMgr->isRunning(taskId)) {
+            allFinished = false;
+            continue;
+        }
+        releaseOwnedTask(taskId);
+    }
+    return allFinished;
 }
 
 CadModule::CadModule(QObject* parent)
@@ -482,7 +528,7 @@ CadModule::CadModule(QObject* parent)
         m_documentRegistry->ensure(id);
         m_selectedSketchDocId = kInvalidDocumentId;
         m_selectedSketchId = 0;
-        if (auto* gd = workspaceGuiDocument()) {
+        if (auto* gd = activeGuiDocument()) {
             gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
             if (auto* md = project->machineDocument())
                 gd->updateMachineWorkspaceTransforms(md, project->workpieceDocument());
@@ -505,7 +551,7 @@ CadModule::CadModule(QObject* parent)
             });
     // 项目打开后刷新工件显示：确保无论通过哪个入口打开，视图都会重建。
     connect(project, &lcnc::LcncProjectManager::projectOpened, this, [this, project](const QString&) {
-        if (auto* gd = workspaceGuiDocument()) {
+        if (auto* gd = activeGuiDocument()) {
             gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
             if (auto* md = project->machineDocument())
                 gd->updateMachineWorkspaceTransforms(md, project->workpieceDocument());
@@ -580,6 +626,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
             [filePath, pendingWorkspace, error, loadResult](TaskProgress* prog) {
                 prog->setRange(0, 100);
                 prog->setStepName(QStringLiteral("读取工程包..."));
+                if (prog->isAbortRequested())
+                    throw std::runtime_error("project open cancelled");
                 prog->setValue(10);
                 const QString packagePath = lcnc::LcncProjectPackage::packageDirectory(filePath);
                 if (!lcnc::LcncProjectPackage::load(*pendingWorkspace->workpieceDocument(),
@@ -591,10 +639,14 @@ DocumentId CadModule::openDocument(const QString& filePath)
                                                      pendingWorkspace->camData())) {
                     throw std::runtime_error("project open failed");
                 }
+                if (prog->isAbortRequested())
+                    throw std::runtime_error("project open cancelled");
                 prog->setValue(100);
             });
 
-        watchTask(this, taskId, [this, filePath, pendingWorkspace, loadResult, error, openGeneration](bool success) {
+        trackOwnedTask(taskId);
+        watchTask(this, taskId, [this, taskId, filePath, pendingWorkspace, loadResult, error, openGeneration](bool success) {
+            releaseOwnedTask(taskId);
             auto* project = lcnc::Kernel::current().projectManager();
             if (!project->isSingleDocumentOpenCurrent(openGeneration))
                 return;
@@ -620,7 +672,7 @@ DocumentId CadModule::openDocument(const QString& filePath)
             pendingWorkspace->session().clearDirty();
             project->adoptWorkspace(pendingWorkspace, true);
 
-            if (auto* gd = workspaceGuiDocument()) {
+            if (auto* gd = activeGuiDocument()) {
                 gd->rebuildDomain(lcnc::ProjectDomain::Workpiece, project->workpieceDocument());
                 gd->updateMachineWorkspaceTransforms(project->machineDocument(), project->workpieceDocument());
                 gd->fitAll();
@@ -644,6 +696,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
                        ext.toStdString(),
                        filePath.toStdString());
             prog->setRange(0, 100);
+            if (prog->isAbortRequested())
+                throw std::runtime_error("document open cancelled");
 
             if (ext == "stp" || ext == "step") {
                 prog->setStepName(QStringLiteral("读取 STEP..."));
@@ -698,6 +752,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
                        "CadModule::openDocument worker done docId={} workpieceCount={}",
                        doc ? doc->id() : kInvalidDocumentId,
                        entityCount(doc, LcncDocument::EntityKind::Workpiece));
+            if (prog->isAbortRequested())
+                throw std::runtime_error("document open cancelled");
             prog->setValue(100);
         });
 
@@ -707,7 +763,9 @@ DocumentId CadModule::openDocument(const QString& filePath)
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    watchTask(this, taskId, [this, pendingWorkspace, docId, displayName, sourceFilePath, error, openGeneration](bool success) {
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, pendingWorkspace, docId, displayName, sourceFilePath, error, openGeneration](bool success) {
+        releaseOwnedTask(taskId);
         auto* project = lcnc::Kernel::current().projectManager();
         if (!project->isSingleDocumentOpenCurrent(openGeneration))
             return;
@@ -753,6 +811,8 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
         [filePath, doc, error](TaskProgress* prog) {
             prog->setRange(0, 100);
             prog->setStepName(QStringLiteral("读取 STEP..."));
+            if (prog->isAbortRequested())
+                throw std::runtime_error("step import cancelled");
 
             prog->setValue(50);
             prog->setStepName(QStringLiteral("转换形体..."));
@@ -763,12 +823,16 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
                                         error.get())) {
                 throw std::runtime_error("step import failed");
             }
+            if (prog->isAbortRequested())
+                throw std::runtime_error("step import cancelled");
             prog->setValue(100);
         });
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    watchTask(this, taskId, [this, docId, createdNew, displayName, sourceFilePath, error](bool success) {
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, docId, createdNew, displayName, sourceFilePath, error](bool success) {
+        releaseOwnedTask(taskId);
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
@@ -810,6 +874,8 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
         [filePath, doc, error](TaskProgress* prog) {
             prog->setRange(0, 100);
             prog->setStepName(QStringLiteral("读取 STL..."));
+            if (prog->isAbortRequested())
+                throw std::runtime_error("stl import cancelled");
 
             TopoDS_Shape shape;
             StlAPI_Reader reader;
@@ -822,12 +888,16 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
             prog->setValue(80);
             doc->addShapeEntity(shape, QFileInfo(filePath).baseName(),
                                 LcncDocument::EntityKind::Workpiece);
+            if (prog->isAbortRequested())
+                throw std::runtime_error("stl import cancelled");
             prog->setValue(100);
         });
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    watchTask(this, taskId, [this, docId, createdNew, displayName, sourceFilePath, error](bool success) {
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, docId, createdNew, displayName, sourceFilePath, error](bool success) {
+        releaseOwnedTask(taskId);
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
@@ -886,6 +956,8 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
         [doc, filePath, error](TaskProgress* prog) {
             prog->setRange(0, 100);
             prog->setStepName(QStringLiteral("写入 STEP..."));
+            if (prog->isAbortRequested())
+                throw std::runtime_error("step export cancelled");
 
             Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
             TDF_LabelSequence shapes;
@@ -903,10 +975,14 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
                 throw std::runtime_error("step export failed");
             }
 
+            if (prog->isAbortRequested())
+                throw std::runtime_error("step export cancelled");
             prog->setValue(100);
         });
 
-    watchTask(this, taskId, [this, error](bool success) {
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, error](bool success) {
+        releaseOwnedTask(taskId);
         if (!success) {
             emit operationFailed(tr("导出 STEP 失败"),
                                  error->isEmpty() ? tr("导出 STEP 失败") : *error);
@@ -950,9 +1026,9 @@ LcncDocument* CadModule::workpieceDocument() const
     return lcnc::Kernel::current().projectManager()->workpieceDocument();
 }
 
-GuiDocument* CadModule::workspaceGuiDocument() const
+GuiDocument* CadModule::activeGuiDocument() const
 {
-    return lcnc::Kernel::current().guiApp()->workspaceGuiDocument();
+    return lcnc::Kernel::current().guiApp()->activeGuiDocument();
 }
 
 LcncDocument* CadModule::domainDocumentById(DocumentId id) const
@@ -972,7 +1048,7 @@ void CadModule::setEntityVisible(DocumentId docId, const QString& entry, bool vi
     if (entry.isEmpty())
         return;
 
-    if (auto* gd = workspaceGuiDocument()) {
+    if (auto* gd = activeGuiDocument()) {
         Handle(AIS_Shape) ais = gd->aisShape(docId, entry);
         if (ais.IsNull())
             return;
@@ -995,7 +1071,7 @@ void CadModule::setEntriesVisible(DocumentId docId, const QStringList& entries, 
 
 void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
 {
-    GuiDocument* gd = workspaceGuiDocument();
+    GuiDocument* gd = activeGuiDocument();
     if (!gd)
         return;
 
@@ -1024,7 +1100,7 @@ void CadModule::setSelectedEntries(DocumentId docId, const QStringList& entries)
 
 QStringList CadModule::selectedEntries(DocumentId docId) const
 {
-    if (auto* gd = workspaceGuiDocument())
+    if (auto* gd = activeGuiDocument())
         return gd->selectedEntries(docId);
 
     return {};
@@ -1092,7 +1168,7 @@ void CadModule::setSelectionContext(const lcnc::cad::selection::CadSelectionCont
             m_selectedSketchId = context.selectedSketchId;
             emit sketchSelectionChanged(m_selectedSketchId);
         }
-        if (auto* gd = workspaceGuiDocument()) {
+        if (auto* gd = activeGuiDocument()) {
             const Handle(AIS_InteractiveContext)& ctx = gd->context();
             if (!ctx.IsNull())
                 ctx->ClearSelected(false);
@@ -1115,7 +1191,7 @@ void CadModule::setSelectionContext(const lcnc::cad::selection::CadSelectionCont
             entries.append(item.entry);
     }
     if (entries.isEmpty()) {
-        if (auto* gd = workspaceGuiDocument()) {
+        if (auto* gd = activeGuiDocument()) {
             const Handle(AIS_InteractiveContext)& ctx = gd->context();
             if (!ctx.IsNull())
                 ctx->ClearSelected(false);
@@ -1193,7 +1269,7 @@ bool CadModule::deleteShapes(DocumentId docId, const QStringList& entries)
         return false;
 
     doc->openCommand(tr("删除形体"));
-    if (auto* gd = workspaceGuiDocument()) {
+    if (auto* gd = activeGuiDocument()) {
         for (const QString& entry : entries)
             gd->eraseEntity(docId, entry);
     }
@@ -1215,7 +1291,7 @@ int CadModule::explodeShape(DocumentId docId, const TDF_Label& label, int entity
 
     // Erase original AIS object
     const QString entry = XcafUtils::entry(label);
-    if (auto* gd = workspaceGuiDocument())
+    if (auto* gd = activeGuiDocument())
         gd->eraseEntity(docId, entry);
 
     int count = ShapeService::explodeShape(doc, label, entityKind);
@@ -2004,7 +2080,7 @@ void CadModule::redo(DocumentId docId)
 
 void CadModule::refreshDisplay(DocumentId docId)
 {
-    auto* gd = workspaceGuiDocument();
+    auto* gd = activeGuiDocument();
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "CadModule::refreshDisplay docId={} gd={}",
                docId, static_cast<void*>(gd));

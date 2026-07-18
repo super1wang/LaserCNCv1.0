@@ -24,7 +24,7 @@ public:
     GuiApplication*  guiApp()  const override;
     TaskManager*     taskMgr() const override;
 
-    GuiDocument*  workspaceGuiDocument() const override;
+    GuiDocument*  activeGuiDocument() const override;
 
     DocumentId    workpieceDocumentId() const override;
     DocumentId    machineDocumentId()   const override;

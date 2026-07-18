@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QThreadPool>
 
 #include <functional>
 
@@ -69,6 +70,7 @@ private:
     QFutureWatcherBase* m_watcher{nullptr};
     bool m_active{false};
     bool m_inFlight{false};
+    QThreadPool m_pollPool;
     ProcessMonitorSnapshot m_lastSnapshot;
     QHash<QString, int> m_triggerCounts;
     QHash<QString, ProcessMonitorAlarm> m_activeAlarms;

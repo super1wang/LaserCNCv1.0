@@ -2,11 +2,14 @@
 #include <boost/lexical_cast.hpp>
 #include <fstream>
 //#include "bdaqctrl.h"
-#include "LogModule.h"
+#include "process_log_compat.h"
+#include "modules/process/runtime/process_runtime_configuration.h"
 
  
-GTNMotionControl::GTNMotionControl(void)
-	: m_bConnectFlag(false)
+GTNMotionControl::GTNMotionControl(lcnc::process::ProcessSettingsService& settings,
+	                                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
+	: MotionControl(settings, runtimeConfiguration)
+	, m_bConnectFlag(false)
 	, m_strName("GTN")
 	, m_iCore(1)
 	, m_dPreX(0)
@@ -185,18 +188,17 @@ bool GTNMotionControl::Disconnect()
 	if (!m_bConnectFlag)
 		return true;
 
+	bool success = true;
 	short sRtn;
 	// 关闭激光
 	sRtn = GTN_SetDoBit(m_iCore, MC_GPO, 4, 1);
 	if (0!= sRtn)
 	{
 		LogError("Disconnect", "GTN_SetDoBit", "", sRtn);
-		return false;
+		success = false;
 	}
 	if (!StopMotion())
-	{
-		return false;
-	}
+		success = false;
 	for (Axis axis : m_vecMotors)
 	{
 		string strIndex = boost::lexical_cast<string>(m_mapMotorValue[axis].AxisIndex);
@@ -205,7 +207,7 @@ bool GTNMotionControl::Disconnect()
 		if (0 != sRtn)
 		{
 			LogError("Disconnect", "GTN_LmtsOffEx:" + strIndex, "", sRtn);
-			return false;
+			success = false;
 		}
 	}
 	sRtn = GTN_Close();
@@ -216,7 +218,7 @@ bool GTNMotionControl::Disconnect()
 	}
 	
 	m_bConnectFlag = false;
-	return true;
+	return success;
 }
 
 bool GTNMotionControl::IsConnected()
@@ -244,7 +246,7 @@ bool GTNMotionControl::Home()
 	for (const int axisValue : arr)
 	{
 		Axis eAxis = static_cast<Axis>(axisValue);
-		if (!DT::IsAxisUse(eAxis))
+		if (!m_runtimeConfiguration.isAxisEnabled(eAxis))
 			continue;
 
 		if (m_bStop)
@@ -1566,18 +1568,18 @@ void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	short sRtn;
 	
 	//X 定位轴
-	if (curTool.m_bXIsMove && eDirectionX != Axis::X && DT::IsAxisUse(Axis::X))
+	if (curTool.m_bXIsMove && eDirectionX != Axis::X && m_runtimeConfiguration.isAxisEnabled(Axis::X))
 	{
 		MovePostion(Axis::X, curTool.m_dIdleXVelocity, curTool.m_dXPosition);
 	}
 	//A 定位轴
-	if (curTool.m_bAIsMove && eDirectionY != Axis::A && DT::IsAxisUse(Axis::A))
+	if (curTool.m_bAIsMove && eDirectionY != Axis::A && m_runtimeConfiguration.isAxisEnabled(Axis::A))
 	{
 		MovePostion(Axis::A, curTool.m_dIdleAVelocity, curTool.m_dAPosition / 360 * PI * m_dDiameter);
 		
 	}
 	//Y 定位轴
-	if (curTool.m_bYIsMove && eDirectionY != Axis::Y && DT::IsAxisUse(Axis::Y))
+	if (curTool.m_bYIsMove && eDirectionY != Axis::Y && m_runtimeConfiguration.isAxisEnabled(Axis::Y))
 	{
 		MovePostion(Axis::Y, curTool.m_dIdleYVelocity, curTool.m_dYPosition);
 		

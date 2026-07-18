@@ -18,9 +18,9 @@ lcnc::LcncProjectManager* AppContext::projectManager() const { return lcnc::Kern
 GuiApplication*  AppContext::guiApp() const { return lcnc::Kernel::current().guiApp();  }
 TaskManager*     AppContext::taskMgr()const { return lcnc::Kernel::current().taskManager();      }
 
-GuiDocument* AppContext::workspaceGuiDocument() const
+GuiDocument* AppContext::activeGuiDocument() const
 {
-    return lcnc::Kernel::current().guiApp()->workspaceGuiDocument();
+    return lcnc::Kernel::current().guiApp()->activeGuiDocument();
 }
 
 DocumentId AppContext::workpieceDocumentId() const

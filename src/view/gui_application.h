@@ -24,7 +24,6 @@ public:
     explicit GuiApplication(QObject* parent = nullptr);
     ~GuiApplication() override;
 
-    GuiDocument* workspaceGuiDocument() const { return activeGuiDocument(); }
     GuiDocument* activeGuiDocument() const;
     GuiDocument* guiDocument(ProjectWorkspaceId id) const;
     GuiDocument* ensureGuiDocument(ProjectWorkspaceId id);
@@ -47,10 +46,10 @@ public:
 signals:
     void guiDocumentAboutToClose(ProjectWorkspaceId id, GuiDocument* document);
     void guiDocumentReady(ProjectWorkspaceId id, GuiDocument* document);
-    void activeGuiDocumentChanged(ProjectWorkspaceId id, GuiDocument* document);
-    void workspaceGuiDocumentAboutToClose(GuiDocument* document);
-    void workspaceGuiDocumentReady();
-    void workspaceGuiDocumentChanged(GuiDocument* document);
+    void activeWorkspaceDocumentChanged(ProjectWorkspaceId id, GuiDocument* document);
+    void activeGuiDocumentAboutToClose(GuiDocument* document);
+    void activeGuiDocumentReady();
+    void activeGuiDocumentChanged(GuiDocument* document);
 
 private:
     static GuiApplication* s_instance;

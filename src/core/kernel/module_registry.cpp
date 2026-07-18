@@ -116,6 +116,28 @@ bool ModuleRegistry::startAll(IKernel& kernel)
         return false;
     }
 
+    const auto stopModuleNoThrow = [](IModule* module, const char* phase) {
+        if (!module)
+            return;
+        const auto id = module->info().id;
+        try {
+            module->stop();
+        } catch (const std::exception& e) {
+            LCNC_ERR(LogCode::InternalUnexpectedState,
+                     "{}: module '{}' stop threw: {}",
+                     phase, id.toStdString(), e.what());
+        } catch (...) {
+            LCNC_ERR(LogCode::InternalUnexpectedState,
+                     "{}: module '{}' stop threw unknown exception",
+                     phase, id.toStdString());
+        }
+    };
+    const auto rollbackInitialized = [&stopModuleNoThrow](const std::vector<IModule*>& modules,
+                                                           const char* phase) {
+        for (auto it = modules.rbegin(); it != modules.rend(); ++it)
+            stopModuleNoThrow(*it, phase);
+    };
+
     // ── init 阶段 ───────────────────────────────────────────────────────
     std::vector<IModule*> initialized;
     for (auto* m : m_startupOrder) {
@@ -131,27 +153,19 @@ bool ModuleRegistry::startAll(IKernel& kernel)
                      "Module '{}' init threw: {}",
                      info.id.toStdString(), e.what());
             ok = false;
+        } catch (...) {
+            LCNC_ERR(LogCode::InternalUnexpectedState,
+                     "Module '{}' init threw unknown exception",
+                     info.id.toStdString());
+            ok = false;
         }
         if (!ok) {
             LCNC_ERR(LogCode::InternalUnexpectedState,
                      "Module '{}' init failed; rolling back",
                      info.id.toStdString());
-            // 反向 stop 已 init 的模块（虽然只 init 没 start，但允许子类
-            // 在 stop 中清理 init 阶段的资源）
-            for (auto it = initialized.rbegin(); it != initialized.rend(); ++it) {
-                const auto rid = (*it)->info().id;
-                try {
-                    (*it)->stop();
-                } catch (const std::exception& e) {
-                    LCNC_ERR(LogCode::InternalUnexpectedState,
-                             "Rollback: module '{}' stop threw: {}",
-                             rid.toStdString(), e.what());
-                } catch (...) {
-                    LCNC_ERR(LogCode::InternalUnexpectedState,
-                             "Rollback: module '{}' stop threw unknown exception",
-                             rid.toStdString());
-                }
-            }
+            // 失败模块本身也可能已分配部分 init 资源，必须先清理它。
+            stopModuleNoThrow(m, "Init rollback");
+            rollbackInitialized(initialized, "Init rollback");
             return false;
         }
         initialized.push_back(m);
@@ -169,12 +183,20 @@ bool ModuleRegistry::startAll(IKernel& kernel)
                      "Module '{}' start threw: {}",
                      info.id.toStdString(), e.what());
             ok = false;
+        } catch (...) {
+            LCNC_ERR(LogCode::InternalUnexpectedState,
+                     "Module '{}' start threw unknown exception",
+                     info.id.toStdString());
+            ok = false;
         }
         if (!ok) {
             LCNC_ERR(LogCode::InternalUnexpectedState,
                      "Module '{}' start failed; rolling back already-started",
                      info.id.toStdString());
-            stopAll();
+            // 所有模块都已 init，不能只停已 start 的子集；否则后续析构会
+            // 遗留订阅、服务注册或后台资源。
+            rollbackInitialized(initialized, "Start rollback");
+            m_started.clear();
             return false;
         }
         m_started.push_back(m);
@@ -200,6 +222,10 @@ void ModuleRegistry::stopAll()
             LCNC_ERR(LogCode::InternalUnexpectedState,
                      "Module '{}' stop threw: {}",
                      id.toStdString(), e.what());
+        } catch (...) {
+            LCNC_ERR(LogCode::InternalUnexpectedState,
+                     "Module '{}' stop threw unknown exception",
+                     id.toStdString());
         }
     }
     m_started.clear();

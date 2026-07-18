@@ -1,8 +1,42 @@
 cmake_minimum_required(VERSION 3.20)
 project(LaserCNC VERSION 1.0.0 LANGUAGES CXX)
+include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Memory-safety gate.  This stays opt-in because vendor SDK DLLs are not
+# instrumented, but every project-owned translation unit can be built with the
+# MSVC AddressSanitizer runtime through the `asan` configure preset.
+option(LCNC_ENABLE_ASAN "Enable MSVC AddressSanitizer for project code" OFF)
+if(LCNC_ENABLE_ASAN AND NOT MSVC)
+    message(FATAL_ERROR "LCNC_ENABLE_ASAN currently requires MSVC")
+endif()
+if(LCNC_ENABLE_ASAN)
+    # QuaZip is built from source via add_subdirectory below.  ASan's STL
+    # annotations must match across every C++ static library, so this cannot
+    # be limited to LaserCNC's own targets.
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:CXX>:/fsanitize=address>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/Zi>"
+    )
+    # /fsanitize=address is a compiler switch (not a link.exe switch).  The
+    # compiler injects the runtime library; incremental linking is unsupported.
+    add_link_options(/INCREMENTAL:NO)
+    get_filename_component(_lcnc_msvc_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(LCNC_ASAN_RUNTIME_DLL "${_lcnc_msvc_bin_dir}/clang_rt.asan_dynamic-x86_64.dll"
+        CACHE FILEPATH "MSVC AddressSanitizer runtime DLL")
+    if(NOT EXISTS "${LCNC_ASAN_RUNTIME_DLL}")
+        message(FATAL_ERROR "LCNC_ENABLE_ASAN requires clang_rt.asan_dynamic-x86_64.dll: ${LCNC_ASAN_RUNTIME_DLL}")
+    endif()
+    function(lcnc_deploy_asan_runtime target)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LCNC_ASAN_RUNTIME_DLL}"
+                "$<TARGET_FILE_DIR:${target}>"
+            COMMENT "Copying MSVC AddressSanitizer runtime for ${target}")
+    endfunction()
+endif()
 
 # AUTOMOC/AUTOUIC/AUTORCC are configured per-target below (not globally) so
 # that each static library only scans its own sources. AUTOUIC in particular
@@ -54,6 +88,8 @@ set(LCNC_PROCESS_SDK_LIB_RELEASE_DIR "${LCNC_PROCESS_SDK_ROOT}/lib_3rd/release" 
 
 set(LCNC_ACS_INCLUDE_DIR "${LCNC_PROCESS_SDK_INCLUDE_DIR}" CACHE PATH "ACS SDK include directory")
 set(LCNC_ACS_LIB "${LCNC_PROCESS_SDK_LIB_DEBUG_DIR}/ACSCL_x64.LIB" CACHE FILEPATH "ACS controller import library")
+set(LCNC_ACS_SIMULATOR_PROGRAM "${CMAKE_CURRENT_SOURCE_DIR}/resources/process/Simulator.prg"
+    CACHE FILEPATH "ACS Simulator buffer program deployed next to LaserCNC.exe")
 set(LCNC_GTN_INCLUDE_DIR "${LCNC_PROCESS_SDK_ROOT}/gts" CACHE PATH "GTN SDK include directory")
 set(LCNC_GTN_LIB "${LCNC_PROCESS_SDK_ROOT}/gts/gts.lib" CACHE FILEPATH "GTN controller import library")
 set(LCNC_GTN_RUNTIME_DLL "${LCNC_PROCESS_SDK_ROOT}/gts/gts.dll" CACHE FILEPATH "GTN controller runtime DLL")
@@ -78,6 +114,7 @@ endfunction()
 if(LCNC_WITH_ACS)
     lcnc_require_existing("${LCNC_ACS_INCLUDE_DIR}/ACSC.h" "LCNC_WITH_ACS requires ACSC.h")
     lcnc_require_existing("${LCNC_ACS_LIB}" "LCNC_WITH_ACS requires LCNC_ACS_LIB")
+    lcnc_require_existing("${LCNC_ACS_SIMULATOR_PROGRAM}" "LCNC_WITH_ACS requires Simulator.prg")
 endif()
 if(LCNC_WITH_GTN)
     lcnc_require_existing("${LCNC_GTN_INCLUDE_DIR}/gts.h" "LCNC_WITH_GTN requires gts.h")
@@ -266,17 +303,16 @@ set(SRCS_MODULE_CAM
 
 set(SRCS_MODULE_PROCESS
     src/modules/process/process_module.cpp
+    src/modules/process/runtime/process_axis_utilities.cpp
     src/modules/process/settings/process_settings_service.cpp
     src/modules/process/settings/process_parameter_registry.cpp
     src/modules/process/settings/process_property_model.cpp
     src/modules/process/settings/process_io_table_model.cpp
     src/modules/process/settings/process_settings_dialog.cpp
     src/modules/process/System/Service.cpp
-    src/modules/process/System/LogModule.cpp
     src/modules/process/System/MessageModule.cpp
     src/modules/process/Setting/BuiltinIODefs.cpp
     src/modules/process/device/MotionControl/MotionControl.cpp
-    src/modules/process/device/MotionControl/ACSMotionControl.cpp
     src/modules/process/device/MotionControl/SimulateCMHPMotionControl.cpp
     src/modules/process/device/Connect/SerialPort.cpp
     src/modules/process/device/Laser/LDFactory.cpp
@@ -296,8 +332,6 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/axis_map.h
     src/modules/process/runtime/axis_map.cpp
     src/modules/process/runtime/i_motion_command_sink.h
-    src/modules/process/runtime/acs_text_command_sink.h
-    src/modules/process/runtime/acs_text_command_sink.cpp
     src/modules/process/runtime/gtn_buffered_command_sink.h
     src/modules/process/runtime/pure_simulation_sink.h
     src/modules/process/runtime/pure_simulation_sink.cpp
@@ -337,8 +371,11 @@ set(SRCS_MODULE_PROCESS
 
 if(LCNC_WITH_ACS)
     list(APPEND SRCS_MODULE_PROCESS
+        src/modules/process/device/MotionControl/ACSMotionControl.cpp
         src/modules/process/controllers/acs_motion_controller_adapter.h
         src/modules/process/controllers/acs_motion_controller_adapter.cpp
+        src/modules/process/runtime/acs_text_command_sink.h
+        src/modules/process/runtime/acs_text_command_sink.cpp
     )
 endif()
 if(LCNC_WITH_GTN)
@@ -386,6 +423,11 @@ target_link_libraries(lcnc_core PUBLIC
 )
 # QuaZip 仅在 lcnc_project_package.cpp 实现内部使用（不出现在公开头文件）→ PRIVATE。
 target_link_libraries(lcnc_core PRIVATE QuaZip::QuaZip)
+
+add_executable(lcnc_project_upgrade
+    tools/lcnc_project_upgrade_main.cpp
+)
+target_link_libraries(lcnc_project_upgrade PRIVATE lcnc_core Qt6::Core)
 
 # view ────────────────────────────────────────────────────────────────────────
 add_library(lcnc_view STATIC ${SRCS_VIEW})
@@ -448,13 +490,6 @@ target_link_libraries(lcnc_module_process PUBLIC
     Qt6::Network
     Qt6::UiTools
 )
-# ACSMotionControl.cpp pulls in the ACS SDK
-# unconditionally (they are not gated by LCNC_WITH_ACS the way the optional
-# adapter is), so link ACSCL_x64.LIB into the process library by default.
-# LCNC_WITH_ACS still controls the additional acs_motion_controller_adapter.{h,cpp}.
-if(EXISTS "${LCNC_ACS_LIB}")
-    target_link_libraries(lcnc_module_process PRIVATE "${LCNC_ACS_LIB}")
-endif()
 if(LCNC_WITH_ACS)
     target_include_directories(lcnc_module_process PRIVATE "${LCNC_ACS_INCLUDE_DIR}")
     target_link_libraries(lcnc_module_process PRIVATE "${LCNC_ACS_LIB}")
@@ -490,6 +525,19 @@ set_target_properties(LaserCNC PROPERTIES
 )
 target_link_libraries(LaserCNC PRIVATE lcnc_app)
 
+if(LCNC_WITH_ACS)
+    # Relink (and therefore rerun POST_BUILD) when the simulator program
+    # changes; otherwise an incremental build could leave a stale deployed
+    # copy beside the executable.
+    set_property(TARGET LaserCNC APPEND PROPERTY LINK_DEPENDS
+        "${LCNC_ACS_SIMULATOR_PROGRAM}")
+    add_custom_command(TARGET LaserCNC POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LCNC_ACS_SIMULATOR_PROGRAM}"
+            "$<TARGET_FILE_DIR:LaserCNC>/Simulator.prg"
+        COMMENT "Deploying ACS Simulator program")
+endif()
+
 if(WIN32)
     set_target_properties(LaserCNC PROPERTIES
         WIN32_EXECUTABLE TRUE
@@ -506,14 +554,38 @@ endif()
 # the changed DLLs.
 set(LCNC_RUNTIME_BIN_DIR_DEBUG   "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_debug"   CACHE PATH "Runtime DLL directory (Debug)")
 set(LCNC_RUNTIME_BIN_DIR_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_release" CACHE PATH "Runtime DLL directory (Release)")
+set(LCNC_TBB_BIN_DIR "C:/work/occt/3rdparty-vc14-64/tbb-2021.13.0-x64/bin"
+    CACHE PATH "OCCT TBB runtime DLL directory")
+
+function(lcnc_deploy_tbb_runtime target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<IF:$<CONFIG:Debug>,${LCNC_TBB_BIN_DIR}/tbb12_debug.dll,${LCNC_TBB_BIN_DIR}/tbb12.dll>"
+            "$<TARGET_FILE_DIR:${target}>"
+        COMMENT "Copying OCCT TBB runtime for ${target}")
+endfunction()
 
 set(_lcnc_runtime_bin "$<IF:$<CONFIG:Debug>,${LCNC_RUNTIME_BIN_DIR_DEBUG},${LCNC_RUNTIME_BIN_DIR_RELEASE}>")
-add_custom_command(TARGET LaserCNC POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${_lcnc_runtime_bin}"
-        "$<TARGET_FILE_DIR:LaserCNC>"
-    COMMENT "Copying runtime DLLs from 3rd/runtime/bin_<config> to output directory"
-)
+if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
+    add_custom_command(TARGET LaserCNC POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${_lcnc_runtime_bin}"
+            "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMENT "Copying runtime DLLs from 3rd/runtime/bin_<config> to output directory"
+    )
+    add_custom_command(TARGET lcnc_project_upgrade POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${_lcnc_runtime_bin}"
+            "$<TARGET_FILE_DIR:lcnc_project_upgrade>"
+        COMMENT "Copying runtime DLLs for lcnc_project_upgrade"
+    )
+endif()
+lcnc_deploy_tbb_runtime(LaserCNC)
+lcnc_deploy_tbb_runtime(lcnc_project_upgrade)
+if(LCNC_ENABLE_ASAN)
+    lcnc_deploy_asan_runtime(LaserCNC)
+    lcnc_deploy_asan_runtime(lcnc_project_upgrade)
+endif()
 if(LCNC_WITH_GTN)
     add_custom_command(TARGET LaserCNC POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -521,6 +593,58 @@ if(LCNC_WITH_GTN)
             "$<TARGET_FILE_DIR:LaserCNC>"
         COMMENT "Copying GTN runtime DLL to output directory"
     )
+endif()
+
+if(BUILD_TESTING)
+    find_program(LCNC_POWERSHELL_EXECUTABLE NAMES powershell pwsh REQUIRED)
+    add_executable(lcnc_project_package_test
+        tests/lcnc_project_package_test.cpp
+    )
+    target_link_libraries(lcnc_project_package_test PRIVATE lcnc_core Qt6::Core QuaZip::QuaZip)
+    add_executable(lcnc_task_manager_test
+        tests/task_manager_test.cpp
+    )
+    target_link_libraries(lcnc_task_manager_test PRIVATE lcnc_core Qt6::Core Qt6::Concurrent)
+    add_executable(lcnc_process_runtime_configuration_test
+        tests/process_runtime_configuration_test.cpp
+    )
+    target_link_libraries(lcnc_process_runtime_configuration_test PRIVATE Qt6::Core)
+    target_include_directories(lcnc_process_runtime_configuration_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/3rd/magic_enum"
+    )
+    if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
+        add_custom_command(TARGET lcnc_project_package_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${_lcnc_runtime_bin}"
+                "$<TARGET_FILE_DIR:lcnc_project_package_test>")
+        add_custom_command(TARGET lcnc_task_manager_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${_lcnc_runtime_bin}"
+                "$<TARGET_FILE_DIR:lcnc_task_manager_test>")
+        add_custom_command(TARGET lcnc_process_runtime_configuration_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${_lcnc_runtime_bin}"
+                "$<TARGET_FILE_DIR:lcnc_process_runtime_configuration_test>")
+    endif()
+    lcnc_deploy_tbb_runtime(lcnc_project_package_test)
+    lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
+    lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
+    if(LCNC_ENABLE_ASAN)
+        lcnc_deploy_asan_runtime(lcnc_project_package_test)
+        lcnc_deploy_asan_runtime(lcnc_task_manager_test)
+        lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
+    endif()
+    add_test(NAME architecture_checks
+        COMMAND "${LCNC_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_architecture.ps1"
+                -Root "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME lcnc_project_package_test
+        COMMAND lcnc_project_package_test)
+    add_test(NAME lcnc_task_manager_test
+        COMMAND lcnc_task_manager_test)
+    add_test(NAME lcnc_process_runtime_configuration_test
+        COMMAND lcnc_process_runtime_configuration_test)
 endif()
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")

@@ -1,5 +1,6 @@
 #include "MessageModule.h"
 #include "BuzzerControl.h"
+#include "core/logging/logger.h"
 #include <QMessageBox>
 #include <QApplication>
 #include <QTimer>
@@ -86,20 +87,15 @@ void MessageModule::ReportMessage(LogType eType, LogLevel eLevel, int iCode, con
 void MessageModule::WriteLog(const LogType& eType, const LogLevel& eLevel, const int& iCode, const QString& qstrMessage)
 {
 	QString qstrLog = qstrMessage.isEmpty() ? ExplainCode(eLevel, iCode) : qstrMessage;
-	switch (eType)
-	{
-	case LogType::System:
-		LogModule::SystemLog(eLevel, qstrLog.toUtf8().data());
-		break;
-	case LogType::Operator:
-		LogModule::OperatorLog(eLevel, qstrLog.toUtf8().data());
-		break;
-	case LogType::Process:
-		LogModule::ProcessLog(eLevel, qstrLog.toUtf8().data());
-		break;
-	default:
-		LogModule::SystemLog(LogLevel::Error, qstrLog.toUtf8().data());
-		break;
+	const char* channel = eType == LogType::Operator ? "operator" : eType == LogType::Process ? "process" : "system";
+	const auto payload = qstrLog.toUtf8().toStdString();
+	switch (eLevel) {
+	case LogLevel::Trace:    LCNC_TRACE(lcnc::LogCode::Generic, "[{}] {}", channel, payload); break;
+	case LogLevel::Debug:    LCNC_DEBUG(lcnc::LogCode::Generic, "[{}] {}", channel, payload); break;
+	case LogLevel::Info:     LCNC_INFO(lcnc::LogCode::Generic, "[{}] {}", channel, payload); break;
+	case LogLevel::Warn:     LCNC_WARN(lcnc::LogCode::Generic, "[{}] {}", channel, payload); break;
+	case LogLevel::Error:    LCNC_ERR(lcnc::LogCode::Generic, "[{}] {}", channel, payload); break;
+	case LogLevel::Critical: lcnc::Logger::log(spdlog::level::critical, lcnc::LogCode::Generic, "[{}] {}", channel, payload); break;
 	}
 }
 

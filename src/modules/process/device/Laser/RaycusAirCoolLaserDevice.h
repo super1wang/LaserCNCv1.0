@@ -12,7 +12,7 @@ using namespace std;
 class RaycusAirCoolLaserDevice : public LaserDevice
 {
 public:
-	RaycusAirCoolLaserDevice();
+	explicit RaycusAirCoolLaserDevice(lcnc::process::ProcessSettingsService& settings);
 
 	virtual ErrorCode		SetLaserTable(const table& tableLaser = table{});
 

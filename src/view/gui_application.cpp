@@ -67,9 +67,9 @@ GuiDocument* GuiApplication::ensureGuiDocument(ProjectWorkspaceId id)
     m_guiDocuments.insert(id, document);
     emit guiDocumentReady(id, document);
     if (id == m_activeWorkspaceId) {
-        emit workspaceGuiDocumentReady();
-        emit workspaceGuiDocumentChanged(document);
-        emit activeGuiDocumentChanged(id, document);
+        emit activeGuiDocumentReady();
+        emit activeGuiDocumentChanged(document);
+        emit activeWorkspaceDocumentChanged(id, document);
     }
     return document;
 }
@@ -87,7 +87,7 @@ void GuiApplication::closeGuiDocument(ProjectWorkspaceId id)
 
     emit guiDocumentAboutToClose(id, document);
     if (wasActive)
-        emit workspaceGuiDocumentAboutToClose(document);
+        emit activeGuiDocumentAboutToClose(document);
 
     m_guiDocuments.remove(id);
     if (wasActive)
@@ -117,16 +117,16 @@ void GuiApplication::resetWorkspaceGuiDocument()
                id, static_cast<void*>(oldDocument));
     if (oldDocument) {
         emit guiDocumentAboutToClose(id, oldDocument);
-        emit workspaceGuiDocumentAboutToClose(oldDocument);
+        emit activeGuiDocumentAboutToClose(oldDocument);
         oldDocument->deleteLater();
     }
 
     GuiDocument* document = createWorkspaceGuiDocument();
     m_guiDocuments.insert(id, document);
     emit guiDocumentReady(id, document);
-    emit workspaceGuiDocumentReady();
-    emit workspaceGuiDocumentChanged(document);
-    emit activeGuiDocumentChanged(id, document);
+    emit activeGuiDocumentReady();
+    emit activeGuiDocumentChanged(document);
+    emit activeWorkspaceDocumentChanged(id, document);
 }
 
 void GuiApplication::setActiveWorkspace(ProjectWorkspaceId id)
@@ -136,10 +136,10 @@ void GuiApplication::setActiveWorkspace(ProjectWorkspaceId id)
 
     m_activeWorkspaceId = id;
     GuiDocument* document = ensureGuiDocument(id);
-    emit activeGuiDocumentChanged(id, document);
-    emit workspaceGuiDocumentChanged(document);
+    emit activeWorkspaceDocumentChanged(id, document);
+    emit activeGuiDocumentChanged(document);
     if (document)
-        emit workspaceGuiDocumentReady();
+        emit activeGuiDocumentReady();
 }
 
 void GuiApplication::applyDisplayModeToDocument(GuiDocument* document) const

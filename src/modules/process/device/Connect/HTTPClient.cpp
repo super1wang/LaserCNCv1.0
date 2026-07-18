@@ -9,7 +9,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
-#include "LogModule.h"
+#include "process_log_compat.h"
 
 namespace
 {

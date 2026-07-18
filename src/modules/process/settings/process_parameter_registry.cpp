@@ -35,23 +35,40 @@ ParameterDescriptor machineField(QString id, QString title, QString group, Param
     return result;
 }
 
-QStringList toolNames()
+QStringList toolNames(const ProcessSettingsService& settings)
 {
-    if (auto* settings = ProcessSettingsService::current())
-        return settings->toolDisplayNames();
-    return {};
+    return settings.toolDisplayNames();
 }
 
 } // namespace
+
+ProcessParameterRegistry::ProcessParameterRegistry(const ProcessSettingsService& settings)
+    : m_settings(settings)
+{
+}
 
 QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() const
 {
     QVector<ParameterObjectDescriptor> objects;
 
     ParameterObjectDescriptor controller{QStringLiteral("controller"), QObject::tr("运动控制器"), QObject::tr("运动与轴系")};
+#if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
+    const QString defaultController = QStringLiteral("SimulatorCMHP");
+#elif defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    const QString defaultController = QStringLiteral("GTN");
+#else
+    const QString defaultController = QStringLiteral("Simulator");
+#endif
     auto controllerType = field("type", QObject::tr("控制器类型"), QObject::tr("连接"), ParameterValueType::Enum,
-                                ProcessConfigArea::Devices, "MotionControl", "sType", "SimulatorCMHP");
-    controllerType.enumValues = {"SimulatorCMHP", "ACS", "GTN"};
+                                ProcessConfigArea::Devices, "MotionControl", "sType", defaultController);
+    controllerType.enumValues = {QStringLiteral("Simulator")};
+#if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
+    controllerType.enumValues.append(QStringLiteral("SimulatorCMHP"));
+    controllerType.enumValues.append(QStringLiteral("ACS"));
+#endif
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    controllerType.enumValues.append(QStringLiteral("GTN"));
+#endif
     controller.fields = {controllerType};
     objects.append(controller);
 
@@ -140,7 +157,7 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
     }
     objects.append(positions);
 
-    for (const QString& toolName : toolNames()) {
+    for (const QString& toolName : toolNames(m_settings)) {
         ParameterObjectDescriptor tool;
         tool.id = QStringLiteral("tool:%1").arg(toolName);
         tool.title = toolName;

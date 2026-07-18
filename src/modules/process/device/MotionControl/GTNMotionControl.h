@@ -128,7 +128,8 @@ protected:
 private:
 	//string FindAxisSign(MotionControl::Axis);
 public:
-	GTNMotionControl(void);
+	GTNMotionControl(lcnc::process::ProcessSettingsService& settings,
+	                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration);
 	~GTNMotionControl(void);
 
 	//MotionControl基类函数重写

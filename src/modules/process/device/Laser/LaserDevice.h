@@ -6,24 +6,9 @@
 #include "SerialPort.h"
 #include "toml.hpp"
 #include "modules/process/settings/process_settings_service.h"
-#include "MessageModule.h"
 
 using namespace std;
 using toml::table;
-
-inline table processLaserTable(const QString& name = {})
-{
-    if (auto* settings = lcnc::process::ProcessSettingsService::current())
-        return settings->rawTable(lcnc::process::ProcessConfigArea::Devices, name);
-    return {};
-}
-
-inline QVariant processLaserValue(const QString& tableName, const QString& key, const QVariant& fallback = {})
-{
-    if (auto* settings = lcnc::process::ProcessSettingsService::current())
-        return settings->rawValue(lcnc::process::ProcessConfigArea::Devices, tableName, key, fallback);
-    return fallback;
-}
 
 enum class LaserResponseMode
 {
@@ -139,6 +124,20 @@ public:
 	//virtual void SetLaserModulation(string) = 0;
 
 protected:
+	explicit LaserDevice(lcnc::process::ProcessSettingsService& settings)
+		: m_settings(settings) {}
+
+	table processLaserTable(const QString& name = {}) const
+	{
+		return m_settings.rawTable(lcnc::process::ProcessConfigArea::Devices, name);
+	}
+
+	QVariant processLaserValue(const QString& tableName, const QString& key, const QVariant& fallback = {}) const
+	{
+		return m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices, tableName, key, fallback);
+	}
+
+	lcnc::process::ProcessSettingsService& m_settings;
 	static double			m_dEnergy;
 	static double			m_dFrequency;
 	static double			m_dPulseWidth;

@@ -6,7 +6,11 @@
 #include <QTimer>
 #include <QElapsedTimer>
 
+#include <memory>
 #include "modules/process/device/MotionControl/MotionControl.h"
+#include "modules/process/runtime/process_device_coordinator.h"
+
+namespace lcnc::process { class ProcessSettingsService; class ProcessRuntimeConfiguration; }
 
 struct ButtonState
 {
@@ -19,10 +23,19 @@ struct ButtonState
 class Service
 {
 public:
-    Service(void);
+    using DeviceLock = lcnc::process::ProcessDeviceCoordinator::Lease;
+    Service(lcnc::process::ProcessSettingsService& settings,
+            lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration);
+    ~Service();
 
     void SetMotionControl(string strName = "");
-    MotionControl* GetMotionControl() { return m_pMotionControl; };
+    MotionControl* GetMotionControl() { return m_motionControl.get(); };
+    string configuredMotionControllerName() const;
+    bool configuredControllerRequiresDevice() const;
+    /// Serializes all vendor SDK traffic for this Process runtime.
+    DeviceLock lockDeviceAccess() { return m_deviceCoordinator.acquire(); }
+    /// Stops outputs and disconnects owned devices in the only safe ownership order.
+    bool shutdownDevices();
 
     void SetLaserDevice(string strName = "");
     LaserDevice* GetLaserDevice() { return m_pLaserDevice; };
@@ -37,7 +50,10 @@ public:
     void SetGasTable(const table& table_Gas = {});
 
 private:
-    MotionControl*  m_pMotionControl{nullptr};
+    lcnc::process::ProcessSettingsService& m_settings;
+    lcnc::process::ProcessRuntimeConfiguration& m_runtimeConfiguration;
+    std::unique_ptr<MotionControl> m_motionControl;
+    lcnc::process::ProcessDeviceCoordinator m_deviceCoordinator;
 
     LDFactory       m_LDFactory;
     LaserDevice*    m_pLaserDevice{nullptr};

@@ -12,7 +12,7 @@ using namespace std;
 class AnalogLaserDevice : public LaserDevice
 {
 public:
-	AnalogLaserDevice();
+	explicit AnalogLaserDevice(lcnc::process::ProcessSettingsService& settings);
 	virtual ErrorCode		SetLaserTable(const table& tableLaser = table{});
 
 	virtual const string&	GetName();

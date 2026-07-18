@@ -1,0 +1,18 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "local-paths",
+      "inherits": "debug",
+      "hidden": true,
+      "cacheVariables": {
+        "LCNC_QT6_ROOT": "C:/Qt/6.x/msvc2022_64",
+        "LCNC_OCCT_ROOT": "C:/OpenCASCADE",
+        "LCNC_SARIBBON_ROOT": "C:/SARibbon",
+        "LCNC_QUAZIP_ROOT": "C:/src/quazip",
+        "LCNC_ZLIB_ROOT": "C:/OpenCASCADE/3rdparty/zlib",
+        "LCNC_BOOST_ROOT": "C:/vcpkg/installed/x64-windows"
+      }
+    }
+  ]
+}

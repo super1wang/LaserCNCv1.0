@@ -7,7 +7,7 @@
 #include <queue>
 #include <memory>
 #include "MessageCode.h"
-#include "LogModule.h"
+#include "process_log_compat.h"
 
 #define SHOW_SYS_INFO(code, ...)			MessageModule::instance().ReportMessage(LogType::System,	LogLevel::Info,		static_cast<int>(code), ##__VA_ARGS__)
 #define SHOW_SYS_WARN(code, ...)			MessageModule::instance().ReportMessage(LogType::System,	LogLevel::Warn,		static_cast<int>(code), ##__VA_ARGS__)

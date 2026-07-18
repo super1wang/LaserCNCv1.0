@@ -189,6 +189,7 @@ void ProcessSettingsDialog::apply()
     const auto result = m_settings->commit();
     if (!result.success) { QMessageBox::critical(this, tr("应用参数"), result.error); return; }
     if (m_runtime) {
+        const auto deviceLock = m_runtime->lockDeviceAccess();
         if (result.changes.domains.contains("devices")) { m_runtime->SetMotionControlTable(); m_runtime->SetLaserTable(); }
         if (result.changes.domains.contains("io") && m_runtime->GetMotionControl()) { m_runtime->GetMotionControl()->SetDigitalTable(); m_runtime->GetMotionControl()->SetAnalogTable(); }
         if (result.changes.domains.contains("tools")) m_runtime->SetToolTable();
