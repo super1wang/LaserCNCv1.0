@@ -13,13 +13,38 @@ void TaskProgress::setValue(int value)
     if (range <= 0) return;
     int pct = qBound(0, (value - m_min) * 100 / range, 100);
     m_percent.store(pct);
-    if (m_callback)
-        m_callback(pct, m_stepName);
+
+    ProgressCallback callback;
+    QString step;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        callback = m_callback;
+        step = m_stepName;
+    }
+    if (callback)
+        callback(pct, step);
 }
 
 void TaskProgress::setStepName(const QString& name)
 {
-    m_stepName = name;
-    if (m_callback)
-        m_callback(m_percent.load(), name);
+    ProgressCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_stepName = name;
+        callback = m_callback;
+    }
+    if (callback)
+        callback(m_percent.load(), name);
+}
+
+QString TaskProgress::stepName() const
+{
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    return m_stepName;
+}
+
+void TaskProgress::setCallback(ProgressCallback cb)
+{
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    m_callback = std::move(cb);
 }

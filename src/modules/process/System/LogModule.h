@@ -31,9 +31,6 @@ enum class LogLevel
 	Critical
 };
 
-#define LOG LogModule::instance()
-
-
 #define LOG_SYS_TRACE(message)			LogModule::SystemLog	(LogLevel::Trace,		message)
 #define LOG_SYS_DEBUG(message)			LogModule::SystemLog	(LogLevel::Debug,		message)
 #define LOG_SYS_INFO(message)			LogModule::SystemLog	(LogLevel::Info,		message)
@@ -77,16 +74,10 @@ struct CuttingLogSummary
 
 class LogModule {
 public:
-	LogModule();
-	~LogModule();
-
 	// 日志操作
 	static void InitLog();
 	static void StopLog();
 	static void RefreshLog();
-
-	// 函数宏指针
-	static LogModule* instance();
 
 	// 切换用户
 	static void ChangeUser(const string& strPermission = m_strPermission, const string& strUserName = m_strUser);
@@ -112,7 +103,7 @@ public:
 	static vector<CuttingLogSummary> GetCuttingLogSummaries();
 
 private:
-	static LogModule* uniqueInstance;
+	LogModule() = delete;
 
 	static shared_ptr<spdlog::logger> log_System;
 	static shared_ptr<spdlog::logger> log_Operator;

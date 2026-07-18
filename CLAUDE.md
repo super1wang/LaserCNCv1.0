@@ -5,11 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build
 
 ```powershell
-cmake --build cmake-build-sdkcheck --config Debug -j 16
+cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --build build --config Debug"
 ```
 
-- **Use the `cmake-build-sdkcheck/` dir (Visual Studio 2022 generator, MSVC 14.4x)** — it matches the toolchain Qt 6.9.1 `msvc2022_64` and OpenCASCADE were built with. No vcvars needed (the VS/MSBuild generator brings its own env). Output: `cmake-build-sdkcheck/Debug/LaserCNC.exe`.
-- ⚠️ **Do NOT build/run the `build/` dir.** It is configured with the **VS18 Insiders preview compiler (MSVC 14.51)**, which is **ABI-incompatible** with the VS2022-built Qt/OCC libraries — a binary built there **crashes at startup** with a garbage stack (fake `~TaskManager` → `Qt6Cored.dll`). That is a toolchain mismatch, not a code bug.
+- `build/` currently uses Ninja. Initialize the MSVC/Windows SDK environment and do not pass MSBuild-only flags such as `/m /nologo`.
 - Single CMake target: `LaserCNC` (WIN32 executable).
 - Requires CMake 3.20+, MSVC 2022 x64, C++17.
 - Qt 6.9.1, OpenCASCADE 7.9.0, SARibbon — paths configured via CMake cache variables (`LCNC_QT6_ROOT`, `LCNC_OCCT_ROOT`, `LCNC_SARIBBON_ROOT`).
@@ -20,13 +19,13 @@ cmake --build cmake-build-sdkcheck --config Debug -j 16
 
 ## Architecture
 
-### Micro-Kernel + Three-Domain Documents + Single Workspace View
+### Micro-Kernel + Unified Project Document + Workspace-Bound Views
 
-The application is a single-process, single-project desktop app for 5-axis laser machining (CAD + CAM + Process).
+The application is a single-process, multi-workspace desktop app for 5-axis laser machining (CAD + CAM + Process).
 
 **Kernel** (`src/core/kernel/kernel.h`) is the one global entry point (`Kernel::current()`). It owns `AppSettings`, `LcncProjectManager`, `TaskManager`, `MachineConfigurationService`, `ServiceRegistry`, `EventBus`, and `ModuleRegistry`. `GuiApplication` and `CommandContainer` are injected as raw pointers (owned by `main()` and `MainWindow` respectively).
 
-**One unified project document (workpiece + CAM), owned by `core/`, saved/loaded as one unit.** `LcncProjectManager` owns a single project `LcncDocument` (`workpieceDocument()`; `camDocument()` is an alias of it) that holds **both** the workpiece source geometry (`EntityKind::Workpiece`/`Auxiliary`) **and** the CAM contour wires (`EntityKind::Cam`) in one XCAF tree. A standalone STEP import adds `Workpiece` entities; `generateToolpath` writes each contour wire as a `Cam` entity and records its label in `LaserContour.xcafEntry`. The dense CAM runtime — contours, toolpaths, layers, lead-ins, **process parameters**, and **project-level generation params** (`CamDataManager::GenerationParams`) — lives in `lcnc::cam::CamDataManager` (`core/project/cam/`), also owned by `LcncProjectManager`. There is **no** separate empty CAM document anymore.
+**Each project workspace owns one unified project document (workpiece + CAM), saved/loaded as one unit.** `LcncProjectManager` manages multiple `ProjectWorkspace` instances. Each workspace owns one `LcncDocument` (`workpieceDocument()` and `camDocument()` alias it) holding both workpiece source geometry (`EntityKind::Workpiece`/`Auxiliary`) and CAM contour wires (`EntityKind::Cam`) in one XCAF tree. Dense CAM runtime data lives in the workspace's `lcnc::cam::CamDataManager`. There is no separate CAM document.
 
 **The machine model is an independent reference asset owned by `core/`, NOT project data.** `lcnc::cam::MachineWorkspace` (now in `core/machine/`) is **owned by the `Kernel`**, holds the machine `LcncDocument` (+ kinematics), is **preloaded at startup** from `CamConfig::machineModelPath` (via `MainWindow`), stays **resident in the view across project switches** (project reset erases only Workpiece + CAM display, never Machine), and is **never written into `.lcnc` / never dirties the project**. `CamModule` borrows it (`Kernel::current().machineWorkspace()`) for load/axis/calibration business logic. `LcncProjectManager` keeps only a non-owning machine-doc *reference* (`attachMachineDocument`) so `GuiDocument::domainForDocument` can route by domain.
 
@@ -88,7 +87,8 @@ In `main.cpp`: construct Kernel → registerCoreServices → load settings → i
 LCNC_INFO(lcnc::LogCode::Xxx, "fmt {}", arg);
 LCNC_DEBUG / LCNC_INFO / LCNC_WARN / LCNC_ERR / LCNC_CRIT
 ```
-Every catch block must log with `LCNC_ERR`. `LCNC_CRIT` throws `std::logic_error`.
+Every catch block must log with `LCNC_ERR`. `LCNC_CRIT` only writes a critical log;
+the caller must still return, throw, or terminate explicitly.
 
 ### Banned Legacy APIs
 New code must not use: `projectDocument()`, `workspaceGuiDocument()`, `ensureProjectDocument()`, or the `sourceDocument()` path on `GuiDocument`. Use `workpieceDocument()`, `machineDocument()`, `camDocument()` and document/domain-aware display APIs.
@@ -100,13 +100,13 @@ Pure OCC/math, no UI or document ownership. Free functions preferred. Namespaces
 
 The Process module handles execution/simulation, not geometry. Critical boundary: **Process must never include OCC types** (`TopoDS_*`, `AIS_*`, `gp_*`, `BRep*`, `XCAF*`). It consumes only the OCC-free `ToolpathExportSnapshot` DTO from CAM via `ICamToolpathProvider`.
 
-Internal structure — thin `ProcessModule` facade delegates to:
-- `ProcessRuntime` — internal coordinator (NOT a global singleton)
-- `ProcessStateMachine` — states: Idle → Preparing → Ready → Processing → Paused/Stopping/Error/EmergencyStop
-- `ProcessDeviceCoordinator` — unified motion/laser/IO entry point
-- `ProcessToolpathService` → `ProcessToolMatcher` → `ProcessJobPlan` (contour ordering/sorting now lives in the core CAM layer model — `LayerContainer` sort strategy + `core/algorithms/cam/contour_order_planner` — not a Process-side sorter)
-- `ProcessInstructionPlanner` → controller-neutral `ProcessCommandBuffer` → `IControllerTranslator` → ACS/GTN/PureSimulation adapter
-- `ProcessWorkflowService` + `ProcessExecutionService` + `ProcessNodeExecutorRegistry`
+Current runtime structure:
+- `ProcessModule` — facade and coordinator for state, connection, preflight, monitoring and workflow.
+- `ProcessCuttingPlanService` + `ProcessToolpathService` + `NormalCuttingManager` — prepare and execute the CAM snapshot.
+- `MotionSinkFactory` — selects PureSimulation, ACS text, or GTN buffered execution.
+- `ProcessWorkflowExecutor` + step registry — executes the editable process flow.
+
+`ProcessDeviceCoordinator` is still planned work; until it exists, do not add new direct SDK access paths. Track the remaining safety work in `todo.md`.
 
 Controller adapters (`PureSimulation`, `SimulatorCMHP`, ACS, GTN) are behind `IMotionController`. Vendor SDK headers (ACSC.h, gts.h) must NEVER appear in public interfaces — they stay in option-gated private `.cpp` files.
 
@@ -121,7 +121,7 @@ v2→v3 is forward-compatible: a v2 project (no Cam wires) loads fine; re-saving
 
 ## Pre-Commit Verification
 
-1. Build passes (see Build section above — use `cmake-build-sdkcheck`, NOT `build/`)
+1. Build passes using the command in the Build section.
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
 3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)

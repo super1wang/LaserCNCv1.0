@@ -16,6 +16,7 @@
 #include "modules/process/workflow/process_flow_document.h"
 
 class QTimer;
+class QFutureWatcherBase;
 class Service;
 
 namespace lcnc::process {
@@ -175,7 +176,6 @@ private:
     void triggerSafeStopOutputs();
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
-    void seedDefaultIOTables();
     void startDeviceMonitoring();
     void stopDeviceMonitoring();
     bool validateProcessingEnvironment(QString* errorMessage);
@@ -191,6 +191,7 @@ private:
     QMap<QString, bool>   m_digitalOutputs;
     QTimer*               m_simTimer{nullptr};
     QTimer*               m_hwStatusTimer{nullptr};   ///< 硬件状态轮询（联机模式下生效）
+    QFutureWatcherBase*    m_hwPollWatcher{nullptr};  ///< shutdown 前必须等待，保护控制器借用指针
     bool                  m_hwPollInFlight{false};    ///< 防止后台采集任务堆积
     double                m_feedOverride{1.0};
     double                m_simPhase{0.0};

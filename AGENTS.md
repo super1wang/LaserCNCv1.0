@@ -5,8 +5,10 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ## Build
 
 ```powershell
-cmake --build build --config Debug -- /m /nologo
+cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --build build --config Debug"
 ```
+
+- `build/` 当前是 Ninja 生成器，不要追加 MSBuild 专用的 `/m /nologo`。
 
 - Single CMake target: `LaserCNC` (WIN32 executable).
 - Requires CMake 3.20+, MSVC 2022 x64, C++17.
@@ -18,18 +20,17 @@ cmake --build build --config Debug -- /m /nologo
 
 ## Architecture
 
-### Micro-Kernel + Three-Domain Documents + Single Workspace View
+### Micro-Kernel + Unified Project Document + Workspace-Bound Views
 
-The application is a single-process, single-project desktop app for 5-axis laser machining (CAD + CAM + Process).
+The application is a single-process, multi-workspace desktop app for 5-axis laser machining (CAD + CAM + Process). See `ARCHITECTURE.md` for the authoritative architecture.
 
 **Kernel** (`src/core/kernel/kernel.h`) is the one global entry point (`Kernel::current()`). It owns `AppSettings`, `LcncProjectManager`, `TaskManager`, `MachineConfigurationService`, `ServiceRegistry`, `EventBus`, and `ModuleRegistry`. `GuiApplication` and `CommandContainer` are injected as raw pointers (owned by `main()` and `MainWindow` respectively).
 
-**Three independent `LcncDocument`s** (OCC/XCAF containers) managed by `LcncProjectManager`:
-- **Workpiece** — source geometry, CAD modeling results.
-- **Machine** — machine tool geometry, kinematics, mounting.
-- **CAM** — sparse OCC contours + dense toolpath runtime data (`CamDataManager`).
+Each `ProjectWorkspace` owns one project `LcncDocument` containing both Workpiece and CAM-kind XCAF entities, plus a dense `CamDataManager` and `LcncProjectSession`. `workpieceDocument()` and `camDocument()` currently alias that same physical document.
 
-**Single workspace `GuiDocument`** — all three domains display into one shared OCC view. AIS objects are registered by `{DocumentId, XCAF entry}` to avoid cross-document conflicts.
+The machine document is an independent reference asset owned by Kernel's `MachineWorkspace`; it is not persisted in `.lcnc` and must not dirty a project.
+
+`GuiApplication` owns one `GuiDocument` per open workspace. AIS objects are registered by document id, XCAF entry, domain, and entity kind.
 
 ### Layer Dependency (strict, top-down only)
 
@@ -78,7 +79,8 @@ In `main.cpp`: construct Kernel → registerCoreServices → load settings → i
 LCNC_INFO(lcnc::LogCode::Xxx, "fmt {}", arg);
 LCNC_DEBUG / LCNC_INFO / LCNC_WARN / LCNC_ERR / LCNC_CRIT
 ```
-Every catch block must log with `LCNC_ERR`. `LCNC_CRIT` throws `std::logic_error`.
+Every catch block must log with `LCNC_ERR`. `LCNC_CRIT` only writes a critical log;
+the caller must still return, throw, or terminate explicitly.
 
 ### Banned Legacy APIs
 New code must not use: `projectDocument()`, `workspaceGuiDocument()`, `ensureProjectDocument()`, or the `sourceDocument()` path on `GuiDocument`. Use `workpieceDocument()`, `machineDocument()`, `camDocument()` and document/domain-aware display APIs.
@@ -90,27 +92,28 @@ Pure OCC/math, no UI or document ownership. Free functions preferred. Namespaces
 
 The Process module handles execution/simulation, not geometry. Critical boundary: **Process must never include OCC types** (`TopoDS_*`, `AIS_*`, `gp_*`, `BRep*`, `XCAF*`). It consumes only the OCC-free `ToolpathExportSnapshot` DTO from CAM via `ICamToolpathProvider`.
 
-Internal structure — thin `ProcessModule` facade delegates to:
-- `ProcessRuntime` — internal coordinator (NOT a global singleton)
-- `ProcessStateMachine` — states: Idle → Preparing → Ready → Processing → Paused/Stopping/Error/EmergencyStop
-- `ProcessDeviceCoordinator` — unified motion/laser/IO entry point
-- `ProcessToolpathService` → `ProcessToolpathSorter` + `ProcessToolMatcher` → `ProcessJobPlan`
-- `ProcessInstructionPlanner` → controller-neutral `ProcessCommandBuffer` → `IControllerTranslator` → ACS/GTN/PureSimulation adapter
-- `ProcessWorkflowService` + `ProcessExecutionService` + `ProcessNodeExecutorRegistry`
+Current runtime structure:
+- `ProcessModule` — facade and coordinator for state, connection, preflight, monitoring and workflow.
+- `ProcessCuttingPlanService` + `ProcessToolpathService` + `NormalCuttingManager` — prepare and execute the CAM snapshot.
+- `MotionSinkFactory` — selects PureSimulation, ACS text, or GTN buffered execution.
+- `ProcessWorkflowExecutor` + step registry — executes the editable process flow.
+
+`ProcessDeviceCoordinator` is still planned work; until it exists, do not add new direct SDK access paths. Track the remaining safety work in `todo.md`.
 
 Controller adapters (`PureSimulation`, `SimulatorCMHP`, ACS, GTN) are behind `IMotionController`. Vendor SDK headers (ACSC.h, gts.h) must NEVER appear in public interfaces — they stay in option-gated private `.cpp` files.
 
 ## `.lcnc` Project Package
 
-Zip archive (currently PowerShell-based, planned replacement with QuaZip) containing:
+QuaZip archive (format v3) containing:
 - `project.toml` — manifest, version, metadata
-- `project.xbf` — OCC/XCAF binary snapshot
+- `workpiece.xbf` — Workpiece/Auxiliary and CAM-kind XCAF entities
+- `cam_toolpath.toml` + `cam_toolpath_points.bin` — CAM metadata and dense points
 
 Save/load goes through `LcncProjectManager` → `LcncProjectPackage`.
 
 ## Pre-Commit Verification
 
-1. Build passes: `cmake --build build --config Debug -- /m /nologo`
+1. Build passes using the command in the Build section.
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
 3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)

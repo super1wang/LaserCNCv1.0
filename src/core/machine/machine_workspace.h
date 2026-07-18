@@ -28,7 +28,7 @@ namespace lcnc::cam {
  *    `loadModel(path)` 在用户切换机台或 CamModule::init 时调用一次。
  *  - **独立于工程**：机台几何不属于工程数据 —— 不进 .lcnc、不计入工程脏标记、
  *    新建/打开工程时不被清空（见 LcncProjectManager::resetProjectDocuments）。
- *  - **生命周期**：与 CamModule 同生命周期。
+ *  - **生命周期**：由 Kernel 持有，晚于业务模块创建、早于 ProjectManager 销毁。
  */
 class MachineWorkspace : public QObject
 {

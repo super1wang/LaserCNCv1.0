@@ -23,7 +23,7 @@ public:
     QString createdUtc;
     QString savedUtc;
     QString projectXcafPath{QStringLiteral("project.xbf")};   ///< v1 legacy; v2 uses workpieceXcafPath
-    QString workpieceXcafPath{QStringLiteral("workpiece.xbf")}; ///< v2 workpiece only
+    QString workpieceXcafPath{QStringLiteral("workpiece.xbf")}; ///< v2 workpiece only; v3 workpiece + CAM entities
     QString camCacheDirectory{QStringLiteral("cam/cache")};
     ProjectSaveOptions saveOptions;
 

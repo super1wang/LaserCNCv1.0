@@ -20,6 +20,8 @@ struct ProcessSettingsCommitResult { bool success{false}; ProcessSettingsChangeS
 class ProcessSettingsService
 {
 public:
+    ~ProcessSettingsService();
+
     static ProcessSettingsService* current();
 
     bool initialize();

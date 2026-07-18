@@ -227,6 +227,11 @@ ProcessMonitorService::ProcessMonitorService(QObject* parent)
     connect(m_timer, &QTimer::timeout, this, &ProcessMonitorService::pollAsync);
 }
 
+ProcessMonitorService::~ProcessMonitorService()
+{
+    stop();
+}
+
 void ProcessMonitorService::setContextProvider(std::function<ProcessMonitorPollContext()> provider)
 {
     m_contextProvider = std::move(provider);
@@ -234,6 +239,7 @@ void ProcessMonitorService::setContextProvider(std::function<ProcessMonitorPollC
 
 void ProcessMonitorService::start()
 {
+    m_active = true;
     if (!m_timer->isActive())
         m_timer->start();
     requestPoll();
@@ -241,7 +247,14 @@ void ProcessMonitorService::start()
 
 void ProcessMonitorService::stop()
 {
+    m_active = false;
     m_timer->stop();
+    if (m_watcher) {
+        m_watcher->waitForFinished();
+        disconnect(m_watcher, nullptr, this, nullptr);
+        delete m_watcher;
+        m_watcher = nullptr;
+    }
     m_inFlight = false;
     m_triggerCounts.clear();
     m_activeAlarms.clear();
@@ -250,13 +263,14 @@ void ProcessMonitorService::stop()
 void ProcessMonitorService::requestPoll()
 {
     QMetaObject::invokeMethod(this, [this] {
-        pollAsync();
+        if (m_active)
+            pollAsync();
     }, Qt::QueuedConnection);
 }
 
 void ProcessMonitorService::pollAsync()
 {
-    if (m_inFlight || !m_contextProvider)
+    if (!m_active || m_inFlight || !m_contextProvider)
         return;
 
     const ProcessMonitorPollContext context = m_contextProvider();
@@ -267,11 +281,14 @@ void ProcessMonitorService::pollAsync()
     m_inFlight = true;
     QPointer<ProcessMonitorService> self(this);
     auto* watcher = new QFutureWatcher<ProcessMonitorSnapshot>(this);
+    m_watcher = watcher;
     connect(watcher, &QFutureWatcher<ProcessMonitorSnapshot>::finished, this, [this, self, watcher]() {
         const ProcessMonitorSnapshot result = watcher->result();
+        if (m_watcher == watcher)
+            m_watcher = nullptr;
         watcher->deleteLater();
         m_inFlight = false;
-        if (!self)
+        if (!self || !m_active)
             return;
 
         ProcessMonitorSnapshot snapshot = result;

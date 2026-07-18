@@ -1,84 +1,147 @@
-# LaserCNC Todo 与审阅记录
+# LaserCNC 审计与改进计划
 
-审阅日期：2026-05-08  
-审阅重点：框架结构优化、项目运行稳定性、单项目三域数据边界、唯一 workspace view。
+审计日期：2026-07-17。审计基线：`main` 工作树，约 6.4 万行 C++ 头文件/实现，CMake 编译清单、分层 include、异步任务、对象所有权、异常处理、兼容代码、文档和构建配置均已纳入检查。
 
-## 当前基线
+## 已在本轮完成
 
-- 单项目模式已经落地：`LcncProjectManager` 拥有 Workpiece、Machine、CAM 三份 `LcncDocument`。
-- `GuiApplication` 只拥有一个 workspace `GuiDocument`。
-- `GuiDocument` 已使用 `DocumentId + entry` 注册 AIS 对象，并支持 `rebuildDomain()` 局部刷新。
-- CAD/CAM 显隐、选择和刷新路径已基本按 document/domain 限定。
-- `LcncDocument` 已完成首轮瘦身：工件显示名和源文件路径迁入 `LcncProjectSession::workpiece()`。
-- 阶段 1 稳定性收口已完成首轮实现：`.lcnc` 保存 manifest 时使用 session workpiece source path，工程包读写错误日志更明确，`GuiDocument` domain rebuild 增加 display registry 计数诊断。
-- 运行时显示修复已完成：Workpiece 源模型直接进入公共视窗，安装仅平移源 Workpiece document；CAM 轮廓主体由 CAM document 的 AIS registry 唯一显示，`ToolpathRenderer` 不再创建第二份轮廓 AIS。
-- `LaserCNC` Debug 构建已通过；当前仅见第三方对象缺 PDB 的非致命链接警告。
+- [x] 删除 5 份阶段性根目录文档和 93 份过时的自动生成 `.qoder/repowiki` Markdown，建立唯一架构事实源 `ARCHITECTURE.md`。
+- [x] 删除未编译且无引用的旧 Process UI、License、Expression、SignalSource、TCP/UDP/HTTP server 和 legacy adapter/types。
+- [x] 删除已编译但没有任何运行时入口的平行 communication framework、旧 `ProcessSettings` 壳以及未接入的 `ProcessRuntime/ProcessStateMachine`。
+- [x] 删除 `Service` 中已移除设备的 no-op 兼容 API和无引用显示状态字段。
+- [x] 修复 `TaskManager` 退出时不等待 worker、未释放任务实体的问题，并使 `waitForDone(timeoutMs)` 真正遵守超时。
+- [x] 为 `TaskProgress` 的跨线程 `QString/callback` 状态增加互斥保护。
+- [x] 修复 Process 硬件状态轮询和环境监控在析构时可能继续使用裸控制器指针的 use-after-free 风险。
+- [x] 移除 `LogModule::instance()` 的确定性堆泄漏。
+- [x] 将 Logger 关闭移到所有 GUI、模块、任务和 Kernel 对象析构之后。
+- [x] 在 QApplication 析构前显式停止并等待旧 `MessageModule` 线程，消除静态析构顺序风险。
+- [x] 删除只为旧 CMake 清单保留的空 `commands_cad.cpp`，由 CMake 显式登记其 Qt 元对象头。
+- [x] 修复 `LCNC_WITH_REAL_LASER` 未加入真实激光实现源文件的问题；明确 Qt SerialPort 为当前继承链的必需依赖。
+- [x] 修复 Process 分域 TOML 只由 `devices.toml` 触发默认写入的缺陷；每个域现可独立校验、备份损坏文件并原子重建。
+- [x] Ninja/MSVC Debug 构建通过，隐藏窗口启动、主窗口正常关闭和退出码 0 已验证。
 
-## 审阅发现的问题
+## P0：发布前必须完成
 
-| 优先级 | 问题 | 影响 | 建议 |
-| --- | --- | --- | --- |
-| P0（已完成） | `LcncProjectPackage::save()` 过去把 `manifest.sourceFilePath` 写成 `workpieceDocument.filePath()`。 | 已改为由 `LcncProjectManager` 传入 session manifest metadata，避免保存后工件源路径变成工程包路径。 | 后续在 package roundtrip 测试中持续校验 `session().workpiece().sourceFilePath`。 |
-| P0（已完成） | 导入工件后曾存在源模型、挂载模型以及 CAM sparse/runtime 轮廓重复显示。 | 已取消 Machine document 工件副本：Workpiece 源 AIS 直接显示，安装只平移源数据；CAM 轮廓主体由 CAM document 唯一显示，`ToolpathRenderer` 仅保留引入线/法线/预览覆盖物。 | 手工 smoke 中继续验证 STEP 导入、节点显隐和刀路显隐的一致性。 |
-| P0 | 缺少运行时 smoke 验证。 | 机台加载、工件导入、工程树勾选、CAM 轮廓和 `.lcnc` 打开保存仍主要依赖手测。 | 建立最小 smoke checklist 和可脚本化验证，覆盖三域显示组合与保存/打开。 |
-| P1 | `LcncDocument` 仍持有 `MachineKinematics`、三份 domain tree 和 category group labels。 | document 仍承担部分 machine/domain 业务，后续会阻碍 MachineModelManager 独立。 | 第二轮瘦身：迁出 `MachineKinematics`，将 tree/cache 归入对应 domain manager 或 snapshot builder。 |
-| P1 | `GuiDocument` 仍保留 `sourceDocument()` 和裸 entry 兼容 API。 | 新旧路径并存，后续修改显示逻辑时容易重新引入跨 document entry 冲突。 | 将 CAD/CAM/app 调用全部迁到 document/domain-aware API 后删除兼容 wrapper。 |
-| P1 | `RenderingManager` 仍依赖 `GuiDocument::sourceDocument()`。 | 多域 workspace 下样式应用仍有兼容痕迹。 | 改为按 display registry 的 domain/document 分组应用样式。 |
-| P1 | `.lcnc` package backend 依赖 PowerShell `Compress-Archive` / `Expand-Archive`。 | 对运行环境、错误恢复、编码和大文件稳定性不够可控。 | 本轮暂保留 PowerShell；阶段 4 先抽象 archive backend 和原子保存，后续再替换为 QuaZip。 |
-| P1 | `CadModule`、`CamModule` 实现文件过重。 | I/O、显示同步、业务流程、任务回调混在 facade 中，维护风险高。 | 继续拆 service：WorkpieceImportService、WorkspaceDisplaySyncService、MachineModelManager、ToolpathWorkflowService。 |
-| P2 | `GuiApplication` 保留 `s_instance` 单例守卫。 | 虽然没有公开 `instance()`，但仍是旧单例思路的残留。 | 在确认无外部依赖后改为普通对象守卫或移除静态状态，仅由 Kernel 注入访问。 |
-| P2 | Process 目前以仿真控制器为主。 | 真实控制器接入、掉线恢复、错误状态和安全互锁不足。 | 强化 `IMotionController` 状态机、错误恢复、急停互锁和日志诊断。 |
-| P2 | 第三方库和历史文档变更较多，工作树噪声大。 | 后续审阅 diff 容易混入无关文件。 | 建议建立 vendor 更新规则和文档归档规则，构建输出保持忽略。 |
+### 1. 设备访问单线程化
 
-## 下一阶段开发规划
+现状：连接/断开、回零、加工、150 ms 状态轮询和 500 ms 环境监控可能从不同 worker 同时调用 `MotionControl` 及供应商 SDK。当前没有可证明的线程安全协议。
 
-### 阶段 1：运行稳定性收口（2026-05-09 已完成首轮实现）
+- [ ] 建立唯一 `ProcessDeviceCoordinator` 或专用设备线程，所有 ACS/GTN/激光/IO 命令排队串行执行。
+- [ ] 读操作和写操作统一经过同一入口，禁止 UI/monitor/workflow 直接取得 `MotionControl*`。
+- [ ] 急停使用最高优先级命令并提供同步确认；安全输出复位失败必须进入 Error/EmergencyStop。
+- 验收：并发连接、轮询、回零、加工和停止压力测试无竞态；TSan 不适用于当前 MSVC/Qt 组合时，使用供应商模拟器与调用序列日志证明串行性。
 
-- [x] 修复 `.lcnc` 保存 metadata：`manifest.sourceFilePath` 使用 session workpiece source path。
-- [x] `LcncProjectPackage::save()` 新增 session-driven manifest 保存通道，并把实际写出的 manifest 回写到 `LcncProjectSession`。
-- [x] 保留 PowerShell zip 后端，同时补充压缩、解压、manifest、XCAF 缺失等失败路径日志。
-- [x] 为 `GuiDocument::rebuildDomain()` / `eraseDomain()` 增加 display registry 计数日志，便于确认 domain rebuild 不清空其它 domain。
-- [x] 修复运行时重复显示：取消 Machine document 工件挂载副本，安装改为平移 Workpiece 源形体；CAM 轮廓主体改由 CAM document AIS 唯一显示。
-- [x] VS Code CMake Tools 构建 `LaserCNC` 通过；仅保留既有 `vc143.pdb` 非致命链接警告。
-- [ ] 运行时 smoke 仍需手工执行：启动、加载机台、导入 STEP、反向顺序加载、三域节点显隐、CAM 轮廓、保存/打开。
+### 2. 任务取消与关机协议
 
-### 阶段 2：框架结构继续瘦身
+现状：`TaskManager` 已能安全等待，但取消仍是协作式；多个硬件/文件任务不检查 `isAbortRequested()`，供应商调用阻塞时退出可能无限等待。
 
-- 从 `LcncDocument` 迁出 `MachineKinematics`，建立 `MachineModelManager` 或纳入 `MachineProjectState`/CAM service 管理。
-- 把 `LcncDocument::EntityKind` 降级为 document-local storage tag，避免承载项目域所有权语义。
-- 合并或迁移 `m_workpieceTree/m_machineTree/m_camTree`，让 ProjectExplorer snapshot 从 domain manager 或 document storage adapter 构建。
-- 删除 `GuiDocument` 的裸 entry API 和 `sourceDocument()` 兼容路径。
-- 将 `RenderingManager` 改为按 `ProjectDomain` 和 `DocumentId` 应用样式。
+- [ ] 所有长任务保存 task id，模块 `stop()` 先请求取消再等待自己的任务。
+- [ ] 循环和阶段边界检查取消；硬件 SDK 配置超时和 abort API。
+- [ ] 将“正在连接/断开/回零”纳入正式状态机，禁止状态交叉。
+- [ ] 设计超时后的安全降级：停止发新命令、关闭输出、记录错误，不释放仍被 SDK 使用的对象。
+- 验收：在导入、CAM 生成、连接、回零各阶段强制关闭应用，进程可控退出且无 UAF/死锁。
 
-### 阶段 3：模块服务化
+### 3. 模块异常边界
 
-- CAD：拆出导入导出、建模流程、选择同步、显示刷新服务，减少 `CadModule` facade 体积。
-- CAM：拆出机台模型管理、挂载管理、刀路 workflow、CAM runtime 同步服务。
-- Process：完善控制器 contract，区分仿真控制器、真实控制器和 UI 状态同步。
-- ProjectExplorer：推进真正 model-view 适配，节点 id 稳定化，减少 `QTreeWidgetItem*` 语义泄漏。
+现状：`ModuleRegistry` 的 init/start/stop 只在部分路径捕获 `std::exception`，非标准异常可能越过顶层导致进程终止；若模块 init 中途失败，失败模块自身没有统一 rollback 合同。
 
-### 阶段 4：工程包和配置稳定性
+- [ ] init/start/stop 全部补齐 `catch (...)` 并记录模块 id。
+- [ ] 明确 `stop()` 必须能清理“只 init 未 start”的部分状态，且幂等、noexcept。
+- [ ] `main()` 增加顶层异常边界，确保 Logger flush 和安全输出收尾。
+- 验收：故障注入覆盖 CAD/CAM/Process 每个 init/start 阶段，均能反向清理并产生明确日志。
 
-- 抽象 zip backend，替换 PowerShell 实现。
-- `.lcnc` 保存采用临时文件 + 原子替换；失败时保留旧包。
-- 增加 package schema version 校验和向后兼容策略。
-- 对 `CamConfig`、`ProcessSettings`、`AppSettings` 增加配置值范围校验和默认值恢复。
+### 4. 内存与崩溃验证门禁
 
-### 阶段 5：测试与诊断
+现状：仓库没有自动化测试目标、ASan/Application Verifier 配置或长稳测试；静态审计与成功构建不能证明不存在泄漏。
 
-- 增加核心算法单元测试：CAD primitive/boolean/transform、CAM face classifier、toolpath id reorder。
-- 增加 project package roundtrip 测试：新建、导入、保存、打开、metadata 校验。
-- 增加 view/display 集成测试钩子：统计每个 domain 的 AIS 数量和选择结果。
-- 增加日志分层：启动、配置、project IO、display registry、machine kinematics、controller state。
+- [ ] 增加 MSVC ASan preset，先覆盖 PureSimulation、工程开关、CAM 生成/清空和退出。
+- [ ] 增加 Application Verifier/页堆脚本，覆盖 Qt/OCC/供应商 DLL 场景。
+- [ ] 建立 8 小时循环：新建/打开/关闭工程、显示/隐藏机台、生成/重算、仿真加工、退出重启。
+- [ ] 对 OCC `Handle`、QObject parent tree、后台 future 和供应商句柄分别记录资源基线。
+- 验收：ASan 0 error；Application Verifier 0 heap/handle error；长稳测试私有工作集和句柄数无持续单调增长。
 
-## 手工 smoke 清单
+### 5. 硬件关闭与日志生命周期
 
-- 启动程序后无崩溃，日志目录创建成功。
-- 加载机台模型后 workspace 显示机台。
-- 再打开 STEP/IGES/STL/BREP 工件后，机台不应短暂清空，且 Workpiece 源模型直接在公共视窗中显示。
-- 反向顺序也成立：先打开工件，再加载机台。
-- Machine 节点勾选只影响机台 AIS，不影响工件 AIS。
-- Workpiece 节点勾选只影响 Workpiece 源 AIS，不影响 Machine/CAM domain。
-- CAM 轮廓刷新不清空 Workpiece/Machine 显示，工程树隐藏轮廓后不应残留另一份轮廓。
-- 保存 `.lcnc` 后重新打开，三域根节点、工件源路径、机台路径和 CAM runtime 状态符合预期。
-- Process 执行 tab 独立可用，不出现在 ProjectExplorer 树中。
+现状：`ProcessModule::stop()` 不执行同步设备断开；控制器由函数内 static 对象持有，GTN 析构未明确断开。旧 `MessageModule` 已在 QApplication 析构前显式停止，但双日志/弹窗线程框架本身仍应移除。
+
+- [ ] 在 Kernel shutdown 前完成同步 safe-stop、断激光、断控制器和监控退出。
+- [ ] 取消函数内 static 控制器，将实例所有权交给设备 coordinator。
+- [ ] 移除 `MessageModule`/旧三日志系统，统一到 `lcnc::Logger` + 主线程通知服务。
+- [ ] 禁止硬编码 `D:/Log`，日志目录统一从应用配置派生。
+- 验收：真实/模拟控制器重复连接 100 次、正常退出和异常退出均无残留线程、句柄或输出状态。
+
+## P1：结构稳定性
+
+### 6. 收口 Process 旧框架
+
+- [ ] 将 `Service`、`MotionControl`、`LaserDevice`、`ToolFactory` 的 PascalCase/全局状态接口封装成现代 service 接口。
+- [ ] 移除 `ProcessSettingsService::current()`、`DT::*` 等隐藏全局依赖，改为构造注入。
+- [ ] `ProcessModule` 只保留 facade、生命周期和信号转发；连接、监控、执行、状态分别下沉。
+- [ ] 删除 `IProcessFacade` 中已标记 deprecated 的同步连接别名和 `ProcessCuttingJob::order`。
+- 验收：`process_module.cpp` 小于 800 行；硬件 SDK 头只出现在 option-gated 私有 `.cpp`。
+
+### 7. CMake 与可选 SDK 隔离
+
+现状：依赖根目录使用个人绝对路径默认值，`lcnc_common` 广泛暴露 `3rd/include_3rd`，ACS/BDAQ 的旧实现仍存在无条件编译/链接行为。
+
+- [ ] 提供 `CMakePresets.json`，个人路径放入不提交的 `CMakeUserPresets.json`。
+- [ ] ACS、GTN、BDAQ、真实激光分别建立私有 adapter target；开关关闭时不解析其任何供应商头。
+- [ ] 构建矩阵验证 `all-off`、`GTN`、`ACS`、`real-laser` 和合法组合。
+- [ ] 对本轮补齐的 `LCNC_WITH_REAL_LASER=ON` 单独配置并编译验证。
+- 验收：干净机器可只凭 preset 配置；每个开关的声明、源文件、include、lib、runtime DLL 完全一致。
+
+### 8. 统一工程文档 API
+
+现状：Workpiece 和 CAM 已物理合并，但仍同时存在 `projectDocument()`、`sourceDocument()`、`workspaceGuiDocument()` 等旧别名，文档规范与代码长期漂移。
+
+- [ ] 选择明确名称（建议 `projectDocument()` + EntityKind/domain API），移除伪装成独立文档的别名。
+- [ ] `GuiDocument` 的默认 source document 参数改为显式 `DocumentId/domain`。
+- [ ] 机台域只通过 `MachineWorkspace` 暴露，ProjectManager 不再提供模糊所有权接口。
+- 验收：同一概念只有一个公开名称；所有权可从类型和 API 直接判断。
+
+### 9. 拆分超大 facade/UI
+
+当前热点：`cam_module.cpp` 约 3600 行、`main_window.cpp` 约 2400 行、`cad_module.cpp`/`process_module.cpp` 约 1800 行、`dialog_options.cpp` 约 1200 行。
+
+- [ ] CamModule 拆为 generation/solve/layer/lead-in/machine-placement coordinators。
+- [ ] MainWindow 拆为 workspace view controller、project explorer controller、panel/ribbon composer。
+- [ ] CadModule 拆分 document IO、modeling session 和 view synchronization。
+- [ ] 选项对话框按页面拆分独立 widget/model。
+- 验收：模块 facade 不含大段算法和临时 UI；单文件职责可用一句话描述。
+
+### 10. 自动化架构检查
+
+- [ ] 增加脚本检查 core/view 反向 include、Process OCC 类型、禁用 API 和未列入 CMake 的 `.cpp`。
+- [ ] CMake/CI 执行 `git diff --check`、Debug 构建和架构脚本。
+- [ ] 为 `LcncProjectPackage`、`CamDataManager`、contour order、状态机和 TaskManager 增加单元测试 target。
+- 验收：违反分层或新增孤儿 `.cpp` 时 CI 直接失败。
+
+## P2：兼容与可维护性
+
+### 11. 建立兼容代码退出策略
+
+当前仍有 `.lcnc` v1/v2、`process_cutting_plan.toml`、CAM JSON、旧 workflow tree 和旧字段读取。它们涉及用户数据，不应在没有迁移方案时直接删除。
+
+- [ ] 统计现场最低项目版本，确定最后支持版本。
+- [ ] 提供一次性离线升级工具，将旧工程升级到 v3 当前 schema。
+- [ ] 建立每个旧版本的只读 fixture；禁止新格式继续双写 legacy 字段。
+- [ ] 到期后删除旧读取器、旧字段、别名和迁移分支。
+- 验收：兼容代码均有来源版本、测试样本、截止版本和删除 issue。
+
+### 12. 工程自包含与可追溯
+
+- [ ] 将项目使用的工具参数快照写入 `.lcnc`，避免只按全局工具名解析导致历史工程漂移。
+- [ ] manifest 记录软件版本、机台构型摘要、配置 schema 与刀路算法版本。
+- [ ] 保存采用明确的临时文件 + 原子替换，并验证中断保存不会破坏旧包。
+- 验收：工程复制到另一台机器后可还原相同工具参数并检测不兼容机台配置。
+
+## 每轮验证清单
+
+- [ ] `git diff --check`
+- [ ] core/view 分层 include 扫描为 0
+- [ ] Process OCC 类型扫描为 0
+- [ ] 无未列入 CMake 且非明确 optional 的 `.cpp`
+- [ ] Debug 构建通过
+- [ ] 新建、打开、切换、关闭工程 smoke
+- [ ] CAM 生成、显式重算、图层/轮廓状态 smoke
+- [ ] Process PureSimulation 启动/暂停/继续/停止/急停 smoke
+- [ ] 涉及硬件时完成安全输出和断开检查

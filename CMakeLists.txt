@@ -11,20 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ─── Qt ───────────────────────────────────────────────────────────────────────
 set(LCNC_QT6_ROOT "E:/Qt6.9.1/6.9.1/msvc2022_64" CACHE PATH "Qt6 installation root")
 set(Qt6_DIR "${LCNC_QT6_ROOT}/lib/cmake/Qt6" CACHE PATH "Qt6 CMake package directory")
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network UiTools)
-
-option(LCNC_WITH_SERIAL_COMM "Enable Qt SerialPort communication channel" ON)
-if(LCNC_WITH_SERIAL_COMM)
-    find_package(Qt6 QUIET COMPONENTS SerialPort)
-    if(TARGET Qt6::SerialPort)
-        set(LCNC_PROCESS_HAS_SERIAL_COMM ON)
-    else()
-        set(LCNC_PROCESS_HAS_SERIAL_COMM OFF)
-        message(WARNING "LCNC_WITH_SERIAL_COMM=ON but Qt6 SerialPort was not found; serial communication will be unavailable")
-    endif()
-else()
-    set(LCNC_PROCESS_HAS_SERIAL_COMM OFF)
-endif()
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network SerialPort UiTools)
 
 # ─── OpenCASCADE ──────────────────────────────────────────────────────────────
 set(LCNC_OCCT_ROOT "G:/environment/occt7.9-vc144-64-combined/occt-vc144-64" CACHE PATH "OpenCASCADE installation root")
@@ -123,7 +110,6 @@ target_compile_definitions(lcnc_common INTERFACE
     LCNC_PROCESS_HAS_GTN=$<BOOL:${LCNC_WITH_GTN}>
     LCNC_PROCESS_HAS_BDAQ=$<BOOL:${LCNC_WITH_BDAQ}>
     LCNC_PROCESS_HAS_REAL_LASER=$<BOOL:${LCNC_WITH_REAL_LASER}>
-    LCNC_PROCESS_HAS_SERIAL_COMM=$<BOOL:${LCNC_PROCESS_HAS_SERIAL_COMM}>
 )
 if(WIN32)
     target_compile_definitions(lcnc_common INTERFACE
@@ -234,6 +220,7 @@ set(SRCS_VIEW
 )
 
 set(SRCS_MODULE_CAD
+    src/modules/cad/commands/commands_cad.h
     src/modules/cad/cad_module.cpp
     src/modules/cad/document/cad_document_state.cpp
     src/modules/cad/document/cad_document_registry.cpp
@@ -248,7 +235,6 @@ set(SRCS_MODULE_CAD
     src/modules/cad/commands/commands_file.cpp
     src/modules/cad/commands/commands_edit.cpp
     src/modules/cad/commands/command_helpers.cpp
-    src/modules/cad/commands/commands_cad.cpp
     src/modules/cad/commands/commands_cad_sketch.cpp
     src/modules/cad/commands/commands_cad_view.cpp
     src/modules/cad/commands/commands_cad_primitives.cpp
@@ -299,34 +285,9 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/device/Laser/SimulatorLaserDevice.cpp
     src/modules/process/Tool/Tool.cpp
     src/modules/process/Tool/ToolFactory.cpp
-    src/modules/process/communication/communication_types.h
-    src/modules/process/communication/communication_types.cpp
-    src/modules/process/communication/communication_endpoint.h
-    src/modules/process/communication/communication_endpoint.cpp
-    src/modules/process/communication/communication_message.h
-    src/modules/process/communication/communication_message.cpp
-    src/modules/process/communication/i_communication_channel.h
-    src/modules/process/communication/communication_channel_base.h
-    src/modules/process/communication/communication_channel_base.cpp
-    src/modules/process/communication/communication_log_model.h
-    src/modules/process/communication/communication_log_model.cpp
-    src/modules/process/communication/communication_manager.h
-    src/modules/process/communication/communication_manager.cpp
-    src/modules/process/communication/communication_device_base.h
-    src/modules/process/communication/communication_device_base.cpp
-    src/modules/process/communication/protocols/mock_channel.h
-    src/modules/process/communication/protocols/mock_channel.cpp
-    src/modules/process/communication/protocols/tcp_channel.h
-    src/modules/process/communication/protocols/tcp_channel.cpp
-    src/modules/process/communication/protocols/http_channel.h
-    src/modules/process/communication/protocols/http_channel.cpp
-    src/modules/process/communication/ui/communication_settings_page.h
-    src/modules/process/communication/ui/communication_settings_page.cpp
     src/modules/process/monitor/process_monitor_types.h
     src/modules/process/monitor/process_monitor_service.h
     src/modules/process/monitor/process_monitor_service.cpp
-    src/modules/process/runtime/process_runtime.cpp
-    src/modules/process/runtime/process_state_machine.cpp
     src/modules/process/runtime/process_cancellation_token.h
     src/modules/process/runtime/process_interrupt_context.h
     src/modules/process/runtime/process_interrupt_context.cpp
@@ -388,10 +349,15 @@ if(LCNC_WITH_GTN)
         src/modules/process/runtime/gtn_buffered_command_sink.cpp
     )
 endif()
-if(TARGET Qt6::SerialPort)
+if(LCNC_WITH_REAL_LASER)
     list(APPEND SRCS_MODULE_PROCESS
-        src/modules/process/communication/protocols/serial_channel.h
-        src/modules/process/communication/protocols/serial_channel.cpp
+        src/modules/process/device/Connect/HTTPClient.cpp
+        src/modules/process/device/Laser/IPGLaserDevice.cpp
+        src/modules/process/device/Laser/PharosLaserDevice.cpp
+        src/modules/process/device/Laser/RaycusLaserDevice.cpp
+        src/modules/process/device/Laser/RaycusAirCoolLaserDevice.cpp
+        src/modules/process/device/Laser/RaycusQCWLaserDevice.cpp
+        src/modules/process/device/Laser/ULTRONLaserDevice.cpp
     )
 endif()
 
@@ -501,9 +467,7 @@ if(LCNC_WITH_BDAQ)
     target_include_directories(lcnc_module_process PRIVATE "${LCNC_BDAQ_INCLUDE_DIR}")
     target_link_libraries(lcnc_module_process PRIVATE "${LCNC_BDAQ_LIB}")
 endif()
-if(TARGET Qt6::SerialPort)
-    target_link_libraries(lcnc_module_process PUBLIC Qt6::SerialPort)
-endif()
+target_link_libraries(lcnc_module_process PUBLIC Qt6::SerialPort)
 
 # app — bundles the three modules so the exe only needs to link lcnc_app ──────
 add_library(lcnc_app STATIC ${SRCS_APP})

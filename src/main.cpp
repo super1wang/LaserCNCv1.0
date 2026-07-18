@@ -12,6 +12,7 @@
 #include "modules/cad/cad_module.h"
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
+#include "modules/process/System/MessageModule.h"
 
 namespace {
 
@@ -73,6 +74,8 @@ int main(int argc, char* argv[])
     //    保证依赖在前。
     //    [modules].disabled = [...] 可在 mainwindow.toml 中关闭某些模块；
     //    被关闭的模块连同依赖它的下游模块都不会加入 Kernel。
+    int rc = -1;
+    {
     lcnc::Kernel kernel;
     kernel.registerCoreServices();
     kernel.appSettings()->loadDefault();   // mainwindow.toml
@@ -113,26 +116,32 @@ int main(int argc, char* argv[])
     if (!kernel.bootstrap()) {
         LCNC_CRIT(lcnc::LogCode::InternalUnexpectedState,
                   "Kernel bootstrap failed; aborting startup");
-        return -1;
+    } else {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "Kernel ready: services={}",
+                  kernel.services().size());
+
+        MainWindow mainWin;
+        mainWin.show();
+
+        rc = app.exec();
+
+        // 注意：Kernel 在 MainWindow 之后销毁，但模块在销毁前先 stop。
+        kernel.appSettings()->saveDefault();
+        kernel.shutdown();
     }
-    LCNC_INFO(lcnc::LogCode::Generic,
-              "Kernel ready: services={}",
-              kernel.services().size());
-
-    MainWindow mainWin;
-    mainWin.show();
-
-    const int rc = app.exec();
-
-    // 注意：Kernel 在 MainWindow 之后销毁，但模块在销毁前先 stop。
-    kernel.appSettings()->saveDefault();
-    kernel.shutdown();
 
     // 作用域销毁顺序：mainWin → guiAppOwner → kernel（声明顺序的反序），
     // 满足 "UI → GuiApplication → ProjectManager/TaskManager" 的依赖
     // 反向释放，无需在此处手动 reset。
+    }
 
-    LCNC_INFO(lcnc::LogCode::Generic, "Shutdown rc={}", rc);
+    // 旧消息桥接线程可能由任一 Process 路径惰性创建；必须在 QApplication
+    // 和日志系统仍存活时显式停止，不能依赖进程退出阶段的静态析构顺序。
+    MessageModule::shutdown();
+
+    // Logger 必须晚于所有可能写日志的模块、任务和 GUI 对象关闭。
+    LCNC_INFO(lcnc::LogCode::Generic, "Shutdown complete rc={}", rc);
     lcnc::Logger::shutdown();
     return rc;
 }

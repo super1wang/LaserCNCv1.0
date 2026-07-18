@@ -5,6 +5,7 @@
 #include "modules/process/Setting/BuiltinIODefs.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -71,6 +72,12 @@ toml::value tomlFromVariant(const QVariant& value, ParameterValueType type)
 } // namespace
 
 ProcessSettingsService* ProcessSettingsService::s_current = nullptr;
+
+ProcessSettingsService::~ProcessSettingsService()
+{
+    if (s_current == this)
+        s_current = nullptr;
+}
 
 ProcessSettingsService* ProcessSettingsService::current() { return s_current; }
 
@@ -169,6 +176,12 @@ void ProcessSettingsService::seedDefaults()
     tool["fEnergy"] = 20.0; tool["fFrequency"] = 30.0; tool["fPluse"] = 20.0;
     tool["fBeforeOpenLaser"] = 0.0; tool["fAfterCloseLaser"] = 0.0;
     toolSection["Default"] = tool;
+    // Keep every domain structurally valid even when it has no fields yet.
+    sectionRef(ProcessConfigArea::Devices, QStringLiteral("Internet"));
+    sectionRef(ProcessConfigArea::Devices, QStringLiteral("Camera"));
+    sectionRef(ProcessConfigArea::Operations, QStringLiteral("Cutting"));
+    sectionRef(ProcessConfigArea::Operations, QStringLiteral("LoadingPos"));
+    sectionRef(ProcessConfigArea::Workflow, QStringLiteral("Special"));
     seedBuiltinIo();
 }
 
@@ -182,11 +195,15 @@ bool ProcessSettingsService::loadDomain(const QString& fileName, QString* error)
             if (error) *error = QObject::tr("配置文件 %1 的 schema 无效。").arg(path);
             return false;
         }
-        for (const auto& item : parsed.at("Setting").as_table()) {
+        const auto& parsedSettings = parsed.at("Setting").as_table();
+        for (const auto& item : parsedSettings) {
             if (!item.second.is_table()) {
                 if (error) *error = QObject::tr("配置文件 %1 中的域 %2 不是表。").arg(path, QString::fromStdString(item.first));
                 return false;
             }
+        }
+        // Commit only after the entire file has passed schema validation.
+        for (const auto& item : parsedSettings) {
             m_draft["Setting"][item.first] = item.second;
         }
         return true;
@@ -205,10 +222,48 @@ bool ProcessSettingsService::initialize()
     seedDefaults();
     QDir().mkpath(QDir(rootDir()).filePath(QStringLiteral("tools")));
     QString error;
-    const bool ok = loadDomain(QStringLiteral("devices.toml"), &error)
-        && loadDomain(QStringLiteral("io.toml"), &error)
-        && loadDomain(QStringLiteral("operations.toml"), &error)
-        && loadDomain(QStringLiteral("workflow.toml"), &error);
+    const auto backupInvalidFile = [this](const QString& fileName, QString* backupError) {
+        const QString path = QDir(rootDir()).filePath(fileName);
+        const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmsszzz"));
+        const QString backup = path + QStringLiteral(".invalid-") + stamp;
+        if (!QFile::copy(path, backup)) {
+            if (backupError)
+                *backupError = QObject::tr("无法备份损坏配置 %1 到 %2。").arg(path, backup);
+            return false;
+        }
+        LCNC_WARN(lcnc::LogCode::SettingsParseFailed,
+                  "process.settings: invalid '{}' preserved as '{}'; rebuilding defaults",
+                  path.toStdString(), backup.toStdString());
+        return true;
+    };
+    const auto loadOrRepairDomain = [this, &error, &backupInvalidFile](
+                                        const QString& fileName,
+                                        const QStringList& sections) {
+        const QString path = QDir(rootDir()).filePath(fileName);
+        if (!QFileInfo::exists(path))
+            return writeDomain(fileName, sections, &error);
+        if (loadDomain(fileName, &error))
+            return true;
+        if (!backupInvalidFile(fileName, &error))
+            return false;
+        error.clear();
+        return writeDomain(fileName, sections, &error);
+    };
+
+    const bool ok = loadOrRepairDomain(
+                        QStringLiteral("devices.toml"),
+                        {QStringLiteral("MotionControl"), QStringLiteral("Laser"),
+                         QStringLiteral("Internet"), QStringLiteral("Camera")})
+        && loadOrRepairDomain(
+            QStringLiteral("io.toml"),
+            {QStringLiteral("Digital"), QStringLiteral("Analog")})
+        && loadOrRepairDomain(
+            QStringLiteral("operations.toml"),
+            {QStringLiteral("Gas"), QStringLiteral("Water"),
+             QStringLiteral("Monitor"), QStringLiteral("LoadingPos")})
+        && loadOrRepairDomain(
+            QStringLiteral("workflow.toml"),
+            {QStringLiteral("Special")});
     if (!ok) {
         LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
                  "process.settings: initialization failed: {}",
@@ -216,8 +271,22 @@ bool ProcessSettingsService::initialize()
         return false;
     }
     const QString indexPath = QDir(rootDir()).filePath(QStringLiteral("tools/index.toml"));
+    if (!QFileInfo::exists(indexPath) && !writeTools(&error, nullptr)) {
+        LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
+                 "process.settings: failed to create tool defaults: {}",
+                 error.toStdString());
+        return false;
+    }
     if (QFileInfo::exists(indexPath)) {
-        if (!loadDomain(QStringLiteral("tools/index.toml"), &error)) return false;
+        if (!loadDomain(QStringLiteral("tools/index.toml"), &error)) {
+            if (!backupInvalidFile(QStringLiteral("tools/index.toml"), &error)
+                || !writeTools(&error, nullptr)) {
+                LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
+                         "process.settings: failed to repair tool index: {}",
+                         error.toStdString());
+                return false;
+            }
+        }
         try {
             const toml::value index = toml::parse(indexPath.toStdString());
             if (index.contains("tools") && index.at("tools").is_array()) {
@@ -249,14 +318,6 @@ bool ProcessSettingsService::initialize()
     seedBuiltinIo();
     // No legacy file is inspected.  First run persists only the new default store.
     m_committed.value = m_draft;
-    if (!QFileInfo::exists(QDir(rootDir()).filePath(QStringLiteral("devices.toml")))) {
-        if (!writeDomain(QStringLiteral("devices.toml"), {"MotionControl", "Laser", "Internet", "Camera"}, &error)
-            || !writeDomain(QStringLiteral("io.toml"), {"Digital", "Analog"}, &error)
-            || !writeDomain(QStringLiteral("operations.toml"), {"Gas", "Water", "Monitor", "LoadingPos"}, &error)
-            || !writeDomain(QStringLiteral("workflow.toml"), {"Special"}, &error)
-            || !writeTools(&error, nullptr)) return false;
-        m_committed.value = m_draft;
-    }
     beginEdit();
     return true;
 }

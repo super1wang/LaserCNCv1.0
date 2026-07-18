@@ -5,15 +5,26 @@
 #include <QTimer>
 #include <QPointer>
 
+MessageModule* MessageModule::s_instance = nullptr;
+
 MessageModule& MessageModule::instance()
 {
 	static MessageModule instance;
 	return instance;
 }
 
+void MessageModule::shutdown()
+{
+	if (!s_instance)
+		return;
+	s_instance->stop();
+	s_instance->wait();
+}
+
 MessageModule::MessageModule(QObject* parent)
 	: QThread(parent)
 {
+	s_instance = this;
 	start();
 }
 
@@ -21,6 +32,7 @@ MessageModule::~MessageModule()
 {
 	stop();
 	wait();
+	s_instance = nullptr;
 }
 
 void MessageModule::run()
@@ -61,6 +73,8 @@ void MessageModule::ReportMessage(LogType eType, LogLevel eLevel, int iCode, con
 {
 	WriteLog(eType, eLevel, iCode, qstrMessage);
 	QMutexLocker locker(&m_mutex);
+	if (m_stopped)
+		return;
 	m_MessageQueue.push({ eType, eLevel, iCode, qstrMessage });
 	m_condition.wakeOne();
 	if (eLevel == LogLevel::Error)

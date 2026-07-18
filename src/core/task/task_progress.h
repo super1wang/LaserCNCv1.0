@@ -9,6 +9,7 @@
  */
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <QString>
 
 class TaskProgress
@@ -28,16 +29,17 @@ public:
     void requestAbort() { m_abortRequested.store(true); }
 
     int     percent()  const { return m_percent.load(); }
-    QString stepName() const { return m_stepName; }
+    QString stepName() const;
 
     /// Set a callback invoked whenever progress or step changes (in worker thread)
-    void setCallback(ProgressCallback cb) { m_callback = std::move(cb); }
+    void setCallback(ProgressCallback cb);
 
 private:
     std::atomic<bool> m_abortRequested{false};
     std::atomic<int>  m_percent{0};
     int               m_min{0};
     int               m_max{100};
+    mutable std::mutex m_stateMutex;
     QString           m_stepName;
     ProgressCallback  m_callback;
 };

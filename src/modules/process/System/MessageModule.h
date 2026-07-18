@@ -26,6 +26,7 @@ class MessageModule : public QThread
 	Q_OBJECT
 public:
 	static MessageModule& instance();
+	static void shutdown();
 
 	void ReportMessage(LogType eType, LogLevel eLevel, int iCode, const QString& qstrMessage = QString());
 	void stop();
@@ -54,6 +55,8 @@ private:
 	QString ExplainInfoCode(InfoCode eCode)			const;
 
 private:
+	static MessageModule* s_instance;
+
 	QMutex				m_mutex;
 	QWaitCondition		m_condition;
 	std::queue<Message> m_MessageQueue;

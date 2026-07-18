@@ -164,26 +164,10 @@ shared_ptr<spdlog::logger> LogModule::log_System	= nullptr;
 shared_ptr<spdlog::logger> LogModule::log_Operator	= nullptr;
 shared_ptr<spdlog::logger> LogModule::log_Process	= nullptr;
 
-LogModule*	LogModule::uniqueInstance	= nullptr;
 string		LogModule::m_strPermission	= "Operator";
 string		LogModule::m_strUser		= "User";
 string		LogModule::m_strCurrentProcessLogPath;
 mutex		LogModule::m_mutexUserChange;
-
-LogModule::LogModule()
-{
-}
-
-LogModule::~LogModule()
-{
-}
-
-LogModule* LogModule::instance() {
-	if (!uniqueInstance) {
-		uniqueInstance = new LogModule();
-	}
-	return uniqueInstance;
-}
 
 void LogModule::InitLog()
 {

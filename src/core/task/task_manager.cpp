@@ -1,7 +1,11 @@
 #include "core/task/task_manager.h"
 
 #include <QFuture>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QtConcurrent/QtConcurrent>
+
+#include <utility>
 
 #include "core/logging/logger.h"
 
@@ -20,6 +24,31 @@ TaskManager::TaskManager(QObject* parent)
 
 TaskManager::~TaskManager()
 {
+    // Jobs may retain borrowed module/document pointers.  Keep their progress
+    // objects and watcher entities alive until every worker has left its
+    // callable; otherwise shutdown can race into use-after-free.
+    for (Entity* entity : std::as_const(m_tasks)) {
+        if (entity && entity->progress)
+            entity->progress->requestAbort();
+    }
+    for (Entity* entity : std::as_const(m_tasks)) {
+        if (entity && entity->watcher)
+            entity->watcher->waitForFinished();
+    }
+
+    const auto remaining = m_tasks;
+    m_tasks.clear();
+    for (Entity* entity : remaining) {
+        if (!entity)
+            continue;
+        if (entity->watcher) {
+            disconnect(entity->watcher, nullptr, this, nullptr);
+            delete entity->watcher;
+        }
+        delete entity->progress;
+        delete entity;
+    }
+
     if (s_instance == this) s_instance = nullptr;
 }
 
@@ -103,8 +132,12 @@ bool TaskManager::waitForDone(TaskId id, int timeoutMs)
             e->watcher->waitForFinished();
             return true;
         }
-        e->watcher->future().waitForFinished();
-        return true;
+
+        QElapsedTimer timer;
+        timer.start();
+        while (e->watcher->isRunning() && timer.elapsed() < timeoutMs)
+            QThread::msleep(1);
+        return !e->watcher->isRunning();
     }
     return false;
 }

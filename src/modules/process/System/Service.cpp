@@ -8,15 +8,8 @@
 #include "modules/process/device/MotionControl/GTNMotionControl.h"
 #endif
 
-Service::Service(void):
-    m_bCuttingHeadShow(false)
-    ,m_bShowDirection(false)
-    ,m_bShowCuttingPath(false)
-    ,m_bShowPathID(false)
+Service::Service(void)
 {
-    m_pMotionControl = nullptr;
-    m_pLaserDevice   = nullptr;
-    SetCuttingDevice("NormalCutting");
     SetToolTable();
 }
 
@@ -222,16 +215,4 @@ void Service::SetGasTable(const table& table_Gas)
         if (m_pMotionControl)
             m_pMotionControl->AnalogOutputSet(AnalogOUT::Pressure, iConversions / 2.0 * dPressure);
     }
-}
-
-void Service::SetCompTable(const table& table_Comp)
-{
-    Q_UNUSED(table_Comp);
-    // CompDevice removed
-        // CompDevice removed
-}
-
-void Service::RedrawDrawing()
-{
-    // No-op: old QCad framework not available.
 }

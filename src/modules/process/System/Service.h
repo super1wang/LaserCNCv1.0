@@ -27,29 +27,6 @@ public:
     void SetLaserDevice(string strName = "");
     LaserDevice* GetLaserDevice() { return m_pLaserDevice; };
 
-    void SetCompDevice(string = "") {}
-    void* GetCompDevice() { return nullptr; }
-
-    // CuttingDevice and SignalSource removed.
-    void SetCuttingDevice(string) {}
-    void* GetCuttingDevice() { return nullptr; }
-    void* GetSignalSource()  { return nullptr; }
-
-    void SetCuttingHeadShow(bool bFlag) { m_bCuttingHeadShow = bFlag; };
-    bool GetCuttingHeadShow() { return m_bCuttingHeadShow; };
-
-    void SetShowDirectionFlag(bool bFlag) { m_bShowDirection = bFlag; };
-    bool GetShowDirectionFlag() { return m_bShowDirection; };
-
-    void SetShowCuttingPath(bool bFlag) { m_bShowCuttingPath = bFlag; };
-    bool GetShowCuttingPath() { return m_bShowCuttingPath; };
-
-    void SetShowPathID(bool bFlag) { m_bShowPathID = bFlag; };
-    bool GetShowPathID() { return m_bShowPathID; };
-
-    void SetRedrawLayers(bool bFlag) { m_bRedrawLayers = bFlag; };
-    bool GetRedrawLayers() { return m_bRedrawLayers; };
-
     void SetToolTable();
     void ClearToolDate();
 
@@ -57,11 +34,7 @@ public:
     void SetDigitalTable(const table& table_Digital = {});
     void SetAnalogTable(const table& table_Analog = {});
     void SetLaserTable(const table& table_Laser = {});
-    void SetSignalSourceTable(const table& = {}) {}
     void SetGasTable(const table& table_Gas = {});
-    void SetCompTable(const table& table_Comp = {});
-
-    void RedrawDrawing();
 
 private:
     MotionControl*  m_pMotionControl{nullptr};
@@ -71,16 +44,6 @@ private:
 
     ToolFactory     m_ToolFactory;
 
-    bool    m_bCuttingHeadShow{false};
-    bool    m_bShowDirection{false};
-    bool    m_bShowCuttingPath{false};
-    bool    m_bShowPathID{false};
-    bool    m_bRedrawLayers{false};
-
     string  m_strMotionControl;
     string  m_strLaserDevice;
-    string  m_strCompDevice;
-
-    QString m_qstrDirectionX;
-    QString m_qstrDirectionY;
 };

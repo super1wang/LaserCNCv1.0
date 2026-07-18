@@ -65,7 +65,7 @@ void LcncProjectManifest::writeTo(toml::value& root) const
     using namespace toml_io;
 
     root["schema"] = qs(schema);
-    root["formatVersion"] = kCurrentFormatVersion; // 永远写出 v2
+    root["formatVersion"] = kCurrentFormatVersion;
     root["projectName"] = qs(projectName);
     root["documentName"] = qs(documentName);
     root["sourceFilePath"] = qs(sourceFilePath);

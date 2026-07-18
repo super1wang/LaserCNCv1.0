@@ -8,6 +8,7 @@
 #include <functional>
 
 class QTimer;
+class QFutureWatcherBase;
 
 namespace lcnc::process {
 
@@ -45,6 +46,7 @@ class ProcessMonitorService : public QObject
     Q_OBJECT
 public:
     explicit ProcessMonitorService(QObject* parent = nullptr);
+    ~ProcessMonitorService() override;
 
     void setContextProvider(std::function<ProcessMonitorPollContext()> provider);
     void start();
@@ -64,6 +66,8 @@ private:
 
     std::function<ProcessMonitorPollContext()> m_contextProvider;
     QTimer* m_timer{nullptr};
+    QFutureWatcherBase* m_watcher{nullptr};
+    bool m_active{false};
     bool m_inFlight{false};
     ProcessMonitorSnapshot m_lastSnapshot;
     QHash<QString, int> m_triggerCounts;

@@ -1077,9 +1077,15 @@ void ProcessModule::stopDeviceMonitoring()
 {
     if (m_hwStatusTimer)
         m_hwStatusTimer->stop();
-    m_hwPollInFlight = false;
     if (m_monitorService)
         m_monitorService->stop();
+    if (m_hwPollWatcher) {
+        m_hwPollWatcher->waitForFinished();
+        disconnect(m_hwPollWatcher, nullptr, this, nullptr);
+        delete m_hwPollWatcher;
+        m_hwPollWatcher = nullptr;
+    }
+    m_hwPollInFlight = false;
 }
 
 bool ProcessModule::validateProcessingEnvironment(QString* errorMessage)
@@ -1799,12 +1805,15 @@ void ProcessModule::pollHardwareStatus()
     m_hwPollInFlight = true;
     QPointer<ProcessModule> self(this);
     auto* watcher = new QFutureWatcher<HardwareIoBatch>(this);
+    m_hwPollWatcher = watcher;
     connect(watcher, &QFutureWatcher<HardwareIoBatch>::finished, this,
             [this, self, watcher]() {
         const HardwareIoBatch batch = watcher->result();
+        if (m_hwPollWatcher == watcher)
+            m_hwPollWatcher = nullptr;
         watcher->deleteLater();
         m_hwPollInFlight = false;
-        if (!self)
+        if (!self || !m_initialized || !m_connected)
             return;
 
         for (const HardwareAxisSample& s : batch.axes) {
@@ -1871,14 +1880,6 @@ void ProcessModule::pollHardwareStatus()
         }
         return batch;
     }));
-}
-
-namespace {
-} // namespace
-
-void ProcessModule::seedDefaultIOTables()
-{
-    // Built-in IO is seeded by ProcessSettingsService before the runtime is started.
 }
 
 QList<DigitalOutputDescriptor> ProcessModule::mainPanelDigitalOutputs() const
