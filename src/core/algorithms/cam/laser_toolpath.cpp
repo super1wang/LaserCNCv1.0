@@ -18,6 +18,7 @@
 #include <BRepLProp_CLProps.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepClass_FaceClassifier.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepBndLib.hxx>
@@ -524,6 +525,26 @@ bool liesOnMachiningFace(const std::vector<MachiningFaceProbe>& faces,
     return std::any_of(faces.begin(), faces.end(), [&](const MachiningFaceProbe& face) {
         return classifyPointOnFace(face, point);
     });
+}
+
+bool isMaterialSideOfWorkpiece(const TopoDS_Shape& workpiece,
+                               const gp_Pnt& surfacePoint,
+                               const gp_Dir& outwardNormal,
+                               const gp_Vec& lateralDirection,
+                               double lateralDistance)
+{
+    if (workpiece.IsNull())
+        return false;
+
+    // The face-UV test above is precise for a regular outer face, but a seam,
+    // narrow trimmed face, or split analytic surface may leave both lateral
+    // probes outside that one face.  Move each probe a small distance into the
+    // workpiece and ask the solid classifier which side contains material.
+    const double inwardDistance = std::max(0.0005, std::min(0.01, lateralDistance));
+    const gp_Pnt probe = surfacePoint.Translated(lateralDirection * lateralDistance)
+        .Translated(gp_Vec(outwardNormal) * -inwardDistance);
+    BRepClass3d_SolidClassifier classifier(workpiece, probe, inwardDistance * 0.1);
+    return classifier.State() == TopAbs_IN;
 }
 
 gp_Dir avoidCrossSectionDirection(const gp_Pnt& point,
@@ -1139,10 +1160,26 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
             break;
         }
     }
+    if (!sideResolved && !forwardOnSurface && !reverseOnSurface) {
+        // A valid contour can lie at a seam between split/narrow outer faces:
+        // neither tangent-plane probe belongs to the individual face UV domain.
+        // In that case, fall back to the material side instead of treating the
+        // missing single-face hit as proof that no hanging side exists.
+        for (const double probeDistance : kLeadInDirectionProbeDistances) {
+            forwardOnSurface = isMaterialSideOfWorkpiece(
+                contour.sourceShape, start.position, start.normal, direction, probeDistance);
+            reverseOnSurface = isMaterialSideOfWorkpiece(
+                contour.sourceShape, start.position, start.normal, direction.Reversed(), probeDistance);
+            if (forwardOnSurface != reverseOnSurface) {
+                sideResolved = true;
+                break;
+            }
+        }
+    }
     if (!sideResolved) {
         result.error = forwardOnSurface
             ? QStringLiteral("轮廓起点两侧近点均落在加工外表面，无法确定悬空侧")
-            : QStringLiteral("轮廓起点两侧近点均未落在加工外表面，无法确定悬空侧");
+            : QStringLiteral("轮廓起点两侧近点均未落在加工外表面，且实体分类未能确认材料侧，无法确定悬空侧");
         return result;
     }
 
