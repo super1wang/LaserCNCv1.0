@@ -33,6 +33,7 @@
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -455,7 +456,8 @@ bool findClosestFaceNormal(const gp_Pnt& pt,
     return found;
 }
 
-constexpr double kLeadInDirectionProbeDistance = 0.01;
+constexpr std::array<double, 4> kLeadInDirectionProbeDistances{
+    0.001, 0.0025, 0.005, 0.01};
 
 struct MachiningFaceProbe
 {
@@ -1120,13 +1122,24 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
         return result;
     }
 
-    const gp_Pnt forwardProbe = start.position.Translated(
-        direction * kLeadInDirectionProbeDistance);
-    const gp_Pnt reverseProbe = start.position.Translated(
-        direction * -kLeadInDirectionProbeDistance);
-    const bool forwardOnSurface = liesOnMachiningFace(machiningFaces, forwardProbe);
-    const bool reverseOnSurface = liesOnMachiningFace(machiningFaces, reverseProbe);
-    if (forwardOnSurface == reverseOnSurface) {
+    // Small/narrow trimmed faces can reject a fixed 0.01 mm UV probe on both
+    // sides even though one side is the machining face.  Probe progressively
+    // while retaining the safety rule: accept a direction only when its
+    // opposite side is positively classified as machining surface.
+    bool sideResolved = false;
+    bool forwardOnSurface = false;
+    bool reverseOnSurface = false;
+    for (const double probeDistance : kLeadInDirectionProbeDistances) {
+        const gp_Pnt forwardProbe = start.position.Translated(direction * probeDistance);
+        const gp_Pnt reverseProbe = start.position.Translated(direction * -probeDistance);
+        forwardOnSurface = liesOnMachiningFace(machiningFaces, forwardProbe);
+        reverseOnSurface = liesOnMachiningFace(machiningFaces, reverseProbe);
+        if (forwardOnSurface != reverseOnSurface) {
+            sideResolved = true;
+            break;
+        }
+    }
+    if (!sideResolved) {
         result.error = forwardOnSurface
             ? QStringLiteral("轮廓起点两侧近点均落在加工外表面，无法确定悬空侧")
             : QStringLiteral("轮廓起点两侧近点均未落在加工外表面，无法确定悬空侧");

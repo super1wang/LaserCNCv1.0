@@ -40,6 +40,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPoint>
+#include <QPointer>
 #include <QSignalBlocker>
 #include <QByteArray>
 #include <QThread>
@@ -217,17 +218,16 @@ public:
         : QObject(nullptr)
         , m_module(module)
     {
-        if (auto* mgr = layerMgr()) {
-            auto bump = [this] { refreshCache(); };
-            QObject::connect(mgr, &lcnc::cam::LayerManager::layersReset,             this, bump);
-            QObject::connect(mgr, &lcnc::cam::LayerManager::layerAdded,              this, [this](std::uint64_t) { refreshCache(); });
-            QObject::connect(mgr, &lcnc::cam::LayerManager::layerRemoved,            this, [this](std::uint64_t) { refreshCache(); });
-            QObject::connect(mgr, &lcnc::cam::LayerManager::layersReordered,         this, bump);
-            QObject::connect(mgr, &lcnc::cam::LayerManager::layerPropertyChanged,    this, [this](std::uint64_t, lcnc::cam::LayerProperty) { refreshCache(); });
-            QObject::connect(mgr, &lcnc::cam::LayerManager::contourMembershipChanged,this, bump);
-            QObject::connect(mgr, &lcnc::cam::LayerManager::manualContourOrderChanged,this, bump);
-            QObject::connect(mgr, &lcnc::cam::LayerManager::sortStrategyChanged,     this, [this](lcnc::cam::CuttingPlanSortStrategy) { refreshCache(); });
-            QObject::connect(mgr, &lcnc::cam::LayerManager::lastAutoSortAxisChanged, this, [this](lcnc::cam::AutoSortAxis) { refreshCache(); });
+        if (m_module) {
+            // LayerManager belongs to the active project CamDataManager and can be
+            // replaced when a project is opened or switched.  Module-level signals
+            // make that transition refresh the immutable Process-side cache too.
+            QObject::connect(m_module, &CamModule::toolpathGenerated,
+                             this, [this] { refreshCache(); });
+            QObject::connect(m_module, &CamModule::toolpathCleared,
+                             this, [this] { refreshCache(); });
+            QObject::connect(m_module, &CamModule::toolpathLayersChanged,
+                             this, [this] { refreshCache(); });
         }
         refreshCache();
     }
@@ -312,10 +312,44 @@ public:
     }
 
 private:
+    void bindLayerManager()
+    {
+        auto* const manager = layerMgr();
+        if (m_layerManager == manager)
+            return;
+
+        if (m_layerManager)
+            QObject::disconnect(m_layerManager, nullptr, this, nullptr);
+        m_layerManager = manager;
+        if (!m_layerManager)
+            return;
+
+        auto refresh = [this] { refreshCache(); };
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::layersReset,
+                         this, refresh);
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::layerAdded,
+                         this, [this](std::uint64_t) { refreshCache(); });
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::layerRemoved,
+                         this, [this](std::uint64_t) { refreshCache(); });
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::layersReordered,
+                         this, refresh);
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::layerPropertyChanged,
+                         this, [this](std::uint64_t, lcnc::cam::LayerProperty) { refreshCache(); });
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::contourMembershipChanged,
+                         this, refresh);
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::manualContourOrderChanged,
+                         this, refresh);
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::sortStrategyChanged,
+                         this, [this](lcnc::cam::CuttingPlanSortStrategy) { refreshCache(); });
+        QObject::connect(m_layerManager, &lcnc::cam::LayerManager::lastAutoSortAxisChanged,
+                         this, [this](lcnc::cam::AutoSortAxis) { refreshCache(); });
+    }
+
     void refreshCache()
     {
         if (!m_module || QThread::currentThread() != m_module->thread())
             return;
+        bindLayerManager();
         QVector<lcnc::cam::LayerSnapshot> layers;
         const auto* container = layerContainer();
         const auto* toolpath = container ? container->toolpath() : nullptr;
@@ -358,6 +392,7 @@ private:
     }
 
     CamModule*           m_module{nullptr};
+    QPointer<lcnc::cam::LayerManager> m_layerManager;
     mutable QMutex       m_cacheMutex;
     QVector<lcnc::cam::LayerSnapshot> m_layers;
     QVector<lcnc::cam::ContourId> m_manualContourOrder;
