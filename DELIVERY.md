@@ -68,7 +68,7 @@
   `cmake --build --preset acs-gtn-debug --parallel 16`
 - 生成器：Ninja Multi-Config，唯一生成树为 `build/`
 - Debug 运行目录：`x64/Debug`
-- CMake 最低版本：3.21（链接器 launcher 从 3.21 起可用）
+- CMake 最低版本：3.20；必须在 MSVC x64 开发环境中调用 CMake（文档中的构建任务会自动完成此步骤）。
 - 2026-07-23 复核：
   - ACS+GTN Debug 构建通过。
   - `ctest --test-dir build --build-config Debug --output-on-failure`：5/5 通过。

@@ -47,7 +47,7 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 
 ## 构建
 
-要求 CMake 3.21+、MSVC x64、Qt 6.9.1、OpenCASCADE 7.9.0 与 SARibbon。日常构建使用 Ninja Multi-Config，不能附加 MSBuild 的 `/m /nologo` 参数。
+要求 CMake 3.20+、MSVC x64、Qt 6.9.1、OpenCASCADE 7.9.0 与 SARibbon。日常构建使用 Ninja Multi-Config，不能附加 MSBuild 的 `/m /nologo` 参数。
 
 ```powershell
 cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"

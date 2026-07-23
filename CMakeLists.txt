@@ -1,26 +1,9 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.20)
 project(LaserCNC VERSION 1.0.0 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# CMake Tools invokes Ninja directly and therefore does not inherit the MSVC
-# and Windows SDK environment that a Developer Command Prompt normally sets.
-# Wrap every compiler/linker child process so direct IDE builds remain valid
-# without committing machine-specific INCLUDE/LIB paths.
-if(MSVC)
-    set(LCNC_MSVC_ENV_LAUNCHER "${CMAKE_CURRENT_SOURCE_DIR}/scripts/msvc_x64_env.cmd"
-        CACHE FILEPATH "MSVC x64 environment launcher")
-    set(CMAKE_C_COMPILER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
-        "Launcher used for C compiler commands" FORCE)
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
-        "Launcher used for C++ compiler commands" FORCE)
-    set(CMAKE_C_LINKER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
-        "Launcher used for C linker commands" FORCE)
-    set(CMAKE_CXX_LINKER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
-        "Launcher used for C++ linker commands" FORCE)
-endif()
 
 # Memory-safety gate.  This stays opt-in because vendor SDK DLLs are not
 # instrumented, but every project-owned translation unit can be built with the

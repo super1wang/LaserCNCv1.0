@@ -12,7 +12,7 @@ cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tool
 - 日常 ACS+GTN 构建将 `LaserCNC.exe` 及运行时依赖部署到 `x64/Debug` 或 `x64/Release`；测试、符号和 CMake 中间文件必须留在 `build/`。
 
 - Single CMake target: `LaserCNC` (WIN32 executable).
-- Requires CMake 3.21+, MSVC 2022 x64, C++17.
+- Requires CMake 3.20+, MSVC 2022 x64, C++17.
 - Qt 6.9.1, OpenCASCADE 7.9.0, SARibbon — paths configured via CMake cache variables (`LCNC_QT6_ROOT`, `LCNC_OCCT_ROOT`, `LCNC_SARIBBON_ROOT`).
 - Vendored 3rd-party libs in `3rd/`: spdlog (logging), toml11 (config).
 - OCC and SARibbon DLLs are copied to the output directory via POST_BUILD commands.
