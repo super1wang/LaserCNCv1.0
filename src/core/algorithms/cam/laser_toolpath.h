@@ -77,6 +77,18 @@ struct LeadInSolution
 };
 
 /**
+ * @brief Transient topology adjacent to one ordered contour edge.
+ *
+ * Faces are rebound from the source shape whenever a contour is extracted or
+ * recalculated. They are intentionally not persisted in the project package.
+ */
+struct LeadInEdgeSurfaceContext
+{
+    std::vector<TopoDS_Face> outerFaces;
+    std::vector<TopoDS_Face> crossSectionFaces;
+};
+
+/**
  * @brief One closed or open contour extracted from the workpiece.
  */
 struct LaserContour
@@ -88,6 +100,7 @@ struct LaserContour
     TopoDS_Wire                wire;     ///< The original topological wire
     TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
+    std::vector<LeadInEdgeSurfaceContext> leadInSurfaceContext; ///< Transient edge-to-face adjacency
     LeadInParams               leadIn;   ///< Lead-in parameters for this contour
     LeadInSolution             leadInSolution; ///< Derived geometry and machine pose
     ContourGenerationParams    appliedParams; ///< Parameters matching the stored points
@@ -212,6 +225,20 @@ public:
     static bool setContourStart(LaserContour& contour,
                                 int pointIndex,
                                 QString* error = nullptr);
+
+    /// Choose the first sampled start whose topology can unambiguously resolve
+    /// a suspended lead-in side. Interior edge samples are preferred to seam
+    /// vertices; an existing manually selected start must use setContourStart().
+    static bool setAutomaticContourStart(LaserContour& contour,
+                                         QString* error = nullptr);
+
+    /// Bind each ordered wire edge to the exact outer and cross-section faces
+    /// that share it. This context is transient and must be rebuilt after load
+    /// before rediscretising a contour.
+    static void bindLeadInSurfaceContext(
+        LaserContour& contour,
+        const std::vector<TopoDS_Face>& outerFaces,
+        const std::vector<TopoDS_Face>& crossFaces);
 
     /// Find the surface normal at a point on the workpiece.
     /// Iterates all faces and finds the one closest to the query point.

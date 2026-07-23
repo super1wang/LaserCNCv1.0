@@ -651,7 +651,9 @@ void activateCamContourSelection(const Handle(AIS_InteractiveContext)& ctx,
 
 Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
                                                    const TopoDS_Shape& wire,
-                                                   const QString& name)
+                                                   const QString& name,
+                                                   bool updateViewer,
+                                                   bool configureSelection)
 {
     if (contourId == 0)
         return {};
@@ -667,10 +669,14 @@ Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
     // 替换语义：先删旧，再注册新（同 DisplayKey 命中即覆盖）。
     eraseKey(DisplayKey{camDoc->id(), entry}, /*updateViewer=*/false);
 
-    Handle(AIS_Shape) ais = m_scene->displayShape(wire, /*fitAll=*/false, /*update=*/true, /*background=*/false);
+    Handle(AIS_Shape) ais = m_scene->displayShape(wire,
+                                                   /*fitAll=*/false,
+                                                   /*update=*/updateViewer,
+                                                   /*background=*/false);
     if (ais.IsNull())
         return {};
-    activateCamContourSelection(m_scene->context(), ais);
+    if (configureSelection)
+        activateCamContourSelection(m_scene->context(), ais);
     DisplayObject obj;
     obj.domain     = lcnc::ProjectDomain::Cam;
     obj.entityKind = static_cast<int>(LcncDocument::EntityKind::Cam);
@@ -680,7 +686,7 @@ Handle(AIS_Shape) GuiDocument::displayContourBody(std::uint64_t contourId,
     obj.ais        = ais;
     m_displayObjects.insert(DisplayKey{camDoc->id(), entry}, obj);
     (void)name; // name 仅用于日志/将来交互提示
-    if (!m_view.IsNull())
+    if (updateViewer && !m_view.IsNull())
         m_view->Redraw();
     return ais;
 }

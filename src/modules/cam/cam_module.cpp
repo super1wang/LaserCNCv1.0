@@ -2313,6 +2313,7 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 
             if (!contour.points.empty()) {
                 int startIndex = 0;
+                const bool hasManualStart = oldContour && oldContour->leadIn.valid;
                 if (oldContour && oldContour->leadIn.valid) {
                     auto selected = std::find_if(contour.points.begin(), contour.points.end(),
                         [&contour](const ToolpathPoint& point) {
@@ -2340,7 +2341,12 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
                     startIndex = static_cast<int>(std::distance(contour.points.begin(), selected));
                 }
                 QString leadInError;
-                if (!LaserToolpathBuilder::setContourStart(contour, startIndex, &leadInError)
+                const bool startSet = hasManualStart
+                    ? LaserToolpathBuilder::setContourStart(
+                          contour, startIndex, &leadInError)
+                    : LaserToolpathBuilder::setAutomaticContourStart(
+                          contour, &leadInError);
+                if (!startSet
                     || !contour.leadInSolution.valid) {
                     if (leadInError.isEmpty())
                         leadInError = contour.leadInSolution.error;
@@ -2524,6 +2530,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     }
                     if (!contour.points.empty()) {
                         int startIndex = 0;
+                        const bool hasManualStart = oldContour && oldContour->leadIn.valid;
                         if (oldContour && oldContour->leadIn.valid) {
                             auto selected = std::find_if(contour.points.begin(), contour.points.end(),
                                 [&contour](const ToolpathPoint& point) {
@@ -2546,7 +2553,12 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             startIndex = static_cast<int>(std::distance(contour.points.begin(), selected));
                         }
                         QString leadInError;
-                        if (!LaserToolpathBuilder::setContourStart(contour, startIndex, &leadInError)
+                        const bool startSet = hasManualStart
+                            ? LaserToolpathBuilder::setContourStart(
+                                  contour, startIndex, &leadInError)
+                            : LaserToolpathBuilder::setAutomaticContourStart(
+                                  contour, &leadInError);
+                        if (!startSet
                             || !contour.leadInSolution.valid) {
                             result->error = leadInError.isEmpty() ? contour.leadInSolution.error : leadInError;
                             return;
@@ -3662,12 +3674,15 @@ bool CamModule::recalcToolpath()
             if (group)
                 crossFaces.insert(crossFaces.end(), group->faces.begin(), group->faces.end());
         }
-        if (!outerFaces.empty() && !crossFaces.empty())
+        if (!outerFaces.empty() && !crossFaces.empty()) {
+            LaserToolpathBuilder::bindLeadInSurfaceContext(
+                updated, outerFaces, crossFaces);
             LaserToolpathBuilder::discretizeContourWithClassification(
                 updated, outerFaces, crossFaces, updated.pendingParams.deflection);
-        else
+        } else {
             LaserToolpathBuilder::discretizeContour(
                 updated, sourceShape, updated.pendingParams.deflection);
+        }
     } else {
         LaserToolpathBuilder::discretizeContour(
             updated, sourceShape, updated.pendingParams.deflection);
@@ -3851,11 +3866,14 @@ TaskId CamModule::recalcToolpathAsync()
                 for (const auto* group : classification.crossSectionGroups())
                     if (group)
                         crossFaces.insert(crossFaces.end(), group->faces.begin(), group->faces.end());
-                if (!outerFaces.empty() && !crossFaces.empty())
+                if (!outerFaces.empty() && !crossFaces.empty()) {
+                    LaserToolpathBuilder::bindLeadInSurfaceContext(
+                        updated, outerFaces, crossFaces);
                     LaserToolpathBuilder::discretizeContourWithClassification(
                         updated, outerFaces, crossFaces, updated.pendingParams.deflection);
-                else
+                } else {
                     LaserToolpathBuilder::discretizeContour(updated, sourceShape, updated.pendingParams.deflection);
+                }
             } else {
                 LaserToolpathBuilder::discretizeContour(updated, sourceShape, updated.pendingParams.deflection);
             }
@@ -4519,12 +4537,19 @@ void CamModule::syncCamDocumentContours(bool forceRebuild)
         const QString name = contour.name.trimmed().isEmpty()
             ? tr("轮廓 %1").arg(index + 1)
             : contour.name;
-        gd->displayContourBody(contour.contourId, contour.wire, name);
+        // 刀路生成后可能一次新增数百/数千条轮廓。不能在这里逐条提交
+        // UpdateCurrentViewer/Redraw，否则主线程会被每条 AIS 的重绘占满。
+        // 选择结构统一由后续的 setCamContoursVisible() 建立一次。
+        gd->displayContourBody(contour.contourId,
+                               contour.wire,
+                               name,
+                               /*updateViewer=*/false,
+                               /*configureSelection=*/false);
     }
 
     applyCamContourTransforms();
     applyToolpathLayerColors(false);
-    applyCamContourVisibility();
+    applyCamContourVisibility(); // 此处统一建立选择结构并只提交一次视图更新。
 
 }
 

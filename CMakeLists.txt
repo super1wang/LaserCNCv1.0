@@ -423,6 +423,41 @@ target_link_libraries(lcnc_core PUBLIC
     Qt6::Gui
     Qt6::Concurrent
 )
+
+# CMake Tools 从 IDE 直接启动 Ninja 时未必继承 VsDevCmd 设置的 LIB。
+# 从 CMake 已选定的 MSVC/Windows SDK 工具路径推导对应的库目录，保证 Qt
+# 的 opengl32.lib 和 MSVC Debug CRT 在此构建方式下同样可被链接器找到。
+if(WIN32 AND CMAKE_RC_COMPILER AND CMAKE_CXX_COMPILER)
+    get_filename_component(_lcnc_sdk_arch_dir "${CMAKE_RC_COMPILER}" DIRECTORY)
+    get_filename_component(_lcnc_sdk_version_dir "${_lcnc_sdk_arch_dir}" DIRECTORY)
+    get_filename_component(_lcnc_sdk_bin_dir "${_lcnc_sdk_version_dir}" DIRECTORY)
+    get_filename_component(_lcnc_sdk_root "${_lcnc_sdk_bin_dir}" DIRECTORY)
+    get_filename_component(_lcnc_sdk_version "${_lcnc_sdk_version_dir}" NAME)
+    set(_lcnc_sdk_um_x64_lib_dir   "${_lcnc_sdk_root}/Lib/${_lcnc_sdk_version}/um/x64")
+    set(_lcnc_sdk_ucrt_x64_lib_dir "${_lcnc_sdk_root}/Lib/${_lcnc_sdk_version}/ucrt/x64")
+
+    get_filename_component(_lcnc_msvc_arch_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(_lcnc_msvc_host_dir "${_lcnc_msvc_arch_dir}" DIRECTORY)
+    get_filename_component(_lcnc_msvc_bin_dir "${_lcnc_msvc_host_dir}" DIRECTORY)
+    get_filename_component(_lcnc_msvc_root "${_lcnc_msvc_bin_dir}" DIRECTORY)
+    set(_lcnc_msvc_x64_lib_dir "${_lcnc_msvc_root}/lib/x64")
+
+    set(_lcnc_windows_link_dirs)
+    foreach(_lcnc_link_dir IN ITEMS
+            "${_lcnc_msvc_x64_lib_dir}"
+            "${_lcnc_sdk_um_x64_lib_dir}"
+            "${_lcnc_sdk_ucrt_x64_lib_dir}")
+        if(EXISTS "${_lcnc_link_dir}")
+            list(APPEND _lcnc_windows_link_dirs "${_lcnc_link_dir}")
+        endif()
+    endforeach()
+    if(_lcnc_windows_link_dirs)
+        target_link_directories(lcnc_core PUBLIC ${_lcnc_windows_link_dirs})
+    else()
+        message(WARNING "Unable to derive MSVC/Windows SDK library directories from the configured toolchain")
+    endif()
+endif()
+
 # QuaZip 仅在 lcnc_project_package.cpp 实现内部使用（不出现在公开头文件）→ PRIVATE。
 target_link_libraries(lcnc_core PRIVATE QuaZip::QuaZip)
 
@@ -638,6 +673,10 @@ if(BUILD_TESTING)
         tests/task_manager_test.cpp
     )
     target_link_libraries(lcnc_task_manager_test PRIVATE lcnc_core Qt6::Core Qt6::Concurrent)
+    add_executable(lcnc_cam_lead_in_test
+        tests/cam_lead_in_test.cpp
+    )
+    target_link_libraries(lcnc_cam_lead_in_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_process_runtime_configuration_test
         tests/process_runtime_configuration_test.cpp
     )
@@ -659,6 +698,10 @@ if(BUILD_TESTING)
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${_lcnc_runtime_bin}"
                 "$<TARGET_FILE_DIR:lcnc_task_manager_test>")
+        add_custom_command(TARGET lcnc_cam_lead_in_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${_lcnc_runtime_bin}"
+                "$<TARGET_FILE_DIR:lcnc_cam_lead_in_test>")
         add_custom_command(TARGET lcnc_process_runtime_configuration_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${_lcnc_runtime_bin}"
@@ -670,11 +713,13 @@ if(BUILD_TESTING)
     endif()
     lcnc_deploy_tbb_runtime(lcnc_project_package_test)
     lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
+    lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_test)
     lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
     lcnc_deploy_tbb_runtime(lcnc_device_command_queue_test)
     if(LCNC_ENABLE_ASAN)
         lcnc_deploy_asan_runtime(lcnc_project_package_test)
         lcnc_deploy_asan_runtime(lcnc_task_manager_test)
+        lcnc_deploy_asan_runtime(lcnc_cam_lead_in_test)
         lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
         lcnc_deploy_asan_runtime(lcnc_device_command_queue_test)
     endif()
@@ -686,6 +731,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_project_package_test)
     add_test(NAME lcnc_task_manager_test
         COMMAND lcnc_task_manager_test)
+    add_test(NAME lcnc_cam_lead_in_test
+        COMMAND lcnc_cam_lead_in_test)
     add_test(NAME lcnc_process_runtime_configuration_test
         COMMAND lcnc_process_runtime_configuration_test)
     add_test(NAME lcnc_device_command_queue_test

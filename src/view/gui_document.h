@@ -103,7 +103,9 @@ public:
     /// 显示一条 CAM 轮廓体；若 contourId 已存在则替换其 AIS。
     Handle(AIS_Shape) displayContourBody(std::uint64_t contourId,
                                          const TopoDS_Shape& wire,
-                                         const QString& name);
+                                         const QString& name,
+                                         bool updateViewer = true,
+                                         bool configureSelection = true);
     /// 查找；不存在返回空 handle。
     Handle(AIS_Shape) aisShapeForContour(std::uint64_t contourId) const;
     /// 返回当前 GuiDocument 已显示的 CAM 轮廓 id。

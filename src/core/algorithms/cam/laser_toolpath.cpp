@@ -24,7 +24,9 @@
 #include <BRepBndLib.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <ShapeAnalysis_Surface.hxx>
 #include <Geom_Surface.hxx>
 #include <GeomLProp_SLProps.hxx>
@@ -485,8 +487,21 @@ std::vector<MachiningFaceProbe> findMachiningFacesAtStart(
 
     constexpr double kNormalAlignment = 0.9;
     constexpr double kStartDistanceTolerance = 1e-4;
-    for (TopExp_Explorer exp(contour.sourceShape, TopAbs_FACE); exp.More(); exp.Next()) {
-        const TopoDS_Face face = TopoDS::Face(exp.Current());
+    std::vector<TopoDS_Face> sourceFaces;
+    const bool hasBoundFaces =
+        start.sourceEdgeIndex >= 0
+        && start.sourceEdgeIndex < static_cast<int>(contour.leadInSurfaceContext.size())
+        && !contour.leadInSurfaceContext[static_cast<std::size_t>(
+                start.sourceEdgeIndex)].outerFaces.empty();
+    if (hasBoundFaces) {
+        sourceFaces = contour.leadInSurfaceContext[static_cast<std::size_t>(
+            start.sourceEdgeIndex)].outerFaces;
+    } else {
+        for (TopExp_Explorer exp(contour.sourceShape, TopAbs_FACE); exp.More(); exp.Next())
+            sourceFaces.push_back(TopoDS::Face(exp.Current()));
+    }
+
+    for (const TopoDS_Face& face : sourceFaces) {
         Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
         if (surface.IsNull())
             continue;
@@ -507,7 +522,9 @@ std::vector<MachiningFaceProbe> findMachiningFacesAtStart(
         gp_Dir faceNormal = props.Normal();
         if (face.Orientation() == TopAbs_REVERSED)
             faceNormal.Reverse();
-        if (gp_Vec(faceNormal).Dot(gp_Vec(start.normal)) < kNormalAlignment)
+        const double alignment = gp_Vec(faceNormal).Dot(gp_Vec(start.normal));
+        if ((hasBoundFaces && std::abs(alignment) < 0.5)
+            || (!hasBoundFaces && alignment < kNormalAlignment))
             continue;
 
         BRepClass_FaceClassifier classifier(face, uv, tolerance);
@@ -525,6 +542,95 @@ bool liesOnMachiningFace(const std::vector<MachiningFaceProbe>& faces,
     return std::any_of(faces.begin(), faces.end(), [&](const MachiningFaceProbe& face) {
         return classifyPointOnFace(face, point);
     });
+}
+
+bool leadInProjectsOntoMachiningFace(const std::vector<MachiningFaceProbe>& faces,
+                                     const gp_Pnt& start,
+                                     const gp_Vec& direction,
+                                     double length)
+{
+    // A point travelling in the tangent plane of a convex surface can be
+    // outside the solid while still sitting directly above material. Classify
+    // its projection against the trimmed outer-face domain instead of using
+    // only the 3D solid state. Check the complete lead-in, including points
+    // immediately next to the contour boundary.
+    for (const double distance : kLeadInDirectionProbeDistances) {
+        if (distance <= length
+            && liesOnMachiningFace(faces, start.Translated(direction * distance))) {
+            return true;
+        }
+    }
+
+    constexpr double kMaximumSampleStep = 0.05;
+    constexpr int kMaximumSamples = 256;
+    const int sampleCount = std::clamp(
+        static_cast<int>(std::ceil(length / kMaximumSampleStep)),
+        2,
+        kMaximumSamples);
+    for (int sampleIndex = 1; sampleIndex <= sampleCount; ++sampleIndex) {
+        const double distance = length * static_cast<double>(sampleIndex)
+            / static_cast<double>(sampleCount);
+        if (liesOnMachiningFace(faces, start.Translated(direction * distance)))
+            return true;
+    }
+    return false;
+}
+
+bool appendFaceIfContainsEdge(std::vector<TopoDS_Face>& result,
+                              const std::vector<TopoDS_Face>& candidates,
+                              const TopoDS_Edge& edge)
+{
+    bool found = false;
+    for (const TopoDS_Face& face : candidates) {
+        bool contains = false;
+        for (TopExp_Explorer exp(face, TopAbs_EDGE); exp.More(); exp.Next()) {
+            if (edge.IsSame(exp.Current())) {
+                contains = true;
+                break;
+            }
+        }
+        if (!contains)
+            continue;
+
+        const bool duplicate = std::any_of(
+            result.begin(), result.end(),
+            [&face](const TopoDS_Face& existing) { return existing.IsSame(face); });
+        if (!duplicate)
+            result.push_back(face);
+        found = true;
+    }
+    return found;
+}
+
+void bindOwnedWireSurfaceContext(
+    LaserContour& contour,
+    const TopoDS_Face& owner,
+    const TopTools_IndexedDataMapOfShapeListOfShape& edgeToFaces)
+{
+    contour.leadInSurfaceContext.clear();
+    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next()) {
+        LeadInEdgeSurfaceContext context;
+        context.outerFaces.push_back(owner);
+        const TopoDS_Edge edge = exp.Current();
+        if (edgeToFaces.Contains(edge)) {
+            const TopTools_ListOfShape& adjacentFaces = edgeToFaces.FindFromKey(edge);
+            for (TopTools_ListIteratorOfListOfShape it(adjacentFaces);
+                 it.More(); it.Next()) {
+                const TopoDS_Face face = TopoDS::Face(it.Value());
+                if (face.IsSame(owner))
+                    continue;
+                const bool duplicate = std::any_of(
+                    context.crossSectionFaces.begin(),
+                    context.crossSectionFaces.end(),
+                    [&face](const TopoDS_Face& existing) {
+                        return existing.IsSame(face);
+                    });
+                if (!duplicate)
+                    context.crossSectionFaces.push_back(face);
+            }
+        }
+        contour.leadInSurfaceContext.push_back(std::move(context));
+    }
 }
 
 bool isMaterialSideOfWorkpiece(const TopoDS_Shape& workpiece,
@@ -626,10 +732,14 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(const TopoDS_Sha
     //
     // Strategy: iterate all Faces, use BRepTools::OuterWire() to identify
     // each face's outer boundary wire, and deduplicate by TopoDS::IsSame().
-    std::vector<TopoDS_Wire> outerWires;
+    struct OwnedWire {
+        TopoDS_Wire wire;
+        TopoDS_Face owner;
+    };
+    std::vector<OwnedWire> outerWires;
     auto isAlreadyCollected = [&](const TopoDS_Wire& w) {
         for (const auto& ow : outerWires)
-            if (ow.IsSame(w)) return true;
+            if (ow.wire.IsSame(w)) return true;
         return false;
     };
 
@@ -637,14 +747,18 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(const TopoDS_Sha
         const TopoDS_Face& face = TopoDS::Face(faceExp.Current());
         TopoDS_Wire outer = BRepTools::OuterWire(face);
         if (!outer.IsNull() && !isAlreadyCollected(outer))
-            outerWires.push_back(outer);
+            outerWires.push_back({outer, face});
     }
 
+    TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+    TopExp::MapShapesAndAncestors(
+        workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
     int wireIdx = 0;
-    for (auto& w : outerWires) {
+    for (auto& owned : outerWires) {
         LaserContour c;
-        c.wire = w;
+        c.wire = owned.wire;
         c.name = QString::fromUtf8("外轮廓 %1").arg(++wireIdx);
+        bindOwnedWireSurfaceContext(c, owned.owner, edgeToFaces);
         result.push_back(std::move(c));
     }
 
@@ -707,10 +821,14 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
 
         // Use legacy extraction but skip wires from inner faces
         std::vector<LaserContour> result;
-        std::vector<TopoDS_Wire> outerWires;
+        struct OwnedWire {
+            TopoDS_Wire wire;
+            TopoDS_Face owner;
+        };
+        std::vector<OwnedWire> outerWires;
         auto isAlreadyCollected = [&](const TopoDS_Wire& w) {
             for (const auto& ow : outerWires)
-                if (ow.IsSame(w)) return true;
+                if (ow.wire.IsSame(w)) return true;
             return false;
         };
         for (TopExp_Explorer faceExp(workpiece, TopAbs_FACE); faceExp.More(); faceExp.Next()) {
@@ -719,13 +837,17 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
                 continue;  // skip inner surfaces
             TopoDS_Wire outer = BRepTools::OuterWire(face);
             if (!outer.IsNull() && !isAlreadyCollected(outer))
-                outerWires.push_back(outer);
+                outerWires.push_back({outer, face});
         }
+        TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+        TopExp::MapShapesAndAncestors(
+            workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
         int wireIdx = 0;
-        for (auto& w : outerWires) {
+        for (auto& owned : outerWires) {
             LaserContour c;
-            c.wire = w;
+            c.wire = owned.wire;
             c.name = QString::fromUtf8("外轮廓 %1").arg(++wireIdx);
+            bindOwnedWireSurfaceContext(c, owned.owner, edgeToFaces);
             result.push_back(std::move(c));
         }
         for (auto& c : result)
@@ -785,6 +907,7 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
         computeContourSignature(c);
 
         // Discretise with face-classification-aware normals
+        bindLeadInSurfaceContext(c, outerFaces, crossFaces);
         discretizeContourWithClassification(c, outerFaces, crossFaces,
                                             params.deflection);
         result.push_back(std::move(c));
@@ -808,6 +931,7 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
         return;
 
     const gp_Pnt workpieceCenter = shapeCenter(workpiece);
+    const std::vector<TopoDS_Face> noFaces;
 
     // 必须按 WireExplorer 的连接顺序遍历边，不能用 TopExp_Explorer（拓扑集合顺序不保证连贯）。
     int edgeIndex = 0;
@@ -835,6 +959,18 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
         if (reversed)
             std::reverse(parameters.begin(), parameters.end());
 
+        const LeadInEdgeSurfaceContext* surfaceContext =
+            edgeIndex >= 0
+                && edgeIndex < static_cast<int>(contour.leadInSurfaceContext.size())
+            ? &contour.leadInSurfaceContext[static_cast<std::size_t>(edgeIndex)]
+            : nullptr;
+        const std::vector<TopoDS_Face>* pointOuterFaces =
+            surfaceContext && !surfaceContext->outerFaces.empty()
+            ? &surfaceContext->outerFaces : nullptr;
+        const std::vector<TopoDS_Face>* pointCrossFaces =
+            surfaceContext && !surfaceContext->crossSectionFaces.empty()
+            ? &surfaceContext->crossSectionFaces : nullptr;
+
         for (double parameter : parameters) {
             ToolpathPoint tp;
             tp.param = parameter;
@@ -849,10 +985,25 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
                 continue; // 去除相邻边连接处重复点
             }
 
-            tp.normal = enforceOutwardDirection(
-                tp.position,
-                findSurfaceNormal(workpiece, tp.position),
-                workpieceCenter);
+            const gp_Dir surfaceNormal = pointOuterFaces
+                ? findMachiningNormal(
+                      tp.position,
+                      *pointOuterFaces,
+                      pointCrossFaces ? *pointCrossFaces : noFaces)
+                : findSurfaceNormal(workpiece, tp.position);
+            tp.normal = pointOuterFaces
+                ? surfaceNormal
+                : enforceOutwardDirection(
+                      tp.position, surfaceNormal, workpieceCenter);
+
+            if (pointCrossFaces) {
+                double crossDistance = 0.0;
+                tp.crossSectionNormalValid = findClosestFaceNormal(
+                    tp.position,
+                    *pointCrossFaces,
+                    tp.crossSectionNormal,
+                    crossDistance);
+            }
 
             gp_Pnt pDummy;
             gp_Vec tangentVec;
@@ -914,6 +1065,18 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
         if (reversed)
             std::reverse(parameters.begin(), parameters.end());
 
+        const LeadInEdgeSurfaceContext* surfaceContext =
+            edgeIndex >= 0
+                && edgeIndex < static_cast<int>(contour.leadInSurfaceContext.size())
+            ? &contour.leadInSurfaceContext[static_cast<std::size_t>(edgeIndex)]
+            : nullptr;
+        const std::vector<TopoDS_Face>& pointOuterFaces =
+            surfaceContext && !surfaceContext->outerFaces.empty()
+            ? surfaceContext->outerFaces : outerFaces;
+        const std::vector<TopoDS_Face>& pointCrossFaces =
+            surfaceContext && !surfaceContext->crossSectionFaces.empty()
+            ? surfaceContext->crossSectionFaces : crossFaces;
+
         for (double parameter : parameters) {
             ToolpathPoint tp;
             tp.param = parameter;
@@ -931,13 +1094,13 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             // Compute machining normal using face classification
             tp.normal = avoidCrossSectionDirection(
                 tp.position,
-                findMachiningNormal(tp.position, outerFaces, crossFaces),
+                findMachiningNormal(tp.position, pointOuterFaces, pointCrossFaces),
                 outerCenter,
-                crossFaces);
+                pointCrossFaces);
 
             double crossDistance = 0.0;
             tp.crossSectionNormalValid = findClosestFaceNormal(
-                tp.position, crossFaces, tp.crossSectionNormal, crossDistance);
+                tp.position, pointCrossFaces, tp.crossSectionNormal, crossDistance);
 
             // Compute tangent along the curve
             gp_Pnt pDummy;
@@ -952,6 +1115,24 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
 
             contour.points.push_back(tp);
         }
+    }
+}
+
+void LaserToolpathBuilder::bindLeadInSurfaceContext(
+    LaserContour& contour,
+    const std::vector<TopoDS_Face>& outerFaces,
+    const std::vector<TopoDS_Face>& crossFaces)
+{
+    contour.leadInSurfaceContext.clear();
+    if (contour.wire.IsNull())
+        return;
+
+    for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next()) {
+        LeadInEdgeSurfaceContext context;
+        const TopoDS_Edge edge = exp.Current();
+        appendFaceIfContainsEdge(context.outerFaces, outerFaces, edge);
+        appendFaceIfContainsEdge(context.crossSectionFaces, crossFaces, edge);
+        contour.leadInSurfaceContext.push_back(std::move(context));
     }
 }
 
@@ -1088,6 +1269,64 @@ bool LaserToolpathBuilder::setContourStart(LaserContour& contour,
     return true;
 }
 
+bool LaserToolpathBuilder::setAutomaticContourStart(LaserContour& contour,
+                                                    QString* error)
+{
+    if (contour.points.empty()) {
+        if (error)
+            *error = QStringLiteral("轮廓没有可用采样点");
+        return false;
+    }
+
+    const bool closed = contourHasClosingPoint(contour)
+        || (!contour.wire.IsNull() && contour.wire.Closed());
+    const int candidateCount = static_cast<int>(contour.points.size())
+        - (contourHasClosingPoint(contour) ? 1 : 0);
+    std::vector<int> candidates;
+    candidates.reserve(static_cast<std::size_t>(std::max(0, candidateCount)));
+
+    // Prefer samples strictly inside one source edge. At a wire vertex both
+    // neighbouring trimmed faces can reject a tiny tangent-plane probe even
+    // though the contour itself is valid.
+    if (closed) {
+        for (int i = 0; i < candidateCount; ++i) {
+            const int previous = (i + candidateCount - 1) % candidateCount;
+            const int next = (i + 1) % candidateCount;
+            if (contour.points[previous].sourceEdgeIndex
+                    == contour.points[i].sourceEdgeIndex
+                && contour.points[next].sourceEdgeIndex
+                    == contour.points[i].sourceEdgeIndex) {
+                candidates.push_back(i);
+            }
+        }
+    }
+    for (int i = 0; i < candidateCount; ++i) {
+        if (std::find(candidates.begin(), candidates.end(), i) == candidates.end())
+            candidates.push_back(i);
+    }
+
+    QString lastError;
+    for (const int pointIndex : candidates) {
+        LaserContour candidate = contour;
+        QString candidateError;
+        if (!setContourStart(candidate, pointIndex, &candidateError))
+            continue;
+        if (!candidate.leadInSolution.valid) {
+            lastError = candidate.leadInSolution.error;
+            continue;
+        }
+        contour = std::move(candidate);
+        return true;
+    }
+
+    if (error) {
+        *error = lastError.isEmpty()
+            ? QStringLiteral("轮廓没有可确定悬空侧的安全起点")
+            : lastError;
+    }
+    return false;
+}
+
 TopoDS_Edge LaserToolpathBuilder::computeLeadInEdge(const LaserContour& contour)
 {
     if (!contour.leadInSolution.valid || contour.points.empty())
@@ -1143,48 +1382,66 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
         return result;
     }
 
-    // Small/narrow trimmed faces can reject a fixed 0.01 mm UV probe on both
-    // sides even though one side is the machining face.  Probe progressively
-    // while retaining the safety rule: accept a direction only when its
-    // opposite side is positively classified as machining surface.
+    // A solid classifier alone is unsafe for convex surfaces such as an
+    // ellipse: a tangent-plane point can be outside the solid while its
+    // projection still lies above the material face. The projected, trimmed
+    // outer-face domain is therefore the final material-side gate.
+    bool forwardOnSurface = leadInProjectsOntoMachiningFace(
+        machiningFaces, start.position, direction, length);
+    bool reverseOnSurface = leadInProjectsOntoMachiningFace(
+        machiningFaces, start.position, direction.Reversed(), length);
+
     bool sideResolved = false;
-    bool forwardOnSurface = false;
-    bool reverseOnSurface = false;
-    for (const double probeDistance : kLeadInDirectionProbeDistances) {
-        const gp_Pnt forwardProbe = start.position.Translated(direction * probeDistance);
-        const gp_Pnt reverseProbe = start.position.Translated(direction * -probeDistance);
-        forwardOnSurface = liesOnMachiningFace(machiningFaces, forwardProbe);
-        reverseOnSurface = liesOnMachiningFace(machiningFaces, reverseProbe);
-        if (forwardOnSurface != reverseOnSurface) {
-            sideResolved = true;
-            break;
+    if (forwardOnSurface != reverseOnSurface) {
+        if (forwardOnSurface)
+            direction.Reverse();
+        sideResolved = true;
+    } else if (forwardOnSurface) {
+        result.error = QStringLiteral("下刀线两侧投影均落在加工外表面，无法确定悬空侧");
+        return result;
+    }
+
+    // The outward normal of the exact cross-section face adjacent to this
+    // contour edge points into the cut void. It ranks two directions that are
+    // both outside the outer-face projection domain, but it never overrides a
+    // direction proven to be above material by the check above.
+    if (!sideResolved && start.crossSectionNormalValid) {
+        gp_Vec crossOut(start.crossSectionNormal);
+        const gp_Vec projected = crossOut - outer * crossOut.Dot(outer);
+        if (projected.Magnitude() > 1e-9) {
+            const gp_Dir suspended(projected);
+            const double alignment = gp_Vec(direction).Dot(gp_Vec(suspended));
+            if (std::abs(alignment) >= 0.5) {
+                if (alignment < 0.0)
+                    direction.Reverse();
+                sideResolved = true;
+            }
         }
     }
-    if (!sideResolved && !forwardOnSurface && !reverseOnSurface) {
-        // A valid contour can lie at a seam between split/narrow outer faces:
-        // neither tangent-plane probe belongs to the individual face UV domain.
-        // In that case, fall back to the material side instead of treating the
-        // missing single-face hit as proof that no hanging side exists.
+
+    if (!sideResolved) {
         for (const double probeDistance : kLeadInDirectionProbeDistances) {
             forwardOnSurface = isMaterialSideOfWorkpiece(
-                contour.sourceShape, start.position, start.normal, direction, probeDistance);
+                contour.sourceShape, start.position, start.normal,
+                direction, probeDistance);
             reverseOnSurface = isMaterialSideOfWorkpiece(
-                contour.sourceShape, start.position, start.normal, direction.Reversed(), probeDistance);
+                contour.sourceShape, start.position, start.normal,
+                direction.Reversed(), probeDistance);
             if (forwardOnSurface != reverseOnSurface) {
                 sideResolved = true;
                 break;
             }
         }
-    }
-    if (!sideResolved) {
-        result.error = forwardOnSurface
-            ? QStringLiteral("轮廓起点两侧近点均落在加工外表面，无法确定悬空侧")
-            : QStringLiteral("轮廓起点两侧近点均未落在加工外表面，且实体分类未能确认材料侧，无法确定悬空侧");
-        return result;
-    }
 
-    if (forwardOnSurface)
-        direction.Reverse();
+        if (!sideResolved) {
+            result.error = QStringLiteral(
+                "下刀线投影未落在加工外表面，且实体分类未能确认材料侧，无法确定悬空侧");
+            return result;
+        }
+
+        if (forwardOnSurface)
+            direction.Reverse();
+    }
 
     ToolpathPoint point = start;
     point.position = start.position.Translated(direction * length);
