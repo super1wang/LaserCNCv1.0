@@ -42,11 +42,9 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshotForOrde
         m_snapshot.description = QObject::tr("未连接 CAM 刀路提供者");
         return m_snapshot;
     }
-    if (!m_provider->solveToolpathForOrder(orderedContourIds)) {
-        m_snapshot = {};
-        m_snapshot.description = QObject::tr("CAM 五轴刀路求解失败");
-        return m_snapshot;
-    }
+    // Cutting-plan mutations resolve the authoritative CAM order on the GUI
+    // thread before publishing planChanged. Process consumes the immutable
+    // cached snapshot here and must never mutate CAM from its workflow thread.
     m_snapshot = m_provider->exportToolpathSnapshotForOrder(orderedContourIds);
     LCNC_INFO(lcnc::LogCode::Generic,
               "process.toolpath: ordered snapshot revision={} contours={} points={} orderSize={}",

@@ -10,13 +10,14 @@
 #include "modules/process/device/MotionControl/MotionControl.h"
 #include "modules/process/process_module.h"
 #include "modules/process/runtime/i_motion_command_sink.h"
+#include "modules/process/runtime/device_command_queue.h"
 #include "modules/process/runtime/machine_pose5.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
-#include <QCoreApplication>
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
+#include <QThread>
 
 #include <algorithm>
 #include <cmath>
@@ -29,7 +30,6 @@ constexpr char kStartNumber[]       = "startNumber";
 constexpr char kEndNumber[]         = "endNumber";
 constexpr char kCompensationIndex[] = "compensationIndex";
 
-constexpr int kPollSliceMs        = 20;
 constexpr int kTokenPollEvery     = 64;   // sink.lineTo 期间每多少段轮询一次 token
 
 constexpr char kEnvContourIndex[] = "contourIndex";
@@ -103,11 +103,13 @@ bool sameCacheDouble(double a, double b)
 NormalCuttingManager::NormalCuttingManager(Service* service,
                                            std::shared_ptr<lcnc::cam::ICamToolpathProvider> toolpathProvider,
                                            ProcessModule* processModule,
+                                           DeviceCommandQueue* deviceQueue,
                                            QObject* parent)
     : QObject(parent)
     , m_service(service)
     , m_toolpathProvider(std::move(toolpathProvider))
     , m_processModule(processModule)
+    , m_deviceQueue(deviceQueue)
     , m_toolpathService(std::make_unique<ProcessToolpathService>(m_toolpathProvider))
     , m_simTicker(std::make_unique<PureSimulationToolpathTicker>(processModule))
 {
@@ -145,10 +147,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
                                 ProcessInterruptContext* interrupt,
                                 QString* errorMessage)
 {
-    // ACS/GTN buffered execution must not race status polling, reconnect, or
-    // interactive motion. The recursive lease also permits Service helpers.
-    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
-                                      : Service::DeviceLock{};
     ProcessInterruptContext localFallback;
     ProcessInterruptContext& ic = interrupt ? *interrupt : localFallback;
 
@@ -329,6 +327,11 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
                                            int total,
                                            QString* errorMessage)
 {
+    // Construct and start one complete contour under the device lease. The
+    // lease is deliberately released immediately after startProgram(): the
+    // remaining completion wait is made of short queue polls so Stop can run
+    // between them.
+    auto deviceLock = m_service ? m_service->lockDeviceAccess() : Service::DeviceLock{};
     if (!row.tool) {
         if (errorMessage) *errorMessage = tr("轮廓 %1 没有绑定工具").arg(row.data.contour.contourId);
         return false;
@@ -400,19 +403,56 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     sink.laserOff(tool);
     sink.endProgram(tool);
 
-    // ——— 一次性下发 + 等待完成（ACS: LoadBuffer+RunBuffer+WaitEnd；
-    //                          GTN: CrdDataEx+CrdStart+PrfTrapAxis；
-    //                          PureSim: 启动 ticker + 等回放完成）———
+    // ——— 一次性提交并启动（不在持锁区等待控制器完成）———
     QString flushErr;
-    if (!sink.flush(&flushErr)) {
+    if (!sink.startProgram(&flushErr)) {
         if (errorMessage) *errorMessage = flushErr.isEmpty()
             ? tr("控制器执行失败")
             : flushErr;
         return false;
     }
+    if (deviceLock.owns_lock())
+        deviceLock.unlock();
 
-    QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
-    return true;
+    const bool pureSimulation = sink.id() == QStringLiteral("PureSimulation");
+    while (true) {
+        // “暂停”只在轮廓边界生效；当前已下发的轮廓自然完成。停止/急停
+        // 则由 Stop 优先级命令落到控制器，随后本轮询立即观察到完成。
+        if (interrupt.isStopping()) {
+            if (errorMessage)
+                *errorMessage = tr("普通切割已被中断");
+            return false;
+        }
+
+        bool running = false;
+        if (pureSimulation || !m_deviceQueue) {
+            running = sink.isProgramRunning(&flushErr);
+        } else {
+            const auto state = std::make_shared<bool>(false);
+            const DeviceCommandResult result = m_deviceQueue->executeAndWait(
+                DeviceCommandQueue::ResultCommand([this, &sink, state] {
+                    QString pollError;
+                    const auto pollLock = m_service ? m_service->lockDeviceAccess()
+                                                     : Service::DeviceLock{};
+                    *state = sink.isProgramRunning(&pollError);
+                    return DeviceCommandResult{pollError.isEmpty(), pollError};
+                }), TaskPriority::Workflow, 1000);
+            if (!result.success) {
+                if (errorMessage)
+                    *errorMessage = result.error.isEmpty() ? tr("控制器状态读取失败") : result.error;
+                return false;
+            }
+            running = *state;
+        }
+        if (!flushErr.isEmpty()) {
+            if (errorMessage)
+                *errorMessage = flushErr;
+            return false;
+        }
+        if (!running)
+            return true;
+        QThread::msleep(10);
+    }
 }
 
 void NormalCuttingManager::unwrapCuttingListCAxis(QVector<CuttingRow>& rows) const

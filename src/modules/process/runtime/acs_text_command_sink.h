@@ -36,6 +36,8 @@ public:
     void setCancellation(ProcessInterruptContext* token) override { m_token = token; }
 
     void resetProgram() override;
+    bool startProgram(QString* errorMessage = nullptr) override;
+    bool isProgramRunning(QString* errorMessage = nullptr) override;
     bool flush(QString* errorMessage = nullptr) override;
 
     void jumpToIdleZ(const MachinePose5& pose, const Tool& tool) override;

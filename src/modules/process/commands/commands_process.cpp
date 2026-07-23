@@ -131,7 +131,12 @@ void CmdOpenProcessSettings::execute()
         auto* mod = lcnc::Kernel::current().service<ProcessModule>();
         if (!mod || !mod->settingsService())
             return;
-        ProcessSettingsDialog dlg(mod->settingsService(), mod->service());
+        ProcessSettingsDialog dlg(
+            mod->settingsService(),
+            [mod](const ProcessSettingsChangeSet& changes) {
+                if (mod)
+                    mod->applySettingsChanges(changes);
+            });
         dlg.exec();
 
         // 设置对话框关闭后刷新主界面 IO 栏（showInMain 列可能改过）。

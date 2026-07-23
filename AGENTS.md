@@ -5,18 +5,18 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ## Build
 
 ```powershell
-cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --build build --config Debug"
+cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
 ```
 
-- `build/` 当前是 Ninja 生成器，不要追加 MSBuild 专用的 `/m /nologo`。
+- `build/` 是唯一的 Ninja Multi-Config 生成树，不要追加 MSBuild 专用的 `/m /nologo`。
+- 日常 ACS+GTN 构建将 `LaserCNC.exe` 及运行时依赖部署到 `x64/Debug` 或 `x64/Release`；测试、符号和 CMake 中间文件必须留在 `build/`。
 
 - Single CMake target: `LaserCNC` (WIN32 executable).
-- Requires CMake 3.20+, MSVC 2022 x64, C++17.
+- Requires CMake 3.21+, MSVC 2022 x64, C++17.
 - Qt 6.9.1, OpenCASCADE 7.9.0, SARibbon — paths configured via CMake cache variables (`LCNC_QT6_ROOT`, `LCNC_OCCT_ROOT`, `LCNC_SARIBBON_ROOT`).
 - Vendored 3rd-party libs in `3rd/`: spdlog (logging), toml11 (config).
 - OCC and SARibbon DLLs are copied to the output directory via POST_BUILD commands.
-- Conditional Process device SDKs (ACS, GTN, BDAQ, real laser) are OFF by default; enable with CMake `-D` options (`LCNC_WITH_ACS`, etc.).
-- Use `CMakePresets.json` for the verified `debug` (all-off), `acs`, `gtn`, and `asan` variants. A disabled SDK must not leak headers or link libraries into Process.
+- ACS and GTN are ON in the daily `acs-gtn` preset. `all-off`, `acs`, `gtn`, and `asan` remain explicit verification presets. A disabled SDK must not leak headers or link libraries into Process.
 - If build fails with `LNK1168`, the previous `LaserCNC.exe` is still running — kill it and retry.
 
 ## Architecture
@@ -138,5 +138,5 @@ The `asan` preset must deploy `clang_rt.asan_dynamic-x86_64.dll` and the selecte
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
 3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument\|sourceDocument`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)
-5. CTest architecture gate: `ctest --test-dir build/debug --output-on-failure`
+5. CTest architecture gate: `ctest --test-dir build --build-config Debug --output-on-failure`
 5. Memory-sensitive changes additionally build `cmake --preset asan && cmake --build --preset asan`; do not enable Application Verifier without explicit user/test-run authority.

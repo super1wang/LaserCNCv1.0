@@ -57,9 +57,9 @@ bool CmdGenerateToolpath::isEnabled() const
 void CmdGenerateToolpath::execute()
 {
     CamModule* cam = context()->camModule();
-    if (!cam->generateToolpath(cam->smoothAngle(),
-                               cam->useFaceClassification(),
-                               cam->deflection())) {
+    if (cam->generateToolpathAsync(cam->smoothAngle(),
+                                   cam->useFaceClassification(),
+                                   cam->deflection()) == kInvalidTaskId) {
         QMessageBox::warning(nullptr, tr("生成刀路"),
             tr("项目工作区中未找到工件，或未找到可用的轮廓边缘。"));
     }
@@ -150,7 +150,7 @@ bool CmdRecalcToolpath::isEnabled() const
 
 void CmdRecalcToolpath::execute()
 {
-    context()->camModule()->recalcToolpath();
+    context()->camModule()->recalcToolpathAsync();
 }
 
 

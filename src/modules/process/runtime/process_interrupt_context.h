@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QMutex>
+#include <QWaitCondition>
 #include <QString>
 #include <QVariantMap>
 
@@ -29,7 +30,7 @@ struct ProcessResumePoint
  * 设计目标
  * --------
  *   1. 所有工作流步骤（含子流程节点）通过同一个 API —— `checkpoint()` —— 注册中断点。
- *   2. 暂停时主线程会自然挂在最近一个 checkpoint 上抽水等待；恢复时自然返回继续执行。
+ *   2. 暂停时工作流线程会在最近一个 checkpoint 上条件等待；恢复时自然返回继续执行。
  *   3. 停止/急停时 checkpoint 返回 false，步骤代码沿正常 control flow 退出，线程自然收尾。
  *   4. 暂停期间记录"中断的位置和环境"，恢复时既可以"原地继续"（线程没退出），也可以
  *      在下一次进入同一节点时通过 `hasResumePoint / resumePoint` 取出 env，从断点继续。
@@ -37,7 +38,7 @@ struct ProcessResumePoint
  * 线程模型
  * --------
  *   原子位（paused/stopRequested/emergencyStop）跨线程安全；恢复点容器以 QMutex 保护。
- *   实际工作流仍跑在主线程，GUI 可以无锁地 requestPause/requestStop。
+ *   工作流运行在专属后台线程，GUI 可以无锁地 requestPause/requestStop。
  *
  * 与遗留命名的兼容
  * ----------------
@@ -100,6 +101,8 @@ public:
 private:
     mutable QMutex m_resumeMutex;
     QHash<QString, ProcessResumePoint> m_resumePoints;
+    QMutex m_pauseMutex;
+    QWaitCondition m_pauseChanged;
 };
 
 } // namespace lcnc::process

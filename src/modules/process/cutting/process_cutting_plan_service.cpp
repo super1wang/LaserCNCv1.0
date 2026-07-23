@@ -368,7 +368,7 @@ void ProcessCuttingPlanService::bumpRevisionAndNotify(bool manualOnly)
         emit manualOrderChanged();
     emit planChanged();
     if (auto* k = lcnc::Kernel::tryCurrent())
-        k->events().publish(lcnc::process::events::CuttingPlanChanged{m_planRevision});
+        k->events().publish(lcnc::process::events::CuttingPlanChanged{m_planRevision.load()});
 }
 
 void ProcessCuttingPlanService::notifyExternalPlanChanged()

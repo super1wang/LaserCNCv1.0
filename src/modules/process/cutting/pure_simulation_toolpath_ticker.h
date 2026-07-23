@@ -21,7 +21,7 @@ namespace lcnc::process {
  * 让 3D 模型沿轨迹运动。
  *
  * 设计上不持有 QThread；定时器跑在创建者所在线程（即主线程）。
- * 调用方在外层循环里 QCoreApplication::processEvents() 抽水即可。
+ * 后台工作流必须通过 queued/blocking-queued 调用本对象，不能直接操作 QTimer。
  */
 class PureSimulationToolpathTicker : public QObject
 {

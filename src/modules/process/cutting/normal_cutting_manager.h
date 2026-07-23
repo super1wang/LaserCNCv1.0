@@ -21,6 +21,7 @@ namespace lcnc::process {
 class PureSimulationToolpathTicker;
 class ProcessCuttingPlanService;
 class IMotionCommandSink;
+class DeviceCommandQueue;
 
 /**
  * @brief 普通切割主管线 —— 把 CAM 顺序切割链表落地到统一的 IMotionCommandSink。
@@ -37,8 +38,9 @@ class IMotionCommandSink;
  *                                  laserOff → endProgram → flush
  *
  * 暂停/停止/急停经 ProcessCancellationToken 协同：
- *   - 主线程同步执行，每条轮廓边界做 ic.checkpoint() —— pause 在此阻塞，stop 立刻返回 false；
- *   - sink 内部（PureSim 的 flush 循环、GTN/ACS 的 PrfTrapAxis/WaitProgramEnd 期间）也轮询 token。
+ *   - 工作流专属线程在每条轮廓边界做 ic.checkpoint()；pause 在此生效。
+ *   - 每条轮廓仅在构建/启动期间持有设备租约；运行期改用短队列状态读取，
+ *     使 Stop 优先级命令能在两次读取之间取得设备访问权。
  */
 class NormalCuttingManager : public QObject
 {
@@ -47,6 +49,7 @@ public:
     NormalCuttingManager(Service* service,
                          std::shared_ptr<lcnc::cam::ICamToolpathProvider> toolpathProvider,
                          ProcessModule* processModule,
+                         DeviceCommandQueue* deviceQueue,
                          QObject* parent = nullptr);
     ~NormalCuttingManager() override;
 
@@ -54,7 +57,7 @@ public:
     void setCuttingPlanService(ProcessCuttingPlanService* service);
 
     /**
-     * 同步执行普通切割。会反复 QCoreApplication::processEvents() 抽水。
+     * 在工作流专属线程同步执行普通切割；不得抽取 GUI 事件。
      * @return true 全部完成；false 中途因停止/急停/控制器错误退出。
      */
     bool run(const QString& nodeId,
@@ -112,6 +115,7 @@ private:
     Service* m_service{nullptr};
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_toolpathProvider;
     ProcessModule* m_processModule{nullptr};
+    DeviceCommandQueue* m_deviceQueue{nullptr};
     std::unique_ptr<ProcessToolpathService> m_toolpathService;
     std::unique_ptr<PureSimulationToolpathTicker> m_simTicker;
     ProcessCuttingPlanService* m_planService{nullptr};

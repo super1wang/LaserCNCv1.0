@@ -7,16 +7,33 @@
 #include "modules/process/workflow/process_node_registry.h"
 
 #include <QTimer>
+#include <QElapsedTimer>
+#include <QThread>
+#include <QtConcurrent>
 
 namespace lcnc::process {
 
 ProcessWorkflowExecutor::ProcessWorkflowExecutor(QObject* parent)
     : QObject(parent)
     , m_stepTimer(new QTimer(this))
+    , m_stepWatcher(new QFutureWatcher<QPair<bool, QString>>(this))
 {
+    // 工作流步骤拥有独立单线程，不与 CAM、导入或设备轮询竞争通用线程池。
+    // GUI 线程只处理流程文档状态和信号投影。
+    m_workflowPool.setMaxThreadCount(1);
+    m_workflowPool.setExpiryTimeout(-1);
+    m_workflowPool.setObjectName(QStringLiteral("ProcessWorkflow"));
     m_stepTimer->setSingleShot(true);
     connect(m_stepTimer, &QTimer::timeout,
             this, &ProcessWorkflowExecutor::completeCurrentStep);
+    connect(m_stepWatcher, &QFutureWatcher<QPair<bool, QString>>::finished,
+            this, &ProcessWorkflowExecutor::completeStepDispatch);
+}
+
+ProcessWorkflowExecutor::~ProcessWorkflowExecutor()
+{
+    m_token.requestStop();
+    m_workflowPool.waitForDone();
 }
 
 bool ProcessWorkflowExecutor::start(ProcessFlowDocument& document, QString* errorMessage)
@@ -128,6 +145,20 @@ void ProcessWorkflowExecutor::stop()
     emit messageLogged(tr("流程已停止"));
 }
 
+bool ProcessWorkflowExecutor::waitForIdle(int timeoutMs)
+{
+    if (m_stepWatcher->future().isFinished())
+        return true;
+    QElapsedTimer timer;
+    timer.start();
+    while (!m_stepWatcher->future().isFinished()) {
+        if (timeoutMs >= 0 && timer.elapsed() >= timeoutMs)
+            return false;
+        QThread::msleep(10);
+    }
+    return true;
+}
+
 void ProcessWorkflowExecutor::emergencyStop()
 {
     m_token.requestEmergencyStop();
@@ -187,32 +218,52 @@ void ProcessWorkflowExecutor::runNextStep()
         const ProcessExecutionStep& step = m_plan.at(m_currentIndex);
         setNodeState(step.nodeId, ProcessNodeState::Running);
         emit nodeStarted(step.nodeId);
-        QString errorMessage;
-        if (!dispatchStepSideEffects(step, &errorMessage)) {
-            // 步骤可能因 stop/急停在 checkpoint 返回 false 而正常退出。这种情况下
-            // pause/stop/emergencyStop 已经把状态切到对应终态，这里不再降级为 Error。
-            if (m_token.isStopping()) {
-                LCNC_INFO(lcnc::LogCode::Generic,
-                          "process.executor: step '{}' interrupted by stop/emergency",
-                          step.nodeId.toStdString());
-                return;
-            }
-            failCurrentStep(errorMessage);
+        if (!m_stepRegistry || !m_stepContext) {
+            failCurrentStep(tr("流程步骤运行环境未初始化"));
             return;
         }
-        // dispatch 返回 true 但途中可能被暂停过——若仍处 Paused 不能立刻进入下一步，
-        // 等 resume 时由 resume() 走 stepTimer 续跑。
-        if (m_state == State::Paused) {
-            // 长流程已退出 execute() 而 GUI 当下还停留在 Paused，最常见原因是用户在
-            // checkpoint 抽水期间 pause 又 resume 紧接着 plugin 完成。这种情况下
-            // resume() 会负责重启 stepTimer，下面的 start 是兜底——保持幂等。
+        const auto plugin = m_stepRegistry->stepByExecutorKey(step.executorKey);
+        if (!plugin) {
+            failCurrentStep(tr("未注册或已禁用的流程步骤插件: %1").arg(step.executorKey));
+            return;
         }
-        m_stepTimer->start(durationForStep(step));
+        ProcessNodeExecutionRequest request;
+        request.nodeId = step.nodeId;
+        request.executorKey = step.executorKey;
+        request.displayName = step.name;
+        request.parameters = step.parameters;
+        ProcessStepContext* context = m_stepContext;
+        m_dispatching = true;
+        m_stepWatcher->setFuture(QtConcurrent::run(&m_workflowPool,
+            [plugin, request, context] {
+                QString errorMessage;
+                const bool ok = plugin->execute(request, *context, &errorMessage);
+                return qMakePair(ok, errorMessage);
+            }));
     } catch (const std::exception& ex) {
         failCurrentStep(QString::fromUtf8(ex.what()));
     } catch (...) {
         failCurrentStep(tr("未知执行异常"));
     }
+}
+
+void ProcessWorkflowExecutor::completeStepDispatch()
+{
+    m_dispatching = false;
+    const QPair<bool, QString> result = m_stepWatcher->result();
+    if (!result.first) {
+        if (m_token.isStopping()) {
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "process.executor: current step interrupted by stop/emergency");
+            return;
+        }
+        failCurrentStep(result.second.isEmpty() ? tr("流程步骤执行失败") : result.second);
+        return;
+    }
+    if (m_state != State::Running)
+        return;
+    if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
+        m_stepTimer->start(durationForStep(m_plan.at(m_currentIndex)));
 }
 
 void ProcessWorkflowExecutor::completeCurrentStep()

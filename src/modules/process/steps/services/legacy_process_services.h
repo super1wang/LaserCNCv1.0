@@ -6,11 +6,15 @@ class Service;
 
 namespace lcnc::process {
 
+class DeviceCommandQueue;
+
 class LegacyProcessMotionService final : public IProcessMotionService
 {
 public:
-    explicit LegacyProcessMotionService(Service* service = nullptr);
+    explicit LegacyProcessMotionService(Service* service = nullptr,
+                                        DeviceCommandQueue* deviceQueue = nullptr);
     void setService(Service* service) { m_service = service; }
+    void setDeviceCommandQueue(DeviceCommandQueue* deviceQueue) { m_deviceQueue = deviceQueue; }
 
     bool moveAxis(const QString& axis,
                   const QString& mode,
@@ -26,13 +30,16 @@ public:
 
 private:
     Service* m_service{nullptr};
+    DeviceCommandQueue* m_deviceQueue{nullptr};
 };
 
 class LegacyProcessIoService final : public IProcessIoService
 {
 public:
-    explicit LegacyProcessIoService(Service* service = nullptr);
+    explicit LegacyProcessIoService(Service* service = nullptr,
+                                    DeviceCommandQueue* deviceQueue = nullptr);
     void setService(Service* service) { m_service = service; }
+    void setDeviceCommandQueue(DeviceCommandQueue* deviceQueue) { m_deviceQueue = deviceQueue; }
 
     bool setOutput(const QString& signalType,
                    const QString& ioName,
@@ -47,6 +54,7 @@ public:
 
 private:
     Service* m_service{nullptr};
+    DeviceCommandQueue* m_deviceQueue{nullptr};
 };
 
 class CallbackProcessCuttingService final : public IProcessCuttingService

@@ -35,7 +35,8 @@ int main(int argc, char* argv[])
 
     bool abortObserved = false;
     bool abortFinished = false;
-    bool abortSuccess = false;
+    bool abortSuccess = true;
+    TaskExecutionStatus abortStatus = TaskExecutionStatus::Queued;
     TaskId abortTask = manager.run(QStringLiteral("cooperative abort"), [&abortObserved](TaskProgress* progress) {
         while (!progress->isAbortRequested()) {
             progress->setValue(25);
@@ -51,6 +52,11 @@ int main(int argc, char* argv[])
                 abortSuccess = success;
             }
         });
+    QObject::connect(&manager, &TaskManager::taskFinishedDetailed, &app,
+        [&abortStatus, abortTask](TaskId id, TaskExecutionStatus status, const QString&) {
+            if (id == abortTask)
+                abortStatus = status;
+        });
 
     if (!pumpUntil([&manager, abortTask] { return manager.isRunning(abortTask); }, 500))
         return fail(QStringLiteral("Task did not start"));
@@ -60,7 +66,8 @@ int main(int argc, char* argv[])
     if (!manager.waitForDone(abortTask, 2000)
         || !pumpUntil([&abortFinished] { return abortFinished; }, 2000))
         return fail(QStringLiteral("Cooperative task did not finish after abort"));
-    if (!abortObserved || !abortSuccess || manager.isRunning(abortTask))
+    if (!abortObserved || abortSuccess || abortStatus != TaskExecutionStatus::Cancelled
+        || manager.isRunning(abortTask))
         return fail(QStringLiteral("Cooperative abort task produced an invalid terminal state"));
 
     bool exceptionFinished = false;

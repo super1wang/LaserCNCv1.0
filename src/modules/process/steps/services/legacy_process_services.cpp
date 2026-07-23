@@ -1,5 +1,6 @@
 #include "modules/process/steps/services/legacy_process_services.h"
 
+#include "modules/process/runtime/device_command_queue.h"
 #include "modules/process/System/Service.h"
 
 #include <QElapsedTimer>
@@ -7,7 +8,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <optional>
+#include <utility>
 
 namespace lcnc::process {
 
@@ -60,10 +63,31 @@ std::optional<Enum> ioEnumFromKey(const QString& tomlKey)
     return enum_cast<Enum>(stripIoKeyPrefix(tomlKey).toStdString());
 }
 
+template <typename Fn>
+bool executeDeviceCommand(DeviceCommandQueue* queue,
+                          TaskPriority priority,
+                          int timeoutMs,
+                          Fn&& command,
+                          QString* errorMessage)
+{
+    if (!queue) {
+        if (errorMessage)
+            *errorMessage = QObject::tr("设备命令队列不可用");
+        return false;
+    }
+    const DeviceCommandResult result = queue->executeAndWait(
+        DeviceCommandQueue::ResultCommand(std::forward<Fn>(command)), priority, timeoutMs);
+    if (!result.success && errorMessage)
+        *errorMessage = result.error;
+    return result.success;
+}
+
 } // namespace
 
-LegacyProcessMotionService::LegacyProcessMotionService(Service* service)
+LegacyProcessMotionService::LegacyProcessMotionService(Service* service,
+                                                       DeviceCommandQueue* deviceQueue)
     : m_service(service)
+    , m_deviceQueue(deviceQueue)
 {
 }
 
@@ -74,21 +98,24 @@ bool LegacyProcessMotionService::moveAxis(const QString& axis,
                                           int timeoutMs,
                                           QString* errorMessage)
 {
-    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
-                                      : Service::DeviceLock{};
-    Q_UNUSED(timeoutMs);
-    MotionControl* mc = motionControl(m_service, errorMessage);
-    if (!mc)
-        return false;
-    Axis eAxis;
-    if (!resolveAxis(mc, axis, &eAxis, errorMessage))
-        return false;
-    const bool ok = isRelativeMode(mode)
-        ? mc->MoveRelative(eAxis, target, velocity)
-        : mc->MoveAbsolute(eAxis, target, velocity);
-    if (!ok && errorMessage)
-        *errorMessage = QObject::tr("轴 %1 运动失败").arg(axis);
-    return ok;
+    Service* const service = m_service;
+    return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
+        [service, axis, mode, target, velocity] {
+            QString error;
+            const auto deviceLock = service ? service->lockDeviceAccess() : Service::DeviceLock{};
+            MotionControl* mc = motionControl(service, &error);
+            if (!mc)
+                return DeviceCommandResult{false, error};
+            Axis eAxis;
+            if (!resolveAxis(mc, axis, &eAxis, &error))
+                return DeviceCommandResult{false, error};
+            const bool ok = isRelativeMode(mode)
+                ? mc->MoveRelative(eAxis, target, velocity)
+                : mc->MoveAbsolute(eAxis, target, velocity);
+            if (!ok)
+                error = QObject::tr("轴 %1 运动失败").arg(axis);
+            return DeviceCommandResult{ok, error};
+        }, errorMessage);
 }
 
 bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
@@ -96,21 +123,9 @@ bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
                                           int timeoutMs,
                                           QString* errorMessage)
 {
-    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
-                                      : Service::DeviceLock{};
-    Q_UNUSED(timeoutMs);
-    MotionControl* mc = motionControl(m_service, errorMessage);
-    if (!mc)
-        return false;
-
     const bool sync = mode.compare(QStringLiteral("sync"), Qt::CaseInsensitive) == 0
         || mode.compare(QStringLiteral("synchronous"), Qt::CaseInsensitive) == 0
         || mode.compare(QStringLiteral("同步"), Qt::CaseInsensitive) == 0;
-    if (sync && QString::fromStdString(mc->GetName()) == QStringLiteral("GTN")) {
-        if (errorMessage)
-            *errorMessage = QObject::tr("GTN 控制器暂不支持同步多轴运动，请改为顺序执行");
-        return false;
-    }
     if (!sync) {
         for (const QVariant& item : rows) {
             const QVariantMap row = item.toMap();
@@ -126,43 +141,60 @@ bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
         return true;
     }
 
-    vector<Axis> axes;
-    vector<double> positions;
-    double velocity = 5.0;
-    bool relative = false;
-    for (const QVariant& item : rows) {
-        const QVariantMap row = item.toMap();
-        Axis eAxis;
-        if (!resolveAxis(mc, row.value(QStringLiteral("axis")).toString(), &eAxis, errorMessage))
-            return false;
-        axes.push_back(eAxis);
-        positions.push_back(row.value(QStringLiteral("target"), 0.0).toDouble());
-        velocity = row.value(QStringLiteral("velocity"), velocity).toDouble();
-        relative = isRelativeMode(row.value(QStringLiteral("mode"), QStringLiteral("absolute")).toString());
-    }
-
-    const bool ok = relative ? mc->MoveMRelative(axes, positions, velocity)
-                             : mc->MoveMAbsolute(axes, positions, velocity);
-    if (!ok && errorMessage)
-        *errorMessage = QObject::tr("同步多轴运动失败");
-    return ok;
+    Service* const service = m_service;
+    return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
+        [service, rows] {
+            QString error;
+            const auto deviceLock = service ? service->lockDeviceAccess() : Service::DeviceLock{};
+            MotionControl* mc = motionControl(service, &error);
+            if (!mc)
+                return DeviceCommandResult{false, error};
+            if (QString::fromStdString(mc->GetName()) == QStringLiteral("GTN"))
+                return DeviceCommandResult{false,
+                    QObject::tr("GTN 控制器暂不支持同步多轴运动，请改为顺序执行")};
+            vector<Axis> axes;
+            vector<double> positions;
+            double velocity = 5.0;
+            bool relative = false;
+            for (const QVariant& item : rows) {
+                const QVariantMap row = item.toMap();
+                Axis eAxis;
+                if (!resolveAxis(mc, row.value(QStringLiteral("axis")).toString(), &eAxis, &error))
+                    return DeviceCommandResult{false, error};
+                axes.push_back(eAxis);
+                positions.push_back(row.value(QStringLiteral("target"), 0.0).toDouble());
+                velocity = row.value(QStringLiteral("velocity"), velocity).toDouble();
+                relative = isRelativeMode(row.value(QStringLiteral("mode"), QStringLiteral("absolute")).toString());
+            }
+            const bool ok = relative ? mc->MoveMRelative(axes, positions, velocity)
+                                     : mc->MoveMAbsolute(axes, positions, velocity);
+            if (!ok)
+                error = QObject::tr("同步多轴运动失败");
+            return DeviceCommandResult{ok, error};
+        }, errorMessage);
 }
 
 bool LegacyProcessMotionService::stopMotion(QString* errorMessage)
 {
-    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
-                                      : Service::DeviceLock{};
-    MotionControl* mc = motionControl(m_service, errorMessage);
-    if (!mc)
-        return false;
-    const bool ok = mc->StopMotion() && mc->StopAllBuffer();
-    if (!ok && errorMessage)
-        *errorMessage = QObject::tr("停止运动失败");
-    return ok;
+    Service* const service = m_service;
+    return executeDeviceCommand(m_deviceQueue, TaskPriority::Stop, 5000,
+        [service] {
+            QString error;
+            const auto deviceLock = service ? service->lockDeviceAccess() : Service::DeviceLock{};
+            MotionControl* mc = motionControl(service, &error);
+            if (!mc)
+                return DeviceCommandResult{false, error};
+            const bool ok = mc->StopMotion() && mc->StopAllBuffer();
+            if (!ok)
+                error = QObject::tr("停止运动失败");
+            return DeviceCommandResult{ok, error};
+        }, errorMessage);
 }
 
-LegacyProcessIoService::LegacyProcessIoService(Service* service)
+LegacyProcessIoService::LegacyProcessIoService(Service* service,
+                                               DeviceCommandQueue* deviceQueue)
     : m_service(service)
+    , m_deviceQueue(deviceQueue)
 {
 }
 
@@ -171,29 +203,33 @@ bool LegacyProcessIoService::setOutput(const QString& signalType,
                                        const QVariant& value,
                                        QString* errorMessage)
 {
-    MotionControl* mc = motionControl(m_service, errorMessage);
-    if (!mc)
-        return false;
-    const bool digital = signalType.compare(QStringLiteral("digital"), Qt::CaseInsensitive) == 0;
-    bool ok = false;
-    if (digital) {
-        if (auto e = ioEnumFromKey<DigitalOUT>(ioName)) {
-            if (mc->m_mapDigitalOUT.count(e.value()))
-                ok = mc->DigitalOutputSet(e.value(), value.toBool() ? 1 : 0);
-            else if (errorMessage)
-                *errorMessage = QObject::tr("数字量输出 %1 未注册").arg(ioName);
-        }
-    } else {
-        if (auto e = ioEnumFromKey<AnalogOUT>(ioName)) {
-            if (mc->m_mapAnalogOUT.count(e.value()))
-                ok = mc->AnalogOutputSet(e.value(), value.toDouble());
-            else if (errorMessage)
-                *errorMessage = QObject::tr("模拟量输出 %1 未注册").arg(ioName);
-        }
-    }
-    if (!ok && errorMessage && errorMessage->isEmpty())
-        *errorMessage = QObject::tr("输出信号 %1 设置失败").arg(ioName);
-    return ok;
+    Service* const service = m_service;
+    return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, 5000,
+        [service, signalType, ioName, value] {
+            QString error;
+            const auto deviceLock = service ? service->lockDeviceAccess() : Service::DeviceLock{};
+            MotionControl* mc = motionControl(service, &error);
+            if (!mc)
+                return DeviceCommandResult{false, error};
+            const bool digital = signalType.compare(QStringLiteral("digital"), Qt::CaseInsensitive) == 0;
+            bool ok = false;
+            if (digital) {
+                if (auto e = ioEnumFromKey<DigitalOUT>(ioName)) {
+                    if (mc->m_mapDigitalOUT.count(e.value()))
+                        ok = mc->DigitalOutputSet(e.value(), value.toBool() ? 1 : 0);
+                    else
+                        error = QObject::tr("数字量输出 %1 未注册").arg(ioName);
+                }
+            } else if (auto e = ioEnumFromKey<AnalogOUT>(ioName)) {
+                if (mc->m_mapAnalogOUT.count(e.value()))
+                    ok = mc->AnalogOutputSet(e.value(), value.toDouble());
+                else
+                    error = QObject::tr("模拟量输出 %1 未注册").arg(ioName);
+            }
+            if (!ok && error.isEmpty())
+                error = QObject::tr("输出信号 %1 设置失败").arg(ioName);
+            return DeviceCommandResult{ok, error};
+        }, errorMessage);
 }
 
 bool LegacyProcessIoService::waitInput(const QString& signalType,
@@ -203,16 +239,10 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
                                        int pollIntervalMs,
                                        QString* errorMessage)
 {
-    const auto deviceLock = m_service ? m_service->lockDeviceAccess()
-                                      : Service::DeviceLock{};
-    MotionControl* mc = motionControl(m_service, errorMessage);
-    if (!mc)
-        return false;
     const bool analog = signalType.compare(QStringLiteral("analog"), Qt::CaseInsensitive) == 0;
     auto digitalEnum = analog ? std::optional<DigitalIN>{} : ioEnumFromKey<DigitalIN>(ioName);
     auto analogEnum = analog ? ioEnumFromKey<AnalogIN>(ioName) : std::optional<AnalogIN>{};
-    if ((!analog && (!digitalEnum.has_value() || !mc->m_mapDigitalIN.count(digitalEnum.value())))
-        || (analog && (!analogEnum.has_value() || !mc->m_mapAnalogIN.count(analogEnum.value())))) {
+    if ((!analog && !digitalEnum.has_value()) || (analog && !analogEnum.has_value())) {
         if (errorMessage)
             *errorMessage = QObject::tr("输入信号 %1 未注册").arg(ioName);
         return false;
@@ -221,21 +251,39 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
     timer.start();
     const int interval = std::clamp(pollIntervalMs, 10, 1000);
     while (timeoutMs <= 0 || timer.elapsed() <= timeoutMs) {
-        {
-            const auto deviceLock = m_service ? m_service->lockDeviceAccess()
-                                              : Service::DeviceLock{};
+        const auto matched = std::make_shared<bool>(false);
+        Service* const service = m_service;
+        if (!executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow,
+                                  std::max(1000, interval * 2),
+            [service, analog, digitalEnum, analogEnum, targetValue, matched, ioName] {
+                QString error;
+                const auto deviceLock = service ? service->lockDeviceAccess() : Service::DeviceLock{};
+                MotionControl* mc = motionControl(service, &error);
+                if (!mc)
+                    return DeviceCommandResult{false, error};
             if (analog) {
+                if (!mc->m_mapAnalogIN.count(analogEnum.value()))
+                    return DeviceCommandResult{false, QObject::tr("输入信号 %1 未注册").arg(ioName)};
                 double value = 0.0;
                 if (mc->AnalogInputGet(analogEnum.value(), value)
-                    && std::abs(value - targetValue.toDouble()) < 1e-6)
-                    return true;
+                    && std::abs(value - targetValue.toDouble()) < 1e-6) {
+                    *matched = true;
+                }
             } else {
+                if (!mc->m_mapDigitalIN.count(digitalEnum.value()))
+                    return DeviceCommandResult{false, QObject::tr("输入信号 %1 未注册").arg(ioName)};
                 int value = 0;
                 if (mc->DigitalInputGet(digitalEnum.value(), value)
-                    && (value != 0) == targetValue.toBool())
-                    return true;
+                    && (value != 0) == targetValue.toBool()) {
+                    *matched = true;
+                }
             }
+                return DeviceCommandResult{};
+            }, errorMessage)) {
+            return false;
         }
+        if (*matched)
+            return true;
         QThread::msleep(static_cast<unsigned long>(interval));
     }
     if (errorMessage)

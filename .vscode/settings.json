@@ -1,25 +1,6 @@
 {
-  // This workspace uses the existing Ninja directory.  Keep CMake Tools and
-  // launch.json on the same artifact; do not point debugging at the stale
-  // Visual Studio Debug subdirectory.
-  "cmake.buildDirectory": "${workspaceFolder}/cmake-build-sdkcheck",
-  "cmake.generator": "Ninja",
-  "cmake.configureSettings": {
-    "CMAKE_BUILD_TYPE": "Debug",
-    "LCNC_WITH_ACS": "ON",
-    "LCNC_WITH_GTN": "ON",
-    "LCNC_WITH_BDAQ": "OFF",
-    "LCNC_WITH_REAL_LASER": "OFF",
-    "LCNC_ACS_INCLUDE_DIR": "${workspaceFolder}/3rd/include_3rd",
-    "LCNC_ACS_LIB": "${workspaceFolder}/3rd/lib_3rd/debug/ACSCL_x64.LIB",
-    "LCNC_GTN_INCLUDE_DIR": "${workspaceFolder}/3rd/gts",
-    "LCNC_GTN_LIB": "${workspaceFolder}/3rd/gts/gts.lib",
-    "LCNC_GTN_RUNTIME_DLL": "${workspaceFolder}/3rd/gts/gts.dll"
-  },
+  "cmake.configurePreset": "acs-gtn",
+  "cmake.buildPreset": "acs-gtn-debug",
   "cmake.parallelJobs": 16,
-  "cmake.buildBeforeRun": false,
-  "cmake.debugConfig": {
-    "console": "integratedTerminal",
-    "cwd": "${workspaceFolder}/cmake-build-sdkcheck"
-  }
+  "cmake.buildBeforeRun": false
 }

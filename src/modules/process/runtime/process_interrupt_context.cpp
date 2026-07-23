@@ -1,18 +1,12 @@
 #include "modules/process/runtime/process_interrupt_context.h"
 
-#include <QCoreApplication>
-#include <QEventLoop>
 #include <QMutexLocker>
-#include <QThread>
 
 namespace lcnc::process {
 
 namespace {
 
-// 暂停期间每轮 processEvents 的时间片（ms）。
-constexpr int kPauseSliceMs = 50;
-// 每轮 processEvents 之后的让出 sleep，避免在 paused 下空转。
-constexpr int kPauseSleepMs = 20;
+constexpr unsigned long kPauseWaitSliceMs = 100;
 
 } // namespace
 
@@ -27,6 +21,8 @@ void ProcessInterruptContext::requestPause()
 void ProcessInterruptContext::requestResume()
 {
     paused.store(false);
+    QMutexLocker lock(&m_pauseMutex);
+    m_pauseChanged.wakeAll();
 }
 
 void ProcessInterruptContext::requestStop()
@@ -34,6 +30,8 @@ void ProcessInterruptContext::requestStop()
     stopRequested.store(true);
     // 同步翻 paused → 让正卡在 checkpoint 抽水循环里的步骤立刻醒来并退出。
     paused.store(false);
+    QMutexLocker lock(&m_pauseMutex);
+    m_pauseChanged.wakeAll();
 }
 
 void ProcessInterruptContext::requestEmergencyStop()
@@ -41,6 +39,8 @@ void ProcessInterruptContext::requestEmergencyStop()
     emergencyStop.store(true);
     stopRequested.store(true);
     paused.store(false);
+    QMutexLocker lock(&m_pauseMutex);
+    m_pauseChanged.wakeAll();
 }
 
 void ProcessInterruptContext::reset()
@@ -48,6 +48,10 @@ void ProcessInterruptContext::reset()
     paused.store(false);
     stopRequested.store(false);
     emergencyStop.store(false);
+    {
+        QMutexLocker lock(&m_pauseMutex);
+        m_pauseChanged.wakeAll();
+    }
     QMutexLocker lk(&m_resumeMutex);
     m_resumePoints.clear();
 }
@@ -68,13 +72,14 @@ bool ProcessInterruptContext::checkpoint(const QString& nodeId,
         p.valid = true;
     }
 
-    // 2. 暂停态下进入抽水等待循环
+    // 2. 暂停态下进入条件等待。不得在工作流线程调用 processEvents：
+    // 那会把 GUI 事件重入到错误的线程，也会让轮询干扰流程执行。
     while (paused.load()) {
         if (stopRequested.load() || emergencyStop.load())
             return false;
-        // 抽水期间 GUI 仍可响应，再次 pause/resume/stop 会更新原子位。
-        QCoreApplication::processEvents(QEventLoop::AllEvents, kPauseSliceMs);
-        QThread::msleep(static_cast<unsigned long>(kPauseSleepMs));
+        QMutexLocker lock(&m_pauseMutex);
+        if (paused.load() && !stopRequested.load() && !emergencyStop.load())
+            m_pauseChanged.wait(&m_pauseMutex, kPauseWaitSliceMs);
     }
 
     // 3. 离开断点前再检一次（极少：刚解除 pause 又被 stop）

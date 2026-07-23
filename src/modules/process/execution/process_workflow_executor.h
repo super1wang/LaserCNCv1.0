@@ -5,6 +5,8 @@
 
 #include <QObject>
 #include <QVector>
+#include <QFutureWatcher>
+#include <QThreadPool>
 #include <functional>
 
 class QTimer;
@@ -50,6 +52,7 @@ public:
     using DeviceStopper = std::function<void(bool emergency)>;
 
     explicit ProcessWorkflowExecutor(QObject* parent = nullptr);
+    ~ProcessWorkflowExecutor() override;
 
     bool start(ProcessFlowDocument& document, QString* errorMessage = nullptr);
     void pause();
@@ -64,6 +67,8 @@ public:
     void setDeviceStopper(DeviceStopper stopper);
 
     ProcessCancellationToken* cancellationToken() { return &m_token; }
+    /// Used during module teardown after stop() requested cooperative exit.
+    bool waitForIdle(int timeoutMs);
 
 signals:
     void messageLogged(const QString& message);
@@ -80,6 +85,7 @@ private:
     void collectNode(const ProcessNode& node, int depth);
     void resetNodeStates(QVector<ProcessNode>& nodes);
     void runNextStep();
+    void completeStepDispatch();
     void completeCurrentStep();
     void failCurrentStep(const QString& message);
     void setNodeState(const QString& nodeId, ProcessNodeState state);
@@ -93,6 +99,8 @@ private:
     ProcessStepRegistry* m_stepRegistry{nullptr};
     ProcessStepContext* m_stepContext{nullptr};
     QTimer* m_stepTimer{nullptr};
+    QFutureWatcher<QPair<bool, QString>>* m_stepWatcher{nullptr};
+    QThreadPool m_workflowPool;
     int m_currentIndex{-1};
     bool m_dispatching{false};   ///< true: 当前正同步运行 plugin->execute()，pause 在 checkpoint 内生效
     ProcessCancellationToken m_token;

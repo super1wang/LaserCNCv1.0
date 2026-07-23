@@ -5,8 +5,6 @@
 #include "modules/process/device/MotionControl/GTNMotionControl.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
-#include <QCoreApplication>
-#include <QEventLoop>
 #include <QThread>
 
 #include <utility>
@@ -42,6 +40,24 @@ void GtnBufferedCommandSink::resetProgram()
 
 bool GtnBufferedCommandSink::flush(QString* errorMessage)
 {
+    if (!startProgram(errorMessage))
+        return false;
+    while (isProgramRunning(errorMessage)) {
+        if (m_token) {
+            while (m_token->isPaused())
+                QThread::msleep(10);
+            if (m_token->isStopping()) {
+                if (errorMessage) *errorMessage = QStringLiteral("切割已被中断");
+                return false;
+            }
+        }
+        QThread::msleep(10);
+    }
+    return true;
+}
+
+bool GtnBufferedCommandSink::startProgram(QString* errorMessage)
+{
     if (!m_gtn) {
         if (errorMessage) *errorMessage = QStringLiteral("GtnBufferedCommandSink: motion control not bound");
         return false;
@@ -54,24 +70,16 @@ bool GtnBufferedCommandSink::flush(QString* errorMessage)
     }
     // 切换回点位模式。
     m_gtn->PrfTrapAxis();
-
-    // 轮询等待全部插补完成（与 ACS sink 的 IsBufferRunning 对应）。
-    constexpr int kPollSliceMs = 20;
-    while (m_gtn->IsAxisMoving()) {
-        if (m_token) {
-            while (m_token->isPaused()) {
-                QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
-                QThread::msleep(2);
-            }
-            if (m_token->isStopping()) {
-                if (errorMessage) *errorMessage = QStringLiteral("切割已被中断");
-                return false;
-            }
-        }
-        QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
-        QThread::msleep(2);
-    }
     return true;
+}
+
+bool GtnBufferedCommandSink::isProgramRunning(QString* errorMessage)
+{
+    if (!m_gtn) {
+        if (errorMessage) *errorMessage = QStringLiteral("GtnBufferedCommandSink: motion control not bound");
+        return false;
+    }
+    return m_gtn->IsAxisMoving();
 }
 
 void GtnBufferedCommandSink::jumpToIdleZ(const MachinePose5& pose, const Tool& tool)

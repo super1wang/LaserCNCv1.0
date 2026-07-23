@@ -9,24 +9,27 @@
     {
       "name": "base-ninja",
       "hidden": true,
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "LCNC_WITH_ACS": "OFF",
-        "LCNC_WITH_GTN": "OFF",
+        "LCNC_WITH_ACS": "ON",
+        "LCNC_WITH_GTN": "ON",
         "LCNC_WITH_BDAQ": "OFF",
         "LCNC_WITH_REAL_LASER": "OFF"
       }
     },
     {
-      "name": "debug",
-      "displayName": "Debug (all device SDKs off)",
+      "name": "all-off",
+      "displayName": "All device SDKs off",
       "inherits": "base-ninja"
+      ,"cacheVariables": {
+        "LCNC_WITH_ACS": "OFF",
+        "LCNC_WITH_GTN": "OFF"
+      }
     },
     {
       "name": "asan",
-      "displayName": "Debug with MSVC AddressSanitizer",
+      "displayName": "ACS + GTN with MSVC AddressSanitizer",
       "inherits": "base-ninja",
       "cacheVariables": {
         "LCNC_ENABLE_ASAN": "ON"
@@ -34,17 +37,19 @@
     },
     {
       "name": "acs",
-      "displayName": "Debug with ACS adapter",
+      "displayName": "ACS adapter only",
       "inherits": "base-ninja",
       "cacheVariables": {
-        "LCNC_WITH_ACS": "ON"
+        "LCNC_WITH_ACS": "ON",
+        "LCNC_WITH_GTN": "OFF"
       }
     },
     {
       "name": "gtn",
-      "displayName": "Debug with GTN adapter",
+      "displayName": "GTN adapter only",
       "inherits": "base-ninja",
       "cacheVariables": {
+        "LCNC_WITH_ACS": "OFF",
         "LCNC_WITH_GTN": "ON"
       }
     },
@@ -60,24 +65,34 @@
   ],
   "buildPresets": [
     {
-      "name": "debug",
-      "configurePreset": "debug"
+      "name": "debug-all-off",
+      "configurePreset": "all-off",
+      "configuration": "Debug"
     },
     {
       "name": "asan",
-      "configurePreset": "asan"
+      "configurePreset": "asan",
+      "configuration": "Debug"
     },
     {
       "name": "acs",
-      "configurePreset": "acs"
+      "configurePreset": "acs",
+      "configuration": "Debug"
     },
     {
       "name": "gtn",
-      "configurePreset": "gtn"
+      "configurePreset": "gtn",
+      "configuration": "Debug"
     },
     {
-      "name": "acs-gtn",
-      "configurePreset": "acs-gtn"
+      "name": "acs-gtn-debug",
+      "configurePreset": "acs-gtn",
+      "configuration": "Debug"
+    },
+    {
+      "name": "acs-gtn-release",
+      "configurePreset": "acs-gtn",
+      "configuration": "Release"
     }
   ]
 }

@@ -3,7 +3,7 @@
   "configurePresets": [
     {
       "name": "local-paths",
-      "inherits": "debug",
+      "inherits": "acs-gtn",
       "hidden": true,
       "cacheVariables": {
         "LCNC_QT6_ROOT": "C:/Qt/6.x/msvc2022_64",

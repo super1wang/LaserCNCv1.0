@@ -1,9 +1,26 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 project(LaserCNC VERSION 1.0.0 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# CMake Tools invokes Ninja directly and therefore does not inherit the MSVC
+# and Windows SDK environment that a Developer Command Prompt normally sets.
+# Wrap every compiler/linker child process so direct IDE builds remain valid
+# without committing machine-specific INCLUDE/LIB paths.
+if(MSVC)
+    set(LCNC_MSVC_ENV_LAUNCHER "${CMAKE_CURRENT_SOURCE_DIR}/scripts/msvc_x64_env.cmd"
+        CACHE FILEPATH "MSVC x64 environment launcher")
+    set(CMAKE_C_COMPILER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
+        "Launcher used for C compiler commands" FORCE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
+        "Launcher used for C++ compiler commands" FORCE)
+    set(CMAKE_C_LINKER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
+        "Launcher used for C linker commands" FORCE)
+    set(CMAKE_CXX_LINKER_LAUNCHER "${LCNC_MSVC_ENV_LAUNCHER}" CACHE FILEPATH
+        "Launcher used for C++ linker commands" FORCE)
+endif()
 
 # Memory-safety gate.  This stays opt-in because vendor SDK DLLs are not
 # instrumented, but every project-owned translation unit can be built with the
@@ -76,8 +93,8 @@ set(BUILD_SHARED_LIBS OFF) # 构建静态 QuaZip（CMP0077 使其 option() 尊�
 add_subdirectory("${LCNC_QUAZIP_ROOT}" "${CMAKE_BINARY_DIR}/quazip-build")
 
 # ─── Optional process device SDKs ─────────────────────────────────────────────
-option(LCNC_WITH_ACS "Enable ACS motion controller adapter" OFF)
-option(LCNC_WITH_GTN "Enable GTN motion controller adapter" OFF)
+option(LCNC_WITH_ACS "Enable ACS motion controller adapter" ON)
+option(LCNC_WITH_GTN "Enable GTN motion controller adapter" ON)
 option(LCNC_WITH_BDAQ "Enable BDAQ IO adapter" OFF)
 option(LCNC_WITH_REAL_LASER "Enable real laser adapters" OFF)
 
@@ -304,6 +321,8 @@ set(SRCS_MODULE_CAM
 set(SRCS_MODULE_PROCESS
     src/modules/process/process_module.cpp
     src/modules/process/runtime/process_axis_utilities.cpp
+    src/modules/process/runtime/device_command_queue.cpp
+    src/modules/process/runtime/device_command_queue.h
     src/modules/process/settings/process_settings_service.cpp
     src/modules/process/settings/process_parameter_registry.cpp
     src/modules/process/settings/process_property_model.cpp
@@ -519,11 +538,21 @@ add_executable(LaserCNC WIN32
     src/main.cpp
     resources/resources.qrc
 )
+set(LCNC_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/x64" CACHE PATH
+    "Root directory for deployable LaserCNC runtime files")
 set_target_properties(LaserCNC PROPERTIES
     AUTOMOC ON
     AUTORCC ON
+    RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_ROOT}/$<CONFIG>"
+    PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/symbols/$<CONFIG>"
 )
 target_link_libraries(LaserCNC PRIVATE lcnc_app)
+
+if(MSVC)
+    # Runtime folders contain deployable files only. Keep incremental-link
+    # state and symbols under build/ so they cannot be mistaken for releases.
+    target_link_options(LaserCNC PRIVATE "$<$<CONFIG:Debug>:/INCREMENTAL:NO>")
+endif()
 
 if(LCNC_WITH_ACS)
     # Relink (and therefore rerun POST_BUILD) when the simulator program
@@ -544,6 +573,27 @@ if(WIN32)
         LINK_FLAGS "/ENTRY:mainCRTStartup"
     )
 endif()
+
+set(LCNC_RUNTIME_CONFIG_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/config.toml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Peripheral.toml"
+)
+add_custom_command(TARGET LaserCNC POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:LaserCNC>/config"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:LaserCNC>/logs"
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "$<TARGET_FILE_DIR:LaserCNC>/LaserCNC.pdb"
+        "$<TARGET_FILE_DIR:LaserCNC>/LaserCNC.ilk"
+    COMMENT "Preparing deployable LaserCNC runtime directory")
+foreach(_lcnc_runtime_config IN LISTS LCNC_RUNTIME_CONFIG_FILES)
+    if(EXISTS "${_lcnc_runtime_config}")
+        add_custom_command(TARGET LaserCNC POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_lcnc_runtime_config}"
+                "$<TARGET_FILE_DIR:LaserCNC>"
+            COMMENT "Deploying runtime configuration")
+    endif()
+endforeach()
 
 # ─── Deploy runtime DLLs ──────────────────────────────────────────────────────
 # All runtime DLLs (OCC, Qt6 + plugins, SARibbon, boost, ACS, etc.) live as a
@@ -613,6 +663,10 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/3rd/magic_enum"
     )
+    add_executable(lcnc_device_command_queue_test
+        tests/device_command_queue_test.cpp
+    )
+    target_link_libraries(lcnc_device_command_queue_test PRIVATE lcnc_module_process Qt6::Core)
     if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
         add_custom_command(TARGET lcnc_project_package_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -626,14 +680,20 @@ if(BUILD_TESTING)
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${_lcnc_runtime_bin}"
                 "$<TARGET_FILE_DIR:lcnc_process_runtime_configuration_test>")
+        add_custom_command(TARGET lcnc_device_command_queue_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${_lcnc_runtime_bin}"
+                "$<TARGET_FILE_DIR:lcnc_device_command_queue_test>")
     endif()
     lcnc_deploy_tbb_runtime(lcnc_project_package_test)
     lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
     lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
+    lcnc_deploy_tbb_runtime(lcnc_device_command_queue_test)
     if(LCNC_ENABLE_ASAN)
         lcnc_deploy_asan_runtime(lcnc_project_package_test)
         lcnc_deploy_asan_runtime(lcnc_task_manager_test)
         lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
+        lcnc_deploy_asan_runtime(lcnc_device_command_queue_test)
     endif()
     add_test(NAME architecture_checks
         COMMAND "${LCNC_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
@@ -645,6 +705,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_task_manager_test)
     add_test(NAME lcnc_process_runtime_configuration_test
         COMMAND lcnc_process_runtime_configuration_test)
+    add_test(NAME lcnc_device_command_queue_test
+        COMMAND lcnc_device_command_queue_test)
 endif()
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")

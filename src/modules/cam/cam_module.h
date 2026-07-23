@@ -221,6 +221,8 @@ public:
 
     // ── Toolpath ─────────────────────────────────────────────────────────
     bool generateToolpath(double smoothAngle, bool useFaceClassification, double deflection = 0.1);
+    TaskId generateToolpathAsync(double smoothAngle, bool useFaceClassification,
+                                 double deflection = 0.1);
     void clearToolpath();
 
     // 刀路持久化（cam_toolpath.toml + points.bin）已下沉到 core
@@ -273,6 +275,10 @@ public:
 
     /// Apply pending parameters and rebuild/solve only the active contour.
     bool recalcToolpath();
+    /// Asynchronous variant used by UI commands. OCC calculation runs against
+    /// a copied contour/kinematics snapshot; document and view updates remain
+    /// on the GUI thread.
+    TaskId recalcToolpathAsync();
 
     /// Toggle toolpath display visibility.
     void setToolpathVisible(bool visible);

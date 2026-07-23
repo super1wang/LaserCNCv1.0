@@ -13,6 +13,7 @@
 #include <QStringList>
 #include <QVector>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 
@@ -138,7 +139,7 @@ public:
 
     // ── IProcessCuttingPlanProvider 实现 ──────────────────────────────────
     QVector<lcnc::cam::ContourId> orderedContourIds() const override;
-    std::uint64_t                 planRevision() const override { return m_planRevision; }
+    std::uint64_t                 planRevision() const override { return m_planRevision.load(); }
 
     /// 列出某图层下的全部轮廓（来自 CAM snapshot），供 UI 渲染轮廓复选行。
     struct ContourBrief
@@ -168,7 +169,7 @@ private:
     void wireLayerProviderSignals();
 
     /// 单调递增；任何变化（plan/manual/strategy/sync/load）都自增。
-    std::uint64_t m_planRevision{0};
+    std::atomic<std::uint64_t> m_planRevision{0};
 
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_provider;
     std::shared_ptr<lcnc::cam::ICamLayerProvider>    m_layerProvider;

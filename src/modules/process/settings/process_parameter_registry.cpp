@@ -169,6 +169,8 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
             field("cutJerk", QObject::tr("切割加加速度"), QObject::tr("切割"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutJerk", 1000.0, {}, 0.0),
             field("cuttingHeight", QObject::tr("切割高度增量"), QObject::tr("高度"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCuttingHeight", 0.0, "mm"),
             field("idleHeight", QObject::tr("空程高度增量"), QObject::tr("高度"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdleHeight", 0.0, "mm"),
+            field("jumpAcceleration", QObject::tr("空程加速度"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelAcc", 100.0, {}, 0.0),
+            field("jumpJerk", QObject::tr("空程加加速度"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelJerk", 1000.0, {}, 0.0),
             field("energy", QObject::tr("能量"), QObject::tr("激光"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fEnergy", 20.0, "%", 0.0),
             field("frequency", QObject::tr("频率"), QObject::tr("激光"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fFrequency", 30.0, "kHz", 0.0),
             field("pulseWidth", QObject::tr("脉宽"), QObject::tr("激光"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fPluse", 20.0, "μs", 0.0),

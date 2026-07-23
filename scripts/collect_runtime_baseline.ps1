@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 if ([string]::IsNullOrWhiteSpace($Executable)) {
-    $Executable = Join-Path $repoRoot "build\LaserCNC.exe"
+    $Executable = Join-Path $repoRoot "x64\Debug\LaserCNC.exe"
 }
 $Executable = (Resolve-Path $Executable).Path
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {

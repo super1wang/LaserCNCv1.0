@@ -45,7 +45,12 @@ public:
 
     // —— 程序生命周期 ——
     virtual void resetProgram() = 0;
-    /// 末段提交：ACS=Load+Run+WaitEnd；GTN=CrdData+CrdStart+WaitDone。
+    /// 提交并启动：ACS=Load+Run；GTN=CrdData+CrdStart；不得在此等待完成。
+    virtual bool startProgram(QString* errorMessage = nullptr) = 0;
+    /// 短状态读取；true 表示控制器/仿真仍在执行。
+    virtual bool isProgramRunning(QString* errorMessage = nullptr) = 0;
+    /// 兼容入口：提交、启动并等待。新代码应使用 startProgram/isProgramRunning，
+    /// 以便把等待轮询调度为可抢占的短设备任务。
     virtual bool flush(QString* errorMessage = nullptr) = 0;
 
     // —— 空程跳转（用各轴自己的速度，X/Y 协调）——

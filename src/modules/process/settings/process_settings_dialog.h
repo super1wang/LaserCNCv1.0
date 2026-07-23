@@ -4,23 +4,28 @@
 
 #include <QDialog>
 #include <QVector>
+#include <functional>
 
 class QLineEdit;
 class QStackedWidget;
 class QTableView;
 class QTreeView;
 class QTreeWidget;
-class Service;
 
 namespace lcnc::process {
 class ProcessPropertyModel;
 class ProcessIoTableModel;
 class ProcessSettingsService;
+struct ProcessSettingsChangeSet;
 
 class ProcessSettingsDialog final : public QDialog
 {
 public:
-    ProcessSettingsDialog(ProcessSettingsService* settings, Service* runtime, QWidget* parent = nullptr);
+    using SettingsAppliedHandler = std::function<void(const ProcessSettingsChangeSet&)>;
+
+    ProcessSettingsDialog(ProcessSettingsService* settings,
+                          SettingsAppliedHandler settingsApplied,
+                          QWidget* parent = nullptr);
 
 private:
     void rebuildObjectTree();
@@ -33,7 +38,7 @@ private:
     QString selectedToolName() const;
 
     ProcessSettingsService* m_settings{nullptr};
-    Service* m_runtime{nullptr};
+    SettingsAppliedHandler m_settingsApplied;
     QTreeWidget* m_objects{nullptr};
     QTreeView* m_properties{nullptr};
     QTableView* m_ioTable{nullptr};

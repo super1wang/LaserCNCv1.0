@@ -1,6 +1,5 @@
 #include "modules/process/settings/process_settings_dialog.h"
 
-#include "modules/process/System/Service.h"
 #include "modules/process/settings/process_property_model.h"
 #include "modules/process/settings/process_io_table_model.h"
 #include "modules/process/settings/process_settings_service.h"
@@ -22,8 +21,10 @@
 
 namespace lcnc::process {
 
-ProcessSettingsDialog::ProcessSettingsDialog(ProcessSettingsService* settings, Service* runtime, QWidget* parent)
-    : QDialog(parent), m_settings(settings), m_runtime(runtime)
+ProcessSettingsDialog::ProcessSettingsDialog(ProcessSettingsService* settings,
+                                             SettingsAppliedHandler settingsApplied,
+                                             QWidget* parent)
+    : QDialog(parent), m_settings(settings), m_settingsApplied(std::move(settingsApplied))
 {
     setWindowTitle(tr("加工参数"));
     resize(1080, 700);
@@ -188,13 +189,8 @@ void ProcessSettingsDialog::apply()
 {
     const auto result = m_settings->commit();
     if (!result.success) { QMessageBox::critical(this, tr("应用参数"), result.error); return; }
-    if (m_runtime) {
-        const auto deviceLock = m_runtime->lockDeviceAccess();
-        if (result.changes.domains.contains("devices")) { m_runtime->SetMotionControlTable(); m_runtime->SetLaserTable(); }
-        if (result.changes.domains.contains("io") && m_runtime->GetMotionControl()) { m_runtime->GetMotionControl()->SetDigitalTable(); m_runtime->GetMotionControl()->SetAnalogTable(); }
-        if (result.changes.domains.contains("tools")) m_runtime->SetToolTable();
-        if (result.changes.domains.contains("operations")) m_runtime->SetGasTable();
-    }
+    if (m_settingsApplied)
+        m_settingsApplied(result.changes);
     rebuildObjectTree();
 }
 

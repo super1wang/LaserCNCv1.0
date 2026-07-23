@@ -5,8 +5,8 @@
 #include <QMap>
 #include <QSet>
 #include <QString>
-#include <QThreadPool>
 #include <atomic>
+#include <cstdint>
 #include <memory>
 
 #include "core/kinematics/machine_kinematics.h"
@@ -20,7 +20,6 @@
 #include "modules/process/runtime/process_runtime_configuration.h"
 
 class QTimer;
-class QFutureWatcherBase;
 class Service;
 
 namespace lcnc::process {
@@ -32,6 +31,8 @@ class ProcessCuttingPlanService;
 class ProcessMonitorService;
 class ProcessWorkflowExecutor;
 class ProcessSettingsService;
+class DeviceCommandQueue;
+struct ProcessSettingsChangeSet;
 }
 
 namespace lcnc {
@@ -126,6 +127,8 @@ public:
     QList<DigitalOutputDescriptor> mainPanelDigitalOutputs() const;
     /// 在 settings 变更（设置对话框 Apply/OK）后调用，重新发射 IO 描述符 + 启动期反馈。
     void refreshIOFromSettings();
+    /// Queues committed settings for background application to Process devices.
+    void applySettingsChanges(const lcnc::process::ProcessSettingsChangeSet& changes);
 
     /// NormalCuttingManager 在执行普通切割期间调用，旁路 onSimulationTick 的
     /// Lissajous 正弦波 + 硬件状态轮询，避免与刀路驱动写入 setAxisPosition 抢占。
@@ -183,13 +186,14 @@ private:
 
     void initializeAxisPositions();
     void initializeAxisEnabledStates();
-    [[nodiscard]] bool safeStopProcessOutputs();
     [[nodiscard]] bool triggerSafeStopOutputs();
+    void clearSafeOutputCache();
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
     void startDeviceMonitoring();
     void stopDeviceMonitoring();
-    bool validateProcessingEnvironment(QString* errorMessage);
+    bool validateProcessingConfiguration(QString* errorMessage);
+    void startWorkflowAfterPreflight();
     void trackOwnedTask(TaskId taskId);
     void releaseOwnedTask(TaskId taskId);
     /// 请求本模块任务取消并等待；false 表示仍有 worker 未在期限内退出。
@@ -204,6 +208,8 @@ private:
     bool                  m_simulationMode{true};
 #endif
     bool                  m_homing{false};
+    bool                  m_preflightInFlight{false};
+    std::uint64_t         m_runRequestGeneration{0};
     State                 m_state{State::Idle};
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, double> m_axisPositions;
@@ -211,13 +217,9 @@ private:
     QMap<QString, bool>   m_digitalOutputs;
     QTimer*               m_simTimer{nullptr};
     QTimer*               m_hwStatusTimer{nullptr};   ///< 硬件状态轮询（联机模式下生效）
-    QFutureWatcherBase*    m_hwPollWatcher{nullptr};  ///< shutdown 前必须等待，保护控制器借用指针
-    bool                  m_hwPollInFlight{false};    ///< 防止后台采集任务堆积
-    QThreadPool           m_controllerPollPool;       ///< 单线程控制器轮询池，禁止在 GUI 线程访问 SDK
+    bool                  m_hwPollInFlight{false};    ///< 防止设备队列内轮询任务堆积
     QTimer*               m_peripheralStatusTimer{nullptr}; ///< 串口外设低频轮询
-    QFutureWatcherBase*    m_peripheralPollWatcher{nullptr};
     bool                  m_peripheralPollInFlight{false};
-    QThreadPool           m_peripheralPollPool;       ///< 与控制器轮询分离的低频工作池
     QString               m_lastPeripheralDiagnostic;
     double                m_feedOverride{1.0};
     double                m_simPhase{0.0};
@@ -234,6 +236,10 @@ private:
     // Declared before Service so reverse member destruction releases the
     // Service (which borrows this settings object) first.
     std::shared_ptr<Service> m_service;
+    // Serializes all newly migrated vendor device operations on one dedicated
+    // thread. Service ownership remains here until the remaining call paths
+    // have moved behind this boundary.
+    std::unique_ptr<lcnc::process::DeviceCommandQueue> m_deviceCommandQueue;
     std::unique_ptr<lcnc::process::LegacyProcessMotionService> m_motionStepService;
     std::unique_ptr<lcnc::process::LegacyProcessIoService> m_ioStepService;
     std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;

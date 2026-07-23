@@ -2,16 +2,20 @@
   "version": "2.0.0",
   "tasks": [
     {
-      // 与 CMake Tools 使用同一 Ninja 构建目录，避免调用不存在或过期的 .sln。
+      // 与 CMake Tools 和 launch 使用同一个 ACS+GTN Multi-Config preset。
       "label": "CMake: build",
       "type": "shell",
-      "command": "cmake",
-      "args": [
-        "--build",
-        "${workspaceFolder}/cmake-build-sdkcheck",
-        "--parallel",
-        "16"
-      ],
+      "command": "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Insiders\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --build --preset acs-gtn-debug --parallel 16",
+      "options": {
+        "shell": {
+          "executable": "cmd.exe",
+          "args": [
+            "/d",
+            "/s",
+            "/c"
+          ]
+        }
+      },
       "group": {
         "kind": "build",
         "isDefault": true

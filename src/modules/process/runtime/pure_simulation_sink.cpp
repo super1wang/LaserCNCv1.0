@@ -6,8 +6,7 @@
 #include "modules/process/process_module.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
-#include <QCoreApplication>
-#include <QEventLoop>
+#include <QMetaObject>
 #include <QThread>
 
 #include <utility>
@@ -15,8 +14,21 @@
 namespace lcnc::process {
 
 namespace {
-constexpr int kPollSliceMs = 20;
+
+template <typename Fn>
+void invokeOnObjectThread(QObject* object, Fn&& fn)
+{
+    if (!object)
+        return;
+    if (object->thread() == QThread::currentThread()) {
+        fn();
+        return;
+    }
+    QMetaObject::invokeMethod(
+        object, std::forward<Fn>(fn), Qt::BlockingQueuedConnection);
 }
+
+} // namespace
 
 PureSimulationSink::PureSimulationSink(PureSimulationToolpathTicker* ticker,
                                         ProcessModule* processModule,
@@ -31,9 +43,19 @@ void PureSimulationSink::resetProgram()
 {
     m_pending.clear();
     m_feedRate = 600.0;
+    m_started = false;
 }
 
 bool PureSimulationSink::flush(QString* errorMessage)
+{
+    if (!startProgram(errorMessage))
+        return false;
+    while (isProgramRunning(errorMessage))
+        QThread::msleep(10);
+    return !(m_token && m_token->isStopping());
+}
+
+bool PureSimulationSink::startProgram(QString* errorMessage)
 {
     if (!m_ticker || !m_processModule) {
         if (errorMessage) *errorMessage = QStringLiteral("PureSimulationSink: ticker/processModule unbound");
@@ -42,27 +64,44 @@ bool PureSimulationSink::flush(QString* errorMessage)
     if (m_pending.size() < 2)
         return true;  // 没有可回放的段
 
-    const double feedOverride = m_processModule->feedOverride();
-    m_ticker->start(m_pending, m_feedRate, feedOverride);
+    double feedOverride = 1.0;
+    invokeOnObjectThread(m_processModule, [this, &feedOverride] {
+        feedOverride = m_processModule->feedOverride();
+    });
+    const auto points = m_pending;
+    const double feedRate = m_feedRate;
+    invokeOnObjectThread(m_ticker, [this, points, feedRate, feedOverride] {
+        m_ticker->start(points, feedRate, feedOverride);
+    });
+    m_started = true;
+    return true;
+}
 
-    // 与遗留 executeContourPureSim 等价的等待循环。
-    while (!m_ticker->isDone()) {
-        if (m_token) {
-            if (m_token->isPaused())
+bool PureSimulationSink::isProgramRunning(QString* errorMessage)
+{
+    if (!m_ticker || !m_started)
+        return false;
+    if (m_token) {
+        const bool paused = m_token->isPaused();
+        invokeOnObjectThread(m_ticker, [this, paused] {
+            if (paused)
                 m_ticker->pause();
             else
                 m_ticker->resume();
-            if (m_token->isStopping()) {
-                m_ticker->stop();
-                if (errorMessage) *errorMessage = QStringLiteral("仿真已被中断");
-                return false;
-            }
+        });
+        if (m_token->isStopping()) {
+            invokeOnObjectThread(m_ticker, [this] { m_ticker->stop(); });
+            if (errorMessage) *errorMessage = QStringLiteral("仿真已被中断");
+            return false;
         }
-        QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
-        QThread::msleep(2);
     }
+    bool done = true;
+    invokeOnObjectThread(m_ticker, [this, &done] { done = m_ticker->isDone(); });
+    if (!done)
+        return true;
+    m_started = false;
     m_pending.clear();
-    return true;
+    return false;
 }
 
 void PureSimulationSink::jumpToIdleZ(const MachinePose5&, const Tool&) {}

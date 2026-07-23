@@ -2,14 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // F5 先构建，再启动 CMake Tools 实际生成的 Ninja 产物。
+      // F5 先构建，再启动部署到 x64/Debug 的 ACS+GTN 运行产物。
       "name": "Debug LaserCNC",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/cmake-build-sdkcheck/LaserCNC.exe",
+      "program": "${workspaceFolder}/x64/Debug/LaserCNC.exe",
       "args": [],
       "stopAtEntry": false,
-      "cwd": "${workspaceFolder}/cmake-build-sdkcheck",
+      "cwd": "${workspaceFolder}/x64/Debug",
       "environment": [],
       "console": "integratedTerminal",
       "preLaunchTask": "CMake: build"

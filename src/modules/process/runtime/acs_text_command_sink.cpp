@@ -5,8 +5,6 @@
 #include "modules/process/device/MotionControl/ACSMotionControl.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
-#include <QCoreApplication>
-#include <QEventLoop>
 #include <QThread>
 
 #include <boost/lexical_cast.hpp>
@@ -242,6 +240,24 @@ void AcsTextCommandSink::resetProgram()
 
 bool AcsTextCommandSink::flush(QString* errorMessage)
 {
+    if (!startProgram(errorMessage))
+        return false;
+    while (isProgramRunning(errorMessage)) {
+        if (m_token) {
+            while (m_token->isPaused())
+                QThread::msleep(10);
+            if (m_token->isStopping()) {
+                if (errorMessage) *errorMessage = QStringLiteral("切割已被中断");
+                return false;
+            }
+        }
+        QThread::msleep(10);
+    }
+    return true;
+}
+
+bool AcsTextCommandSink::startProgram(QString* errorMessage)
+{
     if (!m_acs) {
         if (errorMessage) *errorMessage = QStringLiteral("AcsTextCommandSink: motion control not bound");
         return false;
@@ -252,31 +268,19 @@ bool AcsTextCommandSink::flush(QString* errorMessage)
         return false;
     }
 
-    // 轮询等待缓冲执行完成（对应遗留 waitForACSCompletion）。
+    return true;
+}
+
+bool AcsTextCommandSink::isProgramRunning(QString* errorMessage)
+{
+    if (!m_acs) {
+        if (errorMessage) *errorMessage = QStringLiteral("AcsTextCommandSink: motion control not bound");
+        return false;
+    }
     // ACSMotionControl 始终用 buffer #9 作为程序缓冲（参见 ACSMotionControl 构造函数）。
     constexpr int kAcsProgramBuffer = 9;
-    constexpr int kPollSliceMs      = 20;
-    while (m_acs->IsBufferRunning(kAcsProgramBuffer)) {
-        // The cutting manager holds the device lease while an ACS buffer runs,
-        // so background polling intentionally waits. Read positions here on
-        // that same owner thread to keep the machine view live without a
-        // concurrent SDK call.
-        publishControllerPositions();
-        if (m_token) {
-            while (m_token->isPaused()) {
-                QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
-                QThread::msleep(2);
-            }
-            if (m_token->isStopping()) {
-                if (errorMessage) *errorMessage = QStringLiteral("切割已被中断");
-                return false;
-            }
-        }
-        QCoreApplication::processEvents(QEventLoop::AllEvents, kPollSliceMs);
-        QThread::msleep(2);
-    }
     publishControllerPositions();
-    return true;
+    return m_acs->IsBufferRunning(kAcsProgramBuffer);
 }
 
 void AcsTextCommandSink::jumpToIdleZ(const MachinePose5& pose, const Tool& tool)

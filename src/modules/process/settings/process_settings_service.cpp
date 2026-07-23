@@ -174,6 +174,7 @@ void ProcessSettingsService::seedDefaults()
     toolIndex["sTool_0"] = "Default";
     table tool;
     tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0;
+    tool["fIdelAcc"] = 100.0; tool["fIdelJerk"] = 1000.0;
     tool["fCuttingHeight"] = 0.0; tool["fIdleHeight"] = 0.0;
     tool["fEnergy"] = 20.0; tool["fFrequency"] = 30.0; tool["fPluse"] = 20.0;
     tool["fBeforeOpenLaser"] = 0.0; tool["fAfterCloseLaser"] = 0.0;
