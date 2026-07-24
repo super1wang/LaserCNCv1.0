@@ -13,6 +13,8 @@
 #include <QComboBox>
 #include <QIcon>
 #include <QKeySequence>
+#include <QToolButton>
+#include <QVBoxLayout>
 #include <QWidget>
 
 namespace lcnc::process {
@@ -84,8 +86,28 @@ void buildRibbonTab(SARibbonCategory* cat,
                              m->setAutoSortAxisFromText(text);
                          }
                      });
-    panelOrder->addSmallWidget(axisCombo);
-    panelOrder->addLargeAction(container->findAction(CmdAutoSortCuttingOrder::Name));
+
+    // Keep the sort direction physically attached to the action it controls.
+    // This prevents the axis selector from being mistaken for the adjacent
+    // manual-order command in the three-row ribbon layout.
+    auto* autoSortControl = new QWidget(panelOrder);
+    auto* autoSortLayout = new QVBoxLayout(autoSortControl);
+    autoSortControl->setFixedSize(82, 56);
+    autoSortLayout->setContentsMargins(1, 0, 1, 0);
+    autoSortLayout->setSpacing(1);
+    auto* autoSortButton = new QToolButton(autoSortControl);
+    autoSortButton->setDefaultAction(container->findAction(CmdAutoSortCuttingOrder::Name));
+    autoSortButton->setText(QObject::tr("自动排序"));
+    autoSortButton->setToolTip(QObject::tr("自动设置加工顺序"));
+    autoSortButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    autoSortButton->setIconSize(QSize(18, 18));
+    autoSortButton->setFixedHeight(30);
+    axisCombo->setParent(autoSortControl);
+    axisCombo->setMinimumWidth(64);
+    axisCombo->setFixedHeight(22);
+    autoSortLayout->addWidget(autoSortButton);
+    autoSortLayout->addWidget(axisCombo);
+    panelOrder->addLargeWidget(autoSortControl);
     panelOrder->addLargeAction(container->findAction(CmdToggleTravelPath::Name));
 
     // ── 运行 ───────────────────────────────────────────────────────────────

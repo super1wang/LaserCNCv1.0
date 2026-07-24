@@ -1564,15 +1564,15 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     panelView->addLargeAction(m_cmdContainer->findAction(CmdFitAll::Name));
 
     // View orientation quick actions
-    struct OrientInfo { QString label; QString key; V3d_TypeOfOrientation orient; };
+    struct OrientInfo { QString label; QString key; QString iconPath; V3d_TypeOfOrientation orient; };
     const QList<OrientInfo> orients = {
-        { tr("正视"),   "1", V3d_Xpos              },
-        { tr("俯视"),   "2", V3d_Zpos              },
-        { tr("侧视"),   "3", V3d_Ypos              },
-        { tr("等轴测"), "0", V3d_XposYnegZpos      },
+        { tr("正视"),   "1", QStringLiteral(":/icons/view_front.svg"), V3d_Xpos              },
+        { tr("俯视"),   "2", QStringLiteral(":/icons/view_top.svg"),   V3d_Zpos              },
+        { tr("侧视"),   "3", QStringLiteral(":/icons/view_side.svg"),  V3d_Ypos              },
+        { tr("等轴测"), "0", QStringLiteral(":/icons/view_iso.svg"),   V3d_XposYnegZpos      },
     };
     for (auto& info : orients) {
-        auto* act = new QAction(info.label + " [" + info.key + "]", this);
+        auto* act = new QAction(QIcon(info.iconPath), info.label + " [" + info.key + "]", this);
         connect(act, &QAction::triggered, this,
                 [this, o = info.orient] {
                     if (auto* view = occView())

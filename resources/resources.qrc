@@ -11,6 +11,10 @@
     <file alias="icons/undo.svg">icons/undo.svg</file>
     <file alias="icons/redo.svg">icons/redo.svg</file>
     <file alias="icons/fit_all.svg">icons/fit_all.svg</file>
+    <file alias="icons/view_front.svg">icons/view_front.svg</file>
+    <file alias="icons/view_top.svg">icons/view_top.svg</file>
+    <file alias="icons/view_side.svg">icons/view_side.svg</file>
+    <file alias="icons/view_iso.svg">icons/view_iso.svg</file>
     <file alias="icons/wireframe.svg">icons/wireframe.svg</file>
     <file alias="icons/shaded.svg">icons/shaded.svg</file>
     <file alias="icons/shaded_edges.svg">icons/shaded_edges.svg</file>
