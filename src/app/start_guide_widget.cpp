@@ -126,8 +126,9 @@ void StartGuideWidget::rebuild()
         btn->setFixedSize(kCardWidth, kCardHeight);
         btn->setAutoRaise(false);
         btn->setStyleSheet(QStringLiteral(
-            "QToolButton { border: 1px solid #D8DEE8; border-radius: 8px; padding: 8px; background: #FFFFFF; }"
-            "QToolButton:hover { border-color: #2A6FDB; background: #F5F8FF; }"));
+            "QToolButton { border: 1px solid #D8DEE8; border-radius: 8px; padding: 8px; "
+            "background: #FFFFFF; color: #1F3440; font-weight: 600; }"
+            "QToolButton:hover { border-color: #2A6FDB; background: #F5F8FF; color: #102A3A; }"));
 
         connect(btn, &QToolButton::clicked, this, [this, path]() {
             emit fileActivated(path);

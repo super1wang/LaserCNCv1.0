@@ -336,6 +336,41 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
         if (errorMessage) *errorMessage = tr("轮廓 %1 没有绑定工具").arg(row.data.contour.contourId);
         return false;
     }
+
+    // 运行中轴使能可能在启动预检之后被人为撤销或被驱动器切断。控制器的
+    // 指令构建层会跳过失能轴，若这里不阻断，就会把该轮廓视为完成并继续
+    // 下发下一轮廓。每次下发前直接读取硬件状态，将其作为不可恢复的步骤失败。
+    if (!m_processModule || !m_processModule->simulationMode()) {
+        MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
+        if (!mc || !mc->IsConnected()) {
+            if (errorMessage)
+                *errorMessage = tr("加工过程中运动控制器未连接");
+            return false;
+        }
+        int fault = 0;
+        if (!mc->IsAxisStatusNormal(fault)) {
+            if (errorMessage)
+                *errorMessage = tr("加工过程中无法读取运动控制器状态");
+            return false;
+        }
+        if (fault != 0) {
+            if (errorMessage)
+                *errorMessage = tr("加工过程中运动控制器故障码: %1").arg(fault);
+            return false;
+        }
+        QStringList disabledAxes;
+        for (Axis axis : mc->m_vecMotors) {
+            if (mc->IsMotorCreated(axis) && !mc->IsEnabled(axis))
+                disabledAxes.append(QString::fromLatin1(enum_name(axis).data()));
+        }
+        if (!disabledAxes.isEmpty()) {
+            if (errorMessage)
+                *errorMessage = tr("加工过程中轴系未使能: %1")
+                    .arg(disabledAxes.join(tr("，")));
+            return false;
+        }
+    }
+
     const Tool& tool = *row.tool;
     const auto& pts = row.data.points;
     if (pts.size() < 2)

@@ -2249,6 +2249,7 @@ void ProcessModule::pollHardwareStatus()
                 self->setStatusMessage(self->tr("设备状态读取失败: %1").arg(result.error));
                 return;
             }
+            QStringList disabledAxesWhileRunning;
             for (const HardwareAxisSample& s : batch->axes) {
                 if (!s.valid)
                     continue;
@@ -2259,6 +2260,20 @@ void ProcessModule::pollHardwareStatus()
                     self->m_axisEnabled.insert(s.name, s.enabled);
                     emit self->axisEnabledChanged(s.name, s.enabled);
                 }
+                if (!s.enabled && self->m_state == State::Running)
+                    disabledAxesWhileRunning.append(s.name);
+            }
+            if (!disabledAxesWhileRunning.isEmpty()) {
+                const QString message = self->tr("加工过程中检测到轴系未使能: %1；已停止流程")
+                    .arg(disabledAxesWhileRunning.join(self->tr("，")));
+                LCNC_ERR(lcnc::LogCode::Generic,
+                         "process: axis disabled while running: {}",
+                         disabledAxesWhileRunning.join(QStringLiteral(",")).toStdString());
+                // emergencyStop() 取消当前工作流、抢占下发安全停机命令，确保不会
+                // 继续进入下一轮廓；随后显式落到 Error，而不是显示为正常完成。
+                if (self->m_workflowExecutor)
+                    self->m_workflowExecutor->emergencyStop();
+                self->setState(State::Error, message);
             }
             for (const HardwareDigitalOutputSample& s : batch->digitalOutputs) {
                 if (!s.valid)

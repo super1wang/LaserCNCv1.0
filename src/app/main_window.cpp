@@ -246,6 +246,15 @@ MainWindow::MainWindow(QWidget* parent)
     createCentralLayout();  // Central splitter — creates m_occView first
     createCommands();       // Commands connect to m_occView (must exist)
     createRibbon();         // Ribbon uses m_cmdContainer (must exist)
+    // SARibbon installs its own stylesheet; apply its native dark theme after
+    // the ribbon hierarchy exists so it does not fall back to the light skin.
+    QTimer::singleShot(0, this, [this] {
+        setRibbonTheme(SARibbonTheme::RibbonThemeDark2);
+        // The native theme's tab caption sits too close to the lower edge in
+        // loose three-row mode.  A local override runs after the theme QSS.
+        ribbonBar()->setStyleSheet(
+            "SARibbonTabBar::tab { padding: 3px 15px 8px; margin: 0 2px; }");
+    });
     createStatusBar();
 
         auto* project = lcnc::Kernel::current().projectManager();
@@ -1516,6 +1525,9 @@ void MainWindow::createRibbon()
 {
     SARibbonBar* ribbon = ribbonBar();
     ribbon->setRibbonStyle(SARibbonBar::RibbonStyleLooseThreeRow);
+    // The application menu is unused: remove its blank launcher rather than
+    // reserving a dead button at the far left of the tab strip.
+    ribbon->setApplicationButton(nullptr);
 
     buildFileTab(ribbon->addCategoryPage(tr("文件")));
     buildViewTab(ribbon->addCategoryPage(tr("视图")));
@@ -1538,8 +1550,8 @@ void MainWindow::buildFileTab(SARibbonCategory* cat)
     SARibbonPanel* panelIO = cat->addPanel(tr("导入/导出"));
     panelIO->addLargeAction(m_cmdContainer->findAction(CmdImportStep::Name));
     panelIO->addLargeAction(m_cmdContainer->findAction(CmdImportStl::Name));
-    panelIO->addSmallAction(m_cmdContainer->findAction(CmdExportStep::Name));
-    panelIO->addSmallAction(m_cmdContainer->findAction(CmdCloseDocument::Name));
+    panelIO->addLargeAction(m_cmdContainer->findAction(CmdExportStep::Name));
+    panelIO->addLargeAction(m_cmdContainer->findAction(CmdCloseDocument::Name));
 
     // ── 应用 — 选项按钮 ─────────────────────────────────────────────────
     SARibbonPanel* panelApp = cat->addPanel(tr("应用"));
@@ -1566,13 +1578,13 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
                     if (auto* view = occView())
                         view->setOrientation(o);
                 });
-        panelView->addSmallAction(act);
+        panelView->addLargeAction(act);
     }
 
     SARibbonPanel* panelDisplay = cat->addPanel(tr("显示"));
-    panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleShaded::Name));
-    panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleWireframe::Name));
-    panelDisplay->addSmallAction(m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name));
+    panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleShaded::Name));
+    panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleWireframe::Name));
+    panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name));
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleWorldAxes::Name));
 
     QAction* aWire = m_cmdContainer->findAction(CmdToggleWireframe::Name);

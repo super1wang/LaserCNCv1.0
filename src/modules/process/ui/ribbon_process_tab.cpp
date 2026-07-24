@@ -60,7 +60,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     SARibbonPanel* panelProc = cat->addPanel(QObject::tr("流程"));
     panelProc->addLargeAction(container->findAction(CmdNewProcess::Name));
     panelProc->addLargeAction(container->findAction(CmdLoadProcess::Name));
-    panelProc->addSmallAction(container->findAction(CmdSaveProcess::Name));
+    panelProc->addLargeAction(container->findAction(CmdSaveProcess::Name));
 
     // ── 加工顺序 ──────────────────────────────────────────────────────────
     SARibbonPanel* panelOrder = cat->addPanel(QObject::tr("加工顺序"));
@@ -85,19 +85,19 @@ void buildRibbonTab(SARibbonCategory* cat,
                          }
                      });
     panelOrder->addSmallWidget(axisCombo);
-    panelOrder->addSmallAction(container->findAction(CmdAutoSortCuttingOrder::Name));
-    panelOrder->addSmallAction(container->findAction(CmdToggleTravelPath::Name));
+    panelOrder->addLargeAction(container->findAction(CmdAutoSortCuttingOrder::Name));
+    panelOrder->addLargeAction(container->findAction(CmdToggleTravelPath::Name));
 
     // ── 运行 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelRun = cat->addPanel(QObject::tr("运行"));
     panelRun->addLargeAction(container->findAction(CmdRunStart::Name));
-    panelRun->addSmallAction(container->findAction(CmdRunPause::Name));
-    panelRun->addSmallAction(container->findAction(CmdRunStop::Name));
+    panelRun->addLargeAction(container->findAction(CmdRunPause::Name));
+    panelRun->addLargeAction(container->findAction(CmdRunStop::Name));
 
     // ── 安全 ───────────────────────────────────────────────────────────────
     SARibbonPanel* panelSafe = cat->addPanel(QObject::tr("安全"));
     panelSafe->addLargeAction(container->findAction(CmdEmergencyStop::Name));
-    panelSafe->addSmallAction(container->findAction(CmdResetEmergencyStop::Name));
+    panelSafe->addLargeAction(container->findAction(CmdResetEmergencyStop::Name));
 
     // ── 参数 (唯一设置按钮) ────────────────────────────────────────────────
     SARibbonPanel* panelParam = cat->addPanel(QObject::tr("参数"));

@@ -442,6 +442,21 @@ if(WIN32 AND CMAKE_RC_COMPILER AND CMAKE_CXX_COMPILER)
     get_filename_component(_lcnc_msvc_root "${_lcnc_msvc_bin_dir}" DIRECTORY)
     set(_lcnc_msvc_x64_lib_dir "${_lcnc_msvc_root}/lib/x64")
 
+    set(_lcnc_windows_include_dirs)
+    foreach(_lcnc_include_dir IN ITEMS
+            "${_lcnc_msvc_root}/include"
+            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/ucrt"
+            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/shared"
+            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/um"
+            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/winrt")
+        if(EXISTS "${_lcnc_include_dir}")
+            list(APPEND _lcnc_windows_include_dirs "${_lcnc_include_dir}")
+        endif()
+    endforeach()
+    if(_lcnc_windows_include_dirs)
+        target_include_directories(lcnc_core SYSTEM PUBLIC ${_lcnc_windows_include_dirs})
+    endif()
+
     set(_lcnc_windows_link_dirs)
     foreach(_lcnc_link_dir IN ITEMS
             "${_lcnc_msvc_x64_lib_dir}"

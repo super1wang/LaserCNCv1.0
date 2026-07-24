@@ -102,6 +102,7 @@ private:
     class QPushButton* m_btnPause{nullptr};
     class QPushButton* m_btnResume{nullptr};
     class QPushButton* m_btnStop{nullptr};
+    class QStackedLayout* m_runActionStack{nullptr};
     class QDoubleSpinBox* m_jogDistanceSpin{nullptr};
     class QLabel* m_jogValueLabel{nullptr};
     JogMode        m_jogMode{JogMode::Relative};

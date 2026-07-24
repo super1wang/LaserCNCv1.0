@@ -186,7 +186,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     auto* menuGrid = makeCommandMenu(
         cat,
         QObject::tr("网格"),
-        QIcon(":/icons/coordinate.svg"),
+        QIcon(":/icons/grid.svg"),
         {container->findAction(CmdToggleCadGrid::Name),
          container->findAction(CmdToggleGridSnap::Name)});
     panelAssist->addLargeMenu(menuGrid);
@@ -200,7 +200,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     auto* menuSnap = makeCommandMenu(
         cat,
         QObject::tr("抓取"),
-        QIcon(":/icons/shape.svg"),
+        QIcon(":/icons/snap.svg"),
         {container->findAction(CmdSnapNone::Name),
          container->findAction(CmdSnapVertex::Name),
          container->findAction(CmdSnapEdge::Name),

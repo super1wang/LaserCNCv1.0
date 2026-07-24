@@ -16,6 +16,10 @@
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QTimer>
+#include <QStackedLayout>
+#include <QScrollArea>
+
+#include <algorithm>
 
 namespace {
 
@@ -35,6 +39,29 @@ void clearLayout(QLayout* layout)
     }
 }
 
+QList<MachineAxisDef> orderedAxes(const QList<MachineAxisDef>& source)
+{
+    QList<MachineAxisDef> axes = source;
+    const auto priority = [](const QString& axis) {
+        const QString name = axis.trimmed().toUpper();
+        if (name == QStringLiteral("X")) return 0;
+        if (name == QStringLiteral("Y")) return 1;
+        if (name == QStringLiteral("Z")) return 2;
+        if (name == QStringLiteral("A")) return 3;
+        if (name == QStringLiteral("B")) return 4;
+        if (name == QStringLiteral("C")) return 5;
+        return 100;
+    };
+    std::sort(axes.begin(), axes.end(), [&priority](const MachineAxisDef& left, const MachineAxisDef& right) {
+        const int leftPriority = priority(left.name);
+        const int rightPriority = priority(right.name);
+        return leftPriority == rightPriority
+            ? left.name.compare(right.name, Qt::CaseInsensitive) < 0
+            : leftPriority < rightPriority;
+    });
+    return axes;
+}
+
 } // namespace
 
 WidgetLaserControl::WidgetLaserControl(QWidget* parent)
@@ -47,14 +74,20 @@ WidgetLaserControl::WidgetLaserControl(QWidget* parent)
 void WidgetLaserControl::buildUi()
 {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(4, 4, 4, 4);
-    mainLayout->setSpacing(6);
+    mainLayout->setContentsMargins(6, 6, 6, 6);
+    mainLayout->setSpacing(8);
 
     m_tabs = new QTabWidget(this);
-    m_controlPage = new QWidget(m_tabs);
+    auto* controlScroll = new QScrollArea(m_tabs);
+    controlScroll->setWidgetResizable(true);
+    controlScroll->setFrameShape(QFrame::NoFrame);
+    controlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    controlScroll->setStyleSheet("QScrollArea { background: #202B35; }");
+    m_controlPage = new QWidget(controlScroll);
+    m_controlPage->setStyleSheet("background: #202B35;");
     m_controlLayout = new QVBoxLayout(m_controlPage);
-    m_controlLayout->setContentsMargins(4, 4, 4, 4);
-    m_controlLayout->setSpacing(6);
+    m_controlLayout->setContentsMargins(6, 6, 6, 6);
+    m_controlLayout->setSpacing(8);
 
     m_logPage = new QWidget(m_tabs);
     auto* logLayout = new QVBoxLayout(m_logPage);
@@ -62,10 +95,11 @@ void WidgetLaserControl::buildUi()
     m_logView = new QTextEdit(m_logPage);
     m_logView->setReadOnly(true);
     m_logView->setAcceptRichText(true);
-    m_logView->setStyleSheet("QTextEdit { background: #101820; color: #E5E7EB; font-family: Consolas, monospace; font-size: 11px; }");
+    m_logView->setStyleSheet("QTextEdit { background: #101820; color: #D6E4EA; font-family: Consolas, monospace; font-size: 11px; }");
     logLayout->addWidget(m_logView);
 
-    m_tabs->addTab(m_controlPage, tr("控制"));
+    controlScroll->setWidget(m_controlPage);
+    m_tabs->addTab(controlScroll, tr("控制"));
     m_tabs->addTab(m_logPage, tr("系统日志"));
     mainLayout->addWidget(m_tabs);
 
@@ -103,17 +137,22 @@ void WidgetLaserControl::buildProcessGroup()
     m_btnResume = new QPushButton(QIcon(":/icons/start.svg"), tr("继续"), group);
     m_btnStop = new QPushButton(QIcon(":/icons/stop.svg"), tr("停止"), group);
 
-    for (auto* button : {m_btnRun, m_btnPause, m_btnResume, m_btnStop})
-        button->setMinimumHeight(36);
+    m_btnRun->setProperty("role", "run");
+    m_btnPause->setProperty("role", "pause");
+    m_btnResume->setProperty("role", "resume");
+    m_btnStop->setProperty("role", "stop");
+    for (auto* button : {m_btnRun, m_btnPause, m_btnResume, m_btnStop}) {
+        button->setMinimumHeight(38);
+        button->setIconSize(QSize(18, 18));
+    }
 
-    m_btnRun->setStyleSheet("background-color: #1B8F4A; color: white; font-weight: 600;");
-    m_btnPause->setStyleSheet("background-color: #997a4b; color: white; font-weight: 600;");
-    m_btnResume->setStyleSheet("background-color: #2563EB; color: white; font-weight: 600;");
-    m_btnStop->setStyleSheet("background-color: #B91C1C; color: white; font-weight: 600;");
-
-    row->addWidget(m_btnRun);
-    row->addWidget(m_btnPause);
-    row->addWidget(m_btnResume);
+    auto* actionSlot = new QWidget(group);
+    m_runActionStack = new QStackedLayout(actionSlot);
+    m_runActionStack->setContentsMargins(0, 0, 0, 0);
+    m_runActionStack->addWidget(m_btnRun);
+    m_runActionStack->addWidget(m_btnPause);
+    m_runActionStack->addWidget(m_btnResume);
+    row->addWidget(actionSlot, 1);
     row->addWidget(m_btnStop);
     vlay->addLayout(row);
 
@@ -241,8 +280,10 @@ void WidgetLaserControl::rebuildAxisGroup()
     m_axisButtons.clear();
 
     auto* grid = new QGridLayout(m_axisGroup);
-    int row = 0;
-    for (const MachineAxisDef& axis : m_axisDefinitions) {
+    grid->setHorizontalSpacing(5);
+    grid->setVerticalSpacing(3);
+    int axisIndex = 0;
+    for (const MachineAxisDef& axis : orderedAxes(m_axisDefinitions)) {
         if (axis.name == QStringLiteral("BASE"))
             continue;
 
@@ -255,7 +296,7 @@ void WidgetLaserControl::rebuildAxisGroup()
         auto* val  = new QLabel("  0.000", m_axisGroup);
         val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         val->setMinimumWidth(70);
-        val->setStyleSheet("font-family: Consolas, monospace; color: #00FF88;");
+        val->setStyleSheet("font-family: Consolas, monospace; color: #49E6B5; font-weight: 600;");
         auto* unit = new QLabel(axis.motionType == MachineAxisDef::Linear ? "mm" : "°", m_axisGroup);
         const QString axisName = axis.name.trimmed().toUpper();
         m_axisButtons.insert(axisName, btnAxis);
@@ -264,17 +305,19 @@ void WidgetLaserControl::rebuildAxisGroup()
             updateAxisButtonStyle(axisName, checked);
             emit axisEnableToggled(axisName, checked);
         });
-        grid->addWidget(btnAxis, row, 0);
-        grid->addWidget(val,  row, 1);
-        grid->addWidget(unit, row, 2);
+        const int row = axisIndex / 2;
+        const int column = (axisIndex % 2) * 3;
+        grid->addWidget(btnAxis, row, column);
+        grid->addWidget(val, row, column + 1);
+        grid->addWidget(unit, row, column + 2);
         m_posLabels[axis.name] = val;
-        ++row;
+        ++axisIndex;
     }
 
-    if (row == 0) {
+    if (axisIndex == 0) {
         auto* placeholder = new QLabel(tr("加载机台并配置轴系后显示"), m_axisGroup);
         placeholder->setStyleSheet("color: gray; font-size: 11px;");
-        grid->addWidget(placeholder, 0, 0, 1, 3);
+        grid->addWidget(placeholder, 0, 0, 1, 6);
     }
 }
 
@@ -288,14 +331,15 @@ void WidgetLaserControl::rebuildJogGroup()
 
     auto* vlay = new QVBoxLayout(m_jogGroup);
 
-    auto* modeRow = new QHBoxLayout();
-    modeRow->addWidget(new QLabel(tr("模式:"), m_jogGroup));
+    auto* modeSpeedRow = new QHBoxLayout();
+    modeSpeedRow->setSpacing(3);
+    modeSpeedRow->addWidget(new QLabel(tr("模式:"), m_jogGroup));
     auto* btnRelative = new QPushButton(tr("相对"), m_jogGroup);
     auto* btnAbsolute = new QPushButton(tr("绝对"), m_jogGroup);
     auto* btnContinuous = new QPushButton(tr("连续"), m_jogGroup);
     for (auto* b : {btnRelative, btnAbsolute, btnContinuous}) {
         b->setCheckable(true);
-        b->setMaximumWidth(48);
+        b->setFixedWidth(38);
     }
     btnRelative->setChecked(m_jogMode == JogMode::Relative);
     btnAbsolute->setChecked(m_jogMode == JogMode::Absolute);
@@ -314,14 +358,11 @@ void WidgetLaserControl::rebuildJogGroup()
         }
         updateJogModeUi();
     });
-    modeRow->addWidget(btnRelative);
-    modeRow->addWidget(btnAbsolute);
-    modeRow->addWidget(btnContinuous);
-    modeRow->addStretch();
-    vlay->addLayout(modeRow);
-
-    auto* speedRow = new QHBoxLayout();
-    speedRow->addWidget(new QLabel(tr("速度:"), m_jogGroup));
+    modeSpeedRow->addWidget(btnRelative);
+    modeSpeedRow->addWidget(btnAbsolute);
+    modeSpeedRow->addWidget(btnContinuous);
+    modeSpeedRow->addSpacing(8);
+    modeSpeedRow->addWidget(new QLabel(tr("速度:"), m_jogGroup));
     auto* btnSlow = new QPushButton(tr("慢"), m_jogGroup);
     auto* btnMed  = new QPushButton(tr("中"), m_jogGroup);
     auto* btnFast = new QPushButton(tr("快"), m_jogGroup);
@@ -340,12 +381,12 @@ void WidgetLaserControl::rebuildJogGroup()
     connect(speedGroup, &QButtonGroup::idClicked,
             this, [this](int id) { m_jogSpeedLevel = id; });
     for (auto* b : {btnSlow, btnMed, btnFast})
-        b->setMaximumWidth(40);
-    speedRow->addWidget(btnSlow);
-    speedRow->addWidget(btnMed);
-    speedRow->addWidget(btnFast);
-    speedRow->addStretch();
-    vlay->addLayout(speedRow);
+        b->setFixedWidth(30);
+    modeSpeedRow->addWidget(btnSlow);
+    modeSpeedRow->addWidget(btnMed);
+    modeSpeedRow->addWidget(btnFast);
+    modeSpeedRow->addStretch();
+    vlay->addLayout(modeSpeedRow);
 
     auto* distanceRow = new QHBoxLayout();
     m_jogValueLabel = new QLabel(tr("距离:"), m_jogGroup);
@@ -363,16 +404,22 @@ void WidgetLaserControl::rebuildJogGroup()
 
     auto* jogGrid = new QGridLayout();
     int row = 0;
-    for (const MachineAxisDef& axis : m_axisDefinitions) {
+    for (const MachineAxisDef& axis : orderedAxes(m_axisDefinitions)) {
         if (axis.name == QStringLiteral("BASE"))
             continue;
 
-        auto* lblAxis = new QLabel(axis.name + ":", m_jogGroup);
+        auto* lblAxis = new QLabel(axis.name, m_jogGroup);
         lblAxis->setMinimumWidth(46);
-        auto* btnPlus  = new QPushButton("+", m_jogGroup);
-        auto* btnMinus = new QPushButton("-", m_jogGroup);
-        btnPlus->setFixedWidth(46);
-        btnMinus->setFixedWidth(46);
+        lblAxis->setAlignment(Qt::AlignCenter);
+        lblAxis->setStyleSheet("background:#253542; border:1px solid #4A606D; border-radius:3px; padding:5px; color:#9EDBEC; font-weight:700;");
+        auto* btnPlus  = new QPushButton(QIcon(":/icons/jog_positive.svg"), tr("+"), m_jogGroup);
+        auto* btnMinus = new QPushButton(QIcon(":/icons/jog_negative.svg"), tr("−"), m_jogGroup);
+        btnPlus->setProperty("jogDirection", "positive");
+        btnMinus->setProperty("jogDirection", "negative");
+        btnPlus->setToolTip(tr("%1 正方向点动").arg(axis.name));
+        btnMinus->setToolTip(tr("%1 负方向点动").arg(axis.name));
+        btnPlus->setIconSize(QSize(16, 16));
+        btnMinus->setIconSize(QSize(16, 16));
         btnPlus->setAutoRepeat(false);
         btnMinus->setAutoRepeat(false);
 
@@ -444,9 +491,9 @@ void WidgetLaserControl::updateRunState(lcnc::ProcessRunState state)
 
     const bool running = state == lcnc::ProcessRunState::Running;
     const bool paused = state == lcnc::ProcessRunState::Paused;
-    m_btnRun->setVisible(!running && !paused);
-    m_btnPause->setVisible(running);
-    m_btnResume->setVisible(paused);
+    if (m_runActionStack) {
+        m_runActionStack->setCurrentWidget(running ? m_btnPause : (paused ? m_btnResume : m_btnRun));
+    }
     if (m_btnStop)
         m_btnStop->setVisible(true);
     refreshStatusBanner();

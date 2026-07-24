@@ -40,6 +40,11 @@
     <file alias="icons/start.svg">icons/start.svg</file>
     <file alias="icons/pause.svg">icons/pause.svg</file>
     <file alias="icons/stop.svg">icons/stop.svg</file>
+    <file alias="icons/jog_negative.svg">icons/jog_negative.svg</file>
+    <file alias="icons/jog_positive.svg">icons/jog_positive.svg</file>
+    <file alias="icons/emergency_stop.svg">icons/emergency_stop.svg</file>
+    <file alias="icons/reset.svg">icons/reset.svg</file>
+    <file alias="icons/cutting_plan.svg">icons/cutting_plan.svg</file>
     <file alias="icons/toolpath.svg">icons/toolpath.svg</file>
     <file alias="icons/toolpath_32.svg">icons/toolpath_32.svg</file>
     <file alias="icons/toolpath_5x.svg">icons/toolpath_5x.svg</file>
@@ -53,6 +58,11 @@
     <file alias="icons/open_process.svg">icons/open_process.svg</file>
     <file alias="icons/save_process.svg">icons/save_process.svg</file>
     <file alias="icons/settings.svg">icons/settings.svg</file>
+    <file alias="icons/options.svg">icons/options.svg</file>
+    <file alias="icons/grid.svg">icons/grid.svg</file>
+    <file alias="icons/snap.svg">icons/snap.svg</file>
+    <file alias="icons/delete.svg">icons/delete.svg</file>
+    <file alias="icons/explode.svg">icons/explode.svg</file>
     <file alias="icons/coordinate.svg">icons/coordinate.svg</file>
     <file alias="icons/laser_param.svg">icons/laser_param.svg</file>
     <file alias="icons/motion_param.svg">icons/motion_param.svg</file>

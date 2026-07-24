@@ -30,6 +30,63 @@ QSurfaceFormat makeOccSurfaceFormat()
     return format;
 }
 
+QString industrialStyleSheet()
+{
+    // Keep the CAD viewport unstyled: OCC owns its rendering surface.  The
+    // surrounding chrome is deliberately dark, low-glare and high-contrast so
+    // it remains readable beside a bright laser/toolpath preview.
+    return QStringLiteral(R"QSS(
+        QWidget { font-family: "Segoe UI", "Microsoft YaHei UI"; font-size: 12px; color: #D8E1E8; }
+        QMainWindow, QDialog { background: #1B232C; }
+        QMenuBar { background: #202A34; border-bottom: 1px solid #364654; padding: 2px 8px; }
+        QMenuBar::item { padding: 6px 12px; background: transparent; }
+        QMenuBar::item:selected { background: #2D4254; color: #F4FAFF; }
+        QMenu { background: #24303B; border: 1px solid #405260; padding: 4px; }
+        QMenu::item { padding: 6px 26px 6px 22px; border-radius: 3px; }
+        QMenu::item:selected { background: #176B86; }
+        SARibbonBar { background: #18232D; border-bottom: 1px solid #405260; }
+        SARibbonTabBar { background: #1B2731; border: 0; }
+        SARibbonTabBar::tab { color: #AFC1CC; background: transparent; border: 0; padding: 3px 15px 8px; margin: 0 2px; }
+        SARibbonTabBar::tab:hover { background: #2A3D4B; color: #E8F6FB; }
+        SARibbonTabBar::tab:selected { background: #176B86; color: #FFFFFF; border-bottom: 2px solid #64D8F2; }
+        SARibbonStackedWidget, SARibbonCategory { background: #22303A; border-top: 1px solid #405260; }
+        SARibbonPanel { background: transparent; border-right: 1px solid #41535F; }
+        SARibbonPanelLabel { color: #7ED7EB; font-weight: 600; }
+        SARibbonToolButton, QToolButton { color: #D7E4EA; background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 3px; }
+        SARibbonToolButton:hover, QToolButton:hover { background: #324956; border-color: #5E8594; }
+        SARibbonToolButton:pressed, QToolButton:pressed { background: #176B86; }
+        SARibbonSeparatorWidget { background: #41535F; }
+        QTabWidget::pane { border: 1px solid #405260; background: #202B35; }
+        QTabBar::tab { background: #273440; border: 1px solid #405260; border-bottom: 0; color: #9EAFBC; padding: 6px 12px; margin-right: 2px; }
+        QTabBar::tab:selected { background: #202B35; color: #5DD6F5; border-top: 2px solid #20B8D7; }
+        QGroupBox { border: 1px solid #405260; border-radius: 4px; margin-top: 10px; padding: 8px 6px 6px 6px; font-weight: 600; color: #B9D8E4; background: #202B35; }
+        QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 9px; padding: 0 5px; color: #6BD4EF; }
+        QPushButton { background: #2A3945; border: 1px solid #506571; border-radius: 3px; min-height: 25px; padding: 3px 8px; color: #E6EEF2; }
+        QPushButton:hover { background: #354B5A; border-color: #70CAE1; }
+        QPushButton:pressed { background: #1D6A82; }
+        QPushButton:checked { background: #176B86; border-color: #63D5F3; color: #FFFFFF; }
+        QPushButton[role="run"] { background: #087A5B; border-color: #22B98A; font-weight: 700; }
+        QPushButton[role="pause"] { background: #886B32; border-color: #D7AE54; font-weight: 700; }
+        QPushButton[role="resume"] { background: #166C99; border-color: #4ABCE7; font-weight: 700; }
+        QPushButton[role="stop"] { background: #A52B2B; border-color: #F05B5B; font-weight: 700; }
+        QPushButton[jogDirection="negative"], QPushButton[jogDirection="positive"] { min-height: 30px; min-width: 48px; padding: 2px; font-size: 14px; font-weight: 700; }
+        QPushButton[jogDirection="negative"] { background: #263A48; border-color: #557788; }
+        QPushButton[jogDirection="positive"] { background: #1E5260; border-color: #4DBFCB; }
+        QLineEdit, QDoubleSpinBox, QComboBox, QTextEdit { background: #16212A; border: 1px solid #4A606D; border-radius: 3px; padding: 3px 6px; selection-background-color: #197A98; }
+        QDoubleSpinBox:focus, QComboBox:focus { border-color: #55C9E5; }
+        QProgressBar { border: 1px solid #4A606D; border-radius: 3px; text-align: center; color: #E7F3F7; background: #142029; min-height: 12px; }
+        QProgressBar::chunk { background: #1397A8; border-radius: 2px; }
+        QTreeWidget, QTreeView, QTableView { background: #202B35; alternate-background-color: #25333F; border: 1px solid #405260; }
+        QTreeView::item { color: #D5E0E7; background: transparent; padding: 2px 3px; }
+        QTreeView::item:selected { color: #FFFFFF; background: #176B86; }
+        QHeaderView::section { background: #2A3945; border: 0; border-right: 1px solid #405260; border-bottom: 1px solid #405260; padding: 5px; color: #B9D8E4; }
+        QScrollBar:vertical { background: #18222B; width: 10px; margin: 0; }
+        QScrollBar::handle:vertical { background: #4B6471; min-height: 26px; border-radius: 4px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        QScrollArea, QScrollArea > QWidget > QWidget { background: #202B35; }
+    )QSS");
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -42,6 +99,7 @@ int main(int argc, char* argv[])
     QSurfaceFormat::setDefaultFormat(makeOccSurfaceFormat());
 
     QApplication app(argc, argv);
+    app.setStyleSheet(industrialStyleSheet());
     app.setApplicationName("LaserCNC");
     app.setApplicationVersion("1.0.0");
     app.setApplicationDisplayName("五轴激光加工CAM软件");

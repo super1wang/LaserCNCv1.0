@@ -13,13 +13,13 @@ constexpr const char* kNodeMimeType = "application/x-lcnc-process-node-id";
 QColor stateColor(const ProcessNode& node)
 {
     if (!node.enabled || node.state == ProcessNodeState::Disabled)
-        return QColor(QStringLiteral("#F3F4F6"));
+        return QColor(QStringLiteral("#303A44"));
 
     switch (node.state) {
-    case ProcessNodeState::Running: return QColor(QStringLiteral("#DCFCE7"));
-    case ProcessNodeState::Paused: return QColor(QStringLiteral("#FEF3C7"));
-    case ProcessNodeState::Stopped: return QColor(QStringLiteral("#FEE2E2"));
-    default: return QColor(QStringLiteral("#E0F2FE"));
+    case ProcessNodeState::Running: return QColor(QStringLiteral("#164D3A"));
+    case ProcessNodeState::Paused: return QColor(QStringLiteral("#594718"));
+    case ProcessNodeState::Stopped: return QColor(QStringLiteral("#5A2529"));
+    default: return QColor(QStringLiteral("#173B50"));
     }
 }
 
@@ -86,6 +86,10 @@ QVariant ProcessFlowModel::data(const QModelIndex& index, int role) const
         return index.column() == 0 ? node->name : ProcessNodeRegistry::instance().summary(*node);
     case Qt::BackgroundRole:
         return stateColor(*node);
+    case Qt::ForegroundRole:
+        return node->enabled && node->state != ProcessNodeState::Disabled
+            ? QColor(QStringLiteral("#E8F4F8"))
+            : QColor(QStringLiteral("#9AAAB4"));
     case NodeIdRole:
         return node->id;
     case NodeTypeRole:

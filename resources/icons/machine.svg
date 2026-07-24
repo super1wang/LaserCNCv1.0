@@ -1,4 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="2">
-  <rect x="3" y="3" width="18" height="18" rx="2"/>
-  <text x="12" y="16" font-size="8" text-anchor="middle" fill="#555">machine</text>
+  <path stroke="#F0C66A" stroke-linecap="round" stroke-linejoin="round" d="M4 20h16M6 20v-8h7v8M8 12V7h8v13M10 7V4h4v3M16 16h3v4M4 15h2"/>
 </svg>
