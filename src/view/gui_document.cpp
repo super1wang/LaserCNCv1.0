@@ -227,7 +227,7 @@ bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int h
     };
 
     QList<DisplayState> states;
-    QList<Handle(AIS_InteractiveObject)> workpieceObjects;
+    QList<TopoDS_Shape> workpieceShapes;
     auto hideTemporarily = [&ctx, &states](const Handle(AIS_InteractiveObject)& object) {
         if (object.IsNull())
             return;
@@ -238,27 +238,36 @@ bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int h
     };
 
     for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
-        if (it.value().domain == lcnc::ProjectDomain::Workpiece && !it.value().ais.IsNull())
-            workpieceObjects.append(Handle(AIS_InteractiveObject)::DownCast(it.value().ais));
+        if (it.value().domain != lcnc::ProjectDomain::Workpiece || it.value().ais.IsNull())
+            continue;
+        const TopoDS_Shape shape = it.value().ais->Shape();
+        if (!shape.IsNull())
+            workpieceShapes.append(shape);
     }
 
-    if (workpieceObjects.isEmpty())
+    if (workpieceShapes.isEmpty())
         return false;
-
-    auto isWorkpieceObject = [&workpieceObjects](const Handle(AIS_InteractiveObject)& object) {
-        for (const Handle(AIS_InteractiveObject)& workpieceObject : workpieceObjects) {
-            if (object == workpieceObject)
-                return true;
-        }
-        return false;
-    };
 
     AIS_ListOfInteractive displayedObjects;
     ctx->DisplayedObjects(displayedObjects);
     for (AIS_ListIteratorOfListOfInteractive it(displayedObjects); it.More(); it.Next()) {
         const Handle(AIS_InteractiveObject)& object = it.Value();
-        if (!isWorkpieceObject(object))
-            hideTemporarily(object);
+        hideTemporarily(object);
+    }
+
+    // ToPixMap is an off-screen render.  Reusing a visible XCAFPrs_AISObject
+    // here can reuse its wireframe cache instead of its shaded cache for
+    // complex labels.  Build detached, already-meshed shaded presentations
+    // solely for the thumbnail; the live view keeps its Mayo XCAF objects.
+    QList<Handle(AIS_Shape)> previewObjects;
+    for (const TopoDS_Shape& shape : workpieceShapes) {
+        Handle(AIS_Shape) preview = new AIS_Shape(shape);
+        preview->SetDisplayMode(AIS_Shaded);
+        preview->SetMaterial(Graphic3d_NOM_PLASTER);
+        preview->Attributes()->SetFaceBoundaryDraw(Standard_False);
+        preview->Attributes()->SetAutoTriangulation(Standard_False);
+        ctx->Display(preview, AIS_Shaded, 0, Standard_False);
+        previewObjects.append(preview);
     }
 
     Handle(Graphic3d_Camera) previousCamera = new Graphic3d_Camera();
@@ -275,6 +284,10 @@ bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int h
         && image.Save(TCollection_AsciiString(filePath.toUtf8().constData()));
 
     m_view->SetCamera(previousCamera);
+    for (const Handle(AIS_Shape)& preview : previewObjects) {
+        if (!preview.IsNull())
+            ctx->Erase(preview, Standard_False);
+    }
     for (const DisplayState& state : states) {
         if (state.wasDisplayed && !state.object.IsNull() && !ctx->IsDisplayed(state.object))
             ctx->Display(state.object, Standard_False);
@@ -491,8 +504,20 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
             TDF_Label lbl   = labels.Value(i);
             TopoDS_Shape sh = XcafUtils::shape(lbl);
             if (!sh.IsNull()) {
+                const QString entry = XcafUtils::entry(lbl);
+                // Our import reconstructs XCAF labels, unlike Mayo which
+                // keeps source labels.  Present the Mayo-style precomputed
+                // mesh directly to avoid an edge-only XCAFPrs presentation.
                 Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
-                registerDisplayObject(domain, document, static_cast<int>(kind), XcafUtils::entry(lbl), ais);
+                ais->SetMaterial(Graphic3d_NOM_PLASTER);
+                ais->Attributes()->SetAutoTriangulation(Standard_False);
+                ais->Attributes()->SetIsoOnTriangulation(Standard_False);
+                ais->Attributes()->SetFaceBoundaryDraw(Standard_False);
+                registerDisplayObject(domain,
+                                      document,
+                                      static_cast<int>(kind),
+                                      entry,
+                                      ais);
             }
         }
     }
@@ -884,10 +909,6 @@ void GuiDocument::updateMachineWorkspaceTransforms(LcncDocument* machineDocument
         if (!machineObject && !workpieceObject)
             continue;
 
-        const Handle(AIS_Shape)& ais = object.ais;
-        if (ais.IsNull())
-            continue;
-
         gp_Trsf t;
         bool hasTransform = false;
         if (machineObject) {
@@ -912,6 +933,9 @@ void GuiDocument::updateMachineWorkspaceTransforms(LcncDocument* machineDocument
         if (!hasTransform)
             continue;
 
+        const Handle(AIS_Shape)& ais = object.ais;
+        if (ais.IsNull())
+            continue;
         ais->SetLocalTransformation(t);
         ctx->RecomputePrsOnly(ais, Standard_False);
     }

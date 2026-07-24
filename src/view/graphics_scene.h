@@ -32,7 +32,6 @@ public:
                                    bool fitAll  = false,
                                    bool selectable = true,
                                    bool updateViewer = true);
-
     void redisplayShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
     void eraseShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
     void eraseAll();

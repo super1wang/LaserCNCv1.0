@@ -176,10 +176,13 @@ void GuiApplication::setCurrentDisplayMode(int displayMode, bool faceBoundary)
         for (AIS_ListIteratorOfListOfInteractive it(list); it.More(); it.Next()) {
             const Handle(AIS_InteractiveObject)& obj = it.Value();
             if (Handle(AIS_Shape) shape = Handle(AIS_Shape)::DownCast(obj); !shape.IsNull()) {
-                ctx->SetDisplayMode(shape, displayMode, Standard_False);
-                if (!shape->Attributes().IsNull())
+                if (shape->DisplayMode() != displayMode)
+                    ctx->SetDisplayMode(shape, displayMode, Standard_False);
+                if (!shape->Attributes().IsNull()
+                    && shape->Attributes()->FaceBoundaryDraw() != faceBoundary) {
                     shape->Attributes()->SetFaceBoundaryDraw(faceBoundary);
-                ctx->Redisplay(shape, Standard_False);
+                    shape->Redisplay(Standard_True);
+                }
             }
         }
         ctx->UpdateCurrentViewer();

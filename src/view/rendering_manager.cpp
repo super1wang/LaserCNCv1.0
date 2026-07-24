@@ -82,11 +82,6 @@ Graphic3d_NameOfMaterial materialName(const QString& id)
     return Graphic3d_NameOfMaterial_Plastified;
 }
 
-int displayModeFromStartup(StartupDisplayMode mode)
-{
-    return mode == StartupDisplayMode::Wireframe ? 0 : 1;
-}
-
 void applyPresetDefaults(RenderProfileSettings& profile, bool cam)
 {
     switch (profile.qualityPreset) {
@@ -182,7 +177,10 @@ void RenderingManager::applyNow(RenderDirtyFlags flags)
                static_cast<int>(flags.toInt()), m_machineView);
 
     if (flags.testFlag(RenderDirtyFlag::DefaultDisplay)) {
-        setRuntimeDisplayMode(displayModeFromStartup(m_profile.defaultDisplayMode), false);
+        // Do not replay the legacy per-profile startup mode after a document
+        // has been displayed. Explicit Ribbon mode commands remain
+        // authoritative; default viewing starts with filled shading.
+        setRuntimeDisplayMode(AIS_Shaded, false);
     }
     if (flags.testFlag(RenderDirtyFlag::Profile)) {
         applyViewRenderingParams();
@@ -220,10 +218,16 @@ void RenderingManager::setRuntimeDisplayMode(int displayMode, bool faceBoundary)
     for (const Handle(AIS_Shape)& shape : targets) {
         if (shape.IsNull())
             continue;
-        ctx->SetDisplayMode(shape, displayMode, Standard_False);
-        if (!shape->Attributes().IsNull())
+        if (shape->DisplayMode() != displayMode)
+            ctx->SetDisplayMode(shape, displayMode, Standard_False);
+        if (!shape->Attributes().IsNull()
+            && shape->Attributes()->FaceBoundaryDraw() != faceBoundary) {
             shape->Attributes()->SetFaceBoundaryDraw(faceBoundary);
-        ctx->Redisplay(shape, Standard_False);
+            // Mayo invalidates every cached display mode here.  Redisplaying
+            // only the current presentation leaves complex XCAF objects with
+            // a stale wireframe/shaded cache after a mode switch.
+            shape->Redisplay(Standard_True);
+        }
     }
     ctx->UpdateCurrentViewer();
 }
@@ -416,8 +420,12 @@ void RenderingManager::applyShapeStyle(const QString& entry,
         color = QColor(200, 200, 210);
     }
 
-    ais->SetOwnDeviationCoefficient(p.deviationCoefficient);
-    ais->SetOwnDeviationAngle(p.deviationAngle);
+    // Imported workpieces are meshed explicitly before display. Do not let
+    // the generic quality profile replace that mesh with a coarse lazy mesh.
+    if (ais->Attributes().IsNull() || ais->Attributes()->IsAutoTriangulation()) {
+        ais->SetOwnDeviationCoefficient(p.deviationCoefficient);
+        ais->SetOwnDeviationAngle(p.deviationAngle);
+    }
     if (!ais->Attributes().IsNull()) {
         ais->Attributes()->SetFaceBoundaryDraw(m_runtimeFaceBoundary);
         ais->Attributes()->FaceBoundaryAspect()->SetColor(Quantity_NOC_GRAY40);

@@ -26,8 +26,11 @@
 
 #include <BRep_Builder.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
 #include <Bnd_Box.hxx>
+#include <IMeshTools_Parameters.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <IGESCAFControl_Reader.hxx>
 #include <IGESControl_Reader.hxx>
@@ -39,8 +42,11 @@
 #include <TDocStd_Document.hxx>
 #include <TDF_LabelSequence.hxx>
 #include <TopoDS_Compound.hxx>
+#include <TopoDS.hxx>
+#include <TopExp_Explorer.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <Standard_Failure.hxx>
 
 #include <algorithm>
 #include <memory>
@@ -392,6 +398,86 @@ bool importIgesWithFallback(const QString& filePath,
     return importIgesAsSingleShape(filePath, doc, kind, displayName, error);
 }
 
+bool prepareMayoStyleDisplayMesh(LcncDocument* doc,
+                                 TaskProgress* prog,
+                                 QString* error)
+{
+    if (!doc)
+        return false;
+
+    const TDF_LabelSequence labels =
+        doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    const int count = labels.Length();
+    if (count == 0)
+        return true;
+
+    // Match Mayo's normal BRep meshing policy.  The mesh is built as part of
+    // the import task, before any AIS presentation is created.
+    for (int i = 1; i <= count; ++i) {
+        if (prog && prog->isAbortRequested())
+            return false;
+
+        const TopoDS_Shape shape = XcafUtils::shape(labels.Value(i));
+        if (shape.IsNull())
+            continue;
+
+        try {
+            Bnd_Box box;
+            BRepBndLib::Add(shape, box, Standard_False);
+            Standard_Real xMin = 0.0;
+            Standard_Real yMin = 0.0;
+            Standard_Real zMin = 0.0;
+            Standard_Real xMax = 0.0;
+            Standard_Real yMax = 0.0;
+            Standard_Real zMax = 0.0;
+            if (!box.IsVoid())
+                box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+            const double maxSize = box.IsVoid()
+                ? 1.0
+                : std::max({xMax - xMin, yMax - yMin, zMax - zMin});
+
+            IMeshTools_Parameters params;
+            params.InParallel = Standard_True;
+            params.AllowQualityDecrease = Standard_True;
+            params.Relative = Standard_False;
+            params.Deflection = std::max(1e-3, 0.004 * maxSize);
+            params.Angle = 20.0 * 3.14159265358979323846 / 180.0;
+            BRepMesh_IncrementalMesh mesher(shape, params);
+            if (!mesher.IsDone()) {
+                if (error)
+                    *error = QObject::tr("模型显示网格生成未完成");
+                return false;
+            }
+
+            int faceCount = 0;
+            int meshedFaceCount = 0;
+            for (TopExp_Explorer it(shape, TopAbs_FACE); it.More(); it.Next()) {
+                ++faceCount;
+                TopLoc_Location location;
+                if (!BRep_Tool::Triangulation(TopoDS::Face(it.Current()), location).IsNull())
+                    ++meshedFaceCount;
+            }
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "Mayo-style display mesh prepared: faces={} triangulated={} deflection={} angle={}",
+                      faceCount,
+                      meshedFaceCount,
+                      params.Deflection,
+                      params.Angle);
+        } catch (const Standard_Failure& ex) {
+            if (error) {
+                *error = QObject::tr("模型显示网格生成失败: %1")
+                    .arg(QString::fromUtf8(ex.GetMessageString()));
+            }
+            return false;
+        }
+
+        if (prog)
+            prog->setValue(60 + (35 * i) / count);
+    }
+
+    return true;
+}
+
 void watchTask(QObject* owner, TaskId taskId, std::function<void(bool)> onFinished)
 {
     auto connection = std::make_shared<QMetaObject::Connection>();
@@ -639,6 +725,12 @@ DocumentId CadModule::openDocument(const QString& filePath)
                                                      pendingWorkspace->camData())) {
                     throw std::runtime_error("project open failed");
                 }
+                prog->setStepName(QStringLiteral("生成显示网格..."));
+                if (!prepareMayoStyleDisplayMesh(pendingWorkspace->workpieceDocument(),
+                                                 prog,
+                                                 error.get())) {
+                    throw std::runtime_error("project display mesh preparation failed");
+                }
                 if (prog->isAbortRequested())
                     throw std::runtime_error("project open cancelled");
                 prog->setValue(100);
@@ -748,6 +840,10 @@ DocumentId CadModule::openDocument(const QString& filePath)
                                     LcncDocument::EntityKind::Workpiece);
             }
 
+            prog->setStepName(QStringLiteral("生成显示网格..."));
+            if (!prepareMayoStyleDisplayMesh(doc, prog, error.get()))
+                throw std::runtime_error("display mesh preparation failed");
+
             LCNC_DEBUG(lcnc::LogCode::Generic,
                        "CadModule::openDocument worker done docId={} workpieceCount={}",
                        doc ? doc->id() : kInvalidDocumentId,
@@ -823,6 +919,9 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
                                         error.get())) {
                 throw std::runtime_error("step import failed");
             }
+            prog->setStepName(QStringLiteral("生成显示网格..."));
+            if (!prepareMayoStyleDisplayMesh(doc, prog, error.get()))
+                throw std::runtime_error("display mesh preparation failed");
             if (prog->isAbortRequested())
                 throw std::runtime_error("step import cancelled");
             prog->setValue(100);

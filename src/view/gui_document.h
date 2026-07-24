@@ -11,6 +11,7 @@
 #include <V3d_View.hxx>
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_NeutralWindow.hxx>
+#include <TopoDS_Shape.hxx>
 
 #include <cstdint>
 
