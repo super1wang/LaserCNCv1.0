@@ -135,6 +135,8 @@ private:
                       const Handle(AIS_InteractiveContext)& ctx);
 
     void restoreDefaultSelectionModes();
+    /// Apply the current CAD snap filter to every selectable entity in the active document.
+    void applyCadSnapSelectionMode();
 
     void handleSelection(const QPoint& pos);
     void eraseGridObject();

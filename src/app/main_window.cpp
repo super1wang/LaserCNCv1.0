@@ -1,4 +1,5 @@
 #include "app/main_window.h"
+
 #include "core/kernel/kernel.h"
 #include "core/services/selection_service.h"
 #include "app/app_context.h"
@@ -63,6 +64,8 @@
 #include <QLabel>
 #include <QMenu>
 #include <QAction>
+#include <QActionGroup>
+#include <QProgressBar>
 #include <QToolTip>
 
 #include <QVBoxLayout>
@@ -103,7 +106,6 @@ constexpr int kRoleEntry = lcnc::app::ProjectExplorerRoles::Entry;
 constexpr int kRoleNodeKey = lcnc::app::ProjectExplorerRoles::NodeKey;
 constexpr int kRoleLeafEntries = lcnc::app::ProjectExplorerRoles::LeafEntries;
 constexpr int kRoleContourIndex = lcnc::app::ProjectExplorerRoles::ContourIndex;
-constexpr int kRoleAxisName = lcnc::app::ProjectExplorerRoles::AxisName;
 constexpr int kRoleContourId = lcnc::app::ProjectExplorerRoles::ContourId;
 constexpr int kRoleLayerId = lcnc::app::ProjectExplorerRoles::LayerId;
 using lcnc::app::projectNodeKind;
@@ -372,6 +374,30 @@ void MainWindow::createContext()
                 if (m_sbStatus)
                     m_sbStatus->setText(status);
             });
+    connect(m_appContext->processModule(), &ProcessModule::connectionChanged,
+            this, [this](bool) {
+                // 连接/断开都在后台完成；完成后必须立即重算 Ribbon 动作，
+                // 否则“连接设备”会保持断开前的禁用状态。
+                updateCommandStates();
+            });
+
+    connect(m_appContext->processModule(), &ProcessModule::deviceConnectProgress,
+            this, [this](const QString& deviceName, int percent, const QString& step) {
+                if (!m_sbDeviceProgress)
+                    return;
+                m_sbDeviceProgress->setVisible(true);
+                m_sbDeviceProgress->setValue(qBound(0, percent, 100));
+                m_sbDeviceProgress->setFormat(tr("%1: %2 (%p%)").arg(deviceName, step));
+            });
+    connect(m_appContext->processModule(), &ProcessModule::deviceConnectFinished,
+            this, [this](bool allSuccess, const QString& summary) {
+                if (!m_sbDeviceProgress)
+                    return;
+                m_sbDeviceProgress->setValue(allSuccess ? 100 : 0);
+                m_sbDeviceProgress->setVisible(false);
+                if (m_sbStatus)
+                    m_sbStatus->setText(summary);
+            });
 }
 
 void MainWindow::createCommands()
@@ -465,9 +491,9 @@ void MainWindow::createCentralLayout()
                     ->sourceWorkpieceEntriesForMountedEntries(entries);
                 if (!sourceEntries.isEmpty())
                     selectProjectExplorerEntries(
-                        m_appContext->workpieceDocumentId(), sourceEntries, true);
+                        m_appContext->workpieceDocumentId(), sourceEntries);
                 else
-                    selectProjectExplorerEntries(kInvalidDocumentId, entries, false);
+                    selectProjectExplorerEntries(kInvalidDocumentId, {});
                 m_machinePanel->setSelectedEntries(entries);
             });
     connect(m_appContext->camModule(), &CamModule::toolpathContourSelected, this,
@@ -484,7 +510,7 @@ void MainWindow::createCentralLayout()
 
     connect(m_appContext->cadModule(), &CadModule::selectionChanged, this,
             [this](DocumentId docId, const QStringList& entries) {
-                selectProjectExplorerEntries(docId, entries, true);
+                selectProjectExplorerEntries(docId, entries);
                 updateCommandStates();
             });
 
@@ -746,11 +772,8 @@ void MainWindow::createLeftPanel()
             [this]() {
                 if (m_blockProjectExplorerSignals || !m_projectExplorerTree)
                     return;
-                const auto currentKind = projectNodeKind(m_projectExplorerTree->currentItem());
-
                 // ── 推送到 SelectionService（轮廓选择顺序记录）─────────────────
-                // 这一段独立于下方的 MachineShape 短路返回：无论当前焦点节点是什么，
-                // 只要选中集合里有 Contour 节点，就要把"新增/移除"差分推给服务。
+                // 只要选中集合里有 Contour 节点，就把新增/移除差分推给服务。
                 auto selSvc = lcnc::Kernel::current()
                                   .services()
                                   .getService<lcnc::core::SelectionService>();
@@ -780,20 +803,6 @@ void MainWindow::createLeftPanel()
                     }
                     m_lastExplorerContourSelection = nowSelected;
                 }
-
-                if (!lcnc::app::isMachineProjectNode(currentKind))
-                    return;
-
-                QStringList entries;
-                for (QTreeWidgetItem* item : m_projectExplorerTree->selectedItems()) {
-                    const auto kind = projectNodeKind(item);
-                    if (kind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
-                        const QString entry = item->data(0, kRoleEntry).toString();
-                        if (!entry.isEmpty())
-                            entries.append(entry);
-                    }
-                }
-                m_appContext->camModule()->setSelectedEntries(entries);
             });
 
     auto* processWidget = new QG_ProcessesWidget(m_leftTabs);
@@ -1588,6 +1597,25 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     SARibbonPanel* panelView = cat->addPanel(tr("视图"));
     panelView->addLargeAction(m_cmdContainer->findAction(CmdFitAll::Name));
 
+    // 抓取是视图拾取过滤器，而不是 CAD 建模命令：放在视图页，且作用于当前工作区。
+    auto* snapGroup = new QActionGroup(this);
+    snapGroup->setExclusive(true);
+    QAction* snapNone = m_cmdContainer->findAction(CmdSnapNone::Name);
+    QAction* snapVertex = m_cmdContainer->findAction(CmdSnapVertex::Name);
+    QAction* snapEdge = m_cmdContainer->findAction(CmdSnapEdge::Name);
+    QAction* snapFace = m_cmdContainer->findAction(CmdSnapFace::Name);
+    snapGroup->addAction(snapNone);
+    snapGroup->addAction(snapVertex);
+    snapGroup->addAction(snapEdge);
+    snapGroup->addAction(snapFace);
+    auto* menuSnap = new QMenu(tr("抓取"), cat);
+    menuSnap->setIcon(QIcon(":/icons/snap.svg"));
+    menuSnap->addAction(snapNone);
+    menuSnap->addAction(snapVertex);
+    menuSnap->addAction(snapEdge);
+    menuSnap->addAction(snapFace);
+    panelView->addLargeMenu(menuSnap);
+
     // View orientation quick actions
     struct OrientInfo { QString label; QString key; QString iconPath; V3d_TypeOfOrientation orient; };
     const QList<OrientInfo> orients = {
@@ -1693,12 +1721,18 @@ void MainWindow::createStatusBar()
         ? m_appContext->processModule()->statusMessage()
         : tr("就绪");
     m_sbStatus  = new QLabel(statusText, this);
+    m_sbDeviceProgress = new QProgressBar(this);
 
     m_sbDocName->setMinimumWidth(200);
     m_sbCoords->setMinimumWidth(280);
+    m_sbDeviceProgress->setRange(0, 100);
+    m_sbDeviceProgress->setMinimumWidth(260);
+    m_sbDeviceProgress->setTextVisible(true);
+    m_sbDeviceProgress->setVisible(false);
 
     statusBar()->addWidget(m_sbDocName);
     statusBar()->addPermanentWidget(m_sbCoords);
+    statusBar()->addPermanentWidget(m_sbDeviceProgress);
     statusBar()->addPermanentWidget(m_sbStatus);
 }
 
@@ -1785,21 +1819,6 @@ void MainWindow::onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current,
             updateCadSketchOverlay();
             updateCadTaskPanelState();
         }
-    } else if (lcnc::app::isMachineProjectNode(kind)) {
-        m_appContext->camModule()->requestMachineView();
-
-        QStringList entries;
-        for (QTreeWidgetItem* item : m_projectExplorerTree->selectedItems()) {
-            const auto itemKind = projectNodeKind(item);
-            if (itemKind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
-                const QString selectedEntry = item->data(0, kRoleEntry).toString();
-                if (!selectedEntry.isEmpty())
-                    entries.append(selectedEntry);
-            }
-        }
-        if (entries.isEmpty() && !entry.isEmpty())
-            entries.append(entry);
-        m_appContext->camModule()->setSelectedEntries(entries);
     } else if (lcnc::app::isToolpathProjectNode(kind)) {
         m_appContext->camModule()->requestMachineView();
         if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
@@ -1909,33 +1928,6 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
             return;
 
         m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
-        return;
-    }
-
-    if (lcnc::app::isMachineProjectNode(kind)) {
-        const QString entry = item->data(0, kRoleEntry).toString();
-
-        if (entry.isEmpty()) {
-            cascadeCheckState(item, [](QTreeWidgetItem* child) {
-                return lcnc::app::isMachineProjectNode(projectNodeKind(child));
-            });
-
-            std::function<void(QTreeWidgetItem*)> applyMachineVisibility = [&](QTreeWidgetItem* node) {
-                const auto childKind = projectNodeKind(node);
-                if (childKind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
-                    const QString childEntry = node->data(0, kRoleEntry).toString();
-                    if (!childEntry.isEmpty())
-                        m_appContext->camModule()->setEntityVisible(childEntry, visible);
-                }
-                for (int childIndex = 0; childIndex < node->childCount(); ++childIndex)
-                    applyMachineVisibility(node->child(childIndex));
-            };
-            for (int childIndex = 0; childIndex < item->childCount(); ++childIndex)
-                applyMachineVisibility(item->child(childIndex));
-            return;
-        }
-
-        m_appContext->camModule()->setEntityVisible(entry, visible);
         return;
     }
 
@@ -2088,36 +2080,6 @@ void MainWindow::onProjectExplorerContextMenuRequested(const QPoint& pos)
         return;
     }
 
-    QString axisName = item->data(0, kRoleAxisName).toString();
-    QString shapeEntry;
-
-    if (kind == lcnc::app::ProjectExplorerNodeKind::MachineShape) {
-        shapeEntry = item->data(0, kRoleEntry).toString();
-        for (QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent()) {
-            if (projectNodeKind(parent) == lcnc::app::ProjectExplorerNodeKind::MachineAxis) {
-                axisName = parent->data(0, kRoleAxisName).toString();
-                break;
-            }
-        }
-    }
-
-    if (axisName.isEmpty())
-        return;
-
-    QMenu menu(this);
-    QAction* removeAction = nullptr;
-    if (!shapeEntry.isEmpty())
-        removeAction = menu.addAction(tr("删除所选节点"));
-    QAction* clearAction = menu.addAction(tr("清除该轴系所有标记节点"));
-
-    QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
-    if (!chosen)
-        return;
-
-    if (chosen == removeAction)
-        m_appContext->camModule()->unassignShape(shapeEntry);
-    else if (chosen == clearAction)
-        m_appContext->camModule()->clearAxisAssignments(axisName);
 }
 
 void MainWindow::rebuildProjectExplorer()
@@ -2313,7 +2275,7 @@ void MainWindow::selectProjectExplorerContours(const QList<int>& contourIndexes)
     }
 }
 
-void MainWindow::selectProjectExplorerEntries(DocumentId docId, const QStringList& entries, bool cadOnly)
+void MainWindow::selectProjectExplorerEntries(DocumentId docId, const QStringList& entries)
 {
     if (!m_projectExplorerTree)
         return;
@@ -2326,11 +2288,8 @@ void MainWindow::selectProjectExplorerEntries(DocumentId docId, const QStringLis
         QTreeWidgetItemIterator iterator(m_projectExplorerTree);
         while (*iterator) {
             const auto kind = projectNodeKind(*iterator);
-            const bool kindMatches = cadOnly
-                ? lcnc::app::isCadProjectNode(kind)
-                : lcnc::app::isMachineProjectNode(kind);
-            const bool docMatches = !cadOnly
-                || docId == kInvalidDocumentId
+            const bool kindMatches = lcnc::app::isCadProjectNode(kind);
+            const bool docMatches = docId == kInvalidDocumentId
                 || (*iterator)->data(0, kRoleDocId).toInt() == docId;
             const QString entry = (*iterator)->data(0, kRoleEntry).toString();
             if (kindMatches && docMatches && !entry.isEmpty() && entries.contains(entry)) {

@@ -134,7 +134,13 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
         Handle(AIS_Shape) coneAis = new AIS_Shape(coneShape);
         coneAis->SetColor(Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB));
         coneAis->SetMaterial(Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_ShinyPlastified));
+        // 模拟刀头是置顶辅助对象。实体锥若留在默认 Z 层，会被机床实体遮住，
+        // 而同组的置顶线框仍然可见，最终看起来就像刀头只能以线框显示。
+        // 同时设置对象自己的显示模式，保证隐藏后再次显示以及全局线框切换时
+        // 仍使用实体着色 presentation。
+        coneAis->SetDisplayMode(AIS_Shaded);
         ctx->Display(coneAis, AIS_Shaded, 0, Standard_False);
+        ctx->SetZLayer(coneAis, Graphic3d_ZLayerId_Topmost);
         ctx->Deactivate(coneAis);
         axisGuideAis.insert(QStringLiteral("head:cone"), coneAis);
     } else {

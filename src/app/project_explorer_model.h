@@ -23,10 +23,6 @@ enum class ProjectExplorerNodeKind {
     CadSketch,
     CadSketchElement,
     CadTemporarySketch,
-    MachineRoot,
-    MachineAxis,
-    MachineShape,
-    MachineUnassignedGroup,
     ToolpathRoot,
     ToolpathLayer,
     ToolpathContour,
@@ -42,7 +38,6 @@ struct ProjectExplorerNode {
     QString infoText;
     QString entry;
     QStringList leafEntries;
-    QString axisName;
     std::uint64_t layerId{0};
     QColor layerColor;
     QString toolName;
@@ -70,7 +65,6 @@ public:
 };
 
 bool isCadProjectNode(ProjectExplorerNodeKind kind);
-bool isMachineProjectNode(ProjectExplorerNodeKind kind);
 bool isToolpathProjectNode(ProjectExplorerNodeKind kind);
 bool isMachiningFaceProjectNode(ProjectExplorerNodeKind kind);
 

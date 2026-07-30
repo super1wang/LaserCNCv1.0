@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QtGlobal>
 
 namespace lcnc {
 
@@ -91,16 +92,24 @@ DocumentOpenMode documentOpenModeFromString(const QString& text)
 
 QString displayModeToString(StartupDisplayMode mode)
 {
-    return mode == StartupDisplayMode::Wireframe
-        ? QStringLiteral("wireframe")
-        : QStringLiteral("shaded");
+    switch (mode) {
+    case StartupDisplayMode::Wireframe:
+        return QStringLiteral("wireframe");
+    case StartupDisplayMode::ShadedWithEdges:
+        return QStringLiteral("shaded_with_edges");
+    case StartupDisplayMode::Shaded:
+        return QStringLiteral("shaded");
+    }
+    return QStringLiteral("shaded");
 }
 
 StartupDisplayMode displayModeFromString(const QString& text)
 {
-    return text.compare(QStringLiteral("wireframe"), Qt::CaseInsensitive) == 0
-        ? StartupDisplayMode::Wireframe
-        : StartupDisplayMode::Shaded;
+    if (text.compare(QStringLiteral("wireframe"), Qt::CaseInsensitive) == 0)
+        return StartupDisplayMode::Wireframe;
+    if (text.compare(QStringLiteral("shaded_with_edges"), Qt::CaseInsensitive) == 0)
+        return StartupDisplayMode::ShadedWithEdges;
+    return StartupDisplayMode::Shaded;
 }
 
 void applyPresetDefaults(RenderProfileSettings& profile, bool cam)
@@ -350,6 +359,10 @@ void AppSettings::readFrom(const toml::value& root)
     if (root.contains("colors") && root.at("colors").is_table()) {
         const auto& c = root.at("colors");
         colors.workpieceColor = colorFromHex(get_qstring(c, "workpiece", colorToHex(colors.workpieceColor)), colors.workpieceColor);
+        colors.workpieceTransparency = qBound(0.0,
+            get_double(c, "workpiece_transparency", colors.workpieceTransparency), 1.0);
+        colors.machineTransparency = qBound(0.0,
+            get_double(c, "machine_transparency", colors.machineTransparency), 1.0);
         const QColor legacyCad = colorFromHex(get_qstring(c, "cad_background", colorToHex(kLegacyCadBackground)), kLegacyCadBackground);
         const QColor legacyCam = colorFromHex(get_qstring(c, "cam_background", colorToHex(kLegacyCamBackground)), kLegacyCamBackground);
         if (c.contains("background") && c.at("background").is_string()) {
@@ -441,6 +454,8 @@ void AppSettings::writeTo(toml::value& root) const
 
     toml::value colorTable(toml::table{});
     colorTable["workpiece"] = qs(colorToHex(colors.workpieceColor));
+    colorTable["workpiece_transparency"] = qBound(0.0, colors.workpieceTransparency, 1.0);
+    colorTable["machine_transparency"] = qBound(0.0, colors.machineTransparency, 1.0);
     colorTable["background"] = qs(colorToHex(colors.backgroundColor));
     colorTable["cad_background"] = qs(colorToHex(colors.backgroundColor));
     colorTable["cam_background"] = qs(colorToHex(colors.backgroundColor));

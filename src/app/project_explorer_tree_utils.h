@@ -16,10 +16,9 @@ inline constexpr int NodeKey = Qt::UserRole + 3;
 inline constexpr int LeafEntries = Qt::UserRole + 4;
 inline constexpr int NodeKind = Qt::UserRole + 5;
 inline constexpr int ContourIndex = Qt::UserRole + 6;
-inline constexpr int AxisName = Qt::UserRole + 7;
-inline constexpr int ContourId = Qt::UserRole + 8;
-inline constexpr int LayerId = Qt::UserRole + 9;
-inline constexpr int MachiningFaceId = Qt::UserRole + 10;
+inline constexpr int ContourId = Qt::UserRole + 7;
+inline constexpr int LayerId = Qt::UserRole + 8;
+inline constexpr int MachiningFaceId = Qt::UserRole + 9;
 } // namespace ProjectExplorerRoles
 
 ProjectExplorerNodeKind projectNodeKind(const QTreeWidgetItem* item);

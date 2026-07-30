@@ -23,6 +23,7 @@ class GraphicsScene;
 class QStackedWidget;
 class QSplitter;
 class QLabel;
+class QProgressBar;
 class QTabBar;
 class QTabWidget;
 class QTreeWidget;
@@ -140,7 +141,7 @@ private:
     void selectProjectExplorerContour(int contourIndex);
     void selectProjectExplorerContourById(lcnc::cam::ContourId contourId, int fallbackIndex = -1);
     void selectProjectExplorerContours(const QList<int>& contourIndexes);
-    void selectProjectExplorerEntries(DocumentId docId, const QStringList& entries, bool cadOnly);
+    void selectProjectExplorerEntries(DocumentId docId, const QStringList& entries);
 
     // ── Members ───────────────────────────────────────────────────────────────
     AppContext*        m_appContext{nullptr};
@@ -175,6 +176,7 @@ private:
     QLabel* m_sbDocName{nullptr};
     QLabel* m_sbCoords{nullptr};
     QLabel* m_sbStatus{nullptr};
+    QProgressBar* m_sbDeviceProgress{nullptr};
     QString m_pendingCalibrationTarget;
     lcnc::cam::ui::DialogAxisCalibrationWizard* m_axisCalibWizard{nullptr};
     lcnc::app::ProjectExplorerSnapshot m_projectExplorerSnapshot;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(LaserCNC VERSION 1.0.0 LANGUAGES CXX)
+project(LaserCNC VERSION 1.2.0 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -225,7 +225,6 @@ set(SRCS_CORE
     src/core/algorithms/cad/boolean_ops.cpp
     src/core/algorithms/cad/measure.cpp
     src/core/algorithms/cad/sketch.cpp
-    src/core/algorithms/cad/sketch_constraints.cpp
     src/core/algorithms/cad/features.cpp
     src/core/algorithms/cad/transform_ops.cpp
     src/core/algorithms/cam/face_classifier.cpp
@@ -265,7 +264,6 @@ set(SRCS_MODULE_CAD
     src/modules/cad/services/sketch_manager.cpp
     src/modules/cad/services/shape_service.cpp
     src/modules/cad/selection/cad_selection_resolver.cpp
-    src/modules/cad/sketch/sketch_serializer.cpp
     src/modules/cad/task/cad_command_dispatcher.cpp
     src/modules/cad/task/cad_tool_registry.cpp
     src/modules/cad/task/cad_tool_filter.cpp
@@ -339,7 +337,6 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/pure_simulation_sink.cpp
     src/modules/process/runtime/motion_sink_factory.cpp
     src/modules/process/toolpath/process_toolpath_service.cpp
-    src/modules/process/toolpath/process_tool_matcher.cpp
     src/modules/process/cutting/normal_cutting_manager.h
     src/modules/process/cutting/normal_cutting_manager.cpp
     src/modules/process/cutting/pure_simulation_toolpath_ticker.h
@@ -374,16 +371,12 @@ set(SRCS_MODULE_PROCESS
 if(LCNC_WITH_ACS)
     list(APPEND SRCS_MODULE_PROCESS
         src/modules/process/device/MotionControl/ACSMotionControl.cpp
-        src/modules/process/controllers/acs_motion_controller_adapter.h
-        src/modules/process/controllers/acs_motion_controller_adapter.cpp
         src/modules/process/runtime/acs_text_command_sink.h
         src/modules/process/runtime/acs_text_command_sink.cpp
     )
 endif()
 if(LCNC_WITH_GTN)
     list(APPEND SRCS_MODULE_PROCESS
-        src/modules/process/controllers/gtn_motion_controller_adapter.h
-        src/modules/process/controllers/gtn_motion_controller_adapter.cpp
         src/modules/process/device/MotionControl/GTNMotionControl.cpp
         src/modules/process/runtime/gtn_buffered_command_sink.cpp
     )
@@ -637,8 +630,15 @@ endforeach()
 # the changed DLLs.
 set(LCNC_RUNTIME_BIN_DIR_DEBUG   "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_debug"   CACHE PATH "Runtime DLL directory (Debug)")
 set(LCNC_RUNTIME_BIN_DIR_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_release" CACHE PATH "Runtime DLL directory (Release)")
+set(LCNC_ZLIB_RUNTIME_DLL "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/common/zlib1.dll"
+    CACHE FILEPATH "Compatibility zlib runtime DLL for LaserCNC deployments")
 set(LCNC_TBB_BIN_DIR "C:/work/occt/3rdparty-vc14-64/tbb-2021.13.0-x64/bin"
     CACHE PATH "OCCT TBB runtime DLL directory")
+
+if(NOT EXISTS "${LCNC_ZLIB_RUNTIME_DLL}")
+    message(FATAL_ERROR
+        "LaserCNC zlib compatibility runtime is missing: ${LCNC_ZLIB_RUNTIME_DLL}")
+endif()
 
 function(lcnc_deploy_tbb_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
@@ -650,18 +650,29 @@ endfunction()
 
 set(_lcnc_runtime_bin "$<IF:$<CONFIG:Debug>,${LCNC_RUNTIME_BIN_DIR_DEBUG},${LCNC_RUNTIME_BIN_DIR_RELEASE}>")
 if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
-    add_custom_command(TARGET LaserCNC POST_BUILD
+    # All test executables share ${CMAKE_BINARY_DIR}/<config>. A POST_BUILD
+    # copy on each target races under a parallel build, so deploy the snapshot
+    # once per output directory and make consumers depend on that deployment.
+    add_custom_target(lcnc_runtime_deploy_build
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${_lcnc_runtime_bin}"
+            "${CMAKE_BINARY_DIR}/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LCNC_ZLIB_RUNTIME_DLL}"
+            "${CMAKE_BINARY_DIR}/$<CONFIG>"
+        COMMENT "Copying runtime DLLs to build output directory"
+    )
+    add_custom_target(lcnc_runtime_deploy_app
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${_lcnc_runtime_bin}"
             "$<TARGET_FILE_DIR:LaserCNC>"
-        COMMENT "Copying runtime DLLs from 3rd/runtime/bin_<config> to output directory"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LCNC_ZLIB_RUNTIME_DLL}"
+            "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMENT "Copying runtime DLLs to LaserCNC output directory"
     )
-    add_custom_command(TARGET lcnc_project_upgrade POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${_lcnc_runtime_bin}"
-            "$<TARGET_FILE_DIR:lcnc_project_upgrade>"
-        COMMENT "Copying runtime DLLs for lcnc_project_upgrade"
-    )
+    add_dependencies(LaserCNC lcnc_runtime_deploy_app)
+    add_dependencies(lcnc_project_upgrade lcnc_runtime_deploy_build)
 endif()
 lcnc_deploy_tbb_runtime(LaserCNC)
 lcnc_deploy_tbb_runtime(lcnc_project_upgrade)
@@ -709,30 +720,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(lcnc_device_command_queue_test PRIVATE lcnc_module_process Qt6::Core)
     if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
-        add_custom_command(TARGET lcnc_project_package_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${_lcnc_runtime_bin}"
-                "$<TARGET_FILE_DIR:lcnc_project_package_test>")
-        add_custom_command(TARGET lcnc_task_manager_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${_lcnc_runtime_bin}"
-                "$<TARGET_FILE_DIR:lcnc_task_manager_test>")
-        add_custom_command(TARGET lcnc_cam_lead_in_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${_lcnc_runtime_bin}"
-                "$<TARGET_FILE_DIR:lcnc_cam_lead_in_test>")
-        add_custom_command(TARGET lcnc_contour_extraction_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${_lcnc_runtime_bin}"
-                "$<TARGET_FILE_DIR:lcnc_contour_extraction_test>")
-        add_custom_command(TARGET lcnc_process_runtime_configuration_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${_lcnc_runtime_bin}"
-                "$<TARGET_FILE_DIR:lcnc_process_runtime_configuration_test>")
-        add_custom_command(TARGET lcnc_device_command_queue_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${_lcnc_runtime_bin}"
-                "$<TARGET_FILE_DIR:lcnc_device_command_queue_test>")
+        add_dependencies(lcnc_project_package_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_task_manager_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_cam_lead_in_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_contour_extraction_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_process_runtime_configuration_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_device_command_queue_test lcnc_runtime_deploy_build)
     endif()
     lcnc_deploy_tbb_runtime(lcnc_project_package_test)
     lcnc_deploy_tbb_runtime(lcnc_task_manager_test)

@@ -32,7 +32,8 @@ enum class RenderMethod {
  */
 enum class StartupDisplayMode {
     Wireframe = 0,
-    Shaded = 1
+    Shaded = 1,
+    ShadedWithEdges = 2
 };
 
 /**
@@ -82,6 +83,8 @@ struct RenderProfileSettings {
  */
 struct ColorSettings {
     QColor workpieceColor = QColor(200, 200, 210);
+    double workpieceTransparency = 0.0; ///< 0.0 = opaque, 1.0 = fully transparent
+    double machineTransparency = 0.0;   ///< 0.0 = opaque, 1.0 = fully transparent
     QColor backgroundColor = QColor(42, 48, 58);
     QColor cadBackgroundColor = QColor(42, 48, 58);
     QColor camBackgroundColor = QColor(42, 48, 58);

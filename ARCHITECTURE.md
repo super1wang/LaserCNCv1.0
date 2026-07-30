@@ -1,6 +1,6 @@
 # LaserCNC 架构说明
 
-本文描述 2026-07-17 源码基线的实际架构。若本文与阶段性设计记录冲突，以源码、`CMakeLists.txt` 和本文为准。
+本文描述 2026-07-30 源码基线的实际架构。若本文与阶段性设计记录冲突，以源码、`CMakeLists.txt` 和本文为准。
 
 ## 1. 系统定位
 
@@ -129,7 +129,7 @@ Process 不读取 OCC。CAM 通过 `ICamToolpathProvider` 输出 `ToolpathExport
 当前 `ProcessModule` 仍是较大的 facade/coordinator，实际拥有或协调：
 
 - typed settings 与参数/IO 模型。
-- `Service` 及运动控制器、激光器、工具表；其中 `ProcessDeviceCoordinator` 租约串行化所有供应商 SDK 调用。
+- `Service` 及运动控制器、激光器、工具表；`DeviceCommandQueue` 承接分优先级调度，`ProcessDeviceCoordinator` 租约仍是最终供应商 SDK 串行边界。
 - `ProcessCuttingPlanService`、`NormalCuttingManager` 与 motion sink。
 - 流程文档、步骤插件注册表和 `ProcessWorkflowExecutor`。
 - 加工前置检查、状态、连接/断开、回零、急停、轮询和监控。
@@ -147,7 +147,7 @@ CAM ToolpathExportSnapshot
 
 `runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。任何 Error、EmergencyStop 或停止路径必须关闭激光与吹气等安全输出。
 
-硬件 SDK 类型只能存在于私有实现。`Service` 已以 `unique_ptr` 持有当前控制器，禁止函数内 static 控制器；所有 SDK 访问均须取得 `ProcessDeviceCoordinator` 租约。专用设备线程、旧 `Service` 接口和双日志系统仍是待收口的技术债，详见 `todo.md`。
+硬件 SDK 类型只能存在于私有实现。`Service` 已以 `unique_ptr` 持有当前控制器，禁止函数内 static 控制器；所有 SDK 访问均须取得 `ProcessDeviceCoordinator` 租约。设备队列已经用于 Stop、Workflow、Interactive、Normal 和 Polling 调度，但尚未成为唯一 SDK 入口；旧 `Service` 接口和剩余兼容 UI/日志路径仍是待收口技术债，详见 `todo.md`。
 
 设备公共接口不依赖 `MessageModule`；告警提示只能由具体设备实现文件引入，避免把旧 UI/日志基础设施泄漏给控制器和激光器消费者。
 `MessageModule` 的 UI 提示队列和设备兼容日志宏均直接经 `lcnc::Logger`；旧 `LogModule` 三 sink、独立刷新与硬编码路径已删除。
@@ -157,7 +157,7 @@ Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `Proces
 
 ## 自动化架构门禁
 
-`scripts/check_architecture.ps1` 是 CTest 的 `architecture_checks`。它拒绝 core/view 反向依赖、Process 对 OCC 的 include、已淘汰文档 API，以及未纳入 `CMakeLists.txt` 的 `.cpp`。标准验证命令为 `ctest --test-dir build/debug --output-on-failure`。
+`scripts/check_architecture.ps1` 是 CTest 的 `architecture_checks`。它拒绝 core/view 反向依赖、纯算法依赖 UI/文档/Kernel、Process 对 OCC 的 include、设备公共头泄漏兼容日志、Process settings singleton、已淘汰文档 API，以及未纳入 `CMakeLists.txt` 的 `.cpp`。标准验证命令为 `ctest --test-dir build --build-config Debug --output-on-failure`。
 
 ## 9. 异步与内存安全规则
 

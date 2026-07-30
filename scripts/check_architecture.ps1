@@ -17,10 +17,24 @@ function Find-ForbiddenInclude([string]$Path, [string]$Pattern, [string]$Rule) {
 Find-ForbiddenInclude (Join-Path $srcPath 'core') '#\s*include\s*[<"](?:view|modules|app)/' 'core may not depend on view/modules/app'
 Find-ForbiddenInclude (Join-Path $srcPath 'view') '#\s*include\s*[<"](?:modules|app)/' 'view may not depend on modules/app'
 Find-ForbiddenInclude (Join-Path $srcPath 'modules/process') '#\s*include\s*[<"](?:TopoDS|AIS_|gp_|Geom_|BRep|XCAF)' 'Process may not include OCC types'
+Find-ForbiddenInclude (Join-Path $srcPath 'core/algorithms') '#\s*include\s*[<"](?:QWidget|QAction|QDialog|core/document/lcnc_document|view/gui_document|core/kernel/kernel)' 'core algorithms must remain independent of UI, documents, and Kernel'
+Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules/process/device') -Recurse -File |
+    Where-Object { $_.Extension -in '.h', '.hpp' } |
+    ForEach-Object {
+    foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern '#\s*include\s*[<"](?:modules/process/System/)?(?:MessageModule|process_log_compat)\.h')) {
+        $violations.Add("Process device public headers may not expose compatibility logging: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+    }
+}
 
 Get-ChildItem -LiteralPath $srcPath -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
     foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern '\b(projectDocument|workspaceGuiDocument|ensureProjectDocument|sourceDocument)\s*\(')) {
         $violations.Add("retired document API: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+    }
+}
+
+Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules/process') -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
+    foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern '\bProcessSettingsService::current\s*\(')) {
+        $violations.Add("Process must use injected settings: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
     }
 }
 

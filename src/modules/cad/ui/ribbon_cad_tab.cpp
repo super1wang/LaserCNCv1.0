@@ -9,7 +9,6 @@
 #include <SARibbonCategory.h>
 #include <SARibbonPanel.h>
 #include <QAction>
-#include <QActionGroup>
 #include <QIcon>
 #include <QMenu>
 
@@ -102,7 +101,7 @@ void registerCommands(CommandContainer* container)
 
 void buildRibbonTab(SARibbonCategory* cat,
                     CommandContainer* container,
-                    QObject* parent)
+                    QObject* /*parent*/)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::buildRibbonTab begin");
 
@@ -190,22 +189,6 @@ void buildRibbonTab(SARibbonCategory* cat,
         {container->findAction(CmdToggleCadGrid::Name),
          container->findAction(CmdToggleGridSnap::Name)});
     panelAssist->addLargeMenu(menuGrid);
-
-    auto* snapGroup = new QActionGroup(parent);
-    snapGroup->setExclusive(true);
-    snapGroup->addAction(container->findAction(CmdSnapNone::Name));
-    snapGroup->addAction(container->findAction(CmdSnapVertex::Name));
-    snapGroup->addAction(container->findAction(CmdSnapEdge::Name));
-    snapGroup->addAction(container->findAction(CmdSnapFace::Name));
-    auto* menuSnap = makeCommandMenu(
-        cat,
-        QObject::tr("抓取"),
-        QIcon(":/icons/snap.svg"),
-        {container->findAction(CmdSnapNone::Name),
-         container->findAction(CmdSnapVertex::Name),
-         container->findAction(CmdSnapEdge::Name),
-         container->findAction(CmdSnapFace::Name)});
-    panelAssist->addLargeMenu(menuSnap);
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::buildRibbonTab end");
 }

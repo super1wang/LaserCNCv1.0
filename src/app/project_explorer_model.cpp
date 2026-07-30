@@ -365,14 +365,6 @@ bool isCadProjectNode(ProjectExplorerNodeKind kind)
     }
 }
 
-// Phase D：机台节点已从工程树删除，该函数保留以兼容 main_window 调用方；
-// 后续 Phase F 可改为返回 false 并删掉调用方 switch 分支。
-bool isMachineProjectNode(ProjectExplorerNodeKind kind)
-{
-    (void)kind;
-    return false;
-}
-
 bool isToolpathProjectNode(ProjectExplorerNodeKind kind)
 {
     return kind == ProjectExplorerNodeKind::ToolpathRoot

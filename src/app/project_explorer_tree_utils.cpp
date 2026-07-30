@@ -20,12 +20,7 @@ QIcon iconForProjectNode(ProjectExplorerNodeKind kind)
         return QIcon(":/icons/sketch.svg");
     case ProjectExplorerNodeKind::CadShape:
     case ProjectExplorerNodeKind::CadSketchElement:
-    case ProjectExplorerNodeKind::MachineShape:
         return QIcon(":/icons/shape.svg");
-    case ProjectExplorerNodeKind::MachineRoot:
-        return QIcon(":/icons/machine.svg");
-    case ProjectExplorerNodeKind::MachineAxis:
-        return QIcon(":/icons/coordinate.svg");
     case ProjectExplorerNodeKind::ToolpathRoot:
     case ProjectExplorerNodeKind::ToolpathLayer:
     case ProjectExplorerNodeKind::ToolpathContour:
@@ -34,7 +29,6 @@ QIcon iconForProjectNode(ProjectExplorerNodeKind kind)
     case ProjectExplorerNodeKind::MachiningFace:
         return QIcon(":/icons/shape.svg");
     case ProjectExplorerNodeKind::CadGroup:
-    case ProjectExplorerNodeKind::MachineUnassignedGroup:
     default:
         return QIcon(":/icons/machine.svg");
     }
@@ -56,7 +50,6 @@ void configureProjectTreeItem(QTreeWidgetItem* item,
     item->setData(0, ProjectExplorerRoles::ContourId, static_cast<qulonglong>(node.contourId));
     item->setData(0, ProjectExplorerRoles::LayerId, static_cast<qulonglong>(node.layerId));
     item->setData(0, ProjectExplorerRoles::MachiningFaceId, static_cast<qulonglong>(node.machiningFaceId));
-    item->setData(0, ProjectExplorerRoles::AxisName, node.axisName);
     if (!node.toolTip.isEmpty())
         item->setToolTip(0, node.toolTip);
 
@@ -74,13 +67,11 @@ void configureProjectTreeItem(QTreeWidgetItem* item,
         item->setCheckState(0, node.checked ? Qt::Checked : Qt::Unchecked);
     if (node.muted)
         item->setForeground(0, Qt::gray);
-    if (node.kind == ProjectExplorerNodeKind::MachineUnassignedGroup)
-        item->setForeground(0, QColor(160, 100, 60));
     if (node.kind == ProjectExplorerNodeKind::ToolpathLayer && node.layerColor.isValid()) {
         item->setForeground(0, node.layerColor.darker(130));
         item->setBackground(1, node.layerColor.lighter(175));
     }
-    if (!parent || node.kind == ProjectExplorerNodeKind::MachineAxis) {
+    if (!parent) {
         QFont font = item->font(0);
         font.setBold(true);
         item->setFont(0, font);

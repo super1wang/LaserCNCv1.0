@@ -98,6 +98,8 @@ private:
 
     QPushButton* m_btnWorkpieceColor{nullptr};
     QPushButton* m_btnBackgroundColor{nullptr};
+    QDoubleSpinBox* m_spWorkpieceTransparency{nullptr};
+    QDoubleSpinBox* m_spMachineTransparency{nullptr};
     QPushButton* m_btnSelectionColor{nullptr};
     QPushButton* m_btnHoverColor{nullptr};
     QPushButton* m_btnTreeSelectionColor{nullptr};

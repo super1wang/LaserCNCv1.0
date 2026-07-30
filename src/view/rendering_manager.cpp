@@ -177,10 +177,11 @@ void RenderingManager::applyNow(RenderDirtyFlags flags)
                static_cast<int>(flags.toInt()), m_machineView);
 
     if (flags.testFlag(RenderDirtyFlag::DefaultDisplay)) {
-        // Do not replay the legacy per-profile startup mode after a document
-        // has been displayed. Explicit Ribbon mode commands remain
-        // authoritative; default viewing starts with filled shading.
-        setRuntimeDisplayMode(AIS_Shaded, false);
+        const bool faceBoundary = m_profile.defaultDisplayMode
+            == StartupDisplayMode::ShadedWithEdges;
+        const int displayMode = m_profile.defaultDisplayMode
+            == StartupDisplayMode::Wireframe ? AIS_WireFrame : AIS_Shaded;
+        setRuntimeDisplayMode(displayMode, faceBoundary);
     }
     if (flags.testFlag(RenderDirtyFlag::Profile)) {
         applyViewRenderingParams();
@@ -442,6 +443,12 @@ void RenderingManager::applyShapeStyle(const QString& entry,
     Graphic3d_MaterialAspect material(materialName(p.material));
     ctx->SetMaterial(ais, material, Standard_False);
     ctx->SetColor(ais, toQuantity(color), Standard_False);
+    double transparency = 0.0;
+    if (isMachineShape)
+        transparency = m_colors.machineTransparency;
+    else if (isWorkpieceShape)
+        transparency = m_colors.workpieceTransparency;
+    ctx->SetTransparency(ais, qBound(0.0, transparency, 1.0), Standard_False);
     ctx->Redisplay(ais, Standard_False);
 }
 

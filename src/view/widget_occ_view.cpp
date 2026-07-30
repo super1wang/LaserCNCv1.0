@@ -246,6 +246,7 @@ void WidgetOccView::activateView(const Handle(V3d_View)& view,
     if (!m_view.IsNull()) {
         m_occWindow->SetSize(width(), height());
         m_view->MustBeResized();
+        applyCadSnapSelectionMode();
         syncGridObject();
         m_transformGizmoRenderer.render(m_context, false);
         m_sketchOverlayRenderer.render(m_context, false);
@@ -255,13 +256,32 @@ void WidgetOccView::activateView(const Handle(V3d_View)& view,
 
 void WidgetOccView::restoreDefaultSelectionModes()
 {
+    applyCadSnapSelectionMode();
+}
+
+void WidgetOccView::applyCadSnapSelectionMode()
+{
     if (m_context.IsNull())
         return;
 
     m_context->Deactivate();
 
     if (m_activeDoc) {
-        m_activeDoc->setEntitySelectionMode(0);
+        int selectionMode = 0;
+        switch (m_cadSnapMode) {
+        case CadSnapMode::Vertex:
+            selectionMode = AIS_Shape::SelectionMode(TopAbs_VERTEX);
+            break;
+        case CadSnapMode::Edge:
+            selectionMode = AIS_Shape::SelectionMode(TopAbs_EDGE);
+            break;
+        case CadSnapMode::Face:
+            selectionMode = AIS_Shape::SelectionMode(TopAbs_FACE);
+            break;
+        case CadSnapMode::None:
+            break;
+        }
+        m_activeDoc->setEntitySelectionMode(selectionMode);
         if (!m_activeDoc->viewCube().IsNull())
             m_context->Activate(m_activeDoc->viewCube(), 0, Standard_False);
     }
@@ -359,11 +379,15 @@ void WidgetOccView::setGridSnapEnabled(bool enabled)
 
 void WidgetOccView::setCadSnapMode(CadSnapMode mode)
 {
-    if (m_cadSnapMode == mode)
-        return;
+    const bool changed = m_cadSnapMode != mode;
     m_cadSnapMode = mode;
-    LCNC_DEBUG(lcnc::LogCode::Generic,
-               "WidgetOccView::setCadSnapMode mode={}", static_cast<int>(mode));
+    if (changed) {
+        LCNC_DEBUG(lcnc::LogCode::Generic,
+                   "WidgetOccView::setCadSnapMode mode={}", static_cast<int>(mode));
+    }
+    // QAction can be checked already when the user selects it; apply even in
+    // that case so the ribbon state and the OCC selection filter cannot drift.
+    applyCadSnapSelectionMode();
 }
 
 bool WidgetOccView::screenToSketchPlane(const QPoint& pos,
@@ -673,7 +697,13 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
     }
 
     if (m_facePickActive) {
+        // Face-pick mode uses a dedicated face selection mode, but it still
+        // needs MoveTo() to update OCCT's dynamic highlight under the cursor.
+        // Previously this branch emitted an unconnected signal and returned,
+        // leaving the operator with no visual confirmation before clicking.
+        m_context->MoveTo(e->pos().x(), e->pos().y(), m_view, Standard_True);
         emit facePickMoved(e->pos());
+        m_view->Redraw();
         m_prevPos = e->pos();
         return;
     }

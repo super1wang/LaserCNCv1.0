@@ -24,6 +24,13 @@ GuiApplication::GuiApplication(QObject* parent)
                "second GuiApplication instance — must be Kernel-owned only");
     s_instance = this;
 
+    if (const auto* settings = lcnc::Kernel::current().appSettings()) {
+        const lcnc::StartupDisplayMode defaultMode = settings->camViewRendering.defaultDisplayMode;
+        m_currentDisplayMode = defaultMode == lcnc::StartupDisplayMode::Wireframe
+            ? AIS_WireFrame : AIS_Shaded;
+        m_currentFaceBoundary = defaultMode == lcnc::StartupDisplayMode::ShadedWithEdges;
+    }
+
     if (auto* project = lcnc::Kernel::current().projectManager()) {
         connect(project, &lcnc::LcncProjectManager::workspaceAdded,
                 this, [this](ProjectWorkspaceId id) { ensureGuiDocument(id); });

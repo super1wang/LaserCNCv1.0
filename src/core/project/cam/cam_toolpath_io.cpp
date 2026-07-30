@@ -463,6 +463,10 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
     try {
         root = toml::parse(tomlPath.toStdString());
     } catch (const std::exception& e) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.toolpath: failed to parse '{}': {}",
+                 tomlPath.toStdString(),
+                 e.what());
         if (errorMsg) *errorMsg = QStringLiteral("解析 cam_toolpath.toml 失败: %1")
                                        .arg(QString::fromLocal8Bit(e.what()));
         return false;
@@ -714,6 +718,10 @@ bool migrateLegacyProcessCuttingPlan(CamDataManager& cam, const QString& package
     try {
         root = toml::parse(filePath.toStdString());
     } catch (const std::exception& e) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.toolpath: failed to parse legacy cutting plan '{}': {}",
+                 filePath.toStdString(),
+                 e.what());
         if (errorMsg)
             *errorMsg = QStringLiteral("解析 process_cutting_plan.toml 失败: %1")
                             .arg(QString::fromLocal8Bit(e.what()));

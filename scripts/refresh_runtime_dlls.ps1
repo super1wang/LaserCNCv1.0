@@ -8,7 +8,7 @@
 #   2. 用 windeployqt 让 Qt 自己分析 x64/<Config>/LaserCNC.exe 的 import，把它需要的 Qt
 #      DLL + 插件子目录 (platforms/, imageformats/, ...) 拷贝到该运行目录。
 #   3. 把 OCC 的 TK*.dll、OCC 的 3rd-party (FreeImage / freetype / ffmpeg /
-#      openvr / tbb / jemalloc) 拷过来。OCC 在这台机上只有 release 版，
+#      openvr / tbb / jemalloc) 以及仓库备份的 zlib1.dll 拷过来。OCC 在这台机上只有 release 版，
 #      debug 配置仍然链 release OCC（OCC 一向如此分发）。
 #   4. SARibbon、boost、ACSCL_x64.dll。
 #   5. 把 x64/<Config>/ 里所有 .dll + 插件子目录原样镜像到
@@ -29,6 +29,7 @@ $BuildDir = Join-Path $RepoRoot "build"
 $CmakeConfig = (Get-Culture).TextInfo.ToTitleCase($Config)
 $RuntimeDir = Join-Path $RepoRoot ("x64\" + $CmakeConfig)
 $Target   = Join-Path $RepoRoot "3rd\runtime\bin_$Config"
+$ZlibDll = Join-Path $RepoRoot "3rd\runtime\common\zlib1.dll"
 $IsDebug  = ($Config -eq "debug")
 $AcsDll   = if ($IsDebug) { $AcsDllDebug } else { $AcsDllRelease }
 
@@ -70,6 +71,12 @@ foreach ($tbbName in $tbbNames) {
     }
     Copy-Item -Force $tbbSource $RuntimeDir
 }
+
+Write-Host "== Step 3c: ensure zlib runtime present in $RuntimeDir =="
+if (-not (Test-Path $ZlibDll)) {
+    throw "zlib runtime backup not found: $ZlibDll"
+}
+Copy-Item -Force $ZlibDll $RuntimeDir
 
 Write-Host "== Step 4: mirror DLLs and Qt plugin subdirs into 3rd/runtime/bin_$Config =="
 if (Test-Path $Target) { Remove-Item -Recurse -Force $Target }

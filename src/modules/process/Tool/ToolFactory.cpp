@@ -1,4 +1,7 @@
 #include "ToolFactory.h"
+
+#include "core/logging/logger.h"
+
 #include <boost/lexical_cast.hpp>
 
 map<int,Tool> ToolFactory::m_mapTools;
@@ -64,7 +67,16 @@ bool ToolFactory::restoreSnapshot(const ::toml::table& snapshot)
 			Tool tool;
 			tool.SetFromTable(value.as_table());
 			restored.emplace(std::stoi(key), std::move(tool));
+		} catch (const std::exception& exception) {
+			LCNC_ERR(lcnc::LogCode::Generic,
+					 "process.tool: failed to restore tool '{}': {}",
+					 key,
+					 exception.what());
+			return false;
 		} catch (...) {
+			LCNC_ERR(lcnc::LogCode::Generic,
+					 "process.tool: failed to restore tool '{}' due to an unknown exception",
+					 key);
 			return false;
 		}
 	}

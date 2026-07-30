@@ -144,7 +144,9 @@ void CmdOpenProcessSettings::execute()
             mod->refreshIOFromSettings();
     }
     catch (const std::exception& e) {
-        qWarning("CmdOpenProcessSettings::execute failed: %s", e.what());
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "CmdOpenProcessSettings::execute failed: {}",
+                 e.what());
     }
 }
 
@@ -253,6 +255,42 @@ bool CmdHome::isEnabled() const
 void CmdHome::execute()
 {
     if (auto* p = processFacade()) p->home();
+}
+
+// ── CmdMoveToLoadingPosition ────────────────────────────────────────────────
+CmdMoveToLoadingPosition::CmdMoveToLoadingPosition(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/move.svg"), tr("上料位"), this);
+    a->setStatusTip(tr("移动至设置中定义的上料位"));
+    setAction(a);
+}
+bool CmdMoveToLoadingPosition::isEnabled() const
+{
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->isConnected()
+             && p->state() == lcnc::ProcessRunState::Idle;
+}
+void CmdMoveToLoadingPosition::execute()
+{
+    if (auto* module = processModule()) module->moveToConfiguredPosition(true);
+}
+
+// ── CmdMoveToBlankingPosition ───────────────────────────────────────────────
+CmdMoveToBlankingPosition::CmdMoveToBlankingPosition(IAppContext* ctx) : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/move.svg"), tr("下料位"), this);
+    a->setStatusTip(tr("移动至设置中定义的下料位"));
+    setAction(a);
+}
+bool CmdMoveToBlankingPosition::isEnabled() const
+{
+    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
+    return p && p->isConnected()
+             && p->state() == lcnc::ProcessRunState::Idle;
+}
+void CmdMoveToBlankingPosition::execute()
+{
+    if (auto* module = processModule()) module->moveToConfiguredPosition(false);
 }
 
 // ── CmdConnectDevices ───────────────────────────────────────────────────────

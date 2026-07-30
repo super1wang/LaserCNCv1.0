@@ -1,5 +1,7 @@
 #include "modules/process/workflow/process_flow_store.h"
 
+#include "core/logging/logger.h"
+
 #include <QVariant>
 
 #include <fstream>
@@ -178,6 +180,10 @@ bool ProcessFlowStore::loadFromFile(const QString& filePath,
     try {
         return loadFromToml(toml::parse(filePath.toStdString()), document, errorMessage);
     } catch (const std::exception& e) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.workflow: failed to load '{}': {}",
+                 filePath.toStdString(),
+                 e.what());
         setError(errorMessage, QString::fromLocal8Bit(e.what()));
         return false;
     }

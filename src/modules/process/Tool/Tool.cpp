@@ -1,5 +1,7 @@
 #include "Tool.h"
 
+#include "core/logging/logger.h"
+
 #include <cmath>
 #include <string>
 
@@ -28,7 +30,12 @@ bool tryGetDouble(const table& t, const char* key, double& dst)
 			dst = 0.0;
 		return true;
 	}
-	catch (...) { return false; }
+	catch (...) {
+		LCNC_ERR(lcnc::LogCode::Generic,
+				 "process.tool: failed to convert field '{}'",
+				 key);
+		return false;
+	}
 }
 
 bool tryGetInt(const table& t, const char* key, int& dst)
@@ -44,7 +51,12 @@ bool tryGetInt(const table& t, const char* key, int& dst)
 		else                       return false;
 		return true;
 	}
-	catch (...) { return false; }
+	catch (...) {
+		LCNC_ERR(lcnc::LogCode::Generic,
+				 "process.tool: failed to convert field '{}'",
+				 key);
+		return false;
+	}
 }
 
 bool tryGetBool(const table& t, const char* key, bool& dst)
@@ -60,7 +72,12 @@ bool tryGetBool(const table& t, const char* key, bool& dst)
 		else                       return false;
 		return true;
 	}
-	catch (...) { return false; }
+	catch (...) {
+		LCNC_ERR(lcnc::LogCode::Generic,
+				 "process.tool: failed to convert field '{}'",
+				 key);
+		return false;
+	}
 }
 
 bool tryGetString(const table& t, const char* key, std::string& dst)
@@ -75,7 +92,12 @@ bool tryGetString(const table& t, const char* key, std::string& dst)
 		dst = v.as_string();
 		return true;
 	}
-	catch (...) { return false; }
+	catch (...) {
+		LCNC_ERR(lcnc::LogCode::Generic,
+				 "process.tool: failed to convert field '{}'",
+				 key);
+		return false;
+	}
 }
 
 bool tryGetWideString(const table& t, const char* key, std::wstring& dst)
@@ -90,7 +112,12 @@ bool tryGetWideString(const table& t, const char* key, std::wstring& dst)
 		dst = QString::fromUtf8(v.as_string().c_str()).toStdWString();
 		return true;
 	}
-	catch (...) { return false; }
+	catch (...) {
+		LCNC_ERR(lcnc::LogCode::Generic,
+				 "process.tool: failed to convert field '{}'",
+				 key);
+		return false;
+	}
 }
 
 } // namespace

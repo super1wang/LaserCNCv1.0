@@ -152,7 +152,9 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
     ParameterObjectDescriptor positions{QStringLiteral("positions"), QObject::tr("上下料位置"), QObject::tr("运动与轴系")};
     if (machine) for (const auto& axis : machine->axisConfigurations()) {
         const QString axisName = axis.axis.name;
+        positions.fields.append(field(QStringLiteral("loading.enabled.%1").arg(axisName), QObject::tr("启用上料 %1").arg(axisName), QObject::tr("上料"), ParameterValueType::Bool, ProcessConfigArea::Operations, "LoadingPos", QStringLiteral("bLoadingPos%1").arg(axisName), false));
         positions.fields.append(field(QStringLiteral("loading.%1").arg(axisName), QObject::tr("上料 %1").arg(axisName), QObject::tr("上料"), ParameterValueType::Double, ProcessConfigArea::Operations, "LoadingPos", QStringLiteral("fLoadingPos%1").arg(axisName), 0.0));
+        positions.fields.append(field(QStringLiteral("blanking.enabled.%1").arg(axisName), QObject::tr("启用下料 %1").arg(axisName), QObject::tr("下料"), ParameterValueType::Bool, ProcessConfigArea::Operations, "BlankingPos", QStringLiteral("bBlankingPos%1").arg(axisName), false));
         positions.fields.append(field(QStringLiteral("blanking.%1").arg(axisName), QObject::tr("下料 %1").arg(axisName), QObject::tr("下料"), ParameterValueType::Double, ProcessConfigArea::Operations, "BlankingPos", QStringLiteral("fBlankingPos%1").arg(axisName), 0.0));
     }
     objects.append(positions);

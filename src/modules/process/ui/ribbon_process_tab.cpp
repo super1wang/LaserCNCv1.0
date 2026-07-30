@@ -36,6 +36,8 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdRunStop>(CmdRunStop::Name);
 
     container->addCommand<CmdHome>(CmdHome::Name);
+    container->addCommand<CmdMoveToLoadingPosition>(CmdMoveToLoadingPosition::Name);
+    container->addCommand<CmdMoveToBlankingPosition>(CmdMoveToBlankingPosition::Name);
     container->addCommand<CmdEmergencyStop>(CmdEmergencyStop::Name);
     container->addCommand<CmdResetEmergencyStop>(CmdResetEmergencyStop::Name);
 
@@ -56,6 +58,8 @@ void buildRibbonTab(SARibbonCategory* cat,
     SARibbonPanel* panelConn = cat->addPanel(QObject::tr("连接"));
     panelConn->addLargeAction(container->findAction(CmdConnectDevices::Name));
     panelConn->addLargeAction(container->findAction(CmdHome::Name));
+    panelConn->addLargeAction(container->findAction(CmdMoveToLoadingPosition::Name));
+    panelConn->addLargeAction(container->findAction(CmdMoveToBlankingPosition::Name));
     panelConn->addLargeAction(container->findAction(CmdDisconnectDevices::Name));
 
     // ── 流程 ───────────────────────────────────────────────────────────────

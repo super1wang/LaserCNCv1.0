@@ -3,6 +3,9 @@
 /************************************************************************/
 
 #include "ULTRONLaserDevice.h"
+
+#include "core/logging/logger.h"
+
 #include "MessageModule.h"
 #include <string>
 #include <stdlib.h>
@@ -559,7 +562,10 @@ string ULTRONLaserDevice::hexStrToDecString(const string& hexStr)
 	}
 	catch (const exception& e) {
 		// 处理非法16进制字符串（如"G1"、空字符串）
-		
+		LCNC_ERR(lcnc::LogCode::Generic,
+				 "ULTRONLaserDevice: invalid hexadecimal value '{}': {}",
+				 hexNum,
+				 e.what());
 		return "";
 	}
 }

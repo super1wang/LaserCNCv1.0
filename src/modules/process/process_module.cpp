@@ -6,7 +6,6 @@
 #include "core/project/lcnc_project_package.h"
 #include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
-#include "core/project/lcnc_project_package.h"
 #include "core/task/task_manager.h"
 #include "core/task/task_progress.h"
 #include "modules/cam/cam_module.h"
@@ -373,6 +372,9 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                     }
                     return true;
                 } catch (const std::exception& exception) {
+                    LCNC_ERR(lcnc::LogCode::Generic,
+                             "ProcessModule: failed to parse project tool snapshot: {}",
+                             exception.what());
                     if (error) *error = QStringLiteral("解析项目工具快照失败: %1").arg(exception.what());
                     return false;
                 }
@@ -797,9 +799,22 @@ void ProcessModule::connectAllDevices()
     m_deviceOperation = DeviceOperation::Connecting;
     const bool pureSimulation = m_simulationMode;
     QPointer<ProcessModule> self(this);
-    if (!m_deviceCommandQueue->submit([service, pureSimulation, self] {
+    const auto reportProgress = [self](int percent, const QString& step) {
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self, [self, percent, step] {
+            if (!self || self->m_deviceOperation != DeviceOperation::Connecting)
+                return;
+            emit self->deviceConnectProgress(QObject::tr("连接设备"), percent, step);
+            self->setStatusMessage(QObject::tr("正在连接设备：%1").arg(step));
+        }, Qt::QueuedConnection);
+    };
+    emit deviceConnectProgress(tr("连接设备"), 0, tr("已提交连接任务"));
+    setStatusMessage(tr("正在连接设备：等待设备线程"));
+    if (!m_deviceCommandQueue->submit([service, pureSimulation, self, reportProgress] {
             bool success = true;
             try {
+                reportProgress(10, QObject::tr("正在创建运动控制器"));
                 if (pureSimulation)
                     service->SetMotionControl("Simulator");
                 else
@@ -810,25 +825,31 @@ void ProcessModule::connectAllDevices()
                     throw std::runtime_error(
                         QObject::tr("运动控制器实例化失败；当前构建未启用所选控制器").toStdString());
                 }
+                reportProgress(25, QObject::tr("正在连接运动控制器"));
                 if (!motionControl->Connect()) {
                     throw std::runtime_error(
                         QObject::tr("运动控制器连接失败；禁止回退到纯软件仿真").toStdString());
                 }
+                reportProgress(50, QObject::tr("正在初始化运动轴"));
                 motionControl->rebuildAxes();
 
+                reportProgress(65, QObject::tr("正在创建激光器"));
                 service->SetLaserDevice();
                 auto* laserDevice = service->GetLaserDevice();
+                reportProgress(75, QObject::tr("正在连接激光器"));
                 if (!laserDevice || !laserDevice->Connect()) {
                     throw std::runtime_error(
                         QObject::tr("激光器连接失败；已取消本次设备连接").toStdString());
                 }
 
+                reportProgress(88, QObject::tr("正在加载设备参数"));
                 if (!pureSimulation) {
                     service->SetMotionControlTable();
                     service->SetDigitalTable();
                     service->SetAnalogTable();
                 }
                 service->SetLaserTable();
+                reportProgress(100, QObject::tr("设备初始化完成"));
             } catch (const std::exception& exception) {
                 success = false;
                 LCNC_ERR(lcnc::LogCode::Generic,
@@ -862,6 +883,7 @@ void ProcessModule::connectAllDevices()
         })) {
         m_deviceOperation = DeviceOperation::None;
         setState(State::Error, tr("设备连接命令未能排队"));
+        emit deviceConnectFinished(false, tr("设备连接命令未能排队"));
     }
 }
 
@@ -1306,6 +1328,125 @@ void ProcessModule::home()
         m_homing = false;
         m_deviceOperation = DeviceOperation::None;
         setState(State::Error, tr("回零命令未能排队"));
+    }
+}
+
+void ProcessModule::moveToConfiguredPosition(bool loading)
+{
+    const QString positionName = loading ? tr("上料位") : tr("下料位");
+    if (m_state != State::Idle) {
+        setStatusMessage(tr("当前加工状态不允许移动至%1").arg(positionName));
+        return;
+    }
+    if (m_homing || m_deviceOperation != DeviceOperation::None) {
+        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        return;
+    }
+    if (!m_settingsService || !m_deviceCommandQueue || !m_service) {
+        setStatusMessage(tr("设备命令队列或加工设置不可用"));
+        return;
+    }
+
+    struct AxisTarget {
+        QString name;
+        double position;
+    };
+    QVector<AxisTarget> targets;
+    const QString tableName = loading ? QStringLiteral("LoadingPos")
+                                      : QStringLiteral("BlankingPos");
+    const QString keyPrefix = loading ? QStringLiteral("fLoadingPos")
+                                      : QStringLiteral("fBlankingPos");
+    const QString enablePrefix = loading ? QStringLiteral("bLoadingPos")
+                                         : QStringLiteral("bBlankingPos");
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        const QString axisName = axis.name.trimmed().toUpper();
+        if (axisName.isEmpty() || axisName == QStringLiteral("BASE"))
+            continue;
+        const bool positionEnabled = m_settingsService->rawValue(
+            lcnc::process::ProcessConfigArea::Operations, tableName,
+            enablePrefix + axisName, false).toBool();
+        if (!positionEnabled)
+            continue;
+        if (!m_axisEnabled.value(axisName, true)) {
+            setStatusMessage(tr("%1 轴未使能，无法移动至%2").arg(axisName, positionName));
+            return;
+        }
+        const auto eAxis = enum_cast<Axis>(axisName.toStdString());
+        if (!eAxis.has_value()) {
+            setStatusMessage(tr("%1 轴未注册，无法移动至%2").arg(axisName, positionName));
+            return;
+        }
+        const QVariant targetValue = m_settingsService->rawValue(
+            lcnc::process::ProcessConfigArea::Operations, tableName,
+            keyPrefix + axisName);
+        bool targetValid = false;
+        const double target = targetValue.toDouble(&targetValid);
+        if (!targetValid || !std::isfinite(target)) {
+            setStatusMessage(tr("%1 轴的%2未配置有效位置").arg(axisName, positionName));
+            return;
+        }
+        if (target < axis.minVal || target > axis.maxVal) {
+            setStatusMessage(tr("%1 轴的%2超出行程范围").arg(axisName, positionName));
+            return;
+        }
+        targets.append({axisName, target});
+    }
+    if (targets.isEmpty()) {
+        setStatusMessage(tr("没有可移动至%1的轴").arg(positionName));
+        return;
+    }
+
+    m_deviceOperation = DeviceOperation::PresetMove;
+    setStatusMessage(tr("正在移动至%1（共 %2 个轴）").arg(positionName).arg(targets.size()));
+    const auto service = m_service;
+    QPointer<ProcessModule> self(this);
+    if (!m_deviceCommandQueue->submit(
+            [service, targets, positionName] {
+                const auto deviceLock = service->lockDeviceAccess();
+                auto* mc = service->GetMotionControl();
+                if (!mc || !mc->IsConnected())
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("未连接控制器，请先连接设备")};
+
+                for (const AxisTarget& target : targets) {
+                    const auto axis = enum_cast<Axis>(target.name.toStdString());
+                    if (!axis.has_value() || !mc->IsMotorCreated(axis.value()))
+                        return lcnc::process::DeviceCommandResult{false,
+                            QObject::tr("%1 轴未在控制器中创建").arg(target.name)};
+                    if (!mc->IsEnabled(axis.value()))
+                        return lcnc::process::DeviceCommandResult{false,
+                            QObject::tr("%1 轴当前未使能").arg(target.name)};
+                    if (!mc->IsHomed(axis.value()))
+                        return lcnc::process::DeviceCommandResult{false,
+                            QObject::tr("%1 轴尚未回零").arg(target.name)};
+                    if (mc->IsAxisMoving(axis.value()))
+                        return lcnc::process::DeviceCommandResult{false,
+                            QObject::tr("%1 轴正在运动").arg(target.name)};
+                }
+                for (const AxisTarget& target : targets) {
+                    const auto axis = enum_cast<Axis>(target.name.toStdString());
+                    if (!mc->MoveAbsolute(axis.value(), target.position, jogVelocityForLevel(1))) {
+                        (void)mc->StopMotion();
+                        return lcnc::process::DeviceCommandResult{false,
+                            QObject::tr("%1 轴移动至%2失败").arg(target.name, positionName)};
+                    }
+                }
+                return lcnc::process::DeviceCommandResult{true, {}};
+            },
+            TaskPriority::Interactive,
+            [self, positionName](const lcnc::process::DeviceCommandResult& result) {
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, positionName, result] {
+                    if (!self)
+                        return;
+                    self->m_deviceOperation = DeviceOperation::None;
+                    if (!result.success) {
+                        self->setStatusMessage(result.error);
+                        return;
+                    }
+                    self->setStatusMessage(self->tr("已下发移动至%1的命令").arg(positionName));
+                }, Qt::QueuedConnection);
+            })) {
+        m_deviceOperation = DeviceOperation::None;
+        setStatusMessage(tr("移动至%1的命令未能排队").arg(positionName));
     }
 }
 

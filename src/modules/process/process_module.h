@@ -98,6 +98,7 @@ public:
     void setDigitalOutput(const QString& outputName, bool value);
     QMap<QString, bool> digitalOutputStates() const { return m_digitalOutputs; }
     void home() override;
+    void moveToConfiguredPosition(bool loading);
 
     void runStart() override;
     void runPause() override;
@@ -182,7 +183,7 @@ private slots:
     void pollPeripheralStatus();        // 低频采集串口外设状态
 
 private:
-    enum class DeviceOperation { None, Connecting, Disconnecting, Homing };
+    enum class DeviceOperation { None, Connecting, Disconnecting, Homing, PresetMove };
 
     void initializeAxisPositions();
     void initializeAxisEnabledStates();

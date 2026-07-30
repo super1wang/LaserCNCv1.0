@@ -260,6 +260,8 @@ bool profileRuntimeEqual(const RenderProfileSettings& a, const RenderProfileSett
 bool colorModelEqual(const ColorSettings& a, const ColorSettings& b)
 {
     return a.workpieceColor == b.workpieceColor
+        && qFuzzyCompare(a.workpieceTransparency, b.workpieceTransparency)
+        && qFuzzyCompare(a.machineTransparency, b.machineTransparency)
         && a.machineAxisColors == b.machineAxisColors;
 }
 
@@ -424,6 +426,7 @@ void DialogOptions::buildRenderPage(const QString& title, bool camView, RenderCo
     c.defaultDisplay = new QComboBox(displayGroup);
     c.defaultDisplay->addItem(tr("线框"), static_cast<int>(StartupDisplayMode::Wireframe));
     c.defaultDisplay->addItem(tr("着色"), static_cast<int>(StartupDisplayMode::Shaded));
+    c.defaultDisplay->addItem(tr("带边着色"), static_cast<int>(StartupDisplayMode::ShadedWithEdges));
     displayForm->addRow(tr("启动/新 View 默认显示模式:"), c.defaultDisplay);
 
     c.quality = new QComboBox(displayGroup);
@@ -547,7 +550,19 @@ void DialogOptions::buildColorPage()
     auto* modelForm = new QFormLayout(modelGroup);
     m_btnWorkpieceColor = makeColorButton(&m_colorDraft.workpieceColor);
     m_btnBackgroundColor = makeColorButton(&m_colorDraft.backgroundColor);
+    m_spWorkpieceTransparency = noWheel(new QDoubleSpinBox(modelGroup));
+    m_spWorkpieceTransparency->setRange(0.0, 100.0);
+    m_spWorkpieceTransparency->setDecimals(0);
+    m_spWorkpieceTransparency->setSingleStep(5.0);
+    m_spWorkpieceTransparency->setSuffix(tr(" %"));
+    m_spMachineTransparency = noWheel(new QDoubleSpinBox(modelGroup));
+    m_spMachineTransparency->setRange(0.0, 100.0);
+    m_spMachineTransparency->setDecimals(0);
+    m_spMachineTransparency->setSingleStep(5.0);
+    m_spMachineTransparency->setSuffix(tr(" %"));
     modelForm->addRow(tr("工件颜色:"), m_btnWorkpieceColor);
+    modelForm->addRow(tr("工件模型透明度:"), m_spWorkpieceTransparency);
+    modelForm->addRow(tr("机台模型透明度:"), m_spMachineTransparency);
     modelForm->addRow(tr("视图背景:"), m_btnBackgroundColor);
     root->addWidget(modelGroup);
 
@@ -988,6 +1003,8 @@ void DialogOptions::loadFromSettings()
 
     styleColorButton(m_btnWorkpieceColor, m_colorDraft.workpieceColor);
     styleColorButton(m_btnBackgroundColor, m_colorDraft.backgroundColor);
+    m_spWorkpieceTransparency->setValue(m_colorDraft.workpieceTransparency * 100.0);
+    m_spMachineTransparency->setValue(m_colorDraft.machineTransparency * 100.0);
     styleColorButton(m_btnSelectionColor, m_colorDraft.selectionColor);
     styleColorButton(m_btnHoverColor, m_colorDraft.hoverColor);
     styleColorButton(m_btnTreeSelectionColor, m_colorDraft.treeSelectionColor);
@@ -1183,6 +1200,8 @@ bool DialogOptions::applyChanges()
     m_renderDraft = collectProfileFromUi(m_renderControls);
     m_colorDraft.cadBackgroundColor = m_colorDraft.backgroundColor;
     m_colorDraft.camBackgroundColor = m_colorDraft.backgroundColor;
+    m_colorDraft.workpieceTransparency = m_spWorkpieceTransparency->value() / 100.0;
+    m_colorDraft.machineTransparency = m_spMachineTransparency->value() / 100.0;
     m_colorDraft.highlightDisplayMode = m_cbHighlightMode->currentData().toInt();
     m_colorDraft.highlightLineWidth = m_spHighlightLineWidth->value();
 
@@ -1233,6 +1252,12 @@ bool DialogOptions::applyChanges()
 
     settings->cadViewRendering = m_renderDraft;
     settings->camViewRendering = m_renderDraft;
+    if (cadDefaultDirty || camDefaultDirty) {
+        settings->viewState.displayMode = m_renderDraft.defaultDisplayMode
+            == StartupDisplayMode::Wireframe ? 0 : 1;
+        settings->viewState.faceBoundary = m_renderDraft.defaultDisplayMode
+            == StartupDisplayMode::ShadedWithEdges;
+    }
     settings->colors = m_colorDraft;
     settings->language = newLanguage;
     settings->theme = newTheme;
@@ -1264,9 +1289,7 @@ bool DialogOptions::applyChanges()
             cadFlags |= lcnc::view::RenderDirtyFlag::Highlight;
             camFlags |= lcnc::view::RenderDirtyFlag::Highlight;
         }
-    // 默认显示模式只作为启动/新 view 默认值保存，不刷新当前 view。
-    Q_UNUSED(cadDefaultDirty);
-    Q_UNUSED(camDefaultDirty);
+        // 默认显示模式会在下次启动或新建 View 时生效，不刷新当前 View。
         if (cadFlags != lcnc::view::RenderDirtyFlags(lcnc::view::RenderDirtyFlag::None)) {
             guiApp->requestApplyRenderingSettings(
                 settings->cadViewRendering, settings->camViewRendering, settings->colors,

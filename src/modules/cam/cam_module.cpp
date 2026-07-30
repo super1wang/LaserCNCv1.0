@@ -63,6 +63,12 @@
 #include <gp_Trsf.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
+#include <AIS_DisplayMode.hxx>
+#include <Aspect_PolygonOffsetMode.hxx>
+#include <Aspect_TypeOfLine.hxx>
+#include <Graphic3d_ZLayerId.hxx>
+#include <Prs3d_Drawer.hxx>
+#include <Prs3d_LineAspect.hxx>
 #include <TDF_LabelSequence.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <TopoDS.hxx>
@@ -5294,6 +5300,9 @@ void CamModule::addMachiningFace(const TopoDS_Face& face)
         }
     }
     m_machiningFaces.push_back(std::move(entry));
+    // An explicit pick must always be visible so the operator can confirm the
+    // growing face set, even when the machining-face tree was hidden earlier.
+    m_machiningFacesVisible = true;
     refreshMachiningFaceDisplay();
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
@@ -5427,10 +5436,28 @@ void CamModule::refreshMachiningFaceDisplay()
         if (entry.face.IsNull()
             || entry.role != lcnc::cam::MachiningFaceRole::MachiningSurface)
             continue;
+        const Quantity_Color highlightColor = entry.manual
+            ? Quantity_Color(1.0, 0.82, 0.0, Quantity_TOC_RGB)
+            : Quantity_Color(0.0, 0.85, 1.0, Quantity_TOC_RGB);
         Handle(AIS_Shape) ais = new AIS_Shape(entry.face);
-        ais->SetColor(entry.manual ? Quantity_NOC_YELLOW : Quantity_NOC_CYAN1);
-        ais->SetTransparency(0.6);
-        ctx->Display(ais, Standard_False);
+        ais->SetDisplayMode(AIS_Shaded);
+        ais->SetColor(highlightColor);
+        ais->SetTransparency(entry.manual ? 0.25 : 0.45);
+        ais->SetPolygonOffsets(Aspect_POM_Fill, -1.0f, -1.0f);
+        if (!ais->Attributes().IsNull()) {
+            ais->Attributes()->SetFaceBoundaryDraw(true);
+            ais->Attributes()->SetFaceBoundaryAspect(
+                new Prs3d_LineAspect(highlightColor, Aspect_TOL_SOLID,
+                                     entry.manual ? 3.0 : 2.0));
+        }
+        ctx->Display(ais, AIS_Shaded, 0, Standard_False);
+        // Draw after the workpiece while inheriting its depth buffer.  This
+        // avoids coplanar Z-fighting without showing back-side faces through
+        // the solid.
+        ctx->SetZLayer(ais, Graphic3d_ZLayerId_Top);
+        // The confirmation overlay is presentation-only; otherwise it can
+        // intercept the next click in a multi-face pick session.
+        ctx->Deactivate(ais);
         m_machiningFaceAis.insert(entry.faceId, ais);
     }
     ctx->UpdateCurrentViewer();

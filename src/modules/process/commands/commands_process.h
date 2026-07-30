@@ -112,6 +112,26 @@ public:
     bool isEnabled() const override;
 };
 
+/// 移动至设置中定义的上料位。
+class CmdMoveToLoadingPosition : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.moveToLoadingPosition";
+    explicit CmdMoveToLoadingPosition(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 移动至设置中定义的下料位。
+class CmdMoveToBlankingPosition : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.moveToBlankingPosition";
+    explicit CmdMoveToBlankingPosition(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
 /// 异步连接当前已启用的全部外设（运动控制器、激光器等）。
 class CmdConnectDevices : public CommandBase {
     Q_OBJECT
