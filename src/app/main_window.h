@@ -1,9 +1,9 @@
 #pragma once
 
 #include <SARibbonMainWindow.h>
-#include <QHash>
 #include <QSet>
 #include <cstdint>
+#include <memory>
 #include "core/project/project_types.h"
 #include "app/project_explorer_model.h"
 
@@ -18,7 +18,12 @@ class WidgetToolpathPanel;
 class DialogTaskManager;
 namespace lcnc::cad::ui { class WidgetCadTaskPanel; }
 namespace lcnc::cam::ui { class DialogAxisCalibrationWizard; }
-namespace lcnc::app { class StartGuideWidget; }
+namespace lcnc::app {
+class ProjectExplorerController;
+class StartGuideWidget;
+class ViewStateController;
+class WorkspacePresenter;
+}
 class GraphicsScene;
 class QStackedWidget;
 class QSplitter;
@@ -159,7 +164,7 @@ private:
     WidgetMachineTree* m_machineTree{nullptr};
     WidgetOccView*     m_occView{nullptr};        ///< Active OCC viewport; use occView() at call time.
     WidgetOccView*     m_defaultOccView{nullptr};
-    QHash<ProjectWorkspaceId, WidgetOccView*> m_workspaceOccViews;
+    std::unique_ptr<lcnc::app::WorkspacePresenter> m_workspacePresenter;
     QStackedWidget*    m_rightStack{nullptr};
     QTabWidget*        m_camRightTabs{nullptr};   // CAM ribbon 右栏：机床面板 / 刀路参数面板 两个 tab
     WidgetMachinePanel*   m_machinePanel{nullptr};
@@ -180,6 +185,8 @@ private:
     QString m_pendingCalibrationTarget;
     lcnc::cam::ui::DialogAxisCalibrationWizard* m_axisCalibWizard{nullptr};
     lcnc::app::ProjectExplorerSnapshot m_projectExplorerSnapshot;
+    std::unique_ptr<lcnc::app::ProjectExplorerController> m_projectExplorerController;
+    std::unique_ptr<lcnc::app::ViewStateController> m_viewStateController;
     bool m_machineWorkspaceActive{false};
     bool m_blockProjectExplorerSignals{false};
     bool m_skipNextSourceRecent{false};

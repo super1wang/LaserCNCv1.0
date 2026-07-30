@@ -14,7 +14,7 @@
 #include <TDF_LabelSequence.hxx>
 #include <TopoDS_Shape.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
-#include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_Colortool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 
 namespace lcnc { class LcncProjectManager; }

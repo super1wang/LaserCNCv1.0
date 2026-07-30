@@ -83,7 +83,7 @@ toml::value writeParameters(const QVariantMap& parameters)
     return result;
 }
 
-ProcessNode readNode(const toml::value& value, bool legacy)
+ProcessNode readNode(const toml::value& value)
 {
     ProcessNode node;
     if (!value.is_table())
@@ -92,30 +92,19 @@ ProcessNode readNode(const toml::value& value, bool legacy)
     const auto& table = value.as_table();
     const QString typeText = tableString(table, "type", QStringLiteral("Base"));
     const QString stateText = tableString(table, "state", QStringLiteral("Enable"));
-    const QString fallbackName = legacy ? typeText : defaultProcessNodeName(processNodeTypeFromString(typeText));
-    const QString name = legacy
-        ? tableString(table, "label", fallbackName)
-        : tableString(table, "name", fallbackName);
+    const QString fallbackName = defaultProcessNodeName(processNodeTypeFromString(typeText));
+    const QString name = tableString(table, "name", fallbackName);
 
     node.id = tableString(table, "id", createProcessNodeId());
     node.type = processNodeTypeFromString(typeText);
     node.name = name;
     node.state = processNodeStateFromString(stateText);
-    node.enabled = legacy
-        ? node.state != ProcessNodeState::Disabled
-        : tableBool(table, "enabled", node.state != ProcessNodeState::Disabled);
+    node.enabled = tableBool(table, "enabled", node.state != ProcessNodeState::Disabled);
     node.parameters = readParameters(table);
 
-    if (legacy) {
-        const QString info = tableString(table, "info");
-        if (!info.isEmpty())
-            node.parameters.insert(QStringLiteral("info"), info);
-    }
-
-    const char* childKey = legacy ? "children" : "children";
-    if (table.count(childKey) && table.at(childKey).is_array()) {
-        for (const toml::value& childValue : table.at(childKey).as_array())
-            node.children.append(readNode(childValue, legacy));
+    if (table.count("children") && table.at("children").is_array()) {
+        for (const toml::value& childValue : table.at("children").as_array())
+            node.children.append(readNode(childValue));
     }
     return node;
 }
@@ -137,32 +126,14 @@ toml::value writeNode(const ProcessNode& node)
     return value;
 }
 
-toml::value writeLegacyNode(const ProcessNode& node)
-{
-    toml::value value(toml::table{});
-    value["id"] = node.id.toStdString();
-    value["type"] = processNodeTypeToString(node.type).toStdString();
-    value["state"] = node.enabled
-        ? processNodeStateToString(node.state).toStdString()
-        : std::string("Disable");
-    value["label"] = node.name.toStdString();
-    value["info"] = node.parameters.value(QStringLiteral("info")).toString().toStdString();
-
-    toml::array children;
-    for (const ProcessNode& child : node.children)
-        children.push_back(writeLegacyNode(child));
-    value["children"] = children;
-    return value;
-}
-
-bool readNodesFromArray(const toml::value& arrayValue, bool legacy, QVector<ProcessNode>& output)
+bool readNodesFromArray(const toml::value& arrayValue, QVector<ProcessNode>& output)
 {
     if (!arrayValue.is_array())
         return false;
 
     output.clear();
     for (const toml::value& nodeValue : arrayValue.as_array())
-        output.append(readNode(nodeValue, legacy));
+        output.append(readNode(nodeValue));
     return true;
 }
 
@@ -218,13 +189,13 @@ bool ProcessFlowStore::loadFromToml(const toml::value& root,
     }
 
     const auto& process = root.at("Process").as_table();
+    if (!process.count("schemaVersion") || !process.at("schemaVersion").is_integer()
+        || process.at("schemaVersion").as_integer() != SchemaVersion) {
+        setError(errorMessage, QStringLiteral("Unsupported Process workflow schema"));
+        return false;
+    }
     QVector<ProcessNode> nodes;
-    bool loaded = false;
-
-    if (process.count("nodes"))
-        loaded = readNodesFromArray(process.at("nodes"), false, nodes);
-    if (!loaded && process.count("items"))
-        loaded = readNodesFromArray(process.at("items"), true, nodes);
+    const bool loaded = process.count("nodes") && readNodesFromArray(process.at("nodes"), nodes);
 
     if (!loaded) {
         setError(errorMessage, QStringLiteral("Missing Process nodes"));
@@ -243,14 +214,11 @@ toml::value ProcessFlowStore::toToml(const ProcessFlowDocument& document)
     process["schemaVersion"] = SchemaVersion;
 
     toml::array nodes;
-    toml::array legacyItems;
     for (const ProcessNode& node : document.rootNodes()) {
         nodes.push_back(writeNode(node));
-        legacyItems.push_back(writeLegacyNode(node));
     }
 
     process["nodes"] = nodes;
-    process["items"] = legacyItems;
     root["Process"] = process;
     return root;
 }

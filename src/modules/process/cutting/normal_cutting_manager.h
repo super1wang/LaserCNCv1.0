@@ -1,7 +1,7 @@
 #pragma once
 
 #include "modules/cam/contracts/toolpath_export_dto.h"
-#include "modules/process/Tool/Tool.h"
+#include "modules/process/tool/tool.h"
 #include "modules/process/runtime/process_cancellation_token.h"
 #include "modules/process/toolpath/process_toolpath_service.h"
 
@@ -12,7 +12,7 @@
 #include <memory>
 
 class ProcessModule;
-class Service;
+class ProcessDeviceRuntime;
 
 namespace lcnc::cam { class ICamToolpathProvider; }
 
@@ -46,7 +46,7 @@ class NormalCuttingManager : public QObject
 {
     Q_OBJECT
 public:
-    NormalCuttingManager(Service* service,
+    NormalCuttingManager(ProcessDeviceRuntime* service,
                          std::shared_ptr<lcnc::cam::ICamToolpathProvider> toolpathProvider,
                          ProcessModule* processModule,
                          DeviceCommandQueue* deviceQueue,
@@ -104,7 +104,8 @@ private:
     Tool* resolveTool(const QString& toolName, const QString& layerName, QStringList* warnings);
 
     /// 把一条轮廓喂给 sink。控制器无关。
-    bool executeContour(IMotionCommandSink& sink,
+    bool executeContour(const std::shared_ptr<IMotionCommandSink>& sink,
+                        bool pureSimulation,
                         const CuttingRow& row,
                         ProcessInterruptContext& interrupt,
                         const QString& nodeId,
@@ -112,7 +113,7 @@ private:
                         int total,
                         QString* errorMessage);
 
-    Service* m_service{nullptr};
+    ProcessDeviceRuntime* m_service{nullptr};
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_toolpathProvider;
     ProcessModule* m_processModule{nullptr};
     DeviceCommandQueue* m_deviceQueue{nullptr};

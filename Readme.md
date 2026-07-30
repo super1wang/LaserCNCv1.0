@@ -69,7 +69,7 @@ Debug 运行文件位于 `x64/Debug`，Release 位于 `x64/Release`。两个目�
 
 ## `.lcnc` 工程包
 
-当前 format v4 使用 QuaZip，包含 `project.toml`、`workpiece.xbf`、`cam_toolpath.toml`、`cam_toolpath_points.bin` 和项目工具快照 `tools.toml`。机台模型不属于工程包；manifest 记录软件、机台和算法可追溯信息。桌面端仅打开 v4；旧 v1/v2/v3 工程必须先运行 `lcnc_project_upgrade <input.lcnc> <output.lcnc> [--tools <tools.toml>]`，工具不会覆盖输入文件。升级器会保留源包中的 `tools.toml`；没有快照的旧包必须通过 `--tools` 提供完整快照，不能把全局工具名当作项目参数。
+当前 format v4 使用 QuaZip，包含 `project.toml`、`workpiece.xbf`、`cam_toolpath.toml`、`cam_toolpath_points.bin` 和项目工具快照 `tools.toml`。机台模型不属于工程包；manifest 记录软件、机台和算法可追溯信息。应用和库只打开 v4；旧 v1/v2/v3 工程会被明确拒绝，不在产品内执行迁移、猜测或回退。
 若工程记录的机台构型与当前机台不一致，软件会提示该差异：允许查看和仿真，但会禁止真实加工，直至确认配置后重新保存工程。
 归档保存使用 staging 文件后原子替换，保存失败会保留旧工程包。
 工程包回归测试包含在 `ctest --test-dir build-cmake --build-config Debug --output-on-failure` 中，覆盖 v4 工具快照 round-trip、缺快照拒绝、失败保存不改写既有包，以及实际离线工具的 v1/v2/v3 结构 fixture 升级。

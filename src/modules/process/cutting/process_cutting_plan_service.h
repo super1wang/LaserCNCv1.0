@@ -150,8 +150,7 @@ public:
     };
     QVector<ContourBrief> contoursInLayer(std::uint64_t layerId) const;
 
-    // 项目持久化已全部下沉到 core（lcnc::cam::saveCamToolpath / loadCamToolpath /
-    // migrateLegacyProcessCuttingPlan，由 LcncProjectManager 统一调度）。本服务不再做项目文件 IO。
+    // Project persistence is owned by the core package services; this service performs no project file I/O.
 
     /// 供 ProcessModule 把 CAM LayerManager 的 Qt 信号桥接到本服务的
     /// planChanged/manualOrderChanged。仅由 ProcessModule 调用。

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -23,33 +24,30 @@ namespace lcnc::cad_algo {
 
 double minDistance(const TopoDS_Shape& a, const TopoDS_Shape& b)
 {
-    if (a.IsNull() || b.IsNull()) return -1.0;
-    try {
-        BRepExtrema_DistShapeShape dss(a, b);
-        dss.Perform();
-        if (!dss.IsDone()) return -1.0;
-        return dss.Value();
-    } catch (const Standard_Failure&) {
-        return -1.0;
-    }
+    if (a.IsNull() || b.IsNull())
+        throw std::invalid_argument("Distance input shape is null");
+    BRepExtrema_DistShapeShape distance(a, b);
+    distance.Perform();
+    if (!distance.IsDone())
+        throw Standard_Failure("Distance calculation failed");
+    return distance.Value();
 }
 
 gp_Vec firstFaceNormal(const TopoDS_Shape& shape)
 {
-    if (shape.IsNull()) return {};
-    try {
-        TopExp_Explorer ex(shape, TopAbs_FACE);
-        if (!ex.More()) return {};
-        const TopoDS_Face& face = TopoDS::Face(ex.Current());
-        BRepAdaptor_Surface surf(face);
-        const double u = 0.5 * (surf.FirstUParameter() + surf.LastUParameter());
-        const double v = 0.5 * (surf.FirstVParameter() + surf.LastVParameter());
-        GeomLProp_SLProps props(surf.Surface().Surface(), u, v, 1, 1e-6);
-        if (!props.IsNormalDefined()) return {};
-        return gp_Vec(props.Normal());
-    } catch (const Standard_Failure&) {
+    if (shape.IsNull())
+        throw std::invalid_argument("Normal input shape is null");
+    TopExp_Explorer explorer(shape, TopAbs_FACE);
+    if (!explorer.More())
         return {};
-    }
+    const TopoDS_Face& face = TopoDS::Face(explorer.Current());
+    BRepAdaptor_Surface surface(face);
+    const double u = 0.5 * (surface.FirstUParameter() + surface.LastUParameter());
+    const double v = 0.5 * (surface.FirstVParameter() + surface.LastVParameter());
+    GeomLProp_SLProps properties(surface.Surface().Surface(), u, v, 1, 1e-6);
+    if (!properties.IsNormalDefined())
+        return {};
+    return gp_Vec(properties.Normal());
 }
 
 double angleBetween(const gp_Vec& a, const gp_Vec& b)
@@ -64,14 +62,11 @@ double angleBetween(const gp_Vec& a, const gp_Vec& b)
 
 double surfaceArea(const TopoDS_Shape& shape)
 {
-    if (shape.IsNull()) return 0.0;
-    try {
-        GProp_GProps props;
-        BRepGProp::SurfaceProperties(shape, props);
-        return props.Mass();
-    } catch (const Standard_Failure&) {
-        return 0.0;
-    }
+    if (shape.IsNull())
+        throw std::invalid_argument("Surface-area input shape is null");
+    GProp_GProps properties;
+    BRepGProp::SurfaceProperties(shape, properties);
+    return properties.Mass();
 }
 
 } // namespace lcnc::cad_algo

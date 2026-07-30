@@ -4180,6 +4180,10 @@ continue?</source>
         <translation>暂停</translation>
     </message>
     <message>
+        <source>Stopped</source>
+        <translation>已停止</translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>错误</translation>
     </message>
@@ -5649,6 +5653,10 @@ continue?</source>
         <translation>运行中</translation>
     </message>
     <message>
+        <source>Stopped</source>
+        <translation>已停止</translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>错误</translation>
     </message>
@@ -6025,8 +6033,8 @@ continue?</source>
         <translation>浅色</translation>
     </message>
     <message>
-        <source>Dark (in development)</source>
-        <translation>深色（开发中）</translation>
+        <source>Dark</source>
+        <translation>深色</translation>
     </message>
     <message>
         <source>Theme:</source>

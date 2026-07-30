@@ -15,17 +15,18 @@
 #include "core/task/task_manager.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/i_process_facade.h"
+#include "modules/process/runtime/process_run_coordinator.h"
 #include "modules/process/steps/process_step_context.h"
 #include "modules/process/workflow/process_flow_document.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
 
 class QTimer;
-class Service;
+class ProcessDeviceRuntime;
 
 namespace lcnc::process {
 class CallbackProcessCuttingService;
-class LegacyProcessIoService;
-class LegacyProcessMotionService;
+class ProcessIoWorkflowService;
+class ProcessMotionWorkflowService;
 class NormalCuttingManager;
 class ProcessCuttingPlanService;
 class ProcessMonitorService;
@@ -43,8 +44,8 @@ class MachineConfigurationService;
 /**
  * @brief Process module — manages execution process, peripherals, and parameters.
  *
- * 使用 System/Service 作为现有设备适配器，参数界面由动态属性表提供。
- * 运动指令统一走 service->GetMotionControl()（仿真模式下由 MCFactory
+ * 使用 System/ProcessDeviceRuntime 作为现有设备适配器，参数界面由动态属性表提供。
+ * 运动指令统一走 service->motionControl()（仿真模式下由 MCFactory
  * 返回 SimulatorCMHP / ACS 仿真器）。
  */
 /**
@@ -120,7 +121,7 @@ public:
 
     lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
     const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
-    Service* service() const { return m_service.get(); }
+    ProcessDeviceRuntime* service() const { return m_service.get(); }
     lcnc::process::ProcessSettingsService* settingsService() const { return m_settingsService.get(); }
     QString statusMessage() const override;
 
@@ -187,7 +188,6 @@ private:
 
     void initializeAxisPositions();
     void initializeAxisEnabledStates();
-    [[nodiscard]] bool triggerSafeStopOutputs();
     void clearSafeOutputCache();
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
@@ -212,6 +212,7 @@ private:
     bool                  m_preflightInFlight{false};
     std::uint64_t         m_runRequestGeneration{0};
     State                 m_state{State::Idle};
+    lcnc::process::ProcessRunCoordinator m_runCoordinator;
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, double> m_axisPositions;
     QMap<QString, bool>   m_axisEnabled;
@@ -228,21 +229,21 @@ private:
     lcnc::IKernel*        m_kernel{nullptr};
     lcnc::process::ProcessFlowDocument m_processFlowDocument;
     lcnc::process::ProcessStepContext m_stepContext;
-    // Background connect/disconnect/home tasks retain a shared Service lease so
+    // Background connect/disconnect/home tasks retain a shared ProcessDeviceRuntime lease so
     // a bounded module shutdown cannot destroy vendor objects while an SDK call
     // is still returning.
     std::unique_ptr<lcnc::process::ProcessSettingsService> m_settingsService;
-    // Must outlive Service and every controller which borrows these runtime facts.
+    // Must outlive ProcessDeviceRuntime and every controller which borrows these runtime facts.
     lcnc::process::ProcessRuntimeConfiguration m_runtimeConfiguration;
-    // Declared before Service so reverse member destruction releases the
-    // Service (which borrows this settings object) first.
-    std::shared_ptr<Service> m_service;
+    // Declared before ProcessDeviceRuntime so reverse member destruction releases the
+    // ProcessDeviceRuntime (which borrows this settings object) first.
+    std::shared_ptr<ProcessDeviceRuntime> m_service;
     // Serializes all newly migrated vendor device operations on one dedicated
-    // thread. Service ownership remains here until the remaining call paths
+    // thread. ProcessDeviceRuntime ownership remains here until the remaining call paths
     // have moved behind this boundary.
     std::unique_ptr<lcnc::process::DeviceCommandQueue> m_deviceCommandQueue;
-    std::unique_ptr<lcnc::process::LegacyProcessMotionService> m_motionStepService;
-    std::unique_ptr<lcnc::process::LegacyProcessIoService> m_ioStepService;
+    std::unique_ptr<lcnc::process::ProcessMotionWorkflowService> m_motionStepService;
+    std::unique_ptr<lcnc::process::ProcessIoWorkflowService> m_ioStepService;
     std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;
     std::unique_ptr<lcnc::process::ProcessCuttingPlanService> m_cuttingPlanService;
     std::unique_ptr<lcnc::process::NormalCuttingManager> m_normalCuttingManager;

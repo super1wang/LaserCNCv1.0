@@ -47,7 +47,7 @@ ProcessModule* processModule()
 CmdNewProcess::CmdNewProcess(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：新建流程
-    auto* a = new QAction(QIcon(":/icons/new_process.svg"), tr("Create new process"), this);
+    auto* a = new QAction(QIcon("themeicons:new_process.svg"), tr("Create new process"), this);
     // 中文翻译：清空当前流程树并创建新流程
     a->setStatusTip(tr("Clear the current process tree and create a new process"));
     setAction(a);
@@ -66,7 +66,7 @@ void CmdNewProcess::execute()
 CmdLoadProcess::CmdLoadProcess(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：加载流程
-    auto* a = new QAction(QIcon(":/icons/open_process.svg"), tr("Loading process"), this);
+    auto* a = new QAction(QIcon("themeicons:open_process.svg"), tr("Loading process"), this);
     // 中文翻译：从 TOML 文件加载流程树
     a->setStatusTip(tr("Load process tree from TOML file"));
     setAction(a);
@@ -96,7 +96,7 @@ void CmdLoadProcess::execute()
 CmdSaveProcess::CmdSaveProcess(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：保存流程
-    auto* a = new QAction(QIcon(":/icons/save_process.svg"), tr("Save process"), this);
+    auto* a = new QAction(QIcon("themeicons:save_process.svg"), tr("Save process"), this);
     // 中文翻译：保存当前流程树为 TOML 文件
     a->setStatusTip(tr("Save the current process tree as a TOML file"));
     setAction(a);
@@ -126,7 +126,7 @@ void CmdSaveProcess::execute()
 CmdOpenProcessSettings::CmdOpenProcessSettings(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：设置
-    auto* a = new QAction(QIcon(":/icons/settings.svg"), tr("settings"), this);
+    auto* a = new QAction(QIcon("themeicons:settings.svg"), tr("settings"), this);
     // 中文翻译：打开外设和加工参数设置
     a->setStatusTip(tr("Open peripherals and processing parameter settings"));
     setAction(a);
@@ -164,7 +164,7 @@ void CmdOpenProcessSettings::execute()
 CmdRunStart::CmdRunStart(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：运行
-    auto* a = new QAction(QIcon(":/icons/start.svg"), tr("run"), this);
+    auto* a = new QAction(QIcon("themeicons:start.svg"), tr("run"), this);
     a->setShortcut(QKeySequence(Qt::Key_F5));
     // 中文翻译：启动加工运行（仿真或控制器）
     a->setStatusTip(tr("Start a machining run (simulation or controller)"));
@@ -185,7 +185,7 @@ void CmdRunStart::execute()
 CmdRunPause::CmdRunPause(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：暂停
-    auto* a = new QAction(QIcon(":/icons/pause.svg"), tr("pause"), this);
+    auto* a = new QAction(QIcon("themeicons:pause.svg"), tr("pause"), this);
     // 中文翻译：暂停当前加工运行
     a->setStatusTip(tr("Pause current processing run"));
     setAction(a);
@@ -204,7 +204,7 @@ void CmdRunPause::execute()
 CmdRunStop::CmdRunStop(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：停止
-    auto* a = new QAction(QIcon(":/icons/stop.svg"), tr("stop"), this);
+    auto* a = new QAction(QIcon("themeicons:stop.svg"), tr("stop"), this);
     // 中文翻译：停止当前加工运行
     a->setStatusTip(tr("Stop current processing run"));
     setAction(a);
@@ -225,7 +225,7 @@ void CmdRunStop::execute()
 CmdEmergencyStop::CmdEmergencyStop(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：急停
-    auto* a = new QAction(QIcon(":/icons/emergency_stop.svg"), tr("emergency stop"), this);
+    auto* a = new QAction(QIcon("themeicons:emergency_stop.svg"), tr("emergency stop"), this);
     // 中文翻译：立即触发急停
     a->setStatusTip(tr("Trigger emergency stop immediately"));
     setAction(a);
@@ -244,7 +244,7 @@ void CmdEmergencyStop::execute()
 CmdResetEmergencyStop::CmdResetEmergencyStop(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：复位急停
-    auto* a = new QAction(QIcon(":/icons/reset.svg"), tr("Reset emergency stop"), this);
+    auto* a = new QAction(QIcon("themeicons:reset.svg"), tr("Reset emergency stop"), this);
     // 中文翻译：解除急停状态并恢复 Idle
     a->setStatusTip(tr("Release the emergency stop state and resume Idle"));
     setAction(a);
@@ -263,7 +263,7 @@ void CmdResetEmergencyStop::execute()
 CmdHome::CmdHome(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：回零
-    auto* a = new QAction(QIcon(":/icons/home.svg"), tr("Return to zero"), this);
+    auto* a = new QAction(QIcon("themeicons:home.svg"), tr("Return to zero"), this);
     // 中文翻译：按 Z 轴优先顺序回零
     a->setStatusTip(tr("Return to zero according to Z axis priority order"));
     setAction(a);
@@ -283,7 +283,7 @@ void CmdHome::execute()
 CmdMoveToLoadingPosition::CmdMoveToLoadingPosition(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：上料位
-    auto* a = new QAction(QIcon(":/icons/move.svg"), tr("Loading position"), this);
+    auto* a = new QAction(QIcon("themeicons:move.svg"), tr("Loading position"), this);
     // 中文翻译：移动至设置中定义的上料位
     a->setStatusTip(tr("Move to the loading level defined in the settings"));
     setAction(a);
@@ -303,7 +303,7 @@ void CmdMoveToLoadingPosition::execute()
 CmdMoveToBlankingPosition::CmdMoveToBlankingPosition(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：下料位
-    auto* a = new QAction(QIcon(":/icons/move.svg"), tr("Unloading position"), this);
+    auto* a = new QAction(QIcon("themeicons:move.svg"), tr("Unloading position"), this);
     // 中文翻译：移动至设置中定义的下料位
     a->setStatusTip(tr("Move to the blanking position defined in the settings"));
     setAction(a);
@@ -323,7 +323,7 @@ void CmdMoveToBlankingPosition::execute()
 CmdConnectDevices::CmdConnectDevices(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：连接设备
-    auto* a = new QAction(QIcon(":/icons/connect.svg"), tr("Connect devices"), this);
+    auto* a = new QAction(QIcon("themeicons:connect.svg"), tr("Connect devices"), this);
     // 中文翻译：异步连接全部已配置外设（运动控制器、激光器等）
     a->setStatusTip(tr("Asynchronously connect all configured peripherals (motion controllers, lasers, etc.)"));
     setAction(a);
@@ -344,7 +344,7 @@ void CmdConnectDevices::execute()
 CmdDisconnectDevices::CmdDisconnectDevices(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：断开设备
-    auto* a = new QAction(QIcon(":/icons/disconnect.svg"), tr("Disconnect device"), this);
+    auto* a = new QAction(QIcon("themeicons:disconnect.svg"), tr("Disconnect device"), this);
     // 中文翻译：异步断开全部已连接外设
     a->setStatusTip(tr("Asynchronously disconnect all connected peripherals"));
     setAction(a);
@@ -364,7 +364,7 @@ CmdManualAppendSelectedToCuttingOrder::CmdManualAppendSelectedToCuttingOrder(IAp
     : CommandBase(ctx)
 {
     // 中文翻译：手动设置加工顺序
-    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("Manually set processing sequence"), this);
+    auto* a = new QAction(QIcon("themeicons:cutting_plan.svg"), tr("Manually set processing sequence"), this);
     // 中文翻译：将当前选中的轮廓按选择顺序追加到切割链表
     a->setStatusTip(tr("Append the currently selected contour to the cutting list in the order of selection"));
     setAction(a);
@@ -420,7 +420,7 @@ void CmdManualAppendSelectedToCuttingOrder::execute()
 CmdAutoSortCuttingOrder::CmdAutoSortCuttingOrder(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：自动设置加工顺序
-    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("Automatically set processing sequence"), this);
+    auto* a = new QAction(QIcon("themeicons:cutting_plan.svg"), tr("Automatically set processing sequence"), this);
     // 中文翻译：若当前已选轮廓，则仅对选中轮廓按当前轴模式自动规划；否则对全部轮廓自动规划
     a->setStatusTip(tr("If the contour is currently selected, only the selected contour will be automatically planned according to the current axis mode; otherwise, all contours will be automatically planned."));
     setAction(a);
@@ -464,7 +464,7 @@ void CmdAutoSortCuttingOrder::execute()
 CmdToggleTravelPath::CmdToggleTravelPath(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：切割路径显示
-    auto* a = new QAction(QIcon(":/icons/cutting_plan.svg"), tr("Cutting path display"), this);
+    auto* a = new QAction(QIcon("themeicons:cutting_plan.svg"), tr("Cutting path display"), this);
     // 中文翻译：在 3D 视图中用虚线显示相邻轮廓间的空程路径
     a->setStatusTip(tr("Shows the free path between adjacent contours as a dashed line in the 3D view"));
     a->setCheckable(true);

@@ -15,7 +15,7 @@
  */
 
 #include "axis_map.h"
-#include "modules/process/Tool/Tool.h"
+#include "modules/process/tool/tool.h"
 #include "modules/process/runtime/machine_pose5.h"
 #include "modules/process/runtime/motion_params.h"
 

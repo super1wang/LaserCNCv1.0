@@ -4,8 +4,6 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax3.hxx>
 
-class QString;
-
 namespace lcnc::cad_algo {
 
 /**
@@ -36,24 +34,21 @@ struct SketchPlane {
 TopoDS_Wire makeRectangleWire(const SketchPlane& plane,
                               double width,
                               double height,
-                              SketchPoint2d center = {},
-                              QString* errMsg = nullptr);
+                              SketchPoint2d center = {});
 
 /**
  * @brief Build a circular sketch wire on @p plane.
  */
 TopoDS_Wire makeCircleWire(const SketchPlane& plane,
                            double radius,
-                           SketchPoint2d center = {},
-                           QString* errMsg = nullptr);
+                           SketchPoint2d center = {});
 
 /**
  * @brief Build a single open straight-segment wire between two 2D points.
  */
 TopoDS_Wire makeLineWire(const SketchPlane& plane,
                          SketchPoint2d start,
-                         SketchPoint2d end,
-                         QString* errMsg = nullptr);
+                         SketchPoint2d end);
 
 /**
  * @brief Build a circular arc wire defined by start, mid and end 2D points.
@@ -61,8 +56,7 @@ TopoDS_Wire makeLineWire(const SketchPlane& plane,
 TopoDS_Wire makeArcWire(const SketchPlane& plane,
                         SketchPoint2d start,
                         SketchPoint2d mid,
-                        SketchPoint2d end,
-                        QString* errMsg = nullptr);
+                        SketchPoint2d end);
 
 /**
  * @brief Build a closed regular polygon wire inscribed in @p radius.
@@ -70,12 +64,11 @@ TopoDS_Wire makeArcWire(const SketchPlane& plane,
 TopoDS_Wire makePolygonWire(const SketchPlane& plane,
                             int sides,
                             double radius,
-                            SketchPoint2d center = {},
-                            QString* errMsg = nullptr);
+                            SketchPoint2d center = {});
 
 /**
  * @brief Build a planar face from a closed sketch wire.
  */
-TopoDS_Face makeFaceFromWire(const TopoDS_Wire& wire, QString* errMsg = nullptr);
+TopoDS_Face makeFaceFromWire(const TopoDS_Wire& wire);
 
 } // namespace lcnc::cad_algo

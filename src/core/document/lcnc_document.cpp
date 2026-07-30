@@ -7,10 +7,10 @@
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
-#include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_Colortool.hxx>
 #include <TDataStd_Name.hxx>
 #include <TDataStd_Integer.hxx>
-#include <TDF_Tool.hxx>
+#include <TDF_tool.hxx>
 #include <TDF_LabelSequence.hxx>
 #include <TDF_ChildIterator.hxx>
 #include <TCollection_AsciiString.hxx>

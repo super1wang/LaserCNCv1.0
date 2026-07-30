@@ -1,6 +1,6 @@
 #include "core/document/xcaf_utils.h"
 
-#include <TDF_Tool.hxx>
+#include <TDF_tool.hxx>
 #include <TDF_ChildIterator.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <TCollection_AsciiString.hxx>

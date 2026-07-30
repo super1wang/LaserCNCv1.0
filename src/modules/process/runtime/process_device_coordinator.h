@@ -12,7 +12,7 @@ namespace lcnc::process {
  * 已持有租约的流程调用栈中再次关闭输出。
  *
  * 该对象只负责串行化，不拥有供应商对象。供应商对象仍由 Process 的
- * Service 生命周期管理，因此不会在后台读取期间被提前销毁。
+ * ProcessDeviceRuntime 生命周期管理，因此不会在后台读取期间被提前销毁。
  */
 class ProcessDeviceCoordinator final
 {

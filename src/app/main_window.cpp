@@ -4,6 +4,9 @@
 #include "core/services/selection_service.h"
 #include "app/app_context.h"
 #include "app/command_registry.h"
+#include "app/controllers/project_explorer_controller.h"
+#include "app/controllers/view_state_controller.h"
+#include "app/controllers/workspace_presenter.h"
 #include "app/project_explorer_tree_utils.h"
 #include "app/start_guide_widget.h"
 #include "core/command/commands_api.h"
@@ -18,7 +21,7 @@
 #include "modules/cad/ui/widget_cad_task_panel.h"
 #include "modules/cam/ui/ribbon_cam_tab.h"
 #include "modules/process/ui/ribbon_process_tab.h"
-#include "modules/process/Process/qg_processeswidget.h"
+#include "modules/process/ui/process_flow_widget.h"
 #include "view/widget_occ_view.h"
 #include "modules/cam/ui/widget_machine_panel.h"
 #include "modules/cam/ui/widget_machine_tree.h"
@@ -59,7 +62,6 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QHeaderView>
-#include <QScrollBar>
 #include <QStatusBar>
 #include <QLabel>
 #include <QMenu>
@@ -109,55 +111,6 @@ constexpr int kRoleContourIndex = lcnc::app::ProjectExplorerRoles::ContourIndex;
 constexpr int kRoleContourId = lcnc::app::ProjectExplorerRoles::ContourId;
 constexpr int kRoleLayerId = lcnc::app::ProjectExplorerRoles::LayerId;
 using lcnc::app::projectNodeKind;
-
-QString projectTreeNodeKey(const QTreeWidgetItem* item)
-{
-    return item ? item->data(0, kRoleNodeKey).toString() : QString();
-}
-
-QSet<QString> expandedProjectTreeNodeKeys(QTreeWidget* tree)
-{
-    QSet<QString> keys;
-    if (!tree)
-        return keys;
-
-    QTreeWidgetItemIterator it(tree);
-    while (*it) {
-        const QString key = projectTreeNodeKey(*it);
-        if (!key.isEmpty() && (*it)->isExpanded())
-            keys.insert(key);
-        ++it;
-    }
-    return keys;
-}
-
-QTreeWidgetItem* findProjectTreeItemByKey(QTreeWidget* tree, const QString& nodeKey)
-{
-    if (!tree || nodeKey.isEmpty())
-        return nullptr;
-
-    QTreeWidgetItemIterator it(tree);
-    while (*it) {
-        if (projectTreeNodeKey(*it) == nodeKey)
-            return *it;
-        ++it;
-    }
-    return nullptr;
-}
-
-void restoreProjectTreeExpandedState(QTreeWidget* tree, const QSet<QString>& expandedKeys)
-{
-    if (!tree)
-        return;
-
-    QTreeWidgetItemIterator it(tree);
-    while (*it) {
-        const QString key = projectTreeNodeKey(*it);
-        if (!key.isEmpty())
-            (*it)->setExpanded(expandedKeys.contains(key));
-        ++it;
-    }
-}
 
 QString primitiveToolId(int primitiveIndex)
 {
@@ -242,7 +195,7 @@ MainWindow::MainWindow(QWidget* parent)
 {
     // 中文翻译：LaserCNC — 五轴激光加工CAM软件
     setWindowTitle(tr("LaserCNC — five-axis laser processing CAM software"));
-    setWindowIcon(QIcon(":/icons/app_icon.svg"));
+    setWindowIcon(QIcon("themeicons:app_icon.svg"));
     resize(1440, 900);
 
     // Initialise in dependency order
@@ -250,14 +203,18 @@ MainWindow::MainWindow(QWidget* parent)
     createCentralLayout();  // Central splitter — creates m_occView first
     createCommands();       // Commands connect to m_occView (must exist)
     createRibbon();         // Ribbon uses m_cmdContainer (must exist)
-    // SARibbon installs its own stylesheet; apply its native dark theme after
-    // the ribbon hierarchy exists so it does not fall back to the light skin.
+    // SARibbon installs its own stylesheet. Apply the selected native theme
+    // after the ribbon hierarchy exists, then restore the shared tab geometry.
     QTimer::singleShot(0, this, [this] {
-        setRibbonTheme(SARibbonTheme::RibbonThemeDark2);
-        // The native theme's tab caption sits too close to the lower edge in
-        // loose three-row mode.  A local override runs after the theme QSS.
-        ribbonBar()->setStyleSheet(
-            "SARibbonTabBar::tab { padding: 3px 15px 8px; margin: 0 2px; }");
+        const bool lightTheme =
+            qApp->property("lcnc.theme").toString() == QStringLiteral("light");
+        setRibbonTheme(lightTheme
+                           ? SARibbonTheme::RibbonThemeOffice2021Blue
+                           : SARibbonTheme::RibbonThemeDark2);
+        ribbonBar()->setStyleSheet(lightTheme
+            ? "SARibbonTabBar::tab { color:#3D5663; padding:3px 15px 8px; margin:0 2px; }"
+              "SARibbonTabBar::tab:selected { color:#FFFFFF; background:#167A9A; }"
+            : "SARibbonTabBar::tab { padding:3px 15px 8px; margin:0 2px; }");
     });
     createStatusBar();
 
@@ -362,6 +319,11 @@ void MainWindow::createContext()
     // Task manager
     lcnc::Kernel::current().taskManager();
     lcnc::Kernel::current().projectManager()->ensureProject();
+    if (auto* settings = lcnc::Kernel::current().appSettings()) {
+        m_viewStateController = std::make_unique<lcnc::app::ViewStateController>(
+            *settings,
+            [settings] { return settings->saveDefault(); });
+    }
 
     connect(m_appContext->cadModule(), &CadModule::operationFailed,
             this, [this](const QString& title, const QString& message) {
@@ -531,6 +493,8 @@ void MainWindow::create3DView()
     m_defaultOccView = createOccView(m_viewStack);
     m_defaultOccView->attachDefaultScene(m_defaultScene);
     m_viewStack->addWidget(m_defaultOccView);
+    m_workspacePresenter =
+        std::make_unique<lcnc::app::WorkspacePresenter>(m_viewStack, m_defaultOccView);
     m_occView = m_defaultOccView;
 }
 
@@ -688,12 +652,16 @@ WidgetOccView* MainWindow::ensureWorkspaceOccView(ProjectWorkspaceId id)
 {
     if (id == kInvalidProjectWorkspaceId || !m_viewStack)
         return nullptr;
-    if (WidgetOccView* existing = m_workspaceOccViews.value(id, nullptr))
-        return existing;
+    if (m_workspacePresenter) {
+        if (auto* existing =
+                qobject_cast<WidgetOccView*>(m_workspacePresenter->view(id))) {
+            return existing;
+        }
+    }
 
     WidgetOccView* view = createOccView(m_viewStack);
-    m_workspaceOccViews.insert(id, view);
-    m_viewStack->addWidget(view);
+    if (m_workspacePresenter)
+        m_workspacePresenter->registerView(id, view);
     return view;
 }
 
@@ -711,21 +679,21 @@ void MainWindow::activateWorkspaceOccView(ProjectWorkspaceId id, GuiDocument* do
     }
 
     m_occView = view;
-    if (m_viewStack && m_viewStack->currentWidget() != view)
-        m_viewStack->setCurrentWidget(view);
+    if (m_workspacePresenter)
+        (void)m_workspacePresenter->activate(id);
     view->attachDocument(document);
 }
 
 void MainWindow::removeWorkspaceOccView(ProjectWorkspaceId id)
 {
-    WidgetOccView* view = m_workspaceOccViews.take(id);
+    WidgetOccView* view = m_workspacePresenter
+        ? qobject_cast<WidgetOccView*>(m_workspacePresenter->take(id))
+        : nullptr;
     if (!view)
         return;
 
     const bool wasActive = (m_occView == view);
     view->attachDefaultScene(nullptr);
-    if (m_viewStack)
-        m_viewStack->removeWidget(view);
     view->deleteLater();
 
     if (wasActive)
@@ -737,8 +705,8 @@ void MainWindow::showDefaultOccView()
     if (!m_defaultOccView)
         return;
     m_occView = m_defaultOccView;
-    if (m_viewStack && m_viewStack->currentWidget() != m_defaultOccView)
-        m_viewStack->setCurrentWidget(m_defaultOccView);
+    if (m_workspacePresenter)
+        m_workspacePresenter->showDefault();
     m_defaultOccView->attachDefaultScene(m_defaultScene);
 }
 
@@ -750,6 +718,8 @@ void MainWindow::createLeftPanel()
     m_leftTabs->setMaximumWidth(380);
 
     m_projectExplorerTree = new QTreeWidget(this);
+    m_projectExplorerController =
+        std::make_unique<lcnc::app::ProjectExplorerController>(m_projectExplorerTree);
     m_projectExplorerTree->setColumnCount(2);
     // 中文翻译：项目；信息
     m_projectExplorerTree->setHeaderLabels({tr("Project"), tr("information")});
@@ -813,12 +783,12 @@ void MainWindow::createLeftPanel()
                 }
             });
 
-    auto* processWidget = new QG_ProcessesWidget(m_leftTabs);
+    auto* processWidget = new ProcessFlowWidget(m_leftTabs);
     m_processLeftPanel = processWidget;
     if (auto* process = m_appContext->processModule()) {
         processWidget->setFlowDocument(&process->processFlowDocument());
         connect(process, &ProcessModule::processFlowChanged,
-                processWidget, &QG_ProcessesWidget::reloadFlowModel);
+                processWidget, &ProcessFlowWidget::reloadFlowModel);
     }
     // 机台模型树：独立 tab，展示已加载的机台几何结构（按轴分组）。
     m_machineTree = new WidgetMachineTree(m_leftTabs);
@@ -1633,7 +1603,7 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     snapGroup->addAction(snapFace);
     // 中文翻译：抓取
     auto* menuSnap = new QMenu(tr("crawl"), cat);
-    menuSnap->setIcon(QIcon(":/icons/snap.svg"));
+    menuSnap->setIcon(QIcon("themeicons:snap.svg"));
     menuSnap->addAction(snapNone);
     menuSnap->addAction(snapVertex);
     menuSnap->addAction(snapEdge);
@@ -1644,13 +1614,13 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     struct OrientInfo { QString label; QString key; QString iconPath; V3d_TypeOfOrientation orient; };
     const QList<OrientInfo> orients = {
         // 中文翻译：正视
-        { tr("Front"),   "1", QStringLiteral(":/icons/view_front.svg"), V3d_Xpos              },
+        { tr("Front"),   "1", QStringLiteral("themeicons:view_front.svg"), V3d_Xpos              },
         // 中文翻译：俯视
-        { tr("Top"),   "2", QStringLiteral(":/icons/view_top.svg"),   V3d_Zpos              },
+        { tr("Top"),   "2", QStringLiteral("themeicons:view_top.svg"),   V3d_Zpos              },
         // 中文翻译：侧视
-        { tr("Side"),   "3", QStringLiteral(":/icons/view_side.svg"),  V3d_Ypos              },
+        { tr("Side"),   "3", QStringLiteral("themeicons:view_side.svg"),  V3d_Ypos              },
         // 中文翻译：等轴测
-        { tr("Isometric"), "0", QStringLiteral(":/icons/view_iso.svg"),   V3d_XposYnegZpos      },
+        { tr("Isometric"), "0", QStringLiteral("themeicons:view_iso.svg"),   V3d_XposYnegZpos      },
     };
     for (auto& info : orients) {
         auto* act = new QAction(QIcon(info.iconPath), info.label + " [" + info.key + "]", this);
@@ -1696,21 +1666,21 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     // 中文翻译：机台显示
     SARibbonPanel* panelMachineView = cat->addPanel(tr("Machine display"));
     // 中文翻译：旋转轴线
-    m_actRotaryAxisGuides = new QAction(QIcon(":/icons/machine.svg"), tr("axis of rotation"), this);
+    m_actRotaryAxisGuides = new QAction(QIcon("themeicons:machine.svg"), tr("axis of rotation"), this);
     m_actRotaryAxisGuides->setCheckable(true);
     // 中文翻译：显示/隐藏机台 A/C 旋转轴辅助线
     m_actRotaryAxisGuides->setStatusTip(tr("Show/hide machine A/C rotation axis auxiliary line"));
     panelMachineView->addLargeAction(m_actRotaryAxisGuides);
 
     // 中文翻译：模拟刀头
-    m_actCutterHeadGuide = new QAction(QIcon(":/icons/machine.svg"), tr("Simulated cutter head"), this);
+    m_actCutterHeadGuide = new QAction(QIcon("themeicons:machine.svg"), tr("Simulated cutter head"), this);
     m_actCutterHeadGuide->setCheckable(true);
     // 中文翻译：显示/隐藏模拟刀头辅助线和锥形指示
     m_actCutterHeadGuide->setStatusTip(tr("Show/hide simulated tool head guide lines and taper indicators"));
     panelMachineView->addLargeAction(m_actCutterHeadGuide);
 
     // 中文翻译：机台模型
-    m_actMachineModelVisible = new QAction(QIcon(":/icons/machine.svg"), tr("Machine model"), this);
+    m_actMachineModelVisible = new QAction(QIcon("themeicons:machine.svg"), tr("Machine model"), this);
     m_actMachineModelVisible->setCheckable(true);
     // 中文翻译：显示/隐藏机台模型；开启后可在机台节点树中局部显示轴系
     m_actMachineModelVisible->setStatusTip(tr("Show/hide the machine model; after turning it on, the axis system can be partially displayed in the machine node tree"));
@@ -2136,24 +2106,13 @@ void MainWindow::rebuildProjectExplorer()
     if (!m_projectExplorerTree)
         return;
 
-    const QSet<QString> expandedKeys = expandedProjectTreeNodeKeys(m_projectExplorerTree);
-    const QString currentNodeKey = projectTreeNodeKey(m_projectExplorerTree->currentItem());
-    const int scrollValue = m_projectExplorerTree->verticalScrollBar()
-        ? m_projectExplorerTree->verticalScrollBar()->value()
-        : 0;
-
     m_projectExplorerSnapshot = lcnc::app::ProjectExplorerModel::build(
         m_appContext->cadModule(),
         m_appContext->camModule());
 
     m_blockProjectExplorerSignals = true;
-    QSignalBlocker blocker(m_projectExplorerTree);
-    lcnc::app::populateProjectExplorerTree(m_projectExplorerTree, m_projectExplorerSnapshot);
-    restoreProjectTreeExpandedState(m_projectExplorerTree, expandedKeys);
-    if (QTreeWidgetItem* currentItem = findProjectTreeItemByKey(m_projectExplorerTree, currentNodeKey))
-        m_projectExplorerTree->setCurrentItem(currentItem);
-    if (m_projectExplorerTree->verticalScrollBar())
-        m_projectExplorerTree->verticalScrollBar()->setValue(scrollValue);
+    if (m_projectExplorerController)
+        m_projectExplorerController->rebuild(m_projectExplorerSnapshot);
     m_blockProjectExplorerSignals = false;
 
     if (!isMachineViewActive())
@@ -2403,7 +2362,6 @@ void MainWindow::syncMachineWorkspaceUi()
 void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
 {
     ProcessModule* process = m_appContext->processModule();
-    CamModule* cam = m_appContext->camModule();
     LcncDocument* machineDoc = m_appContext->camModule()->machineDocument();
     auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
     const QList<MachineAxisDef> configuredAxes = machineConfig
@@ -2457,38 +2415,30 @@ void MainWindow::syncMachineTreeVisibilityState()
 
 void MainWindow::persistViewDisplayMode(int displayMode, bool faceBoundary)
 {
-    auto* settings = lcnc::Kernel::current().appSettings();
-    if (!settings)
-        return;
-
-    settings->viewState.displayMode = displayMode;
-    settings->viewState.faceBoundary = faceBoundary;
-    settings->saveDefault();
+    if (m_viewStateController)
+        (void)m_viewStateController->persistDisplayMode(displayMode, faceBoundary);
 }
 
 void MainWindow::persistViewToggleState()
 {
-    auto* settings = lcnc::Kernel::current().appSettings();
-    if (!settings)
+    if (!m_viewStateController)
         return;
 
+    bool worldAxesVisible = false;
     if (auto* worldAxes = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleWorldAxes::Name) : nullptr)
-        settings->viewState.worldAxesVisible = worldAxes->isChecked();
-    if (m_actRotaryAxisGuides)
-        settings->viewState.rotaryAxisGuidesVisible = m_actRotaryAxisGuides->isChecked();
-    if (m_actCutterHeadGuide)
-        settings->viewState.cutterHeadGuideVisible = m_actCutterHeadGuide->isChecked();
-    settings->viewState.machineModelVisible = false;
-    settings->saveDefault();
+        worldAxesVisible = worldAxes->isChecked();
+    (void)m_viewStateController->persistToggles(
+        worldAxesVisible,
+        m_actRotaryAxisGuides && m_actRotaryAxisGuides->isChecked(),
+        m_actCutterHeadGuide && m_actCutterHeadGuide->isChecked());
 }
 
 void MainWindow::applyPersistedViewState()
 {
-    auto* settings = lcnc::Kernel::current().appSettings();
-    if (!settings)
+    if (!m_viewStateController)
         return;
 
-    const auto state = settings->viewState;
+    const auto state = m_viewStateController->state();
     QAction* aWire = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleWireframe::Name) : nullptr;
     QAction* aShade = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleShaded::Name) : nullptr;
     QAction* aEdges = m_cmdContainer ? m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name) : nullptr;
@@ -2797,9 +2747,11 @@ void MainWindow::closeEvent(QCloseEvent* e)
     // OCC view from the widget so no Redraw() fires during Qt teardown.
     if (m_defaultOccView)
         m_defaultOccView->attachDefaultScene(nullptr);
-    for (WidgetOccView* view : std::as_const(m_workspaceOccViews)) {
-        if (view)
-            view->attachDefaultScene(nullptr);
+    if (m_workspacePresenter) {
+        for (QWidget* widget : m_workspacePresenter->views()) {
+            if (auto* view = qobject_cast<WidgetOccView*>(widget))
+                view->attachDefaultScene(nullptr);
+        }
     }
 
     // Accept; Qt's parent-child destructor chain cleans up all OCC resources.

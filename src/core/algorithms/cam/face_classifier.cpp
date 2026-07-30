@@ -4,7 +4,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Vertex.hxx>
-#include <BRep_Tool.hxx>
+#include <BRep_tool.hxx>
 #include <BRepTools.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepAdaptor_Curve.hxx>

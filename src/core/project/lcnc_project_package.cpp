@@ -171,15 +171,14 @@ lcnc::LcncProjectManifest prepareSaveManifest(const LcncDocument& workpieceDocum
 
     if (manifest.schema.trimmed().isEmpty())
         manifest.schema = QStringLiteral("lcnc.project");
-    // Every write uses the current format. Older manifests are accepted only by the
-    // standalone upgrader and must not preserve their on-disk format.
+    // Every write uses the sole supported on-disk format.
     manifest.formatVersion = lcnc::LcncProjectManifest::kCurrentFormatVersion;
     if (manifest.projectName.trimmed().isEmpty())
         manifest.projectName = fallbackName;
     if (manifest.documentName.trimmed().isEmpty())
         manifest.documentName = manifest.projectName;
-    if (manifest.projectXcafPath.trimmed().isEmpty())
-        manifest.projectXcafPath = QStringLiteral("project.xbf");
+    if (manifest.workpieceXcafPath.trimmed().isEmpty())
+        manifest.workpieceXcafPath = QStringLiteral("workpiece.xbf");
     if (manifest.camCacheDirectory.trimmed().isEmpty())
         manifest.camCacheDirectory = QStringLiteral("cam/cache");
 
@@ -258,7 +257,6 @@ bool saveXcafSnapshot(const LcncDocument& workpieceDocument,
                       const LcncDocument* camDocument,
                       const QString& xcafPath,
                       const lcnc::ProjectSaveOptions& options,
-                      int formatVersion,
                       QString* errorMsg)
 {
     ensureXcafDrivers();
@@ -272,12 +270,11 @@ bool saveXcafSnapshot(const LcncDocument& workpieceDocument,
     if (options.includeWorkpieceModel)
         exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Workpiece, shapeTool);
     exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Auxiliary, shapeTool);
-    // v3：统一工程文档 —— CAM 轮廓几何(wire)随工程持久化（EntityKind::Cam）；
+    // CAM 轮廓几何(wire)随工程持久化（EntityKind::Cam）；
     // 稠密采样点仍存 cam_toolpath_points.bin。机台不进 XBF（独立参考资产）。
     exportEntityKind(workpieceDocument, LcncDocument::EntityKind::Cam, shapeTool);
     (void)machineDocument;
     (void)camDocument;
-    (void)formatVersion;
 
     const PCDM_StoreStatus status = app->SaveAs(xdeDoc, occPath(xcafPath));
     if (status != PCDM_SS_OK) {
@@ -293,9 +290,10 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
                       LcncDocument* machineDocument,
                       LcncDocument* camDocument,
                       const QString& xcafPath,
-                      int formatVersion,
                       QString* errorMsg)
 {
+    (void)machineDocument;
+    (void)camDocument;
     ensureXcafDrivers();
 
     Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
@@ -316,8 +314,6 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
     const Handle(XCAFDoc_ShapeTool) shapeTool = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
     TDF_LabelSequence labels;
     shapeTool->GetFreeShapes(labels);
-    int migratedMachine = 0;
-    int discardedCam = 0;
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label label = labels.Value(i);
         const TopoDS_Shape shape = shapeTool->GetShape(label);
@@ -325,38 +321,9 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
             continue;
 
         const LcncDocument::EntityKind kind = entityKindFromLabel(label);
-        if (formatVersion >= 3) {
-            // v3: 统一工程文档 —— 工件 + CAM 轮廓同存，按存储的 EntityKind 还原。
-            workpieceDocument.addShapeEntity(shape,
-                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
-                kind);
-        } else if (formatVersion == 2) {
-            // v2: 所有 shape 都属工件（只有 workpiece.xbf，无 CAM 几何）。
-            workpieceDocument.addShapeEntity(shape,
-                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
-                LcncDocument::EntityKind::Workpiece);
-        } else {
-            // v1: 按 kind 分发。
-            LcncDocument* target = &workpieceDocument;
-            LcncDocument::EntityKind targetKind = LcncDocument::EntityKind::Workpiece;
-            if (kind == LcncDocument::EntityKind::Machine && machineDocument) {
-                target = machineDocument;
-                targetKind = LcncDocument::EntityKind::Machine;
-                ++migratedMachine;
-            } else if (kind == LcncDocument::EntityKind::Cam) {
-                // CAM 实体不再需要(Phase C 剥离了 XCAF 镜像)，直接丢弃。
-                ++discardedCam;
-                continue;
-            }
-            target->addShapeEntity(shape,
-                labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
-                targetKind);
-        }
-    }
-    if (migratedMachine > 0 || discardedCam > 0) {
-        LCNC_INFO(lcnc::LogCode::Generic,
-                  "loadXcafSnapshot: v1 migration machine={} cam_discarded={}",
-                  migratedMachine, discardedCam);
+        workpieceDocument.addShapeEntity(shape,
+            labelNameOrFallback(label, QStringLiteral("Shape_%1").arg(i)),
+            kind);
     }
     // Open() registers a temporary document with the XCAF application. All
     // shapes above have been copied into project-owned documents, so retaining
@@ -400,12 +367,10 @@ QString LcncProjectPackage::manifestPath(const QString& path)
     return QDir(packageDirectory(path)).filePath(QStringLiteral("project.toml"));
 }
 
-QString LcncProjectPackage::projectXcafPath(const QString& path,
-                                            const LcncProjectManifest& manifest)
+QString LcncProjectPackage::workpieceXcafPath(const QString& path,
+                                              const LcncProjectManifest& manifest)
 {
-    // v2+ 使用 workpiece.xbf；v1 保持 project.xbf
-    const QString xbf = manifest.formatVersion >= 2 ? manifest.workpieceXcafPath : manifest.projectXcafPath;
-    return QDir(packageDirectory(path)).filePath(xbf);
+    return QDir(packageDirectory(path)).filePath(manifest.workpieceXcafPath);
 }
 
 bool LcncProjectPackage::save(const LcncDocument& document,
@@ -475,9 +440,9 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
         return false;
     }
 
-    const QString xcafPath = projectXcafPath(packagePath, manifest);
+    const QString xcafPath = workpieceXcafPath(packagePath, manifest);
     if (!saveXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, options, manifest.formatVersion, errorMsg)) {
+                          xcafPath, options, errorMsg)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Failed to save .lcnc XCAF snapshot '{}'",
                  xcafPath.toStdString());
@@ -517,13 +482,12 @@ bool LcncProjectPackage::save(const LcncDocument& workpieceDocument,
     if (const auto& extension = packageExtension(); extension.write
         && !extension.write(packagePath, manifest, errorMsg))
         return false;
-    if (manifest.formatVersion >= 4
-        && !QFileInfo::exists(packageDir.filePath(manifest.toolSnapshotPath))) {
+    if (!QFileInfo::exists(packageDir.filePath(manifest.toolSnapshotPath))) {
         if (errorMsg)
             // 中文翻译：v4 工程缺少项目工具快照: %1
-            *errorMsg = QStringLiteral("v4 project is missing project tools snapshot: %1").arg(manifest.toolSnapshotPath);
+            *errorMsg = QStringLiteral("Project is missing required tools snapshot: %1").arg(manifest.toolSnapshotPath);
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "Refusing to save v4 package without tool snapshot path='{}'",
+                 "Refusing to save package without tool snapshot path='{}'",
                  manifest.toolSnapshotPath.toStdString());
         return false;
     }
@@ -558,19 +522,7 @@ bool LcncProjectPackage::load(LcncDocument& workpieceDocument,
                               lcnc::cam::CamDataManager* camData)
 {
     return loadInternal(workpieceDocument, machineDocument, camDocument,
-                        path, result, errorMsg, camData, false);
-}
-
-bool LcncProjectPackage::loadForMigration(LcncDocument& workpieceDocument,
-                                          LcncDocument* machineDocument,
-                                          LcncDocument* camDocument,
-                                          const QString& path,
-                                          ProjectLoadResult* result,
-                                          QString* errorMsg,
-                                          lcnc::cam::CamDataManager* camData)
-{
-    return loadInternal(workpieceDocument, machineDocument, camDocument,
-                        path, result, errorMsg, camData, true);
+                        path, result, errorMsg, camData);
 }
 
 bool LcncProjectPackage::loadInternal(LcncDocument& workpieceDocument,
@@ -579,8 +531,7 @@ bool LcncProjectPackage::loadInternal(LcncDocument& workpieceDocument,
                                       const QString& path,
                                       ProjectLoadResult* result,
                                       QString* errorMsg,
-                                      lcnc::cam::CamDataManager* camData,
-                                      bool allowLegacyFormat)
+                                      lcnc::cam::CamDataManager* camData)
 {
     const QFileInfo inputInfo(path);
     const bool readArchive = isArchiveFile(inputInfo);
@@ -612,24 +563,23 @@ bool LcncProjectPackage::loadInternal(LcncDocument& workpieceDocument,
                  manifestFile.toStdString());
         return false;
     }
-    if (!manifest.validate(errorMsg, allowLegacyFormat)) {
+    if (!manifest.validate(errorMsg)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Invalid .lcnc manifest '{}'",
                  manifestFile.toStdString());
         return false;
     }
-    if (manifest.formatVersion >= 4
-        && !QFileInfo::exists(QDir(packagePath).filePath(manifest.toolSnapshotPath))) {
+    if (!QFileInfo::exists(QDir(packagePath).filePath(manifest.toolSnapshotPath))) {
         if (errorMsg)
             // 中文翻译：项目缺少 v4 工具快照: %1
-            *errorMsg = QStringLiteral("Project is missing v4 tools snapshot: %1").arg(manifest.toolSnapshotPath);
+            *errorMsg = QStringLiteral("Project is missing required tools snapshot: %1").arg(manifest.toolSnapshotPath);
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "Missing required v4 tool snapshot '{}' in package '{}'",
+                 "Missing required tool snapshot '{}' in package '{}'",
                  manifest.toolSnapshotPath.toStdString(), packagePath.toStdString());
         return false;
     }
 
-    const QString xcafPath = projectXcafPath(packagePath, manifest);
+    const QString xcafPath = workpieceXcafPath(packagePath, manifest);
     if (!QFileInfo::exists(xcafPath)) {
         if (errorMsg)
             // 中文翻译：项目缺少 XCAF 数据文件: %1
@@ -640,7 +590,7 @@ bool LcncProjectPackage::loadInternal(LcncDocument& workpieceDocument,
         return false;
     }
     if (!loadXcafSnapshot(workpieceDocument, machineDocument, camDocument,
-                          xcafPath, manifest.formatVersion, errorMsg)) {
+                          xcafPath, errorMsg)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Failed to load .lcnc XCAF snapshot '{}'",
                  xcafPath.toStdString());
@@ -653,12 +603,6 @@ bool LcncProjectPackage::loadInternal(LcncDocument& workpieceDocument,
         if (!lcnc::cam::loadCamToolpath(*camData, packagePath, &camErr))
             LCNC_INFO(lcnc::LogCode::Generic,
                       "No CAM toolpath in package '{}' ({})",
-                      packagePath.toStdString(), camErr.toStdString());
-        // Legacy cutting plans are migration-only input and must never be
-        // consumed by the desktop application.
-        if (allowLegacyFormat && !lcnc::cam::migrateLegacyProcessCuttingPlan(*camData, packagePath, &camErr))
-            LCNC_WARN(lcnc::LogCode::Generic,
-                      "v1 cutting-plan migration failed in '{}': {}",
                       packagePath.toStdString(), camErr.toStdString());
     }
     if (const auto& extension = packageExtension(); extension.read

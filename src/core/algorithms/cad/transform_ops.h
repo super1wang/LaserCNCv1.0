@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QString>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
@@ -18,7 +17,6 @@ struct TransformParams {
 
 /// Build a transformed copy of a shape without mutating document state.
 TopoDS_Shape transformShape(const TopoDS_Shape& shape,
-                            const TransformParams& params,
-                            QString* errMsg = nullptr);
+                            const TransformParams& params);
 
 } // namespace lcnc::cad_algo

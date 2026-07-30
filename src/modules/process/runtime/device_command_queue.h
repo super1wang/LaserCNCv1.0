@@ -8,15 +8,33 @@
 #include <QString>
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
 
 namespace lcnc::process {
 
+using DeviceCommandId = std::uint64_t;
+
+enum class DeviceCommandCompletion {
+    Succeeded,
+    Failed,
+    Superseded,
+    Cancelled,
+    Shutdown,
+    TimedOut,
+};
+
 struct DeviceCommandResult {
     bool success{true};
     QString error;
+    DeviceCommandCompletion completion{DeviceCommandCompletion::Succeeded};
+};
+
+struct DeviceCommandTicket {
+    DeviceCommandId id{0};
+    bool accepted{false};
 };
 
 /**
@@ -45,6 +63,12 @@ public:
                 TaskPriority priority,
                 Completion completion = {},
                 const QString& coalesceKey = {});
+    DeviceCommandTicket submitWithTicket(ResultCommand command,
+                                         TaskPriority priority,
+                                         Completion completion = {},
+                                         const QString& coalesceKey = {});
+    /// Cancels a pending command. Running vendor calls are never interrupted.
+    bool cancel(DeviceCommandId id);
     /**
      * @brief Submit a bounded command and wait outside the GUI thread.
      *
@@ -58,6 +82,8 @@ public:
     bool submitEmergency(Command command);
     bool submitStop(Command command);
     bool submitWorkflow(Command command);
+    /// Rejects new non-Stop work while preserving the safety lane.
+    void beginStopOnly();
     bool shutdown(int timeoutMs = 5000);
 
     bool isWorkerThread() const;
@@ -78,7 +104,9 @@ private:
     };
 
     struct QueuedCommand {
-        Command command;
+        ResultCommand command;
+        Completion completion;
+        DeviceCommandId id{0};
         QString coalesceKey;
     };
 
@@ -87,7 +115,13 @@ private:
         return static_cast<int>(priority);
     }
 
-    bool enqueue(Command command, TaskPriority priority, const QString& coalesceKey);
+    DeviceCommandTicket enqueue(ResultCommand command,
+                                TaskPriority priority,
+                                Completion completion,
+                                const QString& coalesceKey);
+    void markTimedOut(DeviceCommandId id);
+    static DeviceCommandResult completionResult(DeviceCommandCompletion completion,
+                                                QString error = {});
     void runWorker();
 
     mutable QMutex m_mutex;
@@ -95,7 +129,11 @@ private:
     std::array<std::deque<QueuedCommand>, 5> m_commands;
     Qt::HANDLE m_workerThreadId{nullptr};
     bool m_accepting{false};
+    bool m_stopOnly{false};
     bool m_shutdownRequested{false};
+    DeviceCommandId m_activeCommandId{0};
+    DeviceCommandId m_timeoutBarrierId{0};
+    DeviceCommandId m_nextCommandId{1};
     WorkerThread m_thread;
 };
 

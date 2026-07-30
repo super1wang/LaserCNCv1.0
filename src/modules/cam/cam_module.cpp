@@ -7,6 +7,7 @@
 #include "core/project/cam/layer_container.h"
 #include "core/project/cam/layer_manager.h"
 #include "modules/cam/services/machine_axis_detector.h"
+#include "modules/cam/services/toolpath_generation_service.h"
 #include "modules/cam/services/machine_io.h"
 #include "modules/cam/services/reference_pick.h"
 #include "core/machine/machine_workspace.h"
@@ -584,7 +585,7 @@ CamModule::CamModule(QObject* parent)
     , m_travelPathRenderer(std::make_unique<lcnc::view::TravelPathRenderer>())
     , m_camData(lcnc::Kernel::current().projectManager()->camData())
 {
-    // 加载持久化配置（首次启动会自动迁移旧版 CamConfig.json -> cam.toml）。
+    // 加载当前持久化 TOML 配置。
     m_config.loadDefault();
 
     auto* project = lcnc::Kernel::current().projectManager();
@@ -2752,7 +2753,6 @@ bool CamModule::extractContoursFromMachiningFaces()
             switch (entry.role) {
             case lcnc::cam::MachiningFaceRole::MachiningSurface: machiningFaces.push_back(entry.face); break;
             case lcnc::cam::MachiningFaceRole::CrossSection: crossSectionFaces.push_back(entry.face); break;
-            case lcnc::cam::MachiningFaceRole::LegacyOuterSurface: break;
             }
         }
         if (machiningFaces.empty())
@@ -2958,7 +2958,6 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
                     switch (entry.role) {
                     case lcnc::cam::MachiningFaceRole::MachiningSurface: machiningFaces.push_back(entry.face); break;
                     case lcnc::cam::MachiningFaceRole::CrossSection: crossSectionFaces.push_back(entry.face); break;
-                    case lcnc::cam::MachiningFaceRole::LegacyOuterSurface: break;
                     }
                 }
                 if (!machiningFaces.empty()) {
@@ -3612,6 +3611,23 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
         params.selectedMachiningFaces = manualMachiningFaces();
     params.deflection = deflection;
     const std::vector<MachiningFaceEntry> selectedFaceEntries = m_machiningFaces;
+    lcnc::cam::ToolpathGenerationStamp generationStamp;
+    generationStamp.toolpathRevision = sourceRevision;
+    generationStamp.machiningFaceRevision = faceSetRevision;
+    generationStamp.machineSetupRevision = setupRevision;
+    generationStamp.leadInLength = leadInLength;
+    generationStamp.smoothAngle = smoothAngle;
+    generationStamp.deflection = deflection;
+    generationStamp.useFaceClassification = effectiveUseFaceClassification;
+    generationStamp.extractionStrategy = extractionStrategy;
+    generationStamp.contourIds.reserve(toolpathRef().contours().size());
+    for (const auto& contour : toolpathRef().contours())
+        generationStamp.contourIds.push_back(contour.contourId);
+    generationStamp.sources.reserve(static_cast<std::size_t>(workpieceSources.size()));
+    for (const WorkpieceShapeSource& source : workpieceSources) {
+        generationStamp.sources.push_back(
+            {source.workpieceEntry, source.componentIndex, source.shape});
+    }
 
     // Beam direction is workpiece-mount-dependent, so compute it per source on
     // this (main) thread where the kinematics wpc mounts live; the worker only
@@ -3831,9 +3847,9 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
 
     trackOwnedTask(taskId);
     watchTask(this, taskId,
-        [this, taskId, result, sourceRevision, workpieceSources, leadInLength, previousOrder,
-         effectiveUseFaceClassification, smoothAngle, deflection, faceSetRevision,
-         setupRevision, extractionStrategy](bool success) {
+        [this, taskId, result, leadInLength, previousOrder,
+         effectiveUseFaceClassification, smoothAngle, deflection,
+         generationStamp](bool success) {
             releaseOwnedTask(taskId);
             if (!success || !result->ok) {
                 // 中文翻译：全局生成刀路
@@ -3843,13 +3859,6 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 return;
             }
             const QList<WorkpieceShapeSource> currentSources = collectWorkpieceShapes();
-            const bool sourcesUnchanged = currentSources.size() == workpieceSources.size()
-                && std::equal(currentSources.cbegin(), currentSources.cend(), workpieceSources.cbegin(),
-                    [](const WorkpieceShapeSource& current, const WorkpieceShapeSource& original) {
-                        return current.workpieceEntry == original.workpieceEntry
-                            && current.componentIndex == original.componentIndex
-                            && current.shape.IsSame(original.shape);
-                    });
             bool currentEffectiveFaceClassification = m_useFaceClassification;
             if (m_machineConfig) {
                 switch (m_machineConfig->toolpathAlgorithm()) {
@@ -3862,14 +3871,26 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     break;
                 }
             }
-            if (toolpathRevision() != sourceRevision || !sourcesUnchanged
-                || std::abs(m_config.leadInLength() - leadInLength) > 1e-12
-                || std::abs(m_smoothAngle - smoothAngle) > 1e-12
-                || std::abs(m_deflection - deflection) > 1e-12
-                || currentEffectiveFaceClassification != effectiveUseFaceClassification
-                || m_extractionStrategy != extractionStrategy
-                || machiningFaceSetRevision() != faceSetRevision
-                || machineSetupRevision() != setupRevision) {
+            lcnc::cam::ToolpathGenerationStamp currentStamp;
+            currentStamp.toolpathRevision = toolpathRevision();
+            currentStamp.machiningFaceRevision = machiningFaceSetRevision();
+            currentStamp.machineSetupRevision = machineSetupRevision();
+            currentStamp.leadInLength = m_config.leadInLength();
+            currentStamp.smoothAngle = m_smoothAngle;
+            currentStamp.deflection = m_deflection;
+            currentStamp.useFaceClassification = currentEffectiveFaceClassification;
+            currentStamp.extractionStrategy = m_extractionStrategy;
+            const auto& currentContours = toolpathRef().contours();
+            currentStamp.contourIds.reserve(currentContours.size());
+            for (const auto& contour : currentContours)
+                currentStamp.contourIds.push_back(contour.contourId);
+            currentStamp.sources.reserve(static_cast<std::size_t>(currentSources.size()));
+            for (const WorkpieceShapeSource& source : currentSources) {
+                currentStamp.sources.push_back(
+                    {source.workpieceEntry, source.componentIndex, source.shape});
+            }
+            if (!lcnc::cam::ToolpathGenerationService::acceptsResult(
+                    generationStamp, currentStamp, true, false)) {
                 // 中文翻译：全局生成刀路；刀路在计算期间已变更，后台结果已丢弃
                 emit operationFailed(tr("Generate toolpath globally"), tr("The tool path has changed during calculation and the background results have been discarded"));
                 return;
@@ -5176,6 +5197,12 @@ TaskId CamModule::recalcToolpathAsync()
     const auto appliedGlobal = m_camData->appliedGenerationParams();
     const QList<MachineAxisDef> axes = machine->axes();
     const QString configType = machine->configType();
+    // Recalculation works from an immutable contour snapshot.  Do not apply its
+    // result if any project-level toolpath, face-pipeline, or machine setup
+    // input changed while the worker was running.
+    const std::uint64_t capturedToolpathRevision = toolpathRevision();
+    const std::uint64_t capturedFaceRevision = machiningFaceSetRevision();
+    const std::uint64_t capturedSetupRevision = machineSetupRevision();
     const std::uint64_t originalSignature = current.signature;
     const ContourGenerationParams originalPendingParams = current.pendingParams;
     const lcnc::cam::ContourId targetId = currentId;
@@ -5278,7 +5305,8 @@ TaskId CamModule::recalcToolpathAsync()
         });
 
     watchTask(this, taskId,
-        [this, result, targetId, originalSignature, originalPendingParams, sourceShape](bool success) {
+        [this, result, targetId, capturedToolpathRevision, capturedFaceRevision,
+         capturedSetupRevision, originalSignature, originalPendingParams, sourceShape](bool success) {
         const int latestIndex = contourIndexById(targetId);
         if (!success || !result->ok) {
             // 中文翻译：重新计算当前轮廓
@@ -5292,6 +5320,9 @@ TaskId CamModule::recalcToolpathAsync()
             : (toolpathRef().contour(latestIndex).sourceShape.IsNull()
                 ? m_workpieceShape : toolpathRef().contour(latestIndex).sourceShape);
         if (latestIndex < 0 || latestSourceShape.IsNull()
+            || toolpathRevision() != capturedToolpathRevision
+            || machiningFaceSetRevision() != capturedFaceRevision
+            || machineSetupRevision() != capturedSetupRevision
             || toolpathRef().contour(latestIndex).signature != originalSignature
             || !latestSourceShape.IsSame(sourceShape)
             || std::abs(toolpathRef().contour(latestIndex).pendingParams.leadInLength
@@ -5427,7 +5458,6 @@ QList<CamModule::MachiningFaceInfo> CamModule::machiningFacesForTree() const
             case lcnc::cam::MachiningFaceRole::MachiningSurface: return tr("Processing surface");
             // 中文翻译：横截面
             case lcnc::cam::MachiningFaceRole::CrossSection: return tr("cross section");
-            case lcnc::cam::MachiningFaceRole::LegacyOuterSurface: break;
             }
             // 中文翻译：加工面
             return tr("Processing surface");
@@ -6574,4 +6604,3 @@ void CamModule::refreshTravelPath()
     m_travelPathRenderer->updateTransforms(gd, kinematics());
     if (gd->hasView()) gd->view()->Redraw();
 }
-

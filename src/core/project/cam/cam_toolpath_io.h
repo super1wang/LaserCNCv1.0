@@ -32,9 +32,4 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
 /// cache files are absent (treated by callers as "no persisted toolpath").
 bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* errorMsg = nullptr);
 
-/// One-time backward-compat migration: import a pre-unification
-/// process_cutting_plan.toml (v1) into the CAM layer container, then rename it
-/// so the migration does not run again. No-op when the legacy file is absent.
-bool migrateLegacyProcessCuttingPlan(CamDataManager& cam, const QString& packageDir, QString* errorMsg = nullptr);
-
 } // namespace lcnc::cam

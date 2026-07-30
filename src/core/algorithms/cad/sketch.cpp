@@ -5,32 +5,33 @@
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <GC_MakeArcOfCircle.hxx>
-#include <Geom_TrimmedCurve.hxx>
 #include <Standard_Failure.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
-#include <QString>
-
 #include <cmath>
+#include <stdexcept>
 
 namespace lcnc::cad_algo {
 
 namespace {
-void setErr(QString* errMsg, const QString& message)
-{
-    if (errMsg)
-        *errMsg = message;
-}
 
 gp_Pnt toWorld(const SketchPlane& plane, SketchPoint2d point)
 {
-    gp_Pnt p = plane.axes.Location();
-    p.Translate(gp_Vec(plane.axes.XDirection()).Multiplied(point.x));
-    p.Translate(gp_Vec(plane.axes.YDirection()).Multiplied(point.y));
-    return p;
+    gp_Pnt result = plane.axes.Location();
+    result.Translate(gp_Vec(plane.axes.XDirection()).Multiplied(point.x));
+    result.Translate(gp_Vec(plane.axes.YDirection()).Multiplied(point.y));
+    return result;
 }
+
+TopoDS_Wire checkedWire(BRepBuilderAPI_MakeWire& builder, const char* failure)
+{
+    if (!builder.IsDone())
+        throw Standard_Failure(failure);
+    return builder.Wire();
+}
+
 } // namespace
 
 SketchPlane SketchPlane::xy()
@@ -51,183 +52,112 @@ SketchPlane SketchPlane::zx()
 TopoDS_Wire makeRectangleWire(const SketchPlane& plane,
                               double width,
                               double height,
-                              SketchPoint2d center,
-                              QString* errMsg)
+                              SketchPoint2d center)
 {
-    if (width <= 0.0 || height <= 0.0) {
-        setErr(errMsg, QStringLiteral("Rectangle width and height must be > 0"));
-        return {};
-    }
+    if (width <= 0.0 || height <= 0.0)
+        throw std::invalid_argument("Rectangle width and height must be > 0");
 
-    try {
-        const double halfWidth = width * 0.5;
-        const double halfHeight = height * 0.5;
-        BRepBuilderAPI_MakePolygon polygon;
-        polygon.Add(toWorld(plane, {center.x - halfWidth, center.y - halfHeight}));
-        polygon.Add(toWorld(plane, {center.x + halfWidth, center.y - halfHeight}));
-        polygon.Add(toWorld(plane, {center.x + halfWidth, center.y + halfHeight}));
-        polygon.Add(toWorld(plane, {center.x - halfWidth, center.y + halfHeight}));
-        polygon.Close();
-        if (!polygon.IsDone()) {
-            setErr(errMsg, QStringLiteral("Rectangle wire build failed"));
-            return {};
-        }
-        return polygon.Wire();
-    } catch (const Standard_Failure& f) {
-        setErr(errMsg, QString::fromUtf8(f.GetMessageString()));
-        return {};
-    }
+    const double halfWidth = width * 0.5;
+    const double halfHeight = height * 0.5;
+    BRepBuilderAPI_MakePolygon polygon;
+    polygon.Add(toWorld(plane, {center.x - halfWidth, center.y - halfHeight}));
+    polygon.Add(toWorld(plane, {center.x + halfWidth, center.y - halfHeight}));
+    polygon.Add(toWorld(plane, {center.x + halfWidth, center.y + halfHeight}));
+    polygon.Add(toWorld(plane, {center.x - halfWidth, center.y + halfHeight}));
+    polygon.Close();
+    if (!polygon.IsDone())
+        throw Standard_Failure("Rectangle wire build failed");
+    return polygon.Wire();
 }
 
 TopoDS_Wire makeCircleWire(const SketchPlane& plane,
                            double radius,
-                           SketchPoint2d center,
-                           QString* errMsg)
+                           SketchPoint2d center)
 {
-    if (radius <= 0.0) {
-        setErr(errMsg, QStringLiteral("Circle radius must be > 0"));
-        return {};
-    }
+    if (radius <= 0.0)
+        throw std::invalid_argument("Circle radius must be > 0");
 
-    try {
-        gp_Ax2 circleAxes(toWorld(plane, center), plane.axes.Direction(), plane.axes.XDirection());
-        BRepBuilderAPI_MakeEdge edge(gp_Circ(circleAxes, radius));
-        if (!edge.IsDone()) {
-            setErr(errMsg, QStringLiteral("Circle edge build failed"));
-            return {};
-        }
-        BRepBuilderAPI_MakeWire wire(edge.Edge());
-        if (!wire.IsDone()) {
-            setErr(errMsg, QStringLiteral("Circle wire build failed"));
-            return {};
-        }
-        return wire.Wire();
-    } catch (const Standard_Failure& f) {
-        setErr(errMsg, QString::fromUtf8(f.GetMessageString()));
-        return {};
-    }
+    gp_Ax2 circleAxes(toWorld(plane, center), plane.axes.Direction(), plane.axes.XDirection());
+    BRepBuilderAPI_MakeEdge edge(gp_Circ(circleAxes, radius));
+    if (!edge.IsDone())
+        throw Standard_Failure("Circle edge build failed");
+    BRepBuilderAPI_MakeWire wire(edge.Edge());
+    return checkedWire(wire, "Circle wire build failed");
 }
 
-TopoDS_Face makeFaceFromWire(const TopoDS_Wire& wire, QString* errMsg)
+TopoDS_Face makeFaceFromWire(const TopoDS_Wire& wire)
 {
-    if (wire.IsNull()) {
-        setErr(errMsg, QStringLiteral("Sketch wire is null"));
-        return {};
-    }
-
-    try {
-        BRepBuilderAPI_MakeFace face(wire, true);
-        if (!face.IsDone()) {
-            setErr(errMsg, QStringLiteral("Sketch face build failed"));
-            return {};
-        }
-        return face.Face();
-    } catch (const Standard_Failure& f) {
-        setErr(errMsg, QString::fromUtf8(f.GetMessageString()));
-        return {};
-    }
+    if (wire.IsNull())
+        throw std::invalid_argument("Sketch wire is null");
+    BRepBuilderAPI_MakeFace face(wire, true);
+    if (!face.IsDone())
+        throw Standard_Failure("Sketch face build failed");
+    return face.Face();
 }
 
 TopoDS_Wire makeLineWire(const SketchPlane& plane,
                          SketchPoint2d start,
-                         SketchPoint2d end,
-                         QString* errMsg)
+                         SketchPoint2d end)
 {
-    const gp_Pnt p1 = toWorld(plane, start);
-    const gp_Pnt p2 = toWorld(plane, end);
-    if (p1.Distance(p2) <= 1e-9) {
-        setErr(errMsg, QStringLiteral("Line endpoints coincide"));
-        return {};
-    }
+    const gp_Pnt first = toWorld(plane, start);
+    const gp_Pnt second = toWorld(plane, end);
+    if (first.Distance(second) <= 1.0e-9)
+        throw std::invalid_argument("Line endpoints coincide");
 
-    try {
-        BRepBuilderAPI_MakeEdge edge(p1, p2);
-        if (!edge.IsDone()) {
-            setErr(errMsg, QStringLiteral("Line edge build failed"));
-            return {};
-        }
-        BRepBuilderAPI_MakeWire wire(edge.Edge());
-        if (!wire.IsDone()) {
-            setErr(errMsg, QStringLiteral("Line wire build failed"));
-            return {};
-        }
-        return wire.Wire();
-    } catch (const Standard_Failure& f) {
-        setErr(errMsg, QString::fromUtf8(f.GetMessageString()));
-        return {};
-    }
+    BRepBuilderAPI_MakeEdge edge(first, second);
+    if (!edge.IsDone())
+        throw Standard_Failure("Line edge build failed");
+    BRepBuilderAPI_MakeWire wire(edge.Edge());
+    return checkedWire(wire, "Line wire build failed");
 }
 
 TopoDS_Wire makeArcWire(const SketchPlane& plane,
                         SketchPoint2d start,
                         SketchPoint2d mid,
-                        SketchPoint2d end,
-                        QString* errMsg)
+                        SketchPoint2d end)
 {
-    const gp_Pnt p1 = toWorld(plane, start);
-    const gp_Pnt p2 = toWorld(plane, mid);
-    const gp_Pnt p3 = toWorld(plane, end);
-    if (p1.Distance(p3) <= 1e-9 || p1.Distance(p2) <= 1e-9 || p2.Distance(p3) <= 1e-9) {
-        setErr(errMsg, QStringLiteral("Arc points must be distinct"));
-        return {};
+    const gp_Pnt first = toWorld(plane, start);
+    const gp_Pnt middle = toWorld(plane, mid);
+    const gp_Pnt last = toWorld(plane, end);
+    if (first.Distance(last) <= 1.0e-9
+        || first.Distance(middle) <= 1.0e-9
+        || middle.Distance(last) <= 1.0e-9) {
+        throw std::invalid_argument("Arc points must be distinct");
     }
 
-    try {
-        GC_MakeArcOfCircle arcMaker(p1, p2, p3);
-        if (!arcMaker.IsDone()) {
-            setErr(errMsg, QStringLiteral("Arc geometry build failed"));
-            return {};
-        }
-        BRepBuilderAPI_MakeEdge edge(arcMaker.Value());
-        if (!edge.IsDone()) {
-            setErr(errMsg, QStringLiteral("Arc edge build failed"));
-            return {};
-        }
-        BRepBuilderAPI_MakeWire wire(edge.Edge());
-        if (!wire.IsDone()) {
-            setErr(errMsg, QStringLiteral("Arc wire build failed"));
-            return {};
-        }
-        return wire.Wire();
-    } catch (const Standard_Failure& f) {
-        setErr(errMsg, QString::fromUtf8(f.GetMessageString()));
-        return {};
-    }
+    GC_MakeArcOfCircle arc(first, middle, last);
+    if (!arc.IsDone())
+        throw Standard_Failure("Arc geometry build failed");
+    BRepBuilderAPI_MakeEdge edge(arc.Value());
+    if (!edge.IsDone())
+        throw Standard_Failure("Arc edge build failed");
+    BRepBuilderAPI_MakeWire wire(edge.Edge());
+    return checkedWire(wire, "Arc wire build failed");
 }
 
 TopoDS_Wire makePolygonWire(const SketchPlane& plane,
                             int sides,
                             double radius,
-                            SketchPoint2d center,
-                            QString* errMsg)
+                            SketchPoint2d center)
 {
-    if (sides < 3) {
-        setErr(errMsg, QStringLiteral("Polygon must have at least 3 sides"));
-        return {};
-    }
-    if (radius <= 0.0) {
-        setErr(errMsg, QStringLiteral("Polygon radius must be > 0"));
-        return {};
-    }
+    if (sides < 3)
+        throw std::invalid_argument("Polygon must have at least 3 sides");
+    if (radius <= 0.0)
+        throw std::invalid_argument("Polygon radius must be > 0");
 
-    try {
-        BRepBuilderAPI_MakePolygon polygon;
-        for (int i = 0; i < sides; ++i) {
-            const double theta = (2.0 * M_PI * static_cast<double>(i)) / static_cast<double>(sides);
-            polygon.Add(toWorld(plane,
-                                {center.x + radius * std::cos(theta),
-                                 center.y + radius * std::sin(theta)}));
-        }
-        polygon.Close();
-        if (!polygon.IsDone()) {
-            setErr(errMsg, QStringLiteral("Polygon wire build failed"));
-            return {};
-        }
-        return polygon.Wire();
-    } catch (const Standard_Failure& f) {
-        setErr(errMsg, QString::fromUtf8(f.GetMessageString()));
-        return {};
+    constexpr double kPi = 3.14159265358979323846;
+    BRepBuilderAPI_MakePolygon polygon;
+    for (int index = 0; index < sides; ++index) {
+        const double angle =
+            (2.0 * kPi * static_cast<double>(index)) / static_cast<double>(sides);
+        polygon.Add(toWorld(plane,
+                            {center.x + radius * std::cos(angle),
+                             center.y + radius * std::sin(angle)}));
     }
+    polygon.Close();
+    if (!polygon.IsDone())
+        throw Standard_Failure("Polygon wire build failed");
+    return polygon.Wire();
 }
 
 } // namespace lcnc::cad_algo

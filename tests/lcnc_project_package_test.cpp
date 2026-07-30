@@ -6,7 +6,6 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
-#include <QProcess>
 #include <QSaveFile>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -103,7 +102,7 @@ int main(int argc, char* argv[])
                             QString* error) {
             QFile file(QDir(stagingDirectory).filePath(manifest.toolSnapshotPath));
             if (!file.exists())
-                return true; // v1/v2/v3 migration input has no project snapshot.
+                return true;
             if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
                 if (error) *error = QStringLiteral("Cannot read test tool snapshot");
                 return false;
@@ -146,16 +145,7 @@ int main(int argc, char* argv[])
         || QCryptographicHash::hash(originalFile.readAll(), QCryptographicHash::Sha256) != originalDigest)
         return fail(QStringLiteral("failed v4 save modified the existing package"));
 
-    // v1/v2/v3 fixtures intentionally have no tools.toml.  The migration
-    // utility supplies the explicit snapshot and the resulting v4 package
-    // must pass normal desktop loading.
-    const QString suppliedToolsPath = QDir(temporary.path()).filePath(QStringLiteral("supplied-tools.toml"));
-    {
-        QSaveFile suppliedTools(suppliedToolsPath);
-        if (!suppliedTools.open(QIODevice::WriteOnly | QIODevice::Text)
-            || suppliedTools.write(expectedSnapshot) != expectedSnapshot.size() || !suppliedTools.commit())
-            return fail(QStringLiteral("Cannot create supplied migration tools snapshot"));
-    }
+    // Historical packages are intentionally rejected rather than migrated.
     for (const int legacyVersion : {1, 2, 3}) {
         installSnapshotExtension();
         const QString legacyPath = QDir(temporary.path()).filePath(
@@ -163,29 +153,10 @@ int main(int argc, char* argv[])
         if (!writeLegacyFixture(packagePath, legacyPath, legacyVersion, &error))
             return fail(QStringLiteral("v%1 fixture creation failed: %2").arg(legacyVersion).arg(error));
 
-        const QString upgradedPath = QDir(temporary.path()).filePath(
-            QStringLiteral("upgraded-v%1.lcnc").arg(legacyVersion));
-        QProcess upgrader;
-        upgrader.setProgram(QDir(QCoreApplication::applicationDirPath()).filePath(
-            QStringLiteral("lcnc_project_upgrade.exe")));
-        upgrader.setArguments({legacyPath, upgradedPath, QStringLiteral("--tools"), suppliedToolsPath});
-        upgrader.start();
-        if (!upgrader.waitForFinished(30000) || upgrader.exitStatus() != QProcess::NormalExit
-            || upgrader.exitCode() != 0) {
-            return fail(QStringLiteral("v%1 migration tool failed: %2")
-                            .arg(legacyVersion)
-                            .arg(QString::fromLocal8Bit(upgrader.readAllStandardError())));
-        }
-
-        restoredSnapshot.clear();
-        auto upgradedWorkpiece = LcncDocument::createStandalone(40 + legacyVersion, QStringLiteral("Upgraded"));
-        lcnc::ProjectLoadResult upgradedResult;
-        if (!lcnc::LcncProjectPackage::load(*upgradedWorkpiece, nullptr, nullptr,
-                                             upgradedPath, &upgradedResult, &error)
-            || upgradedResult.manifest.formatVersion != lcnc::LcncProjectManifest::kCurrentFormatVersion
-            || restoredSnapshot != expectedSnapshot)
-            return fail(QStringLiteral("v%1 did not upgrade to a self-contained v4 package: %2")
-                            .arg(legacyVersion).arg(error));
+        auto rejectedWorkpiece = LcncDocument::createStandalone(40 + legacyVersion, QStringLiteral("Rejected"));
+        if (lcnc::LcncProjectPackage::load(*rejectedWorkpiece, nullptr, nullptr,
+                                            legacyPath, nullptr, &error))
+            return fail(QStringLiteral("v%1 package was unexpectedly accepted").arg(legacyVersion));
     }
 
     return 0;

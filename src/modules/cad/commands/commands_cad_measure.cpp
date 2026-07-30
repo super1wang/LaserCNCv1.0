@@ -3,6 +3,7 @@
 #include "app/app_command_context.h"
 #include "core/algorithms/cad/measure.h"
 #include "modules/cad/commands/command_helpers.h"
+#include "modules/cad/services/cad_algorithm_boundary.h"
 
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
@@ -22,7 +23,7 @@ using namespace lcnc::cad::commands;
 CmdMeasureDistance::CmdMeasureDistance(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：距离
-    auto* action = new QAction(QIcon(":/icons/measure_dist.svg"), tr("distance"), this);
+    auto* action = new QAction(QIcon("themeicons:measure_dist.svg"), tr("distance"), this);
     // 中文翻译：测量两形体间的最小距离
     action->setStatusTip(tr("Measure the minimum distance between two shapes"));
     setAction(action);
@@ -47,10 +48,16 @@ void CmdMeasureDistance::execute()
     if (!pickTwoEntities(tr("distance measurement"), entities, indexA, indexB, selected))
         return;
 
-    const double distance = lcnc::cad_algo::minDistance(entities[indexA].shape, entities[indexB].shape);
-    if (distance < 0.0) {
+    QString error;
+    const double distance = lcnc::cad::invokeCadAlgorithm(
+        [&] {
+            return lcnc::cad_algo::minDistance(
+                entities[indexA].shape, entities[indexB].shape);
+        },
+        &error);
+    if (!error.isEmpty()) {
         // 中文翻译：距离测量；距离计算失败
-        QMessageBox::critical(nullptr, tr("distance measurement"), tr("Distance calculation failed"));
+        QMessageBox::critical(nullptr, tr("distance measurement"), error);
         return;
     }
     // 中文翻译：距离测量
@@ -65,7 +72,7 @@ void CmdMeasureDistance::execute()
 CmdMeasureAngle::CmdMeasureAngle(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：角度
-    auto* action = new QAction(QIcon(":/icons/measure_angle.svg"), tr("angle"), this);
+    auto* action = new QAction(QIcon("themeicons:measure_angle.svg"), tr("angle"), this);
     // 中文翻译：测量两形体第一个面的法向夹角
     action->setStatusTip(tr("Measure the normal angle between the first faces of the two shapes"));
     setAction(action);
@@ -90,8 +97,19 @@ void CmdMeasureAngle::execute()
     if (!pickTwoEntities(tr("angle measurement"), entities, indexA, indexB, selected))
         return;
 
-    const gp_Vec normalA = lcnc::cad_algo::firstFaceNormal(entities[indexA].shape);
-    const gp_Vec normalB = lcnc::cad_algo::firstFaceNormal(entities[indexB].shape);
+    QString error;
+    const gp_Vec normalA = lcnc::cad::invokeCadAlgorithm(
+        [&] { return lcnc::cad_algo::firstFaceNormal(entities[indexA].shape); },
+        &error);
+    const gp_Vec normalB = error.isEmpty()
+        ? lcnc::cad::invokeCadAlgorithm(
+            [&] { return lcnc::cad_algo::firstFaceNormal(entities[indexB].shape); },
+            &error)
+        : gp_Vec{};
+    if (!error.isEmpty()) {
+        QMessageBox::critical(nullptr, tr("angle measurement"), error);
+        return;
+    }
     const double angleDeg = lcnc::cad_algo::angleBetween(normalA, normalB);
     if (angleDeg < 0.0) {
         // 中文翻译：角度测量；无法获取面法向量
@@ -111,7 +129,7 @@ void CmdMeasureAngle::execute()
 CmdMeasureArea::CmdMeasureArea(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：面积
-    auto* action = new QAction(QIcon(":/icons/measure_area.svg"), tr("area"), this);
+    auto* action = new QAction(QIcon("themeicons:measure_area.svg"), tr("area"), this);
     // 中文翻译：计算形体的表面积
     action->setStatusTip(tr("Calculate the surface area of a shape"));
     setAction(action);
@@ -162,20 +180,32 @@ void CmdMeasureArea::execute()
     }
 
     if (targets.size() == 1) {
-        GProp_GProps props;
-        BRepGProp::SurfaceProperties(targets[0].shape, props);
+        QString error;
+        const double area = lcnc::cad::invokeCadAlgorithm(
+            [&] { return lcnc::cad_algo::surfaceArea(targets[0].shape); },
+            &error);
+        if (!error.isEmpty()) {
+            QMessageBox::critical(nullptr, tr("area measurement"), error);
+            return;
+        }
         // 中文翻译：面积测量
         QMessageBox::information(nullptr, tr("area measurement"),
             // 中文翻译：形体 "%1" 的总表面积:\n\n%2 mm²
             tr("Total surface area of shape \"%1\":\n\n%2 mm²")
                 .arg(targets[0].name)
-                .arg(props.Mass(), 0, 'f', 3));
+                .arg(area, 0, 'f', 3));
     } else {
         QString message;
         for (const auto& entity : targets) {
-            GProp_GProps props;
-            BRepGProp::SurfaceProperties(entity.shape, props);
-            message += tr("%1: %2 mm²\n").arg(entity.name).arg(props.Mass(), 0, 'f', 3);
+            QString error;
+            const double area = lcnc::cad::invokeCadAlgorithm(
+                [&] { return lcnc::cad_algo::surfaceArea(entity.shape); },
+                &error);
+            if (!error.isEmpty()) {
+                QMessageBox::critical(nullptr, tr("area measurement"), error);
+                return;
+            }
+            message += tr("%1: %2 mm²\n").arg(entity.name).arg(area, 0, 'f', 3);
         }
         QMessageBox::information(nullptr,
             // 中文翻译：面积测量 (已选中 %1 个)

@@ -14,23 +14,23 @@ QIcon iconForProjectNode(ProjectExplorerNodeKind kind)
     switch (kind) {
     case ProjectExplorerNodeKind::WorkpieceRoot:
     case ProjectExplorerNodeKind::CadDocument:
-        return QIcon(":/icons/new_doc.svg");
+        return QIcon("themeicons:new_doc.svg");
     case ProjectExplorerNodeKind::CadSketch:
     case ProjectExplorerNodeKind::CadTemporarySketch:
-        return QIcon(":/icons/sketch.svg");
+        return QIcon("themeicons:sketch.svg");
     case ProjectExplorerNodeKind::CadShape:
     case ProjectExplorerNodeKind::CadSketchElement:
-        return QIcon(":/icons/shape.svg");
+        return QIcon("themeicons:shape.svg");
     case ProjectExplorerNodeKind::ToolpathRoot:
     case ProjectExplorerNodeKind::ToolpathLayer:
     case ProjectExplorerNodeKind::ToolpathContour:
-        return QIcon(":/icons/toolpath.svg");
+        return QIcon("themeicons:toolpath.svg");
     case ProjectExplorerNodeKind::MachiningFaceRoot:
     case ProjectExplorerNodeKind::MachiningFace:
-        return QIcon(":/icons/shape.svg");
+        return QIcon("themeicons:shape.svg");
     case ProjectExplorerNodeKind::CadGroup:
     default:
-        return QIcon(":/icons/machine.svg");
+        return QIcon("themeicons:machine.svg");
     }
 }
 

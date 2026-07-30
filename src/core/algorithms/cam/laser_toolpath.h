@@ -324,8 +324,7 @@ public:
     /// face classification data is unavailable.
     static gp_Dir findMachiningNormal(
         const gp_Pnt& pt,
-        const std::vector<TopoDS_Face>& outerFaces,
-        const std::vector<TopoDS_Face>& crossFaces);
+        const std::vector<TopoDS_Face>& outerFaces);
 
     /// Discretise a contour with face-classification-aware normals.
     static void discretizeContourWithClassification(

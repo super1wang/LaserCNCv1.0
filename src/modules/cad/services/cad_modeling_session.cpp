@@ -1,6 +1,7 @@
 #include "modules/cad/services/cad_modeling_session.h"
 
 #include "core/algorithms/cad/features.h"
+#include "modules/cad/services/cad_algorithm_boundary.h"
 #include "core/algorithms/cad/sketch.h"
 #include "core/logging/logger.h"
 
@@ -363,33 +364,28 @@ TopoDS_Wire CadModelingSession::buildElementWire(const SketchElement& element,
 {
     const lcnc::cad_algo::SketchPlane plane = toSketchPlane(m_planeKind);
     const auto& p = element.params;
-    switch (element.kind) {
-    case SketchToolKind::Line:
-        return lcnc::cad_algo::makeLineWire(plane,
-                                            {p[0], p[1]},
-                                            {p[2], p[3]},
-                                            errMsg);
-    case SketchToolKind::Arc:
-        return lcnc::cad_algo::makeArcWire(plane,
-                                           {p[0], p[1]},
-                                           {p[2], p[3]},
-                                           {p[4], p[5]},
-                                           errMsg);
-    case SketchToolKind::Circle:
-        return lcnc::cad_algo::makeCircleWire(plane, p[2], {p[0], p[1]}, errMsg);
-    case SketchToolKind::Rectangle:
-        return lcnc::cad_algo::makeRectangleWire(plane, p[2], p[3], {p[0], p[1]}, errMsg);
-    case SketchToolKind::Polygon:
-        return lcnc::cad_algo::makePolygonWire(plane,
-                                               static_cast<int>(p[3]),
-                                               p[2],
-                                               {p[0], p[1]},
-                                               errMsg);
-    case SketchToolKind::Point:
-    case SketchToolKind::None:
-    default:
-        return {};
-    }
+    return invokeCadAlgorithm([&] {
+        switch (element.kind) {
+        case SketchToolKind::Line:
+            return lcnc::cad_algo::makeLineWire(
+                plane, {p[0], p[1]}, {p[2], p[3]});
+        case SketchToolKind::Arc:
+            return lcnc::cad_algo::makeArcWire(
+                plane, {p[0], p[1]}, {p[2], p[3]}, {p[4], p[5]});
+        case SketchToolKind::Circle:
+            return lcnc::cad_algo::makeCircleWire(plane, p[2], {p[0], p[1]});
+        case SketchToolKind::Rectangle:
+            return lcnc::cad_algo::makeRectangleWire(
+                plane, p[2], p[3], {p[0], p[1]});
+        case SketchToolKind::Polygon:
+            return lcnc::cad_algo::makePolygonWire(
+                plane, static_cast<int>(p[3]), p[2], {p[0], p[1]});
+        case SketchToolKind::Point:
+        case SketchToolKind::None:
+        default:
+            return TopoDS_Wire{};
+        }
+    }, errMsg);
 }
 
 bool CadModelingSession::finishSketch(QString* errMsg)
@@ -433,15 +429,18 @@ bool CadModelingSession::finishSketch(QString* errMsg)
     if (wire.IsNull()) {
         switch (m_profileKind) {
         case SketchProfileKind::Circle:
-            wire = lcnc::cad_algo::makeCircleWire(plane, m_profileRadius, {}, &wireError);
+            wire = invokeCadAlgorithm(
+                [&] { return lcnc::cad_algo::makeCircleWire(plane, m_profileRadius); },
+                &wireError);
             break;
         case SketchProfileKind::Rectangle:
         default:
-            wire = lcnc::cad_algo::makeRectangleWire(plane,
-                                                     m_profileWidth,
-                                                     m_profileHeight,
-                                                     {},
-                                                     &wireError);
+            wire = invokeCadAlgorithm(
+                [&] {
+                    return lcnc::cad_algo::makeRectangleWire(
+                        plane, m_profileWidth, m_profileHeight);
+                },
+                &wireError);
             break;
         }
     }
@@ -456,7 +455,9 @@ bool CadModelingSession::finishSketch(QString* errMsg)
     }
 
     QString faceError;
-    m_profileFace = lcnc::cad_algo::makeFaceFromWire(wire, &faceError);
+    m_profileFace = invokeCadAlgorithm(
+        [&] { return lcnc::cad_algo::makeFaceFromWire(wire); },
+        &faceError);
     if (m_profileFace.IsNull()) {
         // 中文翻译：草图面生成失败
         setErr(errMsg, faceError.isEmpty() ? QStringLiteral("Sketch face generation failed") : faceError);
@@ -521,15 +522,17 @@ TopoDS_Shape CadModelingSession::buildFeatureFromRecord(SketchPlaneKind planeKin
         return {};
     }
     const lcnc::cad_algo::SketchPlane plane = toSketchPlane(planeKind);
-    QString featureError;
     TopoDS_Shape result;
     switch (featureKind) {
     case FeatureKind::Revolve:
-        result = lcnc::cad_algo::revolveShape(
-            profileFace,
-            gp_Ax1(plane.axes.Location(), plane.axes.YDirection()),
-            angleDeg,
-            &featureError);
+        result = invokeCadAlgorithm(
+            [&] {
+                return lcnc::cad_algo::revolveShape(
+                    profileFace,
+                    gp_Ax1(plane.axes.Location(), plane.axes.YDirection()),
+                    angleDeg);
+            },
+            errMsg);
         break;
     case FeatureKind::Sweep:
         // 中文翻译：扫掠需要路径草图，当前阶段尚未接入路径会话
@@ -537,16 +540,20 @@ TopoDS_Shape CadModelingSession::buildFeatureFromRecord(SketchPlaneKind planeKin
         return {};
     case FeatureKind::Extrude:
     default:
-        result = lcnc::cad_algo::extrudeShape(
-            profileFace,
-            plane.axes.Direction(),
-            length,
-            &featureError);
+        result = invokeCadAlgorithm(
+            [&] {
+                return lcnc::cad_algo::extrudeShape(
+                    profileFace,
+                    plane.axes.Direction(),
+                    length);
+            },
+            errMsg);
         break;
     }
     if (result.IsNull()) {
         // 中文翻译：特征生成失败
-        setErr(errMsg, featureError.isEmpty() ? QStringLiteral("Feature generation failed") : featureError);
+        if (errMsg && errMsg->isEmpty())
+            setErr(errMsg, QStringLiteral("Feature generation failed"));
         return {};
     }
     return result;

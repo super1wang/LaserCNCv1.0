@@ -701,8 +701,8 @@ void DialogOptions::buildApplicationPage()
     m_cbTheme = new QComboBox(group);
     // 中文翻译：浅色
     m_cbTheme->addItem(tr("Light"), QStringLiteral("light"));
-    // 中文翻译：深色（开发中）
-    m_cbTheme->addItem(tr("Dark (in development)"), QStringLiteral("dark"));
+    // 中文翻译：深色
+    m_cbTheme->addItem(tr("Dark"), QStringLiteral("dark"));
     // 中文翻译：主题：
     form->addRow(tr("Theme:"), m_cbTheme);
 
@@ -1103,8 +1103,6 @@ void DialogOptions::loadFromSettings()
 
     m_renderDraft = m_originalCam;
     m_colorDraft = m_originalColors;
-    m_colorDraft.cadBackgroundColor = m_colorDraft.backgroundColor;
-    m_colorDraft.camBackgroundColor = m_colorDraft.backgroundColor;
     if (m_colorDraft.machineAxisColors.isEmpty())
         m_colorDraft.machineAxisColors = defaultMachineAxisColors();
 
@@ -1308,8 +1306,6 @@ bool DialogOptions::applyChanges()
     }
 
     m_renderDraft = collectProfileFromUi(m_renderControls);
-    m_colorDraft.cadBackgroundColor = m_colorDraft.backgroundColor;
-    m_colorDraft.camBackgroundColor = m_colorDraft.backgroundColor;
     m_colorDraft.workpieceTransparency = m_spWorkpieceTransparency->value() / 100.0;
     m_colorDraft.machineTransparency = m_spMachineTransparency->value() / 100.0;
     m_colorDraft.highlightDisplayMode = m_cbHighlightMode->currentData().toInt();

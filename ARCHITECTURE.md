@@ -129,10 +129,10 @@ Process 不读取 OCC。CAM 通过 `ICamToolpathProvider` 输出 `ToolpathExport
 当前 `ProcessModule` 仍是较大的 facade/coordinator，实际拥有或协调：
 
 - typed settings 与参数/IO 模型。
-- `Service` 及运动控制器、激光器、工具表；`DeviceCommandQueue` 承接分优先级调度，`ProcessDeviceCoordinator` 租约仍是最终供应商 SDK 串行边界。
+- `ProcessDeviceRuntime` 私有持有 `Service`、运动控制器、激光器和工具表；`DeviceCommandQueue` 承接分优先级调度，`ProcessDeviceCoordinator` 租约暂时仍是最终供应商 SDK 串行边界。
 - `ProcessCuttingPlanService`、`NormalCuttingManager` 与 motion sink。
 - 流程文档、步骤插件注册表和 `ProcessWorkflowExecutor`。
-- 加工前置检查、状态、连接/断开、回零、急停、轮询和监控。
+- `ProcessRunCoordinator` 的运行状态迁移，以及尚待继续下沉的加工前置检查、连接/断开、回零、急停、轮询和监控。
 
 执行链路为：
 
@@ -147,10 +147,9 @@ CAM ToolpathExportSnapshot
 
 `runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。任何 Error、EmergencyStop 或停止路径必须关闭激光与吹气等安全输出。
 
-硬件 SDK 类型只能存在于私有实现。`Service` 已以 `unique_ptr` 持有当前控制器，禁止函数内 static 控制器；所有 SDK 访问均须取得 `ProcessDeviceCoordinator` 租约。设备队列已经用于 Stop、Workflow、Interactive、Normal 和 Polling 调度，但尚未成为唯一 SDK 入口；旧 `Service` 接口和剩余兼容 UI/日志路径仍是待收口技术债，详见 `todo.md`。
+硬件 SDK 类型只能存在于私有实现。`ProcessDeviceRuntime` 在设备线程内以 `unique_ptr` 持有 `Service`，后者持有当前控制器，禁止函数内 static 控制器。设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
 
-设备公共接口不依赖 `MessageModule`；告警提示只能由具体设备实现文件引入，避免把旧 UI/日志基础设施泄漏给控制器和激光器消费者。
-`MessageModule` 的 UI 提示队列和设备兼容日志宏均直接经 `lcnc::Logger`；旧 `LogModule` 三 sink、独立刷新与硬编码路径已删除。
+当前仍有部分业务路径通过 `Service::motionControl()`、`laserDevice()` 和 `lockDeviceAccess()` 取得设备并依赖 `ProcessDeviceCoordinator` 防御锁，因此队列尚未成为唯一 SDK 入口。设备公共接口不得泄漏供应商类型；兼容 `MessageModule`、设备日志宏和旧 `LogModule` 均已删除，统一使用 `lcnc::Logger`。剩余入口迁移见 `todo.md`。
 Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `ProcessSettingsService`，不得回退到 `current()` 全局查询。
 
 构建时 ACS、GTN、BDAQ 与真实激光均由 CMake 开关控制。GTN adapter 仅在 `LCNC_WITH_GTN=ON` 时参与构建；ACS adapter、`SimulatorCMHP`、文本 sink、供应商头、import library 和随程序部署的 `Simulator.prg` 也只在 `LCNC_WITH_ACS=ON` 时形成完整 ACS 路径。all-off 构建中的本地状态控制器仅服务显式 PureSimulation，不代表 ACS Simulator。支持的验证预设见 `CMakePresets.json`。
@@ -165,6 +164,7 @@ Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `Proces
 - 非拥有裸指针必须由更长生命周期对象保证，并在异步边界前转换为快照、受控句柄或在关闭时等待。
 - `TaskManager` 析构会先请求取消，再等待全部 worker 退出，最后释放任务实体。
 - CAD、CAM 与 Process 模块均对其 `TaskManager` 任务持有 task-id；模块停止时先请求取消并有界等待。Process 的 worker 持有 `shared_ptr<Service>`，超时降级时不会释放仍可能在供应商 SDK 调用中的对象；连接、断开和回零在同一设备会话中互斥。
+- Process 固定关闭顺序为：停止接收普通命令，取消并等待工作流/后台任务，停止监控，提交 Stop 优先级安全输出，断开设备，最后关闭执行线程。若活动供应商调用超时，则保活 SDK 对象并进入 Error，不得在调用仍活跃时释放。
 - 控制器坐标、轴使能和 IO 状态由 150 ms 定时器调度到独立单线程池；安全环境监控使用另一条 500 ms 单线程池。激光器等串口外设按 2 s 低频调度到外设单线程池，`QSerialPort` 本身归属独立 IO 线程，任何等待串口响应的调用都不得在 GUI 线程执行。
 - Process 硬件轮询和环境监控在停止时等待当前 future 完成，控制器和外设对象不得先于 worker 销毁。
 - Qt GUI 只能在主线程访问；供应商 SDK 是否线程安全不能假定，硬件调用最终应串行化到单一设备执行上下文。
@@ -194,8 +194,8 @@ tools.toml
 - 打开工程时 `LcncProjectManager` 比较 manifest 与当前机台指纹并保存 session 兼容性；MainWindow 显示警告，Process 只在真实加工前拒绝不匹配工程，仿真不受阻断。
 - 机台模型不进入工程包。
 - 归档保存先在目标目录创建 staging zip，成功后用 Windows 原子替换提交；失败不会删除原 `.lcnc`。
-- `lcnc_project_package_test` 以独立临时目录验证 v4 写入/读取工具快照、缺快照拒绝、失败保存后原包 SHA-256 不变，并实际调用 `lcnc_project_upgrade.exe --tools` 迁移 v1/v2/v3 结构 fixture。staging `QTemporaryFile` 必须在 QuaZip 创建归档前析构，以避免 `MoveFileExW` 的 Win32=32 共享冲突。
-- 桌面加载只接受 v4，且 core 校验 `tools.toml` 必须存在。`lcnc_project_upgrade` 通过专用 `loadForMigration()` 读取 v1/v2/v3 和旧 `process_cutting_plan.toml`，并保存为 v4；该迁移 API 不得被桌面调用。升级器保留源包 `tools.toml`，没有该资源的历史包须使用 `--tools <tools.toml>` 显式提供快照；v1/v2 的全局工具名不能被静默当作项目参数快照。
+- `lcnc_project_package_test` 以独立临时目录验证 v4 写入/读取工具快照、缺快照拒绝、失败保存后原包 SHA-256 不变，并验证 v1/v2/v3 manifest 被明确拒绝。staging `QTemporaryFile` 必须在 QuaZip 创建归档前析构，以避免 `MoveFileExW` 的 Win32=32 共享冲突。
+- 应用和库只接受 v4，且 core 校验 `tools.toml` 必须存在；不存在离线升级器、迁移 API 或旧 `process_cutting_plan.toml` 回退。历史项目必须由外部受控迁移流程处理，不得在产品内猜测或修复。
 
 ## 11. 配置与可选硬件
 
@@ -205,7 +205,7 @@ Process 运行时服务、`MotionControl`、`LaserDevice`、`LDFactory` 和 `Pro
 
 `ToolFactory` 查询无副作用：缺失工具不得创建空项，重载相同索引时必须替换旧参数。
 
-`ProcessRuntimeConfiguration` 由 `ProcessModule` 拥有，并借用给 `Service` 和运动控制器；它是 ACS/GTN 标准轴、扩展轴和仿真选择的运行时事实源。配置会归一化并去重轴名，且拒绝把 `BASE` 伪轴下发给设备层；其行为由独立 CTest 覆盖。旧 `DT` 静态运行时状态已删除，`DataType.h` 仅保留共享枚举、数据结构和数值常量。
+`ProcessRuntimeConfiguration` 由 `ProcessModule` 拥有，并借用给 `Service` 和运动控制器；它是 ACS/GTN 标准轴、扩展轴和仿真选择的运行时事实源。配置会归一化并去重轴名，且拒绝把 `BASE` 伪轴下发给设备层；其行为由独立 CTest 覆盖。旧 `DT` 静态运行时状态已删除，`data_type.h` 仅保留共享枚举、数据结构和数值常量。
 
 Process 对外仅保留异步全设备连接/断开；旧同步单控制器接口与 `ProcessLayerJob::order` 兼容字段已删除。
 

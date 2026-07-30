@@ -7,6 +7,7 @@
 
 #include <climits>
 #include <utility>
+#include <vector>
 
 namespace lcnc::process {
 
@@ -31,7 +32,10 @@ bool DeviceCommandQueue::start()
         commands.clear();
     m_workerThreadId = nullptr;
     m_shutdownRequested = false;
+    m_activeCommandId = 0;
+    m_timeoutBarrierId = 0;
     m_accepting = true;
+    m_stopOnly = false;
     m_thread.start();
     return true;
 }
@@ -40,7 +44,12 @@ bool DeviceCommandQueue::submit(Command command,
                                 TaskPriority priority,
                                 const QString& coalesceKey)
 {
-    return enqueue(std::move(command), priority, coalesceKey);
+    if (!command)
+        return false;
+    return enqueue([command = std::move(command)] {
+        command();
+        return DeviceCommandResult{};
+    }, priority, {}, coalesceKey).accepted;
 }
 
 bool DeviceCommandQueue::submit(ResultCommand command,
@@ -48,27 +57,48 @@ bool DeviceCommandQueue::submit(ResultCommand command,
                                 Completion completion,
                                 const QString& coalesceKey)
 {
-    if (!command)
-        return false;
+    return submitWithTicket(std::move(command), priority,
+                            std::move(completion), coalesceKey).accepted;
+}
 
-    return enqueue([command = std::move(command), completion = std::move(completion)] {
-        DeviceCommandResult result;
-        try {
-            result = command();
-        } catch (const std::exception& exception) {
-            result.success = false;
-            result.error = QString::fromUtf8(exception.what());
-            LCNC_ERR(lcnc::LogCode::TaskUnhandled,
-                     "Process device result command threw std::exception: {}", exception.what());
-        } catch (...) {
-            result.success = false;
-            result.error = QStringLiteral("Unknown device command exception");
-            LCNC_ERR(lcnc::LogCode::TaskUnhandled,
-                     "Process device result command threw an unknown exception");
+DeviceCommandTicket DeviceCommandQueue::submitWithTicket(ResultCommand command,
+                                                          TaskPriority priority,
+                                                          Completion completion,
+                                                          const QString& coalesceKey)
+{
+    return enqueue(std::move(command), priority, std::move(completion), coalesceKey);
+}
+
+DeviceCommandResult DeviceCommandQueue::completionResult(DeviceCommandCompletion completion,
+                                                          QString error)
+{
+    return {completion == DeviceCommandCompletion::Succeeded,
+            std::move(error), completion};
+}
+
+bool DeviceCommandQueue::cancel(DeviceCommandId id)
+{
+    Completion completion;
+    bool cancelled = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        for (auto& commands : m_commands) {
+            for (auto it = commands.begin(); it != commands.end(); ++it) {
+                if (it->id != id)
+                    continue;
+                completion = std::move(it->completion);
+                commands.erase(it);
+                cancelled = true;
+                break;
+            }
+            if (cancelled)
+                break;
         }
-        if (completion)
-            completion(result);
-    }, priority, coalesceKey);
+    }
+    if (completion)
+        completion(completionResult(DeviceCommandCompletion::Cancelled,
+                                    QStringLiteral("Device command cancelled before execution")));
+    return cancelled;
 }
 
 DeviceCommandResult DeviceCommandQueue::executeAndWait(ResultCommand command,
@@ -76,12 +106,14 @@ DeviceCommandResult DeviceCommandQueue::executeAndWait(ResultCommand command,
                                                         int timeoutMs)
 {
     if (!command)
-        return {false, QStringLiteral("Missing device command")};
+        return completionResult(DeviceCommandCompletion::Failed,
+                                QStringLiteral("Missing device command"));
 
     if (auto* app = QCoreApplication::instance(); app && app->thread() == QThread::currentThread()) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "DeviceCommandQueue::executeAndWait must not block the GUI thread");
-        return {false, QStringLiteral("Device command must not block the GUI thread")};
+        return completionResult(DeviceCommandCompletion::Failed,
+                                QStringLiteral("Device command must not block the GUI thread"));
     }
 
     if (isWorkerThread()) {
@@ -90,29 +122,38 @@ DeviceCommandResult DeviceCommandQueue::executeAndWait(ResultCommand command,
         } catch (const std::exception& exception) {
             LCNC_ERR(lcnc::LogCode::TaskUnhandled,
                      "Process device result command threw std::exception: {}", exception.what());
-            return {false, QString::fromUtf8(exception.what())};
+            return completionResult(DeviceCommandCompletion::Failed,
+                                    QString::fromUtf8(exception.what()));
         } catch (...) {
             LCNC_ERR(lcnc::LogCode::TaskUnhandled,
                      "Process device result command threw an unknown exception");
-            return {false, QStringLiteral("Unknown device command exception")};
+            return completionResult(DeviceCommandCompletion::Failed,
+                                    QStringLiteral("Unknown device command exception"));
         }
     }
 
     struct WaitState {
         QSemaphore finished;
-        DeviceCommandResult result{false, QStringLiteral("Device command was not executed")};
+        DeviceCommandResult result = completionResult(
+            DeviceCommandCompletion::Failed, QStringLiteral("Device command was not executed"));
     };
     const auto state = std::make_shared<WaitState>();
-    if (!submit(std::move(command), priority,
-                [state](const DeviceCommandResult& result) {
-                    state->result = result;
-                    state->finished.release();
-                })) {
-        return {false, QStringLiteral("Device command queue is not accepting work")};
+    const DeviceCommandTicket ticket = submitWithTicket(
+        std::move(command), priority,
+        [state](const DeviceCommandResult& result) {
+            state->result = result;
+            state->finished.release();
+        });
+    if (!ticket.accepted) {
+        return completionResult(DeviceCommandCompletion::Shutdown,
+                                QStringLiteral("Device command queue is not accepting work"));
     }
 
-    if (!state->finished.tryAcquire(1, timeoutMs < 0 ? INT_MAX : timeoutMs))
-        return {false, QStringLiteral("Timed out waiting for device command")};
+    if (!state->finished.tryAcquire(1, timeoutMs < 0 ? INT_MAX : timeoutMs)) {
+        markTimedOut(ticket.id);
+        return completionResult(DeviceCommandCompletion::TimedOut,
+                                QStringLiteral("Timed out waiting for device command"));
+    }
     return state->result;
 }
 
@@ -123,16 +164,23 @@ bool DeviceCommandQueue::submitEmergency(Command command)
 
 bool DeviceCommandQueue::submitStop(Command command)
 {
-    return enqueue(std::move(command), TaskPriority::Stop, {});
+    return submit(std::move(command), TaskPriority::Stop, {});
 }
 
 bool DeviceCommandQueue::submitWorkflow(Command command)
 {
-    return enqueue(std::move(command), TaskPriority::Workflow, {});
+    return submit(std::move(command), TaskPriority::Workflow, {});
+}
+
+void DeviceCommandQueue::beginStopOnly()
+{
+    QMutexLocker locker(&m_mutex);
+    m_stopOnly = true;
 }
 
 bool DeviceCommandQueue::shutdown(int timeoutMs)
 {
+    std::vector<Completion> dropped;
     {
         QMutexLocker locker(&m_mutex);
         if (!m_thread.isRunning()) {
@@ -146,10 +194,17 @@ bool DeviceCommandQueue::shutdown(int timeoutMs)
         m_shutdownRequested = true;
         for (int index = priorityIndex(TaskPriority::Workflow);
              index < static_cast<int>(m_commands.size()); ++index) {
+            for (QueuedCommand& command : m_commands[static_cast<std::size_t>(index)])
+                if (command.completion)
+                    dropped.push_back(std::move(command.completion));
             m_commands[static_cast<std::size_t>(index)].clear();
         }
         m_workAvailable.wakeOne();
     }
+
+    for (const Completion& completion : dropped)
+        completion(completionResult(DeviceCommandCompletion::Shutdown,
+                                    QStringLiteral("Device command discarded during shutdown")));
 
     return m_thread.wait(timeoutMs < 0 ? ULONG_MAX : static_cast<unsigned long>(timeoutMs));
 }
@@ -165,30 +220,61 @@ bool DeviceCommandQueue::isRunning() const
     return m_thread.isRunning();
 }
 
-bool DeviceCommandQueue::enqueue(Command command,
-                                 TaskPriority priority,
-                                 const QString& coalesceKey)
+DeviceCommandTicket DeviceCommandQueue::enqueue(ResultCommand command,
+                                                 TaskPriority priority,
+                                                 Completion completion,
+                                                 const QString& coalesceKey)
 {
     if (!command)
-        return false;
+        return {};
 
+    Completion superseded;
+    DeviceCommandTicket ticket;
     QMutexLocker locker(&m_mutex);
-    if (!m_accepting || m_shutdownRequested)
-        return false;
+    if (!m_accepting || m_shutdownRequested
+        || (m_stopOnly && priority != TaskPriority::Stop)
+        || (m_timeoutBarrierId != 0 && priority != TaskPriority::Stop))
+        return {};
 
     auto& commands = m_commands[static_cast<std::size_t>(priorityIndex(priority))];
     if (!coalesceKey.isEmpty()) {
         for (QueuedCommand& pending : commands) {
             if (pending.coalesceKey == coalesceKey) {
+                superseded = std::move(pending.completion);
+                ticket = {m_nextCommandId++, true};
                 pending.command = std::move(command);
+                pending.completion = std::move(completion);
+                pending.id = ticket.id;
                 m_workAvailable.wakeOne();
-                return true;
+                locker.unlock();
+                if (superseded)
+                    superseded(completionResult(DeviceCommandCompletion::Superseded,
+                                                 QStringLiteral("Device command superseded by a newer coalesced command")));
+                return ticket;
             }
         }
     }
-    commands.push_back({std::move(command), coalesceKey});
+    ticket = {m_nextCommandId++, true};
+    commands.push_back({std::move(command), std::move(completion), ticket.id, coalesceKey});
     m_workAvailable.wakeOne();
-    return true;
+    return ticket;
+}
+
+void DeviceCommandQueue::markTimedOut(DeviceCommandId id)
+{
+    QMutexLocker locker(&m_mutex);
+    if (m_activeCommandId == id) {
+        m_timeoutBarrierId = id;
+        return;
+    }
+    for (const auto& commands : m_commands) {
+        for (const QueuedCommand& command : commands) {
+            if (command.id == id) {
+                m_timeoutBarrierId = id;
+                return;
+            }
+        }
+    }
 }
 
 void DeviceCommandQueue::WorkerThread::run()
@@ -204,7 +290,8 @@ void DeviceCommandQueue::runWorker()
     }
 
     while (true) {
-        Command command;
+        QueuedCommand command;
+        bool hasCommand = false;
         {
             QMutexLocker locker(&m_mutex);
             const auto hasCommands = [this] {
@@ -219,29 +306,49 @@ void DeviceCommandQueue::runWorker()
             for (auto& commands : m_commands) {
                 if (commands.empty())
                     continue;
-                command = std::move(commands.front().command);
+                command = std::move(commands.front());
                 commands.pop_front();
+                m_activeCommandId = command.id;
+                hasCommand = true;
                 break;
             }
-            if (!command && m_shutdownRequested) {
+            if (!hasCommand && m_shutdownRequested) {
                 break;
             }
         }
 
         try {
-            command();
+            DeviceCommandResult result = command.command();
+            if (result.completion == DeviceCommandCompletion::Succeeded && !result.success)
+                result.completion = DeviceCommandCompletion::Failed;
+            if (command.completion)
+                command.completion(result);
         } catch (const std::exception& exception) {
             LCNC_ERR(lcnc::LogCode::TaskUnhandled,
                      "Process device command threw std::exception: {}", exception.what());
+            if (command.completion)
+                command.completion(completionResult(DeviceCommandCompletion::Failed,
+                                                     QString::fromUtf8(exception.what())));
         } catch (...) {
             LCNC_ERR(lcnc::LogCode::TaskUnhandled,
                      "Process device command threw an unknown exception");
+            if (command.completion)
+                command.completion(completionResult(DeviceCommandCompletion::Failed,
+                                                     QStringLiteral("Unknown device command exception")));
+        }
+        {
+            QMutexLocker locker(&m_mutex);
+            if (m_timeoutBarrierId == command.id)
+                m_timeoutBarrierId = 0;
+            m_activeCommandId = 0;
         }
     }
 
     QMutexLocker locker(&m_mutex);
     m_workerThreadId = nullptr;
     m_accepting = false;
+    m_activeCommandId = 0;
+    m_timeoutBarrierId = 0;
 }
 
 } // namespace lcnc::process

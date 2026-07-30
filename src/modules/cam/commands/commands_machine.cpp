@@ -48,7 +48,7 @@ CmdLoadMachine::CmdLoadMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：加载机台
-    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("Loading machine"), this);
+    auto* a = new QAction(QIcon("themeicons:machine.svg"), tr("Loading machine"), this);
     // 中文翻译：加载机台三维模型，保留当前轴系配置
     a->setStatusTip(tr("Load the 3D model of the machine and retain the current axis configuration"));
     setAction(a);
@@ -94,7 +94,7 @@ CmdMarkAxes::CmdMarkAxes(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：标记轴系
-    auto* a = new QAction(QIcon(":/icons/coordinate.svg"), tr("Mark axis system"), this);
+    auto* a = new QAction(QIcon("themeicons:coordinate.svg"), tr("Mark axis system"), this);
     // 中文翻译：手动为机台各零件指定所属轴系
     a->setStatusTip(tr("Manually assign the axis system to each part of the machine"));
     setAction(a);
@@ -132,7 +132,7 @@ CmdMountWorkpiece::CmdMountWorkpiece(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：安装工件
-    auto* a = new QAction(QIcon(":/icons/workpiece.svg"), tr("Install workpieces"), this);
+    auto* a = new QAction(QIcon("themeicons:workpiece.svg"), tr("Install workpieces"), this);
     // 中文翻译：将工件源模型平移到当前安装位置
     a->setStatusTip(tr("Translate the workpiece source model to the current installation location"));
     setAction(a);
@@ -166,7 +166,7 @@ CmdUnloadMachine::CmdUnloadMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：卸载机台
-    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("Unload the machine"), this);
+    auto* a = new QAction(QIcon("themeicons:machine.svg"), tr("Unload the machine"), this);
     // 中文翻译：删除当前机台参考模型，保留工件、刀路和轴系配置
     a->setStatusTip(tr("Delete the current machine reference model and retain the workpiece, tool path and axis system configuration"));
     setAction(a);
@@ -197,7 +197,7 @@ CmdExportMachine::CmdExportMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：导出机台
-    auto* a = new QAction(QIcon(":/icons/export.svg"), tr("Export machine"), this);
+    auto* a = new QAction(QIcon("themeicons:export.svg"), tr("Export machine"), this);
     // 中文翻译：导出机台模型为 STEP 文件，轴系按 LCNC_AXIS_* 命名以支持自动识别
     a->setStatusTip(tr("Export the machine model as a STEP file, and name the axis system according to LCNC_AXIS_* to support automatic identification."));
     setAction(a);

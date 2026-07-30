@@ -16,32 +16,25 @@ enum class ProcessNodeType
     Loop,
     Group,
     RunGroup,
-    IO,
+    OutputSignal,
     Camera,
-    Monitor,
+    InputSignalWait,
     Calculation,
     Compare,
     Wait,
     Commands,
     Feeding,
     RunGroupCheck,
-    Axis,
-    AxesMove,
+    SingleAxisMove,
+    MultiAxisMove,
     Measurement,
     MarkAcquire,
     Alignment,
     AutoFocus,
     EnergySwitch,
-    Cutting,
+    NormalCutting,
     OverCutting,
 
-    // New retained workflow vocabulary. Values alias legacy types where possible
-    // so existing serialized flows keep loading while UI exposes only these names.
-    OutputSignal = IO,
-    InputSignalWait = Monitor,
-    SingleAxisMove = Axis,
-    MultiAxisMove = AxesMove,
-    NormalCutting = Cutting,
 };
 
 /**

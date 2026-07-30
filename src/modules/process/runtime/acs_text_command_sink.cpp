@@ -1,8 +1,8 @@
 #include "modules/process/runtime/acs_text_command_sink.h"
 
 #include "core/logging/logger.h"
-#include "modules/process/Tool/Tool.h"
-#include "modules/process/device/MotionControl/ACSMotionControl.h"
+#include "modules/process/tool/tool.h"
+#include "modules/process/device/motion_control/acs_motion_control.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
 #include <QThread>

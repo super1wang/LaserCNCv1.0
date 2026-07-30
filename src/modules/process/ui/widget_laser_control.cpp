@@ -18,10 +18,17 @@
 #include <QTimer>
 #include <QStackedLayout>
 #include <QScrollArea>
+#include <QApplication>
 
 #include <algorithm>
 
 namespace {
+
+bool isLightTheme()
+{
+    return qApp
+        && qApp->property("lcnc.theme").toString() == QStringLiteral("light");
+}
 
 void clearLayout(QLayout* layout)
 {
@@ -82,9 +89,7 @@ void WidgetLaserControl::buildUi()
     controlScroll->setWidgetResizable(true);
     controlScroll->setFrameShape(QFrame::NoFrame);
     controlScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    controlScroll->setStyleSheet("QScrollArea { background: #202B35; }");
     m_controlPage = new QWidget(controlScroll);
-    m_controlPage->setStyleSheet("background: #202B35;");
     m_controlLayout = new QVBoxLayout(m_controlPage);
     m_controlLayout->setContentsMargins(6, 6, 6, 6);
     m_controlLayout->setSpacing(8);
@@ -95,7 +100,9 @@ void WidgetLaserControl::buildUi()
     m_logView = new QTextEdit(m_logPage);
     m_logView->setReadOnly(true);
     m_logView->setAcceptRichText(true);
-    m_logView->setStyleSheet("QTextEdit { background: #101820; color: #D6E4EA; font-family: Consolas, monospace; font-size: 11px; }");
+    m_logView->setStyleSheet(isLightTheme()
+        ? "QTextEdit { background:#F7F9FB; color:#243642; font-family:Consolas, monospace; font-size:11px; }"
+        : "QTextEdit { background:#101820; color:#D6E4EA; font-family:Consolas, monospace; font-size:11px; }");
     logLayout->addWidget(m_logView);
 
     controlScroll->setWidget(m_controlPage);
@@ -138,13 +145,13 @@ void WidgetLaserControl::buildProcessGroup()
     auto* row = new QHBoxLayout();
 
     // 中文翻译：运行
-    m_btnRun = new QPushButton(QIcon(":/icons/start.svg"), tr("run"), group);
+    m_btnRun = new QPushButton(QIcon("themeicons:start.svg"), tr("run"), group);
     // 中文翻译：暂停
-    m_btnPause = new QPushButton(QIcon(":/icons/pause.svg"), tr("pause"), group);
+    m_btnPause = new QPushButton(QIcon("themeicons:pause.svg"), tr("pause"), group);
     // 中文翻译：继续
-    m_btnResume = new QPushButton(QIcon(":/icons/start.svg"), tr("continue"), group);
+    m_btnResume = new QPushButton(QIcon("themeicons:start.svg"), tr("continue"), group);
     // 中文翻译：停止
-    m_btnStop = new QPushButton(QIcon(":/icons/stop.svg"), tr("stop"), group);
+    m_btnStop = new QPushButton(QIcon("themeicons:stop.svg"), tr("stop"), group);
 
     m_btnRun->setProperty("role", "run");
     m_btnPause->setProperty("role", "pause");
@@ -313,7 +320,9 @@ void WidgetLaserControl::rebuildAxisGroup()
         auto* val  = new QLabel("  0.000", m_axisGroup);
         val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         val->setMinimumWidth(70);
-        val->setStyleSheet("font-family: Consolas, monospace; color: #49E6B5; font-weight: 600;");
+        val->setStyleSheet(isLightTheme()
+            ? "font-family:Consolas, monospace; color:#08724F; font-weight:600;"
+            : "font-family:Consolas, monospace; color:#49E6B5; font-weight:600;");
         auto* unit = new QLabel(axis.motionType == MachineAxisDef::Linear ? "mm" : "°", m_axisGroup);
         const QString axisName = axis.name.trimmed().toUpper();
         m_axisButtons.insert(axisName, btnAxis);
@@ -438,9 +447,11 @@ void WidgetLaserControl::rebuildJogGroup()
         auto* lblAxis = new QLabel(axis.name, m_jogGroup);
         lblAxis->setMinimumWidth(46);
         lblAxis->setAlignment(Qt::AlignCenter);
-        lblAxis->setStyleSheet("background:#253542; border:1px solid #4A606D; border-radius:3px; padding:5px; color:#9EDBEC; font-weight:700;");
-        auto* btnPlus  = new QPushButton(QIcon(":/icons/jog_positive.svg"), tr("+"), m_jogGroup);
-        auto* btnMinus = new QPushButton(QIcon(":/icons/jog_negative.svg"), tr("−"), m_jogGroup);
+        lblAxis->setStyleSheet(isLightTheme()
+            ? "background:#E5EEF2; border:1px solid #AABAC3; border-radius:3px; padding:5px; color:#285A70; font-weight:700;"
+            : "background:#253542; border:1px solid #4A606D; border-radius:3px; padding:5px; color:#9EDBEC; font-weight:700;");
+        auto* btnPlus  = new QPushButton(QIcon("themeicons:jog_positive.svg"), tr("+"), m_jogGroup);
+        auto* btnMinus = new QPushButton(QIcon("themeicons:jog_negative.svg"), tr("−"), m_jogGroup);
         btnPlus->setProperty("jogDirection", "positive");
         btnMinus->setProperty("jogDirection", "negative");
         // 中文翻译：%1 正方向点动
@@ -510,6 +521,7 @@ void WidgetLaserControl::updateRunState(lcnc::ProcessRunState state)
     } else if (state == lcnc::ProcessRunState::Paused) {
         pauseProcessingClock();
     } else if (state == lcnc::ProcessRunState::Idle
+               || state == lcnc::ProcessRunState::Stopped
                || state == lcnc::ProcessRunState::Error
                || state == lcnc::ProcessRunState::EmergencyStop) {
         pauseProcessingClock();
@@ -707,6 +719,9 @@ QString WidgetLaserControl::stateText(lcnc::ProcessRunState state) const
     case lcnc::ProcessRunState::Paused:
         // 中文翻译：暂停
         return tr("pause");
+    case lcnc::ProcessRunState::Stopped:
+        // 中文翻译：已停止
+        return tr("Stopped");
     case lcnc::ProcessRunState::Error:
         // 中文翻译：错误
         return tr("Error");

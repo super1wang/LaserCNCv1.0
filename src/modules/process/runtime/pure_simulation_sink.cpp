@@ -1,7 +1,7 @@
 #include "modules/process/runtime/pure_simulation_sink.h"
 
 #include "core/logging/logger.h"
-#include "modules/process/Tool/Tool.h"
+#include "modules/process/tool/tool.h"
 #include "modules/process/cutting/pure_simulation_toolpath_ticker.h"
 #include "modules/process/process_module.h"
 #include "modules/process/runtime/process_interrupt_context.h"

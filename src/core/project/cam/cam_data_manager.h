@@ -36,10 +36,7 @@ struct CamPipelineStageState {
 
 enum class MachiningFaceRole : int {
     MachiningSurface = 0,
-    CrossSection = 1,
-    /// v3 packages encoded outer surfaces as 1 and cross sections as 2.
-    /// This value is only retained while loading those packages.
-    LegacyOuterSurface = 2
+    CrossSection = 1
 };
 
 /**

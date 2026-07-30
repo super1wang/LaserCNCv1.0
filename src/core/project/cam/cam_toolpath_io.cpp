@@ -34,16 +34,6 @@ constexpr int  kCamToolpathSchemaVersion = 4;
 constexpr quint64 kPointsBinMagic = 0x315450434E434C00ull;
 constexpr quint32 kPointsBinVersion = 4;
 
-// v1 process_cutting_plan.toml 字段（仅用于一次性迁移）。
-constexpr char kLegacyPlanFile[]        = "process_cutting_plan.toml";
-constexpr char kFieldLayerId[]          = "layerId";
-constexpr char kFieldToolName[]         = "toolName";
-constexpr char kFieldEnabled[]          = "enabled";
-constexpr char kFieldCompensation[]     = "compensationIndex";
-constexpr char kFieldIncludedContours[] = "includedContours";
-constexpr char kFieldManualOrder[]      = "manualContourOrder";
-constexpr char kFieldLastAxis[]         = "lastAutoSortAxis";
-
 QString camToolpathTomlPath(const QString& packageDir)
 {
     return QDir(packageDir).filePath(QString::fromLatin1(kCamToolpathTomlFile));
@@ -180,7 +170,7 @@ bool readPointsBin(const QString& filePath,
         if (errorMsg) *errorMsg = QStringLiteral("Point set file magic mismatch");
         return false;
     }
-    if (version < 1 || version > kPointsBinVersion) {
+    if (version != kPointsBinVersion) {
         // 中文翻译：点集文件版本 %1 不支持
         if (errorMsg) *errorMsg = QStringLiteral("Point set file version %1 is not supported").arg(version);
         return false;
@@ -201,11 +191,9 @@ bool readPointsBin(const QString& filePath,
             quint8 crossValid = 0;
             qint32 sourceEdgeIndex = -1;
             ds >> px >> py >> pz >> nx >> ny >> nz;
-            if (version >= 2)
-                ds >> cnx >> cny >> cnz >> crossValid;
+            ds >> cnx >> cny >> cnz >> crossValid;
             ds >> tx >> ty >> tz >> par;
-            if (version >= 4)
-                ds >> sourceEdgeIndex;
+            ds >> sourceEdgeIndex;
             ds >> mx >> my >> mz >> r1 >> r2 >> r1Name >> r2Name >> valid;
             ToolpathPoint tp;
             tp.position = gp_Pnt(px, py, pz);
@@ -227,10 +215,9 @@ bool readPointsBin(const QString& filePath,
         }
         pointsByContourId.insert(static_cast<std::uint64_t>(contourId), std::move(pts));
 
-        if (version >= 3) {
-            quint8 leadValid = 0;
-            ds >> leadValid;
-            if (leadValid != 0) {
+        quint8 leadValid = 0;
+        ds >> leadValid;
+        if (leadValid != 0) {
                 double px, py, pz, nx, ny, nz, tx, ty, tz, par;
                 double cnx, cny, cnz, mx, my, mz, r1, r2;
                 QString r1Name, r2Name;
@@ -239,8 +226,7 @@ bool readPointsBin(const QString& filePath,
                 ds >> px >> py >> pz >> nx >> ny >> nz;
                 ds >> cnx >> cny >> cnz >> crossValid;
                 ds >> tx >> ty >> tz >> par;
-                if (version >= 4)
-                    ds >> sourceEdgeIndex;
+                ds >> sourceEdgeIndex;
                 ds >> mx >> my >> mz >> r1 >> r2 >> r1Name >> r2Name >> machineValid;
                 LeadInSolution solution;
                 solution.point.position = gp_Pnt(px, py, pz);
@@ -261,7 +247,6 @@ bool readPointsBin(const QString& filePath,
                 solution.valid = true;
                 leadInsByContourId.insert(static_cast<std::uint64_t>(contourId),
                                           std::move(solution));
-            }
         }
     }
     return ds.status() == QDataStream::Ok;
@@ -485,8 +470,13 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         return false;
     }
     const int schemaVersion = root.contains("schemaVersion") && root.at("schemaVersion").is_integer()
-        ? static_cast<int>(root.at("schemaVersion").as_integer())
-        : 1;
+        ? static_cast<int>(root.at("schemaVersion").as_integer()) : 0;
+    if (schemaVersion != kCamToolpathSchemaVersion) {
+        if (errorMsg)
+            *errorMsg = QStringLiteral("CAM toolpath schema version %1 is not supported; expected %2")
+                            .arg(schemaVersion).arg(kCamToolpathSchemaVersion);
+        return false;
+    }
 
     // 2. 读点集（先于 LaserContour，确保按 contourId 关联）。
     QHash<std::uint64_t, std::vector<ToolpathPoint>> pointsByContourId;
@@ -669,11 +659,7 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             if (e.contains("manual"))         rec.manual         = e.at("manual").as_boolean();
             if (e.contains("role")) {
                 const int storedRole = static_cast<int>(e.at("role").as_integer());
-                // v3 used 1 for outer surfaces and 2 for cross sections.
-                rec.role = schemaVersion < 4
-                    ? (storedRole == 2 ? MachiningFaceRole::CrossSection
-                                       : MachiningFaceRole::MachiningSurface)
-                    : static_cast<MachiningFaceRole>(storedRole);
+                rec.role = static_cast<MachiningFaceRole>(storedRole);
             }
             faceRecords.push_back(rec);
         }
@@ -697,112 +683,17 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         }
     }
 
-    // v1/v2 did not persist per-contour discretisation parameters or source-edge anchors.
     for (LaserContour& contour : cam.toolpath().contours()) {
         if (contour.appliedParams.deflection <= 0.0)
             contour.appliedParams.deflection = cam.appliedGenerationParams().deflection;
         if (contour.pendingParams.deflection <= 0.0)
             contour.pendingParams.deflection = contour.appliedParams.deflection;
-        if (schemaVersion < 3 && contour.leadIn.valid && !contour.points.empty()) {
-            const int index = std::clamp(contour.leadIn.entryPointIndex,
-                                         0, static_cast<int>(contour.points.size()) - 1);
-            contour.leadIn.entryEdgeIndex = contour.points[static_cast<std::size_t>(index)].sourceEdgeIndex;
-        }
     }
 
     LCNC_INFO(lcnc::LogCode::Generic,
               "cam.toolpath: restored {} layers, {} contours from cache",
               cam.toolpath().layers().size(),
               cam.toolpath().contourCount());
-    return true;
-}
-
-bool migrateLegacyProcessCuttingPlan(CamDataManager& cam, const QString& packageDir, QString* errorMsg)
-{
-    const QString filePath = QDir(packageDir).filePath(QString::fromLatin1(kLegacyPlanFile));
-    if (!QFileInfo::exists(filePath))
-        return true; // 新项目或已迁移项目：无需做任何事。
-
-    toml::value root;
-    try {
-        root = toml::parse(filePath.toStdString());
-    } catch (const std::exception& e) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.toolpath: failed to parse legacy cutting plan '{}': {}",
-                 filePath.toStdString(),
-                 e.what());
-        if (errorMsg)
-            // 中文翻译：解析 process_cutting_plan.toml 失败: %1
-            *errorMsg = QStringLiteral("Failed to parse process_cutting_plan.toml: %1")
-                            .arg(QString::fromLocal8Bit(e.what()));
-        return false;
-    }
-    if (!root.is_table()) {
-        // 中文翻译：process_cutting_plan.toml 根节点不是 table
-        if (errorMsg) *errorMsg = QStringLiteral("process_cutting_plan.toml root node is not a table");
-        return false;
-    }
-
-    LayerContainer& container = cam.layerContainer();
-    if (root.contains("sortStrategy") && root.at("sortStrategy").is_string()) {
-        container.setSortStrategy(sortStrategyFromString(
-            QString::fromStdString(root.at("sortStrategy").as_string()),
-            CuttingPlanSortStrategy::LayerThenContour));
-    }
-
-    int migratedLayers = 0;
-    if (root.contains("layers") && root.at("layers").is_array()) {
-        for (const toml::value& entry : root.at("layers").as_array()) {
-            if (!entry.is_table()) continue;
-            std::uint64_t layerId = 0;
-            if (entry.contains(kFieldLayerId) && entry.at(kFieldLayerId).is_integer())
-                layerId = static_cast<std::uint64_t>(entry.at(kFieldLayerId).as_integer());
-            if (layerId == 0) continue;
-
-            if (entry.contains(kFieldToolName) && entry.at(kFieldToolName).is_string())
-                container.setLayerToolName(layerId,
-                    QString::fromStdString(entry.at(kFieldToolName).as_string()));
-            if (entry.contains(kFieldEnabled) && entry.at(kFieldEnabled).is_boolean())
-                container.setLayerEnabled(layerId, entry.at(kFieldEnabled).as_boolean());
-            if (entry.contains(kFieldCompensation) && entry.at(kFieldCompensation).is_string())
-                container.setLayerCompensationIndex(layerId,
-                    QString::fromStdString(entry.at(kFieldCompensation).as_string()));
-            if (entry.contains(kFieldIncludedContours) && entry.at(kFieldIncludedContours).is_array()) {
-                QSet<ContourId> included;
-                for (const toml::value& cid : entry.at(kFieldIncludedContours).as_array())
-                    if (cid.is_integer())
-                        included.insert(static_cast<ContourId>(cid.as_integer()));
-                container.setLayerIncludedContours(layerId, included);
-            }
-            ++migratedLayers;
-        }
-    }
-
-    if (root.contains(kFieldManualOrder) && root.at(kFieldManualOrder).is_array()) {
-        QVector<ContourId> manual;
-        for (const toml::value& v : root.at(kFieldManualOrder).as_array()) {
-            if (!v.is_integer()) continue;
-            const auto cid = static_cast<ContourId>(v.as_integer());
-            if (cid != 0) manual.append(cid);
-        }
-        container.setManualContourOrder(manual);
-    }
-    if (root.contains(kFieldLastAxis) && root.at(kFieldLastAxis).is_string()) {
-        container.setLastAutoSortAxis(autoSortAxisFromString(
-            QString::fromStdString(root.at(kFieldLastAxis).as_string()), AutoSortAxis::XPos));
-    }
-
-    // 把旧文件改名以阻止下次再做迁移；新版保存路径不再产出该文件。
-    const QString legacyPath = filePath + QStringLiteral(".legacy");
-    QFile::remove(legacyPath);
-    if (!QFile::rename(filePath, legacyPath)) {
-        LCNC_WARN(lcnc::LogCode::Generic,
-                  "cam.toolpath: failed to rename legacy '{}' to '{}'",
-                  filePath.toStdString(), legacyPath.toStdString());
-    }
-
-    LCNC_INFO(lcnc::LogCode::Generic,
-              "cam.toolpath: migrated v1 process_cutting_plan.toml ({} layers)", migratedLayers);
     return true;
 }
 

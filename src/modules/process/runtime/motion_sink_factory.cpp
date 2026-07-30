@@ -5,15 +5,15 @@
 #include "core/logging/logger.h"
 #include "modules/process/cutting/pure_simulation_toolpath_ticker.h"
 #if LCNC_PROCESS_HAS_ACS
-#include "modules/process/device/MotionControl/ACSMotionControl.h"
-#include "modules/process/device/MotionControl/SimulateCMHPMotionControl.h"
+#include "modules/process/device/motion_control/acs_motion_control.h"
+#include "modules/process/device/motion_control/simulate_cmhp_motion_control.h"
 #include "modules/process/runtime/acs_text_command_sink.h"
 #endif
 #if LCNC_PROCESS_HAS_GTN
-#include "modules/process/device/MotionControl/GTNMotionControl.h"
+#include "modules/process/device/motion_control/gtn_motion_control.h"
 #include "modules/process/runtime/gtn_buffered_command_sink.h"
 #endif
-#include "modules/process/device/MotionControl/MotionControl.h"
+#include "modules/process/device/motion_control/motion_control.h"
 #include "modules/process/process_module.h"
 #include "modules/process/runtime/pure_simulation_sink.h"
 

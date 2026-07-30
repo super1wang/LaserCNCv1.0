@@ -5,7 +5,7 @@
 
 namespace lcnc {
 
-bool LcncProjectManifest::validate(QString* errorMsg, bool allowLegacyFormat) const
+bool LcncProjectManifest::validate(QString* errorMsg) const
 {
     if (schema != QStringLiteral("lcnc.project")) {
         if (errorMsg)
@@ -13,39 +13,26 @@ bool LcncProjectManifest::validate(QString* errorMsg, bool allowLegacyFormat) co
             *errorMsg = QStringLiteral("Unsupported project schema: %1").arg(schema);
         return false;
     }
-    if (formatVersion <= 0 || formatVersion > kCurrentFormatVersion) {
+    if (formatVersion != kCurrentFormatVersion) {
         if (errorMsg)
             // 中文翻译：不支持的项目版本: %1
             *errorMsg = QStringLiteral("Unsupported project version: %1").arg(formatVersion);
         return false;
     }
-    if (!allowLegacyFormat && formatVersion != kCurrentFormatVersion) {
-        if (errorMsg) {
-            // 中文翻译：项目版本 %1 必须先使用 lcnc_project_upgrade 迁移到 v%2
-            *errorMsg = QStringLiteral("Project version %1 must first be migrated to v%2 using lcnc_project_upgrade")
-                            .arg(formatVersion)
-                            .arg(kCurrentFormatVersion);
-        }
-        return false;
-    }
-    // v2: 校验工件 XBF；v1: 校验旧 projectXcafPath
-    const QString xbf = formatVersion >= 2 ? workpieceXcafPath : projectXcafPath;
-    if (xbf.trimmed().isEmpty()) {
+    if (workpieceXcafPath.trimmed().isEmpty()) {
         if (errorMsg)
             // 中文翻译：项目 manifest 缺少 XBF 资源路径
             *errorMsg = QStringLiteral("Project manifest is missing XBF resource path");
         return false;
     }
-    if (formatVersion >= 4) {
-        const QString normalizedSnapshot = QDir::cleanPath(toolSnapshotPath.trimmed());
-        if (normalizedSnapshot.isEmpty() || QFileInfo(normalizedSnapshot).isAbsolute()
-            || normalizedSnapshot == QStringLiteral("..")
-            || normalizedSnapshot.startsWith(QStringLiteral("../"))) {
-            if (errorMsg)
-                // 中文翻译：项目 manifest 包含无效的工具快照路径
-                *errorMsg = QStringLiteral("Project manifest contains invalid tools snapshot path");
-            return false;
-        }
+    const QString normalizedSnapshot = QDir::cleanPath(toolSnapshotPath.trimmed());
+    if (normalizedSnapshot.isEmpty() || QFileInfo(normalizedSnapshot).isAbsolute()
+        || normalizedSnapshot == QStringLiteral("..")
+        || normalizedSnapshot.startsWith(QStringLiteral("../"))) {
+        if (errorMsg)
+            // 中文翻译：项目 manifest 包含无效的工具快照路径
+            *errorMsg = QStringLiteral("Project manifest contains invalid tools snapshot path");
+        return false;
     }
     return true;
 }
@@ -68,15 +55,9 @@ void LcncProjectManifest::readFrom(const toml::value& root)
 
     if (root.contains("resources") && root.at("resources").is_table()) {
         const auto& resources = root.at("resources");
-        // v2: 新项目只用 workpiece.xbf；v1: 读旧 projectXcaf 兜底
-        projectXcafPath = get_qstring(resources, "projectXcaf", QStringLiteral("project.xbf"));
-        workpieceXcafPath = get_qstring(resources, "workpieceXcaf", projectXcafPath);
+        workpieceXcafPath = get_qstring(resources, "workpieceXcaf", QStringLiteral("workpiece.xbf"));
         camCacheDirectory = get_qstring(resources, "camCacheDirectory", QStringLiteral("cam/cache"));
         toolSnapshotPath = get_qstring(resources, "toolSnapshot", QStringLiteral("tools.toml"));
-    } else if (formatVersion < 2) {
-        // v1 旧格式：resources 段不存在时回退默认值
-        projectXcafPath = QStringLiteral("project.xbf");
-        workpieceXcafPath = projectXcafPath;
     } else {
         workpieceXcafPath = QStringLiteral("workpiece.xbf");
     }

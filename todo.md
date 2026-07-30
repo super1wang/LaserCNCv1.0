@@ -7,37 +7,25 @@
 
 ## P0：安全与发布门禁
 
-- [ ] 对 ACS、GTN、SimulatorCMHP 建立连接、轮询、回零、加工、暂停、Stop、急停、断开和退出的可重复测试。
+- [ ] 扩展 `SimulatorCMHP` SDK 集成测试，使单个测试进程内可稳定重复完整的连接、建轴、使能、轮询、回零、短刀路、暂停、Stop、急停、安全输出复位和断开循环；当前只完成真实 SDK/`Simulator.prg` 初始化、100 次设备线程会话命令及同线程断开/销毁，供应商 RPC 释放窗口仍会阻止稳定的 100 次进程级重连。
 - [ ] ACS/GTN 真机各执行不少于 100 次连接/断开和加工停止循环，验证激光、红光、吹气及运动输出安全复位。
 - [ ] 逐项确认供应商调用的 timeout/abort 能力；对不可中断调用定义停止发新命令、对象保活和人工恢复流程。
-- [ ] 验证 DeviceCommandQueue 的 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、轮询合并和 completion 完成语义。
-- [ ] 在禁用第三方输入法注入的环境执行 ASan GUI、Application Verifier/页堆和 8 小时资源趋势。
-- [ ] 执行 all-off、ACS-only、GTN-only、ACS+GTN、real-laser 和 ASan 干净构建矩阵。
+- [ ] 在禁用第三方输入法注入的受控环境执行 ASan GUI、Application Verifier/页堆和 8 小时资源趋势；ASan 构建及全部 CTest 已通过，但不替代这些交互与长稳证据。
 
 ## P1：结构收口
 
-- [ ] 将 `process_module.cpp` 的连接会话、加工预检、轮询投影和运行状态下沉为独立服务；迁移时保持设备租约与关闭顺序。
-- [ ] 让 DeviceCommandQueue 逐步成为唯一 SDK 执行入口；在所有直接路径迁移并完成真机验证前保留 `ProcessDeviceCoordinator`。
-- [ ] 拆分 `cam_module.cpp` 的 machining-face pipeline、toolpath generation、machine calibration 和 display projection。
-- [ ] 拆分 `main_window.cpp` 的 workspace presenter、project explorer controller 和 view-state controller。
-- [ ] 继续将 `cad_module.cpp` 的导入/导出、草图、特征和选择刷新下沉到现有 services。
-- [ ] 为项目代码建立分 target 的 `/W4` 告警基线，供应商头继续使用 external warning policy。
-- [ ] 统一 `core/algorithms/cad` 的 OCC 异常契约：纯算法抛出、调用方记录，或明确采用无异常结果；不得混用。
-- [ ] 分批迁移 45 个 Process legacy PascalCase 文件/目录及其旧式 API；每批必须保持硬件开关构建通过。
+- [ ] 将 `process_module.cpp`（当前约 2,876 行）的连接会话、加工预检、轮询投影继续下沉为 `ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService`；`ProcessRunCoordinator` 已落地，后续迁移必须保持已修正的关闭顺序。
+- [ ] 让 `DeviceCommandQueue` 成为唯一 SDK 执行入口；当前静态扫描仍有 41 处 runtime 外的 `lockDeviceAccess()`、`motionControl()` 或 `laserDevice()` 使用。在全部迁移并完成真机验证前保留 `ProcessDeviceCoordinator` 防御锁。
+- [ ] 完成 `cam_module.cpp`（当前约 6,606 行）的职责下沉；`ToolpathGenerationService` 已实现并覆盖 stale-result 拒绝，machining-face pipeline、machine calibration 和 display projection 仍待独立 service。
+- [ ] 继续将 `cad_module.cpp`（当前约 2,297 行）的文档 IO、草图/特征流程和选择刷新下沉到正式 `CadDocumentIoService`、`CadModelingController`、`CadSelectionController`；本轮仅完成算法异常边界和部分已有 service 委托。
+- [ ] 清理 Process 中仍公开的旧式 `Service::motionControl()`、`laserDevice()`、`lockDeviceAccess()` API；目录和文件 snake_case 迁移已完成，不再保留重复的 legacy 文件或别名。
+- [ ] 收敛 real-laser 配置中旧厂商协议适配器的项目 `/W4` 告警，使该配置也能启用 `/WX`；ACS+GTN 质量预设已达到 `/W4 /WX`。
 
 ## P1：自动化回归
 
-- [ ] 扩展设备队列测试：全部优先级、FIFO、coalesce、shutdown、Superseded/Cancelled/Shutdown 结果。
-- [ ] 增加工作流线程、PureSimulation 线程亲和与 Process 并发关闭测试，并重复运行 100 次。
-- [ ] 增加 CAM 全局生成/当前轮廓重算的成功、取消、工件替换、参数变化和陈旧结果测试。
-- [ ] 增加 CamDataManager、轮廓排序、Process 状态机、工具快照并发读取和工程保存中断测试。
+- [ ] 增加工作流专用线程、PureSimulation/SDK 线程亲和、轮询关闭和 Process 并发关闭测试，并分别重复运行 100 次；队列 lifecycle 和运行状态迁移已有独立回归。
+- [ ] 补齐 CAM 实际异步任务入口的全局生成/当前轮廓重算集成测试；当前 service 级测试已覆盖成功、取消、工件/加工面/参数/轮廓 revision 变化及陈旧结果拒绝。
 - [ ] 测量大模型轮廓提取、面分类、IK 和 GUI 提交阶段的取消延迟与最长卡顿。
-
-## P2：兼容与维护
-
-- [ ] 为 CAM JSON、旧 workflow tree、旧工具字段分别确定 schema、fixture、离线升级路径和删除版本。
-- [ ] 使用真实 v1/v2/v3 工程样本验证离线升级、工具快照、跨机恢复和机台指纹提示。
-- [ ] 将 CI/本地门禁统一为 preset 配置、Debug 构建、CTest、架构扫描、空白检查和启动冒烟。
 
 ## 每次提交最小检查
 
@@ -46,4 +34,5 @@
 - [ ] `cmake --build --preset acs-gtn-debug --parallel 16`
 - [ ] `ctest --test-dir build-cmake --build-config Debug --output-on-failure`
 - [ ] `scripts/check_architecture.ps1 -Root .`
+- [ ] `scripts/run_quality_gates.ps1`
 - [ ] 涉及真实硬件时执行输出安全、Stop 优先级和断开检查

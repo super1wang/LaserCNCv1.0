@@ -26,7 +26,7 @@ using namespace lcnc::cad::commands;
 CmdMoveShape::CmdMoveShape(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：移动
-    auto* action = new QAction(QIcon(":/icons/move.svg"), tr("move"), this);
+    auto* action = new QAction(QIcon("themeicons:move.svg"), tr("move"), this);
     // 中文翻译：沿 X/Y/Z 方向平移形体
     action->setStatusTip(tr("Translate the shape along the X/Y/Z direction"));
     setAction(action);
@@ -103,7 +103,7 @@ void CmdMoveShape::execute()
 CmdRotateShape::CmdRotateShape(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：旋转
-    auto* action = new QAction(QIcon(":/icons/rotate.svg"), tr("rotate"), this);
+    auto* action = new QAction(QIcon("themeicons:rotate.svg"), tr("rotate"), this);
     // 中文翻译：绕轴旋转形体
     action->setStatusTip(tr("Rotate a shape around an axis"));
     setAction(action);

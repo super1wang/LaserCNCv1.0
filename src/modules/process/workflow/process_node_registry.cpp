@@ -81,29 +81,29 @@ QString ProcessNodeRegistry::summary(const ProcessNode& node) const
     case ProcessNodeType::Stop:
         // 中文翻译：流程结束
         return valueText(p, QStringLiteral("message"), QStringLiteral("End of process"));
-    case ProcessNodeType::Axis:
+    case ProcessNodeType::SingleAxisMove:
         return QStringLiteral("%1 %2 %3 F%4").arg(
             valueText(p, QStringLiteral("axis"), QStringLiteral("X")),
             valueText(p, QStringLiteral("mode"), QStringLiteral("absolute")),
             valueText(p, QStringLiteral("target"), 0.0),
             valueText(p, QStringLiteral("velocity"), 5.0));
-    case ProcessNodeType::AxesMove:
+    case ProcessNodeType::MultiAxisMove:
         // 中文翻译：%1，多轴 %2 项
         return QStringLiteral("%1, multi-axis %2 items").arg(
             valueText(p, QStringLiteral("multiMode"), QStringLiteral("sequential")),
             QString::number(p.value(QStringLiteral("axes"), QVariantList{}).toList().size()));
-    case ProcessNodeType::IO:
+    case ProcessNodeType::OutputSignal:
         return QStringLiteral("%1 %2=%3").arg(
             valueText(p, QStringLiteral("signalType"), QStringLiteral("digital")),
             valueText(p, QStringLiteral("ioName"), QStringLiteral("aLaser")),
             valueText(p, QStringLiteral("value"), 1));
-    case ProcessNodeType::Monitor:
+    case ProcessNodeType::InputSignalWait:
         // 中文翻译：等待 %1=%2 timeout=%3ms
         return QStringLiteral("Wait %1=%2 timeout=%3ms").arg(
             valueText(p, QStringLiteral("ioName"), QStringLiteral("aStart")),
             valueText(p, QStringLiteral("targetValue"), true),
             valueText(p, QStringLiteral("timeoutMs"), 5000));
-    case ProcessNodeType::Cutting:
+    case ProcessNodeType::NormalCutting:
         // 中文翻译：普通切割
         return QStringLiteral("Ordinary cutting");
     default:

@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QSurfaceFormat>
+#include <QTimer>
 #include <QTranslator>
 
 #include "app/main_window.h"
@@ -13,7 +14,6 @@
 #include "modules/cad/cad_module.h"
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
-#include "modules/process/System/MessageModule.h"
 
 namespace {
 
@@ -31,7 +31,7 @@ QSurfaceFormat makeOccSurfaceFormat()
     return format;
 }
 
-QString industrialStyleSheet()
+QString darkIndustrialStyleSheet()
 {
     // Keep the CAD viewport unstyled: OCC owns its rendering surface.  The
     // surrounding chrome is deliberately dark, low-glare and high-contrast so
@@ -88,6 +88,80 @@ QString industrialStyleSheet()
     )QSS");
 }
 
+QString lightIndustrialStyleSheet()
+{
+    return QStringLiteral(R"QSS(
+        QWidget { font-family: "Segoe UI", "Microsoft YaHei UI"; font-size: 12px; color: #243642; }
+        QMainWindow, QDialog { background: #F3F6F8; }
+        QMenuBar { background: #F7F9FB; border-bottom: 1px solid #C8D2DA; padding: 2px 8px; }
+        QMenuBar::item { padding: 6px 12px; background: transparent; }
+        QMenuBar::item:selected { background: #DCEAF1; color: #173D4D; }
+        QMenu { background: #FFFFFF; border: 1px solid #BFCBD3; padding: 4px; }
+        QMenu::item { padding: 6px 26px 6px 22px; border-radius: 3px; }
+        QMenu::item:selected { background: #D7EDF5; color: #123C4B; }
+        SARibbonBar { background: #F4F7F9; border-bottom: 1px solid #C3CED6; }
+        SARibbonTabBar { background: #EDF2F5; border: 0; }
+        SARibbonTabBar::tab { color: #3D5663; background: transparent; border: 0; padding: 3px 15px 8px; margin: 0 2px; }
+        SARibbonTabBar::tab:hover { background: #DCE9EF; color: #173D4D; }
+        SARibbonTabBar::tab:selected { background: #167A9A; color: #FFFFFF; border-bottom: 2px solid #0B607D; }
+        SARibbonStackedWidget, SARibbonCategory { background: #F8FAFB; border-top: 1px solid #CBD5DC; }
+        SARibbonPanel { background: transparent; border-right: 1px solid #CBD5DC; }
+        SARibbonPanelLabel { color: #356678; font-weight: 600; }
+        SARibbonToolButton, QToolButton { color: #263F4C; background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 3px; }
+        SARibbonToolButton:hover, QToolButton:hover { background: #E1EDF2; border-color: #8AAAB8; }
+        SARibbonToolButton:pressed, QToolButton:pressed { background: #C4E1EC; }
+        SARibbonSeparatorWidget { background: #CBD5DC; }
+        QTabWidget::pane { border: 1px solid #C5D0D8; background: #FFFFFF; }
+        QTabBar::tab { background: #E9EFF3; border: 1px solid #C5D0D8; border-bottom: 0; color: #526975; padding: 6px 12px; margin-right: 2px; }
+        QTabBar::tab:selected { background: #FFFFFF; color: #116E8C; border-top: 2px solid #1687AA; }
+        QGroupBox { border: 1px solid #C4CFD7; border-radius: 4px; margin-top: 10px; padding: 8px 6px 6px 6px; font-weight: 600; color: #365361; background: #FFFFFF; }
+        QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 9px; padding: 0 5px; color: #176B86; }
+        QPushButton { background: #F4F7F9; border: 1px solid #AAB9C2; border-radius: 3px; min-height: 25px; padding: 3px 8px; color: #243642; }
+        QPushButton:hover { background: #E7F1F5; border-color: #468CA5; }
+        QPushButton:pressed { background: #CCE4ED; }
+        QPushButton:checked { background: #167A9A; border-color: #0B607D; color: #FFFFFF; }
+        QPushButton[role="run"] { background: #DDF3E8; border-color: #2A9B70; color: #116142; font-weight: 700; }
+        QPushButton[role="pause"] { background: #FFF0CF; border-color: #BC8B26; color: #76540D; font-weight: 700; }
+        QPushButton[role="resume"] { background: #DCEFFA; border-color: #3989B5; color: #175B7E; font-weight: 700; }
+        QPushButton[role="stop"] { background: #FBE2E2; border-color: #C74949; color: #8B2424; font-weight: 700; }
+        QPushButton[jogDirection="negative"], QPushButton[jogDirection="positive"] { min-height: 30px; min-width: 48px; padding: 2px; font-size: 14px; font-weight: 700; }
+        QPushButton[jogDirection="negative"] { background: #E9EFF3; border-color: #8EA2AD; }
+        QPushButton[jogDirection="positive"] { background: #D7EEF2; border-color: #4A9DA9; }
+        QLineEdit, QDoubleSpinBox, QComboBox, QTextEdit { background: #FFFFFF; border: 1px solid #AEBCC5; border-radius: 3px; padding: 3px 6px; selection-background-color: #5AA6BE; }
+        QDoubleSpinBox:focus, QComboBox:focus { border-color: #1782A3; }
+        QProgressBar { border: 1px solid #AEBCC5; border-radius: 3px; text-align: center; color: #243642; background: #EDF2F5; min-height: 12px; }
+        QProgressBar::chunk { background: #2698AA; border-radius: 2px; }
+        QTreeWidget, QTreeView, QTableView { background: #FFFFFF; alternate-background-color: #F4F7F9; border: 1px solid #C5D0D8; }
+        QTreeView::item { color: #263C48; background: transparent; padding: 2px 3px; }
+        QTreeView::item:selected { color: #FFFFFF; background: #2A6FDB; }
+        QHeaderView::section { background: #E9EFF3; border: 0; border-right: 1px solid #C5D0D8; border-bottom: 1px solid #C5D0D8; padding: 5px; color: #36505D; }
+        QScrollBar:vertical { background: #EDF2F5; width: 10px; margin: 0; }
+        QScrollBar::handle:vertical { background: #A7B7C0; min-height: 26px; border-radius: 4px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        QScrollArea, QScrollArea > QWidget > QWidget { background: #FFFFFF; }
+    )QSS");
+}
+
+QString normalizedTheme(const QString& theme)
+{
+    return theme.compare(QStringLiteral("light"), Qt::CaseInsensitive) == 0
+        ? QStringLiteral("light")
+        : QStringLiteral("dark");
+}
+
+void applyApplicationTheme(QApplication& app, const QString& configuredTheme)
+{
+    const QString theme = normalizedTheme(configuredTheme);
+    app.setProperty("lcnc.theme", theme);
+    QDir::setSearchPaths(QStringLiteral("themeicons"),
+                         {theme == QStringLiteral("light")
+                              ? QStringLiteral(":/icons/light")
+                              : QStringLiteral(":/icons")});
+    app.setStyleSheet(theme == QStringLiteral("light")
+                          ? lightIndustrialStyleSheet()
+                          : darkIndustrialStyleSheet());
+}
+
 bool installApplicationTranslator(QApplication& app, const QString& language)
 {
     // 翻译资源内置于可执行文件，避免运行目录缺失 qm 文件导致语言设置失效。
@@ -118,7 +192,7 @@ int main(int argc, char* argv[])
     QSurfaceFormat::setDefaultFormat(makeOccSurfaceFormat());
 
     QApplication app(argc, argv);
-    app.setStyleSheet(industrialStyleSheet());
+    const bool smokeTest = app.arguments().contains(QStringLiteral("--smoke-test"));
     app.setApplicationName(QStringLiteral("LaserCNC"));
     app.setApplicationVersion(QStringLiteral("1.0.0"));
     app.setOrganizationName(QStringLiteral("LaserCNC"));
@@ -156,6 +230,7 @@ int main(int argc, char* argv[])
     lcnc::Kernel kernel;
     kernel.registerCoreServices();
     kernel.appSettings()->loadDefault();   // mainwindow.toml
+    applyApplicationTheme(app, kernel.appSettings()->theme);
     installApplicationTranslator(app, kernel.appSettings()->language);
     // 中文翻译：五轴激光加工 CAM
     app.setApplicationDisplayName(
@@ -205,6 +280,8 @@ int main(int argc, char* argv[])
 
         MainWindow mainWin;
         mainWin.show();
+        if (smokeTest)
+            QTimer::singleShot(0, &app, &QCoreApplication::quit);
 
         rc = app.exec();
 
@@ -226,10 +303,6 @@ int main(int argc, char* argv[])
         LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
                  "Unhandled unknown exception in main");
     }
-
-    // 旧消息桥接线程可能由任一 Process 路径惰性创建；必须在 QApplication
-    // 和日志系统仍存活时显式停止，不能依赖进程退出阶段的静态析构顺序。
-    MessageModule::shutdown();
 
     // Logger 必须晚于所有可能写日志的模块、任务和 GUI 对象关闭。
     LCNC_INFO(lcnc::LogCode::Generic, "Shutdown complete rc={}", rc);

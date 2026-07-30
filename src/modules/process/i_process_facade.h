@@ -12,6 +12,7 @@ enum class ProcessRunState {
     Idle,
     Running,
     Paused,
+    Stopped,
     Error,
     EmergencyStop,
 };

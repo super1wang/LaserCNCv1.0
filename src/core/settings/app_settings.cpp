@@ -23,19 +23,10 @@ QString colorToHex(const QColor& c)
     return c.name(QColor::HexRgb);
 }
 
-const QColor kLegacyCadBackground(60, 68, 82);
-const QColor kLegacyCamBackground(42, 48, 58);
-
 QColor colorFromHex(const QString& s, const QColor& def)
 {
     const QColor c(s);
     return c.isValid() ? c : def;
-}
-
-void syncLegacyBackgroundFields(ColorSettings& colors)
-{
-    colors.cadBackgroundColor = colors.backgroundColor;
-    colors.camBackgroundColor = colors.backgroundColor;
 }
 
 QString presetToString(RenderQualityPreset preset)
@@ -226,13 +217,13 @@ void writeProfile(toml::value& table, const RenderProfileSettings& profile)
 QHash<QString, QColor> defaultMachineAxisColors()
 {
     return {
-        {QStringLiteral("BASE"), QColor::fromRgbF(0.62, 0.64, 0.68)},
-        {QStringLiteral("X"),    QColor::fromRgbF(0.90, 0.27, 0.18)},
-        {QStringLiteral("Y"),    QColor::fromRgbF(0.14, 0.66, 0.28)},
-        {QStringLiteral("Z"),    QColor::fromRgbF(0.18, 0.48, 0.94)},
-        {QStringLiteral("A"),    QColor::fromRgbF(0.93, 0.60, 0.08)},
-        {QStringLiteral("B"),    QColor::fromRgbF(0.10, 0.70, 0.70)},
-        {QStringLiteral("C"),    QColor::fromRgbF(0.76, 0.23, 0.79)},
+        {QStringLiteral("BASE"), QColor::fromRgbF(0.62f, 0.64f, 0.68f)},
+        {QStringLiteral("X"),    QColor::fromRgbF(0.90f, 0.27f, 0.18f)},
+        {QStringLiteral("Y"),    QColor::fromRgbF(0.14f, 0.66f, 0.28f)},
+        {QStringLiteral("Z"),    QColor::fromRgbF(0.18f, 0.48f, 0.94f)},
+        {QStringLiteral("A"),    QColor::fromRgbF(0.93f, 0.60f, 0.08f)},
+        {QStringLiteral("B"),    QColor::fromRgbF(0.10f, 0.70f, 0.70f)},
+        {QStringLiteral("C"),    QColor::fromRgbF(0.76f, 0.23f, 0.79f)},
     };
 }
 
@@ -291,7 +282,13 @@ void AppSettings::readFrom(const toml::value& root)
 
     if (root.contains("general") && root.at("general").is_table()) {
         const auto& g = root.at("general");
-        theme       = get_qstring(g, "theme",    theme);
+        // Older builds persisted "light" by default but never applied the
+        // setting (the application was always dark). Treat those files as the
+        // current dark default; once saved by this build, the version marker
+        // preserves an explicit light selection.
+        theme = get_int(g, "theme_version", 0) >= 1
+            ? get_qstring(g, "theme", theme)
+            : QStringLiteral("dark");
         language    = get_qstring(g, "language", language);
         unitSystem  = get_qstring(g, "units",    unitSystem);
         documentOpenMode = documentOpenModeFromString(
@@ -335,27 +332,6 @@ void AppSettings::readFrom(const toml::value& root)
     if (root.contains("rendering_cam") && root.at("rendering_cam").is_table())
         readProfile(root.at("rendering_cam"), camViewRendering);
 
-    // 兼容上一版 [rendering] 字段。
-    if (root.contains("rendering") && root.at("rendering").is_table()) {
-        const auto& r = root.at("rendering");
-        cadViewRendering.defaultDisplayMode = static_cast<StartupDisplayMode>(get_int(r, "display_mode", 1));
-        camViewRendering.defaultDisplayMode = cadViewRendering.defaultDisplayMode;
-        cadViewRendering.qualityPreset = static_cast<RenderQualityPreset>(get_int(r, "quality_level", 1));
-        camViewRendering.qualityPreset = cadViewRendering.qualityPreset;
-        colors.workpieceColor = colorFromHex(get_qstring(r, "file_color", colorToHex(colors.workpieceColor)), colors.workpieceColor);
-        colors.backgroundColor = colorFromHex(get_qstring(r, "machine_default_color", colorToHex(colors.backgroundColor)), colors.backgroundColor);
-        syncLegacyBackgroundFields(colors);
-        if (r.contains("axis_colors") && r.at("axis_colors").is_table()) {
-            const auto& ac = r.at("axis_colors");
-            for (const auto& kv : ac.as_table()) {
-                if (kv.second.is_string()) {
-                    colors.machineAxisColors.insert(QString::fromStdString(kv.first),
-                        colorFromHex(QString::fromStdString(kv.second.as_string()), QColor()));
-                }
-            }
-        }
-    }
-
     if (root.contains("colors") && root.at("colors").is_table()) {
         const auto& c = root.at("colors");
         colors.workpieceColor = colorFromHex(get_qstring(c, "workpiece", colorToHex(colors.workpieceColor)), colors.workpieceColor);
@@ -363,16 +339,8 @@ void AppSettings::readFrom(const toml::value& root)
             get_double(c, "workpiece_transparency", colors.workpieceTransparency), 1.0);
         colors.machineTransparency = qBound(0.0,
             get_double(c, "machine_transparency", colors.machineTransparency), 1.0);
-        const QColor legacyCad = colorFromHex(get_qstring(c, "cad_background", colorToHex(kLegacyCadBackground)), kLegacyCadBackground);
-        const QColor legacyCam = colorFromHex(get_qstring(c, "cam_background", colorToHex(kLegacyCamBackground)), kLegacyCamBackground);
-        if (c.contains("background") && c.at("background").is_string()) {
+        if (c.contains("background") && c.at("background").is_string())
             colors.backgroundColor = colorFromHex(QString::fromStdString(c.at("background").as_string()), colors.backgroundColor);
-        } else if (legacyCad != kLegacyCadBackground && legacyCam == kLegacyCamBackground) {
-            colors.backgroundColor = legacyCad;
-        } else {
-            colors.backgroundColor = legacyCam;
-        }
-        syncLegacyBackgroundFields(colors);
         colors.selectionColor = colorFromHex(get_qstring(c, "selection", colorToHex(colors.selectionColor)), colors.selectionColor);
         colors.hoverColor = colorFromHex(get_qstring(c, "hover", colorToHex(colors.hoverColor)), colors.hoverColor);
         colors.treeSelectionColor = colorFromHex(get_qstring(c, "tree_selection", colorToHex(colors.treeSelectionColor)), colors.treeSelectionColor);
@@ -416,6 +384,7 @@ void AppSettings::writeTo(toml::value& root) const
 
     toml::value general(toml::table{});
     general["theme"] = qs(theme);
+    general["theme_version"] = 1;
     general["language"] = qs(language);
     general["units"] = qs(unitSystem);
     general["document_open_mode"] = qs(documentOpenModeToString(documentOpenMode));
@@ -457,8 +426,6 @@ void AppSettings::writeTo(toml::value& root) const
     colorTable["workpiece_transparency"] = qBound(0.0, colors.workpieceTransparency, 1.0);
     colorTable["machine_transparency"] = qBound(0.0, colors.machineTransparency, 1.0);
     colorTable["background"] = qs(colorToHex(colors.backgroundColor));
-    colorTable["cad_background"] = qs(colorToHex(colors.backgroundColor));
-    colorTable["cam_background"] = qs(colorToHex(colors.backgroundColor));
     colorTable["selection"] = qs(colorToHex(colors.selectionColor));
     colorTable["hover"] = qs(colorToHex(colors.hoverColor));
     colorTable["tree_selection"] = qs(colorToHex(colors.treeSelectionColor));

@@ -37,8 +37,8 @@ public:
     static QString packageDirectory(const QString& path);
 
     static QString manifestPath(const QString& path);
-    static QString projectXcafPath(const QString& path,
-                                   const LcncProjectManifest& manifest = LcncProjectManifest{});
+    static QString workpieceXcafPath(const QString& path,
+                                     const LcncProjectManifest& manifest = LcncProjectManifest{});
 
     static bool save(const LcncDocument& document,
                      const QString& path,
@@ -80,16 +80,6 @@ public:
                      QString* errorMsg = nullptr,
                      lcnc::cam::CamDataManager* camData = nullptr);
 
-    /// Offline migration entry point. The desktop application must use load(),
-    /// which accepts only the current project format.
-    static bool loadForMigration(LcncDocument& workpieceDocument,
-                                 LcncDocument* machineDocument,
-                                 LcncDocument* camDocument,
-                                 const QString& path,
-                                 ProjectLoadResult* result = nullptr,
-                                 QString* errorMsg = nullptr,
-                                 lcnc::cam::CamDataManager* camData = nullptr);
-
 private:
     static bool loadInternal(LcncDocument& workpieceDocument,
                              LcncDocument* machineDocument,
@@ -97,8 +87,7 @@ private:
                              const QString& path,
                              ProjectLoadResult* result,
                              QString* errorMsg,
-                             lcnc::cam::CamDataManager* camData,
-                             bool allowLegacyFormat);
+                             lcnc::cam::CamDataManager* camData);
 };
 
 } // namespace lcnc

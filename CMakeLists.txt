@@ -19,6 +19,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # instrumented, but every project-owned translation unit can be built with the
 # MSVC AddressSanitizer runtime through the `asan` configure preset.
 option(LCNC_ENABLE_ASAN "Enable MSVC AddressSanitizer for project code" OFF)
+option(LCNC_WARNINGS_AS_ERRORS "Treat warnings in LaserCNC-owned targets as errors" OFF)
 if(LCNC_ENABLE_ASAN AND NOT MSVC)
     message(FATAL_ERROR "LCNC_ENABLE_ASAN currently requires MSVC")
 endif()
@@ -109,7 +110,7 @@ set(LCNC_REAL_LASER_SDK_ROOT "${LCNC_PROCESS_SDK_ROOT}" CACHE PATH "Real laser S
 
 # ─── Boost (consumed by process module: ToolFactory, SerialPort, ACSMotionControl) ──
 # Header includes: <boost/lexical_cast.hpp>, <boost/thread.hpp>, <boost/chrono.hpp>
-# Compiled libs needed by SerialPort.cpp (boost::this_thread, boost::chrono): boost_thread, boost_chrono, boost_system
+# Compiled libs needed by serial_port.cpp (boost::this_thread, boost::chrono): boost_thread, boost_chrono, boost_system
 set(LCNC_BOOST_ROOT "G:/environment/vcpkg-master/vcpkg/installed/x64-windows" CACHE PATH "Boost installation root (vcpkg layout: include/ + lib/ + debug/lib/)")
 set(LCNC_BOOST_INCLUDE_DIR "${LCNC_BOOST_ROOT}/include" CACHE PATH "Boost include directory")
 set(LCNC_BOOST_LIB_DIR_RELEASE "${LCNC_BOOST_ROOT}/lib" CACHE PATH "Boost release library directory")
@@ -144,6 +145,18 @@ endif()
 # library and the executable. Linked PUBLIC by lcnc_core so that everything
 # downstream inherits it transitively.
 add_library(lcnc_common INTERFACE)
+add_library(lcnc_project_warnings INTERFACE)
+if(MSVC)
+    target_compile_options(lcnc_project_warnings INTERFACE
+        /W4
+        /external:anglebrackets
+        /external:W0
+    )
+    if(LCNC_WARNINGS_AS_ERRORS)
+        target_compile_options(lcnc_project_warnings INTERFACE /WX)
+    endif()
+endif()
+target_link_libraries(lcnc_common INTERFACE lcnc_project_warnings)
 target_include_directories(lcnc_common INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/3rd
@@ -296,6 +309,7 @@ set(SRCS_MODULE_CAM
     src/modules/cam/contracts/toolpath_export_dto.cpp
     src/modules/cam/settings/cam_config.cpp
     src/modules/cam/services/machine_axis_detector.cpp
+    src/modules/cam/services/toolpath_generation_service.cpp
     src/modules/cam/services/machine_io.cpp
     src/modules/cam/services/reference_pick.cpp
     src/modules/cam/commands/commands_machine.cpp
@@ -314,23 +328,24 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/process_axis_utilities.cpp
     src/modules/process/runtime/device_command_queue.cpp
     src/modules/process/runtime/device_command_queue.h
+    src/modules/process/runtime/process_run_coordinator.cpp
+    src/modules/process/runtime/process_run_coordinator.h
     src/modules/process/settings/process_settings_service.cpp
     src/modules/process/settings/process_parameter_registry.cpp
     src/modules/process/settings/process_property_model.cpp
     src/modules/process/settings/process_io_table_model.cpp
     src/modules/process/settings/process_settings_dialog.cpp
-    src/modules/process/System/Service.cpp
-    src/modules/process/System/MessageModule.cpp
-    src/modules/process/Setting/BuiltinIODefs.cpp
-    src/modules/process/device/MotionControl/MotionControl.cpp
-    src/modules/process/device/MotionControl/SimulateCMHPMotionControl.cpp
-    src/modules/process/device/Connect/SerialPort.cpp
-    src/modules/process/device/Laser/LDFactory.cpp
-    src/modules/process/device/Laser/AnalogLaserDevice.cpp
-    src/modules/process/device/Laser/LaserDevice.cpp
-    src/modules/process/device/Laser/SimulatorLaserDevice.cpp
-    src/modules/process/Tool/Tool.cpp
-    src/modules/process/Tool/ToolFactory.cpp
+    src/modules/process/runtime/process_device_runtime.cpp
+    src/modules/process/setting/builtin_io_defs.cpp
+    src/modules/process/device/motion_control/motion_control.cpp
+    src/modules/process/device/motion_control/simulate_cmhp_motion_control.cpp
+    src/modules/process/device/connect/serial_port.cpp
+    src/modules/process/device/laser/ld_factory.cpp
+    src/modules/process/device/laser/analog_laser_device.cpp
+    src/modules/process/device/laser/laser_device.cpp
+    src/modules/process/device/laser/simulator_laser_device.cpp
+    src/modules/process/tool/tool.cpp
+    src/modules/process/tool/tool_factory.cpp
     src/modules/process/monitor/process_monitor_types.h
     src/modules/process/monitor/process_monitor_service.h
     src/modules/process/monitor/process_monitor_service.cpp
@@ -359,7 +374,7 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/workflow/process_flow_store.cpp
     src/modules/process/steps/process_step_registry.cpp
     src/modules/process/steps/process_step_builtin_registration.cpp
-    src/modules/process/steps/services/legacy_process_services.cpp
+    src/modules/process/steps/services/process_workflow_services.cpp
     src/modules/process/steps/start/start_step.cpp
     src/modules/process/steps/stop/stop_step.cpp
     src/modules/process/steps/single_axis_move/single_axis_move_step.cpp
@@ -370,7 +385,7 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/ui/process_flow_model.cpp
     src/modules/process/ui/process_flow_tree_view.cpp
     src/modules/process/ui/process_node_edit_dialog.cpp
-    src/modules/process/Process/qg_processeswidget.cpp
+    src/modules/process/ui/process_flow_widget.cpp
     src/modules/process/commands/commands_process.cpp
     src/modules/process/ui/widget_laser_control.cpp
     src/modules/process/ui/ribbon_process_tab.cpp
@@ -380,30 +395,41 @@ set(SRCS_MODULE_PROCESS
 
 if(LCNC_WITH_ACS)
     list(APPEND SRCS_MODULE_PROCESS
-        src/modules/process/device/MotionControl/ACSMotionControl.cpp
+        src/modules/process/device/motion_control/acs_motion_control.cpp
         src/modules/process/runtime/acs_text_command_sink.h
         src/modules/process/runtime/acs_text_command_sink.cpp
     )
 endif()
 if(LCNC_WITH_GTN)
     list(APPEND SRCS_MODULE_PROCESS
-        src/modules/process/device/MotionControl/GTNMotionControl.cpp
+        src/modules/process/device/motion_control/gtn_motion_control.cpp
         src/modules/process/runtime/gtn_buffered_command_sink.cpp
+    )
+    # The GTN adapter implements the complete historical vendor surface.  A
+    # small number of SDK-required/no-op parameters and retained diagnostic
+    # locals are intentionally unused; scope these exceptions to this source
+    # while keeping /W4 and /WX on every other Process translation unit.
+    set_source_files_properties(
+        src/modules/process/device/motion_control/gtn_motion_control.cpp
+        PROPERTIES COMPILE_OPTIONS "/wd4100;/wd4101;/wd4189"
     )
 endif()
 if(LCNC_WITH_REAL_LASER)
     list(APPEND SRCS_MODULE_PROCESS
-        src/modules/process/device/Connect/HTTPClient.cpp
-        src/modules/process/device/Laser/IPGLaserDevice.cpp
-        src/modules/process/device/Laser/PharosLaserDevice.cpp
-        src/modules/process/device/Laser/RaycusLaserDevice.cpp
-        src/modules/process/device/Laser/RaycusAirCoolLaserDevice.cpp
-        src/modules/process/device/Laser/RaycusQCWLaserDevice.cpp
-        src/modules/process/device/Laser/ULTRONLaserDevice.cpp
+        src/modules/process/device/connect/http_client.cpp
+        src/modules/process/device/laser/ipg_laser_device.cpp
+        src/modules/process/device/laser/pharos_laser_device.cpp
+        src/modules/process/device/laser/raycus_laser_device.cpp
+        src/modules/process/device/laser/raycus_air_cool_laser_device.cpp
+        src/modules/process/device/laser/raycus_qcw_laser_device.cpp
+        src/modules/process/device/laser/ultron_laser_device.cpp
     )
 endif()
 
 set(SRCS_APP
+    src/app/controllers/project_explorer_controller.cpp
+    src/app/controllers/view_state_controller.cpp
+    src/app/controllers/workspace_presenter.cpp
     src/app/app_context.cpp
     src/app/command_registry.cpp
     src/app/commands/commands_display.cpp
@@ -479,11 +505,6 @@ endif()
 # QuaZip 仅在 lcnc_project_package.cpp 实现内部使用（不出现在公开头文件）→ PRIVATE。
 target_link_libraries(lcnc_core PRIVATE QuaZip::QuaZip)
 
-add_executable(lcnc_project_upgrade
-    tools/lcnc_project_upgrade_main.cpp
-)
-target_link_libraries(lcnc_project_upgrade PRIVATE lcnc_core Qt6::Core)
-
 # view ────────────────────────────────────────────────────────────────────────
 add_library(lcnc_view STATIC ${SRCS_VIEW})
 set_target_properties(lcnc_view PROPERTIES AUTOMOC ON)
@@ -517,14 +538,14 @@ set_target_properties(lcnc_module_process PROPERTIES
     AUTOMOC ON
 )
 target_include_directories(lcnc_module_process PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/System
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Setting
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/Tool
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/MotionControl
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Laser
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/Connect
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/system
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/setting
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/tool
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/motion_control
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/laser
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/connect
 )
-# Boost: ToolFactory.cpp, SerialPort.cpp, ACSMotionControl.cpp pull in
+# Boost: tool_factory.cpp, serial_port.cpp, acs_motion_control.cpp pull in
 # <boost/lexical_cast.hpp>, <boost/thread.hpp>, <boost/chrono.hpp>. The first
 # is header-only; the latter two need compiled libs. We link them by absolute
 # path (PRIVATE — only this library's TUs reference these symbols, the
@@ -675,6 +696,34 @@ function(lcnc_deploy_tbb_runtime target)
         COMMENT "Copying OCCT TBB runtime for ${target}")
 endfunction()
 
+function(lcnc_deploy_qt_offscreen_platform target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:${target}>/platforms"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<IF:$<CONFIG:Debug>,${LCNC_QT6_ROOT}/plugins/platforms/qoffscreend.dll,${LCNC_QT6_ROOT}/plugins/platforms/qoffscreen.dll>"
+            "$<TARGET_FILE_DIR:${target}>/platforms"
+        COMMENT "Copying Qt offscreen platform plugin for ${target}")
+endfunction()
+
+function(lcnc_deploy_acs_simulator_program target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LCNC_ACS_SIMULATOR_PROGRAM}"
+            "$<TARGET_FILE_DIR:${target}>/Simulator.prg"
+        COMMENT "Deploying ACS Simulator program for ${target}")
+endfunction()
+
+function(lcnc_deploy_gtn_runtime target)
+    if(LCNC_WITH_GTN)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LCNC_GTN_RUNTIME_DLL}"
+                "$<TARGET_FILE_DIR:${target}>"
+            COMMENT "Copying GTN runtime DLL for ${target}")
+    endif()
+endfunction()
+
 set(_lcnc_runtime_bin "$<IF:$<CONFIG:Debug>,${LCNC_RUNTIME_BIN_DIR_DEBUG},${LCNC_RUNTIME_BIN_DIR_RELEASE}>")
 if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
     # All test executables share ${CMAKE_BINARY_DIR}/<config>. A POST_BUILD
@@ -699,13 +748,19 @@ if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_REL
         COMMENT "Copying runtime DLLs to LaserCNC output directory"
     )
     add_dependencies(LaserCNC lcnc_runtime_deploy_app)
-    add_dependencies(lcnc_project_upgrade lcnc_runtime_deploy_build)
 endif()
+# The canonical application output is shared by the Ninja and VS generator
+# trees.  Keep zlib attached to the executable's own POST_BUILD action so a
+# generator's custom-target scheduling cannot leave the smoke-test binary
+# without this direct dependency.
+add_custom_command(TARGET LaserCNC POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${LCNC_ZLIB_RUNTIME_DLL}"
+        "$<TARGET_FILE_DIR:LaserCNC>"
+    COMMENT "Copying zlib runtime DLL to LaserCNC output directory")
 lcnc_deploy_tbb_runtime(LaserCNC)
-lcnc_deploy_tbb_runtime(lcnc_project_upgrade)
 if(LCNC_ENABLE_ASAN)
     lcnc_deploy_asan_runtime(LaserCNC)
-    lcnc_deploy_asan_runtime(lcnc_project_upgrade)
 endif()
 if(LCNC_WITH_GTN)
     add_custom_command(TARGET LaserCNC POST_BUILD
@@ -746,6 +801,45 @@ if(BUILD_TESTING)
         tests/device_command_queue_test.cpp
     )
     target_link_libraries(lcnc_device_command_queue_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_process_current_schema_test
+        tests/process_current_schema_test.cpp
+    )
+    target_link_libraries(lcnc_process_current_schema_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_contour_order_planner_test
+        tests/contour_order_planner_test.cpp
+    )
+    target_link_libraries(lcnc_contour_order_planner_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_cam_data_manager_test
+        tests/cam_data_manager_test.cpp
+    )
+    target_link_libraries(lcnc_cam_data_manager_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_toolpath_snapshot_concurrency_test
+        tests/toolpath_snapshot_concurrency_test.cpp
+    )
+    target_link_libraries(lcnc_toolpath_snapshot_concurrency_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_process_run_coordinator_test
+        tests/process_run_coordinator_test.cpp
+    )
+    target_link_libraries(lcnc_process_run_coordinator_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_cad_algorithm_contract_test
+        tests/cad_algorithm_contract_test.cpp
+    )
+    target_link_libraries(lcnc_cad_algorithm_contract_test PRIVATE lcnc_module_cad Qt6::Core)
+    add_executable(lcnc_project_explorer_controller_test
+        tests/project_explorer_controller_test.cpp
+    )
+    target_link_libraries(lcnc_project_explorer_controller_test PRIVATE lcnc_app Qt6::Widgets)
+    add_executable(lcnc_toolpath_generation_service_test
+        tests/toolpath_generation_service_test.cpp
+    )
+    target_link_libraries(lcnc_toolpath_generation_service_test PRIVATE lcnc_module_cam Qt6::Core)
+    if(LCNC_WITH_ACS)
+        add_executable(lcnc_simulator_cmhp_sdk_integration_test
+            tests/simulator_cmhp_sdk_integration_test.cpp
+        )
+        target_link_libraries(lcnc_simulator_cmhp_sdk_integration_test PRIVATE
+            lcnc_module_process Qt6::Core)
+    endif()
     if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
         add_dependencies(lcnc_project_package_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_task_manager_test lcnc_runtime_deploy_build)
@@ -753,6 +847,17 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_contour_extraction_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_runtime_configuration_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_device_command_queue_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_process_current_schema_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_contour_order_planner_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_cam_data_manager_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_toolpath_snapshot_concurrency_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_process_run_coordinator_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_cad_algorithm_contract_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_project_explorer_controller_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_toolpath_generation_service_test lcnc_runtime_deploy_build)
+        if(LCNC_WITH_ACS)
+            add_dependencies(lcnc_simulator_cmhp_sdk_integration_test lcnc_runtime_deploy_build)
+        endif()
     endif()
     lcnc_deploy_tbb_runtime(lcnc_project_package_test)
     lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
@@ -760,6 +865,20 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_contour_extraction_test)
     lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
     lcnc_deploy_tbb_runtime(lcnc_device_command_queue_test)
+    lcnc_deploy_tbb_runtime(lcnc_process_current_schema_test)
+    lcnc_deploy_tbb_runtime(lcnc_contour_order_planner_test)
+    lcnc_deploy_tbb_runtime(lcnc_cam_data_manager_test)
+    lcnc_deploy_tbb_runtime(lcnc_toolpath_snapshot_concurrency_test)
+    lcnc_deploy_tbb_runtime(lcnc_process_run_coordinator_test)
+    lcnc_deploy_tbb_runtime(lcnc_cad_algorithm_contract_test)
+    lcnc_deploy_tbb_runtime(lcnc_project_explorer_controller_test)
+    lcnc_deploy_tbb_runtime(lcnc_toolpath_generation_service_test)
+    if(LCNC_WITH_ACS)
+        lcnc_deploy_tbb_runtime(lcnc_simulator_cmhp_sdk_integration_test)
+        lcnc_deploy_acs_simulator_program(lcnc_simulator_cmhp_sdk_integration_test)
+        lcnc_deploy_gtn_runtime(lcnc_simulator_cmhp_sdk_integration_test)
+    endif()
+    lcnc_deploy_qt_offscreen_platform(lcnc_project_explorer_controller_test)
     if(LCNC_ENABLE_ASAN)
         lcnc_deploy_asan_runtime(lcnc_project_package_test)
         lcnc_deploy_asan_runtime(lcnc_task_manager_test)
@@ -767,6 +886,17 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_contour_extraction_test)
         lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
         lcnc_deploy_asan_runtime(lcnc_device_command_queue_test)
+        lcnc_deploy_asan_runtime(lcnc_process_current_schema_test)
+        lcnc_deploy_asan_runtime(lcnc_contour_order_planner_test)
+        lcnc_deploy_asan_runtime(lcnc_cam_data_manager_test)
+        lcnc_deploy_asan_runtime(lcnc_toolpath_snapshot_concurrency_test)
+        lcnc_deploy_asan_runtime(lcnc_process_run_coordinator_test)
+        lcnc_deploy_asan_runtime(lcnc_cad_algorithm_contract_test)
+        lcnc_deploy_asan_runtime(lcnc_project_explorer_controller_test)
+        lcnc_deploy_asan_runtime(lcnc_toolpath_generation_service_test)
+        if(LCNC_WITH_ACS)
+            lcnc_deploy_asan_runtime(lcnc_simulator_cmhp_sdk_integration_test)
+        endif()
     endif()
     add_test(NAME architecture_checks
         COMMAND "${LCNC_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
@@ -784,6 +914,40 @@ if(BUILD_TESTING)
         COMMAND lcnc_process_runtime_configuration_test)
     add_test(NAME lcnc_device_command_queue_test
         COMMAND lcnc_device_command_queue_test)
+    add_test(NAME lcnc_process_current_schema_test
+        COMMAND lcnc_process_current_schema_test)
+    add_test(NAME lcnc_contour_order_planner_test
+        COMMAND lcnc_contour_order_planner_test)
+    add_test(NAME lcnc_cam_data_manager_test
+        COMMAND lcnc_cam_data_manager_test)
+    add_test(NAME lcnc_toolpath_snapshot_concurrency_test
+        COMMAND lcnc_toolpath_snapshot_concurrency_test)
+    add_test(NAME lcnc_process_run_coordinator_test
+        COMMAND lcnc_process_run_coordinator_test)
+    add_test(NAME lcnc_cad_algorithm_contract_test
+        COMMAND lcnc_cad_algorithm_contract_test)
+    add_test(NAME lcnc_project_explorer_controller_test
+        COMMAND lcnc_project_explorer_controller_test)
+    set_tests_properties(lcnc_project_explorer_controller_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    )
+    add_test(NAME lcnc_toolpath_generation_service_test
+        COMMAND lcnc_toolpath_generation_service_test)
+    if(LCNC_WITH_ACS)
+        add_test(NAME lcnc_simulator_cmhp_sdk_integration_test
+            COMMAND lcnc_simulator_cmhp_sdk_integration_test)
+        set_tests_properties(lcnc_simulator_cmhp_sdk_integration_test PROPERTIES
+            TIMEOUT 600
+            RUN_SERIAL TRUE
+            RESOURCE_LOCK "simulator_cmhp_sdk"
+        )
+    endif()
+    add_test(NAME lcnc_startup_smoke_test
+        COMMAND LaserCNC --smoke-test)
+    set_tests_properties(lcnc_startup_smoke_test PROPERTIES
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+    )
 endif()
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")

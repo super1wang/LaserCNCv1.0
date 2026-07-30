@@ -68,13 +68,13 @@ void buildRibbonTab(SARibbonCategory* cat,
     // 中文翻译：G代码
     SARibbonPanel* panelNC = cat->addPanel(QObject::tr("G code"));
     // 中文翻译：生成G代码
-    panelNC->addLargeAction(makeAct(QObject::tr("Generate G-code"), QStringLiteral(":/icons/gcode.svg")));
+    panelNC->addLargeAction(makeAct(QObject::tr("Generate G-code"), QStringLiteral("themeicons:gcode.svg")));
     // 中文翻译：导入G代码
-    panelNC->addLargeAction(makeAct(QObject::tr("Import G code"), QStringLiteral(":/icons/import.svg")));
+    panelNC->addLargeAction(makeAct(QObject::tr("Import G code"), QStringLiteral("themeicons:import.svg")));
     // 中文翻译：导出G代码
-    panelNC->addLargeAction(makeAct(QObject::tr("Export G-code"), QStringLiteral(":/icons/export.svg")));
+    panelNC->addLargeAction(makeAct(QObject::tr("Export G-code"), QStringLiteral("themeicons:export.svg")));
     // 中文翻译：代码查看
-    panelNC->addLargeAction(makeAct(QObject::tr("code view"),  QStringLiteral(":/icons/code.svg")));
+    panelNC->addLargeAction(makeAct(QObject::tr("code view"),  QStringLiteral("themeicons:code.svg")));
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::buildRibbonTab end");
 }

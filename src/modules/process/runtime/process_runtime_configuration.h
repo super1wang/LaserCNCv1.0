@@ -1,6 +1,6 @@
 #pragma once
 
-#include "modules/process/System/DataType.h"
+#include "modules/process/system/data_type.h"
 
 #include <QStringList>
 

@@ -4,10 +4,9 @@
 
 ## 结论
 
-当前工作区已完成一轮全源码架构审计和可证明死代码清理。独立的
-CMake/Ninja 与 Visual Studio/MSBuild 两条 ACS+GTN Debug 路线均构建
-通过，两棵生成树的 7 项 CTest、架构门禁与空白检查均通过，可作为集成
-测试候选。
+当前工作区已完成一轮阶段性结构、当前格式和自动化测试收口。质量预设的
+CMake/Ninja ACS+GTN Debug（`/W4 /WX`）、全部独立 Ninja 构建矩阵及
+Visual Studio/MSBuild ACS+GTN Debug 已通过对应 CTest，可作为集成测试候选。
 
 当前不是生产发布版本。真机安全、供应商阻塞故障、ASan/Application Verifier 和长时间资源趋势仍未完成。
 
@@ -19,22 +18,55 @@ CMake/Ninja 与 Visual Studio/MSBuild 两条 ACS+GTN Debug 路线均构建
 - 架构脚本新增 pure-algorithm、设备公共头和 settings 注入门禁。
 - CMake/Ninja 与 Visual Studio/MSBuild 已分别固定到 `build-cmake/` 和
   `build-vs/`，禁止继续使用旧共享 `build/`。
+- 应用格式已收紧为项目/CAM v4：删除离线升级器、v1/v2/v3 XCAF 和 CAM
+  回退、旧 workflow tree 双读写、CAM JSON 自动迁移及旧工具字段宽容读取。
+- DeviceCommandQueue 已具备可追踪 completion：优先级、同级 FIFO、按 key
+  合并、显式取消、超时和关闭丢弃均有确定结果；同 key 合并时新旧命令保持
+  独立 ID 且每个已接受命令只完成一次。
+- 新增执行线程私有的 `ProcessDeviceRuntime` 与 `ProcessRunCoordinator`，
+  并修正模块停机顺序；剩余直接设备访问仍明确列入 `todo.md`。
+- MainWindow 已将工作区、工程树和视图状态下沉为三个 controller；CAM 已
+  抽出带 revision 校验的 `ToolpathGenerationService`；CAD 算法异常统一在
+  module/service 边界记录和转换。
+- 新增 `scripts/run_quality_gates.ps1`，统一空白检查、架构/旧格式扫描、配置、构建和 CTest 入口。
 - 两条 ACS+GTN Debug 路线均成功生成 `x64/Debug/LaserCNC.exe`。
-- `build-cmake/` 与 `build-vs/` 的 CTest 均为 7/7 通过。
+- 本轮质量树 `build-cmake-quality/` 的 CTest 为 17/17 通过，其中
+  `lcnc_simulator_cmhp_sdk_integration_test` 使用真实
+  `acsc_OpenCommSimulator()` 与部署的 `Simulator.prg`，并验证 100 次设备
+  线程会话命令和同线程断开/销毁。这不替代 ACS/GTN/真实激光物理硬件验证。
+- 已实测该 SDK 的进程级 `CloseComm`→`OpenCommSimulator` 重启有多秒释放窗口，
+  且连续数轮后会拒绝新句柄；因此“100 次进程级重连”仍是供应商 SDK 环境待验证项，
+  未将其误记为自动化通过。
+- 独立 Ninja 构建矩阵已验证 all-off（16/16 CTest）、ACS-only（17/17，含
+  SimulatorCMHP SDK）与 GTN-only（16/16）。GTN-only 首次链接出现一次测试
+  可执行文件短暂占用，确认无残留进程后重试通过；这不是编译或测试失败。
+- real-laser 配置已构建并通过 17/17 CTest，ASan（ACS+GTN）构建并通过
+  17/17 CTest。real-laser 仍暴露旧厂商协议适配器的 `/W4` 告警，故该配置
+  尚未达到 `/WX` 收口；ASan 通过亦不替代 Application Verifier 和 8 小时资源趋势。
+- Visual Studio/MSBuild ACS+GTN Debug 已构建并通过 17/17 CTest。首次冒烟
+  发现共享应用输出未部署 `zlib1.dll`（`0xc0000135`），现已将该 DLL 绑定到
+  `LaserCNC` POST_BUILD；修复后完整 CTest 通过。
 
 完整问题、证据和发布判断见 [AUDIT.md](AUDIT.md)。
 
 ## 仅静态或构建验证
 
 - Process OCC-free、core/view 分层、淘汰 API、settings singleton、CMake 源文件收录。
-- DeviceCommandQueue 与 ProcessDeviceCoordinator 的结构关系。
-- real-laser 源码的异常日志修正；当前 ACS+GTN preset 未编译真实激光实现。
+- DeviceCommandQueue 与 ProcessDeviceCoordinator 的结构关系；静态扫描仍有
+  41 处 runtime 外的设备锁或设备指针使用，因此唯一 SDK executor 尚未完成。
+- 旧格式拒绝和设备队列 completion：`lcnc_project_package_test`、
+  `lcnc_device_command_queue_test` 已通过。
+- real-laser 源码已构建并通过 CTest，但旧厂商协议适配器仍有项目 `/W4`
+  告警，尚未达到该配置的 `/WX` 收口。
 
 ## 仍需外部环境/真机验证
 
-- ACS、GTN、SimulatorCMHP 和真实激光器的连接、回零、加工、暂停、Stop、急停和断开。
+- SimulatorCMHP 的真实 ACS SDK 100 次完整连接、建轴、使能、轮询、回零、
+  加工、暂停、Stop、急停和断开循环；本轮已完成真实 SDK 初始化及 100 次
+  设备线程会话命令，但没有用它冒充完整进程级重连验证。
+- ACS、GTN 和真实激光器的物理硬件连接、回零、加工、暂停、Stop、急停和断开。
 - 不可中断供应商调用的超时、对象保活与关机故障注入。
-- all-off、ACS-only、GTN-only、real-laser、ASan 构建矩阵。
-- GUI 启动/退出、Application Verifier/页堆和 8 小时资源趋势。
+- Application Verifier/页堆、受控 ASan GUI 和 8 小时资源趋势。
+- 大模型取消响应与 GUI 批提交性能门限。
 
 实施顺序见 [todo.md](todo.md)，架构事实见 [ARCHITECTURE.md](ARCHITECTURE.md)。

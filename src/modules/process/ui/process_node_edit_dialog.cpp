@@ -217,7 +217,7 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
         // 中文翻译：停止时停止运动
         addBool(QStringLiteral("stopMotion"), tr("Stop movement when stopped"));
         break;
-    case ProcessNodeType::Axis:
+    case ProcessNodeType::SingleAxisMove:
         // 中文翻译：轴
         addText(QStringLiteral("axis"), tr("axis"), QStringLiteral("X"));
         // 中文翻译：模式 absolute/relative
@@ -229,10 +229,10 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
         // 中文翻译：超时
         addInt(QStringLiteral("timeoutMs"), tr("timeout"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));
         break;
-    case ProcessNodeType::AxesMove:
+    case ProcessNodeType::MultiAxisMove:
         // 多轴运动使用独立表格页 buildMultiAxisPage()。
         break;
-    case ProcessNodeType::IO: {
+    case ProcessNodeType::OutputSignal: {
         // 中文翻译：输出类型
         auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("Output type"), { QStringLiteral("digital"), QStringLiteral("analog") });
         // 中文翻译：IO 名
@@ -247,7 +247,7 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
         addText(QStringLiteral("value"), tr("value"), QStringLiteral("true"));
         break;
     }
-    case ProcessNodeType::Monitor: {
+    case ProcessNodeType::InputSignalWait: {
         // 中文翻译：输入类型
         auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("input type"), { QStringLiteral("digital"), QStringLiteral("analog") });
         // 中文翻译：输入 IO
@@ -266,7 +266,7 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
         addInt(QStringLiteral("pollIntervalMs"), tr("refresh interval"), 10, 60000, QStringLiteral(" ms"));
         break;
     }
-    case ProcessNodeType::Cutting:
+    case ProcessNodeType::NormalCutting:
         // 中文翻译：选择模式
         addText(QStringLiteral("selectionMode"), tr("Select mode"), QStringLiteral("allEnabled"));
         // 中文翻译：起始序号
@@ -427,7 +427,7 @@ void ProcessNodeEditDialog::loadNode()
 
     if (m_pluginEditor && ProcessStepRegistry::instance().step(m_node.type)) {
         m_detailStack->setCurrentIndex(1);
-    } else if (m_node.type == ProcessNodeType::AxesMove) {
+    } else if (m_node.type == ProcessNodeType::MultiAxisMove) {
         m_detailStack->setCurrentIndex(5);
         loadMultiAxisPage();
     } else if (!m_textEditors.isEmpty() || !m_doubleEditors.isEmpty() || !m_intEditors.isEmpty() || !m_boolEditors.isEmpty() || !m_comboEditors.isEmpty()) {
@@ -453,7 +453,7 @@ void ProcessNodeEditDialog::applyNode()
             if (!step->applyParameterEditor(m_pluginEditor, m_node, &error))
                 return;
         }
-    } else if (m_node.type == ProcessNodeType::AxesMove) {
+    } else if (m_node.type == ProcessNodeType::MultiAxisMove) {
         applyMultiAxisPage();
     } else if (!m_textEditors.isEmpty() || !m_doubleEditors.isEmpty() || !m_intEditors.isEmpty() || !m_boolEditors.isEmpty() || !m_comboEditors.isEmpty()) {
         applyTypedParameterEditors();
@@ -499,7 +499,7 @@ void ProcessNodeEditDialog::loadTypedParameterEditors()
 void ProcessNodeEditDialog::applyTypedParameterEditors()
 {
     QVariantMap parameters = m_node.parameters;
-    if (m_node.type == ProcessNodeType::Cutting)
+    if (m_node.type == ProcessNodeType::NormalCutting)
         parameters.remove(QStringLiteral("dryRun"));
     for (auto it = m_textEditors.cbegin(); it != m_textEditors.cend(); ++it)
         parameters.insert(it.key(), it.value()->text().trimmed());

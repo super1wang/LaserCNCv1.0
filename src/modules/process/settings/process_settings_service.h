@@ -20,7 +20,7 @@ struct ProcessSettingsCommitResult { bool success{false}; ProcessSettingsChangeS
 class ProcessSettingsService
 {
 public:
-    ProcessSettingsService();
+    explicit ProcessSettingsService(QString configurationRoot = {});
 
     bool initialize();
     void beginEdit();
@@ -77,6 +77,7 @@ private:
     ProcessParameterRegistry m_registry;
     bool m_axisDirty{false};
     mutable QHash<QString, QString> m_toolIds;
+    QString m_configurationRoot;
 };
 
 } // namespace lcnc::process

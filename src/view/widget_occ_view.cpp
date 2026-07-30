@@ -661,9 +661,10 @@ void WidgetOccView::mouseReleaseEvent(QMouseEvent* e)
             // Finish rubber-band: hide band, select shapes inside rectangle.
             const QRect selRect = QRect(m_pressPos, e->pos()).normalized();
             clearRubberBand();
-            m_context->Select(selRect.left(),  selRect.top(),
-                              selRect.right(), selRect.bottom(),
-                              m_view, Standard_True);
+            m_context->SelectRectangle(
+                Graphic3d_Vec2i(selRect.left(), selRect.top()),
+                Graphic3d_Vec2i(selRect.right(), selRect.bottom()),
+                m_view);
             emit selectionChanged();
             m_view->Redraw();
         } else {
@@ -894,7 +895,7 @@ void WidgetOccView::handleSelection(const QPoint& pos)
     // ShiftSelect = XOR / toggle: adds to selection if not selected,
     // removes from selection if already selected.  Nothing changes when
     // clicking on empty space — use ESC to clear all.
-    m_context->ShiftSelect(Standard_True);
+    m_context->SelectDetected(AIS_SelectionScheme_XOR);
     emit selectionChanged();
     m_view->Redraw();
 }

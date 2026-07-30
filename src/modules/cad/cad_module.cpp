@@ -3,6 +3,7 @@
 #include "modules/cad/document/cad_document_registry.h"
 #include "modules/cad/selection/cad_selection_resolver.h"
 #include "modules/cad/services/cad_modeling_session.h"
+#include "modules/cad/services/cad_algorithm_boundary.h"
 #include "modules/cad/services/shape_service.h"
 #include "modules/cad/task/cad_command_dispatcher.h"
 #include "modules/cad/task/cad_command_request.h"
@@ -27,7 +28,7 @@
 #include <BRep_Builder.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
-#include <BRep_Tool.hxx>
+#include <BRep_tool.hxx>
 #include <BRepTools.hxx>
 #include <Bnd_Box.hxx>
 #include <IMeshTools_Parameters.hxx>
@@ -195,18 +196,20 @@ TopoDS_Shape buildPrimitiveShape(int primitiveIndex,
                                  const CadModule::PrimitiveParameters& params,
                                  QString* errMsg)
 {
-    switch (primitiveIndex) {
-    case 1:
-        return lcnc::cad_algo::makeCylinder(params.radius1, params.sizeZ, errMsg);
-    case 2:
-        return lcnc::cad_algo::makeSphere(params.radius1, errMsg);
-    case 3:
-        return lcnc::cad_algo::makeCone(params.radius1, params.radius2, params.sizeZ, errMsg);
-    case 4:
-        return lcnc::cad_algo::makeTorus(params.radius1, params.radius2, errMsg);
-    default:
-        return lcnc::cad_algo::makeBox(params.sizeX, params.sizeY, params.sizeZ, errMsg);
-    }
+    return lcnc::cad::invokeCadAlgorithm([&] {
+        switch (primitiveIndex) {
+        case 1:
+            return lcnc::cad_algo::makeCylinder(params.radius1, params.sizeZ);
+        case 2:
+            return lcnc::cad_algo::makeSphere(params.radius1);
+        case 3:
+            return lcnc::cad_algo::makeCone(params.radius1, params.radius2, params.sizeZ);
+        case 4:
+            return lcnc::cad_algo::makeTorus(params.radius1, params.radius2);
+        default:
+            return lcnc::cad_algo::makeBox(params.sizeX, params.sizeY, params.sizeZ);
+        }
+    }, errMsg);
 }
 
 TDF_Label labelByEntry(LcncDocument* doc, const QString& entry)
@@ -1661,7 +1664,9 @@ bool CadModule::buildTransformPreview(const TransformParameters& params,
             continue;
 
         QString transformError;
-        const TopoDS_Shape transformed = lcnc::cad_algo::transformShape(shape, algoParams, &transformError);
+        const TopoDS_Shape transformed = lcnc::cad::invokeCadAlgorithm(
+            [&] { return lcnc::cad_algo::transformShape(shape, algoParams); },
+            &transformError);
         if (transformed.IsNull()) {
             if (errMsg)
                 *errMsg = transformError;
@@ -1717,7 +1722,9 @@ bool CadModule::applyTransform(const TransformParameters& params, QString* errMs
     for (const TDF_Label& label : labels) {
         const TopoDS_Shape shape = shapeTool->GetShape(label);
         QString transformError;
-        const TopoDS_Shape transformed = lcnc::cad_algo::transformShape(shape, algoParams, &transformError);
+        const TopoDS_Shape transformed = lcnc::cad::invokeCadAlgorithm(
+            [&] { return lcnc::cad_algo::transformShape(shape, algoParams); },
+            &transformError);
         if (transformed.IsNull()) {
             doc->abortCommand();
             return fail(transformError);

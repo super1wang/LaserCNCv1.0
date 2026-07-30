@@ -20,8 +20,7 @@
  *     workpieceInstallPosition
  *
  * 由 CamModule 在初始化时构造并通过 @ref loadDefault 装载。
- * 旧版 JSON（CamConfig.json）会在首次加载时自动迁移：解析 JSON、写入
- * 同目录下 cam.toml，并将原 JSON 重命名为 CamConfig.json.bak。
+ * Only the current TOML configuration is accepted.
  *
  * 注：本类不再是单例。进程内通过
  * `lcnc::Kernel::current().service<CamModule>()->config()` 访问。
@@ -31,7 +30,7 @@ class CamConfig : public lcnc::TomlConfig
 public:
     CamConfig() = default;
 
-    /// 装载 <exeDir>/config/cam.toml；若不存在但旧 CamConfig.json 存在则迁移。
+    /// 装载 <exeDir>/config/cam.toml。
     bool loadDefault();
 
     /// 保存到 loadDefault() 使用的同一路径。
@@ -134,11 +133,7 @@ private:
 
     static QString configDirectoryPath();
     static QString tomlFilePath();
-    static QString legacyJsonPath();
     static QString machineKey(const QString& machinePath);
-
-    /// 解析旧 JSON 内容到当前对象。
-    bool importLegacyJson(const QString& jsonPath);
 
     MachineProfile* mutableProfileForMachine(const QString& machinePath);
     const MachineProfile* profileForMachine(const QString& machinePath) const;

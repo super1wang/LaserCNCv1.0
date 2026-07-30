@@ -142,16 +142,16 @@ QWidget* ProcessPropertyDelegate::createEditor(QWidget* parent, const QStyleOpti
 void ProcessPropertyDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const
 {
     const QVariant value = index.data(Qt::EditRole);
-    if (auto* spin = qobject_cast<QSpinBox*>(editor)) spin->setValue(value.toInt());
-    else if (auto* spin = qobject_cast<QDoubleSpinBox*>(editor)) spin->setValue(value.toDouble());
+    if (auto* intSpin = qobject_cast<QSpinBox*>(editor)) intSpin->setValue(value.toInt());
+    else if (auto* doubleSpin = qobject_cast<QDoubleSpinBox*>(editor)) doubleSpin->setValue(value.toDouble());
     else if (auto* combo = qobject_cast<QComboBox*>(editor)) combo->setCurrentText(value.toString());
     else if (auto* line = qobject_cast<QLineEdit*>(editor)) line->setText(value.toString());
 }
 
 void ProcessPropertyDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const
 {
-    if (auto* spin = qobject_cast<QSpinBox*>(editor)) model->setData(index, spin->value());
-    else if (auto* spin = qobject_cast<QDoubleSpinBox*>(editor)) model->setData(index, spin->value());
+    if (auto* intSpin = qobject_cast<QSpinBox*>(editor)) model->setData(index, intSpin->value());
+    else if (auto* doubleSpin = qobject_cast<QDoubleSpinBox*>(editor)) model->setData(index, doubleSpin->value());
     else if (auto* combo = qobject_cast<QComboBox*>(editor)) model->setData(index, combo->currentText());
     else if (auto* line = qobject_cast<QLineEdit*>(editor)) model->setData(index, line->text());
 }

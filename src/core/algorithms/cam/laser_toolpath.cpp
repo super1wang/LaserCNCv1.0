@@ -8,7 +8,7 @@
 #include <TopoDS_Wire.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
-#include <BRep_Tool.hxx>
+#include <BRep_tool.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -1239,7 +1239,6 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
         return;
 
     const gp_Pnt workpieceCenter = shapeCenter(workpiece);
-    const std::vector<TopoDS_Face> noFaces;
 
     // 必须按 WireExplorer 的连接顺序遍历边，不能用 TopExp_Explorer（拓扑集合顺序不保证连贯）。
     int edgeIndex = 0;
@@ -1296,8 +1295,7 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             const gp_Dir surfaceNormal = pointOuterFaces
                 ? findMachiningNormal(
                       tp.position,
-                      *pointOuterFaces,
-                      pointCrossFaces ? *pointCrossFaces : noFaces)
+                      *pointOuterFaces)
                 : findSurfaceNormal(workpiece, tp.position);
             tp.normal = pointOuterFaces
                 ? surfaceNormal
@@ -1402,7 +1400,7 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             // Compute machining normal using face classification
             tp.normal = avoidCrossSectionDirection(
                 tp.position,
-                findMachiningNormal(tp.position, pointOuterFaces, pointCrossFaces),
+                findMachiningNormal(tp.position, pointOuterFaces),
                 outerCenter,
                 pointCrossFaces);
 
@@ -1450,8 +1448,7 @@ void LaserToolpathBuilder::bindLeadInSurfaceContext(
 
 gp_Dir LaserToolpathBuilder::findMachiningNormal(
     const gp_Pnt& pt,
-    const std::vector<TopoDS_Face>& outerFaces,
-    const std::vector<TopoDS_Face>& crossFaces)
+    const std::vector<TopoDS_Face>& outerFaces)
 {
     gp_Dir defaultNormal(0, 0, 1);
 

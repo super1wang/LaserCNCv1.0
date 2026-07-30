@@ -4,11 +4,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 
 namespace {
 
@@ -62,16 +58,6 @@ bool pointFromToml(const toml::value& v, gp_Pnt* out)
     return true;
 }
 
-// ── JSON helpers (legacy migration only) ────────────────────────────────────
-bool pointFromJson(const QJsonValue& v, gp_Pnt* out)
-{
-    if (!out || !v.isArray()) return false;
-    const auto a = v.toArray();
-    if (a.size() != 3) return false;
-    *out = gp_Pnt(a.at(0).toDouble(), a.at(1).toDouble(), a.at(2).toDouble());
-    return true;
-}
-
 } // namespace
 
 // ── Path helpers ────────────────────────────────────────────────────────────
@@ -86,11 +72,6 @@ QString CamConfig::tomlFilePath()
     return QDir(configDirectoryPath()).filePath(QStringLiteral("cam.toml"));
 }
 
-QString CamConfig::legacyJsonPath()
-{
-    return QDir(configDirectoryPath()).filePath(QStringLiteral("CamConfig.json"));
-}
-
 QString CamConfig::machineKey(const QString& machinePath)
 {
     if (machinePath.isEmpty()) return QString();
@@ -102,92 +83,12 @@ bool CamConfig::loadDefault()
 {
     LCNC_DEBUG(lcnc::LogCode::SettingsLoaded, "CamConfig::loadDefault begin");
 
-    const QString tomlPath   = tomlFilePath();
-    const QString legacyPath = legacyJsonPath();
-
-    const bool tomlExists   = QFileInfo::exists(tomlPath);
-    const bool legacyExists = QFileInfo::exists(legacyPath);
-
-    if (!tomlExists && legacyExists) {
-        // 自动迁移：解析 JSON → 写入 TOML → 备份原 JSON。
-        if (importLegacyJson(legacyPath)) {
-            const bool wrote = save(tomlPath);
-            if (wrote) {
-                const QString bak = legacyPath + QStringLiteral(".bak");
-                QFile::remove(bak);
-                if (QFile::rename(legacyPath, bak)) {
-                    LCNC_INFO(lcnc::LogCode::SettingsLoaded,
-                              "CamConfig: migrated legacy JSON '{}' -> TOML '{}'",
-                              legacyPath.toStdString(), tomlPath.toStdString());
-                } else {
-                    LCNC_WARN(lcnc::LogCode::SettingsSaveFailed,
-                              "CamConfig: migrated to TOML but could not rename legacy JSON to '{}'",
-                              bak.toStdString());
-                }
-                return true;
-            }
-            LCNC_ERR(lcnc::LogCode::SettingsSaveFailed,
-                     "CamConfig: legacy JSON parsed but TOML write failed");
-            return false;
-        }
-        LCNC_WARN(lcnc::LogCode::SettingsParseFailed,
-                  "CamConfig: legacy JSON exists but failed to parse, ignoring");
-    }
-
-    return load(tomlPath);
+    return load(tomlFilePath());
 }
 
 bool CamConfig::saveDefault() const
 {
     return save(tomlFilePath());
-}
-
-bool CamConfig::importLegacyJson(const QString& jsonPath)
-{
-    QFile file(jsonPath);
-    if (!file.open(QIODevice::ReadOnly)) return false;
-
-    const auto doc = QJsonDocument::fromJson(file.readAll());
-    if (!doc.isObject()) return false;
-
-    const auto root = doc.object();
-    m_machineModelPath     = root.value(QStringLiteral("machineModelPath")).toString();
-    m_autoLoadMachineModel = root.value(QStringLiteral("autoLoadMachineModel")).toBool(true);
-    m_machinePreset        = root.value(QStringLiteral("machinePreset")).toString();
-    m_autoInstallWorkpiece = root.value(QStringLiteral("autoInstallWorkpiece")).toBool(true);
-    m_machineRenderQualityPreset = renderQualityFromString(
-        root.value(QStringLiteral("machineRenderQuality")).toString());
-
-    const auto tp = root.value(QStringLiteral("toolpath")).toObject();
-    m_leadInLength          = tp.value(QStringLiteral("leadInLength")).toDouble(m_leadInLength);
-    m_deflection            = tp.value(QStringLiteral("deflection")).toDouble(m_deflection);
-    m_smoothAngle           = tp.value(QStringLiteral("smoothAngle")).toDouble(m_smoothAngle);
-    m_useFaceClassification = tp.value(QStringLiteral("useFaceClassification")).toBool(m_useFaceClassification);
-    m_extractionStrategy = tp.value(QStringLiteral("extractionStrategy")).toInt(m_extractionStrategy);
-    m_showNormals           = tp.value(QStringLiteral("showNormals")).toBool(m_showNormals);
-    m_normalSampleStep      = tp.value(QStringLiteral("normalSampleStep")).toDouble(m_normalSampleStep);
-
-    const auto profiles = root.value(QStringLiteral("machineProfiles")).toObject();
-    for (auto it = profiles.begin(); it != profiles.end(); ++it) {
-        if (!it.value().isObject()) continue;
-        MachineProfile profile;
-        const auto po = it.value().toObject();
-
-        const auto axisOrigins = po.value(QStringLiteral("axisOrigins")).toObject();
-        for (auto axIt = axisOrigins.begin(); axIt != axisOrigins.end(); ++axIt) {
-            gp_Pnt origin;
-            if (pointFromJson(axIt.value(), &origin))
-                profile.axisOrigins.insert(axIt.key(), origin);
-        }
-
-        gp_Pnt p;
-        if (pointFromJson(po.value(QStringLiteral("cutterHeadModelPosition")), &p))    { profile.hasCutterHeadModel       = true; profile.cutterHeadModelPosition       = p; }
-        if (pointFromJson(po.value(QStringLiteral("cutterHeadPhysicalPosition")), &p)) { profile.hasCutterHeadPhysical    = true; profile.cutterHeadPhysicalPosition    = p; }
-        if (pointFromJson(po.value(QStringLiteral("workpieceInstallPosition")), &p))   { profile.hasWorkpieceInstallPosition = true; profile.workpieceInstallPosition   = p; }
-
-        m_machineProfiles.insert(it.key(), profile);
-    }
-    return true;
 }
 
 // ── TOML serialization ──────────────────────────────────────────────────────

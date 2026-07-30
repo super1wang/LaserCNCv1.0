@@ -340,10 +340,6 @@ void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* ca
         node.displayName = info.displayName;
         QString role;
         switch (info.role) {
-        case lcnc::cam::MachiningFaceRole::LegacyOuterSurface:
-            // 中文翻译：加工面
-            role = QObject::tr("Processing surface");
-            break;
         case lcnc::cam::MachiningFaceRole::CrossSection:
             // 中文翻译：横截面
             role = QObject::tr("cross section");

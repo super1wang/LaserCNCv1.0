@@ -7,8 +7,8 @@
 #include "core/services/selection_service.h"
 #include "modules/cam/i_cam_layer_provider.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
-#include "modules/process/Tool/Tool.h"
-#include "modules/process/Tool/ToolFactory.h"
+#include "modules/process/tool/tool.h"
+#include "modules/process/tool/tool_factory.h"
 #include "modules/process/runtime/process_events.h"
 
 #include <QDir>

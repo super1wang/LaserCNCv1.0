@@ -86,8 +86,6 @@ struct ColorSettings {
     double workpieceTransparency = 0.0; ///< 0.0 = opaque, 1.0 = fully transparent
     double machineTransparency = 0.0;   ///< 0.0 = opaque, 1.0 = fully transparent
     QColor backgroundColor = QColor(42, 48, 58);
-    QColor cadBackgroundColor = QColor(42, 48, 58);
-    QColor camBackgroundColor = QColor(42, 48, 58);
     QColor selectionColor = QColor(255, 0, 0);
     QColor hoverColor = QColor(255, 165, 0);
     QColor treeSelectionColor = QColor(42, 111, 219);
@@ -123,7 +121,7 @@ public:
     /// Convenience: save back to the path used by loadDefault().
     bool saveDefault() const;
 
-    QString     theme       = QStringLiteral("light");   ///< "light" | "dark"
+    QString     theme       = QStringLiteral("dark");    ///< "light" | "dark"
     QString     language    = QStringLiteral("zh_CN");
     QString     unitSystem  = QStringLiteral("mm");      ///< "mm" | "inch"
     DocumentOpenMode documentOpenMode = DocumentOpenMode::MultiDocument;

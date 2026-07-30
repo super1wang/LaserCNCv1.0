@@ -1,8 +1,8 @@
 #include "modules/process/runtime/gtn_buffered_command_sink.h"
 
 #include "core/logging/logger.h"
-#include "modules/process/Tool/Tool.h"
-#include "modules/process/device/MotionControl/GTNMotionControl.h"
+#include "modules/process/tool/tool.h"
+#include "modules/process/device/motion_control/gtn_motion_control.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
 #include <QThread>

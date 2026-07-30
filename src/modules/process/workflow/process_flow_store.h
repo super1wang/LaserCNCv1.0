@@ -8,7 +8,7 @@
 namespace lcnc::process {
 
 /**
- * @brief Reads and writes process workflow TOML, including legacy tree files.
+ * @brief Reads and writes the current process workflow TOML schema.
  */
 class ProcessFlowStore
 {

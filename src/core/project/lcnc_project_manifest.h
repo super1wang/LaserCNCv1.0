@@ -27,14 +27,12 @@ public:
     QString configurationSchemaVersion;
     QString toolpathAlgorithmVersion;
     QString toolSnapshotPath{QStringLiteral("tools.toml")};
-    QString projectXcafPath{QStringLiteral("project.xbf")};   ///< Legacy v1 migration input only.
     QString workpieceXcafPath{QStringLiteral("workpiece.xbf")}; ///< v4 unified workpiece + CAM entities.
     QString camCacheDirectory{QStringLiteral("cam/cache")};
     ProjectSaveOptions saveOptions;
 
-    /// Returns true when the manifest can be consumed by this build.  Legacy
-    /// formats are intentionally reserved for the offline migration utility.
-    bool validate(QString* errorMsg = nullptr, bool allowLegacyFormat = false) const;
+    /// Returns true when the manifest is exactly the format supported by this build.
+    bool validate(QString* errorMsg = nullptr) const;
 
 protected:
     void readFrom(const toml::value& root) override;

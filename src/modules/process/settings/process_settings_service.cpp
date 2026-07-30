@@ -2,12 +2,10 @@
 
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
-#include "modules/process/Setting/BuiltinIODefs.h"
+#include "modules/process/setting/builtin_io_defs.h"
 
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QObject>
@@ -71,13 +69,16 @@ toml::value tomlFromVariant(const QVariant& value, ParameterValueType type)
 
 } // namespace
 
-ProcessSettingsService::ProcessSettingsService()
+ProcessSettingsService::ProcessSettingsService(QString configurationRoot)
     : m_registry(*this)
+    , m_configurationRoot(std::move(configurationRoot))
 {
 }
 
 QString ProcessSettingsService::rootDir() const
 {
+    if (!m_configurationRoot.trimmed().isEmpty())
+        return QDir::cleanPath(m_configurationRoot);
     return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("config/process"));
 }
 
@@ -178,7 +179,7 @@ void ProcessSettingsService::seedDefaults()
     tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0;
     tool["fIdelAcc"] = 100.0; tool["fIdelJerk"] = 1000.0;
     tool["fCuttingHeight"] = 0.0; tool["fIdleHeight"] = 0.0;
-    tool["fEnergy"] = 20.0; tool["fFrequency"] = 30.0; tool["fPluse"] = 20.0;
+    tool["fEnergy"] = 20.0; tool["fFrequency"] = 30; tool["fPluse"] = 20;
     tool["fBeforeOpenLaser"] = 0.0; tool["fAfterCloseLaser"] = 0.0;
     toolSection["Default"] = tool;
     // Keep every domain structurally valid even when it has no fields yet.
@@ -196,7 +197,12 @@ bool ProcessSettingsService::loadDomain(const QString& fileName, QString* error)
     if (!QFileInfo::exists(path)) return true;
     try {
         const toml::value parsed = toml::parse(path.toStdString());
-        if (!parsed.is_table() || !parsed.contains("Setting") || !parsed.at("Setting").is_table()) {
+        if (!parsed.is_table()
+            || !parsed.contains("schemaVersion")
+            || !parsed.at("schemaVersion").is_integer()
+            || parsed.at("schemaVersion").as_integer() != 2
+            || !parsed.contains("Setting")
+            || !parsed.at("Setting").is_table()) {
             // 中文翻译：配置文件 %1 的 schema 无效。
             if (error) *error = QObject::tr("The schema for configuration file %1 is invalid.").arg(path);
             return false;
@@ -229,47 +235,27 @@ bool ProcessSettingsService::initialize()
     seedDefaults();
     QDir().mkpath(QDir(rootDir()).filePath(QStringLiteral("tools")));
     QString error;
-    const auto backupInvalidFile = [this](const QString& fileName, QString* backupError) {
-        const QString path = QDir(rootDir()).filePath(fileName);
-        const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmsszzz"));
-        const QString backup = path + QStringLiteral(".invalid-") + stamp;
-        if (!QFile::copy(path, backup)) {
-            if (backupError)
-                // 中文翻译：无法备份损坏配置 %1 到 %2。
-                *backupError = QObject::tr("Unable to back up corrupted configurations %1 to %2.").arg(path, backup);
-            return false;
-        }
-        LCNC_WARN(lcnc::LogCode::SettingsParseFailed,
-                  "process.settings: invalid '{}' preserved as '{}'; rebuilding defaults",
-                  path.toStdString(), backup.toStdString());
-        return true;
-    };
-    const auto loadOrRepairDomain = [this, &error, &backupInvalidFile](
-                                        const QString& fileName,
-                                        const QStringList& sections) {
+    const auto loadCurrentDomain = [this, &error](
+                                       const QString& fileName,
+                                       const QStringList& sections) {
         const QString path = QDir(rootDir()).filePath(fileName);
         if (!QFileInfo::exists(path))
             return writeDomain(fileName, sections, &error);
-        if (loadDomain(fileName, &error))
-            return true;
-        if (!backupInvalidFile(fileName, &error))
-            return false;
-        error.clear();
-        return writeDomain(fileName, sections, &error);
+        return loadDomain(fileName, &error);
     };
 
-    const bool ok = loadOrRepairDomain(
+    const bool ok = loadCurrentDomain(
                         QStringLiteral("devices.toml"),
                         {QStringLiteral("MotionControl"), QStringLiteral("Laser"),
                          QStringLiteral("Internet"), QStringLiteral("Camera")})
-        && loadOrRepairDomain(
+        && loadCurrentDomain(
             QStringLiteral("io.toml"),
             {QStringLiteral("Digital"), QStringLiteral("Analog")})
-        && loadOrRepairDomain(
+        && loadCurrentDomain(
             QStringLiteral("operations.toml"),
             {QStringLiteral("Gas"), QStringLiteral("Water"),
              QStringLiteral("Monitor"), QStringLiteral("LoadingPos")})
-        && loadOrRepairDomain(
+        && loadCurrentDomain(
             QStringLiteral("workflow.toml"),
             {QStringLiteral("Special")});
     if (!ok) {
@@ -287,13 +273,10 @@ bool ProcessSettingsService::initialize()
     }
     if (QFileInfo::exists(indexPath)) {
         if (!loadDomain(QStringLiteral("tools/index.toml"), &error)) {
-            if (!backupInvalidFile(QStringLiteral("tools/index.toml"), &error)
-                || !writeTools(&error, nullptr)) {
-                LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
-                         "process.settings: failed to repair tool index: {}",
-                         error.toStdString());
-                return false;
-            }
+            LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
+                     "process.settings: rejected non-current tool index: {}",
+                     error.toStdString());
+            return false;
         }
         try {
             const toml::value index = toml::parse(indexPath.toStdString());
@@ -333,7 +316,10 @@ bool ProcessSettingsService::initialize()
 void ProcessSettingsService::beginEdit()
 {
     m_draft = m_committed.value;
-    if (auto machine = Kernel::current().services().getService<MachineConfigurationService>()) m_axisDraft = machine->axisConfigurations();
+    if (Kernel* kernel = Kernel::tryCurrent()) {
+        if (auto machine = kernel->services().getService<MachineConfigurationService>())
+            m_axisDraft = machine->axisConfigurations();
+    }
     m_axisDirty = false;
 }
 
@@ -553,7 +539,15 @@ ProcessSettingsCommitResult ProcessSettingsService::commit()
     QString error; const auto has = [&result](const QString& name) { return result.changes.domains.contains(name); };
     if ((has("devices") && !writeDomain(QStringLiteral("devices.toml"), {"MotionControl", "Laser", "Internet", "Camera"}, &error)) || (has("io") && !writeDomain(QStringLiteral("io.toml"), {"Digital", "Analog"}, &error)) || (has("operations") && !writeDomain(QStringLiteral("operations.toml"), {"Gas", "Water", "Monitor", "LoadingPos"}, &error)) || (has("workflow") && !writeDomain(QStringLiteral("workflow.toml"), {"Special"}, &error)) || (has("tools") && !writeTools(&error, &result.changes))) { result.error = error; return result; }
     // 中文翻译：机台配置服务不可用。
-    if (has("machine")) { auto machine = Kernel::current().services().getService<MachineConfigurationService>(); if (!machine) { result.error = QObject::tr("The machine configuration service is unavailable."); return result; } machine->setAxisHardwareConfigurations(m_axisDraft); }
+    if (has("machine")) {
+        Kernel* kernel = Kernel::tryCurrent();
+        auto machine = kernel ? kernel->services().getService<MachineConfigurationService>() : nullptr;
+        if (!machine) {
+            result.error = QObject::tr("The machine configuration service is unavailable.");
+            return result;
+        }
+        machine->setAxisHardwareConfigurations(m_axisDraft);
+    }
     m_committed.value = m_draft; beginEdit(); result.success = true; return result;
 }
 

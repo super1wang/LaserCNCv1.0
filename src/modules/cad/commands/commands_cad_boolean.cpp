@@ -3,6 +3,7 @@
 #include "app/app_command_context.h"
 #include "core/algorithms/cad/boolean_ops.h"
 #include "modules/cad/commands/command_helpers.h"
+#include "modules/cad/services/cad_algorithm_boundary.h"
 
 #include <QAction>
 #include <QIcon>
@@ -13,7 +14,7 @@ using namespace lcnc::cad::commands;
 CmdBoolUnion::CmdBoolUnion(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：布尔并
-    auto* action = new QAction(QIcon(":/icons/bool_union.svg"), tr("Boolean"), this);
+    auto* action = new QAction(QIcon("themeicons:bool_union.svg"), tr("Boolean"), this);
     // 中文翻译：布尔并运算 (A ∪ B)
     action->setStatusTip(tr("Boolean union operation (A ∪ B)"));
     setAction(action);
@@ -39,8 +40,12 @@ void CmdBoolUnion::execute()
         return;
 
     QString err;
-    TopoDS_Shape shape = lcnc::cad_algo::fuseShapes(
-        entities[indexA].shape, entities[indexB].shape, &err);
+    TopoDS_Shape shape = lcnc::cad::invokeCadAlgorithm(
+        [&] {
+            return lcnc::cad_algo::fuseShapes(
+                entities[indexA].shape, entities[indexB].shape);
+        },
+        &err);
     if (shape.IsNull()) {
         // 中文翻译：布尔并
         QMessageBox::critical(nullptr, tr("Boolean"), err);
@@ -53,7 +58,7 @@ void CmdBoolUnion::execute()
 CmdBoolCut::CmdBoolCut(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：布尔差
-    auto* action = new QAction(QIcon(":/icons/bool_cut.svg"), tr("Boolean difference"), this);
+    auto* action = new QAction(QIcon("themeicons:bool_cut.svg"), tr("Boolean difference"), this);
     // 中文翻译：布尔差运算 (A − B)
     action->setStatusTip(tr("Boolean difference operation (A − B)"));
     setAction(action);
@@ -79,8 +84,12 @@ void CmdBoolCut::execute()
         return;
 
     QString err;
-    TopoDS_Shape shape = lcnc::cad_algo::cutShapes(
-        entities[indexA].shape, entities[indexB].shape, &err);
+    TopoDS_Shape shape = lcnc::cad::invokeCadAlgorithm(
+        [&] {
+            return lcnc::cad_algo::cutShapes(
+                entities[indexA].shape, entities[indexB].shape);
+        },
+        &err);
     if (shape.IsNull()) {
         // 中文翻译：布尔差
         QMessageBox::critical(nullptr, tr("Boolean difference"), err);
@@ -93,7 +102,7 @@ void CmdBoolCut::execute()
 CmdBoolCommon::CmdBoolCommon(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：布尔交
-    auto* action = new QAction(QIcon(":/icons/bool_common.svg"), tr("Bourgeois"), this);
+    auto* action = new QAction(QIcon("themeicons:bool_common.svg"), tr("Bourgeois"), this);
     // 中文翻译：布尔交运算 (A ∩ B)
     action->setStatusTip(tr("Boolean intersection operation (A ∩ B)"));
     setAction(action);
@@ -119,8 +128,12 @@ void CmdBoolCommon::execute()
         return;
 
     QString err;
-    TopoDS_Shape shape = lcnc::cad_algo::commonShapes(
-        entities[indexA].shape, entities[indexB].shape, &err);
+    TopoDS_Shape shape = lcnc::cad::invokeCadAlgorithm(
+        [&] {
+            return lcnc::cad_algo::commonShapes(
+                entities[indexA].shape, entities[indexB].shape);
+        },
+        &err);
     if (shape.IsNull()) {
         // 中文翻译：布尔交
         QMessageBox::critical(nullptr, tr("Bourgeois"), err);

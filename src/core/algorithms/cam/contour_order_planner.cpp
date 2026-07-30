@@ -45,7 +45,11 @@ QVector<std::uint64_t> planContourOrder(const QVector<ContourEndpoints>& inputs,
     QVector<ContourEndpoints> sorted = inputs;
     std::stable_sort(sorted.begin(), sorted.end(),
                      [axis = params.axis](const ContourEndpoints& a, const ContourEndpoints& b) {
-                         return primaryOf(a, axis) < primaryOf(b, axis);
+                         const double aPrimary = primaryOf(a, axis);
+                         const double bPrimary = primaryOf(b, axis);
+                         if (aPrimary != bPrimary)
+                             return aPrimary < bPrimary;
+                         return a.id < b.id;
                      });
 
     const double tol = std::max(params.primaryBucketTolMm, 0.0);
@@ -80,7 +84,10 @@ QVector<std::uint64_t> planContourOrder(const QVector<ContourEndpoints>& inputs,
                 for (int i = 0; i < bucket.size(); ++i) {
                     const double d = distSq(curX, curY, curZ,
                                             bucket[i].sx, bucket[i].sy, bucket[i].sz);
-                    if (d < bestD) { bestD = d; pick = i; }
+                    if (d < bestD || (d == bestD && bucket[i].id < bucket[pick].id)) {
+                        bestD = d;
+                        pick = i;
+                    }
                 }
             }
             // 否则用 bucket[0]（已按主坐标排序，主方向最前）

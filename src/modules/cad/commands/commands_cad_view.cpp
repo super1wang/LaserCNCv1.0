@@ -10,7 +10,7 @@
 CmdToggleCadGrid::CmdToggleCadGrid(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：网格
-    auto* a = new QAction(QIcon(":/icons/grid.svg"), tr("grid"), this);
+    auto* a = new QAction(QIcon("themeicons:grid.svg"), tr("grid"), this);
     a->setCheckable(true);
     // 中文翻译：显示或隐藏建模网格
     a->setStatusTip(tr("Show or hide the modeling mesh"));
@@ -31,7 +31,7 @@ void CmdToggleCadGrid::execute()
 CmdToggleGridSnap::CmdToggleGridSnap(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：网格吸附
-    auto* a = new QAction(QIcon(":/icons/snap.svg"), tr("Grid adsorption"), this);
+    auto* a = new QAction(QIcon("themeicons:snap.svg"), tr("Grid adsorption"), this);
     a->setCheckable(true);
     // 中文翻译：启用或关闭网格点吸附
     a->setStatusTip(tr("Turn grid point snapping on or off"));

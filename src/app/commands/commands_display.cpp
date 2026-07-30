@@ -19,27 +19,11 @@
 
 #include <memory>
 
-// ── Helper: get the active view (safe) ────────────────────────────────────────
-static Handle(V3d_View) activeView(IAppContext* ctx)
-{
-    // GuiDocument → scene → viewer → first active view
-    if (auto* gd = ctx->activeGuiDocument()) {
-        auto& viewer = gd->scene()->viewer();
-        if (!viewer.IsNull()) {
-            viewer->InitActiveLights();
-            // We can't directly get an active view from V3d_Viewer in OCCT API;
-            // views are owned by WidgetOccView.  Return null; callers that
-            // need the view should obtain it from WidgetOccView directly.
-        }
-    }
-    return Handle(V3d_View)();
-}
-
 // ── CmdFitAll ─────────────────────────────────────────────────────────────────
 CmdFitAll::CmdFitAll(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：适合视图
-    auto* a = new QAction(QIcon(":/icons/fit_all.svg"), tr("fit view"), this);
+    auto* a = new QAction(QIcon("themeicons:fit_all.svg"), tr("fit view"), this);
     a->setShortcut(Qt::Key_F);
     // 中文翻译：调整视图以显示所有对象
     a->setStatusTip(tr("Adjust the view to show all objects"));
@@ -95,7 +79,7 @@ static void applyDisplayModeToCurrentView(IAppContext* ctx, int displayMode, boo
 CmdToggleWireframe::CmdToggleWireframe(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：线框模式
-    auto* a = new QAction(QIcon(":/icons/wireframe.svg"), tr("Wireframe mode"), this);
+    auto* a = new QAction(QIcon("themeicons:wireframe.svg"), tr("Wireframe mode"), this);
     a->setCheckable(true);
     setAction(a);
 }
@@ -110,7 +94,7 @@ void CmdToggleWireframe::execute()
 CmdToggleShaded::CmdToggleShaded(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：着色模式
-    auto* a = new QAction(QIcon(":/icons/shaded.svg"), tr("Shading mode"), this);
+    auto* a = new QAction(QIcon("themeicons:shaded.svg"), tr("Shading mode"), this);
     a->setCheckable(true);
     a->setChecked(true);
     setAction(a);
@@ -127,7 +111,7 @@ CmdToggleShadedWithEdges::CmdToggleShadedWithEdges(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：带边着色
-    auto* a = new QAction(QIcon(":/icons/shaded_edges.svg"), tr("Shading with edges"), this);
+    auto* a = new QAction(QIcon("themeicons:shaded_edges.svg"), tr("Shading with edges"), this);
     a->setCheckable(true);
     setAction(a);
 }
@@ -144,7 +128,7 @@ CmdToggleWorldAxes::CmdToggleWorldAxes(IAppContext* ctx) : CommandBase(ctx)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CmdToggleWorldAxes ctor");
     // 中文翻译：坐标系
-    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("coordinate system"), this);
+    auto* a = new QAction(QIcon("themeicons:machine.svg"), tr("coordinate system"), this);
     a->setCheckable(true);
     a->setChecked(false);
     // 中文翻译：以世界 0 点为中心绘制持久 XYZ 坐标轴；同时显示在机台与所有工件视图。
@@ -178,7 +162,7 @@ CmdShowOptions::CmdShowOptions(IAppContext* ctx) : CommandBase(ctx)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CmdShowOptions ctor");
     // 中文翻译：应用程序选项
-    auto* a = new QAction(QIcon(":/icons/options.svg"), tr("Application options"), this);
+    auto* a = new QAction(QIcon("themeicons:options.svg"), tr("Application options"), this);
     // 中文翻译：打开应用程序选项对话框（图形渲染 / 选择高亮 / 应用程序 / 机台构型）
     a->setStatusTip(tr("Open the Application Options dialog box (Graphics Rendering/Selection Highlighting/Applications/Tool Configuration)"));
     setAction(a);

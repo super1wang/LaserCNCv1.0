@@ -29,7 +29,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <TopExp_Explorer.hxx>
 #include <BRepAdaptor_Curve.hxx>
-#include <BRep_Tool.hxx>
+#include <BRep_tool.hxx>
 #include <StdSelect_BRepOwner.hxx>
 #include <SelectMgr_EntityOwner.hxx>
 
@@ -44,7 +44,7 @@ CmdGenerateToolpath::CmdGenerateToolpath(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：全局生成刀路
-    auto* a = new QAction(QIcon(":/icons/toolpath.svg"), tr("Generate toolpath globally"), this);
+    auto* a = new QAction(QIcon("themeicons:toolpath.svg"), tr("Generate toolpath globally"), this);
     // 中文翻译：使用全局待应用参数重建全部激光刀路
     a->setStatusTip(tr("Rebuild all laser tool paths using global parameters to be applied"));
     setAction(a);
@@ -85,7 +85,7 @@ CmdSetLeadIn::CmdSetLeadIn(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：选择轮廓起点
-    auto* a = new QAction(QIcon(":/icons/toolpath_32.svg"), tr("Select outline start point"), this);
+    auto* a = new QAction(QIcon("themeicons:toolpath_32.svg"), tr("Select outline start point"), this);
     // 中文翻译：在3D视图中点击轮廓采样点设置真实加工起点
     a->setStatusTip(tr("Click the contour sampling point in the 3D view to set the real processing starting point"));
     setAction(a);
@@ -125,7 +125,7 @@ CmdToolpathPreview::CmdToolpathPreview(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：刀路预览
-    auto* a = new QAction(QIcon(":/icons/preview.svg"), tr("Tool path preview"), this);
+    auto* a = new QAction(QIcon("themeicons:preview.svg"), tr("Tool path preview"), this);
     // 中文翻译：切换刀路显示/隐藏
     a->setStatusTip(tr("Switch tool path display/hide"));
     a->setCheckable(true);
@@ -154,7 +154,7 @@ CmdRecalcToolpath::CmdRecalcToolpath(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：重新计算当前轮廓
-    auto* a = new QAction(QIcon(":/icons/toolpath_5x.svg"), tr("Recalculate the current contour"), this);
+    auto* a = new QAction(QIcon("themeicons:toolpath_5x.svg"), tr("Recalculate the current contour"), this);
     // 中文翻译：应用当前轮廓的待应用参数并仅重建该轮廓
     a->setStatusTip(tr("Apply the to-be-applied parameters of the current contour and rebuild only that contour"));
     setAction(a);
@@ -179,7 +179,7 @@ CmdSelectMachiningFace::CmdSelectMachiningFace(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：选择加工面
-    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("Select processing surface"), this);
+    auto* a = new QAction(QIcon("themeicons:shape.svg"), tr("Select processing surface"), this);
     // 中文翻译：在3D视图中点击工件表面拾取加工面（手动选面模式）
     a->setStatusTip(tr("Click on the workpiece surface in the 3D view to select the processing surface (manual surface selection mode)"));
     setAction(a);
@@ -219,7 +219,7 @@ CmdClearMachiningFaces::CmdClearMachiningFaces(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：清除加工面
-    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("Clear the machined surface"), this);
+    auto* a = new QAction(QIcon("themeicons:shape.svg"), tr("Clear the machined surface"), this);
     // 中文翻译：清除所有手动拾取的加工面
     a->setStatusTip(tr("Clear all manually picked work surfaces"));
     setAction(a);
@@ -235,5 +235,4 @@ void CmdClearMachiningFaces::execute()
     context()->camModule()->clearMachiningFaces();
     context()->updateCommandStates();
 }
-
 

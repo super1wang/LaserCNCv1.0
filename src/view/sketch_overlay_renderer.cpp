@@ -1,6 +1,7 @@
 #include "view/sketch_overlay_renderer.h"
 
 #include "core/algorithms/cad/sketch.h"
+#include "core/logging/logger.h"
 
 #include <AIS_InteractiveContext.hxx>
 #include <AIS_InteractiveObject.hxx>
@@ -13,6 +14,9 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Wire.hxx>
+
+#include <Standard_Failure.hxx>
+#include <stdexcept>
 
 namespace lcnc::view {
 namespace {
@@ -121,7 +125,24 @@ void SketchOverlayRenderer::render(const Handle(AIS_InteractiveContext)& context
         if (item.key.isEmpty() || !item.visible)
             continue;
 
-        const TopoDS_Shape shape = buildOverlayShape(item);
+        TopoDS_Shape shape;
+        try {
+            shape = buildOverlayShape(item);
+        } catch (const Standard_Failure& exception) {
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "Sketch overlay OCC projection failed: {}",
+                     exception.GetMessageString());
+            continue;
+        } catch (const std::exception& exception) {
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "Sketch overlay projection failed: {}",
+                     exception.what());
+            continue;
+        } catch (...) {
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "Sketch overlay projection failed with an unknown exception");
+            continue;
+        }
         if (shape.IsNull())
             continue;
 

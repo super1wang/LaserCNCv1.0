@@ -3,6 +3,7 @@
 #include "modules/cam/contracts/toolpath_export_dto.h"
 
 #include <QVector>
+#include <QReadWriteLock>
 #include <memory>
 
 namespace lcnc::cam { class ICamToolpathProvider; }
@@ -49,11 +50,12 @@ public:
     lcnc::cam::ToolpathExportSnapshot refreshSnapshot();
     lcnc::cam::ToolpathExportSnapshot refreshSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds);
-    const lcnc::cam::ToolpathExportSnapshot& currentSnapshot() const { return m_snapshot; }
+    lcnc::cam::ToolpathExportSnapshot currentSnapshot() const;
     ProcessJobPlan buildJobPlan() const;
 
 private:
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_provider;
+    mutable QReadWriteLock m_snapshotLock;
     lcnc::cam::ToolpathExportSnapshot m_snapshot;
 };
 

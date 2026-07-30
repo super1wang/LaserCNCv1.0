@@ -28,7 +28,7 @@ using namespace lcnc::cad::commands;
 CmdDeleteShape::CmdDeleteShape(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：删除
-    auto* action = new QAction(QIcon(":/icons/delete.svg"), tr("Delete"), this);
+    auto* action = new QAction(QIcon("themeicons:delete.svg"), tr("Delete"), this);
     action->setShortcut(QKeySequence::Delete);
     // 中文翻译：删除选中的形体（同步移除三维视图和树节点）
     action->setStatusTip(tr("Delete the selected shape (remove the 3D view and tree nodes simultaneously)"));
@@ -126,7 +126,7 @@ void CmdDeleteShape::execute()
 CmdExplodeShape::CmdExplodeShape(IAppContext* ctx) : CommandBase(ctx)
 {
     // 中文翻译：拆解
-    auto* action = new QAction(QIcon(":/icons/explode.svg"), tr("Explode"), this);
+    auto* action = new QAction(QIcon("themeicons:explode.svg"), tr("Explode"), this);
     // 中文翻译：将选中的复合体拆解为下一层级子形体（一级拆解）
     action->setStatusTip(tr("Disassemble the selected complex into next-level sub-shapes (first-level disassembly)"));
     setAction(action);

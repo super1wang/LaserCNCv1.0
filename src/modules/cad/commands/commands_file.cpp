@@ -14,7 +14,7 @@ CmdNewDocument::CmdNewDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：新建
-    auto* a = new QAction(QIcon(":/icons/new_doc.svg"), tr("New"), this);
+    auto* a = new QAction(QIcon("themeicons:new_doc.svg"), tr("New"), this);
     a->setShortcut(QKeySequence::New);
     // 中文翻译：新建空白文档
     a->setStatusTip(tr("Create a new blank document"));
@@ -32,7 +32,7 @@ CmdOpenDocument::CmdOpenDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：打开
-    auto* a = new QAction(QIcon(":/icons/open.svg"), tr("open"), this);
+    auto* a = new QAction(QIcon("themeicons:open.svg"), tr("open"), this);
     a->setShortcut(QKeySequence::Open);
     // 中文翻译：打开 LaserCNC 项目或工件模型
     a->setStatusTip(tr("Open a LaserCNC project or workpiece model"));
@@ -75,7 +75,7 @@ CmdSaveDocument::CmdSaveDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：保存
-    auto* a = new QAction(QIcon(":/icons/save.svg"), tr("save"), this);
+    auto* a = new QAction(QIcon("themeicons:save.svg"), tr("save"), this);
     a->setShortcut(QKeySequence::Save);
     // 中文翻译：保存当前项目
     a->setStatusTip(tr("Save current project"));
@@ -105,7 +105,7 @@ CmdSaveDocumentAs::CmdSaveDocumentAs(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：另存为
-    auto* a = new QAction(QIcon(":/icons/save_as.svg"), tr("save as"), this);
+    auto* a = new QAction(QIcon("themeicons:save_as.svg"), tr("save as"), this);
     a->setShortcut(QKeySequence::SaveAs);
     setAction(a);
 }
@@ -133,7 +133,7 @@ CmdImportStep::CmdImportStep(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：导入STEP
-    auto* a = new QAction(QIcon(":/icons/import.svg"), tr("Import STEP"), this);
+    auto* a = new QAction(QIcon("themeicons:import.svg"), tr("Import STEP"), this);
     // 中文翻译：导入 STEP 文件到当前文档
     a->setStatusTip(tr("Import STEP files into the current document"));
     setAction(a);
@@ -156,7 +156,7 @@ CmdImportStl::CmdImportStl(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：导入STL
-    auto* a = new QAction(QIcon(":/icons/import.svg"), tr("Import STL"), this);
+    auto* a = new QAction(QIcon("themeicons:import.svg"), tr("Import STL"), this);
     // 中文翻译：导入 STL 文件（机台/工件模型）
     a->setStatusTip(tr("Import STL file (machine/workpiece model)"));
     setAction(a);
@@ -179,7 +179,7 @@ CmdExportStep::CmdExportStep(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：导出STEP
-    auto* a = new QAction(QIcon(":/icons/export.svg"), tr("Export STEP"), this);
+    auto* a = new QAction(QIcon("themeicons:export.svg"), tr("Export STEP"), this);
     setAction(a);
 }
 
@@ -208,7 +208,7 @@ CmdCloseDocument::CmdCloseDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
     // 中文翻译：关闭
-    auto* a = new QAction(QIcon(":/icons/close.svg"), tr("Close"), this);
+    auto* a = new QAction(QIcon("themeicons:close.svg"), tr("Close"), this);
     a->setShortcut(QKeySequence::Close);
     setAction(a);
 }

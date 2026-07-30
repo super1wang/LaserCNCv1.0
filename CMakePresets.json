@@ -34,8 +34,9 @@
     {
       "name": "all-off",
       "displayName": "All device SDKs off",
-      "inherits": "base-ninja"
-      ,"cacheVariables": {
+      "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-cmake-all-off",
+      "cacheVariables": {
         "LCNC_WITH_ACS": "OFF",
         "LCNC_WITH_GTN": "OFF"
       }
@@ -44,6 +45,7 @@
       "name": "asan",
       "displayName": "ACS + GTN with MSVC AddressSanitizer",
       "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-cmake-asan",
       "cacheVariables": {
         "LCNC_ENABLE_ASAN": "ON"
       }
@@ -52,6 +54,7 @@
       "name": "acs",
       "displayName": "ACS adapter only",
       "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-cmake-acs",
       "cacheVariables": {
         "LCNC_WITH_ACS": "ON",
         "LCNC_WITH_GTN": "OFF"
@@ -61,9 +64,28 @@
       "name": "gtn",
       "displayName": "GTN adapter only",
       "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-cmake-gtn",
       "cacheVariables": {
         "LCNC_WITH_ACS": "OFF",
         "LCNC_WITH_GTN": "ON"
+      }
+    },
+    {
+      "name": "real-laser",
+      "displayName": "ACS + GTN with real laser adapters",
+      "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-cmake-real-laser",
+      "cacheVariables": {
+        "LCNC_WITH_REAL_LASER": "ON"
+      }
+    },
+    {
+      "name": "quality",
+      "displayName": "ACS + GTN closure warnings gate",
+      "inherits": "base-ninja",
+      "binaryDir": "${sourceDir}/build-cmake-quality",
+      "cacheVariables": {
+        "LCNC_WARNINGS_AS_ERRORS": "ON"
       }
     },
     {
@@ -104,6 +126,16 @@
     {
       "name": "gtn",
       "configurePreset": "gtn",
+      "configuration": "Debug"
+    },
+    {
+      "name": "real-laser",
+      "configurePreset": "real-laser",
+      "configuration": "Debug"
+    },
+    {
+      "name": "quality",
+      "configurePreset": "quality",
       "configuration": "Debug"
     },
     {

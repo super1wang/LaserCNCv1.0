@@ -112,7 +112,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：基本体
         QObject::tr("Basic body"),
-        QIcon(":/icons/box.svg"),
+        QIcon("themeicons:box.svg"),
         {container->findAction(CmdCreateBox::Name),
          container->findAction(CmdCreateCylinder::Name),
          container->findAction(CmdCreateSphere::Name),
@@ -124,7 +124,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：草图
         QObject::tr("Sketch"),
-        QIcon(":/icons/sketch.svg"),
+        QIcon("themeicons:sketch.svg"),
         {container->findAction(CmdNewSketch::Name),
          container->findAction(CmdFinishSketch::Name),
          container->findAction(CmdCancelSketch::Name)});
@@ -144,7 +144,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：历史
         QObject::tr("history"),
-        QIcon(":/icons/undo.svg"),
+        QIcon("themeicons:undo.svg"),
         {container->findAction(CmdUndo::Name),
          container->findAction(CmdRedo::Name)});
     panelOps->addLargeMenu(menuHistory);
@@ -153,7 +153,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：变换
         QObject::tr("transform"),
-        QIcon(":/icons/move.svg"),
+        QIcon("themeicons:move.svg"),
         {container->findAction(CmdMoveShape::Name),
          container->findAction(CmdRotateShape::Name)});
     panelOps->addLargeMenu(menuTransform);
@@ -162,7 +162,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：布尔
         QObject::tr("Boolean"),
-        QIcon(":/icons/bool_union.svg"),
+        QIcon("themeicons:bool_union.svg"),
         {container->findAction(CmdBoolUnion::Name),
          container->findAction(CmdBoolCut::Name),
          container->findAction(CmdBoolCommon::Name)});
@@ -172,7 +172,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：编辑
         QObject::tr("Edit"),
-        QIcon(":/icons/close.svg"),
+        QIcon("themeicons:close.svg"),
         {container->findAction(CmdDeleteShape::Name),
          container->findAction(CmdExplodeShape::Name)});
     panelOps->addLargeMenu(menuEdit);
@@ -184,7 +184,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：测量
         QObject::tr("Measure"),
-        QIcon(":/icons/measure_dist.svg"),
+        QIcon("themeicons:measure_dist.svg"),
         {container->findAction(CmdMeasureDistance::Name),
          container->findAction(CmdMeasureAngle::Name),
          container->findAction(CmdMeasureArea::Name)});
@@ -197,7 +197,7 @@ void buildRibbonTab(SARibbonCategory* cat,
         cat,
         // 中文翻译：网格
         QObject::tr("grid"),
-        QIcon(":/icons/grid.svg"),
+        QIcon("themeicons:grid.svg"),
         {container->findAction(CmdToggleCadGrid::Name),
          container->findAction(CmdToggleGridSnap::Name)});
     panelAssist->addLargeMenu(menuGrid);
