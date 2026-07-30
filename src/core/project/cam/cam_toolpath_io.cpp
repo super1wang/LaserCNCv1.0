@@ -28,7 +28,7 @@ namespace {
 
 constexpr char kCamToolpathTomlFile[]   = "cam_toolpath.toml";
 constexpr char kCamToolpathPointsFile[] = "cam_toolpath_points.bin";
-constexpr int  kCamToolpathSchemaVersion = 3;
+constexpr int  kCamToolpathSchemaVersion = 4;
 
 // 二进制点集 magic 头（"LCNCTPT1"）。
 constexpr quint64 kPointsBinMagic = 0x315450434E434C00ull;
@@ -274,8 +274,12 @@ bool hasCamToolpathCache(const QString& packageDir)
 bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QString* errorMsg)
 {
     const LaserToolpath& tp = cam.toolpath();
-    if (tp.contourCount() == 0) {
-        // 无刀路 → 不写文件，让旧文件保持（或在 clearToolpath 时显式删除）。
+    const bool hasFaceStage = cam.pipelineStageState(CamPipelineStage::FaceSeparation).available
+        || !cam.machiningFaceRecords().empty();
+    if (tp.contourCount() == 0 && !hasFaceStage) {
+        // No committed CAM stage → no cache to write.  A face-only project is
+        // nevertheless meaningful and must persist so the user can reopen it
+        // and continue at contour extraction.
         return true;
     }
     if (!QDir().mkpath(packageDir)) {
@@ -388,13 +392,43 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
     gen["deflection"]           = gp.deflection;
     gen["smoothAngle"]          = gp.smoothAngle;
     gen["useFaceClassification"] = gp.useFaceClassification;
+    gen["extractionStrategy"]   = gp.extractionStrategy;
     gen["normalSampleStep"]     = gp.normalSampleStep;
     gen["dirty"]                = cam.generationParamsDirty();
     gen["appliedLeadInLength"]  = appliedGp.leadInLength;
     gen["appliedDeflection"]    = appliedGp.deflection;
     gen["appliedSmoothAngle"]   = appliedGp.smoothAngle;
     gen["appliedUseFaceClassification"] = appliedGp.useFaceClassification;
+    gen["appliedExtractionStrategy"]   = appliedGp.extractionStrategy;
     root["generation"]          = gen;
+
+    // Machining-face records (manual picks survive save/reload via signature).
+    toml::array faceRecArr;
+    for (const auto& rec : cam.machiningFaceRecords()) {
+        toml::value entry(toml::table{});
+        entry["faceId"]         = static_cast<std::int64_t>(rec.faceId);
+        entry["signature"]      = static_cast<std::int64_t>(rec.signature);
+        entry["workpieceEntry"] = rec.workpieceEntry.toStdString();
+        entry["manual"]         = rec.manual;
+        entry["role"]           = static_cast<int>(rec.role);
+        faceRecArr.push_back(entry);
+    }
+    root["machiningFaces"] = faceRecArr;
+
+    toml::array pipelineStages;
+    for (int index = 0; index < static_cast<int>(CamPipelineStage::Count); ++index) {
+        const CamPipelineStage stage = static_cast<CamPipelineStage>(index);
+        const CamPipelineStageState& state = cam.pipelineStageState(stage);
+        toml::value entry(toml::table{});
+        entry["stage"] = index;
+        entry["available"] = state.available;
+        entry["dirty"] = state.dirty;
+        entry["revision"] = static_cast<std::int64_t>(state.revision);
+        entry["inputRevision"] = static_cast<std::int64_t>(state.inputRevision);
+        entry["failureReason"] = state.failureReason.toStdString();
+        pipelineStages.push_back(entry);
+    }
+    root["pipelineStages"] = pipelineStages;
 
     std::ofstream out(camToolpathTomlPath(packageDir).toStdString(), std::ios::binary);
     if (!out.is_open()) {
@@ -595,6 +629,7 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         if (gen.contains("deflection"))           gp.deflection           = gen.at("deflection").as_floating();
         if (gen.contains("smoothAngle"))          gp.smoothAngle          = gen.at("smoothAngle").as_floating();
         if (gen.contains("useFaceClassification")) gp.useFaceClassification = gen.at("useFaceClassification").as_boolean();
+        if (gen.contains("extractionStrategy"))    gp.extractionStrategy = static_cast<int>(gen.at("extractionStrategy").as_integer());
         if (gen.contains("normalSampleStep"))     gp.normalSampleStep     = gen.at("normalSampleStep").as_floating();
         cam.generationParams() = gp;
         CamDataManager::GenerationParams applied = gp;
@@ -603,8 +638,50 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         if (gen.contains("appliedSmoothAngle")) applied.smoothAngle = gen.at("appliedSmoothAngle").as_floating();
         if (gen.contains("appliedUseFaceClassification"))
             applied.useFaceClassification = gen.at("appliedUseFaceClassification").as_boolean();
+        if (gen.contains("appliedExtractionStrategy"))
+            applied.extractionStrategy = static_cast<int>(gen.at("appliedExtractionStrategy").as_integer());
         cam.appliedGenerationParams() = applied;
         cam.setGenerationParamsDirty(gen.contains("dirty") && gen.at("dirty").as_boolean());
+    }
+
+    // Machining-face records (manual picks bound by signature on next generate).
+    if (root.contains("machiningFaces") && root.at("machiningFaces").is_array()) {
+        std::vector<CamDataManager::MachiningFaceRecord> faceRecords;
+        for (const toml::value& e : root.at("machiningFaces").as_array()) {
+            if (!e.is_table()) continue;
+            CamDataManager::MachiningFaceRecord rec;
+            if (e.contains("faceId"))         rec.faceId         = static_cast<std::uint64_t>(e.at("faceId").as_integer());
+            if (e.contains("signature"))      rec.signature      = static_cast<std::uint64_t>(e.at("signature").as_integer());
+            if (e.contains("workpieceEntry")) rec.workpieceEntry = QString::fromStdString(e.at("workpieceEntry").as_string());
+            if (e.contains("manual"))         rec.manual         = e.at("manual").as_boolean();
+            if (e.contains("role")) {
+                const int storedRole = static_cast<int>(e.at("role").as_integer());
+                // v3 used 1 for outer surfaces and 2 for cross sections.
+                rec.role = schemaVersion < 4
+                    ? (storedRole == 2 ? MachiningFaceRole::CrossSection
+                                       : MachiningFaceRole::MachiningSurface)
+                    : static_cast<MachiningFaceRole>(storedRole);
+            }
+            faceRecords.push_back(rec);
+        }
+        cam.setMachiningFaceRecords(std::move(faceRecords));
+    }
+
+    if (root.contains("pipelineStages") && root.at("pipelineStages").is_array()) {
+        for (const toml::value& e : root.at("pipelineStages").as_array()) {
+            if (!e.is_table() || !e.contains("stage"))
+                continue;
+            const int index = static_cast<int>(e.at("stage").as_integer());
+            if (index < 0 || index >= static_cast<int>(CamPipelineStage::Count))
+                continue;
+            CamPipelineStageState state;
+            if (e.contains("available")) state.available = e.at("available").as_boolean();
+            if (e.contains("dirty")) state.dirty = e.at("dirty").as_boolean();
+            if (e.contains("revision")) state.revision = static_cast<std::uint64_t>(e.at("revision").as_integer());
+            if (e.contains("inputRevision")) state.inputRevision = static_cast<std::uint64_t>(e.at("inputRevision").as_integer());
+            if (e.contains("failureReason")) state.failureReason = QString::fromStdString(e.at("failureReason").as_string());
+            cam.restorePipelineStageState(static_cast<CamPipelineStage>(index), state);
+        }
     }
 
     // v1/v2 did not persist per-contour discretisation parameters or source-edge anchors.

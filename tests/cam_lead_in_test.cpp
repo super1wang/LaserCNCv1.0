@@ -42,7 +42,7 @@ int verifyShape(const TopoDS_Shape& shape, const QString& label)
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
-    params.useFaceClassification = true;
+    params.strategy = ExtractionStrategy::TubeClassification;
 
     FaceClassification classification;
     auto contours = LaserToolpathBuilder::extractContours(
@@ -100,7 +100,7 @@ int verifyImportedShape(const TopoDS_Shape& shape, const QString& label)
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
-    params.useFaceClassification = true;
+    params.strategy = ExtractionStrategy::TubeClassification;
 
     FaceClassification classification;
     auto contours = LaserToolpathBuilder::extractContours(
@@ -133,7 +133,7 @@ int verifyOuterFaceProjectionOverridesCrossNormal(const TopoDS_Shape& shape,
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
-    params.useFaceClassification = true;
+    params.strategy = ExtractionStrategy::TubeClassification;
 
     auto contours = LaserToolpathBuilder::extractContours(shape, params);
     if (contours.empty())

@@ -5,12 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build
 
 ```powershell
-cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --build build --config Debug"
+cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
 ```
 
-- `build/` currently uses Ninja. Initialize the MSVC/Windows SDK environment and do not pass MSBuild-only flags such as `/m /nologo`.
+- `build/` is the shared Ninja Multi-Config tree. Do not pass MSBuild-specific flags.
 - Single CMake target: `LaserCNC` (WIN32 executable).
-- Requires CMake 3.20+, MSVC 2022 x64, C++17.
+- Requires CMake 3.20+, MSVC 2022 x64 (19.44+), C++17.
 - Qt 6.9.1, OpenCASCADE 7.9.0, SARibbon — paths configured via CMake cache variables (`LCNC_QT6_ROOT`, `LCNC_OCCT_ROOT`, `LCNC_SARIBBON_ROOT`).
 - Vendored 3rd-party libs in `3rd/`: spdlog (logging), toml11 (config).
 - OCC and SARibbon DLLs are copied to the output directory via POST_BUILD commands.
@@ -38,6 +38,34 @@ The application is a single-process, multi-workspace desktop app for 5-axis lase
 - **CAD** edits workpiece geometry through core document APIs.
 - **CAM** runs algorithms (extract / discretise / IK), writes results into the core-owned `CamDataManager` (borrowed via `projectManager()->camData()`), manages layers (`addToolpathLayer`/`removeToolpathLayer` → `CamDataManager::addLayer`/`removeLayer`), and keeps only renderers + transient UI/preview state.
 - **Process** consumes CAM data read-only via the OCC-free `ToolpathExportSnapshot` DTO.
+
+### CAM Contour Extraction Strategy
+
+The contour extraction algorithm (`LaserToolpathBuilder::extractContours`) dispatches on `ExtractionStrategy`:
+
+| Strategy | Description |
+| -------- | ----------- |
+| `Auto` (0) | Machine+posture-driven: derives beam direction in WPC from kinematic `wpcHome` + nominal beam axis (-Z), picks the machining face via `selectMachiningFace`, then extracts all face wires. Falls back to tube classification if no planar face faces the beam. |
+| `PlanarFaceWires` (1) | Same beam-aligned face selection as Auto, then extracts all wires of that face (outer boundary + every inner hole). Holes-first ordering (contourType `InnerHole=2` before `OuterBoundary=0`). |
+| `TubeClassification` (2) | Existing outer-surface ∩ cross-section pipeline (LegacyOuterWire per face, then FaceClassifier group intersection). Produces `TubeCrossSection=1` contours. |
+| `ManualFaceSelection` (3) | User picks faces in 3D view via `CmdSelectMachiningFace`. All wires of the selected faces are extracted. |
+| `LegacyOuterWire` (4) | Pre-strategy fallback: `BRepTools::OuterWire` of every face. |
+
+**Key data flow:**
+
+1. `CamModule::generateToolpath` reads `m_extractionStrategy` (persisted in `cam.toml`).
+2. Beam direction: `beamDirectionWpc(wpcEntry)` = `kinematics->nominalBeamDirectionMachine().Transformed(wpcHome.Inverted())`.
+3. `ContourExtractionParams` carries `strategy` + `machiningBeamDirection` + `selectedMachiningFaces` (manual picks) to the pure-algorithm layer.
+4. Each resulting `LaserContour` has `contourType` set (`OuterBoundary=0`, `TubeCrossSection=1`, `InnerHole=2`, `Unknown=3`) and `sourceInfo` for debugging.
+5. Lead-in is validated per-contour during generate (`setContourStart`/`setAutomaticContourStart` → `computeLeadInSolution`); invalid lead-ins are rejected with an error dialog.
+
+**Machining faces in the project tree** (`CamModule::MachiningFaceEntry`):
+
+- Auto-captured after Auto/PlanarFaceWires generate (cyan AIS highlight).
+- Manually added via `CmdSelectMachiningFace` (yellow AIS highlight).
+- Displayed under a "加工面" root node in the project explorer.
+- Persisted via deterministic face signature (`computeFaceSignature`: area + centroid + surface type + outer-wire vertex count). On project reload, `rebindMachiningFacesFromRecords` matches stored signatures to the loaded workpiece geometry. Non-matching faces are dropped (logged as WARN).
+- Records saved in `cam_toolpath.toml` `[machiningFaces]` alongside the toolpath data.
 
 > Remaining cleanup (not yet done): `MachineKinematics` still physically lives in the Kernel-owned `MachineWorkspace` machine `LcncDocument` rather than in the workspace object itself, and `LcncProjectManager` still exposes `machineDocument()`/`machineDocumentId()` as view-routing reference accessors. Project tool snapshots are already embedded as required `tools.toml` in v4 packages.
 

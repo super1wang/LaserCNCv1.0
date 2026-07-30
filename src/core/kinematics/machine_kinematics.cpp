@@ -234,10 +234,10 @@ QStringList MachineKinematics::workpiecesOnAxis(const QString& axisName) const
 
 // ── Transform computation ──────────────────────────────────────────────────────
 
-gp_Trsf MachineKinematics::axisLocalTrsf(const MachineAxisDef& axis) const
+gp_Trsf MachineKinematics::axisLocalTrsf(const MachineAxisDef& axis, bool home) const
 {
     gp_Trsf t;  // identity
-    if (axis.name == "BASE" || axis.currentPos == 0.0) return t;
+    if (axis.name == "BASE" || home || axis.currentPos == 0.0) return t;
 
     if (axis.motionType == MachineAxisDef::Linear) {
         t.SetTranslation(gp_Vec(axis.direction) * axis.currentPos);
@@ -248,7 +248,7 @@ gp_Trsf MachineKinematics::axisLocalTrsf(const MachineAxisDef& axis) const
     return t;
 }
 
-gp_Trsf MachineKinematics::chainTrsf(const QString& axisName) const
+gp_Trsf MachineKinematics::chainTrsf(const QString& axisName, bool home) const
 {
     // Build chain from ROOT to this axis: [ ..., parent, axisName ]
     QStringList chain;
@@ -267,7 +267,7 @@ gp_Trsf MachineKinematics::chainTrsf(const QString& axisName) const
     for (const QString& n : chain) {
         const MachineAxisDef* def = findAxis(n);
         if (def && def->name != "BASE")
-            result = result.Multiplied(axisLocalTrsf(*def));
+            result = result.Multiplied(axisLocalTrsf(*def, home));
     }
     return result;
 }
@@ -287,6 +287,22 @@ gp_Trsf MachineKinematics::computeWpcTransform(const QString& entry) const
 gp_Trsf MachineKinematics::computeAxisTransform(const QString& axisName) const
 {
     return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName);
+}
+
+gp_Dir MachineKinematics::nominalBeamDirectionMachine() const
+{
+    // All current presets (XYZ, XYZA, VERTICAL_*_TABLE, AB_HEAD, AC_HEAD)
+    // carry the laser head on the machine Z axis; at the home posture the
+    // beam travels along -Z. Rotary axes (table or head) tilt the beam or
+    // workpiece away from home during 5-axis motion, but face identification
+    // is referenced to the setup (home) posture.
+    return gp_Dir(0.0, 0.0, -1.0);
+}
+
+gp_Trsf MachineKinematics::computeWpcTransformHome(const QString& entry) const
+{
+    const QString axisName = m_wpcToAxis.value(entry);
+    return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName, /*home=*/true);
 }
 
 // ── Position control ───────────────────────────────────────────────────────────

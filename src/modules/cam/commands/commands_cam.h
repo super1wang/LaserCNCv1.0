@@ -73,4 +73,35 @@ public:
     void execute()   override;
 };
 
+/**
+ * @brief Pick a workpiece face to use as a machining face (Manual strategy).
+ *
+ * Enters the view's face-pick mode; the picked face is appended to the
+ * manual machining-face set used by ExtractionStrategy::ManualFaceSelection.
+ */
+class CmdSelectMachiningFace : public CommandBase
+{
+    Q_OBJECT
+public:
+    explicit CmdSelectMachiningFace(IAppContext* ctx);
+    static constexpr const char* Name = "cam.select_machining_face";
+
+    bool isEnabled() const override;
+    void execute()   override;
+};
+
+/**
+ * @brief Clear all manually picked machining faces.
+ */
+class CmdClearMachiningFaces : public CommandBase
+{
+    Q_OBJECT
+public:
+    explicit CmdClearMachiningFaces(IAppContext* ctx);
+    static constexpr const char* Name = "cam.clear_machining_faces";
+
+    bool isEnabled() const override;
+    void execute()   override;
+};
+
 

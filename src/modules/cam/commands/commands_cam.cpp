@@ -57,11 +57,16 @@ bool CmdGenerateToolpath::isEnabled() const
 void CmdGenerateToolpath::execute()
 {
     CamModule* cam = context()->camModule();
-    if (cam->generateToolpathAsync(cam->smoothAngle(),
-                                   cam->useFaceClassification(),
-                                   cam->deflection()) == kInvalidTaskId) {
+    if (cam->extractionStrategy() == static_cast<int>(ExtractionStrategy::ManualFaceSelection)
+        && cam->machiningFaceCount() == 0) {
+        QMessageBox::information(nullptr, tr("生成刀路"),
+            tr("手动选面模式下请先点击工件表面拾取加工面（可多次拾取），再生成刀路。"));
+        context()->updateCommandStates();
+        return;
+    }
+    if (!cam->runAutoPipeline()) {
         QMessageBox::warning(nullptr, tr("生成刀路"),
-            tr("项目工作区中未找到工件，或未找到可用的轮廓边缘。"));
+            tr("加工流程未完成，请检查当前阶段的错误信息。"));
     }
     context()->updateCommandStates();
 }
@@ -151,6 +156,66 @@ bool CmdRecalcToolpath::isEnabled() const
 void CmdRecalcToolpath::execute()
 {
     context()->camModule()->recalcToolpathAsync();
+}
+
+// =============================================================================
+// CmdSelectMachiningFace
+// =============================================================================
+
+CmdSelectMachiningFace::CmdSelectMachiningFace(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("选择加工面"), this);
+    a->setStatusTip(tr("在3D视图中点击工件表面拾取加工面（手动选面模式）"));
+    setAction(a);
+}
+
+bool CmdSelectMachiningFace::isEnabled() const
+{
+    LcncDocument* doc = context()->workpieceDocument();
+    return doc && doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length() > 0;
+}
+
+void CmdSelectMachiningFace::execute()
+{
+    CamModule* cam = context()->camModule();
+    cam->requestMachineView();
+    WidgetOccView* occView = context()->occView();
+    if (!occView)
+        return;
+
+    if (occView->isFacePickActive()) {
+        occView->endFacePick();
+        return;
+    }
+
+    occView->beginFacePick();
+    QToolTip::showText(occView->mapToGlobal(QPoint(24, 24)),
+                       tr("点击工件表面拾取加工面（可多次拾取），右键或 Esc 结束"),
+                       occView);
+}
+
+// =============================================================================
+// CmdClearMachiningFaces
+// =============================================================================
+
+CmdClearMachiningFaces::CmdClearMachiningFaces(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("清除加工面"), this);
+    a->setStatusTip(tr("清除所有手动拾取的加工面"));
+    setAction(a);
+}
+
+bool CmdClearMachiningFaces::isEnabled() const
+{
+    return context()->camModule()->machiningFaceCount() > 0;
+}
+
+void CmdClearMachiningFaces::execute()
+{
+    context()->camModule()->clearMachiningFaces();
+    context()->updateCommandStates();
 }
 
 

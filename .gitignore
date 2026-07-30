@@ -39,8 +39,12 @@ Makefile
 *.opensdf
 .vscode/.browse.VC.db*
 .vscode/ipch/
+CMakeUserPresets.json
 
 # Runtime scratch files
+/build.log
+/err.txt
+/out.txt
 /logs/
 /artifacts/
 *.tmp

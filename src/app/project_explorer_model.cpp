@@ -187,7 +187,9 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     root.kind = ProjectExplorerNodeKind::ToolpathRoot;
     root.documentId = cam ? cam->camDocumentId() : kInvalidDocumentId;
     root.nodeKey = QStringLiteral("project.cam");
-    root.displayName = QObject::tr("CAM 数据");
+    // The tree represents the user-editable machining result, not an opaque
+    // implementation cache.  Keep the label aligned with the staged CAM flow.
+    root.displayName = QObject::tr("加工轮廓");
     root.selectable = true;
     root.droppable = true;
     root.checked = true;
@@ -205,6 +207,21 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
             .arg(static_cast<int>(layers.size()))
             .arg(toolpath.contourCount())
         : QObject::tr("未生成");
+    const struct { lcnc::cam::CamPipelineStage stage; const char* name; } stages[] = {
+        {lcnc::cam::CamPipelineStage::FaceSeparation, "分离面"},
+        {lcnc::cam::CamPipelineStage::ContourExtraction, "提取轮廓"},
+        {lcnc::cam::CamPipelineStage::PointDiscretization, "离散点"},
+        {lcnc::cam::CamPipelineStage::GeometricToolpath, "几何刀路"},
+        {lcnc::cam::CamPipelineStage::MachineSolve, "机床求解"},
+    };
+    QStringList stageSummary;
+    for (const auto& item : stages) {
+        const auto state = cam->pipelineStageState(item.stage);
+        const QString status = !state.available ? QObject::tr("未执行")
+            : state.dirty ? QObject::tr("过期") : QObject::tr("完成");
+        stageSummary << QObject::tr("%1:%2").arg(QString::fromUtf8(item.name), status);
+    }
+    root.toolTip = stageSummary.join(QStringLiteral(" · "));
 
     auto contourNode = [&](int index) {
         const LaserContour& contour = toolpath.contour(index);
@@ -271,12 +288,63 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     snapshot.roots.append(std::move(root));
 }
 
+void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
+{
+    ProjectExplorerNode root;
+    root.kind = ProjectExplorerNodeKind::MachiningFaceRoot;
+    root.nodeKey = QStringLiteral("project.machiningfaces");
+    root.displayName = QObject::tr("加工面");
+    root.selectable = true;
+    root.checkable = true;
+    root.checked = cam && cam->machiningFacesVisible();
+
+    // 横截面是内部工艺数据，不在“加工面”树节点中显示。
+    const QList<CamModule::MachiningFaceInfo> faces = cam ? cam->machiningFacesForTree()
+                                                           : QList<CamModule::MachiningFaceInfo>{};
+    if (faces.isEmpty()) {
+        root.infoText = QObject::tr("未选择");
+        collectLeafEntries(root);
+        snapshot.roots.append(std::move(root));
+        return;
+    }
+
+    root.infoText = QObject::tr("%1 个").arg(faces.size());
+    for (const CamModule::MachiningFaceInfo& info : faces) {
+        ProjectExplorerNode node;
+        node.kind = ProjectExplorerNodeKind::MachiningFace;
+        node.nodeKey = QStringLiteral("project.machiningface.%1")
+            .arg(static_cast<qulonglong>(info.faceId));
+        node.displayName = info.displayName;
+        QString role;
+        switch (info.role) {
+        case lcnc::cam::MachiningFaceRole::LegacyOuterSurface:
+            role = QObject::tr("加工面");
+            break;
+        case lcnc::cam::MachiningFaceRole::CrossSection:
+            role = QObject::tr("横截面");
+            break;
+        case lcnc::cam::MachiningFaceRole::MachiningSurface:
+            role = QObject::tr("加工面");
+            break;
+        }
+        node.infoText = QObject::tr("%1 · %2")
+            .arg(info.manual ? QObject::tr("手动") : QObject::tr("自动"), role);
+        node.machiningFaceId = info.faceId;
+        node.selectable = true;
+        node.checkable = false;
+        root.children.append(node);
+    }
+    collectLeafEntries(root);
+    snapshot.roots.append(std::move(root));
+}
+
 } // namespace
 
 ProjectExplorerSnapshot ProjectExplorerModel::build(CadModule* cad, CamModule* cam)
 {
     ProjectExplorerSnapshot snapshot;
     appendWorkpieceSection(snapshot, cad);
+    appendMachiningFaceSection(snapshot, cam);
     appendToolpathSection(snapshot, cam);
     return snapshot;
 }
@@ -310,6 +378,12 @@ bool isToolpathProjectNode(ProjectExplorerNodeKind kind)
     return kind == ProjectExplorerNodeKind::ToolpathRoot
     || kind == ProjectExplorerNodeKind::ToolpathLayer
         || kind == ProjectExplorerNodeKind::ToolpathContour;
+}
+
+bool isMachiningFaceProjectNode(ProjectExplorerNodeKind kind)
+{
+    return kind == ProjectExplorerNodeKind::MachiningFaceRoot
+        || kind == ProjectExplorerNodeKind::MachiningFace;
 }
 
 } // namespace lcnc::app

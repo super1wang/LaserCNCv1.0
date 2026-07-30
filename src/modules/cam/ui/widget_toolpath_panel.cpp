@@ -74,11 +74,15 @@ void WidgetToolpathPanel::buildUi()
     classForm->addRow(tr("光滑阈值:"), m_spinSmoothAngle);
 
     m_comboClassMode = new QComboBox(classGroup);
-    m_comboClassMode->addItem(tr("自动(面分类)"), 1);
-    m_comboClassMode->addItem(tr("全部外轮廓(旧)"), 0);
+    m_comboClassMode->addItem(tr("自动识别"),   static_cast<int>(ExtractionStrategy::Auto));
+    m_comboClassMode->addItem(tr("平面(取孔)"), static_cast<int>(ExtractionStrategy::PlanarFaceWires));
+    m_comboClassMode->addItem(tr("管材(截面)"), static_cast<int>(ExtractionStrategy::TubeClassification));
+    m_comboClassMode->addItem(tr("手动选面"),   static_cast<int>(ExtractionStrategy::ManualFaceSelection));
     m_comboClassMode->setToolTip(
-        tr("自动: 基于面连通域光滑度分类外表面/截面/内表面，提取交线轮廓\n"
-           "全部外轮廓: 使用旧方法提取每个面的外轮廓线"));
+        tr("自动识别: 按机台构型与装夹姿态自动选取加工面（平板取外环+孔，管材取截面）\n"
+           "平面(取孔): 取加工面的全部 Wire（外轮廓 + 每个孔）\n"
+           "管材(截面): 外表面 ∩ 截面交线（管端切割）\n"
+           "手动选面: 在视图点选工件加工面"));
     classForm->addRow(tr("提取模式:"), m_comboClassMode);
 
     mainLayout->addWidget(classGroup);
@@ -102,26 +106,40 @@ void WidgetToolpathPanel::buildUi()
 
     mainLayout->addWidget(normalGroup);
 
-    // ── 操作 group ─────────────────────────────────────────────────────────
-    auto* opsGroup  = new QGroupBox(tr("操作"), this);
+    // ── 分阶段操作 group ───────────────────────────────────────────────────
+    auto* opsGroup  = new QGroupBox(tr("加工流程"), this);
     auto* opsLayout = new QVBoxLayout(opsGroup);
 
-    m_btnGenerate  = new QPushButton(tr("全局生成刀路"), opsGroup);
-    m_btnPickLeadIn = new QPushButton(tr("选择轮廓起点"), opsGroup);
-    m_btnRecalc    = new QPushButton(tr("重新计算当前轮廓"), opsGroup);
-    m_btnPreview   = new QPushButton(tr("刀路预览"), opsGroup);
-    m_btnPreview->setCheckable(true);
-    m_btnPreview->setChecked(true);
-
+    m_btnGenerate  = new QPushButton(tr("全自动执行全部阶段"), opsGroup);
+    m_btnGenerate->setToolTip(tr("从工件开始，依次执行分离面、提取轮廓、离散点、构造刀路和机床求解。"));
+    m_btnSeparateFaces = new QPushButton(tr("1. 自动分离加工面"), opsGroup);
+    m_btnPickMachiningFaces = new QPushButton(tr("1. 手动选择加工面"), opsGroup);
+    m_btnApplyMachiningFaces = new QPushButton(tr("应用加工面并继续"), opsGroup);
+    m_btnExtractContours = new QPushButton(tr("2. 从当前加工面提取轮廓"), opsGroup);
+    m_btnDiscretizePoints = new QPushButton(tr("3. 离散当前轮廓"), opsGroup);
+    m_btnBuildToolpath = new QPushButton(tr("4. 构造下刀线与几何刀路"), opsGroup);
+    m_btnSolveMachinePath = new QPushButton(tr("5. 求解机床坐标"), opsGroup);
+    m_btnPickMachiningFaces->setToolTip(tr("连续点击工件面；右键或 Esc 结束拾取，然后点击“应用加工面并继续”。"));
+    m_btnApplyMachiningFaces->setToolTip(tr("提交当前加工面集合，并使下游轮廓、点和刀路失效。"));
     opsLayout->addWidget(m_btnGenerate);
-    opsLayout->addWidget(m_btnPickLeadIn);
-    opsLayout->addWidget(m_btnRecalc);
-    opsLayout->addWidget(m_btnPreview);
+    opsLayout->addWidget(m_btnSeparateFaces);
+    opsLayout->addWidget(m_btnPickMachiningFaces);
+    opsLayout->addWidget(m_btnApplyMachiningFaces);
+    opsLayout->addWidget(m_btnExtractContours);
+    opsLayout->addWidget(m_btnDiscretizePoints);
+    opsLayout->addWidget(m_btnBuildToolpath);
+    opsLayout->addWidget(m_btnSolveMachinePath);
 
     mainLayout->addWidget(opsGroup);
 
-    // ── 坐标表 group ──────────────────────────────────────────────────────
-    auto* coordGroup  = new QGroupBox(tr("机床坐标"), this);
+    // ── 独立的机床坐标 tab ────────────────────────────────────────────────
+    m_machineCoordinatesPage = new QWidget(this);
+    auto* coordinatePageLayout = new QVBoxLayout(m_machineCoordinatesPage);
+    coordinatePageLayout->setContentsMargins(6, 6, 6, 6);
+    coordinatePageLayout->setSpacing(8);
+    coordinatePageLayout->addWidget(new QLabel(tr("<b>机床坐标</b>"), m_machineCoordinatesPage));
+
+    auto* coordGroup  = new QGroupBox(tr("当前轮廓"), m_machineCoordinatesPage);
     auto* coordLayout = new QVBoxLayout(coordGroup);
 
     m_coordTable = new QTableWidget(0, 6, coordGroup);
@@ -134,7 +152,8 @@ void WidgetToolpathPanel::buildUi()
     m_coordTable->setAlternatingRowColors(true);
     coordLayout->addWidget(m_coordTable);
 
-    mainLayout->addWidget(coordGroup);
+    coordinatePageLayout->addWidget(coordGroup);
+    coordinatePageLayout->addStretch(1);
 
     // Stretch at bottom
     mainLayout->addStretch(1);
@@ -142,12 +161,20 @@ void WidgetToolpathPanel::buildUi()
     // ── Signal connections ─────────────────────────────────────────────────
     connect(m_btnGenerate,  &QPushButton::clicked,
             this, &WidgetToolpathPanel::generateRequested);
-    connect(m_btnPickLeadIn, &QPushButton::clicked,
-            this, &WidgetToolpathPanel::pickLeadInRequested);
-    connect(m_btnRecalc,    &QPushButton::clicked,
-            this, &WidgetToolpathPanel::recalcRequested);
-    connect(m_btnPreview,   &QPushButton::toggled,
-            this, &WidgetToolpathPanel::previewToggled);
+    connect(m_btnSeparateFaces, &QPushButton::clicked,
+            this, &WidgetToolpathPanel::separateFacesRequested);
+    connect(m_btnPickMachiningFaces, &QPushButton::clicked,
+            this, &WidgetToolpathPanel::pickMachiningFacesRequested);
+    connect(m_btnApplyMachiningFaces, &QPushButton::clicked,
+            this, &WidgetToolpathPanel::applyMachiningFacesRequested);
+    connect(m_btnExtractContours, &QPushButton::clicked,
+            this, &WidgetToolpathPanel::extractContoursRequested);
+    connect(m_btnDiscretizePoints, &QPushButton::clicked,
+            this, &WidgetToolpathPanel::discretizePointsRequested);
+    connect(m_btnBuildToolpath, &QPushButton::clicked,
+            this, &WidgetToolpathPanel::buildToolpathRequested);
+    connect(m_btnSolveMachinePath, &QPushButton::clicked,
+            this, &WidgetToolpathPanel::solveMachinePathRequested);
 
     connect(m_spinLeadInLength, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::leadInLengthChanged);
@@ -164,8 +191,8 @@ void WidgetToolpathPanel::buildUi()
 
     connect(m_comboClassMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int index) {
-                int mode = m_comboClassMode->itemData(index).toInt();
-                emit classificationModeChanged(mode);
+                int strategy = m_comboClassMode->itemData(index).toInt();
+                emit extractionStrategyChanged(strategy);
             });
         connect(m_checkShowNormals, &QCheckBox::toggled,
             this, &WidgetToolpathPanel::showNormalsToggled);
@@ -219,8 +246,12 @@ void WidgetToolpathPanel::refreshParameterEditors()
     }
     if (m_spinLeadInLength) m_spinLeadInLength->setEnabled(!currentScope || hasContour);
     if (m_spinDeflection) m_spinDeflection->setEnabled(!currentScope || hasContour);
-    if (m_btnRecalc) m_btnRecalc->setEnabled(currentScope && hasContour);
     if (m_classificationGroup) m_classificationGroup->setEnabled(!currentScope);
+}
+
+QWidget* WidgetToolpathPanel::machineCoordinatesPage() const
+{
+    return m_machineCoordinatesPage;
 }
 
 void WidgetToolpathPanel::setLeadInLength(double mm)
@@ -259,13 +290,12 @@ void WidgetToolpathPanel::setSmoothAngle(double deg)
     m_spinSmoothAngle->setValue(deg);
 }
 
-void WidgetToolpathPanel::setUseFaceClassification(bool enabled)
+void WidgetToolpathPanel::setExtractionStrategy(int strategy)
 {
     if (!m_comboClassMode)
         return;
 
-    const int desiredMode = enabled ? 1 : 0;
-    const int index = m_comboClassMode->findData(desiredMode);
+    const int index = m_comboClassMode->findData(strategy);
     if (index < 0 || m_comboClassMode->currentIndex() == index)
         return;
 
@@ -309,10 +339,10 @@ double WidgetToolpathPanel::smoothAngle() const
     return m_spinSmoothAngle ? m_spinSmoothAngle->value() : 5.0;
 }
 
-bool WidgetToolpathPanel::useFaceClassification() const
+int WidgetToolpathPanel::extractionStrategy() const
 {
-    if (!m_comboClassMode) return true;
-    return m_comboClassMode->currentData().toInt() == 1;
+    if (!m_comboClassMode) return static_cast<int>(ExtractionStrategy::Auto);
+    return m_comboClassMode->currentData().toInt();
 }
 
 void WidgetToolpathPanel::showContourCoordinates(int contourIndex)

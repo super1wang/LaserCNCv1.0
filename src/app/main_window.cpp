@@ -63,6 +63,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QAction>
+#include <QToolTip>
 
 #include <QVBoxLayout>
 #include <QComboBox>
@@ -455,6 +456,8 @@ void MainWindow::createCentralLayout()
             this, &MainWindow::showMachineView);
             connect(m_appContext->camModule(), &CamModule::machineWorkspaceChanged,
                 this, &MainWindow::syncMachineWorkspaceUi);
+        connect(m_appContext->camModule(), &CamModule::machiningFacesChanged,
+            this, &MainWindow::rebuildProjectExplorer);
 
     connect(m_appContext->camModule(), &CamModule::selectionChanged, this,
             [this](const QStringList& entries) {
@@ -583,8 +586,21 @@ void MainWindow::connectOccViewSignals(WidgetOccView* view)
 
     connect(view, &WidgetOccView::facePickConfirmed, this,
             [this, view](const QPoint& pos) {
-                if (m_pendingCalibrationTarget.isEmpty())
+                if (m_pendingCalibrationTarget.isEmpty()) {
+                    // Not axis-calibration -> manual machining-face selection.
+                    QString err;
+                    if (m_appContext->camModule()->pickMachiningFace(view, pos, &err)) {
+                        // Keep the face picker active: a machining-face set is
+                        // deliberately built from multiple operator picks and is
+                        // committed only by the explicit Apply action.
+                        QToolTip::showText(view->mapToGlobal(pos),
+                            tr("已加入加工面；可继续选择，右键或 Esc 结束后点击“应用加工面并继续”。"),
+                            view);
+                    } else if (!err.isEmpty()) {
+                        QToolTip::showText(view->mapToGlobal(pos), err, view);
+                    }
                     return;
+                }
 
                 bool handled = false;
                 // 标定向导是唯一的拾取入口；旧的 A/C/CUTTER_HEAD 直传分支已移除。
@@ -837,18 +853,19 @@ void MainWindow::createRightPanel()
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
     m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
-    m_toolpathPanel->setUseFaceClassification(cam->useFaceClassification());
+    m_toolpathPanel->setExtractionStrategy(cam->extractionStrategy());
     m_toolpathPanel->setShowNormals(cam->showNormals());
     m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
 
     m_rightStack = new QStackedWidget(this);
 
-    // CAM 右栏：两个 tab 页 —— 机床面板 / 刀路参数面板。
+    // CAM 右栏：机床、刀路参数和机床坐标页面。
     m_camRightTabs = new QTabWidget(this);
     m_camRightTabs->setTabPosition(QTabWidget::North);
     m_camRightTabs->setDocumentMode(true);
     m_camRightTabs->addTab(m_machinePanel,  tr("机床"));
     m_camRightTabs->addTab(m_toolpathPanel, tr("刀路参数"));
+    m_camRightTabs->addTab(m_toolpathPanel->machineCoordinatesPage(), tr("机床坐标"));
 
     m_rightStack->addWidget(m_camRightTabs);   // index 0 — CAM ribbon page
     m_rightStack->addWidget(m_laserControl);   // index 1 — laser/process ribbon page
@@ -1171,13 +1188,21 @@ void MainWindow::createRightPanel()
 
     // ── Toolpath panel signals ──────────────────────────────────────────
     connect(m_toolpathPanel, &WidgetToolpathPanel::generateRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdGenerateToolpath::Name)->execute(); });
-    connect(m_toolpathPanel, &WidgetToolpathPanel::pickLeadInRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdSetLeadIn::Name)->execute(); });
-    connect(m_toolpathPanel, &WidgetToolpathPanel::recalcRequested, this,
-            [this]{ m_cmdContainer->findCommand(CmdRecalcToolpath::Name)->execute(); });
-    connect(m_toolpathPanel, &WidgetToolpathPanel::previewToggled, this,
-            [this](bool) { m_cmdContainer->findCommand(CmdToolpathPreview::Name)->execute(); });
+            [this]{ m_appContext->camModule()->runAutoPipeline(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::separateFacesRequested, this,
+            [this]{ m_appContext->camModule()->separateMachiningFacesAsync(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::pickMachiningFacesRequested, this,
+            [this]{ m_cmdContainer->findCommand(CmdSelectMachiningFace::Name)->execute(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::applyMachiningFacesRequested, this,
+            [this]{ m_appContext->camModule()->applyMachiningFaces(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::extractContoursRequested, this,
+            [this]{ m_appContext->camModule()->extractContoursFromMachiningFacesAsync(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::discretizePointsRequested, this,
+            [this]{ m_appContext->camModule()->discretizeCurrentContoursAsync(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::buildToolpathRequested, this,
+            [this]{ m_appContext->camModule()->buildCurrentGeometricToolpathAsync(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::solveMachinePathRequested, this,
+            [this]{ m_appContext->camModule()->solveCurrentGeometricToolpathAsync(); });
     connect(m_toolpathPanel, &WidgetToolpathPanel::leadInLengthChanged, this,
             [this](double v) {
             if (m_toolpathPanel->parameterScope() == WidgetToolpathPanel::ParameterScope::CurrentContour)
@@ -1205,8 +1230,8 @@ void MainWindow::createRightPanel()
     connect(m_toolpathPanel, &WidgetToolpathPanel::smoothAngleChanged, this,
             [this](double v) { m_appContext->camModule()->setSmoothAngle(v); });
 
-        connect(m_toolpathPanel, &WidgetToolpathPanel::classificationModeChanged, this,
-            [this](int mode) { m_appContext->camModule()->setUseFaceClassification(mode == 1); });
+        connect(m_toolpathPanel, &WidgetToolpathPanel::extractionStrategyChanged, this,
+            [this](int strategy) { m_appContext->camModule()->setExtractionStrategy(strategy); });
 
         // 法线显示参数信号
         connect(m_toolpathPanel, &WidgetToolpathPanel::showNormalsToggled, this,
@@ -1914,6 +1939,11 @@ void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*colum
         return;
     }
 
+    if (kind == lcnc::app::ProjectExplorerNodeKind::MachiningFaceRoot) {
+        m_appContext->camModule()->setMachiningFacesVisible(visible);
+        return;
+    }
+
     if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathRoot) {
         cascadeCheckState(item, [](QTreeWidgetItem* child) {
             return lcnc::app::isToolpathProjectNode(projectNodeKind(child));
@@ -2030,6 +2060,34 @@ void MainWindow::onProjectExplorerContextMenuRequested(const QPoint& pos)
         return;
 
     const auto kind = projectNodeKind(item);
+
+    if (kind == lcnc::app::ProjectExplorerNodeKind::MachiningFace) {
+        const std::uint64_t faceId = item->data(
+            0, lcnc::app::ProjectExplorerRoles::MachiningFaceId).toULongLong();
+        QMenu menu(this);
+        QMenu* roleMenu = menu.addMenu(tr("设置面角色"));
+        QAction* machiningAction = roleMenu->addAction(tr("加工面"));
+        QAction* crossSectionAction = roleMenu->addAction(tr("横截面"));
+        QAction* removeAction = menu.addAction(tr("删除加工面"));
+        QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
+        CamModule* cam = m_appContext->camModule();
+        if (chosen == machiningAction)
+            cam->setMachiningFaceRole(faceId, lcnc::cam::MachiningFaceRole::MachiningSurface);
+        else if (chosen == crossSectionAction)
+            cam->setMachiningFaceRole(faceId, lcnc::cam::MachiningFaceRole::CrossSection);
+        else if (chosen == removeAction)
+            m_appContext->camModule()->removeMachiningFace(faceId);
+        return;
+    }
+    if (kind == lcnc::app::ProjectExplorerNodeKind::MachiningFaceRoot) {
+        QMenu menu(this);
+        QAction* clearAction = menu.addAction(tr("清除所有加工面"));
+        QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
+        if (chosen == clearAction)
+            m_appContext->camModule()->clearMachiningFaces();
+        return;
+    }
+
     QString axisName = item->data(0, kRoleAxisName).toString();
     QString shapeEntry;
 
@@ -2320,7 +2378,7 @@ void MainWindow::restorePersistedCamState()
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
     m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
-    m_toolpathPanel->setUseFaceClassification(cam->useFaceClassification());
+    m_toolpathPanel->setExtractionStrategy(cam->extractionStrategy());
     m_toolpathPanel->setShowNormals(cam->showNormals());
     m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
 

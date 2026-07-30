@@ -29,7 +29,9 @@ enum class ProjectExplorerNodeKind {
     MachineUnassignedGroup,
     ToolpathRoot,
     ToolpathLayer,
-    ToolpathContour
+    ToolpathContour,
+    MachiningFaceRoot,
+    MachiningFace
 };
 
 struct ProjectExplorerNode {
@@ -46,6 +48,7 @@ struct ProjectExplorerNode {
     QString toolName;
     int contourIndex{-1};
     lcnc::cam::ContourId contourId{0};
+    std::uint64_t machiningFaceId{0};  ///< MachiningFace node -> face id (for delete)
     bool checkable{true};
     bool checked{true};
     bool selectable{true};
@@ -69,5 +72,6 @@ public:
 bool isCadProjectNode(ProjectExplorerNodeKind kind);
 bool isMachineProjectNode(ProjectExplorerNodeKind kind);
 bool isToolpathProjectNode(ProjectExplorerNodeKind kind);
+bool isMachiningFaceProjectNode(ProjectExplorerNodeKind kind);
 
 } // namespace lcnc::app

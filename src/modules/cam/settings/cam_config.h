@@ -64,6 +64,9 @@ public:
     bool useFaceClassification() const { return m_useFaceClassification; }
     void setUseFaceClassification(bool enabled);
 
+    int  extractionStrategy() const { return m_extractionStrategy; }
+    void setExtractionStrategy(int strategy);
+
     bool showNormals() const { return m_showNormals; }
     void setShowNormals(bool enabled);
 
@@ -149,6 +152,7 @@ private:
     double m_deflection{0.1};
     double m_smoothAngle{5.0};
     bool m_useFaceClassification{true};
+    int m_extractionStrategy{0}; ///< ExtractionStrategy (Auto)
     bool m_showNormals{false};
     double m_normalSampleStep{2.0};
 

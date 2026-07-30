@@ -73,6 +73,7 @@
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
 #include <Quantity_Color.hxx>
+#include <Quantity_NameOfColor.hxx>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
 #include <GeomAbs_SurfaceType.hxx>
@@ -600,6 +601,7 @@ CamModule::CamModule(QObject* parent)
     m_deflection = config.deflection();
     m_smoothAngle = config.smoothAngle();
     m_useFaceClassification = config.useFaceClassification();
+    m_extractionStrategy = config.extractionStrategy();
     m_toolpathRenderer->setShowNormals(config.showNormals());
     m_toolpathRenderer->setNormalSampleStep(config.normalSampleStep());
     // 用全局默认值播种初始（空）工程的工程级生成参数。
@@ -612,6 +614,13 @@ CamModule::CamModule(QObject* parent)
     connect(project, &lcnc::LcncProjectManager::activeWorkspaceChanged,
             this, [this] {
                 auto* project = lcnc::Kernel::current().projectManager();
+                // Machining-face TopoDS handles belong to the workspace that
+                // supplied them.  Drop them before exposing a replacement (or
+                // no) workspace; otherwise the explorer can show stale faces
+                // after the last file is closed.
+                m_machiningFaces.clear();
+                m_nextMachiningFaceId = 1;
+                refreshMachiningFaceDisplay();
                 m_camData = project->camData();
                 const auto activeId = project->activeWorkspaceId();
                 m_machineModelVisible = m_machineVisibleWorkspaceIds.contains(activeId);
@@ -621,6 +630,10 @@ CamModule::CamModule(QObject* parent)
                         gd->view()->Redraw();
                 }
                 displayAxisGuides();
+                if (m_camData && !m_camData->machiningFaceRecords().empty())
+                    rebindMachiningFacesFromRecords();
+                else
+                    emit machiningFacesChanged();
                 emit machineVisibilityChanged();
             });
 
@@ -2209,6 +2222,991 @@ QList<CamModule::WorkpieceShapeSource> CamModule::collectWorkpieceShapes() const
     return result;
 }
 
+bool CamModule::rejectConflictingPipelineOperation(const QString& operation)
+{
+    if (!property("camAutoPipelineRunning").toBool())
+        return false;
+    emit operationFailed(operation, tr("全自动加工流程正在运行，请先取消或等待其结束。"));
+    return true;
+}
+
+std::uint64_t CamModule::machiningFaceSetRevision() const
+{
+    std::uint64_t hash = 1469598103934665603ull;
+    const auto mix = [&hash](std::uint64_t value) {
+        hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+    };
+    for (const MachiningFaceEntry& entry : m_machiningFaces) {
+        mix(entry.faceId);
+        mix(entry.face.IsNull() ? 0 : LaserToolpathBuilder::computeFaceSignature(entry.face));
+        mix(static_cast<std::uint64_t>(entry.role));
+        mix(entry.manual ? 1 : 0);
+        for (const QChar ch : entry.workpieceEntry)
+            mix(ch.unicode());
+    }
+    return hash;
+}
+
+std::uint64_t CamModule::machineSetupRevision() const
+{
+    const MachineKinematics* machine = kinematics();
+    if (!machine)
+        return 0;
+    std::uint64_t hash = 1469598103934665603ull;
+    const auto mix = [&hash](std::uint64_t value) {
+        hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+    };
+    const auto mixDouble = [&mix](double value) {
+        mix(static_cast<std::uint64_t>(std::llround(value * 1000000.0)));
+    };
+    for (const QChar ch : machine->configType()) mix(ch.unicode());
+    for (const MachineAxisDef& axis : machine->axes()) {
+        for (const QChar ch : axis.name) mix(ch.unicode());
+        mix(static_cast<std::uint64_t>(axis.motionType));
+        mixDouble(axis.direction.X()); mixDouble(axis.direction.Y()); mixDouble(axis.direction.Z());
+        mixDouble(axis.origin.X()); mixDouble(axis.origin.Y()); mixDouble(axis.origin.Z());
+        mixDouble(axis.minVal); mixDouble(axis.maxVal);
+        for (const QChar ch : axis.parentAxis) mix(ch.unicode());
+    }
+    for (auto it = machine->wpcMounts().cbegin(); it != machine->wpcMounts().cend(); ++it) {
+        for (const QChar ch : it.key()) mix(ch.unicode());
+        for (const QChar ch : it.value()) mix(ch.unicode());
+    }
+    return hash;
+}
+
+bool facesShareBoundaryEdge(const TopoDS_Face& first, const TopoDS_Face& second)
+{
+    if (first.IsNull() || second.IsNull())
+        return false;
+    for (TopExp_Explorer firstEdges(first, TopAbs_EDGE); firstEdges.More(); firstEdges.Next()) {
+        const TopoDS_Shape edge = firstEdges.Current();
+        for (TopExp_Explorer secondEdges(second, TopAbs_EDGE); secondEdges.More(); secondEdges.Next()) {
+            if (edge.IsSame(secondEdges.Current()))
+                return true;
+        }
+    }
+    return false;
+}
+
+class AutoPipelineRunner final : public QObject
+{
+public:
+    explicit AutoPipelineRunner(CamModule* cam)
+        : QObject(cam)
+        , m_cam(cam)
+    {
+        connect(m_cam, &CamModule::pipelineStageChanged, this,
+                [this](lcnc::cam::CamPipelineStage stage) {
+                    if (stage != m_waitingStage)
+                        return;
+                    advance();
+                });
+        connect(m_cam, &CamModule::operationFailed, this,
+                [this](const QString& title, const QString&) {
+                    if (title == stageTitle(m_waitingStage))
+                        finish(false);
+                });
+    }
+
+    TaskId start(lcnc::cam::CamPipelineStage firstStage =
+                 lcnc::cam::CamPipelineStage::FaceSeparation)
+    {
+        return startStage(firstStage);
+    }
+
+private:
+    static QString stageTitle(lcnc::cam::CamPipelineStage stage)
+    {
+        switch (stage) {
+        case lcnc::cam::CamPipelineStage::FaceSeparation: return QObject::tr("分离加工面");
+        case lcnc::cam::CamPipelineStage::ContourExtraction: return QObject::tr("提取轮廓");
+        case lcnc::cam::CamPipelineStage::PointDiscretization: return QObject::tr("离散点");
+        case lcnc::cam::CamPipelineStage::GeometricToolpath: return QObject::tr("构造刀路");
+        case lcnc::cam::CamPipelineStage::MachineSolve: return QObject::tr("求解机床坐标");
+        default: return {};
+        }
+    }
+
+    TaskId startStage(lcnc::cam::CamPipelineStage stage)
+    {
+        if (!m_cam) {
+            finish(false);
+            return kInvalidTaskId;
+        }
+        m_waitingStage = stage;
+        TaskId taskId = kInvalidTaskId;
+        switch (stage) {
+        case lcnc::cam::CamPipelineStage::FaceSeparation:
+            taskId = m_cam->separateMachiningFacesAsync(); break;
+        case lcnc::cam::CamPipelineStage::ContourExtraction:
+            taskId = m_cam->extractContoursFromMachiningFacesAsync(); break;
+        case lcnc::cam::CamPipelineStage::PointDiscretization:
+            taskId = m_cam->discretizeCurrentContoursAsync(); break;
+        case lcnc::cam::CamPipelineStage::GeometricToolpath:
+            taskId = m_cam->buildCurrentGeometricToolpathAsync(); break;
+        case lcnc::cam::CamPipelineStage::MachineSolve:
+            taskId = m_cam->solveCurrentGeometricToolpathAsync(); break;
+        default:
+            finish(false);
+            return kInvalidTaskId;
+        }
+        if (taskId == kInvalidTaskId)
+            finish(false);
+        return taskId;
+    }
+
+    void advance()
+    {
+        switch (m_waitingStage) {
+        case lcnc::cam::CamPipelineStage::FaceSeparation:
+            QTimer::singleShot(0, this, [this] {
+                startStage(lcnc::cam::CamPipelineStage::ContourExtraction);
+            });
+            break;
+        case lcnc::cam::CamPipelineStage::ContourExtraction:
+            QTimer::singleShot(0, this, [this] {
+                startStage(lcnc::cam::CamPipelineStage::PointDiscretization);
+            });
+            break;
+        case lcnc::cam::CamPipelineStage::PointDiscretization:
+            QTimer::singleShot(0, this, [this] {
+                startStage(lcnc::cam::CamPipelineStage::GeometricToolpath);
+            });
+            break;
+        case lcnc::cam::CamPipelineStage::GeometricToolpath:
+            QTimer::singleShot(0, this, [this] {
+                startStage(lcnc::cam::CamPipelineStage::MachineSolve);
+            });
+            break;
+        case lcnc::cam::CamPipelineStage::MachineSolve:
+            finish(true);
+            break;
+        default:
+            finish(false);
+            break;
+        }
+    }
+
+    void finish(bool success)
+    {
+        if (m_finished)
+            return;
+        m_finished = true;
+        if (m_cam)
+            m_cam->setProperty("camAutoPipelineRunning", false);
+        if (success)
+            LCNC_INFO(lcnc::LogCode::Generic, "CAM automatic pipeline completed");
+        deleteLater();
+    }
+
+    QPointer<CamModule> m_cam;
+    lcnc::cam::CamPipelineStage m_waitingStage{lcnc::cam::CamPipelineStage::Count};
+    bool m_finished{false};
+};
+
+bool CamModule::separateMachiningFaces()
+{
+    const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
+    if (sources.isEmpty()) {
+        emit operationFailed(tr("分离加工面"), tr("项目工作区中未找到工件。"));
+        return false;
+    }
+
+    // Hand-picked faces are deliberate operator input.  An automatic refresh
+    // may replace only auto results; it must never silently resurrect or erase
+    // the manual set.
+    std::vector<MachiningFaceEntry> result;
+    for (const MachiningFaceEntry& entry : m_machiningFaces) {
+        if (entry.manual)
+            result.push_back(entry);
+    }
+
+    const ExtractionStrategy strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
+    if (strategy == ExtractionStrategy::ManualFaceSelection) {
+        if (result.empty()) {
+            emit operationFailed(tr("应用加工面"), tr("手动选面模式下至少需要保留一个加工面。"));
+            return false;
+        }
+        m_machiningFaces = std::move(result);
+        return applyMachiningFaces();
+    }
+
+    auto appendFace = [this, &result](const TopoDS_Face& face,
+                                      const QString& workpieceEntry,
+                                      lcnc::cam::MachiningFaceRole role) {
+        if (face.IsNull())
+            return;
+        const auto duplicate = std::find_if(result.cbegin(), result.cend(),
+            [&face, role](const MachiningFaceEntry& entry) {
+                return entry.role == role && !entry.face.IsNull() && entry.face.IsSame(face);
+            });
+        if (duplicate != result.cend())
+            return;
+        MachiningFaceEntry entry;
+        entry.faceId = m_nextMachiningFaceId++;
+        entry.face = face;
+        entry.workpieceEntry = workpieceEntry;
+        entry.manual = false;
+        entry.role = role;
+        result.push_back(std::move(entry));
+    };
+
+    for (const WorkpieceShapeSource& source : sources) {
+        if (source.shape.IsNull())
+            continue;
+
+        if (strategy == ExtractionStrategy::TubeClassification
+            || strategy == ExtractionStrategy::Auto) {
+            const FaceClassification classification = FaceClassifier::classifyFaces(
+                source.shape, m_smoothAngle);
+            if (const auto* outer = classification.outerGroup()) {
+                for (const TopoDS_Face& face : outer->faces)
+                    appendFace(face, source.workpieceEntry,
+                               lcnc::cam::MachiningFaceRole::MachiningSurface);
+            }
+            for (const auto* group : classification.crossSectionGroups()) {
+                if (!group)
+                    continue;
+                for (const TopoDS_Face& face : group->faces)
+                    appendFace(face, source.workpieceEntry,
+                               lcnc::cam::MachiningFaceRole::CrossSection);
+            }
+            continue;
+        }
+
+        const TopoDS_Face face = LaserToolpathBuilder::selectMachiningFace(
+            source.shape, beamDirectionWpc(source.workpieceEntry));
+        appendFace(face, source.workpieceEntry,
+                   lcnc::cam::MachiningFaceRole::MachiningSurface);
+    }
+
+    if (result.empty()) {
+        emit operationFailed(tr("分离加工面"), tr("未识别到可加工面，请改用手动选面。"));
+        return false;
+    }
+
+    m_machiningFaces = std::move(result);
+    return applyMachiningFaces();
+}
+
+TaskId CamModule::separateMachiningFacesAsync()
+{
+    if (rejectConflictingPipelineOperation(tr("分离加工面")))
+        return kInvalidTaskId;
+    const ExtractionStrategy strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
+    if (strategy == ExtractionStrategy::ManualFaceSelection) {
+        emit operationFailed(tr("分离加工面"), tr("手动模式请通过拾取加工面后点击“应用加工面并继续”。"));
+        return kInvalidTaskId;
+    }
+    if (property("camFaceSeparationRunning").toBool()) {
+        emit operationFailed(tr("分离加工面"), tr("加工面分离任务正在执行。"));
+        return kInvalidTaskId;
+    }
+    const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
+    auto* taskManager = lcnc::Kernel::current().taskManager();
+    if (sources.isEmpty() || !taskManager) {
+        emit operationFailed(tr("分离加工面"), tr("项目工作区中未找到工件，或后台任务不可用。"));
+        return kInvalidTaskId;
+    }
+
+    struct FaceCandidate {
+        TopoDS_Face face;
+        QString workpieceEntry;
+        lcnc::cam::MachiningFaceRole role{lcnc::cam::MachiningFaceRole::MachiningSurface};
+    };
+    struct Result { std::vector<FaceCandidate> faces; QString error; bool ok{false}; };
+    const auto result = std::make_shared<Result>();
+    const double smoothAngle = m_smoothAngle;
+    QVector<gp_Dir> beamDirections;
+    beamDirections.reserve(sources.size());
+    for (const WorkpieceShapeSource& source : sources)
+        beamDirections.push_back(beamDirectionWpc(source.workpieceEntry));
+
+    TaskSpec spec{tr("分离加工面"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
+    setProperty("camFaceSeparationRunning", true);
+    const TaskId taskId = taskManager->run(spec,
+        [sources, beamDirections, strategy, smoothAngle, result](TaskProgress* progress) {
+            progress->setRange(0, std::max(1, static_cast<int>(sources.size())));
+            for (int index = 0; index < sources.size(); ++index) {
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("加工面分离已取消");
+                const WorkpieceShapeSource& source = sources.at(index);
+                if (source.shape.IsNull())
+                    continue;
+                if (strategy == ExtractionStrategy::TubeClassification
+                    || strategy == ExtractionStrategy::Auto) {
+                    const FaceClassification classification = FaceClassifier::classifyFaces(
+                        source.shape, smoothAngle);
+                    if (const auto* outer = classification.outerGroup()) {
+                        for (const TopoDS_Face& face : outer->faces)
+                            result->faces.push_back({face, source.workpieceEntry,
+                                lcnc::cam::MachiningFaceRole::MachiningSurface});
+                    }
+                    for (const auto* group : classification.crossSectionGroups()) {
+                        if (!group)
+                            continue;
+                        for (const TopoDS_Face& face : group->faces)
+                            result->faces.push_back({face, source.workpieceEntry,
+                                lcnc::cam::MachiningFaceRole::CrossSection});
+                    }
+                } else {
+                    const TopoDS_Face face = LaserToolpathBuilder::selectMachiningFace(
+                        source.shape, beamDirections.at(index));
+                    if (!face.IsNull())
+                        result->faces.push_back({face, source.workpieceEntry,
+                            lcnc::cam::MachiningFaceRole::MachiningSurface});
+                }
+                progress->setValue(index + 1);
+            }
+            if (result->faces.empty()) {
+                result->error = QObject::tr("未识别到可加工面，请改用手动选面。");
+                return;
+            }
+            result->ok = true;
+        });
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, result, sources](bool success) {
+        releaseOwnedTask(taskId);
+        setProperty("camFaceSeparationRunning", false);
+        if (!success || !result->ok) {
+            emit operationFailed(tr("分离加工面"), result->error.isEmpty()
+                ? tr("加工面分离失败或已取消") : result->error);
+            return;
+        }
+        const QList<WorkpieceShapeSource> currentSources = collectWorkpieceShapes();
+        const bool sourceChanged = currentSources.size() != sources.size()
+            || std::any_of(sources.cbegin(), sources.cend(), [&currentSources](const WorkpieceShapeSource& source) {
+                const auto found = std::find_if(currentSources.cbegin(), currentSources.cend(),
+                    [&source](const WorkpieceShapeSource& current) {
+                        return current.workpieceEntry == source.workpieceEntry
+                            && current.shape.IsSame(source.shape);
+                    });
+                return found == currentSources.cend();
+            });
+        if (sourceChanged) {
+            emit operationFailed(tr("分离加工面"), tr("工件在后台识别期间已变更，结果已丢弃。"));
+            return;
+        }
+
+        // Keep any operator-picked faces added while the worker was running,
+        // then atomically replace only the automatic portion.
+        std::vector<MachiningFaceEntry> merged;
+        for (const MachiningFaceEntry& entry : m_machiningFaces) {
+            if (entry.manual)
+                merged.push_back(entry);
+        }
+        for (const FaceCandidate& candidate : result->faces) {
+            if (candidate.face.IsNull())
+                continue;
+            const auto duplicate = std::find_if(merged.cbegin(), merged.cend(), [&candidate](const MachiningFaceEntry& entry) {
+                return entry.workpieceEntry == candidate.workpieceEntry
+                    && entry.role == candidate.role && !entry.face.IsNull()
+                    && entry.face.IsSame(candidate.face);
+            });
+            if (duplicate != merged.cend())
+                continue;
+            MachiningFaceEntry entry;
+            entry.faceId = m_nextMachiningFaceId++;
+            entry.face = candidate.face;
+            entry.workpieceEntry = candidate.workpieceEntry;
+            entry.role = candidate.role;
+            merged.push_back(std::move(entry));
+        }
+        if (merged.empty()) {
+            emit operationFailed(tr("分离加工面"), tr("加工面识别结果为空。"));
+            return;
+        }
+        m_machiningFaces = std::move(merged);
+        applyMachiningFaces();
+    });
+    return taskId;
+}
+
+bool CamModule::applyMachiningFaces()
+{
+    if (rejectConflictingPipelineOperation(tr("应用加工面")))
+        return false;
+    if (!m_camData || m_machiningFaces.empty())
+        return false;
+
+    // A changed face set invalidates all derived data.  Preserve stale data for
+    // inspection but make Process reject it until the explicit next stage is run.
+    for (LaserContour& contour : toolpathRef().contours())
+        contour.needsRecalculation = true;
+    m_camData->setGenerationParamsDirty(true);
+    m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation);
+    pushMachiningFaceRecordsToCamData();
+    refreshMachiningFaceDisplay();
+    emit machiningFacesChanged();
+    emit pipelineStageChanged(lcnc::cam::CamPipelineStage::FaceSeparation);
+    emit toolpathGenerated();
+    return true;
+}
+
+lcnc::cam::CamPipelineStageState CamModule::pipelineStageState(
+    lcnc::cam::CamPipelineStage stage) const
+{
+    // ProjectExplorer may rebuild during a workspace transition, before the
+    // activeWorkspaceChanged slot refreshes m_camData.  Never dereference the
+    // cached workspace-owned manager from that transient state.
+    const auto* project = lcnc::Kernel::current().projectManager();
+    const auto* activeCamData = project ? project->camData() : nullptr;
+    return activeCamData ? activeCamData->pipelineStageState(stage)
+                         : lcnc::cam::CamPipelineStageState{};
+}
+
+bool CamModule::extractContoursFromMachiningFaces()
+{
+    if (!m_camData || m_machiningFaces.empty()) {
+        emit operationFailed(tr("提取轮廓"), tr("请先分离或手动应用加工面。"));
+        return false;
+    }
+    const auto& faceState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::FaceSeparation);
+    if (!faceState.available || faceState.dirty) {
+        emit operationFailed(tr("提取轮廓"), tr("加工面尚未应用，请先执行分离面或应用加工面。"));
+        return false;
+    }
+
+    std::vector<LaserContour> extracted;
+    ContourExtractionParams params;
+    params.smoothAngleThresholdDeg = m_smoothAngle;
+    params.deflection = m_deflection;
+    params.strategy = ExtractionStrategy::ManualFaceSelection;
+    for (const WorkpieceShapeSource& source : collectWorkpieceShapes()) {
+        std::vector<TopoDS_Face> machiningFaces;
+        std::vector<TopoDS_Face> crossSectionFaces;
+        for (const MachiningFaceEntry& entry : m_machiningFaces) {
+            if (entry.workpieceEntry != source.workpieceEntry || entry.face.IsNull())
+                continue;
+            switch (entry.role) {
+            case lcnc::cam::MachiningFaceRole::MachiningSurface: machiningFaces.push_back(entry.face); break;
+            case lcnc::cam::MachiningFaceRole::CrossSection: crossSectionFaces.push_back(entry.face); break;
+            case lcnc::cam::MachiningFaceRole::LegacyOuterSurface: break;
+            }
+        }
+        if (machiningFaces.empty())
+            continue;
+        params.machiningBeamDirection = beamDirectionWpc(source.workpieceEntry);
+        std::vector<LaserContour> contours = !crossSectionFaces.empty()
+            ? LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+                source.shape, machiningFaces, crossSectionFaces, params)
+            : LaserToolpathBuilder::extractContoursFromFaces(
+                source.shape, machiningFaces, params.machiningBeamDirection, params);
+        for (LaserContour& contour : contours) {
+            contour.workpieceEntry = source.workpieceEntry;
+            contour.sourceShape = source.shape;
+            contour.appliedParams = {m_config.leadInLength(), m_deflection};
+            contour.pendingParams = contour.appliedParams;
+            contour.needsRecalculation = true;
+            extracted.push_back(std::move(contour));
+        }
+    }
+    if (extracted.empty()) {
+        emit operationFailed(tr("提取轮廓"), tr("当前加工面中未提取到闭合轮廓。"));
+        return false;
+    }
+
+    eraseToolpathDisplay();
+    toolpathRef().contours() = std::move(extracted);
+    toolpathRef().setGlobalLeadInLength(m_config.leadInLength());
+    m_camData->ensureContourIds();
+    m_camData->ensureToolpathLayers();
+    m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::ContourExtraction,
+                                   faceState.revision);
+    m_camData->setGenerationParamsDirty(true);
+    m_camData->markDirty(true);
+    writeContourGeometryToDocument();
+    syncCamDocumentContours(/*forceRebuild=*/true);
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    refreshToolpathDisplay();
+    setActiveContourId(static_cast<lcnc::cam::ContourId>(toolpathRef().contour(0).contourId));
+    emit toolpathGenerated();
+    emit toolpathLayersChanged();
+    emit pipelineStageChanged(lcnc::cam::CamPipelineStage::ContourExtraction);
+    return true;
+}
+
+bool CamModule::discretizeCurrentContours()
+{
+    if (!m_camData || toolpathRef().contourCount() == 0) {
+        emit operationFailed(tr("离散点"), tr("请先提取轮廓。"));
+        return false;
+    }
+    const auto& contourState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::ContourExtraction);
+    if (!contourState.available || contourState.dirty) {
+        emit operationFailed(tr("离散点"), tr("轮廓数据已过期，请先重新提取轮廓。"));
+        return false;
+    }
+    for (LaserContour& contour : toolpathRef().contours()) {
+        if (contour.sourceShape.IsNull()) {
+            emit operationFailed(tr("离散点"), tr("轮廓缺少所属工件几何。"));
+            return false;
+        }
+        contour.points.clear();
+        contour.leadIn = {};
+        contour.leadInSolution = {};
+        LaserToolpathBuilder::discretizeContour(contour, contour.sourceShape, m_deflection);
+        if (contour.points.empty()) {
+            emit operationFailed(tr("离散点"), tr("轮廓 \"%1\" 离散失败。").arg(contour.name));
+            return false;
+        }
+        contour.appliedParams = {m_config.leadInLength(), m_deflection};
+        contour.pendingParams = contour.appliedParams;
+        contour.needsRecalculation = true;
+    }
+    m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::PointDiscretization,
+                                   contourState.revision);
+    m_camData->setGenerationParamsDirty(true);
+    m_camData->markDirty(true);
+    refreshToolpathDisplay();
+    emit toolpathGenerated();
+    emit pipelineStageChanged(lcnc::cam::CamPipelineStage::PointDiscretization);
+    return true;
+}
+
+bool CamModule::buildCurrentGeometricToolpath()
+{
+    if (!m_camData || toolpathRef().contourCount() == 0) {
+        emit operationFailed(tr("构造刀路"), tr("请先完成轮廓离散。"));
+        return false;
+    }
+    const auto& sampleState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::PointDiscretization);
+    if (!sampleState.available || sampleState.dirty) {
+        emit operationFailed(tr("构造刀路"), tr("离散点数据已过期，请先重新离散。"));
+        return false;
+    }
+    for (LaserContour& contour : toolpathRef().contours()) {
+        contour.leadIn.length = contour.pendingParams.leadInLength;
+        QString error;
+        if (!LaserToolpathBuilder::setAutomaticContourStart(contour, &error)
+            || !contour.leadInSolution.valid) {
+            if (error.isEmpty())
+                error = contour.leadInSolution.error;
+            emit operationFailed(tr("构造刀路"),
+                                 tr("轮廓 \"%1\" 下刀线生成失败：%2").arg(contour.name, error));
+            return false;
+        }
+        contour.needsRecalculation = true;
+    }
+    m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::GeometricToolpath,
+                                   sampleState.revision);
+    m_camData->setGenerationParamsDirty(true);
+    m_camData->markDirty(true);
+    refreshToolpathDisplay();
+    emit toolpathGenerated();
+    emit pipelineStageChanged(lcnc::cam::CamPipelineStage::GeometricToolpath);
+    return true;
+}
+
+bool CamModule::solveCurrentGeometricToolpath()
+{
+    if (!m_camData || toolpathRef().contourCount() == 0) {
+        emit operationFailed(tr("求解机床坐标"), tr("请先构造几何刀路。"));
+        return false;
+    }
+    const auto& pathState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::GeometricToolpath);
+    if (!pathState.available || pathState.dirty) {
+        emit operationFailed(tr("求解机床坐标"), tr("几何刀路已过期，请先重新构造刀路。"));
+        return false;
+    }
+    if (!solveToolpathForOrder(defaultCuttingOrderByCAxis()))
+        return false;
+    for (LaserContour& contour : toolpathRef().contours())
+        contour.needsRecalculation = false;
+    m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve,
+                                   pathState.revision);
+    m_camData->setGenerationParamsDirty(false);
+    m_camData->markDirty(true);
+    m_camData->commitToolpathStates();
+    refreshToolpathDisplay();
+    refreshTravelPath();
+    emit toolpathGenerated();
+    emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
+    return true;
+}
+
+TaskId CamModule::extractContoursFromMachiningFacesAsync()
+{
+    if (rejectConflictingPipelineOperation(tr("提取轮廓")))
+        return kInvalidTaskId;
+    if (!m_camData || m_machiningFaces.empty()) {
+        emit operationFailed(tr("提取轮廓"), tr("请先分离或手动应用加工面。"));
+        return kInvalidTaskId;
+    }
+    const auto faceState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::FaceSeparation);
+    auto* taskManager = lcnc::Kernel::current().taskManager();
+    if (!faceState.available || faceState.dirty || !taskManager) {
+        emit operationFailed(tr("提取轮廓"), tr("加工面尚未应用，或后台任务不可用。"));
+        return kInvalidTaskId;
+    }
+
+    const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
+    const std::vector<MachiningFaceEntry> faces = m_machiningFaces;
+    const double smoothAngle = m_smoothAngle;
+    const double deflection = m_deflection;
+    const double leadInLength = m_config.leadInLength();
+    struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
+    const auto result = std::make_shared<Result>();
+    TaskSpec spec{tr("提取加工轮廓"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
+    const TaskId taskId = taskManager->run(spec,
+        [sources, faces, smoothAngle, deflection, leadInLength, result](TaskProgress* progress) {
+            progress->setRange(0, std::max(1, static_cast<int>(sources.size())));
+            ContourExtractionParams params;
+            params.smoothAngleThresholdDeg = smoothAngle;
+            params.deflection = deflection;
+            params.strategy = ExtractionStrategy::ManualFaceSelection;
+            for (int sourceIndex = 0; sourceIndex < sources.size(); ++sourceIndex) {
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("轮廓提取已取消");
+                const WorkpieceShapeSource& source = sources.at(sourceIndex);
+                std::vector<TopoDS_Face> machiningFaces;
+                std::vector<TopoDS_Face> crossSectionFaces;
+                for (const MachiningFaceEntry& entry : faces) {
+                    if (entry.workpieceEntry != source.workpieceEntry || entry.face.IsNull())
+                        continue;
+                    switch (entry.role) {
+                    case lcnc::cam::MachiningFaceRole::MachiningSurface: machiningFaces.push_back(entry.face); break;
+                    case lcnc::cam::MachiningFaceRole::CrossSection: crossSectionFaces.push_back(entry.face); break;
+                    case lcnc::cam::MachiningFaceRole::LegacyOuterSurface: break;
+                    }
+                }
+                if (!machiningFaces.empty()) {
+                    auto contours = !crossSectionFaces.empty()
+                        ? LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+                            source.shape, machiningFaces, crossSectionFaces, params)
+                        : LaserToolpathBuilder::extractContoursFromFaces(
+                            source.shape, machiningFaces, gp_Dir(0.0, 0.0, -1.0), params);
+                    for (LaserContour& contour : contours) {
+                        contour.workpieceEntry = source.workpieceEntry;
+                        contour.sourceShape = source.shape;
+                        contour.appliedParams = {leadInLength, deflection};
+                        contour.pendingParams = contour.appliedParams;
+                        contour.needsRecalculation = true;
+                        result->contours.push_back(std::move(contour));
+                    }
+                }
+                progress->setValue(sourceIndex + 1);
+            }
+            if (result->contours.empty()) {
+                result->error = QObject::tr("当前加工面中未提取到闭合轮廓。");
+                return;
+            }
+            result->ok = true;
+        });
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, result, faceRevision = faceState.revision](bool success) {
+        releaseOwnedTask(taskId);
+        if (!success || !result->ok) {
+            emit operationFailed(tr("提取轮廓"), result->error.isEmpty()
+                ? tr("轮廓提取失败或已取消") : result->error);
+            return;
+        }
+        const auto currentFace = m_camData->pipelineStageState(
+            lcnc::cam::CamPipelineStage::FaceSeparation);
+        if (currentFace.dirty || currentFace.revision != faceRevision) {
+            emit operationFailed(tr("提取轮廓"), tr("加工面在后台计算期间已变更，结果已丢弃。"));
+            return;
+        }
+        eraseToolpathDisplay();
+        toolpathRef().contours() = std::move(result->contours);
+        toolpathRef().setGlobalLeadInLength(m_config.leadInLength());
+        m_camData->ensureContourIds();
+        m_camData->ensureToolpathLayers();
+        m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::ContourExtraction,
+                                       currentFace.revision);
+        m_camData->setGenerationParamsDirty(true);
+        m_camData->markDirty(true);
+        writeContourGeometryToDocument();
+        syncCamDocumentContours(true);
+        lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+        refreshToolpathDisplay();
+        setActiveContourId(static_cast<lcnc::cam::ContourId>(toolpathRef().contour(0).contourId));
+        emit toolpathGenerated();
+        emit toolpathLayersChanged();
+        emit pipelineStageChanged(lcnc::cam::CamPipelineStage::ContourExtraction);
+    });
+    return taskId;
+}
+
+TaskId CamModule::discretizeCurrentContoursAsync()
+{
+    if (rejectConflictingPipelineOperation(tr("离散点")))
+        return kInvalidTaskId;
+    if (!m_camData || toolpathRef().contourCount() == 0) {
+        emit operationFailed(tr("离散点"), tr("请先提取轮廓。"));
+        return kInvalidTaskId;
+    }
+    const auto contourState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::ContourExtraction);
+    auto* taskManager = lcnc::Kernel::current().taskManager();
+    if (!contourState.available || contourState.dirty || !taskManager) {
+        emit operationFailed(tr("离散点"), tr("轮廓数据已过期，或后台任务不可用。"));
+        return kInvalidTaskId;
+    }
+    const std::vector<LaserContour> input = toolpathRef().contours();
+    const double deflection = m_deflection;
+    const double leadInLength = m_config.leadInLength();
+    struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
+    const auto result = std::make_shared<Result>();
+    TaskSpec spec{tr("离散加工轮廓"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
+    const TaskId taskId = taskManager->run(spec,
+        [input, deflection, leadInLength, result](TaskProgress* progress) {
+            progress->setRange(0, std::max(1, static_cast<int>(input.size())));
+            result->contours = input;
+            for (std::size_t index = 0; index < result->contours.size(); ++index) {
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("轮廓离散已取消");
+                LaserContour& contour = result->contours[index];
+                if (contour.sourceShape.IsNull()) {
+                    result->error = QObject::tr("轮廓 \"%1\" 缺少工件几何。").arg(contour.name);
+                    return;
+                }
+                contour.points.clear();
+                contour.leadIn = {};
+                contour.leadInSolution = {};
+                LaserToolpathBuilder::discretizeContour(contour, contour.sourceShape, deflection);
+                if (contour.points.empty()) {
+                    result->error = QObject::tr("轮廓 \"%1\" 离散失败。").arg(contour.name);
+                    return;
+                }
+                contour.appliedParams = {leadInLength, deflection};
+                contour.pendingParams = contour.appliedParams;
+                contour.needsRecalculation = true;
+                progress->setValue(static_cast<int>(index + 1));
+            }
+            result->ok = true;
+        });
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, result, contourRevision = contourState.revision](bool success) {
+        releaseOwnedTask(taskId);
+        if (!success || !result->ok) {
+            emit operationFailed(tr("离散点"), result->error.isEmpty()
+                ? tr("轮廓离散失败或已取消") : result->error);
+            return;
+        }
+        const auto currentContour = m_camData->pipelineStageState(
+            lcnc::cam::CamPipelineStage::ContourExtraction);
+        if (currentContour.dirty || currentContour.revision != contourRevision) {
+            emit operationFailed(tr("离散点"), tr("轮廓在后台计算期间已变更，结果已丢弃。"));
+            return;
+        }
+        toolpathRef().contours() = std::move(result->contours);
+        m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::PointDiscretization,
+                                       currentContour.revision);
+        m_camData->setGenerationParamsDirty(true);
+        m_camData->markDirty(true);
+        refreshToolpathDisplay();
+        emit toolpathGenerated();
+        emit pipelineStageChanged(lcnc::cam::CamPipelineStage::PointDiscretization);
+    });
+    return taskId;
+}
+
+TaskId CamModule::buildCurrentGeometricToolpathAsync()
+{
+    if (rejectConflictingPipelineOperation(tr("构造刀路")))
+        return kInvalidTaskId;
+    if (!m_camData || toolpathRef().contourCount() == 0) {
+        emit operationFailed(tr("构造刀路"), tr("请先完成轮廓离散。"));
+        return kInvalidTaskId;
+    }
+    const auto sampleState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::PointDiscretization);
+    auto* taskManager = lcnc::Kernel::current().taskManager();
+    if (!sampleState.available || sampleState.dirty || !taskManager) {
+        emit operationFailed(tr("构造刀路"), tr("离散点数据已过期，或后台任务不可用。"));
+        return kInvalidTaskId;
+    }
+    const std::vector<LaserContour> input = toolpathRef().contours();
+    struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
+    const auto result = std::make_shared<Result>();
+    TaskSpec spec;
+    spec.label = tr("构造几何刀路");
+    spec.scope = QStringLiteral("cam.pipeline");
+    spec.priority = TaskPriority::Normal;
+    spec.cancellable = true;
+    const TaskId taskId = taskManager->run(spec,
+        [input, result](TaskProgress* progress) {
+            progress->setRange(0, std::max(1, static_cast<int>(input.size())));
+            result->contours = input;
+            for (std::size_t index = 0; index < result->contours.size(); ++index) {
+                if (progress->isAbortRequested())
+                    throw std::runtime_error("几何刀路构造已取消");
+                LaserContour& contour = result->contours[index];
+                contour.leadIn.length = contour.pendingParams.leadInLength;
+                QString error;
+                if (!LaserToolpathBuilder::setAutomaticContourStart(contour, &error)
+                    || !contour.leadInSolution.valid) {
+                    result->error = error.isEmpty() ? contour.leadInSolution.error : error;
+                    return;
+                }
+                contour.needsRecalculation = true;
+                progress->setValue(static_cast<int>(index + 1));
+            }
+            result->ok = true;
+        });
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, result, sampleRevision = sampleState.revision](bool success) {
+        releaseOwnedTask(taskId);
+        if (!success || !result->ok) {
+            emit operationFailed(tr("构造刀路"), result->error.isEmpty()
+                ? tr("几何刀路构造失败或已取消") : result->error);
+            return;
+        }
+        const auto currentSamples = m_camData->pipelineStageState(
+            lcnc::cam::CamPipelineStage::PointDiscretization);
+        if (currentSamples.dirty || currentSamples.revision != sampleRevision) {
+            emit operationFailed(tr("构造刀路"), tr("离散点在后台计算期间已变更，结果已丢弃。"));
+            return;
+        }
+        toolpathRef().contours() = std::move(result->contours);
+        m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::GeometricToolpath,
+                                       currentSamples.revision);
+        m_camData->setGenerationParamsDirty(true);
+        m_camData->markDirty(true);
+        refreshToolpathDisplay();
+        emit toolpathGenerated();
+        emit pipelineStageChanged(lcnc::cam::CamPipelineStage::GeometricToolpath);
+    });
+    return taskId;
+}
+
+TaskId CamModule::solveCurrentGeometricToolpathAsync()
+{
+    if (rejectConflictingPipelineOperation(tr("求解机床坐标")))
+        return kInvalidTaskId;
+    if (!m_camData || toolpathRef().contourCount() == 0) {
+        emit operationFailed(tr("求解机床坐标"), tr("请先构造几何刀路。"));
+        return kInvalidTaskId;
+    }
+    const auto pathState = m_camData->pipelineStageState(
+        lcnc::cam::CamPipelineStage::GeometricToolpath);
+    auto* taskManager = lcnc::Kernel::current().taskManager();
+    MachineKinematics* machine = kinematics();
+    if (!pathState.available || pathState.dirty || !taskManager || !machine) {
+        emit operationFailed(tr("求解机床坐标"), tr("几何刀路已过期，或机台后台服务不可用。"));
+        return kInvalidTaskId;
+    }
+    const std::vector<LaserContour> input = toolpathRef().contours();
+    const QVector<lcnc::cam::ContourId> order = defaultCuttingOrderByCAxis();
+    const QList<MachineAxisDef> axes = machine->axes();
+    const QString configType = machine->configType();
+    struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
+    const auto result = std::make_shared<Result>();
+    TaskSpec spec;
+    spec.label = tr("求解机床坐标");
+    spec.scope = QStringLiteral("cam.pipeline");
+    spec.priority = TaskPriority::Normal;
+    spec.cancellable = true;
+    const TaskId taskId = taskManager->run(spec,
+        [input, order, axes, configType, result](TaskProgress* progress) {
+            progress->setRange(0, 100);
+            result->contours = input;
+            QSet<std::uint64_t> seen;
+            std::vector<LaserContour*> ordered;
+            ordered.reserve(static_cast<std::size_t>(order.size()));
+            for (std::uint64_t id : order) {
+                if (id == 0 || seen.contains(id))
+                    continue;
+                const auto it = std::find_if(result->contours.begin(), result->contours.end(),
+                    [id](const LaserContour& contour) { return contour.contourId == id; });
+                if (it == result->contours.end())
+                    continue;
+                seen.insert(id);
+                for (ToolpathPoint& point : it->points)
+                    point.machineCoord = {};
+                if (it->leadInSolution.valid)
+                    it->leadInSolution.point.machineCoord = {};
+                ordered.push_back(&*it);
+            }
+            if (ordered.empty()) {
+                result->error = QObject::tr("当前没有可求解的轮廓顺序。");
+                return;
+            }
+            MachineKinematics workerKinematics;
+            workerKinematics.setAxes(axes, configType);
+            LaserToolpathBuilder::computeMachineCoordinatesForOrder(
+                ordered, &workerKinematics, gp_Trsf(), nullptr);
+            for (const LaserContour& contour : result->contours) {
+                if (!contour.leadInSolution.valid
+                    || !contour.leadInSolution.point.machineCoord.valid
+                    || !std::all_of(contour.points.begin(), contour.points.end(),
+                        [](const ToolpathPoint& point) { return point.machineCoord.valid; })) {
+                    result->error = QObject::tr("轮廓 \"%1\" 五轴坐标求解失败。").arg(contour.name);
+                    return;
+                }
+            }
+            result->ok = true;
+            progress->setValue(100);
+        });
+    trackOwnedTask(taskId);
+    watchTask(this, taskId, [this, taskId, result, pathRevision = pathState.revision](bool success) {
+        releaseOwnedTask(taskId);
+        if (!success || !result->ok) {
+            emit operationFailed(tr("求解机床坐标"), result->error.isEmpty()
+                ? tr("机床坐标求解失败或已取消") : result->error);
+            return;
+        }
+        const auto currentPath = m_camData->pipelineStageState(
+            lcnc::cam::CamPipelineStage::GeometricToolpath);
+        if (currentPath.dirty || currentPath.revision != pathRevision) {
+            emit operationFailed(tr("求解机床坐标"), tr("几何刀路在后台计算期间已变更，结果已丢弃。"));
+            return;
+        }
+        toolpathRef().contours() = std::move(result->contours);
+        for (LaserContour& contour : toolpathRef().contours())
+            contour.needsRecalculation = false;
+        m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve,
+                                       currentPath.revision);
+        m_camData->setGenerationParamsDirty(false);
+        m_camData->markDirty(true);
+        m_camData->commitToolpathStates();
+        refreshToolpathDisplay();
+        refreshTravelPath();
+        emit toolpathGenerated();
+        emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
+    });
+    return taskId;
+}
+
+TaskId CamModule::runAutoPipelineAsync()
+{
+    if (property("camAutoPipelineRunning").toBool()) {
+        emit operationFailed(tr("全自动执行"), tr("已有自动加工流程正在执行。"));
+        return kInvalidTaskId;
+    }
+    const ExtractionStrategy strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
+    if (strategy == ExtractionStrategy::ManualFaceSelection) {
+        if (!applyMachiningFaces())
+            return kInvalidTaskId;
+    }
+    // A global generation is always one TaskManager job.  Manual-stage
+    // buttons remain the only entry points that create separate stage tasks.
+    setProperty("camAutoPipelineRunning", true);
+    const TaskId automaticTask = generateToolpathAsync(m_smoothAngle,
+                                                        m_useFaceClassification,
+                                                        m_deflection);
+    if (automaticTask == kInvalidTaskId) {
+        setProperty("camAutoPipelineRunning", false);
+        return automaticTask;
+    }
+    watchTask(this, automaticTask, [this](bool) {
+        setProperty("camAutoPipelineRunning", false);
+    });
+    return automaticTask;
+}
+
+bool CamModule::runAutoPipeline()
+{
+    return runAutoPipelineAsync() != kInvalidTaskId;
+}
+
 bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification, double deflection)
 {
     const QList<WorkpieceShapeSource> workpieceSources = collectWorkpieceShapes();
@@ -2249,15 +3247,17 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = smoothAngle;
-    params.useFaceClassification = effectiveUseFaceClassification;
+    params.strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
+    if (params.strategy == ExtractionStrategy::ManualFaceSelection)
+        params.selectedMachiningFaces = manualMachiningFaces();
     params.deflection = deflection;
-
     std::vector<LaserContour> allContours;
 
     for (const WorkpieceShapeSource& source : workpieceSources) {
         if (source.shape.IsNull())
             continue;
 
+        params.machiningBeamDirection = beamDirectionWpc(source.workpieceEntry);
         FaceClassification classification;
         auto contours = LaserToolpathBuilder::extractContours(source.shape, params, &classification);
         if (contours.empty())
@@ -2403,6 +3403,23 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     m_camData->setGenerationParamsDirty(false);
     m_camData->markDirty(true);
     m_camData->commitToolpathStates();    // 把 signature → id 映射固化下来，跨次稳定
+
+    // Auto-capture machining faces for the tree/view (sync path).
+    if (m_extractionStrategy == static_cast<int>(ExtractionStrategy::Auto)
+        || m_extractionStrategy == static_cast<int>(ExtractionStrategy::PlanarFaceWires)) {
+        std::vector<TopoDS_Face> autoFaces;
+        for (const WorkpieceShapeSource& src : workpieceSources) {
+            if (src.shape.IsNull()) continue;
+            const TopoDS_Face f = LaserToolpathBuilder::selectMachiningFace(
+                src.shape, beamDirectionWpc(src.workpieceEntry));
+            if (!f.IsNull())
+                autoFaces.push_back(f);
+        }
+        setAutoMachiningFaces(autoFaces, QString());
+    } else {
+        setAutoMachiningFaces({}, QString());
+    }
+
     writeContourGeometryToDocument();      // 轮廓 wire 写入统一工程文档(EntityKind::Cam)
     relinkContourGeometryFromDocument();   // 与工程包加载路径一致：显示/拾取使用 XCAF 文档版 wire
     syncCamDocumentContours(/*forceRebuild=*/true);
@@ -2452,6 +3469,9 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     };
     const auto result = std::make_shared<GenerationResult>();
     const std::uint64_t sourceRevision = toolpathRevision();
+    const std::uint64_t faceSetRevision = machiningFaceSetRevision();
+    const std::uint64_t setupRevision = machineSetupRevision();
+    const int extractionStrategy = m_extractionStrategy;
     MachineKinematics* machine = kinematics();
     if (!machine) {
         emit operationFailed(tr("全局生成刀路"), tr("找不到机台运动学配置"));
@@ -2461,31 +3481,81 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     const QString configType = machine->configType();
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = smoothAngle;
-    params.useFaceClassification = effectiveUseFaceClassification;
+    params.strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
+    if (params.strategy == ExtractionStrategy::ManualFaceSelection)
+        params.selectedMachiningFaces = manualMachiningFaces();
     params.deflection = deflection;
+    const std::vector<MachiningFaceEntry> selectedFaceEntries = m_machiningFaces;
+
+    // Beam direction is workpiece-mount-dependent, so compute it per source on
+    // this (main) thread where the kinematics wpc mounts live; the worker only
+    // gets a axes/configType copy without mounts.
+    QVector<gp_Dir> beamDirs;
+    beamDirs.reserve(workpieceSources.size());
+    for (const WorkpieceShapeSource& s : workpieceSources)
+        beamDirs.append(beamDirectionWpc(s.workpieceEntry));
 
     TaskSpec spec;
     spec.label = tr("全局生成刀路");
     spec.scope = QStringLiteral("cam.toolpath");
     spec.priority = TaskPriority::Normal;
     const TaskId taskId = taskManager->run(spec,
-        [workpieceSources, previousBySignature, previousOrder, leadInLength, params,
-         effectiveUseFaceClassification, axes, configType, result](TaskProgress* progress) {
-            progress->setRange(0, std::max(1, static_cast<int>(workpieceSources.size())));
+        [workpieceSources, previousBySignature, previousOrder, leadInLength, params, selectedFaceEntries,
+         beamDirs, effectiveUseFaceClassification, axes, configType, result](TaskProgress* progress) {
+            progress->setRange(0, 100);
+            progress->setStepName(QObject::tr("1/5 正在分离加工面与横截面"));
+            progress->setValue(5);
             std::vector<LaserContour> allContours;
             for (int sourceIndex = 0; sourceIndex < workpieceSources.size(); ++sourceIndex) {
                 if (progress->isAbortRequested())
                     throw std::runtime_error("全局刀路生成已取消");
                 const WorkpieceShapeSource& source = workpieceSources.at(sourceIndex);
-                progress->setStepName(QObject::tr("正在提取工件轮廓 %1/%2")
+                progress->setStepName(QObject::tr("2/5 正在提取工件轮廓 %1/%2")
                     .arg(sourceIndex + 1).arg(workpieceSources.size()));
                 if (source.shape.IsNull())
                     continue;
+                ContourExtractionParams perSourceParams = params;
+                perSourceParams.machiningBeamDirection =
+                    beamDirs.value(sourceIndex, gp_Dir(0.0, 0.0, -1.0));
                 FaceClassification classification;
-                auto contours = LaserToolpathBuilder::extractContours(source.shape, params, &classification);
                 std::vector<TopoDS_Face> outerFaces;
                 std::vector<TopoDS_Face> crossFaces;
-                if (effectiveUseFaceClassification) {
+                std::vector<LaserContour> contours;
+                if (perSourceParams.strategy == ExtractionStrategy::ManualFaceSelection) {
+                    for (const MachiningFaceEntry& entry : selectedFaceEntries) {
+                        if (entry.workpieceEntry != source.workpieceEntry || entry.face.IsNull())
+                            continue;
+                        if (entry.role == lcnc::cam::MachiningFaceRole::MachiningSurface)
+                            outerFaces.push_back(entry.face);
+                        else if (entry.role == lcnc::cam::MachiningFaceRole::CrossSection)
+                            crossFaces.push_back(entry.face);
+                    }
+                    if (outerFaces.empty()) {
+                        result->error = QObject::tr("工件源 #%1 未提供加工面。")
+                            .arg(source.componentIndex + 1);
+                        return;
+                    }
+                    contours = crossFaces.empty()
+                        ? LaserToolpathBuilder::extractContoursFromFaces(
+                            source.shape, outerFaces, perSourceParams.machiningBeamDirection, perSourceParams)
+                        : LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+                            source.shape, outerFaces, crossFaces, perSourceParams);
+                } else {
+                    const FaceClassification autoClassification = FaceClassifier::classifyFaces(
+                        source.shape, perSourceParams.smoothAngleThresholdDeg);
+                    if ((perSourceParams.strategy == ExtractionStrategy::Auto
+                         || perSourceParams.strategy == ExtractionStrategy::TubeClassification)
+                        && (!autoClassification.hasOuter() || !autoClassification.hasCrossSection())) {
+                        result->error = QObject::tr("工件源 #%1 无法可靠识别加工面与横截面，请手动调整面组。")
+                            .arg(source.componentIndex + 1);
+                        return;
+                    }
+                    contours = LaserToolpathBuilder::extractContours(
+                        source.shape, perSourceParams, &classification);
+                    if (classification.groups.empty())
+                        classification = autoClassification;
+                }
+                if (effectiveUseFaceClassification && outerFaces.empty()) {
                     if (classification.outerGroup())
                         outerFaces = classification.outerGroup()->faces;
                     for (const auto* group : classification.crossSectionGroups())
@@ -2566,13 +3636,18 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     }
                     allContours.push_back(std::move(contour));
                 }
-                progress->setValue(sourceIndex + 1);
+                progress->setValue(10 + (40 * (sourceIndex + 1))
+                    / std::max(1, static_cast<int>(workpieceSources.size())));
             }
             if (allContours.empty()) {
                 result->error = QObject::tr("未找到可用的轮廓边缘");
                 return;
             }
-            progress->setStepName(QObject::tr("正在求解机台坐标"));
+            progress->setStepName(QObject::tr("3/5 正在离散轮廓点"));
+            progress->setValue(60);
+            progress->setStepName(QObject::tr("4/5 正在构造下刀线与几何刀路"));
+            progress->setValue(70);
+            progress->setStepName(QObject::tr("5/5 正在求解机台坐标"));
             MachineKinematics workerKinematics;
             workerKinematics.setAxes(axes, configType);
             std::vector<LaserContour*> solveContours;
@@ -2610,11 +3685,15 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             }
             result->contours = std::move(allContours);
             result->ok = true;
+            progress->setValue(100);
         });
 
+    trackOwnedTask(taskId);
     watchTask(this, taskId,
-        [this, result, sourceRevision, workpieceSources, leadInLength, previousOrder,
-         effectiveUseFaceClassification, smoothAngle, deflection](bool success) {
+        [this, taskId, result, sourceRevision, workpieceSources, leadInLength, previousOrder,
+         effectiveUseFaceClassification, smoothAngle, deflection, faceSetRevision,
+         setupRevision, extractionStrategy](bool success) {
+            releaseOwnedTask(taskId);
             if (!success || !result->ok) {
                 emit operationFailed(tr("全局生成刀路"),
                     result->error.isEmpty() ? tr("刀路生成失败或已取消") : result->error);
@@ -2644,7 +3723,10 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 || std::abs(m_config.leadInLength() - leadInLength) > 1e-12
                 || std::abs(m_smoothAngle - smoothAngle) > 1e-12
                 || std::abs(m_deflection - deflection) > 1e-12
-                || currentEffectiveFaceClassification != effectiveUseFaceClassification) {
+                || currentEffectiveFaceClassification != effectiveUseFaceClassification
+                || m_extractionStrategy != extractionStrategy
+                || machiningFaceSetRevision() != faceSetRevision
+                || machineSetupRevision() != setupRevision) {
                 emit operationFailed(tr("全局生成刀路"), tr("刀路在计算期间已变更，后台结果已丢弃"));
                 return;
             }
@@ -2655,6 +3737,79 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             m_useFaceClassification = effectiveUseFaceClassification;
             m_deflection = deflection;
             m_workpieceShape = collectWorkpieceShape();
+            // Capture the exact two face groups used by Auto/Tube.  They are
+            // project data, not a renderer-only side effect: later manual
+            // stages continue from these groups without reclassifying.
+            std::vector<MachiningFaceEntry> captured;
+            for (const MachiningFaceEntry& entry : m_machiningFaces)
+                if (entry.manual)
+                    captured.push_back(entry);
+            const ExtractionStrategy currentStrategy =
+                static_cast<ExtractionStrategy>(m_extractionStrategy);
+            for (const WorkpieceShapeSource& src : currentSources) {
+                if (src.shape.IsNull())
+                    continue;
+                auto appendCaptured = [this, &captured, &src](const TopoDS_Face& face,
+                                                               lcnc::cam::MachiningFaceRole role) {
+                    if (face.IsNull())
+                        return;
+                    const auto duplicate = std::find_if(captured.cbegin(), captured.cend(),
+                        [&face, &src, role](const MachiningFaceEntry& entry) {
+                            return entry.workpieceEntry == src.workpieceEntry
+                                && entry.role == role && !entry.face.IsNull()
+                                && entry.face.IsSame(face);
+                        });
+                    if (duplicate != captured.cend())
+                        return;
+                    MachiningFaceEntry entry;
+                    entry.faceId = m_nextMachiningFaceId++;
+                    entry.face = face;
+                    entry.workpieceEntry = src.workpieceEntry;
+                    entry.role = role;
+                    captured.push_back(std::move(entry));
+                };
+                if (currentStrategy == ExtractionStrategy::Auto
+                    || currentStrategy == ExtractionStrategy::TubeClassification) {
+                    const FaceClassification classification = FaceClassifier::classifyFaces(
+                        src.shape, m_smoothAngle);
+                    if (const auto* group = classification.outerGroup())
+                        for (const TopoDS_Face& face : group->faces)
+                            appendCaptured(face, lcnc::cam::MachiningFaceRole::MachiningSurface);
+                    for (const auto* group : classification.crossSectionGroups()) {
+                        if (!group) continue;
+                        for (const TopoDS_Face& face : group->faces)
+                            appendCaptured(face, lcnc::cam::MachiningFaceRole::CrossSection);
+                    }
+                } else if (currentStrategy == ExtractionStrategy::PlanarFaceWires) {
+                    appendCaptured(LaserToolpathBuilder::selectMachiningFace(
+                        src.shape, beamDirectionWpc(src.workpieceEntry)),
+                        lcnc::cam::MachiningFaceRole::MachiningSurface);
+                }
+            }
+            m_machiningFaces = std::move(captured);
+            pushMachiningFaceRecordsToCamData();
+            refreshMachiningFaceDisplay();
+            emit machiningFacesChanged();
+            // This worker completed all five stages as one atomic automatic
+            // operation.  Commit the persisted stage chain only now, after
+            // the frozen inputs have passed the stale-result checks above.
+            m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation);
+            const auto faceStage = m_camData->pipelineStageState(
+                lcnc::cam::CamPipelineStage::FaceSeparation);
+            m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::ContourExtraction,
+                                           faceStage.revision);
+            const auto contourStage = m_camData->pipelineStageState(
+                lcnc::cam::CamPipelineStage::ContourExtraction);
+            m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::PointDiscretization,
+                                           contourStage.revision);
+            const auto pointStage = m_camData->pipelineStageState(
+                lcnc::cam::CamPipelineStage::PointDiscretization);
+            m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::GeometricToolpath,
+                                           pointStage.revision);
+            const auto pathStage = m_camData->pipelineStageState(
+                lcnc::cam::CamPipelineStage::GeometricToolpath);
+            m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve,
+                                           pathStage.revision);
             m_camData->ensureContourIds();
             m_camData->ensureToolpathLayers();
             QVector<lcnc::cam::ContourId> solveOrder;
@@ -2694,6 +3849,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     ? static_cast<lcnc::cam::ContourId>(toolpathRef().contour(0).contourId) : 0);
             emit toolpathGenerated();
             emit toolpathLayersChanged();
+            emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
             refreshTravelPath();
         });
     return taskId;
@@ -2703,6 +3859,10 @@ void CamModule::clearToolpath()
 {
     clearToolpathViewState(/*emitSignals=*/false);
     m_camData->clearToolpath();
+    // 加工面集合随刀路一并清空（避免上一工程/工件的高亮残留）。
+    m_machiningFaces.clear();
+    m_camData->setMachiningFaceRecords({});
+    refreshMachiningFaceDisplay();
     // 统一工程文档：清掉轮廓几何(EntityKind::Cam)实体。
     if (LcncDocument* doc = workpieceDocument())
         doc->clearEntityKind(LcncDocument::EntityKind::Cam);
@@ -2711,6 +3871,7 @@ void CamModule::clearToolpath()
     m_clearingToolpath = false;
     emit toolpathCleared();
     emit toolpathLayersChanged();
+    emit machiningFacesChanged();
 }
 
 bool CamModule::resolveReferencePlaneCenter(WidgetOccView* occView,
@@ -3159,12 +4320,16 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
         exportedContour.workpieceEntry = contour.workpieceEntry;
         exportedContour.enabled = contour.enabled;
         exportedContour.layerEnabled = layer ? layer->enabled : true;
+        const bool machineSolveReady = m_camData && m_camData->hasCompletePipelineChain();
         exportedContour.needsRecalculation = contour.needsRecalculation
-            || (m_camData && m_camData->generationParamsDirty());
+            || (m_camData && m_camData->generationParamsDirty())
+            || !machineSolveReady;
         if (contour.needsRecalculation)
             exportedContour.recalculationReason = tr("轮廓参数或起点尚未重新计算");
         else if (m_camData && m_camData->generationParamsDirty())
             exportedContour.recalculationReason = tr("全局生成参数尚未应用");
+        else if (!machineSolveReady)
+            exportedContour.recalculationReason = tr("五阶段 CAM 流程未完成或上游版本链不一致");
         exportedContour.pointCount = static_cast<int>(contour.points.size());
 
         // 计算世界坐标系下的几何端点：cut start = points.front()；end = points.back()；
@@ -4027,6 +5192,401 @@ void CamModule::setUseFaceClassification(bool on)
     }
 }
 
+gp_Dir CamModule::beamDirectionWpc(const QString& wpcEntry) const
+{
+    const MachineKinematics* kin = kinematics();
+    if (!kin)
+        return gp_Dir(0.0, 0.0, -1.0);
+    // wpcHome maps workpiece -> machine at the home posture; the inverse maps
+    // the machine-space beam direction into workpiece coordinates. Directions
+    // are translation-invariant, so only the rotation matters.
+    const gp_Trsf wpcHome = kin->computeWpcTransformHome(wpcEntry);
+    return kin->nominalBeamDirectionMachine().Transformed(wpcHome.Inverted());
+}
+
+int CamModule::extractionStrategy() const
+{
+    return m_extractionStrategy;
+}
+
+void CamModule::setExtractionStrategy(int strategy)
+{
+    if (m_extractionStrategy == strategy)
+        return;
+    m_extractionStrategy = strategy;
+    m_config.setExtractionStrategy(strategy);  // persist to cam.toml
+    if (m_camData) {
+        m_camData->setGenerationParamsDirty(true);
+        m_camData->markDirty(true);
+    }
+}
+
+int CamModule::machiningFaceCount() const
+{
+    return static_cast<int>(m_machiningFaces.size());
+}
+
+QList<CamModule::MachiningFaceInfo> CamModule::machiningFacesForTree() const
+{
+    QList<MachiningFaceInfo> result;
+    result.reserve(static_cast<int>(m_machiningFaces.size()));
+    int autoIdx = 0, manualIdx = 0;
+    for (const auto& entry : m_machiningFaces) {
+        // Cross sections are algorithmic reference faces.  They intentionally
+        // stay out of the operator-facing machining-face tree.
+        if (entry.role == lcnc::cam::MachiningFaceRole::CrossSection)
+            continue;
+        MachiningFaceInfo info;
+        info.faceId = entry.faceId;
+        info.workpieceEntry = entry.workpieceEntry;
+        info.manual = entry.manual;
+        info.role = entry.role;
+        const QString roleName = [this, &entry]() {
+            switch (entry.role) {
+            case lcnc::cam::MachiningFaceRole::MachiningSurface: return tr("加工面");
+            case lcnc::cam::MachiningFaceRole::CrossSection: return tr("横截面");
+            case lcnc::cam::MachiningFaceRole::LegacyOuterSurface: break;
+            }
+            return tr("加工面");
+        }();
+        info.displayName = entry.manual
+            ? tr("手动%1 %2").arg(roleName).arg(++manualIdx)
+            : tr("%1 %2").arg(roleName).arg(++autoIdx);
+        result.append(info);
+    }
+    return result;
+}
+
+std::vector<TopoDS_Face> CamModule::manualMachiningFaces() const
+{
+    std::vector<TopoDS_Face> faces;
+    for (const auto& entry : m_machiningFaces)
+        if (entry.manual && !entry.face.IsNull())
+            faces.push_back(entry.face);
+    return faces;
+}
+
+void CamModule::addMachiningFace(const TopoDS_Face& face)
+{
+    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+        return;
+    if (face.IsNull())
+        return;
+    for (const auto& existing : m_machiningFaces)
+        if (!existing.face.IsNull() && existing.face.IsSame(face))
+            return;
+    MachiningFaceEntry entry;
+    entry.faceId = m_nextMachiningFaceId++;
+    entry.face = face;
+    entry.manual = true;
+    entry.role = lcnc::cam::MachiningFaceRole::MachiningSurface;
+    for (const WorkpieceShapeSource& source : collectWorkpieceShapes()) {
+        bool found = false;
+        for (TopExp_Explorer exp(source.shape, TopAbs_FACE); exp.More(); exp.Next()) {
+            if (TopoDS::Face(exp.Current()).IsSame(face)) {
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            entry.workpieceEntry = source.workpieceEntry;
+            break;
+        }
+    }
+    m_machiningFaces.push_back(std::move(entry));
+    refreshMachiningFaceDisplay();
+    pushMachiningFaceRecordsToCamData();
+    if (m_camData) {
+        m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
+                                     tr("加工面编辑尚未应用"));
+        m_camData->setGenerationParamsDirty(true);
+    }
+    emit machiningFacesChanged();
+}
+
+bool CamModule::removeMachiningFace(std::uint64_t faceId)
+{
+    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+        return false;
+    auto it = std::find_if(m_machiningFaces.begin(), m_machiningFaces.end(),
+        [faceId](const MachiningFaceEntry& e) { return e.faceId == faceId; });
+    if (it == m_machiningFaces.end())
+        return false;
+    m_machiningFaces.erase(it);
+    pushMachiningFaceRecordsToCamData();
+    if (m_camData) {
+        m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
+                                     tr("加工面编辑尚未应用"));
+        m_camData->setGenerationParamsDirty(true);
+    }
+    refreshMachiningFaceDisplay();
+    emit machiningFacesChanged();
+    return true;
+}
+
+bool CamModule::setMachiningFaceRole(
+    std::uint64_t faceId, lcnc::cam::MachiningFaceRole role)
+{
+    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+        return false;
+    auto it = std::find_if(m_machiningFaces.begin(), m_machiningFaces.end(),
+        [faceId](const MachiningFaceEntry& entry) { return entry.faceId == faceId; });
+    if (it == m_machiningFaces.end() || it->role == role)
+        return false;
+    if (role == lcnc::cam::MachiningFaceRole::CrossSection) {
+        const bool intersectsMachiningFace = std::any_of(
+            m_machiningFaces.cbegin(), m_machiningFaces.cend(), [it](const MachiningFaceEntry& other) {
+                return other.faceId != it->faceId
+                    && other.workpieceEntry == it->workpieceEntry
+                    && other.role == lcnc::cam::MachiningFaceRole::MachiningSurface
+                    && facesShareBoundaryEdge(other.face, it->face);
+            });
+        if (!intersectsMachiningFace) {
+            emit operationFailed(tr("设置横截面"),
+                                 tr("横截面必须与同一工件的加工面相交或共享边。"));
+            return false;
+        }
+    }
+    // Reclassifying an auto result is an operator decision; retain it across a
+    // later automatic refresh just like an explicitly picked face.
+    it->role = role;
+    it->manual = true;
+    pushMachiningFaceRecordsToCamData();
+    if (m_camData) {
+        m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
+                                     tr("加工面角色编辑尚未应用"));
+        m_camData->setGenerationParamsDirty(true);
+    }
+    refreshMachiningFaceDisplay();
+    emit machiningFacesChanged();
+    return true;
+}
+
+void CamModule::clearMachiningFaces()
+{
+    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+        return;
+    if (m_machiningFaces.empty())
+        return;
+    m_machiningFaces.clear();
+    pushMachiningFaceRecordsToCamData();
+    if (m_camData) {
+        m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
+                                     tr("加工面编辑尚未应用"));
+        m_camData->setGenerationParamsDirty(true);
+    }
+    refreshMachiningFaceDisplay();
+    emit machiningFacesChanged();
+}
+
+void CamModule::setAutoMachiningFaces(const std::vector<TopoDS_Face>& faces,
+                                      const QString& workpieceEntry)
+{
+    // Replace auto-captured entries; keep manual picks.
+    std::vector<MachiningFaceEntry> kept;
+    for (auto& entry : m_machiningFaces)
+        if (entry.manual)
+            kept.push_back(std::move(entry));
+    for (const TopoDS_Face& face : faces) {
+        if (face.IsNull())
+            continue;
+        bool dup = false;
+        for (const auto& e : kept)
+            if (!e.face.IsNull() && e.face.IsSame(face)) { dup = true; break; }
+        if (dup)
+            continue;
+        MachiningFaceEntry entry;
+        entry.faceId = m_nextMachiningFaceId++;
+        entry.face = face;
+        entry.workpieceEntry = workpieceEntry;
+        entry.manual = false;
+        kept.push_back(std::move(entry));
+    }
+    m_machiningFaces = std::move(kept);
+    pushMachiningFaceRecordsToCamData();
+    refreshMachiningFaceDisplay();
+    emit machiningFacesChanged();
+}
+
+void CamModule::refreshMachiningFaceDisplay()
+{
+    GuiDocument* gd = activeGuiDocument();
+    if (!gd || gd->context().IsNull())
+        return;
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    for (auto it = m_machiningFaceAis.cbegin(); it != m_machiningFaceAis.cend(); ++it) {
+        if (!it.value().IsNull())
+            ctx->Remove(it.value(), Standard_False);
+    }
+    m_machiningFaceAis.clear();
+    if (!m_machiningFacesVisible) {
+        ctx->UpdateCurrentViewer();
+        return;
+    }
+    for (const auto& entry : m_machiningFaces) {
+        if (entry.face.IsNull()
+            || entry.role != lcnc::cam::MachiningFaceRole::MachiningSurface)
+            continue;
+        Handle(AIS_Shape) ais = new AIS_Shape(entry.face);
+        ais->SetColor(entry.manual ? Quantity_NOC_YELLOW : Quantity_NOC_CYAN1);
+        ais->SetTransparency(0.6);
+        ctx->Display(ais, Standard_False);
+        m_machiningFaceAis.insert(entry.faceId, ais);
+    }
+    ctx->UpdateCurrentViewer();
+}
+
+void CamModule::setMachiningFacesVisible(bool visible)
+{
+    if (m_machiningFacesVisible == visible)
+        return;
+    m_machiningFacesVisible = visible;
+    refreshMachiningFaceDisplay();
+}
+
+bool CamModule::machiningFacesVisible() const
+{
+    return m_machiningFacesVisible;
+}
+
+void CamModule::pushMachiningFaceRecordsToCamData()
+{
+    if (!m_camData)
+        return;
+    std::vector<lcnc::cam::CamDataManager::MachiningFaceRecord> records;
+    records.reserve(m_machiningFaces.size());
+    for (const auto& entry : m_machiningFaces) {
+        lcnc::cam::CamDataManager::MachiningFaceRecord rec;
+        rec.faceId         = entry.faceId;
+        rec.workpieceEntry = entry.workpieceEntry;
+        rec.manual         = entry.manual;
+        rec.role           = entry.role;
+        rec.signature      = entry.face.IsNull()
+            ? 0 : LaserToolpathBuilder::computeFaceSignature(entry.face);
+        records.push_back(rec);
+    }
+    m_camData->setMachiningFaceRecords(std::move(records));
+    m_camData->markDirty(true);
+}
+
+void CamModule::rebindMachiningFacesFromRecords()
+{
+    if (!m_camData)
+        return;
+    const auto& records = m_camData->machiningFaceRecords();
+    if (records.empty())
+        return;
+
+    struct RebindCandidate {
+        QString workpieceEntry;
+        TopoDS_Face face;
+        std::uint64_t signature{0};
+    };
+    std::vector<RebindCandidate> workpieceFaces;
+    for (const WorkpieceShapeSource& source : collectWorkpieceShapes()) {
+        for (TopExp_Explorer exp(source.shape, TopAbs_FACE); exp.More(); exp.Next()) {
+            const TopoDS_Face face = TopoDS::Face(exp.Current());
+            if (face.IsNull())
+                continue;
+            workpieceFaces.push_back({source.workpieceEntry, face,
+                LaserToolpathBuilder::computeFaceSignature(face)});
+        }
+    }
+    if (workpieceFaces.empty()) {
+        m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
+                                     tr("加工面无法在当前工件中重绑"));
+        m_camData->setGenerationParamsDirty(true);
+        return;
+    }
+
+    std::vector<MachiningFaceEntry> rebound;
+    for (const auto& rec : records) {
+        if (rec.signature == 0) continue;
+        MachiningFaceEntry entry;
+        entry.faceId = rec.faceId;
+        entry.workpieceEntry = rec.workpieceEntry;
+        entry.manual = rec.manual;
+        entry.role = rec.role;
+
+        // Find the face in the current workpiece by matching signature.
+        for (const RebindCandidate& candidate : workpieceFaces) {
+            if (candidate.signature == rec.signature
+                && (rec.workpieceEntry.isEmpty()
+                    || candidate.workpieceEntry == rec.workpieceEntry)) {
+                entry.face = candidate.face;
+                break;
+            }
+        }
+        if (entry.face.IsNull()) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "cam.machiningFace: signature {:016x} not found in workpiece; "
+                      "manual face {} dropped",
+                      rec.signature, rec.faceId);
+            continue;
+        }
+        rebound.push_back(std::move(entry));
+    }
+
+    m_machiningFaces = std::move(rebound);
+    if (m_machiningFaces.size() != records.size()) {
+        m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
+                                     tr("部分加工面或横截面无法在当前工件中重绑"));
+        m_camData->setGenerationParamsDirty(true);
+    }
+    if (!m_machiningFaces.empty()) {
+        std::uint64_t maxId = 0;
+        for (const auto& e : m_machiningFaces)
+            maxId = std::max(maxId, e.faceId);
+        m_nextMachiningFaceId = std::max(m_nextMachiningFaceId, maxId + 1);
+    }
+
+    refreshMachiningFaceDisplay();
+    emit machiningFacesChanged();
+
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "cam.machiningFace: rebound {} faces from persisted signatures",
+              m_machiningFaces.size());
+}
+
+bool CamModule::pickMachiningFace(WidgetOccView* view, const QPoint& pos, QString* error)
+{
+    if (!view || view->view().IsNull() || view->context().IsNull()) {
+        if (error) *error = tr("没有可用的视图用于拾取加工面。");
+        return false;
+    }
+    const Handle(AIS_InteractiveContext)& context = view->context();
+    context->MoveTo(pos.x(), pos.y(), view->view(), Standard_False);
+    const Handle(SelectMgr_EntityOwner) owner = context->DetectedOwner();
+    const Handle(StdSelect_BRepOwner) brepOwner =
+        Handle(StdSelect_BRepOwner)::DownCast(owner);
+    if (brepOwner.IsNull() || !brepOwner->HasShape()) {
+        if (error) *error = tr("未检测到面，请将光标放在工件表面上重试。");
+        return false;
+    }
+    const TopoDS_Shape picked = brepOwner->Shape();
+    if (picked.IsNull() || picked.ShapeType() != TopAbs_FACE) {
+        if (error) *error = tr("拾取到的不是面，请选择工件上的加工面。");
+        return false;
+    }
+    bool belongsToWorkpiece = false;
+    for (const WorkpieceShapeSource& source : collectWorkpieceShapes()) {
+        for (TopExp_Explorer exp(source.shape, TopAbs_FACE); exp.More(); exp.Next()) {
+            if (TopoDS::Face(exp.Current()).IsSame(picked)) {
+                belongsToWorkpiece = true;
+                break;
+            }
+        }
+        if (belongsToWorkpiece)
+            break;
+    }
+    if (!belongsToWorkpiece) {
+        if (error) *error = tr("只能选择工件模型上的面，机台、刀路和辅助显示不可作为加工面。");
+        return false;
+    }
+    addMachiningFace(TopoDS::Face(picked));
+    return true;
+}
+
 void CamModule::eraseAxisGuideDisplay()
 {
     m_guideRenderer->erase(activeGuiDocument());
@@ -4650,6 +6210,7 @@ void CamModule::pushGenerationParamsToCamData()
     gp.deflection           = m_deflection;
     gp.smoothAngle          = m_smoothAngle;
     gp.useFaceClassification = m_useFaceClassification;
+    gp.extractionStrategy = m_extractionStrategy;
     if (m_toolpathRenderer)
         gp.normalSampleStep = m_toolpathRenderer->normalSampleStep();
 }
@@ -4662,6 +6223,7 @@ void CamModule::applyGenerationParamsFromCamData()
     m_deflection            = m_config.deflection();
     m_smoothAngle           = m_config.smoothAngle();
     m_useFaceClassification = m_config.useFaceClassification();
+    m_extractionStrategy = m_config.extractionStrategy();
     if (m_toolpathRenderer) {
         m_toolpathRenderer->setShowNormals(m_config.showNormals());
         m_toolpathRenderer->setNormalSampleStep(m_config.normalSampleStep());
@@ -4682,6 +6244,8 @@ void CamModule::onCamDataLoaded()
 
     relinkContourGeometryFromDocument();
     m_workpieceShape = collectWorkpieceShape();
+    // Rebind any persisted manual machining faces after project reload.
+    rebindMachiningFacesFromRecords();
     const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
     for (LaserContour& contour : toolpathRef().contours()) {
         for (const WorkpieceShapeSource& source : sources) {

@@ -10,6 +10,7 @@
 #include <TopoDS_Face.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepTools.hxx>
@@ -17,6 +18,9 @@
 #include <GCPnts_UniformDeflection.hxx>
 #include <BRepLProp_CLProps.hxx>
 #include <BRepGProp_Face.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <GeomAbs_SurfaceType.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -712,7 +716,54 @@ void computeContourSignature(LaserContour& contour)
     contour.signature = h;
 }
 
+// ── Holes-first ordering rank ───────────────────────────────────────────────
+// Lower rank = cut earlier. InnerHole before TubeCrossSection before
+// OuterBoundary, so the outer ring is cut last and the part stays clamped.
+int contourCutOrderRank(int contourType)
+{
+    switch (static_cast<ContourKind>(contourType)) {
+    case ContourKind::InnerHole:        return 0;
+    case ContourKind::TubeCrossSection: return 1;
+    case ContourKind::OuterBoundary:    return 2;
+    case ContourKind::Unknown:          return 3;
+    }
+    return 3;
+}
+
 } // namespace
+
+std::uint64_t LaserToolpathBuilder::computeFaceSignature(const TopoDS_Face& face)
+{
+    std::uint64_t h = 1469598103934665603ull; // FNV-1a 64-bit offset basis
+
+    // Surface type — GeomAbs_SurfaceType is a stable enum.
+    BRepAdaptor_Surface adaptor(face, /*restriction=*/Standard_True);
+    mixHash(h, static_cast<std::uint64_t>(adaptor.GetType()));
+
+    // Area (mm², rounded to 3 decimal places).
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(face, props);
+    const double area = props.Mass();
+    mixHash(h, static_cast<std::uint64_t>(std::llround(area * 1000.0)));
+
+    // Centroid (mm, rounded to 3 decimal places).
+    const gp_Pnt centroid = props.CentreOfMass();
+    mixHash(h, static_cast<std::uint64_t>(std::llround(centroid.X() * 1000.0)));
+    mixHash(h, static_cast<std::uint64_t>(std::llround(centroid.Y() * 1000.0)));
+    mixHash(h, static_cast<std::uint64_t>(std::llround(centroid.Z() * 1000.0)));
+
+    // Outer-wire vertex count (discriminates faces with same area/type but
+    // different topology, e.g. a rectangular vs circular face of equal area).
+    TopoDS_Wire outerWire = BRepTools::OuterWire(face);
+    if (!outerWire.IsNull()) {
+        int vertexCount = 0;
+        for (TopExp_Explorer exp(outerWire, TopAbs_VERTEX); exp.More(); exp.Next())
+            ++vertexCount;
+        mixHash(h, static_cast<std::uint64_t>(vertexCount));
+    }
+
+    return h;
+}
 
 // =============================================================================
 // LaserToolpathBuilder — contour extraction
@@ -794,15 +845,53 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
     const ContourExtractionParams& params,
     FaceClassification* classificationOut)
 {
-    // If face classification is disabled, use the legacy method directly.
-    if (!params.useFaceClassification) {
+    if (workpiece.IsNull()) {
+        if (classificationOut)
+            *classificationOut = {};
+        return {};
+    }
+
+    // ── Strategy dispatch ────────────────────────────────────────────────
+    switch (params.strategy) {
+    case ExtractionStrategy::LegacyOuterWire:
         if (classificationOut)
             *classificationOut = {};
         return extractContours(workpiece);
+    case ExtractionStrategy::ManualFaceSelection:
+        if (classificationOut)
+            *classificationOut = {};
+        return extractContoursFromFaces(workpiece, params.selectedMachiningFaces,
+                                        params.machiningBeamDirection, params);
+    case ExtractionStrategy::PlanarFaceWires: {
+        QString info;
+        TopoDS_Face face = selectMachiningFace(
+            workpiece, params.machiningBeamDirection, &info);
+        if (classificationOut)
+            *classificationOut = {};
+        if (face.IsNull())
+            return extractContours(workpiece);  // safety net: legacy outer wires
+        return extractContoursFromFaces(workpiece, {face},
+                                        params.machiningBeamDirection, params);
+    }
+    case ExtractionStrategy::TubeClassification:
+    case ExtractionStrategy::Auto:
+        break;  // face-classification path below
     }
 
-    if (workpiece.IsNull())
-        return {};
+    // Auto: prefer a planar machining face; only fall back to the tube/
+    // classification path when no planar face faces the beam (e.g. a tube side
+    // or an ambiguous shape that the user should pick manually).
+    if (params.strategy == ExtractionStrategy::Auto) {
+        QString info;
+        TopoDS_Face face = selectMachiningFace(
+            workpiece, params.machiningBeamDirection, &info);
+        if (!face.IsNull() && isPlanarFace(face)) {
+            if (classificationOut)
+                *classificationOut = {};
+            return extractContoursFromFaces(workpiece, {face},
+                                            params.machiningBeamDirection, params);
+        }
+    }
 
     // ── Step 1: classify faces by smooth connectivity ────────────────────
     FaceClassification classification =
@@ -855,36 +944,6 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
         return result;
     }
 
-    // ── Step 2: extract contour edges at outer/cross-section boundary ────
-    std::vector<TopoDS_Edge> contourEdges =
-        FaceClassifier::extractContourEdges(classification);
-
-    if (contourEdges.empty()) {
-        // Fallback: disable face classification to use legacy OuterWire method
-        ContourExtractionParams fallback;
-        fallback.smoothAngleThresholdDeg = params.smoothAngleThresholdDeg;
-        fallback.deflection = params.deflection;
-        fallback.useFaceClassification = false;
-        return extractContours(workpiece, fallback);
-    }
-
-    // ── Step 3: chain edges into wires ───────────────────────────────────
-    std::vector<TopoDS_Wire> wires =
-        FaceClassifier::chainEdgesToWires(contourEdges);
-
-    if (wires.empty()) {
-        // Fallback: disable face classification to use legacy OuterWire method
-        ContourExtractionParams fallback;
-        fallback.smoothAngleThresholdDeg = params.smoothAngleThresholdDeg;
-        fallback.deflection = params.deflection;
-        fallback.useFaceClassification = false;
-        return extractContours(workpiece, fallback);
-    }
-
-    // ── Step 4: build LaserContour objects ────────────────────────────────
-    std::vector<LaserContour> result;
-    result.reserve(wires.size());
-
     // Collect outer and cross-section faces for normal computation
     std::vector<TopoDS_Face> outerFaces;
     if (classification.outerGroup())
@@ -895,23 +954,261 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
         for (const auto& f : cg->faces)
             crossFaces.push_back(f);
 
+    std::vector<LaserContour> result = extractTubeContoursFromFaceGroups(
+        workpiece, outerFaces, crossFaces, params);
+    if (result.empty()) {
+        // A classified but unusable boundary should retain the established
+        // legacy fallback for the one-click automatic workflow.
+        ContourExtractionParams fallback;
+        fallback.smoothAngleThresholdDeg = params.smoothAngleThresholdDeg;
+        fallback.deflection = params.deflection;
+        fallback.strategy = ExtractionStrategy::LegacyOuterWire;
+        return extractContours(workpiece, fallback);
+    }
+    return result;
+}
+
+std::vector<LaserContour> LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+    const TopoDS_Shape& workpiece,
+    const std::vector<TopoDS_Face>& outerFaces,
+    const std::vector<TopoDS_Face>& crossSectionFaces,
+    const ContourExtractionParams& params)
+{
+    if (workpiece.IsNull() || outerFaces.empty() || crossSectionFaces.empty())
+        return {};
+
+    FaceClassification classification;
+    FaceGroup outerGroup;
+    outerGroup.kind = FaceGroupKind::Outer;
+    outerGroup.faces = outerFaces;
+    classification.groups.push_back(std::move(outerGroup));
+    classification.outerIdx = 0;
+    FaceGroup crossSectionGroup;
+    crossSectionGroup.kind = FaceGroupKind::CrossSection;
+    crossSectionGroup.faces = crossSectionFaces;
+    classification.groups.push_back(std::move(crossSectionGroup));
+    const std::vector<TopoDS_Edge> contourEdges =
+        FaceClassifier::extractContourEdges(classification);
+    if (contourEdges.empty())
+        return {};
+
+    const std::vector<TopoDS_Wire> wires = FaceClassifier::chainEdgesToWires(contourEdges);
+    if (wires.empty())
+        return {};
+
+    std::vector<LaserContour> result;
+    result.reserve(wires.size());
     int wireIdx = 0;
-    for (auto& w : wires) {
+    for (const TopoDS_Wire& w : wires) {
         LaserContour c;
         c.wire = w;
         c.name = QString::fromUtf8("加工轮廓 %1").arg(++wireIdx);
-        c.contourType = static_cast<int>(FaceGroupKind::CrossSection);
+        c.contourType = static_cast<int>(ContourKind::TubeCrossSection);
         c.sourceInfo  = QString::fromUtf8("外表面(%1面) ∩ 截面(%2面)")
-                            .arg(outerFaces.size()).arg(crossFaces.size());
+                            .arg(outerFaces.size()).arg(crossSectionFaces.size());
 
         computeContourSignature(c);
 
         // Discretise with face-classification-aware normals
-        bindLeadInSurfaceContext(c, outerFaces, crossFaces);
-        discretizeContourWithClassification(c, outerFaces, crossFaces,
+        bindLeadInSurfaceContext(c, outerFaces, crossSectionFaces);
+        discretizeContourWithClassification(c, outerFaces, crossSectionFaces,
                                             params.deflection);
         result.push_back(std::move(c));
     }
+    return result;
+}
+
+// =============================================================================
+// LaserToolpathBuilder - machining-face selection (planar / plate workflow)
+// =============================================================================
+
+bool LaserToolpathBuilder::isPlanarFace(const TopoDS_Face& face)
+{
+    if (face.IsNull())
+        return false;
+    BRepAdaptor_Surface surf(face, Standard_True);
+    return surf.GetType() == GeomAbs_Plane;
+}
+
+TopoDS_Face LaserToolpathBuilder::selectMachiningFace(
+    const TopoDS_Shape& workpiece, const gp_Dir& beamDirWpc, QString* info)
+{
+    if (info)
+        info->clear();
+    if (workpiece.IsNull())
+        return TopoDS_Face();
+
+    // Among planar faces whose outward normal opposes the beam (i.e. the face
+    // the laser actually hits), pick the one most directly facing the beam;
+    // break near-ties by larger area. The beam travels along beamDirWpc, so a
+    // face facing the laser has outwardNormal . beamDirWpc < 0, most negative
+    // = most head-on.
+    TopoDS_Face best;
+    double bestScore = 0.0;
+    double bestArea = 0.0;
+    bool found = false;
+    const gp_Vec beam(beamDirWpc);
+
+    for (TopExp_Explorer fExp(workpiece, TopAbs_FACE); fExp.More(); fExp.Next()) {
+        const TopoDS_Face face = TopoDS::Face(fExp.Current());
+        if (face.IsNull())
+            continue;
+        BRepAdaptor_Surface surf(face, Standard_True);
+        if (surf.GetType() != GeomAbs_Plane)
+            continue;  // only planar faces qualify as the machining face
+
+        gp_Dir normal = surf.Plane().Axis().Direction();
+        if (face.Orientation() == TopAbs_REVERSED)
+            normal.Reverse();
+
+        const double score = beam.Dot(gp_Vec(normal));
+        if (score >= 0.0)
+            continue;  // does not face the beam
+
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(face, props);
+        const double area = props.Mass();
+
+        if (!found) {
+            best = face; bestScore = score; bestArea = area; found = true;
+        } else if (score < bestScore - 1e-6) {
+            best = face; bestScore = score; bestArea = area;  // more head-on
+        } else if (std::abs(score - bestScore) <= 1e-6 && area > bestArea) {
+            best = face; bestArea = area;  // same facing, larger face
+        }
+    }
+
+    if (!found && info)
+        *info = QStringLiteral(
+            "no planar face faces the beam (tube side or ambiguous; use tube/manual)");
+    return best;
+}
+
+std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
+    const TopoDS_Shape& workpiece,
+    const std::vector<TopoDS_Face>& faces,
+    const gp_Dir& /*beamDirWpc*/,
+    const ContourExtractionParams& /*params*/)
+{
+    std::vector<LaserContour> result;
+    if (workpiece.IsNull() || faces.empty())
+        return result;
+
+    TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+    TopExp::MapShapesAndAncestors(
+        workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
+
+    auto wireBboxDiag = [](const TopoDS_Wire& w) -> double {
+        Bnd_Box bbox;
+        BRepBndLib::Add(w, bbox);
+        if (bbox.IsVoid())
+            return 0.0;
+        Standard_Real x0, y0, z0, x1, y1, z1;
+        bbox.Get(x0, y0, z0, x1, y1, z1);
+        const double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+
+    // A machining face is commonly a smooth group (for example a tube
+    // surface split into several CAD faces).  Taking each face's wires
+    // independently turns the group's internal seams into false contours.
+    // Build the boundary of the entire selected group instead: retain an edge
+    // only when it has a non-selected adjacent face (or is a free edge).
+    TopTools_IndexedMapOfShape selectedFaceMap;
+    for (const TopoDS_Face& face : faces)
+        if (!face.IsNull())
+            selectedFaceMap.Add(face);
+
+    struct BoundaryEdge { TopoDS_Edge edge; TopoDS_Face owner; };
+    std::vector<BoundaryEdge> boundaryEdges;
+    TopTools_IndexedMapOfShape collectedEdges;
+    for (const TopoDS_Face& face : faces) {
+        if (face.IsNull())
+            continue;
+        for (TopExp_Explorer edgeExp(face, TopAbs_EDGE); edgeExp.More(); edgeExp.Next()) {
+            const TopoDS_Edge edge = TopoDS::Edge(edgeExp.Current());
+            if (BRep_Tool::Degenerated(edge) || collectedEdges.Contains(edge))
+                continue;
+
+            int adjacentCount = 0;
+            int selectedAdjacentCount = 0;
+            if (edgeToFaces.Contains(edge)) {
+                const TopTools_ListOfShape& adjacentFaces = edgeToFaces.FindFromKey(edge);
+                for (TopTools_ListIteratorOfListOfShape it(adjacentFaces); it.More(); it.Next()) {
+                    ++adjacentCount;
+                    if (selectedFaceMap.Contains(it.Value()))
+                        ++selectedAdjacentCount;
+                }
+            }
+            // An edge shared exclusively by two or more selected faces is an
+            // internal seam. A free edge remains a valid contour boundary.
+            if (adjacentCount > 1 && adjacentCount == selectedAdjacentCount)
+                continue;
+
+            collectedEdges.Add(edge);
+            boundaryEdges.push_back({edge, face});
+        }
+    }
+
+    std::vector<TopoDS_Edge> edges;
+    edges.reserve(boundaryEdges.size());
+    for (const BoundaryEdge& item : boundaryEdges)
+        edges.push_back(item.edge);
+    const std::vector<TopoDS_Wire> wires = FaceClassifier::chainEdgesToWires(edges);
+
+    const bool hasNonPlanarFace = std::any_of(faces.cbegin(), faces.cend(),
+        [](const TopoDS_Face& face) { return !face.IsNull() && !LaserToolpathBuilder::isPlanarFace(face); });
+    std::size_t largestWire = 0;
+    for (std::size_t index = 1; index < wires.size(); ++index)
+        if (wireBboxDiag(wires[index]) > wireBboxDiag(wires[largestWire]))
+            largestWire = index;
+
+    int holeIdx = 0, outerIdx = 0, tubeIdx = 0;
+    for (std::size_t index = 0; index < wires.size(); ++index) {
+        const TopoDS_Wire& wire = wires[index];
+        if (wire.IsNull() || !wire.Closed())
+            continue;
+
+        TopoDS_Face owner;
+        for (BRepTools_WireExplorer edgeExp(wire); edgeExp.More(); edgeExp.Next()) {
+            const TopoDS_Edge edge = edgeExp.Current();
+            const auto found = std::find_if(boundaryEdges.cbegin(), boundaryEdges.cend(),
+                [&edge](const BoundaryEdge& item) { return item.edge.IsSame(edge); });
+            if (found != boundaryEdges.cend()) {
+                owner = found->owner;
+                break;
+            }
+        }
+        if (owner.IsNull())
+            continue;
+
+        LaserContour contour;
+        contour.wire = wire;
+        if (hasNonPlanarFace) {
+            contour.contourType = static_cast<int>(ContourKind::TubeCrossSection);
+            contour.name = QString::fromUtf8("加工轮廓 %1").arg(++tubeIdx);
+            contour.sourceInfo = QString::fromUtf8("手动加工面组边界");
+        } else {
+            const bool isOuter = index == largestWire;
+            contour.contourType = static_cast<int>(isOuter ? ContourKind::OuterBoundary
+                                                            : ContourKind::InnerHole);
+            contour.name = isOuter ? QString::fromUtf8("外轮廓 %1").arg(++outerIdx)
+                                   : QString::fromUtf8("孔 %1").arg(++holeIdx);
+            contour.sourceInfo = isOuter ? QString::fromUtf8("加工面组外边界")
+                                         : QString::fromUtf8("加工面组孔边界");
+        }
+        bindOwnedWireSurfaceContext(contour, owner, edgeToFaces);
+        computeContourSignature(contour);
+        result.push_back(std::move(contour));
+    }
+
+    // Holes first, outer ring last (stable): keeps the part clamped while inner
+    // holes are cut, and leaves the freeing outer cut for the end.
+    std::stable_sort(result.begin(), result.end(),
+        [](const LaserContour& a, const LaserContour& b) {
+            return contourCutOrderRank(a.contourType)
+                 < contourCutOrderRank(b.contourType);
+        });
 
     return result;
 }

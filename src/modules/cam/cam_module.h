@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "core/project/cam/cam_data_contracts.h"
+#include "core/project/cam/cam_data_manager.h"
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
@@ -68,6 +69,14 @@ class CamModule : public QObject, public lcnc::IModule, public lcnc::ICamFacade
 {
     Q_OBJECT
 public:
+    /// @brief OCC-free info about one machining face, for the project tree.
+    struct MachiningFaceInfo {
+        std::uint64_t faceId{0};
+        QString displayName;
+        QString workpieceEntry;
+        bool manual{false};
+        lcnc::cam::MachiningFaceRole role{lcnc::cam::MachiningFaceRole::MachiningSurface};
+    };
     /// 公开构造：由 Kernel 拥有。
     explicit CamModule(QObject* parent = nullptr);
     /// 显式析构（用于 unique_ptr<前置声明类型>）。
@@ -225,6 +234,31 @@ public:
                                  double deflection = 0.1);
     void clearToolpath();
 
+    // ── Explicit CAM pipeline ───────────────────────────────────────────
+    /// Compute the first-stage face set.  Manual entries are retained and the
+    /// result is the only face input intended for subsequent stages.
+    bool separateMachiningFaces();
+    /// Asynchronously identify automatic machining faces from the workpiece.
+    /// Manual mode remains an explicit Apply action because it has no geometry
+    /// recognition work to schedule.
+    TaskId separateMachiningFacesAsync();
+    /// Commit the current manually edited face set and invalidate all
+    /// downstream stages.  It never regenerates faces behind the user's back.
+    bool applyMachiningFaces();
+    bool extractContoursFromMachiningFaces();
+    bool discretizeCurrentContours();
+    bool buildCurrentGeometricToolpath();
+    bool solveCurrentGeometricToolpath();
+    TaskId extractContoursFromMachiningFacesAsync();
+    TaskId discretizeCurrentContoursAsync();
+    TaskId buildCurrentGeometricToolpathAsync();
+    TaskId solveCurrentGeometricToolpathAsync();
+    /// Starts the automatic pipeline after face separation.  Remaining stages
+    /// are scheduled one-by-one as cancellable TaskManager jobs.
+    TaskId runAutoPipelineAsync();
+    bool runAutoPipeline();
+    lcnc::cam::CamPipelineStageState pipelineStageState(lcnc::cam::CamPipelineStage stage) const;
+
     // 刀路持久化（cam_toolpath.toml + points.bin）已下沉到 core
     // （lcnc::cam::saveCamToolpath / loadCamToolpath，由 LcncProjectManager 统一调度）。
     const LaserToolpath& toolpath() const;
@@ -296,6 +330,39 @@ public:
     void   setSmoothAngle(double deg);
     bool   useFaceClassification() const;
     void   setUseFaceClassification(bool on);
+    /// ExtractionStrategy value (Auto/Planar/Tube/Manual). Drives contour
+    /// extraction; machine config still drives discretization independently.
+    int    extractionStrategy() const;
+    void   setExtractionStrategy(int strategy);
+    /// Laser beam travel direction in \a wpcEntry workpiece coordinates at the
+    /// home posture, derived from the machine beam axis and the wpc mount.
+    /// Used by Auto/PlanarFaceWires to select the machining face.
+    gp_Dir beamDirectionWpc(const QString& wpcEntry) const;
+    /// @name Manual machining-face selection (ManualFaceSelection strategy)
+    /// @{
+    int    machiningFaceCount() const;
+    QList<MachiningFaceInfo> machiningFacesForTree() const;
+    void   addMachiningFace(const TopoDS_Face& face);
+    bool   removeMachiningFace(std::uint64_t faceId);
+    bool   setMachiningFaceRole(std::uint64_t faceId, lcnc::cam::MachiningFaceRole role);
+    void   clearMachiningFaces();
+    bool   pickMachiningFace(WidgetOccView* view, const QPoint& pos, QString* error);
+    /// Toggle only the displayed machining-surface highlights. Cross-section
+    /// faces remain internal reference data and are never rendered here.
+    void   setMachiningFacesVisible(bool visible);
+    bool   machiningFacesVisible() const;
+    /// Faces captured from the last Auto/Planar extraction (shown in tree/view).
+    void   setAutoMachiningFaces(const std::vector<TopoDS_Face>& faces,
+                                 const QString& workpieceEntry);
+    /// Manual picks only (fed into ManualFaceSelection extraction).
+    std::vector<TopoDS_Face> manualMachiningFaces() const;
+    /// Refresh the semi-transparent highlight AIS for the current face set.
+    void   refreshMachiningFaceDisplay();
+    /// Push the current machining-face state into CamDataManager for persistence.
+    void   pushMachiningFaceRecordsToCamData();
+    /// After project load, rebind stored face signatures to workpiece geometry.
+    void   rebindMachiningFacesFromRecords();
+    /// @}
     bool   showNormals() const;
     void   setShowNormals(bool on);
     double normalSampleStep() const;
@@ -355,6 +422,10 @@ signals:
     void workpieceUnmounted();
     void toolpathGenerated();
     void toolpathCleared();
+    /// Emitted when the machining-face set changes (auto-capture / manual add /
+    /// remove / clear) so the project tree and view highlight can refresh.
+    void machiningFacesChanged();
+    void pipelineStageChanged(lcnc::cam::CamPipelineStage stage);
     void toolpathVisibilityChanged(bool visible);
     void toolpathContourSelected(int contourIndex);
     void toolpathContoursSelected(const QList<int>& contourIndexes);
@@ -375,6 +446,9 @@ private:
     /// Collect the workpiece compound shape from the project document.
     TopoDS_Shape collectWorkpieceShape() const;
     QList<WorkpieceShapeSource> collectWorkpieceShapes() const;
+    bool rejectConflictingPipelineOperation(const QString& operation);
+    std::uint64_t machiningFaceSetRevision() const;
+    std::uint64_t machineSetupRevision() const;
 
     /// Refresh axis guide AIS via MachineGuideRenderer.
     void displayAxisGuides();
@@ -473,6 +547,21 @@ private:
     gp_Pnt                      m_physicalAcCenter{0.0, 0.0, 0.0};
     double                      m_smoothAngle{5.0};
     bool                        m_useFaceClassification{true};
+    int                         m_extractionStrategy{0}; ///< ExtractionStrategy (Auto)
+
+    /// One machining face (auto-captured or manually picked), with its highlight AIS.
+    struct MachiningFaceEntry {
+        std::uint64_t           faceId{0};
+        TopoDS_Face             face;
+        QString                 workpieceEntry;
+        bool                    manual{false};
+        lcnc::cam::MachiningFaceRole role{lcnc::cam::MachiningFaceRole::MachiningSurface};
+    };
+    std::vector<MachiningFaceEntry> m_machiningFaces;
+    std::uint64_t               m_nextMachiningFaceId{1};
+    QMap<std::uint64_t, Handle(AIS_Shape)> m_machiningFaceAis;
+    bool                        m_machiningFacesVisible{true};
+
     double                      m_deflection{0.1};
     lcnc::MachineConfigurationService* m_machineConfig{nullptr};
     bool                        m_machineModelVisible{false};

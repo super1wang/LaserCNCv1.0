@@ -163,6 +163,7 @@ bool CamConfig::importLegacyJson(const QString& jsonPath)
     m_deflection            = tp.value(QStringLiteral("deflection")).toDouble(m_deflection);
     m_smoothAngle           = tp.value(QStringLiteral("smoothAngle")).toDouble(m_smoothAngle);
     m_useFaceClassification = tp.value(QStringLiteral("useFaceClassification")).toBool(m_useFaceClassification);
+    m_extractionStrategy = tp.value(QStringLiteral("extractionStrategy")).toInt(m_extractionStrategy);
     m_showNormals           = tp.value(QStringLiteral("showNormals")).toBool(m_showNormals);
     m_normalSampleStep      = tp.value(QStringLiteral("normalSampleStep")).toDouble(m_normalSampleStep);
 
@@ -210,6 +211,7 @@ void CamConfig::readFrom(const toml::value& root)
         m_deflection            = get_double(tp, "deflection",            m_deflection);
         m_smoothAngle           = get_double(tp, "smoothAngle",           m_smoothAngle);
         m_useFaceClassification = get_bool  (tp, "useFaceClassification", m_useFaceClassification);
+        m_extractionStrategy = get_int(tp, "extractionStrategy", m_extractionStrategy);
         m_showNormals           = get_bool  (tp, "showNormals",           m_showNormals);
         m_normalSampleStep      = get_double(tp, "normalSampleStep",      m_normalSampleStep);
     }
@@ -269,6 +271,7 @@ void CamConfig::writeTo(toml::value& root) const
     tp["deflection"]            = m_deflection;
     tp["smoothAngle"]           = m_smoothAngle;
     tp["useFaceClassification"] = m_useFaceClassification;
+    tp["extractionStrategy"] = m_extractionStrategy;
     tp["showNormals"]           = m_showNormals;
     tp["normalSampleStep"]      = m_normalSampleStep;
     root["toolpath"] = tp;
@@ -365,6 +368,13 @@ void CamConfig::setUseFaceClassification(bool enabled)
 {
     if (m_useFaceClassification == enabled) return;
     m_useFaceClassification = enabled;
+    saveDefault();
+}
+
+void CamConfig::setExtractionStrategy(int strategy)
+{
+    if (m_extractionStrategy == strategy) return;
+    m_extractionStrategy = strategy;
     saveDefault();
 }
 

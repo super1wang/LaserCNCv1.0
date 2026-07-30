@@ -9,10 +9,38 @@
 #include <QList>
 #include <QColor>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 
 namespace lcnc::cam {
+
+/// Ordered, persisted CAM pipeline boundaries.  A later stage may only be
+/// consumed when all of its inputs are current.
+enum class CamPipelineStage : int {
+    FaceSeparation = 0,
+    ContourExtraction,
+    PointDiscretization,
+    GeometricToolpath,
+    MachineSolve,
+    Count
+};
+
+struct CamPipelineStageState {
+    bool available{false};
+    bool dirty{true};
+    std::uint64_t revision{0};
+    std::uint64_t inputRevision{0};
+    QString failureReason;
+};
+
+enum class MachiningFaceRole : int {
+    MachiningSurface = 0,
+    CrossSection = 1,
+    /// v3 packages encoded outer surfaces as 1 and cross sections as 2.
+    /// This value is only retained while loading those packages.
+    LegacyOuterSurface = 2
+};
 
 /**
  * @brief Project-core CAM runtime data owner (core layer).
@@ -46,6 +74,26 @@ public:
     CamDataManager();
     ~CamDataManager();
 
+    /// OCC-free record of a machining face for save/reload.
+    /// After project load, CamModule rebinds the stored signatures to the
+    /// workpiece's actual TopoDS_Face instances.
+    struct MachiningFaceRecord {
+        std::uint64_t faceId{0};
+        std::uint64_t signature{0};
+        QString workpieceEntry;
+        bool manual{false};
+        MachiningFaceRole role{MachiningFaceRole::MachiningSurface};
+    };
+
+    /// Set the machining-face records from the CAM module (called after
+    /// generateToolpath or manual add/remove).
+    void setMachiningFaceRecords(const std::vector<MachiningFaceRecord>& records)
+    { m_machiningFaceRecords = records; }
+
+    /// Machining-face records known at last save / current runtime.
+    const std::vector<MachiningFaceRecord>& machiningFaceRecords() const
+    { return m_machiningFaceRecords; }
+
     LaserToolpath& toolpath() { return m_toolpath; }
     const LaserToolpath& toolpath() const { return m_toolpath; }
 
@@ -56,6 +104,7 @@ public:
         double deflection{0.1};
         double smoothAngle{5.0};
         bool   useFaceClassification{true};
+        int    extractionStrategy{0}; ///< ExtractionStrategy (Auto)
         double normalSampleStep{2.0};
     };
     GenerationParams&       generationParams()       { return m_generationParams; }
@@ -64,6 +113,17 @@ public:
     const GenerationParams& appliedGenerationParams() const { return m_appliedGenerationParams; }
     bool generationParamsDirty() const { return m_generationParamsDirty; }
     void setGenerationParamsDirty(bool dirty) { m_generationParamsDirty = dirty; }
+
+    /// Pipeline stage state is project data, not UI state.  It deliberately
+    /// preserves stale downstream snapshots for inspection while preventing
+    /// Process from treating them as executable output.
+    const CamPipelineStageState& pipelineStageState(CamPipelineStage stage) const;
+    void commitPipelineStage(CamPipelineStage stage, std::uint64_t inputRevision = 0);
+    void invalidatePipelineAfter(CamPipelineStage stage, const QString& reason);
+    void failPipelineStage(CamPipelineStage stage, const QString& reason);
+    void clearPipelineStages();
+    void restorePipelineStageState(CamPipelineStage stage, const CamPipelineStageState& state);
+    bool hasCompletePipelineChain() const;
 
     /// Phase A: 新引入的图层容器与 Qt 信号源。
     /// 现阶段是 LaserToolpath 上层的薄包装，Phase B 起逐步成为图层级状态的唯一权威。
@@ -135,6 +195,12 @@ private:
     ContourId m_nextContourId{1};
     std::uint64_t m_nextLayerId{1};
     bool m_dirty{false};
+
+    /// Machining-face records for save/reload (OCC-free, signature-based).
+    std::vector<MachiningFaceRecord> m_machiningFaceRecords;
+
+    std::array<CamPipelineStageState,
+               static_cast<std::size_t>(CamPipelineStage::Count)> m_pipelineStages;
 
     /// Deterministic signature → allocated id maps (see ID stability doc above).
     QHash<std::uint64_t, std::uint64_t> m_signatureToContourId;

@@ -27,6 +27,8 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdSetLeadIn>(CmdSetLeadIn::Name);
     container->addCommand<CmdToolpathPreview>(CmdToolpathPreview::Name);
     container->addCommand<CmdRecalcToolpath>(CmdRecalcToolpath::Name);
+    container->addCommand<CmdSelectMachiningFace>(CmdSelectMachiningFace::Name);
+    container->addCommand<CmdClearMachiningFaces>(CmdClearMachiningFaces::Name);
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::registerCommands end");
 }
@@ -53,6 +55,11 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelPath->addLargeAction(container->findAction(CmdSetLeadIn::Name));
     panelPath->addLargeAction(container->findAction(CmdRecalcToolpath::Name));
     panelPath->addLargeAction(container->findAction(CmdToolpathPreview::Name));
+
+    // ── 加工面 ─────────────────────────────────────────────────────────────
+    SARibbonPanel* panelFace = cat->addPanel(QObject::tr("加工面"));
+    panelFace->addLargeAction(container->findAction(CmdSelectMachiningFace::Name));
+    panelFace->addLargeAction(container->findAction(CmdClearMachiningFaces::Name));
 
     // ── G代码（占位） ─────────────────────────────────────────────────────
     SARibbonPanel* panelNC = cat->addPanel(QObject::tr("G代码"));

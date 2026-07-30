@@ -21,6 +21,40 @@ struct FaceClassification;
 class MachineKinematics;
 
 /**
+ * @brief Strategy for extracting machining contours from a workpiece.
+ *
+ * Replaces the former ``useFaceClassification`` boolean. The CAM layer selects
+ * the strategy from the machine configuration and the user's choice; the
+ * algorithm stays decoupled from kinematics by receiving the beam direction
+ * (in workpiece coordinates) and any user-picked faces as plain data.
+ */
+enum class ExtractionStrategy
+{
+    Auto,               ///< Machine+posture-driven: pick the machining face from
+                        ///< the beam direction, then dispatch to Planar or Tube.
+    PlanarFaceWires,    ///< Machining face -> all wires (outer boundary + holes).
+    TubeClassification, ///< Existing outer-surface ∩ cross-section (tube ends).
+    ManualFaceSelection,///< User-picked faces -> all wires of those faces.
+    LegacyOuterWire     ///< Pre-strategy fallback: OuterWire of every face.
+};
+
+/**
+ * @brief Boundary role of a contour, persisted on LaserContour::contourType.
+ *
+ * Replaces the loose ``FaceGroupKind`` cast so ordering ("holes first, outer
+ * last") is driven by an explicit marker rather than name/sequence.
+ */
+enum class ContourKind
+{
+    OuterBoundary      = 0, ///< Outer material boundary of the machining face.
+    TubeCrossSection   = 1, ///< Tube cross-section contour (outer ∩ cross-section).
+                             ///< =1 preserves back-compat with the old persisted
+                             ///< FaceGroupKind::CrossSection value.
+    InnerHole          = 2, ///< A through-hole boundary inside the machining face.
+    Unknown            = 3  ///< Legacy / unclassified.
+};
+
+/**
  * @brief Machine-space coordinates for one toolpath point (5-axis: X Y Z R1 R2).
  */
 struct MachineCoord
@@ -114,7 +148,7 @@ struct LaserContour
                                             ///< wire has been written into the doc (see CamModule).
 
     // ── Face-classification metadata (set when using face-based extraction) ──
-    int  contourType{3};   ///< FaceGroupKind cast to int (3 = Unknown / legacy)
+    int  contourType{static_cast<int>(ContourKind::Unknown)};   ///< ContourKind cast to int
     QString sourceInfo;    ///< Debug info, e.g. "outer ∩ crossSection"
 };
 
@@ -184,7 +218,17 @@ struct ContourExtractionParams
 {
     double smoothAngleThresholdDeg{5.0}; ///< Angle threshold for smooth face adjacency
     double deflection{0.1};              ///< Chordal deflection for discretisation (mm)
-    bool   useFaceClassification{true};  ///< true = face-based, false = legacy OuterWire
+    ExtractionStrategy strategy{ExtractionStrategy::Auto}; ///< Extraction strategy
+
+    /// Beam travel direction in workpiece coordinates (home posture). Used by
+    /// Auto/PlanarFaceWires to select the machining face. Default -Z matches a
+    /// flat workpiece mounted on a vertical machine with identity wpc transform.
+    gp_Dir machiningBeamDirection{0.0, 0.0, -1.0};
+
+    /// User-picked machining faces (ManualFaceSelection). When non-empty, the
+    /// algorithm extracts all wires of exactly these faces. They must be
+    /// sub-shapes of \a workpiece so edge adjacency resolves.
+    std::vector<TopoDS_Face> selectedMachiningFaces;
 };
 
 class LaserToolpathBuilder
@@ -200,6 +244,35 @@ public:
         const TopoDS_Shape& workpiece,
         const ContourExtractionParams& params,
         FaceClassification* classificationOut = nullptr);
+
+    /// Select the machining face: the planar face whose outward normal most
+    /// opposes the beam direction (most directly faces the laser). Returns a
+    /// null face if no planar face faces the beam (ambiguous / tube side).
+    /// @param beamDirWpc  Beam travel direction in workpiece coordinates.
+    static TopoDS_Face selectMachiningFace(const TopoDS_Shape& workpiece,
+                                           const gp_Dir& beamDirWpc,
+                                           QString* info = nullptr);
+
+    /// Whether \a face is a planar surface.
+    static bool isPlanarFace(const TopoDS_Face& face);
+
+    /// Extract contours from an explicit machining-face group. Shared edges
+    /// inside that group are removed before chaining, so a manually selected
+    /// tube surface has the same external boundary as the classified tube path.
+    static std::vector<LaserContour> extractContoursFromFaces(
+        const TopoDS_Shape& workpiece,
+        const std::vector<TopoDS_Face>& faces,
+        const gp_Dir& beamDirWpc,
+        const ContourExtractionParams& params);
+
+    /// Extract tube cross-section contours from already separated face groups.
+    /// This is deliberately separate from face classification so a user can
+    /// review and edit outer/cross-section faces before contour extraction.
+    static std::vector<LaserContour> extractTubeContoursFromFaceGroups(
+        const TopoDS_Shape& workpiece,
+        const std::vector<TopoDS_Face>& outerFaces,
+        const std::vector<TopoDS_Face>& crossSectionFaces,
+        const ContourExtractionParams& params);
 
     /// Discretise a contour wire into sampled ToolpathPoints.
     /// @param contour    The contour to populate with sampled points.
@@ -280,6 +353,11 @@ public:
         MachineKinematics* kinematics,
         const gp_Trsf& wpcTransform,
         MachineCoord* initialState = nullptr);
+
+    /// Deterministic hash fingerprint of a face (area + centroid + surface type +
+    /// outer-wire vertex count). Stable across session boundaries so that manually
+    /// picked machining faces can be rebound after project reload.
+    static std::uint64_t computeFaceSignature(const TopoDS_Face& face);
 
 private:
     LaserToolpathBuilder() = delete;

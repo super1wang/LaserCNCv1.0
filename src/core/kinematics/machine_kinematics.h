@@ -80,6 +80,16 @@ public:
     /// World transform for an axis node at current axis positions.
     gp_Trsf computeAxisTransform(const QString& axisName) const;
 
+    /// Nominal laser beam direction in machine space at the home posture.
+    /// All current presets carry the laser head on the machine Z axis, so at
+    /// home the beam travels along -Z. Used to identify the machining face.
+    gp_Dir  nominalBeamDirectionMachine() const;
+
+    /// Workpiece->machine transform at the home posture (rotary axes treated
+    /// as zero), independent of the live commanded positions. Used to derive
+    /// the beam direction in workpiece coordinates for machining-face detection.
+    gp_Trsf computeWpcTransformHome(const QString& wpcEntry) const;
+
     // ── Axis position control ─────────────────────────────────────────────────
     /// Clamp to [minVal, maxVal] and emit axisPositionChanged.
     void setAxisPosition(const QString& axisName, double pos);
@@ -95,8 +105,8 @@ signals:
     void assignmentsChanged();
 
 private:
-    gp_Trsf axisLocalTrsf(const MachineAxisDef& axis) const;
-    gp_Trsf chainTrsf     (const QString& axisName)   const;
+    gp_Trsf axisLocalTrsf(const MachineAxisDef& axis, bool home = false) const;
+    gp_Trsf chainTrsf     (const QString& axisName, bool home = false) const;
     void    removeInvalidAssignments();
 
     QString               m_configType;

@@ -30,6 +30,9 @@ QIcon iconForProjectNode(ProjectExplorerNodeKind kind)
     case ProjectExplorerNodeKind::ToolpathLayer:
     case ProjectExplorerNodeKind::ToolpathContour:
         return QIcon(":/icons/toolpath.svg");
+    case ProjectExplorerNodeKind::MachiningFaceRoot:
+    case ProjectExplorerNodeKind::MachiningFace:
+        return QIcon(":/icons/shape.svg");
     case ProjectExplorerNodeKind::CadGroup:
     case ProjectExplorerNodeKind::MachineUnassignedGroup:
     default:
@@ -52,6 +55,7 @@ void configureProjectTreeItem(QTreeWidgetItem* item,
     item->setData(0, ProjectExplorerRoles::ContourIndex, node.contourIndex);
     item->setData(0, ProjectExplorerRoles::ContourId, static_cast<qulonglong>(node.contourId));
     item->setData(0, ProjectExplorerRoles::LayerId, static_cast<qulonglong>(node.layerId));
+    item->setData(0, ProjectExplorerRoles::MachiningFaceId, static_cast<qulonglong>(node.machiningFaceId));
     item->setData(0, ProjectExplorerRoles::AxisName, node.axisName);
     if (!node.toolTip.isEmpty())
         item->setToolTip(0, node.toolTip);

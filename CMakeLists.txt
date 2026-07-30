@@ -692,6 +692,10 @@ if(BUILD_TESTING)
         tests/cam_lead_in_test.cpp
     )
     target_link_libraries(lcnc_cam_lead_in_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_contour_extraction_test
+        tests/contour_extraction_test.cpp
+    )
+    target_link_libraries(lcnc_contour_extraction_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_process_runtime_configuration_test
         tests/process_runtime_configuration_test.cpp
     )
@@ -717,6 +721,10 @@ if(BUILD_TESTING)
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${_lcnc_runtime_bin}"
                 "$<TARGET_FILE_DIR:lcnc_cam_lead_in_test>")
+        add_custom_command(TARGET lcnc_contour_extraction_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${_lcnc_runtime_bin}"
+                "$<TARGET_FILE_DIR:lcnc_contour_extraction_test>")
         add_custom_command(TARGET lcnc_process_runtime_configuration_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${_lcnc_runtime_bin}"
@@ -729,12 +737,14 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_project_package_test)
     lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_test)
+    lcnc_deploy_tbb_runtime(lcnc_contour_extraction_test)
     lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
     lcnc_deploy_tbb_runtime(lcnc_device_command_queue_test)
     if(LCNC_ENABLE_ASAN)
         lcnc_deploy_asan_runtime(lcnc_project_package_test)
         lcnc_deploy_asan_runtime(lcnc_task_manager_test)
         lcnc_deploy_asan_runtime(lcnc_cam_lead_in_test)
+        lcnc_deploy_asan_runtime(lcnc_contour_extraction_test)
         lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
         lcnc_deploy_asan_runtime(lcnc_device_command_queue_test)
     endif()
@@ -748,6 +758,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_task_manager_test)
     add_test(NAME lcnc_cam_lead_in_test
         COMMAND lcnc_cam_lead_in_test)
+    add_test(NAME lcnc_contour_extraction_test
+        COMMAND lcnc_contour_extraction_test)
     add_test(NAME lcnc_process_runtime_configuration_test
         COMMAND lcnc_process_runtime_configuration_test)
     add_test(NAME lcnc_device_command_queue_test

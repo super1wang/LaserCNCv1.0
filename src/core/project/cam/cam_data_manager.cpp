@@ -8,6 +8,15 @@
 
 namespace lcnc::cam {
 
+namespace {
+
+constexpr std::size_t stageIndex(CamPipelineStage stage)
+{
+    return static_cast<std::size_t>(stage);
+}
+
+} // namespace
+
 CamDataManager::CamDataManager()
 {
     m_layerContainer.attach(&m_toolpath);
@@ -16,12 +25,81 @@ CamDataManager::CamDataManager()
 
 CamDataManager::~CamDataManager() = default;
 
+const CamPipelineStageState& CamDataManager::pipelineStageState(CamPipelineStage stage) const
+{
+    return m_pipelineStages.at(stageIndex(stage));
+}
+
+void CamDataManager::commitPipelineStage(CamPipelineStage stage, std::uint64_t inputRevision)
+{
+    CamPipelineStageState& state = m_pipelineStages.at(stageIndex(stage));
+    state.available = true;
+    state.dirty = false;
+    state.inputRevision = inputRevision;
+    ++state.revision;
+    state.failureReason.clear();
+    invalidatePipelineAfter(stage, QStringLiteral("上游 CAM 阶段已更新"));
+    m_dirty = true;
+}
+
+void CamDataManager::invalidatePipelineAfter(CamPipelineStage stage, const QString& reason)
+{
+    const std::size_t first = stageIndex(stage) + 1;
+    for (std::size_t index = first; index < m_pipelineStages.size(); ++index) {
+        CamPipelineStageState& state = m_pipelineStages[index];
+        if (state.available)
+            state.dirty = true;
+        state.failureReason = reason;
+    }
+}
+
+void CamDataManager::failPipelineStage(CamPipelineStage stage, const QString& reason)
+{
+    CamPipelineStageState& state = m_pipelineStages.at(stageIndex(stage));
+    state.dirty = true;
+    state.failureReason = reason;
+    invalidatePipelineAfter(stage, reason);
+    m_dirty = true;
+}
+
+void CamDataManager::clearPipelineStages()
+{
+    for (CamPipelineStageState& state : m_pipelineStages)
+        state = {};
+    m_dirty = true;
+}
+
+void CamDataManager::restorePipelineStageState(CamPipelineStage stage,
+                                                const CamPipelineStageState& state)
+{
+    m_pipelineStages.at(stageIndex(stage)) = state;
+}
+
+bool CamDataManager::hasCompletePipelineChain() const
+{
+    const CamPipelineStageState& face = pipelineStageState(CamPipelineStage::FaceSeparation);
+    if (!face.available || face.dirty)
+        return false;
+    CamPipelineStage previous = CamPipelineStage::FaceSeparation;
+    for (int index = static_cast<int>(CamPipelineStage::ContourExtraction);
+         index < static_cast<int>(CamPipelineStage::Count); ++index) {
+        const CamPipelineStage current = static_cast<CamPipelineStage>(index);
+        const CamPipelineStageState& state = pipelineStageState(current);
+        const CamPipelineStageState& upstream = pipelineStageState(previous);
+        if (!state.available || state.dirty || state.inputRevision != upstream.revision)
+            return false;
+        previous = current;
+    }
+    return true;
+}
+
 void CamDataManager::clearToolpath(bool resetIds)
 {
     m_toolpath.clear();
     m_layerContainer.clearManualOrder();
     m_layerContainer.setSortStrategy(CuttingPlanSortStrategy::LayerThenContour);
     m_layerContainer.setLastAutoSortAxis(AutoSortAxis::XPos);
+    clearPipelineStages();
     if (resetIds) {
         m_nextContourId = 1;
         m_nextLayerId = 1;
