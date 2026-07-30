@@ -157,7 +157,7 @@ Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `Proces
 
 ## 自动化架构门禁
 
-`scripts/check_architecture.ps1` 是 CTest 的 `architecture_checks`。它拒绝 core/view 反向依赖、纯算法依赖 UI/文档/Kernel、Process 对 OCC 的 include、设备公共头泄漏兼容日志、Process settings singleton、已淘汰文档 API，以及未纳入 `CMakeLists.txt` 的 `.cpp`。标准验证命令为 `ctest --test-dir build --build-config Debug --output-on-failure`。
+`scripts/check_architecture.ps1` 是 CTest 的 `architecture_checks`。它拒绝 core/view 反向依赖、纯算法依赖 UI/文档/Kernel、Process 对 OCC 的 include、设备公共头泄漏兼容日志、Process settings singleton、已淘汰文档 API，以及未纳入 `CMakeLists.txt` 的 `.cpp`。标准验证命令为 `ctest --test-dir build-cmake --build-config Debug --output-on-failure`。构建目录和应用输出约定以 `BUILD.md` 为准。
 
 ## 9. 异步与内存安全规则
 

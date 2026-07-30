@@ -7,16 +7,29 @@
   },
   "configurePresets": [
     {
-      "name": "base-ninja",
+      "name": "base-config",
       "hidden": true,
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "LCNC_WITH_ACS": "ON",
         "LCNC_WITH_GTN": "ON",
         "LCNC_WITH_BDAQ": "OFF",
         "LCNC_WITH_REAL_LASER": "OFF"
       }
+    },
+    {
+      "name": "base-ninja",
+      "hidden": true,
+      "inherits": "base-config",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build-cmake"
+    },
+    {
+      "name": "base-vs",
+      "hidden": true,
+      "inherits": "base-config",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build-vs"
     },
     {
       "name": "all-off",
@@ -55,8 +68,17 @@
     },
     {
       "name": "acs-gtn",
-      "displayName": "Debug with ACS and GTN adapters",
+      "displayName": "CMake/Ninja with ACS and GTN adapters",
       "inherits": "base-ninja",
+      "cacheVariables": {
+        "LCNC_WITH_ACS": "ON",
+        "LCNC_WITH_GTN": "ON"
+      }
+    },
+    {
+      "name": "vs-acs-gtn",
+      "displayName": "Visual Studio solution with ACS and GTN adapters",
+      "inherits": "base-vs",
       "cacheVariables": {
         "LCNC_WITH_ACS": "ON",
         "LCNC_WITH_GTN": "ON"
@@ -92,6 +114,16 @@
     {
       "name": "acs-gtn-release",
       "configurePreset": "acs-gtn",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs-acs-gtn-debug",
+      "configurePreset": "vs-acs-gtn",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs-acs-gtn-release",
+      "configurePreset": "vs-acs-gtn",
       "configuration": "Release"
     }
   ]

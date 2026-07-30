@@ -4,7 +4,7 @@
 # 需要随 exe 一起部署的 DLL 后。运行后必须把 3rd/runtime/ 的差异提交到 git。
 #
 # 工作原理：
-#   1. 以唯一 build/ 树重新链接当前配置的 LaserCNC.exe（确保是最新的）。
+#   1. 以 build-cmake/ 或 build-vs/ 的当前配置重新链接 LaserCNC.exe。
 #   2. 用 windeployqt 让 Qt 自己分析 x64/<Config>/LaserCNC.exe 的 import，把它需要的 Qt
 #      DLL + 插件子目录 (platforms/, imageformats/, ...) 拷贝到该运行目录。
 #   3. 把 OCC 的 TK*.dll、OCC 的 3rd-party (FreeImage / freetype / ffmpeg /

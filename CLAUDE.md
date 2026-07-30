@@ -4,11 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
+`BUILD.md` is authoritative. Preserve both supported routes and never share a
+generated tree between them:
+
+- CMake/Ninja uses `build-cmake/` and the `acs-gtn` family of presets.
+- Visual Studio/MSBuild uses `build-vs/`, `build-vs/LaserCNC.sln`, and the
+  `vs-acs-gtn` family of presets.
+- The legacy `build/` tree is forbidden.
+- Both routes deploy `LaserCNC.exe` and runtime files only to root
+  `x64/Debug` or `x64/Release`; intermediates stay in their generator tree.
+- MSBuild flags such as `/m` and `/nologo` must never be passed to Ninja.
+  Do not build the two routes concurrently because they share the deployment
+  directory.
+
 ```powershell
+# CMake/Ninja
 cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
+
+# Visual Studio/MSBuild
+cmake --preset vs-acs-gtn
+cmake --build --preset vs-acs-gtn-debug --parallel 16
 ```
 
-- `build/` is the shared Ninja Multi-Config tree. Do not pass MSBuild-specific flags.
 - Single CMake target: `LaserCNC` (WIN32 executable).
 - Requires CMake 3.20+, MSVC 2022 x64 (19.44+), C++17.
 - Qt 6.9.1, OpenCASCADE 7.9.0, SARibbon — paths configured via CMake cache variables (`LCNC_QT6_ROOT`, `LCNC_OCCT_ROOT`, `LCNC_SARIBBON_ROOT`).
@@ -175,6 +192,6 @@ Archive writes use a sibling staging zip followed by a Windows atomic replacemen
 1. Build passes using the command in the Build section.
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
 3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument\|sourceDocument`
-4. Run the CTest architecture gate: `ctest --test-dir build/debug --output-on-failure`
+4. Run the CTest architecture gate: `ctest --test-dir build-cmake --build-config Debug --output-on-failure`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)
 5. Memory-sensitive changes additionally build `cmake --preset asan && cmake --build --preset asan`; do not enable Application Verifier without explicit user/test-run authority.

@@ -28,9 +28,9 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 
 内存检查可使用 `cmake --preset asan`、`cmake --build --preset asan`，再以 `scripts/collect_runtime_baseline.ps1` 对 ASan 产物采集资源基线；Application Verifier 仅通过 `scripts/application_verifier.ps1 -Enable` 显式配置。
 
-架构门禁运行 `ctest --test-dir build --build-config Debug --output-on-failure`；它检查分层依赖、纯算法边界、Process OCC/设置注入/设备公共头边界、淘汰 API 与孤儿源文件。
+架构门禁运行 `ctest --test-dir build-cmake --build-config Debug --output-on-failure`；它检查分层依赖、纯算法边界、Process OCC/设置注入/设备公共头边界、淘汰 API 与孤儿源文件。
 
-日常构建默认启用 ACS 与 GTN，使用单一 Ninja Multi-Config `build/` 树；应用部署到 `x64/Debug` 或 `x64/Release`。all-off、ACS、GTN 和 ASan 保留为显式验证 preset。GTN 和 ACS adapter 均由各自开关控制，并通过构造注入的 Process 设置服务读取配置；all-off 使用不依赖供应商 SDK 的本地 `Simulator` 与 `PureSimulationSink`。控制器状态以 150 ms 在专用单线程池采集，安全 IO 以 500 ms 采集，串口外设以 2 s 低频采集且串口对象不归属 GUI 线程。
+日常构建默认启用 ACS 与 GTN。CMake/Ninja 使用 `build-cmake/`，Visual Studio/MSBuild 使用 `build-vs/`；旧 `build/` 禁止继续使用。两条路线均只把应用部署到 `x64/Debug` 或 `x64/Release`。all-off、ACS、GTN 和 ASan 保留为 CMake/Ninja 的显式验证 preset。GTN 和 ACS adapter 均由各自开关控制，并通过构造注入的 Process 设置服务读取配置；all-off 使用不依赖供应商 SDK 的本地 `Simulator` 与 `PureSimulationSink`。控制器状态以 150 ms 在专用单线程池采集，安全 IO 以 500 ms 采集，串口外设以 2 s 低频采集且串口对象不归属 GUI 线程。
 
 ## 主要目录
 
@@ -47,13 +47,23 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 
 ## 构建
 
-要求 CMake 3.20+、MSVC x64、Qt 6.9.1、OpenCASCADE 7.9.0 与 SARibbon。日常构建使用 Ninja Multi-Config，不能附加 MSBuild 的 `/m /nologo` 参数。
+要求 CMake 3.20+、MSVC x64、Qt 6.9.1、OpenCASCADE 7.9.0 与 SARibbon。完整且权威的两路线约定见 [BUILD.md](BUILD.md)。
+
+| 路线 | 生成树 | 命令/入口 |
+| --- | --- | --- |
+| CMake/Ninja | `build-cmake/` | `acs-gtn`、`acs-gtn-debug` 等 preset |
+| Visual Studio/MSBuild | `build-vs/` | `vs-acs-gtn` preset 或 `build-vs/LaserCNC.sln` |
 
 ```powershell
+# CMake/Ninja
 cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
+
+# Visual Studio/MSBuild
+cmake --preset vs-acs-gtn
+cmake --build --preset vs-acs-gtn-debug --parallel 16
 ```
 
-Debug 运行文件位于 `x64/Debug`，Release 位于 `x64/Release`。两个目录只部署应用、运行时 DLL/Qt 插件、`Simulator.prg`、基础配置和可写的 `logs/`；符号、测试和 CMake 中间产物保留在 `build/`。执行 `scripts/clean_legacy_build_artifacts.ps1` 可预览旧构建树清理范围，确认后使用 `-Execute` 删除。
+Debug 运行文件位于 `x64/Debug`，Release 位于 `x64/Release`。两个目录是唯一应用输出，只部署应用、运行时 DLL/Qt 插件、`Simulator.prg`、基础配置和可写的 `logs/`；符号、测试和中间产物保留在 `build-cmake/` 或 `build-vs/`。两条路线不可并发构建，也不能相互复用生成树。执行 `scripts/clean_legacy_build_artifacts.ps1` 可预览旧 `build/` 等历史目录，确认后使用 `-Execute` 删除。
 
 本地 SDK 路径通过 `LCNC_QT6_ROOT`、`LCNC_OCCT_ROOT`、`LCNC_SARIBBON_ROOT`、`LCNC_QUAZIP_ROOT` 等 CMake cache 变量配置。硬件开关包括 `LCNC_WITH_ACS`、`LCNC_WITH_GTN`、`LCNC_WITH_BDAQ`、`LCNC_WITH_REAL_LASER`。
 
@@ -62,9 +72,9 @@ Debug 运行文件位于 `x64/Debug`，Release 位于 `x64/Release`。两个目�
 当前 format v4 使用 QuaZip，包含 `project.toml`、`workpiece.xbf`、`cam_toolpath.toml`、`cam_toolpath_points.bin` 和项目工具快照 `tools.toml`。机台模型不属于工程包；manifest 记录软件、机台和算法可追溯信息。桌面端仅打开 v4；旧 v1/v2/v3 工程必须先运行 `lcnc_project_upgrade <input.lcnc> <output.lcnc> [--tools <tools.toml>]`，工具不会覆盖输入文件。升级器会保留源包中的 `tools.toml`；没有快照的旧包必须通过 `--tools` 提供完整快照，不能把全局工具名当作项目参数。
 若工程记录的机台构型与当前机台不一致，软件会提示该差异：允许查看和仿真，但会禁止真实加工，直至确认配置后重新保存工程。
 归档保存使用 staging 文件后原子替换，保存失败会保留旧工程包。
-工程包回归测试包含在 `ctest --test-dir build --build-config Debug --output-on-failure` 中，覆盖 v4 工具快照 round-trip、缺快照拒绝、失败保存不改写既有包，以及实际离线工具的 v1/v2/v3 结构 fixture 升级。
+工程包回归测试包含在 `ctest --test-dir build-cmake --build-config Debug --output-on-failure` 中，覆盖 v4 工具快照 round-trip、缺快照拒绝、失败保存不改写既有包，以及实际离线工具的 v1/v2/v3 结构 fixture 升级。
 同一 CTest 套件还覆盖 TaskManager 的协作取消、超时与异常失败边界，以及 Process 运行时配置的轴归一化、伪轴过滤和权限状态。
-内存检查可使用 `cmake --preset asan && cmake --build --preset asan && ctest --test-dir build --build-config Debug --output-on-failure`；ASan preset 会自动部署其运行时和 OCCT TBB DLL。
+内存检查可使用 `cmake --preset asan && cmake --build --preset asan && ctest --test-dir build-cmake --build-config Debug --output-on-failure`；ASan preset 会自动部署其运行时和 OCCT TBB DLL。
 Process 配置在启动时完成校验后才创建设备服务；默认工具、控制器和激光器均从同一份已注入设置读取。
 资源采集使用 `scripts/collect_runtime_baseline.ps1`；它输出 CSV 并可用 `-MaxPrivateBytesGrowth`、`-MaxHandleGrowth` 设置长期门禁。启动初始化阶段应单独观察，不应与稳定段混为泄漏结论。
 

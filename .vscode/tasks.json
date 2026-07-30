@@ -2,10 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      // 与 CMake Tools 和 launch 使用同一个 ACS+GTN Multi-Config preset。
+      // 配置并构建独立的 build-cmake/ ACS+GTN Multi-Config 生成树。
       "label": "CMake: build",
       "type": "shell",
-      "command": "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Insiders\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --build --preset acs-gtn-debug --parallel 16",
+      "command": "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Insiders\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16",
       "options": {
         "shell": {
           "executable": "cmd.exe",

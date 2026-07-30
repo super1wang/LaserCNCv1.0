@@ -1,5 +1,7 @@
 # CMake and Visual Studio build output
 /build/
+/build-cmake/
+/build-vs/
 /build_debug/
 /build_release/
 /x64/

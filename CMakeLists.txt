@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
-project(LaserCNC VERSION 1.2.0 LANGUAGES CXX)
+
+file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/build" _lcnc_legacy_build_dir)
+file(REAL_PATH "${CMAKE_BINARY_DIR}" _lcnc_binary_dir)
+if(_lcnc_binary_dir STREQUAL _lcnc_legacy_build_dir)
+    message(FATAL_ERROR
+        "The legacy build/ tree is no longer supported because Visual Studio "
+        "and Ninja previously shared it. Use preset acs-gtn (build-cmake/) "
+        "or vs-acs-gtn (build-vs/).")
+endif()
+
+project(LaserCNC VERSION 1.2.1 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -564,8 +574,11 @@ add_executable(LaserCNC WIN32
     src/main.cpp
     resources/resources.qrc
 )
-set(LCNC_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/x64" CACHE PATH
-    "Root directory for deployable LaserCNC runtime files")
+# Both supported generator trees deploy the application to the same canonical
+# runtime root. This is intentionally not a cache variable: build trees contain
+# intermediates, tests and symbols only; x64/<Config> is the sole app output.
+unset(LCNC_RUNTIME_OUTPUT_ROOT CACHE)
+set(LCNC_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/x64")
 set_target_properties(LaserCNC PROPERTIES
     AUTOMOC ON
     AUTORCC ON

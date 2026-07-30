@@ -110,9 +110,10 @@
 
 已完成：
 
-- 使用 `cmake --fresh --preset acs-gtn` 将误配的 Visual Studio 生成树恢复为仓库规定的 Ninja Multi-Config。
-- `cmake --build --preset acs-gtn-debug --parallel 16`：通过，成功生成 `x64/Debug/LaserCNC.exe`。
-- `ctest --test-dir build --build-config Debug --output-on-failure`：7/7 通过。
+- `cmake --preset acs-gtn` 与 `cmake --build --preset acs-gtn-debug --parallel 16`：在独立 `build-cmake/` 通过。
+- `cmake --preset vs-acs-gtn` 与 `cmake --build --preset vs-acs-gtn-debug --parallel 16`：生成并构建独立 `build-vs/LaserCNC.sln`，通过。
+- 两条路线均成功生成唯一应用输出 `x64/Debug/LaserCNC.exe`。
+- `build-cmake/` 与 `build-vs/` 的 CTest 均为 7/7 通过。
 - `scripts/check_architecture.ps1 -Root .`：通过。
 - CMake 孤儿 `.cpp`：0。
 - 未被其他翻译单元消费的成对头/实现：0。

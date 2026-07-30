@@ -4,12 +4,28 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Build
 
+以 `BUILD.md` 为唯一构建约定。必须记住并保持两条路线完全隔离：
+
+- CMake/Ninja：`build-cmake/`，使用 `acs-gtn` 与 `acs-gtn-debug` 等 preset。
+- Visual Studio/MSBuild：`build-vs/`，生成并打开
+  `build-vs/LaserCNC.sln`，使用 `vs-acs-gtn` preset 或直接 MSBuild。
+- 禁止使用旧 `build/`，禁止让两种生成器共享任何生成树。
+- 两条路线的 `LaserCNC.exe` 和运行依赖都只输出到根目录
+  `x64/Debug` 或 `x64/Release`；中间产物留在各自生成树。
+- `/m`、`/nologo` 只传给 MSBuild，绝不传给 Ninja。两条路线不得并发构建。
+
+日常 CMake/Ninja：
+
 ```powershell
 cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
 ```
 
-- `build/` 是唯一的 Ninja Multi-Config 生成树，不要追加 MSBuild 专用的 `/m /nologo`。
-- 日常 ACS+GTN 构建将 `LaserCNC.exe` 及运行时依赖部署到 `x64/Debug` 或 `x64/Release`；测试、符号和 CMake 中间文件必须留在 `build/`。
+Visual Studio/MSBuild：
+
+```powershell
+cmake --preset vs-acs-gtn
+cmake --build --preset vs-acs-gtn-debug --parallel 16
+```
 
 - Single CMake target: `LaserCNC` (WIN32 executable).
 - Requires CMake 3.20+, MSVC 2022 x64, C++17.
@@ -138,5 +154,5 @@ The `asan` preset must deploy `clang_rt.asan_dynamic-x86_64.dll` and the selecte
 2. Layer check: no `core/**` includes `view/modules/app`; no `view/**` includes `modules/app`
 3. No legacy API usage: grep for `projectDocument\|workspaceGuiDocument\|ensureProjectDocument\|sourceDocument`
 4. Process module: no OCC includes (grep for `TopoDS\|AIS_\|gp_\|Geom_\|BRep\|XCAF` in `src/modules/process/`)
-5. CTest architecture gate: `ctest --test-dir build --build-config Debug --output-on-failure`
+5. CTest architecture gate: `ctest --test-dir build-cmake --build-config Debug --output-on-failure`
 5. Memory-sensitive changes additionally build `cmake --preset asan && cmake --build --preset asan`; do not enable Application Verifier without explicit user/test-run authority.

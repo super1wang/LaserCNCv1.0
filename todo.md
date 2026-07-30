@@ -44,6 +44,6 @@
 - [ ] `git diff --check`
 - [ ] `cmake --preset acs-gtn`
 - [ ] `cmake --build --preset acs-gtn-debug --parallel 16`
-- [ ] `ctest --test-dir build --build-config Debug --output-on-failure`
+- [ ] `ctest --test-dir build-cmake --build-config Debug --output-on-failure`
 - [ ] `scripts/check_architecture.ps1 -Root .`
 - [ ] 涉及真实硬件时执行输出安全、Stop 优先级和断开检查
