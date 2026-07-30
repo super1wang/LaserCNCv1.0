@@ -11,9 +11,11 @@
 // ── CmdUndo ────────────────────────────────────────────────────────────────────
 CmdUndo::CmdUndo(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/undo.svg"), tr("撤销"), this);
+    // 中文翻译：撤销
+    auto* a = new QAction(QIcon(":/icons/undo.svg"), tr("Cancel"), this);
     a->setShortcut(QKeySequence::Undo);
-    a->setStatusTip(tr("撤销上一步操作"));
+    // 中文翻译：撤销上一步操作
+    a->setStatusTip(tr("Undo the previous action"));
     setAction(a);
 }
 
@@ -31,9 +33,11 @@ void CmdUndo::execute()
 // ── CmdRedo ────────────────────────────────────────────────────────────────────
 CmdRedo::CmdRedo(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/redo.svg"), tr("重做"), this);
+    // 中文翻译：重做
+    auto* a = new QAction(QIcon(":/icons/redo.svg"), tr("Redo"), this);
     a->setShortcut(QKeySequence::Redo);
-    a->setStatusTip(tr("重做上一步操作"));
+    // 中文翻译：重做上一步操作
+    a->setStatusTip(tr("Redo the previous step"));
     setAction(a);
 }
 

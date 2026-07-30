@@ -334,8 +334,10 @@ void MachineKinematics::autoDetect(const QMap<QString,QString>& entryToName)
     kw << KwPair(QStringLiteral("frame"),   QStringLiteral("BASE"));
     kw << KwPair(QStringLiteral("body"),    QStringLiteral("BASE"));
     kw << KwPair(QStringLiteral("machine"), QStringLiteral("BASE"));
-    kw << KwPair(QString::fromUtf8("固定"), QStringLiteral("BASE"));
-    kw << KwPair(QString::fromUtf8("基座"), QStringLiteral("BASE"));
+    // 中文翻译：固定
+    kw << KwPair(QString::fromUtf8("Fixed"), QStringLiteral("BASE"));
+    // 中文翻译：基座
+    kw << KwPair(QString::fromUtf8("base"), QStringLiteral("BASE"));
 
     for (const auto& axis : m_axes) {
         if (axis.name == QStringLiteral("BASE")) continue;
@@ -343,8 +345,10 @@ void MachineKinematics::autoDetect(const QMap<QString,QString>& entryToName)
         kw << KwPair(al + QStringLiteral("_axis"),  axis.name);
         kw << KwPair(al + QStringLiteral("-axis"),  axis.name);
         kw << KwPair(QStringLiteral("axis_") + al,  axis.name);
-        kw << KwPair(al + QString::fromUtf8("_轴"), axis.name);
-        kw << KwPair(al + QString::fromUtf8("轴"),  axis.name);
+        // 中文翻译：_轴
+        kw << KwPair(al + QString::fromUtf8("_axis"), axis.name);
+        // 中文翻译：轴
+        kw << KwPair(al + QString::fromUtf8("axis"),  axis.name);
         kw << KwPair(al + QStringLiteral("_slide"), axis.name);
         kw << KwPair(al + QStringLiteral("_table"), axis.name);
         kw << KwPair(al + QStringLiteral("_head"),  axis.name);

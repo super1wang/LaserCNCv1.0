@@ -73,7 +73,8 @@ template <class T>
 bool ServiceRegistry::registerService(std::shared_ptr<T> svc)
 {
     static_assert(std::is_base_of_v<IService, T>,
-                  "ServiceRegistry::registerService<T>: T 必须继承自 lcnc::IService");
+                  // 中文翻译：ServiceRegistry::registerService<T>: T 必须继承自 lcnc::IService
+                  "ServiceRegistry::registerService<T>: T must inherit from lcnc::IService");
 
     if (!svc) {
         LCNC_WARN(LogCode::InternalUnexpectedState,

@@ -99,8 +99,10 @@ void WidgetLaserControl::buildUi()
     logLayout->addWidget(m_logView);
 
     controlScroll->setWidget(m_controlPage);
-    m_tabs->addTab(controlScroll, tr("控制"));
-    m_tabs->addTab(m_logPage, tr("系统日志"));
+    // 中文翻译：控制
+    m_tabs->addTab(controlScroll, tr("control"));
+    // 中文翻译：系统日志
+    m_tabs->addTab(m_logPage, tr("System log"));
     mainLayout->addWidget(m_tabs);
 
     buildProcessGroup();
@@ -114,28 +116,35 @@ void WidgetLaserControl::buildUi()
 
 void WidgetLaserControl::buildAxisGroup()
 {
-    m_axisGroup = new QGroupBox(tr("轴位置"), this);
+    // 中文翻译：轴位置
+    m_axisGroup = new QGroupBox(tr("axis position"), this);
     m_controlLayout->addWidget(m_axisGroup);
     rebuildAxisGroup();
 }
 
 void WidgetLaserControl::buildJogGroup()
 {
-    m_jogGroup = new QGroupBox(tr("手动点动"), this);
+    // 中文翻译：手动点动
+    m_jogGroup = new QGroupBox(tr("Manual jog"), this);
     m_controlLayout->addWidget(m_jogGroup);
     rebuildJogGroup();
 }
 
 void WidgetLaserControl::buildProcessGroup()
 {
-    auto* group = new QGroupBox(tr("加工控制"), this);
+    // 中文翻译：加工控制
+    auto* group = new QGroupBox(tr("Process control"), this);
     auto* vlay  = new QVBoxLayout(group);
     auto* row = new QHBoxLayout();
 
-    m_btnRun = new QPushButton(QIcon(":/icons/start.svg"), tr("运行"), group);
-    m_btnPause = new QPushButton(QIcon(":/icons/pause.svg"), tr("暂停"), group);
-    m_btnResume = new QPushButton(QIcon(":/icons/start.svg"), tr("继续"), group);
-    m_btnStop = new QPushButton(QIcon(":/icons/stop.svg"), tr("停止"), group);
+    // 中文翻译：运行
+    m_btnRun = new QPushButton(QIcon(":/icons/start.svg"), tr("run"), group);
+    // 中文翻译：暂停
+    m_btnPause = new QPushButton(QIcon(":/icons/pause.svg"), tr("pause"), group);
+    // 中文翻译：继续
+    m_btnResume = new QPushButton(QIcon(":/icons/start.svg"), tr("continue"), group);
+    // 中文翻译：停止
+    m_btnStop = new QPushButton(QIcon(":/icons/stop.svg"), tr("stop"), group);
 
     m_btnRun->setProperty("role", "run");
     m_btnPause->setProperty("role", "pause");
@@ -167,7 +176,8 @@ void WidgetLaserControl::buildProcessGroup()
 
 void WidgetLaserControl::buildIoGroup()
 {
-    m_ioGroup = new QGroupBox(tr("IO 状态"), this);
+    // 中文翻译：IO 状态
+    m_ioGroup = new QGroupBox(tr("IO status"), this);
     auto* grid = new QGridLayout(m_ioGroup);
     grid->setContentsMargins(4, 4, 4, 4);
     // 初始为空 — 由 ProcessModule::digitalOutputDescriptorsChanged 通过
@@ -195,7 +205,8 @@ void WidgetLaserControl::setDigitalOutputDescriptors(const QList<DigitalOutputDe
     m_ioButtons.clear();
 
     if (descriptors.isEmpty()) {
-        auto* placeholder = new QLabel(tr("未配置主界面 IO"), m_ioGroup);
+        // 中文翻译：未配置主界面 IO
+        auto* placeholder = new QLabel(tr("Main interface IO is not configured"), m_ioGroup);
         placeholder->setStyleSheet("color: gray; font-size: 11px;");
         if (grid)
             grid->addWidget(placeholder, 0, 0, 1, 2);
@@ -211,7 +222,8 @@ void WidgetLaserControl::setDigitalOutputDescriptors(const QList<DigitalOutputDe
         button->setCheckable(true);
         button->setMinimumHeight(30);
         button->setProperty("channel", desc.channel);
-        button->setToolTip(tr("点击切换 %1 输出 (channel=%2)").arg(display, desc.channel));
+        // 中文翻译：点击切换 %1 输出 (channel=%2)
+        button->setToolTip(tr("Click to toggle %1 output (channel=%2)").arg(display, desc.channel));
         m_ioButtons.insert(display, button);
         updateIoButtonStyle(display, false);
         connect(button, &QPushButton::clicked, this, [this, display](bool checked) {
@@ -227,7 +239,8 @@ void WidgetLaserControl::setDigitalOutputDescriptors(const QList<DigitalOutputDe
 
 void WidgetLaserControl::buildStatusGroup()
 {
-    auto* group = new QGroupBox(tr("状态显示"), this);
+    // 中文翻译：状态显示
+    auto* group = new QGroupBox(tr("status display"), this);
     auto* layout = new QVBoxLayout(group);
     m_statusLabel = new QLabel(group);
     m_statusLabel->setAlignment(Qt::AlignCenter);
@@ -238,17 +251,21 @@ void WidgetLaserControl::buildStatusGroup()
     m_processingProgressBar = new QProgressBar(group);
     m_processingProgressBar->setRange(0, 100);
     m_processingProgressBar->setValue(0);
-    m_processingProgressBar->setFormat(tr("加工进度: %p%"));
+    // 中文翻译：加工进度: %p%
+    m_processingProgressBar->setFormat(tr("Processing progress: %p%"));
     layout->addWidget(m_processingProgressBar);
 
     auto* stats = new QGridLayout();
-    stats->addWidget(new QLabel(tr("加工时间:"), group), 0, 0);
+    // 中文翻译：加工时间:
+    stats->addWidget(new QLabel(tr("Processing time:"), group), 0, 0);
     m_processingTimeLabel = new QLabel(group);
     stats->addWidget(m_processingTimeLabel, 0, 1);
-    stats->addWidget(new QLabel(tr("总轮廓数:"), group), 1, 0);
+    // 中文翻译：总轮廓数:
+    stats->addWidget(new QLabel(tr("Total number of contours:"), group), 1, 0);
     m_totalContoursLabel = new QLabel(group);
     stats->addWidget(m_totalContoursLabel, 1, 1);
-    stats->addWidget(new QLabel(tr("已加工轮廓数:"), group), 2, 0);
+    // 中文翻译：已加工轮廓数:
+    stats->addWidget(new QLabel(tr("Number of contours processed:"), group), 2, 0);
     m_completedContoursLabel = new QLabel(group);
     stats->addWidget(m_completedContoursLabel, 2, 1);
     layout->addLayout(stats);
@@ -315,7 +332,8 @@ void WidgetLaserControl::rebuildAxisGroup()
     }
 
     if (axisIndex == 0) {
-        auto* placeholder = new QLabel(tr("加载机台并配置轴系后显示"), m_axisGroup);
+        // 中文翻译：加载机台并配置轴系后显示
+        auto* placeholder = new QLabel(tr("Display after loading the machine and configuring the axis system"), m_axisGroup);
         placeholder->setStyleSheet("color: gray; font-size: 11px;");
         grid->addWidget(placeholder, 0, 0, 1, 6);
     }
@@ -333,10 +351,14 @@ void WidgetLaserControl::rebuildJogGroup()
 
     auto* modeSpeedRow = new QHBoxLayout();
     modeSpeedRow->setSpacing(3);
-    modeSpeedRow->addWidget(new QLabel(tr("模式:"), m_jogGroup));
-    auto* btnRelative = new QPushButton(tr("相对"), m_jogGroup);
-    auto* btnAbsolute = new QPushButton(tr("绝对"), m_jogGroup);
-    auto* btnContinuous = new QPushButton(tr("连续"), m_jogGroup);
+    // 中文翻译：模式:
+    modeSpeedRow->addWidget(new QLabel(tr("Mode:"), m_jogGroup));
+    // 中文翻译：相对
+    auto* btnRelative = new QPushButton(tr("relatively"), m_jogGroup);
+    // 中文翻译：绝对
+    auto* btnAbsolute = new QPushButton(tr("Absolutely"), m_jogGroup);
+    // 中文翻译：连续
+    auto* btnContinuous = new QPushButton(tr("continuous"), m_jogGroup);
     for (auto* b : {btnRelative, btnAbsolute, btnContinuous}) {
         b->setCheckable(true);
         b->setFixedWidth(38);
@@ -362,10 +384,14 @@ void WidgetLaserControl::rebuildJogGroup()
     modeSpeedRow->addWidget(btnAbsolute);
     modeSpeedRow->addWidget(btnContinuous);
     modeSpeedRow->addSpacing(8);
-    modeSpeedRow->addWidget(new QLabel(tr("速度:"), m_jogGroup));
-    auto* btnSlow = new QPushButton(tr("慢"), m_jogGroup);
-    auto* btnMed  = new QPushButton(tr("中"), m_jogGroup);
-    auto* btnFast = new QPushButton(tr("快"), m_jogGroup);
+    // 中文翻译：速度:
+    modeSpeedRow->addWidget(new QLabel(tr("Speed:"), m_jogGroup));
+    // 中文翻译：慢
+    auto* btnSlow = new QPushButton(tr("slow"), m_jogGroup);
+    // 中文翻译：中
+    auto* btnMed  = new QPushButton(tr("in"), m_jogGroup);
+    // 中文翻译：快
+    auto* btnFast = new QPushButton(tr("Fast"), m_jogGroup);
     btnSlow->setCheckable(true);
     btnMed->setCheckable(true);
     btnFast->setCheckable(true);
@@ -389,7 +415,8 @@ void WidgetLaserControl::rebuildJogGroup()
     vlay->addLayout(modeSpeedRow);
 
     auto* distanceRow = new QHBoxLayout();
-    m_jogValueLabel = new QLabel(tr("距离:"), m_jogGroup);
+    // 中文翻译：距离:
+    m_jogValueLabel = new QLabel(tr("Distance:"), m_jogGroup);
     distanceRow->addWidget(m_jogValueLabel);
     m_jogDistanceSpin = new QDoubleSpinBox(m_jogGroup);
     m_jogDistanceSpin->setRange(-1000000.0, 1000000.0);
@@ -416,8 +443,10 @@ void WidgetLaserControl::rebuildJogGroup()
         auto* btnMinus = new QPushButton(QIcon(":/icons/jog_negative.svg"), tr("−"), m_jogGroup);
         btnPlus->setProperty("jogDirection", "positive");
         btnMinus->setProperty("jogDirection", "negative");
-        btnPlus->setToolTip(tr("%1 正方向点动").arg(axis.name));
-        btnMinus->setToolTip(tr("%1 负方向点动").arg(axis.name));
+        // 中文翻译：%1 正方向点动
+        btnPlus->setToolTip(tr("%1 Jog in positive direction").arg(axis.name));
+        // 中文翻译：%1 负方向点动
+        btnMinus->setToolTip(tr("%1 Negative direction jog").arg(axis.name));
         btnPlus->setIconSize(QSize(16, 16));
         btnMinus->setIconSize(QSize(16, 16));
         btnPlus->setAutoRepeat(false);
@@ -440,7 +469,8 @@ void WidgetLaserControl::rebuildJogGroup()
     }
 
     if (row == 0) {
-        auto* placeholder = new QLabel(tr("加载机台并配置轴系后显示"), m_jogGroup);
+        // 中文翻译：加载机台并配置轴系后显示
+        auto* placeholder = new QLabel(tr("Display after loading the machine and configuring the axis system"), m_jogGroup);
         placeholder->setStyleSheet("color: gray; font-size: 11px;");
         vlay->addWidget(placeholder);
     } else {
@@ -589,22 +619,28 @@ void WidgetLaserControl::updateJogModeUi()
 
     switch (m_jogMode) {
     case JogMode::Absolute:
-        m_jogValueLabel->setText(tr("位置:"));
+        // 中文翻译：位置:
+        m_jogValueLabel->setText(tr("Location:"));
         m_jogDistanceSpin->setEnabled(true);
         m_jogDistanceSpin->setMinimum(0.0);
-        m_jogDistanceSpin->setToolTip(tr("+ 按钮移动到正目标位置，- 按钮移动到负目标位置。"));
+        // 中文翻译：+ 按钮移动到正目标位置，- 按钮移动到负目标位置。
+        m_jogDistanceSpin->setToolTip(tr("The + button moves to the positive target position and the - button moves to the negative target position."));
         break;
     case JogMode::Continuous:
-        m_jogValueLabel->setText(tr("距离:"));
+        // 中文翻译：距离:
+        m_jogValueLabel->setText(tr("Distance:"));
         m_jogDistanceSpin->setEnabled(false);
-        m_jogDistanceSpin->setToolTip(tr("连续模式按住 +/- 运动，松开停止。"));
+        // 中文翻译：连续模式按住 +/- 运动，松开停止。
+        m_jogDistanceSpin->setToolTip(tr("Continuous mode press and hold +/- to move, release to stop."));
         break;
     case JogMode::Relative:
     default:
-        m_jogValueLabel->setText(tr("距离:"));
+        // 中文翻译：距离:
+        m_jogValueLabel->setText(tr("Distance:"));
         m_jogDistanceSpin->setEnabled(true);
         m_jogDistanceSpin->setMinimum(0.001);
-        m_jogDistanceSpin->setToolTip(tr("相对模式每次点击按该距离运动。"));
+        // 中文翻译：相对模式每次点击按该距离运动。
+        m_jogDistanceSpin->setToolTip(tr("In relative mode, each click moves by this distance."));
         break;
     }
 }
@@ -634,10 +670,13 @@ void WidgetLaserControl::refreshStatusBanner()
     if (!m_statusLabel)
         return;
     const QString fallback = m_simulationMode
-        ? (m_connected ? tr("仿真模式 — 控制器已连接") : tr("仿真模式 — 未连接"))
-        : (m_connected ? tr("控制器模式 — 已连接") : tr("控制器模式 — 未连接"));
+        // 中文翻译：仿真模式 — 控制器已连接；仿真模式 — 未连接
+        ? (m_connected ? tr("Simulation mode - controller connected") : tr("Emulation mode - not connected"))
+        // 中文翻译：控制器模式 — 已连接；控制器模式 — 未连接
+        : (m_connected ? tr("Controller Mode - Connected") : tr("Controller mode - not connected"));
     const QString status = m_statusText.isEmpty() ? fallback : m_statusText;
-    const QString text = tr("状态机: %1\n%2").arg(stateText(m_runState), status);
+    // 中文翻译：状态机: %1\n%2
+    const QString text = tr("State machine: %1\n%2").arg(stateText(m_runState), status);
 
     QString style = QStringLiteral("background: #333; color: #AAFFAA; padding: 2px 4px; border-radius: 3px;");
     if (m_runState == lcnc::ProcessRunState::EmergencyStop) {
@@ -660,17 +699,23 @@ QString WidgetLaserControl::stateText(lcnc::ProcessRunState state) const
 {
     switch (state) {
     case lcnc::ProcessRunState::Idle:
-        return tr("空闲");
+        // 中文翻译：空闲
+        return tr("free");
     case lcnc::ProcessRunState::Running:
-        return tr("运行中");
+        // 中文翻译：运行中
+        return tr("Running");
     case lcnc::ProcessRunState::Paused:
-        return tr("暂停");
+        // 中文翻译：暂停
+        return tr("pause");
     case lcnc::ProcessRunState::Error:
-        return tr("错误");
+        // 中文翻译：错误
+        return tr("Error");
     case lcnc::ProcessRunState::EmergencyStop:
-        return tr("急停");
+        // 中文翻译：急停
+        return tr("emergency stop");
     }
-    return tr("未知");
+    // 中文翻译：未知
+    return tr("unknown");
 }
 
 void WidgetLaserControl::resetProcessingProgress()

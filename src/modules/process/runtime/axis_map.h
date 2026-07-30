@@ -49,7 +49,8 @@ public:
 
     /// 按 mask 把语义轴展开为 "(0, 1, 2)" 这样的 ACS 轴元组。
     QString axisTupleText(std::uint8_t mask) const;
-    /// 按 mask 输出语义轴对应的"控制器索引"列表。
+    // 中文翻译：控制器索引
+    /// 按 mask 输出语义轴对应的"Controller index"列表。
     QVector<int> activeControllerIndices(std::uint8_t mask) const;
 
 private:

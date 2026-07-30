@@ -9,6 +9,8 @@ namespace lcnc::process {
 
 class ProcessPropertyModel final : public QStandardItemModel
 {
+    Q_OBJECT
+
 public:
     enum Roles { DescriptorRole = Qt::UserRole + 1, ObjectRole, GroupRole };
 

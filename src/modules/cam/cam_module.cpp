@@ -457,7 +457,8 @@ lcnc::ModuleInfo CamModule::info() const
 {
     return {
         QStringLiteral("cam"),
-        QStringLiteral("CAM模块"),
+        // 中文翻译：CAM模块
+        QStringLiteral("CAM module"),
         QStringLiteral("1.0.0"),
         { QStringLiteral("cad") }
     };
@@ -503,7 +504,8 @@ bool CamModule::init(lcnc::IKernel& kernel)
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "CamModule init done");
 
-    // 订阅 Process 模块的"切割路径显示"开关与切割链表变化，驱动 TravelPathRenderer。
+    // 中文翻译：切割路径显示
+    // 订阅 Process 模块的"Cutting path display"开关与切割链表变化，驱动 TravelPathRenderer。
     kernel.events().subscribe<lcnc::process::events::TravelPathVisibilityToggled>(
         [this](const lcnc::process::events::TravelPathVisibilityToggled& e) {
             setTravelPathVisible(e.visible);
@@ -822,7 +824,8 @@ void CamModule::loadMachine(const QString& filePath)
             ShapeService::deleteShape(doc, e);
     }
 
-    TaskId taskId = lcnc::Kernel::current().taskManager()->run(tr("加载机台: %1").arg(fi.fileName()),
+    // 中文翻译：加载机台: %1
+    TaskId taskId = lcnc::Kernel::current().taskManager()->run(tr("Loading machine: %1").arg(fi.fileName()),
         [filePath, doc](TaskProgress* prog) {
             if (prog->isAbortRequested())
                 throw std::runtime_error("machine load cancelled");
@@ -953,16 +956,20 @@ QList<CamModule::AxisOption> CamModule::axisOptions(bool includeDetachOption) co
         return result;
 
     if (includeDetachOption)
-        result.append({QString(), tr("— 解除已有挂载 —")});
+        // 中文翻译：— 解除已有挂载 —
+        result.append({QString(), tr("— Uninstall existing mounts —")});
 
     for (const MachineAxisDef& axis : kin->axes()) {
         QString displayName;
         if (axis.name == QStringLiteral("BASE")) {
-            displayName = tr("BASE（固定基座）");
+            // 中文翻译：BASE（固定基座）
+            displayName = tr("BASE (fixed base)");
         } else if (axis.motionType == MachineAxisDef::Rotary) {
-            displayName = tr("%1 轴（旋转）").arg(axis.name);
+            // 中文翻译：%1 轴（旋转）
+            displayName = tr("%1 axis (rotation)").arg(axis.name);
         } else {
-            displayName = tr("%1 轴（线性）").arg(axis.name);
+            // 中文翻译：%1 轴（线性）
+            displayName = tr("%1 axis (linear)").arg(axis.name);
         }
         result.append({axis.name, displayName});
     }
@@ -1139,26 +1146,31 @@ bool CamModule::fillAxisOriginFromReferenceFace(WidgetOccView* occView,
 {
     QString errorMessage;
     if (!ensureAcCenterCalibrationAvailable(&errorMessage)) {
-        emit operationFailed(tr("轴心快速填充"), errorMessage);
+        // 中文翻译：轴心快速填充
+        emit operationFailed(tr("Fast filling of axis"), errorMessage);
         return false;
     }
 
     const QString normalizedAxis = axisName.trimmed().toUpper();
     if (normalizedAxis != QStringLiteral("A") && normalizedAxis != QStringLiteral("C")) {
-        emit operationFailed(tr("轴心快速填充"),
-                             tr("当前快速填充仅支持 A 轴和 C 轴。"));
+        // 中文翻译：轴心快速填充
+        emit operationFailed(tr("Fast filling of axis"),
+                             // 中文翻译：当前快速填充仅支持 A 轴和 C 轴。
+                             tr("Currently, quick filling only supports A-axis and C-axis."));
         return false;
     }
 
     gp_Pnt faceCenter;
     if (!resolveReferencePlaneCenter(occView, screenPos, faceCenter, &errorMessage)) {
-        emit operationFailed(tr("轴心快速填充"), errorMessage);
+        // 中文翻译：轴心快速填充
+        emit operationFailed(tr("Fast filling of axis"), errorMessage);
         return false;
     }
 
     MachineKinematics* kin = kinematics();
     if (!kin) {
-        emit operationFailed(tr("轴心快速填充"), tr("找不到机台轴系配置。"));
+        // 中文翻译：轴心快速填充；找不到机台轴系配置。
+        emit operationFailed(tr("Fast filling of axis"), tr("The machine axis system configuration cannot be found."));
         return false;
     }
 
@@ -1182,7 +1194,8 @@ bool CamModule::setCutterHeadModelPositionFromReferenceFace(WidgetOccView* occVi
     gp_Pnt faceCenter;
     QString errorMessage;
     if (!resolveReferencePlaneCenter(occView, screenPos, faceCenter, &errorMessage)) {
-        emit operationFailed(tr("切割头对齐"), errorMessage);
+        // 中文翻译：切割头对齐
+        emit operationFailed(tr("Cutting head alignment"), errorMessage);
         return false;
     }
 
@@ -1213,7 +1226,8 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
         LCNC_ERR(lcnc::LogCode::Generic,
                  "CamModule::enterStandardCalibrationPose failed: {}",
                  msg.toStdString());
-        emit operationFailed(tr("机台标定位"), msg);
+        // 中文翻译：机台标定位
+        emit operationFailed(tr("Machine mark positioning"), msg);
         return false;
     };
 
@@ -1223,17 +1237,20 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
 
     MachineKinematics* kin = kinematics();
     if (!kin)
-        return fail(tr("找不到机台轴系配置。"));
+        // 中文翻译：找不到机台轴系配置。
+        return fail(tr("The machine axis system configuration cannot be found."));
 
     try {
         gp_Pnt configuredCenter;
         if (!currentAcRotationCenter(configuredCenter))
-            return fail(tr("请先在应用程序选项的机台构型页填写 A/C 旋转中心。"));
+            // 中文翻译：请先在应用程序选项的机台构型页填写 A/C 旋转中心。
+            return fail(tr("Please fill in the A/C rotation center on the machine configuration page of the application options first."));
 
         // 切割头模型点（BASE 局部坐标），直接采用拾取面中心。
         m_cutterHeadModelPosition = inputs.cutterHeadFaceCenter;
 
-        // 进入"机台标定位"：A=0, C=0；XY 调整为切割头世界 XY 与配置旋转中心 XY 对齐。
+        // 中文翻译：机台标定位
+        // 进入"Machine mark positioning"：A=0, C=0；XY 调整为切割头世界 XY 与配置旋转中心 XY 对齐。
         kin->setAxisPosition(QStringLiteral("A"), 0.0);
         kin->setAxisPosition(QStringLiteral("C"), 0.0);
         if (kin->findAxis(QStringLiteral("X")))
@@ -1251,11 +1268,14 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
                   m_cutterHeadModelPosition.Y(),
                   m_cutterHeadModelPosition.Z());
     } catch (const Standard_Failure& f) {
-        return fail(tr("OCC 异常：%1").arg(QString::fromUtf8(f.GetMessageString())));
+        // 中文翻译：OCC 异常：%1
+        return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.GetMessageString())));
     } catch (const std::exception& e) {
-        return fail(tr("异常：%1").arg(QString::fromUtf8(e.what())));
+        // 中文翻译：异常：%1
+        return fail(tr("Exception: %1").arg(QString::fromUtf8(e.what())));
     } catch (...) {
-        return fail(tr("发生未知异常。"));
+        // 中文翻译：发生未知异常。
+        return fail(tr("An unknown exception occurred."));
     }
 
     displayAxisGuides();
@@ -1309,7 +1329,8 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
         LCNC_ERR(lcnc::LogCode::Generic,
                  "CamModule::applyAxisCalibration failed: {}",
                  msg.toStdString());
-        emit operationFailed(tr("机台坐标系标定"), msg);
+        // 中文翻译：机台坐标系标定
+        emit operationFailed(tr("Machine coordinate system calibration"), msg);
         return false;
     };
 
@@ -1321,7 +1342,8 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
     try {
         gp_Pnt configuredCenter;
         if (!currentAcRotationCenter(configuredCenter))
-            return fail(tr("请先在应用程序选项的机台构型页填写 A/C 旋转中心。"));
+            // 中文翻译：请先在应用程序选项的机台构型页填写 A/C 旋转中心。
+            return fail(tr("Please fill in the A/C rotation center on the machine configuration page of the application options first."));
 
         // A/C 拾取只用于推导“模型当前的 AC 交点”，不写入物理旋转中心。
         const gp_Pnt pickedModelCenter(inputs.cFaceCenter.X(),
@@ -1329,7 +1351,8 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
                                        inputs.aFaceCenter.Z());
         const gp_Vec translation(pickedModelCenter, configuredCenter);
         if (translation.SquareMagnitude() >= 1e-12) {
-            if (!translateMachineGeometryOnly(translation, tr("机台模型对齐")))
+            // 中文翻译：机台模型对齐
+            if (!translateMachineGeometryOnly(translation, tr("Machine model alignment")))
                 return false; // translateMachineGeometryOnly 已发 operationFailed
         } else if (!m_machineModelPath.isEmpty()) {
             m_config.setCutterHeadModelPositionForMachine(m_machineModelPath,
@@ -1351,11 +1374,14 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
             }
         }
     } catch (const Standard_Failure& f) {
-        return fail(tr("OCC 异常：%1").arg(QString::fromUtf8(f.GetMessageString())));
+        // 中文翻译：OCC 异常：%1
+        return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.GetMessageString())));
     } catch (const std::exception& e) {
-        return fail(tr("异常：%1").arg(QString::fromUtf8(e.what())));
+        // 中文翻译：异常：%1
+        return fail(tr("Exception: %1").arg(QString::fromUtf8(e.what())));
     } catch (...) {
-        return fail(tr("发生未知异常。"));
+        // 中文翻译：发生未知异常。
+        return fail(tr("An unknown exception occurred."));
     }
 
     displayAxisGuides();
@@ -1373,13 +1399,15 @@ bool CamModule::alignMachineToPhysicalCenter(const gp_Pnt& physicalCenter)
 {
     QString errorMessage;
     if (!ensureAcCenterCalibrationAvailable(&errorMessage)) {
-        emit operationFailed(tr("机台坐标系转换"), errorMessage);
+        // 中文翻译：机台坐标系转换
+        emit operationFailed(tr("Machine coordinate system conversion"), errorMessage);
         return false;
     }
 
     gp_Pnt currentCenter;
     if (!currentAcRotationCenter(currentCenter)) {
-        emit operationFailed(tr("机台坐标系转换"), tr("无法计算当前模型 AC 中心。"));
+        // 中文翻译：机台坐标系转换；无法计算当前模型 AC 中心。
+        emit operationFailed(tr("Machine coordinate system conversion"), tr("Unable to calculate current model AC center."));
         return false;
     }
 
@@ -1387,7 +1415,8 @@ bool CamModule::alignMachineToPhysicalCenter(const gp_Pnt& physicalCenter)
     if (translation.SquareMagnitude() < 1e-12)
         return true;
 
-    return translateMachineWorkspace(translation, tr("机台坐标系转换"));
+    // 中文翻译：机台坐标系转换
+    return translateMachineWorkspace(translation, tr("Machine coordinate system conversion"));
 }
 
 bool CamModule::alignMachineToPhysicalCutterHead()
@@ -1396,7 +1425,8 @@ bool CamModule::alignMachineToPhysicalCutterHead()
     if (translation.SquareMagnitude() < 1e-12)
         return true;
 
-    return translateMachineWorkspace(translation, tr("切割头物理对齐"));
+    // 中文翻译：切割头物理对齐
+    return translateMachineWorkspace(translation, tr("Cutting head physical alignment"));
 }
 
 bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QString& operationTitle)
@@ -1407,7 +1437,8 @@ bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QStri
     LcncDocument* doc = machineDocument();
     MachineKinematics* kin = kinematics();
     if (!doc || !kin) {
-        emit operationFailed(operationTitle, tr("找不到项目文档或轴系配置。"));
+        // 中文翻译：找不到项目文档或轴系配置。
+        emit operationFailed(operationTitle, tr("Project document or axis configuration not found."));
         return false;
     }
 
@@ -1444,7 +1475,8 @@ bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QStri
 
     if (!moveLabels(machineLabels) || !moveLabels(workpieceLabels)) {
         rollback();
-        emit operationFailed(operationTitle, tr("整机平移失败，当前模型已恢复原始位置。"));
+        // 中文翻译：整机平移失败，当前模型已恢复原始位置。
+        emit operationFailed(operationTitle, tr("The translation of the whole machine failed, and the current model has returned to its original position."));
         return false;
     }
 
@@ -1452,7 +1484,8 @@ bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QStri
         const gp_Pnt shiftedOrigin = axis.origin.Translated(translation);
         if (!kin->setAxisOrigin(axis.name, shiftedOrigin)) {
             rollback();
-            emit operationFailed(operationTitle, tr("轴心平移失败，当前模型已恢复原始位置。"));
+            // 中文翻译：轴心平移失败，当前模型已恢复原始位置。
+            emit operationFailed(operationTitle, tr("Axis translation failed and the current model has returned to its original position."));
             return false;
         }
     }
@@ -1482,7 +1515,8 @@ bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QS
 
     LcncDocument* doc = machineDocument();
     if (!doc) {
-        emit operationFailed(operationTitle, tr("找不到机台项目文档。"));
+        // 中文翻译：找不到机台项目文档。
+        emit operationFailed(operationTitle, tr("The machine project document cannot be found."));
         return false;
     }
 
@@ -1516,7 +1550,8 @@ bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QS
 
     if (!moveLabels(machineLabels) || !moveLabels(workpieceLabels)) {
         rollback();
-        emit operationFailed(operationTitle, tr("机台几何平移失败，当前模型已恢复原始位置。"));
+        // 中文翻译：机台几何平移失败，当前模型已恢复原始位置。
+        emit operationFailed(operationTitle, tr("The machine geometric translation failed and the current model has been restored to its original position."));
         return false;
     }
 
@@ -1551,9 +1586,11 @@ QList<CamModule::WorkpieceMountCandidate> CamModule::mountableWorkpieces() const
         return result;
 
     const QString stateName = lcnc::Kernel::current().projectManager()->session().workpiece().displayName.trimmed();
-    const QString displayName = stateName.isEmpty() ? tr("当前工件") : stateName;
+    // 中文翻译：当前工件
+    const QString displayName = stateName.isEmpty() ? tr("current workpiece") : stateName;
 
-    result.append({doc->id(), tr("%1  (%2 形体)").arg(displayName).arg(workpieceCount), workpieceCount});
+    // 中文翻译：%1  (%2 形体)
+    result.append({doc->id(), tr("%1 (%2 shape)").arg(displayName).arg(workpieceCount), workpieceCount});
 
     return result;
 }
@@ -1678,7 +1715,8 @@ void CamModule::setWorkpieceInstallPosition(const gp_Pnt& position)
     const gp_Vec translation(m_workpieceInstallPositionBaked, position);
     const bool movedWorkpieces = translation.SquareMagnitude() > 1e-12;
     if (movedWorkpieces && !translateWorkpieceDocument(translation)) {
-        emit operationFailed(tr("工件安装位置"), tr("更新工件安装位置失败，当前安装位置未修改。"));
+        // 中文翻译：工件安装位置；更新工件安装位置失败，当前安装位置未修改。
+        emit operationFailed(tr("Workpiece installation position"), tr("Failed to update the workpiece installation location. The current installation location has not been modified."));
         return;
     }
 
@@ -1759,7 +1797,8 @@ bool CamModule::alignWorkpieceInstallPositionToRotationCenter()
 {
     gp_Pnt center;
     if (!currentWorkpieceRotationCenter(center)) {
-        emit operationFailed(tr("工件安装位置"), tr("当前构型没有可用于对齐的工件旋转中心。"));
+        // 中文翻译：工件安装位置；当前构型没有可用于对齐的工件旋转中心。
+        emit operationFailed(tr("Workpiece installation position"), tr("There is no workpiece rotation center available for alignment in the current configuration."));
         return false;
     }
 
@@ -1927,7 +1966,8 @@ void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName, 
     if (movedWorkpiece) {
         clearToolpath();
         if (!translateWorkpieceDocument(placement)) {
-            emit operationFailed(tr("工件安装"), tr("移动工件到安装位置失败。"));
+            // 中文翻译：工件安装；移动工件到安装位置失败。
+            emit operationFailed(tr("Workpiece installation"), tr("Failed to move workpiece to installation location."));
             return;
         }
     }
@@ -2232,7 +2272,8 @@ bool CamModule::rejectConflictingPipelineOperation(const QString& operation)
 {
     if (!property("camAutoPipelineRunning").toBool())
         return false;
-    emit operationFailed(operation, tr("全自动加工流程正在运行，请先取消或等待其结束。"));
+    // 中文翻译：全自动加工流程正在运行，请先取消或等待其结束。
+    emit operationFailed(operation, tr("The fully automatic processing process is running, please cancel or wait for it to end."));
     return true;
 }
 
@@ -2325,11 +2366,16 @@ private:
     static QString stageTitle(lcnc::cam::CamPipelineStage stage)
     {
         switch (stage) {
-        case lcnc::cam::CamPipelineStage::FaceSeparation: return QObject::tr("分离加工面");
-        case lcnc::cam::CamPipelineStage::ContourExtraction: return QObject::tr("提取轮廓");
-        case lcnc::cam::CamPipelineStage::PointDiscretization: return QObject::tr("离散点");
-        case lcnc::cam::CamPipelineStage::GeometricToolpath: return QObject::tr("构造刀路");
-        case lcnc::cam::CamPipelineStage::MachineSolve: return QObject::tr("求解机床坐标");
+        // 中文翻译：分离加工面
+        case lcnc::cam::CamPipelineStage::FaceSeparation: return QObject::tr("Separate processing surface");
+        // 中文翻译：提取轮廓
+        case lcnc::cam::CamPipelineStage::ContourExtraction: return QObject::tr("Extract contours");
+        // 中文翻译：离散点
+        case lcnc::cam::CamPipelineStage::PointDiscretization: return QObject::tr("discrete points");
+        // 中文翻译：构造刀路
+        case lcnc::cam::CamPipelineStage::GeometricToolpath: return QObject::tr("Construct toolpath");
+        // 中文翻译：求解机床坐标
+        case lcnc::cam::CamPipelineStage::MachineSolve: return QObject::tr("Solve for machine coordinates");
         default: return {};
         }
     }
@@ -2415,7 +2461,8 @@ bool CamModule::separateMachiningFaces()
 {
     const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
     if (sources.isEmpty()) {
-        emit operationFailed(tr("分离加工面"), tr("项目工作区中未找到工件。"));
+        // 中文翻译：分离加工面；项目工作区中未找到工件。
+        emit operationFailed(tr("Separate processing surface"), tr("Workpiece not found in project workspace."));
         return false;
     }
 
@@ -2431,7 +2478,8 @@ bool CamModule::separateMachiningFaces()
     const ExtractionStrategy strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
     if (strategy == ExtractionStrategy::ManualFaceSelection) {
         if (result.empty()) {
-            emit operationFailed(tr("应用加工面"), tr("手动选面模式下至少需要保留一个加工面。"));
+            // 中文翻译：应用加工面；手动选面模式下至少需要保留一个加工面。
+            emit operationFailed(tr("Application processing surface"), tr("At least one processing surface needs to be reserved in manual surface selection mode."));
             return false;
         }
         m_machiningFaces = std::move(result);
@@ -2488,7 +2536,8 @@ bool CamModule::separateMachiningFaces()
     }
 
     if (result.empty()) {
-        emit operationFailed(tr("分离加工面"), tr("未识别到可加工面，请改用手动选面。"));
+        // 中文翻译：分离加工面；未识别到可加工面，请改用手动选面。
+        emit operationFailed(tr("Separate processing surface"), tr("No machinable surface is identified, please select manual surface instead."));
         return false;
     }
 
@@ -2498,21 +2547,25 @@ bool CamModule::separateMachiningFaces()
 
 TaskId CamModule::separateMachiningFacesAsync()
 {
-    if (rejectConflictingPipelineOperation(tr("分离加工面")))
+    // 中文翻译：分离加工面
+    if (rejectConflictingPipelineOperation(tr("Separate processing surface")))
         return kInvalidTaskId;
     const ExtractionStrategy strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
     if (strategy == ExtractionStrategy::ManualFaceSelection) {
-        emit operationFailed(tr("分离加工面"), tr("手动模式请通过拾取加工面后点击“应用加工面并继续”。"));
+        // 中文翻译：分离加工面；手动模式请通过拾取加工面后点击“应用加工面并继续”。
+        emit operationFailed(tr("Separate processing surface"), tr("In manual mode, please select the processing surface and click \"Apply processing surface and continue\"."));
         return kInvalidTaskId;
     }
     if (property("camFaceSeparationRunning").toBool()) {
-        emit operationFailed(tr("分离加工面"), tr("加工面分离任务正在执行。"));
+        // 中文翻译：分离加工面；加工面分离任务正在执行。
+        emit operationFailed(tr("Separate processing surface"), tr("The processing surface separation task is being executed."));
         return kInvalidTaskId;
     }
     const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
     auto* taskManager = lcnc::Kernel::current().taskManager();
     if (sources.isEmpty() || !taskManager) {
-        emit operationFailed(tr("分离加工面"), tr("项目工作区中未找到工件，或后台任务不可用。"));
+        // 中文翻译：分离加工面；项目工作区中未找到工件，或后台任务不可用。
+        emit operationFailed(tr("Separate processing surface"), tr("The workpiece was not found in the project workspace, or the background task is not available."));
         return kInvalidTaskId;
     }
 
@@ -2529,14 +2582,16 @@ TaskId CamModule::separateMachiningFacesAsync()
     for (const WorkpieceShapeSource& source : sources)
         beamDirections.push_back(beamDirectionWpc(source.workpieceEntry));
 
-    TaskSpec spec{tr("分离加工面"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
+    // 中文翻译：分离加工面
+    TaskSpec spec{tr("Separate processing surface"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
     setProperty("camFaceSeparationRunning", true);
     const TaskId taskId = taskManager->run(spec,
         [sources, beamDirections, strategy, smoothAngle, result](TaskProgress* progress) {
             progress->setRange(0, std::max(1, static_cast<int>(sources.size())));
             for (int index = 0; index < sources.size(); ++index) {
                 if (progress->isAbortRequested())
-                    throw std::runtime_error("加工面分离已取消");
+                    // 中文翻译：加工面分离已取消
+                    throw std::runtime_error("Machining surface separation canceled");
                 const WorkpieceShapeSource& source = sources.at(index);
                 if (source.shape.IsNull())
                     continue;
@@ -2566,7 +2621,8 @@ TaskId CamModule::separateMachiningFacesAsync()
                 progress->setValue(index + 1);
             }
             if (result->faces.empty()) {
-                result->error = QObject::tr("未识别到可加工面，请改用手动选面。");
+                // 中文翻译：未识别到可加工面，请改用手动选面。
+                result->error = QObject::tr("No machinable surface is identified, please select manual surface instead.");
                 return;
             }
             result->ok = true;
@@ -2576,8 +2632,10 @@ TaskId CamModule::separateMachiningFacesAsync()
         releaseOwnedTask(taskId);
         setProperty("camFaceSeparationRunning", false);
         if (!success || !result->ok) {
-            emit operationFailed(tr("分离加工面"), result->error.isEmpty()
-                ? tr("加工面分离失败或已取消") : result->error);
+            // 中文翻译：分离加工面
+            emit operationFailed(tr("Separate processing surface"), result->error.isEmpty()
+                // 中文翻译：加工面分离失败或已取消
+                ? tr("Processing surface separation failed or canceled") : result->error);
             return;
         }
         const QList<WorkpieceShapeSource> currentSources = collectWorkpieceShapes();
@@ -2591,7 +2649,8 @@ TaskId CamModule::separateMachiningFacesAsync()
                 return found == currentSources.cend();
             });
         if (sourceChanged) {
-            emit operationFailed(tr("分离加工面"), tr("工件在后台识别期间已变更，结果已丢弃。"));
+            // 中文翻译：分离加工面；工件在后台识别期间已变更，结果已丢弃。
+            emit operationFailed(tr("Separate processing surface"), tr("The workpiece was changed during background identification and the results were discarded."));
             return;
         }
 
@@ -2620,7 +2679,8 @@ TaskId CamModule::separateMachiningFacesAsync()
             merged.push_back(std::move(entry));
         }
         if (merged.empty()) {
-            emit operationFailed(tr("分离加工面"), tr("加工面识别结果为空。"));
+            // 中文翻译：分离加工面；加工面识别结果为空。
+            emit operationFailed(tr("Separate processing surface"), tr("The processing surface identification result is empty."));
             return;
         }
         m_machiningFaces = std::move(merged);
@@ -2631,7 +2691,8 @@ TaskId CamModule::separateMachiningFacesAsync()
 
 bool CamModule::applyMachiningFaces()
 {
-    if (rejectConflictingPipelineOperation(tr("应用加工面")))
+    // 中文翻译：应用加工面
+    if (rejectConflictingPipelineOperation(tr("Application processing surface")))
         return false;
     if (!m_camData || m_machiningFaces.empty())
         return false;
@@ -2665,13 +2726,15 @@ lcnc::cam::CamPipelineStageState CamModule::pipelineStageState(
 bool CamModule::extractContoursFromMachiningFaces()
 {
     if (!m_camData || m_machiningFaces.empty()) {
-        emit operationFailed(tr("提取轮廓"), tr("请先分离或手动应用加工面。"));
+        // 中文翻译：提取轮廓；请先分离或手动应用加工面。
+        emit operationFailed(tr("Extract contours"), tr("Please separate or manually apply the machined surface first."));
         return false;
     }
     const auto& faceState = m_camData->pipelineStageState(
         lcnc::cam::CamPipelineStage::FaceSeparation);
     if (!faceState.available || faceState.dirty) {
-        emit operationFailed(tr("提取轮廓"), tr("加工面尚未应用，请先执行分离面或应用加工面。"));
+        // 中文翻译：提取轮廓；加工面尚未应用，请先执行分离面或应用加工面。
+        emit operationFailed(tr("Extract contours"), tr("The machined surface has not yet been applied. Please perform separation or application of the machined surface first."));
         return false;
     }
 
@@ -2710,7 +2773,8 @@ bool CamModule::extractContoursFromMachiningFaces()
         }
     }
     if (extracted.empty()) {
-        emit operationFailed(tr("提取轮廓"), tr("当前加工面中未提取到闭合轮廓。"));
+        // 中文翻译：提取轮廓；当前加工面中未提取到闭合轮廓。
+        emit operationFailed(tr("Extract contours"), tr("No closed contour is extracted from the current processing surface."));
         return false;
     }
 
@@ -2737,18 +2801,21 @@ bool CamModule::extractContoursFromMachiningFaces()
 bool CamModule::discretizeCurrentContours()
 {
     if (!m_camData || toolpathRef().contourCount() == 0) {
-        emit operationFailed(tr("离散点"), tr("请先提取轮廓。"));
+        // 中文翻译：离散点；请先提取轮廓。
+        emit operationFailed(tr("discrete points"), tr("Please extract the outline first."));
         return false;
     }
     const auto& contourState = m_camData->pipelineStageState(
         lcnc::cam::CamPipelineStage::ContourExtraction);
     if (!contourState.available || contourState.dirty) {
-        emit operationFailed(tr("离散点"), tr("轮廓数据已过期，请先重新提取轮廓。"));
+        // 中文翻译：离散点；轮廓数据已过期，请先重新提取轮廓。
+        emit operationFailed(tr("discrete points"), tr("The contour data has expired, please re-extract the contours first."));
         return false;
     }
     for (LaserContour& contour : toolpathRef().contours()) {
         if (contour.sourceShape.IsNull()) {
-            emit operationFailed(tr("离散点"), tr("轮廓缺少所属工件几何。"));
+            // 中文翻译：离散点；轮廓缺少所属工件几何。
+            emit operationFailed(tr("discrete points"), tr("The contour lacks the associated workpiece geometry."));
             return false;
         }
         contour.points.clear();
@@ -2756,7 +2823,8 @@ bool CamModule::discretizeCurrentContours()
         contour.leadInSolution = {};
         LaserToolpathBuilder::discretizeContour(contour, contour.sourceShape, m_deflection);
         if (contour.points.empty()) {
-            emit operationFailed(tr("离散点"), tr("轮廓 \"%1\" 离散失败。").arg(contour.name));
+            // 中文翻译：离散点；轮廓 "%1" 离散失败。
+            emit operationFailed(tr("discrete points"), tr("Contour \"%1\" discrete failure.").arg(contour.name));
             return false;
         }
         contour.appliedParams = {m_config.leadInLength(), m_deflection};
@@ -2776,13 +2844,15 @@ bool CamModule::discretizeCurrentContours()
 bool CamModule::buildCurrentGeometricToolpath()
 {
     if (!m_camData || toolpathRef().contourCount() == 0) {
-        emit operationFailed(tr("构造刀路"), tr("请先完成轮廓离散。"));
+        // 中文翻译：构造刀路；请先完成轮廓离散。
+        emit operationFailed(tr("Construct toolpath"), tr("Please complete the contour discretization first."));
         return false;
     }
     const auto& sampleState = m_camData->pipelineStageState(
         lcnc::cam::CamPipelineStage::PointDiscretization);
     if (!sampleState.available || sampleState.dirty) {
-        emit operationFailed(tr("构造刀路"), tr("离散点数据已过期，请先重新离散。"));
+        // 中文翻译：构造刀路；离散点数据已过期，请先重新离散。
+        emit operationFailed(tr("Construct toolpath"), tr("The discrete point data has expired, please re-discretize first."));
         return false;
     }
     for (LaserContour& contour : toolpathRef().contours()) {
@@ -2792,8 +2862,10 @@ bool CamModule::buildCurrentGeometricToolpath()
             || !contour.leadInSolution.valid) {
             if (error.isEmpty())
                 error = contour.leadInSolution.error;
-            emit operationFailed(tr("构造刀路"),
-                                 tr("轮廓 \"%1\" 下刀线生成失败：%2").arg(contour.name, error));
+            // 中文翻译：构造刀路
+            emit operationFailed(tr("Construct toolpath"),
+                                 // 中文翻译：轮廓 "%1" 下刀线生成失败：%2
+                                 tr("Contour \"%1\" lower cut line generation failed: %2").arg(contour.name, error));
             return false;
         }
         contour.needsRecalculation = true;
@@ -2811,13 +2883,15 @@ bool CamModule::buildCurrentGeometricToolpath()
 bool CamModule::solveCurrentGeometricToolpath()
 {
     if (!m_camData || toolpathRef().contourCount() == 0) {
-        emit operationFailed(tr("求解机床坐标"), tr("请先构造几何刀路。"));
+        // 中文翻译：求解机床坐标；请先构造几何刀路。
+        emit operationFailed(tr("Solve for machine coordinates"), tr("Please construct the geometric tool path first."));
         return false;
     }
     const auto& pathState = m_camData->pipelineStageState(
         lcnc::cam::CamPipelineStage::GeometricToolpath);
     if (!pathState.available || pathState.dirty) {
-        emit operationFailed(tr("求解机床坐标"), tr("几何刀路已过期，请先重新构造刀路。"));
+        // 中文翻译：求解机床坐标；几何刀路已过期，请先重新构造刀路。
+        emit operationFailed(tr("Solve for machine coordinates"), tr("The geometric tool path has expired, please reconstruct the tool path first."));
         return false;
     }
     if (!solveToolpathForOrder(defaultCuttingOrderByCAxis()))
@@ -2838,17 +2912,20 @@ bool CamModule::solveCurrentGeometricToolpath()
 
 TaskId CamModule::extractContoursFromMachiningFacesAsync()
 {
-    if (rejectConflictingPipelineOperation(tr("提取轮廓")))
+    // 中文翻译：提取轮廓
+    if (rejectConflictingPipelineOperation(tr("Extract contours")))
         return kInvalidTaskId;
     if (!m_camData || m_machiningFaces.empty()) {
-        emit operationFailed(tr("提取轮廓"), tr("请先分离或手动应用加工面。"));
+        // 中文翻译：提取轮廓；请先分离或手动应用加工面。
+        emit operationFailed(tr("Extract contours"), tr("Please separate or manually apply the machined surface first."));
         return kInvalidTaskId;
     }
     const auto faceState = m_camData->pipelineStageState(
         lcnc::cam::CamPipelineStage::FaceSeparation);
     auto* taskManager = lcnc::Kernel::current().taskManager();
     if (!faceState.available || faceState.dirty || !taskManager) {
-        emit operationFailed(tr("提取轮廓"), tr("加工面尚未应用，或后台任务不可用。"));
+        // 中文翻译：提取轮廓；加工面尚未应用，或后台任务不可用。
+        emit operationFailed(tr("Extract contours"), tr("The machining surface has not yet been applied, or the background task is not available."));
         return kInvalidTaskId;
     }
 
@@ -2859,7 +2936,8 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
     const double leadInLength = m_config.leadInLength();
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
-    TaskSpec spec{tr("提取加工轮廓"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
+    // 中文翻译：提取加工轮廓
+    TaskSpec spec{tr("Extract machining contours"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
     const TaskId taskId = taskManager->run(spec,
         [sources, faces, smoothAngle, deflection, leadInLength, result](TaskProgress* progress) {
             progress->setRange(0, std::max(1, static_cast<int>(sources.size())));
@@ -2869,7 +2947,8 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
             params.strategy = ExtractionStrategy::ManualFaceSelection;
             for (int sourceIndex = 0; sourceIndex < sources.size(); ++sourceIndex) {
                 if (progress->isAbortRequested())
-                    throw std::runtime_error("轮廓提取已取消");
+                    // 中文翻译：轮廓提取已取消
+                    throw std::runtime_error("Contour extraction canceled");
                 const WorkpieceShapeSource& source = sources.at(sourceIndex);
                 std::vector<TopoDS_Face> machiningFaces;
                 std::vector<TopoDS_Face> crossSectionFaces;
@@ -2900,7 +2979,8 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
                 progress->setValue(sourceIndex + 1);
             }
             if (result->contours.empty()) {
-                result->error = QObject::tr("当前加工面中未提取到闭合轮廓。");
+                // 中文翻译：当前加工面中未提取到闭合轮廓。
+                result->error = QObject::tr("No closed contour is extracted from the current processing surface.");
                 return;
             }
             result->ok = true;
@@ -2909,14 +2989,17 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
     watchTask(this, taskId, [this, taskId, result, faceRevision = faceState.revision](bool success) {
         releaseOwnedTask(taskId);
         if (!success || !result->ok) {
-            emit operationFailed(tr("提取轮廓"), result->error.isEmpty()
-                ? tr("轮廓提取失败或已取消") : result->error);
+            // 中文翻译：提取轮廓
+            emit operationFailed(tr("Extract contours"), result->error.isEmpty()
+                // 中文翻译：轮廓提取失败或已取消
+                ? tr("Contour extraction failed or canceled") : result->error);
             return;
         }
         const auto currentFace = m_camData->pipelineStageState(
             lcnc::cam::CamPipelineStage::FaceSeparation);
         if (currentFace.dirty || currentFace.revision != faceRevision) {
-            emit operationFailed(tr("提取轮廓"), tr("加工面在后台计算期间已变更，结果已丢弃。"));
+            // 中文翻译：提取轮廓；加工面在后台计算期间已变更，结果已丢弃。
+            emit operationFailed(tr("Extract contours"), tr("The machining surface has changed during background calculation and the results have been discarded."));
             return;
         }
         eraseToolpathDisplay();
@@ -2942,17 +3025,20 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
 
 TaskId CamModule::discretizeCurrentContoursAsync()
 {
-    if (rejectConflictingPipelineOperation(tr("离散点")))
+    // 中文翻译：离散点
+    if (rejectConflictingPipelineOperation(tr("discrete points")))
         return kInvalidTaskId;
     if (!m_camData || toolpathRef().contourCount() == 0) {
-        emit operationFailed(tr("离散点"), tr("请先提取轮廓。"));
+        // 中文翻译：离散点；请先提取轮廓。
+        emit operationFailed(tr("discrete points"), tr("Please extract the outline first."));
         return kInvalidTaskId;
     }
     const auto contourState = m_camData->pipelineStageState(
         lcnc::cam::CamPipelineStage::ContourExtraction);
     auto* taskManager = lcnc::Kernel::current().taskManager();
     if (!contourState.available || contourState.dirty || !taskManager) {
-        emit operationFailed(tr("离散点"), tr("轮廓数据已过期，或后台任务不可用。"));
+        // 中文翻译：离散点；轮廓数据已过期，或后台任务不可用。
+        emit operationFailed(tr("discrete points"), tr("The profile data has expired, or the background task is unavailable."));
         return kInvalidTaskId;
     }
     const std::vector<LaserContour> input = toolpathRef().contours();
@@ -2960,17 +3046,20 @@ TaskId CamModule::discretizeCurrentContoursAsync()
     const double leadInLength = m_config.leadInLength();
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
-    TaskSpec spec{tr("离散加工轮廓"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
+    // 中文翻译：离散加工轮廓
+    TaskSpec spec{tr("Discrete machining contours"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
     const TaskId taskId = taskManager->run(spec,
         [input, deflection, leadInLength, result](TaskProgress* progress) {
             progress->setRange(0, std::max(1, static_cast<int>(input.size())));
             result->contours = input;
             for (std::size_t index = 0; index < result->contours.size(); ++index) {
                 if (progress->isAbortRequested())
-                    throw std::runtime_error("轮廓离散已取消");
+                    // 中文翻译：轮廓离散已取消
+                    throw std::runtime_error("Contour discretization canceled");
                 LaserContour& contour = result->contours[index];
                 if (contour.sourceShape.IsNull()) {
-                    result->error = QObject::tr("轮廓 \"%1\" 缺少工件几何。").arg(contour.name);
+                    // 中文翻译：轮廓 "%1" 缺少工件几何。
+                    result->error = QObject::tr("Contour \"%1\" is missing workpiece geometry.").arg(contour.name);
                     return;
                 }
                 contour.points.clear();
@@ -2978,7 +3067,8 @@ TaskId CamModule::discretizeCurrentContoursAsync()
                 contour.leadInSolution = {};
                 LaserToolpathBuilder::discretizeContour(contour, contour.sourceShape, deflection);
                 if (contour.points.empty()) {
-                    result->error = QObject::tr("轮廓 \"%1\" 离散失败。").arg(contour.name);
+                    // 中文翻译：轮廓 "%1" 离散失败。
+                    result->error = QObject::tr("Contour \"%1\" discrete failure.").arg(contour.name);
                     return;
                 }
                 contour.appliedParams = {leadInLength, deflection};
@@ -2992,14 +3082,17 @@ TaskId CamModule::discretizeCurrentContoursAsync()
     watchTask(this, taskId, [this, taskId, result, contourRevision = contourState.revision](bool success) {
         releaseOwnedTask(taskId);
         if (!success || !result->ok) {
-            emit operationFailed(tr("离散点"), result->error.isEmpty()
-                ? tr("轮廓离散失败或已取消") : result->error);
+            // 中文翻译：离散点
+            emit operationFailed(tr("discrete points"), result->error.isEmpty()
+                // 中文翻译：轮廓离散失败或已取消
+                ? tr("Contour discretization failed or canceled") : result->error);
             return;
         }
         const auto currentContour = m_camData->pipelineStageState(
             lcnc::cam::CamPipelineStage::ContourExtraction);
         if (currentContour.dirty || currentContour.revision != contourRevision) {
-            emit operationFailed(tr("离散点"), tr("轮廓在后台计算期间已变更，结果已丢弃。"));
+            // 中文翻译：离散点；轮廓在后台计算期间已变更，结果已丢弃。
+            emit operationFailed(tr("discrete points"), tr("The contour has changed during background calculation and the results have been discarded."));
             return;
         }
         toolpathRef().contours() = std::move(result->contours);
@@ -3016,24 +3109,28 @@ TaskId CamModule::discretizeCurrentContoursAsync()
 
 TaskId CamModule::buildCurrentGeometricToolpathAsync()
 {
-    if (rejectConflictingPipelineOperation(tr("构造刀路")))
+    // 中文翻译：构造刀路
+    if (rejectConflictingPipelineOperation(tr("Construct toolpath")))
         return kInvalidTaskId;
     if (!m_camData || toolpathRef().contourCount() == 0) {
-        emit operationFailed(tr("构造刀路"), tr("请先完成轮廓离散。"));
+        // 中文翻译：构造刀路；请先完成轮廓离散。
+        emit operationFailed(tr("Construct toolpath"), tr("Please complete the contour discretization first."));
         return kInvalidTaskId;
     }
     const auto sampleState = m_camData->pipelineStageState(
         lcnc::cam::CamPipelineStage::PointDiscretization);
     auto* taskManager = lcnc::Kernel::current().taskManager();
     if (!sampleState.available || sampleState.dirty || !taskManager) {
-        emit operationFailed(tr("构造刀路"), tr("离散点数据已过期，或后台任务不可用。"));
+        // 中文翻译：构造刀路；离散点数据已过期，或后台任务不可用。
+        emit operationFailed(tr("Construct toolpath"), tr("The discrete point data is out of date, or the background task is unavailable."));
         return kInvalidTaskId;
     }
     const std::vector<LaserContour> input = toolpathRef().contours();
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     TaskSpec spec;
-    spec.label = tr("构造几何刀路");
+    // 中文翻译：构造几何刀路
+    spec.label = tr("Construct geometry toolpath");
     spec.scope = QStringLiteral("cam.pipeline");
     spec.priority = TaskPriority::Normal;
     spec.cancellable = true;
@@ -3043,7 +3140,8 @@ TaskId CamModule::buildCurrentGeometricToolpathAsync()
             result->contours = input;
             for (std::size_t index = 0; index < result->contours.size(); ++index) {
                 if (progress->isAbortRequested())
-                    throw std::runtime_error("几何刀路构造已取消");
+                    // 中文翻译：几何刀路构造已取消
+                    throw std::runtime_error("Geometric toolpath construction has been cancelled");
                 LaserContour& contour = result->contours[index];
                 contour.leadIn.length = contour.pendingParams.leadInLength;
                 QString error;
@@ -3061,14 +3159,17 @@ TaskId CamModule::buildCurrentGeometricToolpathAsync()
     watchTask(this, taskId, [this, taskId, result, sampleRevision = sampleState.revision](bool success) {
         releaseOwnedTask(taskId);
         if (!success || !result->ok) {
-            emit operationFailed(tr("构造刀路"), result->error.isEmpty()
-                ? tr("几何刀路构造失败或已取消") : result->error);
+            // 中文翻译：构造刀路
+            emit operationFailed(tr("Construct toolpath"), result->error.isEmpty()
+                // 中文翻译：几何刀路构造失败或已取消
+                ? tr("Geometric toolpath construction failed or canceled") : result->error);
             return;
         }
         const auto currentSamples = m_camData->pipelineStageState(
             lcnc::cam::CamPipelineStage::PointDiscretization);
         if (currentSamples.dirty || currentSamples.revision != sampleRevision) {
-            emit operationFailed(tr("构造刀路"), tr("离散点在后台计算期间已变更，结果已丢弃。"));
+            // 中文翻译：构造刀路；离散点在后台计算期间已变更，结果已丢弃。
+            emit operationFailed(tr("Construct toolpath"), tr("The discrete points were changed during background calculation and the results were discarded."));
             return;
         }
         toolpathRef().contours() = std::move(result->contours);
@@ -3085,10 +3186,12 @@ TaskId CamModule::buildCurrentGeometricToolpathAsync()
 
 TaskId CamModule::solveCurrentGeometricToolpathAsync()
 {
-    if (rejectConflictingPipelineOperation(tr("求解机床坐标")))
+    // 中文翻译：求解机床坐标
+    if (rejectConflictingPipelineOperation(tr("Solve for machine coordinates")))
         return kInvalidTaskId;
     if (!m_camData || toolpathRef().contourCount() == 0) {
-        emit operationFailed(tr("求解机床坐标"), tr("请先构造几何刀路。"));
+        // 中文翻译：求解机床坐标；请先构造几何刀路。
+        emit operationFailed(tr("Solve for machine coordinates"), tr("Please construct the geometric tool path first."));
         return kInvalidTaskId;
     }
     const auto pathState = m_camData->pipelineStageState(
@@ -3096,7 +3199,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
     auto* taskManager = lcnc::Kernel::current().taskManager();
     MachineKinematics* machine = kinematics();
     if (!pathState.available || pathState.dirty || !taskManager || !machine) {
-        emit operationFailed(tr("求解机床坐标"), tr("几何刀路已过期，或机台后台服务不可用。"));
+        // 中文翻译：求解机床坐标；几何刀路已过期，或机台后台服务不可用。
+        emit operationFailed(tr("Solve for machine coordinates"), tr("The geometric tool path has expired, or the machine background service is unavailable."));
         return kInvalidTaskId;
     }
     const std::vector<LaserContour> input = toolpathRef().contours();
@@ -3106,7 +3210,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     TaskSpec spec;
-    spec.label = tr("求解机床坐标");
+    // 中文翻译：求解机床坐标
+    spec.label = tr("Solve for machine coordinates");
     spec.scope = QStringLiteral("cam.pipeline");
     spec.priority = TaskPriority::Normal;
     spec.cancellable = true;
@@ -3132,7 +3237,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
                 ordered.push_back(&*it);
             }
             if (ordered.empty()) {
-                result->error = QObject::tr("当前没有可求解的轮廓顺序。");
+                // 中文翻译：当前没有可求解的轮廓顺序。
+                result->error = QObject::tr("There is currently no contour sequence to solve.");
                 return;
             }
             MachineKinematics workerKinematics;
@@ -3144,7 +3250,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
                     || !contour.leadInSolution.point.machineCoord.valid
                     || !std::all_of(contour.points.begin(), contour.points.end(),
                         [](const ToolpathPoint& point) { return point.machineCoord.valid; })) {
-                    result->error = QObject::tr("轮廓 \"%1\" 五轴坐标求解失败。").arg(contour.name);
+                    // 中文翻译：轮廓 "%1" 五轴坐标求解失败。
+                    result->error = QObject::tr("Contour \"%1\" five-axis coordinate solution failed.").arg(contour.name);
                     return;
                 }
             }
@@ -3155,14 +3262,17 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
     watchTask(this, taskId, [this, taskId, result, pathRevision = pathState.revision](bool success) {
         releaseOwnedTask(taskId);
         if (!success || !result->ok) {
-            emit operationFailed(tr("求解机床坐标"), result->error.isEmpty()
-                ? tr("机床坐标求解失败或已取消") : result->error);
+            // 中文翻译：求解机床坐标
+            emit operationFailed(tr("Solve for machine coordinates"), result->error.isEmpty()
+                // 中文翻译：机床坐标求解失败或已取消
+                ? tr("Machine tool coordinate solution failed or canceled") : result->error);
             return;
         }
         const auto currentPath = m_camData->pipelineStageState(
             lcnc::cam::CamPipelineStage::GeometricToolpath);
         if (currentPath.dirty || currentPath.revision != pathRevision) {
-            emit operationFailed(tr("求解机床坐标"), tr("几何刀路在后台计算期间已变更，结果已丢弃。"));
+            // 中文翻译：求解机床坐标；几何刀路在后台计算期间已变更，结果已丢弃。
+            emit operationFailed(tr("Solve for machine coordinates"), tr("The geometry toolpath was changed during background calculation and the results were discarded."));
             return;
         }
         toolpathRef().contours() = std::move(result->contours);
@@ -3184,7 +3294,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
 TaskId CamModule::runAutoPipelineAsync()
 {
     if (property("camAutoPipelineRunning").toBool()) {
-        emit operationFailed(tr("全自动执行"), tr("已有自动加工流程正在执行。"));
+        // 中文翻译：全自动执行；已有自动加工流程正在执行。
+        emit operationFailed(tr("Fully automatic execution"), tr("There is already an automatic processing process being executed."));
         return kInvalidTaskId;
     }
     const ExtractionStrategy strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
@@ -3303,8 +3414,10 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
             contour.sourceShape = source.shape;
             if (workpieceSources.size() > 1) {
                 contour.sourceInfo = contour.sourceInfo.isEmpty()
-                    ? tr("工件源 #%1").arg(source.componentIndex + 1)
-                    : tr("%1 · 工件源 #%2").arg(contour.sourceInfo).arg(source.componentIndex + 1);
+                    // 中文翻译：工件源 #%1
+                    ? tr("Workpiece source #%1").arg(source.componentIndex + 1)
+                    // 中文翻译：%1 · 工件源 #%2
+                    : tr("%1 · Workpiece source #%2").arg(contour.sourceInfo).arg(source.componentIndex + 1);
             }
 
             if (oldContour && oldContour->leadIn.valid) {
@@ -3334,14 +3447,18 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
                             });
                     }
                     if (selected == contour.points.end()) {
-                        emit operationFailed(tr("全局生成刀路"),
-                                             tr("轮廓 \"%1\" 无法恢复人工起点").arg(contour.name));
+                        // 中文翻译：全局生成刀路
+                        emit operationFailed(tr("Generate toolpath globally"),
+                                             // 中文翻译：轮廓 "%1" 无法恢复人工起点
+                                             tr("Contour \"%1\" cannot restore artificial starting point").arg(contour.name));
                         return false;
                     }
                     if (oldContour->leadIn.entryEdgeIndex >= 0
                         && selected->position.Distance(oldContour->leadIn.entryPoint) > 1e-6) {
-                        emit operationFailed(tr("全局生成刀路"),
-                                             tr("轮廓 \"%1\" 的起点拓扑锚点已变化").arg(contour.name));
+                        // 中文翻译：全局生成刀路
+                        emit operationFailed(tr("Generate toolpath globally"),
+                                             // 中文翻译：轮廓 "%1" 的起点拓扑锚点已变化
+                                             tr("The starting topology anchor point of contour \"%1\" has changed").arg(contour.name));
                         return false;
                     }
                     startIndex = static_cast<int>(std::distance(contour.points.begin(), selected));
@@ -3356,8 +3473,10 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
                     || !contour.leadInSolution.valid) {
                     if (leadInError.isEmpty())
                         leadInError = contour.leadInSolution.error;
-                    emit operationFailed(tr("全局生成刀路"),
-                                         tr("轮廓 \"%1\" 下刀点生成失败：%2")
+                    // 中文翻译：全局生成刀路
+                    emit operationFailed(tr("Generate toolpath globally"),
+                                         // 中文翻译：轮廓 "%1" 下刀点生成失败：%2
+                                         tr("Contour \"%1\" cutting point generation failed: %2")
                                              .arg(contour.name, leadInError));
                     return false;
                 }
@@ -3480,7 +3599,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     const int extractionStrategy = m_extractionStrategy;
     MachineKinematics* machine = kinematics();
     if (!machine) {
-        emit operationFailed(tr("全局生成刀路"), tr("找不到机台运动学配置"));
+        // 中文翻译：全局生成刀路；找不到机台运动学配置
+        emit operationFailed(tr("Generate toolpath globally"), tr("Machine kinematics configuration not found"));
         return kInvalidTaskId;
     }
     const QList<MachineAxisDef> axes = machine->axes();
@@ -3502,21 +3622,25 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
         beamDirs.append(beamDirectionWpc(s.workpieceEntry));
 
     TaskSpec spec;
-    spec.label = tr("全局生成刀路");
+    // 中文翻译：全局生成刀路
+    spec.label = tr("Generate toolpath globally");
     spec.scope = QStringLiteral("cam.toolpath");
     spec.priority = TaskPriority::Normal;
     const TaskId taskId = taskManager->run(spec,
         [workpieceSources, previousBySignature, previousOrder, leadInLength, params, selectedFaceEntries,
          beamDirs, effectiveUseFaceClassification, axes, configType, result](TaskProgress* progress) {
             progress->setRange(0, 100);
-            progress->setStepName(QObject::tr("1/5 正在分离加工面与横截面"));
+            // 中文翻译：1/5 正在分离加工面与横截面
+            progress->setStepName(QObject::tr("1/5 Separating the machined surface and cross section"));
             progress->setValue(5);
             std::vector<LaserContour> allContours;
             for (int sourceIndex = 0; sourceIndex < workpieceSources.size(); ++sourceIndex) {
                 if (progress->isAbortRequested())
-                    throw std::runtime_error("全局刀路生成已取消");
+                    // 中文翻译：全局刀路生成已取消
+                    throw std::runtime_error("Global toolpath generation canceled");
                 const WorkpieceShapeSource& source = workpieceSources.at(sourceIndex);
-                progress->setStepName(QObject::tr("2/5 正在提取工件轮廓 %1/%2")
+                // 中文翻译：2/5 正在提取工件轮廓 %1/%2
+                progress->setStepName(QObject::tr("2/5 Extracting workpiece contour %1/%2")
                     .arg(sourceIndex + 1).arg(workpieceSources.size()));
                 if (source.shape.IsNull())
                     continue;
@@ -3537,7 +3661,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             crossFaces.push_back(entry.face);
                     }
                     if (outerFaces.empty()) {
-                        result->error = QObject::tr("工件源 #%1 未提供加工面。")
+                        // 中文翻译：工件源 #%1 未提供加工面。
+                        result->error = QObject::tr("Workpiece source #%1 does not provide a machining surface.")
                             .arg(source.componentIndex + 1);
                         return;
                     }
@@ -3552,7 +3677,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     if ((perSourceParams.strategy == ExtractionStrategy::Auto
                          || perSourceParams.strategy == ExtractionStrategy::TubeClassification)
                         && (!autoClassification.hasOuter() || !autoClassification.hasCrossSection())) {
-                        result->error = QObject::tr("工件源 #%1 无法可靠识别加工面与横截面，请手动调整面组。")
+                        // 中文翻译：工件源 #%1 无法可靠识别加工面与横截面，请手动调整面组。
+                        result->error = QObject::tr("Workpiece source #%1 cannot reliably identify the processing surface and cross section. Please adjust the quilt manually.")
                             .arg(source.componentIndex + 1);
                         return;
                     }
@@ -3570,7 +3696,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 }
                 for (std::size_t contourIndex = 0; contourIndex < contours.size(); ++contourIndex) {
                     if ((contourIndex % 16u) == 0u && progress->isAbortRequested())
-                        throw std::runtime_error("全局刀路生成已取消");
+                        // 中文翻译：全局刀路生成已取消
+                        throw std::runtime_error("Global toolpath generation canceled");
                     auto& contour = contours[contourIndex];
                     const auto oldIt = previousBySignature.constFind(contour.signature);
                     const LaserContour* oldContour = oldIt == previousBySignature.constEnd()
@@ -3592,8 +3719,10 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     contour.sourceShape = source.shape;
                     if (workpieceSources.size() > 1) {
                         contour.sourceInfo = contour.sourceInfo.isEmpty()
-                            ? QObject::tr("工件源 #%1").arg(source.componentIndex + 1)
-                            : QObject::tr("%1 · 工件源 #%2").arg(contour.sourceInfo).arg(source.componentIndex + 1);
+                            // 中文翻译：工件源 #%1
+                            ? QObject::tr("Workpiece source #%1").arg(source.componentIndex + 1)
+                            // 中文翻译：%1 · 工件源 #%2
+                            : QObject::tr("%1 · Workpiece source #%2").arg(contour.sourceInfo).arg(source.componentIndex + 1);
                     }
                     if (oldContour && oldContour->leadIn.valid) {
                         if (!outerFaces.empty() && !crossFaces.empty())
@@ -3623,7 +3752,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             if (selected == contour.points.end()
                                 || (oldContour->leadIn.entryEdgeIndex >= 0
                                     && selected->position.Distance(oldContour->leadIn.entryPoint) > 1e-6)) {
-                                result->error = QObject::tr("轮廓 \"%1\" 的人工起点无法恢复").arg(contour.name);
+                                // 中文翻译：轮廓 "%1" 的人工起点无法恢复
+                                result->error = QObject::tr("Artificial starting point for contour \"%1\" cannot be restored").arg(contour.name);
                                 return;
                             }
                             startIndex = static_cast<int>(std::distance(contour.points.begin(), selected));
@@ -3646,14 +3776,18 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     / std::max(1, static_cast<int>(workpieceSources.size())));
             }
             if (allContours.empty()) {
-                result->error = QObject::tr("未找到可用的轮廓边缘");
+                // 中文翻译：未找到可用的轮廓边缘
+                result->error = QObject::tr("No available contour edges found");
                 return;
             }
-            progress->setStepName(QObject::tr("3/5 正在离散轮廓点"));
+            // 中文翻译：3/5 正在离散轮廓点
+            progress->setStepName(QObject::tr("3/5 Discretizing contour points"));
             progress->setValue(60);
-            progress->setStepName(QObject::tr("4/5 正在构造下刀线与几何刀路"));
+            // 中文翻译：4/5 正在构造下刀线与几何刀路
+            progress->setStepName(QObject::tr("4/5 Constructing knife lines and geometric tool paths"));
             progress->setValue(70);
-            progress->setStepName(QObject::tr("5/5 正在求解机台坐标"));
+            // 中文翻译：5/5 正在求解机台坐标
+            progress->setStepName(QObject::tr("5/5 Solving machine coordinates"));
             MachineKinematics workerKinematics;
             workerKinematics.setAxes(axes, configType);
             std::vector<LaserContour*> solveContours;
@@ -3686,7 +3820,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             [](const ToolpathPoint& point) { return point.machineCoord.valid; });
                 });
             if (!coordinatesValid) {
-                result->error = QObject::tr("全局五轴刀路求解失败");
+                // 中文翻译：全局五轴刀路求解失败
+                result->error = QObject::tr("Global five-axis tool path solution failed");
                 return;
             }
             result->contours = std::move(allContours);
@@ -3701,8 +3836,10 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
          setupRevision, extractionStrategy](bool success) {
             releaseOwnedTask(taskId);
             if (!success || !result->ok) {
-                emit operationFailed(tr("全局生成刀路"),
-                    result->error.isEmpty() ? tr("刀路生成失败或已取消") : result->error);
+                // 中文翻译：全局生成刀路
+                emit operationFailed(tr("Generate toolpath globally"),
+                    // 中文翻译：刀路生成失败或已取消
+                    result->error.isEmpty() ? tr("Tool path generation failed or canceled") : result->error);
                 return;
             }
             const QList<WorkpieceShapeSource> currentSources = collectWorkpieceShapes();
@@ -3733,7 +3870,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 || m_extractionStrategy != extractionStrategy
                 || machiningFaceSetRevision() != faceSetRevision
                 || machineSetupRevision() != setupRevision) {
-                emit operationFailed(tr("全局生成刀路"), tr("刀路在计算期间已变更，后台结果已丢弃"));
+                // 中文翻译：全局生成刀路；刀路在计算期间已变更，后台结果已丢弃
+                emit operationFailed(tr("Generate toolpath globally"), tr("The tool path has changed during calculation and the background results have been discarded"));
                 return;
             }
             eraseToolpathDisplay();
@@ -3893,19 +4031,22 @@ bool CamModule::ensureAcCenterCalibrationAvailable(QString* errorMessage) const
     const MachineKinematics* kin = kinematics();
     if (!kin) {
         if (errorMessage)
-            *errorMessage = tr("找不到机台轴系配置。请先选择 AC 转台构型。");
+            // 中文翻译：找不到机台轴系配置。请先选择 AC 转台构型。
+            *errorMessage = tr("The machine axis system configuration cannot be found. Please select the AC turntable configuration first.");
         return false;
     }
 
     if (kin->configType() != QStringLiteral("VERTICAL_AC_TABLE")) {
         if (errorMessage)
-            *errorMessage = tr("当前仅 VERTICAL_AC_TABLE 构型支持 A/C 模型对齐。");
+            // 中文翻译：当前仅 VERTICAL_AC_TABLE 构型支持 A/C 模型对齐。
+            *errorMessage = tr("A/C model alignment is currently supported only for the VERTICAL_AC_TABLE configuration.");
         return false;
     }
 
     if (!kin->findAxis(QStringLiteral("A")) || !kin->findAxis(QStringLiteral("C"))) {
         if (errorMessage)
-            *errorMessage = tr("当前 AC 转台轴定义不完整，缺少 A 轴或 C 轴。\n请先在应用程序选项的机台构型页完成配置。");
+            // 中文翻译：当前 AC 转台轴定义不完整，缺少 A 轴或 C 轴。\n请先在应用程序选项的机台构型页完成配置。
+            *errorMessage = tr("The current AC rotary table axis definition is incomplete, either the A or C axis is missing.\nPlease complete the configuration on the Machine Configuration page of the application options first.");
         return false;
     }
 
@@ -4268,7 +4409,8 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshot() const
     return buildToolpathExportSnapshot(
         toolpathRef().contours(),
         toolpathRevision(),
-        hasToolpath() ? tr("CAM 刀路快照已导出") : tr("CAM 当前无刀路"));
+        // 中文翻译：CAM 刀路快照已导出；CAM 当前无刀路
+        hasToolpath() ? tr("CAM tool path snapshot exported") : tr("CAM currently has no tool path"));
 }
 
 lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
@@ -4293,7 +4435,8 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
     return buildToolpathExportSnapshot(
         orderedContours,
         toolpathRevision(),
-        orderedContours.empty() ? tr("CAM 当前无刀路") : tr("CAM 有序规划刀路快照已导出"));
+        // 中文翻译：CAM 当前无刀路；CAM 有序规划刀路快照已导出
+        orderedContours.empty() ? tr("CAM currently has no tool path") : tr("CAM orderly planned tool path snapshot has been exported"));
 }
 
 lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
@@ -4331,11 +4474,14 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             || (m_camData && m_camData->generationParamsDirty())
             || !machineSolveReady;
         if (contour.needsRecalculation)
-            exportedContour.recalculationReason = tr("轮廓参数或起点尚未重新计算");
+            // 中文翻译：轮廓参数或起点尚未重新计算
+            exportedContour.recalculationReason = tr("Contour parameters or starting point have not been recalculated");
         else if (m_camData && m_camData->generationParamsDirty())
-            exportedContour.recalculationReason = tr("全局生成参数尚未应用");
+            // 中文翻译：全局生成参数尚未应用
+            exportedContour.recalculationReason = tr("Global build parameters have not been applied yet");
         else if (!machineSolveReady)
-            exportedContour.recalculationReason = tr("五阶段 CAM 流程未完成或上游版本链不一致");
+            // 中文翻译：五阶段 CAM 流程未完成或上游版本链不一致
+            exportedContour.recalculationReason = tr("The five-stage CAM process is incomplete or the upstream version chain is inconsistent");
         exportedContour.pointCount = static_cast<int>(contour.points.size());
 
         // 计算世界坐标系下的几何端点：cut start = points.front()；end = points.back()；
@@ -4377,7 +4523,8 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             exportedContour.leadInError = contour.leadInSolution.error;
             if (contour.leadInSolution.valid && !hasLeadIn
                 && exportedContour.leadInError.isEmpty()) {
-                exportedContour.leadInError = tr("下刀点尚未重新计算五轴坐标");
+                // 中文翻译：下刀点尚未重新计算五轴坐标
+                exportedContour.leadInError = tr("The five-axis coordinates of the tool lowering point have not been recalculated.");
             }
             if (hasLeadIn) {
                 const ToolpathPoint& lead = contour.leadInSolution.point;
@@ -4625,11 +4772,13 @@ bool CamModule::commitLeadInPreview(WidgetOccView* occView, const QPoint& screen
     QString startError;
     if (!LaserToolpathBuilder::setContourStart(
             updated, m_previewLeadInPointIndex, &startError)) {
-        emit operationFailed(tr("设置轮廓起点失败"), startError);
+        // 中文翻译：设置轮廓起点失败
+        emit operationFailed(tr("Failed to set outline start point"), startError);
         return false;
     }
     if (!updated.leadInSolution.valid) {
-        emit operationFailed(tr("设置轮廓起点失败"), updated.leadInSolution.error);
+        // 中文翻译：设置轮廓起点失败
+        emit operationFailed(tr("Failed to set outline start point"), updated.leadInSolution.error);
         return false;
     }
     contour = std::move(updated);
@@ -4820,7 +4969,8 @@ bool CamModule::recalcToolpath()
 {
     const int contourIndex = activeContourIndex();
     if (contourIndex < 0 || contourIndex >= toolpathRef().contourCount()) {
-        emit operationFailed(tr("重新计算当前轮廓"), tr("请先在项目树中选择一条轮廓"));
+        // 中文翻译：重新计算当前轮廓；请先在项目树中选择一条轮廓
+        emit operationFailed(tr("Recalculate the current contour"), tr("Please select a profile in the project tree first"));
         return false;
     }
 
@@ -4829,7 +4979,8 @@ bool CamModule::recalcToolpath()
     const TopoDS_Shape sourceShape = updated.sourceShape.IsNull()
         ? m_workpieceShape : updated.sourceShape;
     if (sourceShape.IsNull()) {
-        emit operationFailed(tr("重新计算当前轮廓"), tr("当前轮廓缺少工件几何"));
+        // 中文翻译：重新计算当前轮廓；当前轮廓缺少工件几何
+        emit operationFailed(tr("Recalculate the current contour"), tr("The current profile is missing workpiece geometry"));
         return false;
     }
 
@@ -4860,7 +5011,8 @@ bool CamModule::recalcToolpath()
     }
 
     if (updated.points.empty()) {
-        emit operationFailed(tr("重新计算当前轮廓"), tr("轮廓 \"%1\" 离散后没有可用点").arg(updated.name));
+        // 中文翻译：重新计算当前轮廓；轮廓 "%1" 离散后没有可用点
+        emit operationFailed(tr("Recalculate the current contour"), tr("Contour \"%1\" has no available points after discretization").arg(updated.name));
         return false;
     }
 
@@ -4877,14 +5029,18 @@ bool CamModule::recalcToolpath()
             });
     }
     if (selected == updated.points.end()) {
-        emit operationFailed(tr("重新计算当前轮廓"),
-                             tr("轮廓 \"%1\" 无法恢复人工起点").arg(updated.name));
+        // 中文翻译：重新计算当前轮廓
+        emit operationFailed(tr("Recalculate the current contour"),
+                             // 中文翻译：轮廓 "%1" 无法恢复人工起点
+                             tr("Contour \"%1\" cannot restore artificial starting point").arg(updated.name));
         return false;
     }
     if (current.leadIn.entryEdgeIndex >= 0
         && selected->position.Distance(current.leadIn.entryPoint) > 1e-6) {
-        emit operationFailed(tr("重新计算当前轮廓"),
-                             tr("轮廓 \"%1\" 的起点拓扑锚点已变化").arg(updated.name));
+        // 中文翻译：重新计算当前轮廓
+        emit operationFailed(tr("Recalculate the current contour"),
+                             // 中文翻译：轮廓 "%1" 的起点拓扑锚点已变化
+                             tr("The starting topology anchor point of contour \"%1\" has changed").arg(updated.name));
         return false;
     }
 
@@ -4895,8 +5051,10 @@ bool CamModule::recalcToolpath()
         || !updated.leadInSolution.valid) {
         if (startError.isEmpty())
             startError = updated.leadInSolution.error;
-        emit operationFailed(tr("重新计算当前轮廓"),
-                             tr("轮廓 \"%1\" 下刀点生成失败：%2").arg(updated.name, startError));
+        // 中文翻译：重新计算当前轮廓
+        emit operationFailed(tr("Recalculate the current contour"),
+                             // 中文翻译：轮廓 "%1" 下刀点生成失败：%2
+                             tr("Contour \"%1\" cutting point generation failed: %2").arg(updated.name, startError));
         return false;
     }
 
@@ -4934,8 +5092,10 @@ bool CamModule::recalcToolpath()
             return point.machineCoord.valid;
         });
     if (!coordinatesValid) {
-        emit operationFailed(tr("重新计算当前轮廓"),
-                             tr("轮廓 \"%1\" 五轴坐标求解失败").arg(updated.name));
+        // 中文翻译：重新计算当前轮廓
+        emit operationFailed(tr("Recalculate the current contour"),
+                             // 中文翻译：轮廓 "%1" 五轴坐标求解失败
+                             tr("Contour \"%1\" five-axis coordinate solution failed").arg(updated.name));
         return false;
     }
 
@@ -4961,13 +5121,15 @@ TaskId CamModule::recalcToolpathAsync()
 {
     const int contourIndex = activeContourIndex();
     if (contourIndex < 0 || contourIndex >= toolpathRef().contourCount()) {
-        emit operationFailed(tr("重新计算当前轮廓"), tr("请先在项目树中选择一条轮廓"));
+        // 中文翻译：重新计算当前轮廓；请先在项目树中选择一条轮廓
+        emit operationFailed(tr("Recalculate the current contour"), tr("Please select a profile in the project tree first"));
         return kInvalidTaskId;
     }
     auto* taskManager = lcnc::Kernel::current().taskManager();
     MachineKinematics* machine = kinematics();
     if (!taskManager || !machine) {
-        emit operationFailed(tr("重新计算当前轮廓"), tr("后台任务或机台运动学服务不可用"));
+        // 中文翻译：重新计算当前轮廓；后台任务或机台运动学服务不可用
+        emit operationFailed(tr("Recalculate the current contour"), tr("Background tasks or machine kinematics services are not available"));
         return kInvalidTaskId;
     }
 
@@ -4975,7 +5137,8 @@ TaskId CamModule::recalcToolpathAsync()
     const TopoDS_Shape sourceShape = current.sourceShape.IsNull()
         ? m_workpieceShape : current.sourceShape;
     if (sourceShape.IsNull()) {
-        emit operationFailed(tr("重新计算当前轮廓"), tr("当前轮廓缺少工件几何"));
+        // 中文翻译：重新计算当前轮廓；当前轮廓缺少工件几何
+        emit operationFailed(tr("Recalculate the current contour"), tr("The current profile is missing workpiece geometry"));
         return kInvalidTaskId;
     }
 
@@ -5018,14 +5181,16 @@ TaskId CamModule::recalcToolpathAsync()
     const lcnc::cam::ContourId targetId = currentId;
 
     TaskSpec spec;
-    spec.label = tr("重新计算当前轮廓");
+    // 中文翻译：重新计算当前轮廓
+    spec.label = tr("Recalculate the current contour");
     spec.scope = QStringLiteral("cam.toolpath");
     spec.priority = TaskPriority::Normal;
     spec.cancellable = true;
     const TaskId taskId = taskManager->run(spec,
         [current, sourceShape, appliedGlobal, continuity, axes, configType, result](TaskProgress* progress) {
             progress->setRange(0, 100);
-            progress->setStepName(QObject::tr("正在离散轮廓"));
+            // 中文翻译：正在离散轮廓
+            progress->setStepName(QObject::tr("discretizing contours"));
             LaserContour updated = current;
             if (appliedGlobal.useFaceClassification) {
                 FaceClassification classification =
@@ -5049,9 +5214,11 @@ TaskId CamModule::recalcToolpathAsync()
                 LaserToolpathBuilder::discretizeContour(updated, sourceShape, updated.pendingParams.deflection);
             }
             if (progress->isAbortRequested())
-                throw std::runtime_error("轮廓重新计算已取消");
+                // 中文翻译：轮廓重新计算已取消
+                throw std::runtime_error("Contour recalculation canceled");
             if (updated.points.empty()) {
-                result->error = QObject::tr("轮廓 \"%1\" 离散后没有可用点").arg(updated.name);
+                // 中文翻译：轮廓 "%1" 离散后没有可用点
+                result->error = QObject::tr("Contour \"%1\" has no available points after discretization").arg(updated.name);
                 return;
             }
             auto selected = std::find_if(updated.points.begin(), updated.points.end(),
@@ -5067,12 +5234,14 @@ TaskId CamModule::recalcToolpathAsync()
                     });
             }
             if (selected == updated.points.end()) {
-                result->error = QObject::tr("轮廓 \"%1\" 无法恢复人工起点").arg(updated.name);
+                // 中文翻译：轮廓 "%1" 无法恢复人工起点
+                result->error = QObject::tr("Contour \"%1\" cannot restore artificial starting point").arg(updated.name);
                 return;
             }
             if (current.leadIn.entryEdgeIndex >= 0
                 && selected->position.Distance(current.leadIn.entryPoint) > 1e-6) {
-                result->error = QObject::tr("轮廓 \"%1\" 的起点拓扑锚点已变化").arg(updated.name);
+                // 中文翻译：轮廓 "%1" 的起点拓扑锚点已变化
+                result->error = QObject::tr("The starting topology anchor point of contour \"%1\" has changed").arg(updated.name);
                 return;
             }
             updated.leadIn.length = updated.pendingParams.leadInLength;
@@ -5084,7 +5253,8 @@ TaskId CamModule::recalcToolpathAsync()
                 return;
             }
             progress->setValue(65);
-            progress->setStepName(QObject::tr("正在求解机台坐标"));
+            // 中文翻译：正在求解机台坐标
+            progress->setStepName(QObject::tr("Solving for machine coordinates"));
             MachineKinematics workerKinematics;
             workerKinematics.setAxes(axes, configType);
             MachineCoord continuityState = continuity;
@@ -5095,7 +5265,8 @@ TaskId CamModule::recalcToolpathAsync()
                     return point.machineCoord.valid;
                 });
             if (!coordinatesValid) {
-                result->error = QObject::tr("轮廓 \"%1\" 五轴坐标求解失败").arg(updated.name);
+                // 中文翻译：轮廓 "%1" 五轴坐标求解失败
+                result->error = QObject::tr("Contour \"%1\" five-axis coordinate solution failed").arg(updated.name);
                 return;
             }
             updated.appliedParams = updated.pendingParams;
@@ -5110,8 +5281,10 @@ TaskId CamModule::recalcToolpathAsync()
         [this, result, targetId, originalSignature, originalPendingParams, sourceShape](bool success) {
         const int latestIndex = contourIndexById(targetId);
         if (!success || !result->ok) {
-            emit operationFailed(tr("重新计算当前轮廓"),
-                                 result->error.isEmpty() ? tr("轮廓重新计算失败或已取消") : result->error);
+            // 中文翻译：重新计算当前轮廓
+            emit operationFailed(tr("Recalculate the current contour"),
+                                 // 中文翻译：轮廓重新计算失败或已取消
+                                 result->error.isEmpty() ? tr("Contour recalculation failed or was canceled") : result->error);
             return;
         }
         const TopoDS_Shape latestSourceShape = latestIndex < 0
@@ -5125,7 +5298,8 @@ TaskId CamModule::recalcToolpathAsync()
                         - originalPendingParams.leadInLength) > 1e-12
             || std::abs(toolpathRef().contour(latestIndex).pendingParams.deflection
                         - originalPendingParams.deflection) > 1e-12) {
-            emit operationFailed(tr("重新计算当前轮廓"), tr("轮廓在计算期间已变更，后台结果已丢弃"));
+            // 中文翻译：重新计算当前轮廓；轮廓在计算期间已变更，后台结果已丢弃
+            emit operationFailed(tr("Recalculate the current contour"), tr("The contour changed during calculation and the background results were discarded"));
             return;
         }
         toolpathRef().contour(latestIndex) = std::move(result->contour);
@@ -5249,14 +5423,18 @@ QList<CamModule::MachiningFaceInfo> CamModule::machiningFacesForTree() const
         info.role = entry.role;
         const QString roleName = [this, &entry]() {
             switch (entry.role) {
-            case lcnc::cam::MachiningFaceRole::MachiningSurface: return tr("加工面");
-            case lcnc::cam::MachiningFaceRole::CrossSection: return tr("横截面");
+            // 中文翻译：加工面
+            case lcnc::cam::MachiningFaceRole::MachiningSurface: return tr("Processing surface");
+            // 中文翻译：横截面
+            case lcnc::cam::MachiningFaceRole::CrossSection: return tr("cross section");
             case lcnc::cam::MachiningFaceRole::LegacyOuterSurface: break;
             }
-            return tr("加工面");
+            // 中文翻译：加工面
+            return tr("Processing surface");
         }();
         info.displayName = entry.manual
-            ? tr("手动%1 %2").arg(roleName).arg(++manualIdx)
+            // 中文翻译：手动%1 %2
+            ? tr("Manual %1 %2").arg(roleName).arg(++manualIdx)
             : tr("%1 %2").arg(roleName).arg(++autoIdx);
         result.append(info);
     }
@@ -5274,7 +5452,8 @@ std::vector<TopoDS_Face> CamModule::manualMachiningFaces() const
 
 void CamModule::addMachiningFace(const TopoDS_Face& face)
 {
-    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+    // 中文翻译：编辑加工面
+    if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return;
     if (face.IsNull())
         return;
@@ -5307,7 +5486,8 @@ void CamModule::addMachiningFace(const TopoDS_Face& face)
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
-                                     tr("加工面编辑尚未应用"));
+                                     // 中文翻译：加工面编辑尚未应用
+                                     tr("Machining surface editing has not been applied yet"));
         m_camData->setGenerationParamsDirty(true);
     }
     emit machiningFacesChanged();
@@ -5315,7 +5495,8 @@ void CamModule::addMachiningFace(const TopoDS_Face& face)
 
 bool CamModule::removeMachiningFace(std::uint64_t faceId)
 {
-    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+    // 中文翻译：编辑加工面
+    if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return false;
     auto it = std::find_if(m_machiningFaces.begin(), m_machiningFaces.end(),
         [faceId](const MachiningFaceEntry& e) { return e.faceId == faceId; });
@@ -5325,7 +5506,8 @@ bool CamModule::removeMachiningFace(std::uint64_t faceId)
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
-                                     tr("加工面编辑尚未应用"));
+                                     // 中文翻译：加工面编辑尚未应用
+                                     tr("Machining surface editing has not been applied yet"));
         m_camData->setGenerationParamsDirty(true);
     }
     refreshMachiningFaceDisplay();
@@ -5336,7 +5518,8 @@ bool CamModule::removeMachiningFace(std::uint64_t faceId)
 bool CamModule::setMachiningFaceRole(
     std::uint64_t faceId, lcnc::cam::MachiningFaceRole role)
 {
-    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+    // 中文翻译：编辑加工面
+    if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return false;
     auto it = std::find_if(m_machiningFaces.begin(), m_machiningFaces.end(),
         [faceId](const MachiningFaceEntry& entry) { return entry.faceId == faceId; });
@@ -5351,8 +5534,10 @@ bool CamModule::setMachiningFaceRole(
                     && facesShareBoundaryEdge(other.face, it->face);
             });
         if (!intersectsMachiningFace) {
-            emit operationFailed(tr("设置横截面"),
-                                 tr("横截面必须与同一工件的加工面相交或共享边。"));
+            // 中文翻译：设置横截面
+            emit operationFailed(tr("Set cross section"),
+                                 // 中文翻译：横截面必须与同一工件的加工面相交或共享边。
+                                 tr("The cross section must intersect or share an edge with a machined surface of the same workpiece."));
             return false;
         }
     }
@@ -5363,7 +5548,8 @@ bool CamModule::setMachiningFaceRole(
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
-                                     tr("加工面角色编辑尚未应用"));
+                                     // 中文翻译：加工面角色编辑尚未应用
+                                     tr("Machining surface role editing has not been applied yet"));
         m_camData->setGenerationParamsDirty(true);
     }
     refreshMachiningFaceDisplay();
@@ -5373,7 +5559,8 @@ bool CamModule::setMachiningFaceRole(
 
 void CamModule::clearMachiningFaces()
 {
-    if (rejectConflictingPipelineOperation(tr("编辑加工面")))
+    // 中文翻译：编辑加工面
+    if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return;
     if (m_machiningFaces.empty())
         return;
@@ -5381,7 +5568,8 @@ void CamModule::clearMachiningFaces()
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
-                                     tr("加工面编辑尚未应用"));
+                                     // 中文翻译：加工面编辑尚未应用
+                                     tr("Machining surface editing has not been applied yet"));
         m_camData->setGenerationParamsDirty(true);
     }
     refreshMachiningFaceDisplay();
@@ -5521,7 +5709,8 @@ void CamModule::rebindMachiningFacesFromRecords()
     }
     if (workpieceFaces.empty()) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
-                                     tr("加工面无法在当前工件中重绑"));
+                                     // 中文翻译：加工面无法在当前工件中重绑
+                                     tr("The machining surface cannot be re-bound in the current workpiece"));
         m_camData->setGenerationParamsDirty(true);
         return;
     }
@@ -5557,7 +5746,8 @@ void CamModule::rebindMachiningFacesFromRecords()
     m_machiningFaces = std::move(rebound);
     if (m_machiningFaces.size() != records.size()) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
-                                     tr("部分加工面或横截面无法在当前工件中重绑"));
+                                     // 中文翻译：部分加工面或横截面无法在当前工件中重绑
+                                     tr("Some machined surfaces or cross-sections cannot be re-bound in the current workpiece"));
         m_camData->setGenerationParamsDirty(true);
     }
     if (!m_machiningFaces.empty()) {
@@ -5578,7 +5768,8 @@ void CamModule::rebindMachiningFacesFromRecords()
 bool CamModule::pickMachiningFace(WidgetOccView* view, const QPoint& pos, QString* error)
 {
     if (!view || view->view().IsNull() || view->context().IsNull()) {
-        if (error) *error = tr("没有可用的视图用于拾取加工面。");
+        // 中文翻译：没有可用的视图用于拾取加工面。
+        if (error) *error = tr("There are no views available for picking work surfaces.");
         return false;
     }
     const Handle(AIS_InteractiveContext)& context = view->context();
@@ -5587,12 +5778,14 @@ bool CamModule::pickMachiningFace(WidgetOccView* view, const QPoint& pos, QStrin
     const Handle(StdSelect_BRepOwner) brepOwner =
         Handle(StdSelect_BRepOwner)::DownCast(owner);
     if (brepOwner.IsNull() || !brepOwner->HasShape()) {
-        if (error) *error = tr("未检测到面，请将光标放在工件表面上重试。");
+        // 中文翻译：未检测到面，请将光标放在工件表面上重试。
+        if (error) *error = tr("No face detected, please place the cursor on the workpiece surface and try again.");
         return false;
     }
     const TopoDS_Shape picked = brepOwner->Shape();
     if (picked.IsNull() || picked.ShapeType() != TopAbs_FACE) {
-        if (error) *error = tr("拾取到的不是面，请选择工件上的加工面。");
+        // 中文翻译：拾取到的不是面，请选择工件上的加工面。
+        if (error) *error = tr("The picked up surface is not a surface, please select the processing surface on the workpiece.");
         return false;
     }
     bool belongsToWorkpiece = false;
@@ -5607,7 +5800,8 @@ bool CamModule::pickMachiningFace(WidgetOccView* view, const QPoint& pos, QStrin
             break;
     }
     if (!belongsToWorkpiece) {
-        if (error) *error = tr("只能选择工件模型上的面，机台、刀路和辅助显示不可作为加工面。");
+        // 中文翻译：只能选择工件模型上的面，机台、刀路和辅助显示不可作为加工面。
+        if (error) *error = tr("Only the surfaces on the workpiece model can be selected, and the machine table, tool path and auxiliary display cannot be used as processing surfaces.");
         return false;
     }
     addMachiningFace(TopoDS::Face(picked));
@@ -6122,7 +6316,8 @@ void CamModule::syncCamDocumentContours(bool forceRebuild)
         if (!forceRebuild && !gd->aisShapeForContour(contour.contourId).IsNull())
             continue;
         const QString name = contour.name.trimmed().isEmpty()
-            ? tr("轮廓 %1").arg(index + 1)
+            // 中文翻译：轮廓 %1
+            ? tr("Outline %1").arg(index + 1)
             : contour.name;
         // 刀路生成后可能一次新增数百/数千条轮廓。不能在这里逐条提交
         // UpdateCurrentViewer/Redraw，否则主线程会被每条 AIS 的重绘占满。

@@ -247,7 +247,8 @@ bool AcsTextCommandSink::flush(QString* errorMessage)
             while (m_token->isPaused())
                 QThread::msleep(10);
             if (m_token->isStopping()) {
-                if (errorMessage) *errorMessage = QStringLiteral("切割已被中断");
+                // 中文翻译：切割已被中断
+                if (errorMessage) *errorMessage = QStringLiteral("Cutting has been interrupted");
                 return false;
             }
         }
@@ -263,7 +264,8 @@ bool AcsTextCommandSink::startProgram(QString* errorMessage)
         return false;
     }
     if (!m_acs->SendCommand()) {
-        if (errorMessage) *errorMessage = QStringLiteral("ACS SendCommand 失败");
+        // 中文翻译：ACS SendCommand 失败
+        if (errorMessage) *errorMessage = QStringLiteral("ACS SendCommand failed");
         LCNC_ERR(lcnc::LogCode::Generic, "AcsTextCommandSink::flush SendCommand failed");
         return false;
     }

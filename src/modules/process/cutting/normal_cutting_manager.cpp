@@ -163,7 +163,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
     }
 
     if (!m_toolpathProvider) {
-        if (errorMessage) *errorMessage = tr("CAM 刀路提供者未注册");
+        // 中文翻译：CAM 刀路提供者未注册
+        if (errorMessage) *errorMessage = tr("CAM tool path provider is not registered");
         return false;
     }
 
@@ -199,7 +200,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
             snapshot = m_toolpathService->refreshSnapshot();
         }
         if (!snapshot.hasEnabledContours()) {
-            if (errorMessage) *errorMessage = tr("CAM 中没有可执行的启用轮廓");
+            // 中文翻译：CAM 中没有可执行的启用轮廓
+            if (errorMessage) *errorMessage = tr("There is no executable enable profile in CAM");
             return false;
         }
         cuttingList = buildCuttingList(snapshot, startNumber, endNumber, compOffsetX, compOffsetY, errorMessage);
@@ -207,7 +209,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
 
     if (cuttingList.isEmpty()) {
         if (errorMessage && errorMessage->isEmpty())
-            *errorMessage = tr("筛选后的切割链表为空");
+            // 中文翻译：筛选后的切割链表为空
+            *errorMessage = tr("The filtered cutting list is empty");
         return false;
     }
 
@@ -216,7 +219,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
     const bool simMode = m_processModule && m_processModule->simulationMode();
     auto sink = MotionSinkFactory::create(mc, simMode, m_simTicker.get(), m_processModule);
     if (!sink) {
-        if (errorMessage) *errorMessage = tr("运动指令汇构造失败（构型/控制器不匹配）");
+        // 中文翻译：运动指令汇构造失败（构型/控制器不匹配）
+        if (errorMessage) *errorMessage = tr("Motion instruction set construction failed (configuration/controller mismatch)");
         return false;
     }
     sink->setCancellation(&ic);
@@ -240,13 +244,15 @@ bool NormalCuttingManager::run(const QString& nodeId,
             const QString phase = rp.env.value(QString::fromLatin1(kEnvPhase)).toString();
             startContourIndex = (phase == QLatin1String("afterContour")) ? (last + 1) : last;
             startContourIndex = std::clamp(startContourIndex, 0, static_cast<int>(cuttingList.size()));
-            emit logMessage(tr("从断点续跑：跳过前 %1 条轮廓").arg(startContourIndex));
+            // 中文翻译：从断点续跑：跳过前 %1 条轮廓
+            emit logMessage(tr("Resume from breakpoint: skip first %1 contours").arg(startContourIndex));
         } else {
             ic.clearResumePoint(nodeId);
         }
     }
 
-    emit logMessage(tr("普通切割开始：%1 条轮廓（起始 %2），后端=%3")
+    // 中文翻译：普通切割开始：%1 条轮廓（起始 %2），后端=%3
+    emit logMessage(tr("Normal cutting start: %1 contours (start %2), backend=%3")
                         .arg(cuttingList.size())
                         .arg(startContourIndex + 1)
                         .arg(backendLabel));
@@ -260,13 +266,15 @@ bool NormalCuttingManager::run(const QString& nodeId,
         env.insert(QString::fromLatin1(kEnvPhase), QStringLiteral("beforeContour"));
         if (!ic.checkpoint(nodeId, makeLabel(QStringLiteral("beforeContour"), i, total), env)) {
             restoreAxisDriver();
-            if (errorMessage) *errorMessage = tr("普通切割已被中断");
+            // 中文翻译：普通切割已被中断
+            if (errorMessage) *errorMessage = tr("Normal cutting has been interrupted");
             return false;
         }
 
         const CuttingRow& row = cuttingList[i];
         emit contourStarted(i + 1, total,
-                            tr("轮廓 #%1 (%2)")
+                            // 中文翻译：轮廓 #%1 (%2)
+                            tr("Outline #%1 (%2)")
                                 .arg(row.data.contour.contourId)
                                 .arg(row.data.contour.contourName));
 
@@ -279,7 +287,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
                      row.data.contour.contourId, ex.what(),
                      row.tool ? row.tool->m_strName : std::string("<null>"));
             if (errorMessage)
-                *errorMessage = tr("轮廓 %1 执行异常：工具方向字段无效").arg(row.data.contour.contourId);
+                // 中文翻译：轮廓 %1 执行异常：工具方向字段无效
+                *errorMessage = tr("Contour %1 execution exception: Tool direction field is invalid").arg(row.data.contour.contourId);
             restoreAxisDriver();
             return false;
         } catch (const std::exception& ex) {
@@ -287,7 +296,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
                      "normal-cutting: exception on contour {}: {}",
                      row.data.contour.contourId, ex.what());
             if (errorMessage)
-                *errorMessage = tr("轮廓 %1 执行异常：%2")
+                // 中文翻译：轮廓 %1 执行异常：%2
+                *errorMessage = tr("Contour %1 execution exception: %2")
                                     .arg(row.data.contour.contourId)
                                     .arg(QString::fromUtf8(ex.what()));
             restoreAxisDriver();
@@ -299,14 +309,16 @@ bool NormalCuttingManager::run(const QString& nodeId,
             if (ic.isStopping())
                 return false;
             if (errorMessage && errorMessage->isEmpty())
-                *errorMessage = tr("轮廓 %1 执行中断").arg(row.data.contour.contourId);
+                // 中文翻译：轮廓 %1 执行中断
+                *errorMessage = tr("Execution of contour %1 interrupted").arg(row.data.contour.contourId);
             return false;
         }
 
         env[QString::fromLatin1(kEnvPhase)] = QStringLiteral("afterContour");
         if (!ic.checkpoint(nodeId, makeLabel(QStringLiteral("afterContour"), i, total), env)) {
             restoreAxisDriver();
-            if (errorMessage) *errorMessage = tr("普通切割已被中断");
+            // 中文翻译：普通切割已被中断
+            if (errorMessage) *errorMessage = tr("Normal cutting has been interrupted");
             return false;
         }
 
@@ -315,7 +327,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
 
     ic.clearResumePoint(nodeId);
     restoreAxisDriver();
-    emit logMessage(tr("普通切割完成"));
+    // 中文翻译：普通切割完成
+    emit logMessage(tr("Ordinary cutting completed"));
     return true;
 }
 
@@ -333,7 +346,8 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     // between them.
     auto deviceLock = m_service ? m_service->lockDeviceAccess() : Service::DeviceLock{};
     if (!row.tool) {
-        if (errorMessage) *errorMessage = tr("轮廓 %1 没有绑定工具").arg(row.data.contour.contourId);
+        // 中文翻译：轮廓 %1 没有绑定工具
+        if (errorMessage) *errorMessage = tr("Profile %1 has no binding tools").arg(row.data.contour.contourId);
         return false;
     }
 
@@ -344,18 +358,21 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
         MotionControl* mc = m_service ? m_service->GetMotionControl() : nullptr;
         if (!mc || !mc->IsConnected()) {
             if (errorMessage)
-                *errorMessage = tr("加工过程中运动控制器未连接");
+                // 中文翻译：加工过程中运动控制器未连接
+                *errorMessage = tr("The motion controller is not connected during processing");
             return false;
         }
         int fault = 0;
         if (!mc->IsAxisStatusNormal(fault)) {
             if (errorMessage)
-                *errorMessage = tr("加工过程中无法读取运动控制器状态");
+                // 中文翻译：加工过程中无法读取运动控制器状态
+                *errorMessage = tr("Unable to read motion controller status during processing");
             return false;
         }
         if (fault != 0) {
             if (errorMessage)
-                *errorMessage = tr("加工过程中运动控制器故障码: %1").arg(fault);
+                // 中文翻译：加工过程中运动控制器故障码: %1
+                *errorMessage = tr("Motion controller fault code during processing: %1").arg(fault);
             return false;
         }
         QStringList disabledAxes;
@@ -365,7 +382,8 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
         }
         if (!disabledAxes.isEmpty()) {
             if (errorMessage)
-                *errorMessage = tr("加工过程中轴系未使能: %1")
+                // 中文翻译：加工过程中轴系未使能: %1
+                *errorMessage = tr("The axis system is not enabled during machining: %1")
                     .arg(disabledAxes.join(tr("，")));
             return false;
         }
@@ -442,7 +460,8 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
     QString flushErr;
     if (!sink.startProgram(&flushErr)) {
         if (errorMessage) *errorMessage = flushErr.isEmpty()
-            ? tr("控制器执行失败")
+            // 中文翻译：控制器执行失败
+            ? tr("Controller execution failed")
             : flushErr;
         return false;
     }
@@ -455,7 +474,8 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
         // 则由 Stop 优先级命令落到控制器，随后本轮询立即观察到完成。
         if (interrupt.isStopping()) {
             if (errorMessage)
-                *errorMessage = tr("普通切割已被中断");
+                // 中文翻译：普通切割已被中断
+                *errorMessage = tr("Normal cutting has been interrupted");
             return false;
         }
 
@@ -474,7 +494,8 @@ bool NormalCuttingManager::executeContour(IMotionCommandSink& sink,
                 }), TaskPriority::Workflow, 1000);
             if (!result.success) {
                 if (errorMessage)
-                    *errorMessage = result.error.isEmpty() ? tr("控制器状态读取失败") : result.error;
+                    // 中文翻译：控制器状态读取失败
+                    *errorMessage = result.error.isEmpty() ? tr("Controller status read failed") : result.error;
                 return false;
             }
             running = *state;
@@ -617,8 +638,10 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             if (contour.needsRecalculation) {
                 if (errorMessage) {
                     const QString reason = contour.recalculationReason.trimmed().isEmpty()
-                        ? tr("刀路尚未重新计算") : contour.recalculationReason;
-                    *errorMessage = tr("轮廓 \"%1\" 无法加工：%2")
+                        // 中文翻译：刀路尚未重新计算
+                        ? tr("Toolpath has not been recalculated") : contour.recalculationReason;
+                    // 中文翻译：轮廓 "%1" 无法加工：%2
+                    *errorMessage = tr("Contour \"%1\" cannot be machined: %2")
                                         .arg(contour.contourName, reason);
                 }
                 LCNC_ERR(lcnc::LogCode::Generic,
@@ -629,9 +652,11 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             if (!contour.hasLeadIn || !contour.leadInPoint.machineCoordValid) {
                 if (errorMessage) {
                     const QString reason = contour.leadInError.trimmed().isEmpty()
-                        ? tr("下刀位姿无效")
+                        // 中文翻译：下刀位姿无效
+                        ? tr("The cutting position is invalid")
                         : contour.leadInError;
-                    *errorMessage = tr("轮廓 \"%1\" 无法加工：%2")
+                    // 中文翻译：轮廓 "%1" 无法加工：%2
+                    *errorMessage = tr("Contour \"%1\" cannot be machined: %2")
                                         .arg(contour.contourName, reason);
                 }
                 LCNC_ERR(lcnc::LogCode::ToolpathLeadInInvalid,
@@ -655,7 +680,8 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
                 if (point.machineCoordValid)
                     continue;
                 if (errorMessage) {
-                    *errorMessage = tr("轮廓 \"%1\" 无法加工：存在未求解的五轴刀路点")
+                    // 中文翻译：轮廓 "%1" 无法加工：存在未求解的五轴刀路点
+                    *errorMessage = tr("Contour \"%1\" cannot be machined: there are unresolved five-axis toolpath points")
                                         .arg(contour.contourName);
                 }
                 LCNC_ERR(lcnc::LogCode::Generic,
@@ -677,7 +703,8 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
         }
         // Phase F：掉落的 fallback 路径已删除。plan service 失败时直接返回空结果。
         if (errorMessage)
-            *errorMessage = tr("无法生成切割链表: 加工链表服务未返回数据");
+            // 中文翻译：无法生成切割链表: 加工链表服务未返回数据
+            *errorMessage = tr("Unable to generate cutting list: Processing list service did not return data");
         LCNC_ERR(lcnc::LogCode::Generic,
                  "normal-cutting: cutting plan service returned empty list, giving up");
     }
@@ -701,12 +728,14 @@ Tool* NormalCuttingManager::resolveTool(const QString& toolName,
     Tool* fallback = ToolFactory::GetTool(layerName);
     if (match(fallback, layerName)) {
         if (warnings)
-            warnings->append(tr("工具 \"%1\" 未注册，已回退到图层名 \"%2\"").arg(toolName, layerName));
+            // 中文翻译：工具 "%1" 未注册，已回退到图层名 "%2"
+            warnings->append(tr("Tool \"%1\" is not registered and has fallen back to layer name \"%2\"").arg(toolName, layerName));
         return fallback;
     }
 
     if (warnings)
-        warnings->append(tr("工具 \"%1\"/图层 \"%2\" 均未注册，使用默认工具参数").arg(toolName, layerName));
+        // 中文翻译：工具 "%1"/图层 "%2" 均未注册，使用默认工具参数
+        warnings->append(tr("Tool \"%1\"/layer \"%2\" are not registered, using default tool parameters").arg(toolName, layerName));
     return &m_sanitizedDefaultTool;
 }
 

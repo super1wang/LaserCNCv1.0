@@ -15,7 +15,8 @@ namespace lcnc::app {
 
 namespace {
 
-/// 注册"显示"分组命令；命令执行时通过 AppContext 动态取得当前 OccView。
+// 中文翻译：显示
+/// 注册"show"分组命令；命令执行时通过 AppContext 动态取得当前 OccView。
 void registerDisplayCommands(CommandContainer* container, QObject* parent)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic,

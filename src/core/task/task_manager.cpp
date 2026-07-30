@@ -68,7 +68,8 @@ TaskId TaskManager::run(TaskSpec spec, TaskJob job)
     entity->id            = id;
     entity->spec          = std::move(spec);
     if (entity->spec.label.isEmpty())
-        entity->spec.label = tr("未命名任务");
+        // 中文翻译：未命名任务
+        entity->spec.label = tr("Unnamed task");
     entity->progress      = new TaskProgress();
     entity->watcher       = new QFutureWatcher<void>(this);
 
@@ -121,7 +122,8 @@ TaskId TaskManager::run(TaskSpec spec, TaskJob job)
             } else {
                 {
                     std::lock_guard<std::mutex> lock(entity->stateMutex);
-                    entity->error = tr("未知异常");
+                    // 中文翻译：未知异常
+                    entity->error = tr("Unknown exception");
                 }
                 setStatus(entity, TaskExecutionStatus::Failed);
                 LCNC_ERR(lcnc::LogCode::TaskUnhandled,

@@ -18,8 +18,10 @@ ProcessNodeDescriptor StopStep::descriptor() const
 {
     ProcessNodeDescriptor d;
     d.type = ProcessNodeType::Stop;
-    d.displayName = QObject::tr("停止");
-    d.category = QObject::tr("结构");
+    // 中文翻译：停止
+    d.displayName = QObject::tr("stop");
+    // 中文翻译：结构
+    d.category = QObject::tr("structure");
     d.topLevelOnly = true;
     d.required = true;
     d.addable = false;
@@ -27,7 +29,8 @@ ProcessNodeDescriptor StopStep::descriptor() const
     d.disableable = false;
     d.movable = false;
     d.executorKey = QStringLiteral("stop");
-    d.defaultParameters.insert(QStringLiteral("message"), QObject::tr("流程结束"));
+    // 中文翻译：流程结束
+    d.defaultParameters.insert(QStringLiteral("message"), QObject::tr("End of process"));
     d.defaultParameters.insert(QStringLiteral("safeStopOutputs"), true);
     d.defaultParameters.insert(QStringLiteral("stopMotion"), false);
     return d;
@@ -35,7 +38,8 @@ ProcessNodeDescriptor StopStep::descriptor() const
 
 QString StopStep::summary(const ProcessNode& node) const
 {
-    return node.parameters.value(QStringLiteral("message"), QObject::tr("流程结束")).toString();
+    // 中文翻译：流程结束
+    return node.parameters.value(QStringLiteral("message"), QObject::tr("End of process")).toString();
 }
 
 QWidget* StopStep::createParameterEditor(const ProcessNode& node, QWidget* parent) const
@@ -45,15 +49,19 @@ QWidget* StopStep::createParameterEditor(const ProcessNode& node, QWidget* paren
 
     auto* message = new QLineEdit(page);
     message->setObjectName(QString::fromLatin1(kMessageName));
-    message->setText(node.parameters.value(QStringLiteral("message"), QObject::tr("流程结束")).toString());
-    form->addRow(QObject::tr("停止消息"), message);
+    // 中文翻译：流程结束
+    message->setText(node.parameters.value(QStringLiteral("message"), QObject::tr("End of process")).toString());
+    // 中文翻译：停止消息
+    form->addRow(QObject::tr("stop message"), message);
 
-    auto* safeOutputs = new QCheckBox(QObject::tr("停止时复位安全输出"), page);
+    // 中文翻译：停止时复位安全输出
+    auto* safeOutputs = new QCheckBox(QObject::tr("Reset safety outputs when stopped"), page);
     safeOutputs->setObjectName(QString::fromLatin1(kSafeOutputsName));
     safeOutputs->setChecked(node.parameters.value(QStringLiteral("safeStopOutputs"), true).toBool());
     form->addRow(QString(), safeOutputs);
 
-    auto* stopMotion = new QCheckBox(QObject::tr("停止时停止运动"), page);
+    // 中文翻译：停止时停止运动
+    auto* stopMotion = new QCheckBox(QObject::tr("Stop movement when stopped"), page);
     stopMotion->setObjectName(QString::fromLatin1(kStopMotionName));
     stopMotion->setChecked(node.parameters.value(QStringLiteral("stopMotion"), false).toBool());
     form->addRow(QString(), stopMotion);
@@ -66,7 +74,8 @@ bool StopStep::applyParameterEditor(QWidget* editor, ProcessNode& node, QString*
     auto* message = editor ? editor->findChild<QLineEdit*>(QString::fromLatin1(kMessageName)) : nullptr;
     auto* safeOutputs = editor ? editor->findChild<QCheckBox*>(QString::fromLatin1(kSafeOutputsName)) : nullptr;
     auto* stopMotion = editor ? editor->findChild<QCheckBox*>(QString::fromLatin1(kStopMotionName)) : nullptr;
-    node.parameters.insert(QStringLiteral("message"), message ? message->text().trimmed() : QObject::tr("流程结束"));
+    // 中文翻译：流程结束
+    node.parameters.insert(QStringLiteral("message"), message ? message->text().trimmed() : QObject::tr("End of process"));
     node.parameters.insert(QStringLiteral("safeStopOutputs"), safeOutputs ? safeOutputs->isChecked() : true);
     node.parameters.insert(QStringLiteral("stopMotion"), stopMotion ? stopMotion->isChecked() : false);
     node.enabled = true;
@@ -77,7 +86,8 @@ bool StopStep::execute(const ProcessNodeExecutionRequest& request,
                        ProcessStepContext& context,
                        QString* errorMessage)
 {
-    const QString message = request.parameters.value(QStringLiteral("message"), QObject::tr("流程结束")).toString();
+    // 中文翻译：流程结束
+    const QString message = request.parameters.value(QStringLiteral("message"), QObject::tr("End of process")).toString();
     if (context.logMessage)
         context.logMessage(message);
     if (request.parameters.value(QStringLiteral("stopMotion"), false).toBool() && context.motion) {

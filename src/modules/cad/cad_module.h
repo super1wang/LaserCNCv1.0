@@ -31,7 +31,8 @@ namespace lcnc::cad::task { class CadCommandDispatcher; }
  *
  * Responsible for:
  *  - Document lifecycle (new / open / save / close / import / export)
- *  - Managing the "文档" (Document) tab page
+ // 中文翻译：文档
+ *  - Managing the "Documentation" (Document) tab page
  *  - Providing modeling operations (create / move / rotate / delete / boolean / explode)
  *    via ShapeService delegation
  *  - Undo/Redo

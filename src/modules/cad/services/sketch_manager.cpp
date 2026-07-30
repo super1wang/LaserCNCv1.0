@@ -10,7 +10,8 @@ int SketchManager::addSketch(SketchPlaneKind plane,
 {
     SketchRecord record;
     record.id = m_nextId++;
-    record.name = QStringLiteral("草图 %1").arg(record.id);
+    // 中文翻译：草图 %1
+    record.name = QStringLiteral("Sketch %1").arg(record.id);
     record.plane = plane;
     record.elements.reserve(static_cast<int>(elements.size()));
     for (const auto& element : elements)

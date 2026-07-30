@@ -302,12 +302,14 @@ bool GTNMotionControl::Home(Axis eAxis)
 			{
 				if (m_bStop)
 				{
-					LogError("Home", "回原点被用户停止", enum_name(eAxis).data(), -1);
+					// 中文翻译：回原点被用户停止
+					LogError("Home", "Return to origin stopped by user", enum_name(eAxis).data(), -1);
 					bAborted = true; break;
 				}
 				if (GetTickCount64() > dwTimeout)
 				{
-					LogError("Home", "回原点超时", enum_name(eAxis).data(), -2);
+					// 中文翻译：回原点超时
+					LogError("Home", "Return to origin timeout", enum_name(eAxis).data(), -2);
 					bAborted = true; break;
 				}
 				GTN_GetHomeStatus(m_iCore, AxisIndex, &tHomeSts);	//获取回原点状态
@@ -315,7 +317,8 @@ bool GTNMotionControl::Home(Axis eAxis)
 			} while (tHomeSts.run);	// 等待搜索原点停止
 			if (bAborted) break;
 
-			if (tHomeSts.error) { LogError("Home", "回原点报错", enum_name(eAxis).data(), tHomeSts.error); break; }
+			// 中文翻译：回原点报错
+			if (tHomeSts.error) { LogError("Home", "Return to origin and report error", enum_name(eAxis).data(), tHomeSts.error); break; }
 
 			sRtn = GTN_ZeroPos(m_iCore, AxisIndex, 1);
 			if (sRtn != 0) { LogError("Home", "GTN_ZeroPos1", enum_name(eAxis).data(), sRtn); break; }
@@ -325,7 +328,8 @@ bool GTNMotionControl::Home(Axis eAxis)
 	}
 	catch (...)
 	{
-		LogError("Home", "回原点异常", enum_name(eAxis).data(), -999);
+		// 中文翻译：回原点异常
+		LogError("Home", "Return to origin exception", enum_name(eAxis).data(), -999);
 		bRet = false;
 	}
 

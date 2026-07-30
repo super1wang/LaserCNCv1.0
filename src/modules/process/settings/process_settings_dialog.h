@@ -20,6 +20,8 @@ struct ProcessSettingsChangeSet;
 
 class ProcessSettingsDialog final : public QDialog
 {
+    Q_OBJECT
+
 public:
     using SettingsAppliedHandler = std::function<void(const ProcessSettingsChangeSet&)>;
 

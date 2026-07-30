@@ -25,7 +25,8 @@ namespace lcnc::view {
  *   - 监听 GraphicsScene 的 QObject::destroyed 自动清理避免悬空。
  *
  * 用法：
- *   - 用户拨动 ribbon "坐标系" 按钮 → 调 setGloballyVisible(b)；
+ // 中文翻译：坐标系
+ *   - 用户拨动 ribbon "coordinate system" 按钮 → 调 setGloballyVisible(b)；
  *   - MainWindow 监听 guiDocumentAdded → 调 attach(scene)；
  *   - MainWindow 监听 guiDocumentClosed → 调 detach(scene)；
  *   - 同一 scene 重复 attach 安全（去重）。

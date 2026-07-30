@@ -22,7 +22,8 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshot()
 {
     if (!m_provider) {
         m_snapshot = {};
-        m_snapshot.description = QObject::tr("未连接 CAM 刀路提供者");
+        // 中文翻译：未连接 CAM 刀路提供者
+        m_snapshot.description = QObject::tr("CAM toolpath provider not connected");
         return m_snapshot;
     }
     m_snapshot = m_provider->exportToolpathSnapshot();
@@ -39,7 +40,8 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshotForOrde
 {
     if (!m_provider) {
         m_snapshot = {};
-        m_snapshot.description = QObject::tr("未连接 CAM 刀路提供者");
+        // 中文翻译：未连接 CAM 刀路提供者
+        m_snapshot.description = QObject::tr("CAM toolpath provider not connected");
         return m_snapshot;
     }
     // Cutting-plan mutations resolve the authoritative CAM order on the GUI
@@ -71,7 +73,8 @@ ProcessJobPlan ProcessToolpathService::buildJobPlan() const
         jobContour.points = m_snapshot.pointsByContourId.value(contour.contourId);
         jobContour.toolSettings = ProcessToolSettings{};
         if (jobContour.points.isEmpty())
-            jobContour.warnings.append(QObject::tr("轮廓 %1 没有刀路点").arg(QString::number(contour.contourId)));
+            // 中文翻译：轮廓 %1 没有刀路点
+            jobContour.warnings.append(QObject::tr("Profile %1 has no toolpath points").arg(QString::number(contour.contourId)));
 
         bool hasInvalidMachinePoint = false;
         for (const auto& point : jobContour.points) {
@@ -81,7 +84,8 @@ ProcessJobPlan ProcessToolpathService::buildJobPlan() const
             }
         }
         if (hasInvalidMachinePoint)
-            jobContour.warnings.append(QObject::tr("轮廓 %1 包含无效机床坐标点").arg(QString::number(contour.contourId)));
+            // 中文翻译：轮廓 %1 包含无效机床坐标点
+            jobContour.warnings.append(QObject::tr("Contour %1 contains invalid machine coordinate points").arg(QString::number(contour.contourId)));
 
         plan.totalPointCount += jobContour.points.size();
         plan.warnings.append(jobContour.warnings);
@@ -90,7 +94,8 @@ ProcessJobPlan ProcessToolpathService::buildJobPlan() const
 
     plan.valid = !plan.contours.isEmpty() && plan.totalPointCount > 0;
     if (!plan.valid)
-        plan.warnings.append(QObject::tr("没有可执行的启用刀路轮廓"));
+        // 中文翻译：没有可执行的启用刀路轮廓
+        plan.warnings.append(QObject::tr("No executable enabled toolpath profile"));
     return plan;
 }
 

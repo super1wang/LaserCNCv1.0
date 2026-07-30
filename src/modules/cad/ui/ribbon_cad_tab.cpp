@@ -106,10 +106,12 @@ void buildRibbonTab(SARibbonCategory* cat,
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cad::buildRibbonTab begin");
 
     // ── 建模 ─────────────────────────────────────────────────────────────
-    SARibbonPanel* panelModel = cat->addPanel(QObject::tr("建模"));
+    // 中文翻译：建模
+    SARibbonPanel* panelModel = cat->addPanel(QObject::tr("Modeling"));
     auto* menuPrimitive = makeCommandMenu(
         cat,
-        QObject::tr("基本体"),
+        // 中文翻译：基本体
+        QObject::tr("Basic body"),
         QIcon(":/icons/box.svg"),
         {container->findAction(CmdCreateBox::Name),
          container->findAction(CmdCreateCylinder::Name),
@@ -120,7 +122,8 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     auto* menuSketch = makeCommandMenu(
         cat,
-        QObject::tr("草图"),
+        // 中文翻译：草图
+        QObject::tr("Sketch"),
         QIcon(":/icons/sketch.svg"),
         {container->findAction(CmdNewSketch::Name),
          container->findAction(CmdFinishSketch::Name),
@@ -135,10 +138,12 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelModel->addLargeMenu(menuSketch);
 
     // ── 操作 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelOps = cat->addPanel(QObject::tr("操作"));
+    // 中文翻译：操作
+    SARibbonPanel* panelOps = cat->addPanel(QObject::tr("Operation"));
     auto* menuHistory = makeCommandMenu(
         cat,
-        QObject::tr("历史"),
+        // 中文翻译：历史
+        QObject::tr("history"),
         QIcon(":/icons/undo.svg"),
         {container->findAction(CmdUndo::Name),
          container->findAction(CmdRedo::Name)});
@@ -146,7 +151,8 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     auto* menuTransform = makeCommandMenu(
         cat,
-        QObject::tr("变换"),
+        // 中文翻译：变换
+        QObject::tr("transform"),
         QIcon(":/icons/move.svg"),
         {container->findAction(CmdMoveShape::Name),
          container->findAction(CmdRotateShape::Name)});
@@ -154,7 +160,8 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     auto* menuBoolean = makeCommandMenu(
         cat,
-        QObject::tr("布尔"),
+        // 中文翻译：布尔
+        QObject::tr("Boolean"),
         QIcon(":/icons/bool_union.svg"),
         {container->findAction(CmdBoolUnion::Name),
          container->findAction(CmdBoolCut::Name),
@@ -163,17 +170,20 @@ void buildRibbonTab(SARibbonCategory* cat,
 
     auto* menuEdit = makeCommandMenu(
         cat,
-        QObject::tr("编辑"),
+        // 中文翻译：编辑
+        QObject::tr("Edit"),
         QIcon(":/icons/close.svg"),
         {container->findAction(CmdDeleteShape::Name),
          container->findAction(CmdExplodeShape::Name)});
     panelOps->addLargeMenu(menuEdit);
 
     // ── 测量 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelMeas = cat->addPanel(QObject::tr("测量"));
+    // 中文翻译：测量
+    SARibbonPanel* panelMeas = cat->addPanel(QObject::tr("Measure"));
     auto* menuMeasure = makeCommandMenu(
         cat,
-        QObject::tr("测量"),
+        // 中文翻译：测量
+        QObject::tr("Measure"),
         QIcon(":/icons/measure_dist.svg"),
         {container->findAction(CmdMeasureDistance::Name),
          container->findAction(CmdMeasureAngle::Name),
@@ -181,10 +191,12 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelMeas->addLargeMenu(menuMeasure);
 
     // ── 辅助 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelAssist = cat->addPanel(QObject::tr("辅助"));
+    // 中文翻译：辅助
+    SARibbonPanel* panelAssist = cat->addPanel(QObject::tr("Auxiliary"));
     auto* menuGrid = makeCommandMenu(
         cat,
-        QObject::tr("网格"),
+        // 中文翻译：网格
+        QObject::tr("grid"),
         QIcon(":/icons/grid.svg"),
         {container->findAction(CmdToggleCadGrid::Name),
          container->findAction(CmdToggleGridSnap::Name)});

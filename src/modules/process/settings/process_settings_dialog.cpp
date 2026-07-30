@@ -26,36 +26,47 @@ ProcessSettingsDialog::ProcessSettingsDialog(ProcessSettingsService* settings,
                                              QWidget* parent)
     : QDialog(parent), m_settings(settings), m_settingsApplied(std::move(settingsApplied))
 {
-    setWindowTitle(tr("加工参数"));
+    // 中文翻译：加工参数
+    setWindowTitle(tr("Processing parameters"));
     resize(1080, 700);
     auto* layout = new QVBoxLayout(this);
     auto* toolbar = new QToolBar(this);
-    toolbar->addAction(tr("新建工具"), this, [this] { createTool(); });
-    toolbar->addAction(tr("复制工具"), this, [this] { copyTool(); });
-    toolbar->addAction(tr("重命名"), this, [this] { renameTool(); });
-    toolbar->addAction(tr("删除工具"), this, [this] { deleteTool(); });
+    // 中文翻译：新建工具
+    toolbar->addAction(tr("New tool"), this, [this] { createTool(); });
+    // 中文翻译：复制工具
+    toolbar->addAction(tr("copy tool"), this, [this] { copyTool(); });
+    // 中文翻译：重命名
+    toolbar->addAction(tr("Rename"), this, [this] { renameTool(); });
+    // 中文翻译：删除工具
+    toolbar->addAction(tr("removal tool"), this, [this] { deleteTool(); });
     toolbar->addSeparator();
-    toolbar->addAction(tr("添加 I/O"), this, [this] {
+    // 中文翻译：添加 I/O
+    toolbar->addAction(tr("Add I/O"), this, [this] {
         if (!m_ioTable || m_editorStack->currentWidget() != m_ioTable) return;
         QString error;
-        if (!m_ioModel->addChannel(&error)) QMessageBox::warning(this, tr("添加 I/O"), error);
+        // 中文翻译：添加 I/O
+        if (!m_ioModel->addChannel(&error)) QMessageBox::warning(this, tr("Add I/O"), error);
     });
-    toolbar->addAction(tr("删除 I/O"), this, [this] {
+    // 中文翻译：删除 I/O
+    toolbar->addAction(tr("Delete I/O"), this, [this] {
         if (!m_ioTable || m_editorStack->currentWidget() != m_ioTable) return;
         const int row = m_ioTable->currentIndex().row();
         if (row < 0) return;
         QString error;
-        if (!m_ioModel->removeChannel(row, &error)) QMessageBox::warning(this, tr("删除 I/O"), error);
+        // 中文翻译：删除 I/O
+        if (!m_ioModel->removeChannel(row, &error)) QMessageBox::warning(this, tr("Delete I/O"), error);
     });
     layout->addWidget(toolbar);
 
     auto* split = new QSplitter(this);
     m_objects = new QTreeWidget(split);
-    m_objects->setHeaderLabel(tr("设置对象"));
+    // 中文翻译：设置对象
+    m_objects->setHeaderLabel(tr("Set object"));
     auto* right = new QWidget(split);
     auto* rightLayout = new QVBoxLayout(right);
     m_search = new QLineEdit(right);
-    m_search->setPlaceholderText(tr("筛选当前对象的参数"));
+    // 中文翻译：筛选当前对象的参数
+    m_search->setPlaceholderText(tr("Filter parameters for the current object"));
     rightLayout->addWidget(m_search);
     m_editorStack = new QStackedWidget(right);
     m_properties = new QTreeView(m_editorStack);
@@ -144,51 +155,63 @@ QString ProcessSettingsDialog::selectedToolName() const
 void ProcessSettingsDialog::createTool()
 {
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("新建工具"), tr("工具名称"), QLineEdit::Normal, {}, &ok);
+    // 中文翻译：新建工具；工具名称
+    const QString name = QInputDialog::getText(this, tr("New tool"), tr("Tool name"), QLineEdit::Normal, {}, &ok);
     if (!ok) return;
     QString error;
-    if (!m_settings->createTool(name, &error)) QMessageBox::warning(this, tr("新建工具"), error);
+    // 中文翻译：新建工具
+    if (!m_settings->createTool(name, &error)) QMessageBox::warning(this, tr("New tool"), error);
     else rebuildObjectTree();
 }
 
 void ProcessSettingsDialog::copyTool()
 {
     const QString source = selectedToolName();
-    if (source.isEmpty()) { QMessageBox::information(this, tr("复制工具"), tr("请先选择工具。")); return; }
+    // 中文翻译：复制工具；请先选择工具。
+    if (source.isEmpty()) { QMessageBox::information(this, tr("copy tool"), tr("Please select a tool first.")); return; }
     bool ok = false;
-    const QString target = QInputDialog::getText(this, tr("复制工具"), tr("新工具名称"), QLineEdit::Normal, source + tr(" 副本"), &ok);
+    // 中文翻译：复制工具；新工具名称； 副本
+    const QString target = QInputDialog::getText(this, tr("copy tool"), tr("New tool name"), QLineEdit::Normal, source + tr("copy"), &ok);
     if (!ok) return;
     QString error;
-    if (!m_settings->copyTool(source, target, &error)) QMessageBox::warning(this, tr("复制工具"), error);
+    // 中文翻译：复制工具
+    if (!m_settings->copyTool(source, target, &error)) QMessageBox::warning(this, tr("copy tool"), error);
     else rebuildObjectTree();
 }
 
 void ProcessSettingsDialog::renameTool()
 {
     const QString source = selectedToolName();
-    if (source.isEmpty()) { QMessageBox::information(this, tr("重命名工具"), tr("请先选择工具。")); return; }
+    // 中文翻译：重命名工具；请先选择工具。
+    if (source.isEmpty()) { QMessageBox::information(this, tr("rename tool"), tr("Please select a tool first.")); return; }
     bool ok = false;
-    const QString target = QInputDialog::getText(this, tr("重命名工具"), tr("新名称"), QLineEdit::Normal, source, &ok);
+    // 中文翻译：重命名工具；新名称
+    const QString target = QInputDialog::getText(this, tr("rename tool"), tr("new name"), QLineEdit::Normal, source, &ok);
     if (!ok) return;
     QString error;
-    if (!m_settings->renameTool(source, target, &error)) QMessageBox::warning(this, tr("重命名工具"), error);
+    // 中文翻译：重命名工具
+    if (!m_settings->renameTool(source, target, &error)) QMessageBox::warning(this, tr("rename tool"), error);
     else rebuildObjectTree();
 }
 
 void ProcessSettingsDialog::deleteTool()
 {
     const QString name = selectedToolName();
-    if (name.isEmpty()) { QMessageBox::information(this, tr("删除工具"), tr("请先选择工具。")); return; }
-    if (QMessageBox::question(this, tr("删除工具"), tr("删除工具“%1”？").arg(name)) != QMessageBox::Yes) return;
+    // 中文翻译：删除工具；请先选择工具。
+    if (name.isEmpty()) { QMessageBox::information(this, tr("removal tool"), tr("Please select a tool first.")); return; }
+    // 中文翻译：删除工具；删除工具“%1”？
+    if (QMessageBox::question(this, tr("removal tool"), tr("Delete tool \"%1\"?").arg(name)) != QMessageBox::Yes) return;
     QString error;
-    if (!m_settings->deleteTool(name, &error)) QMessageBox::warning(this, tr("删除工具"), error);
+    // 中文翻译：删除工具
+    if (!m_settings->deleteTool(name, &error)) QMessageBox::warning(this, tr("removal tool"), error);
     else rebuildObjectTree();
 }
 
 void ProcessSettingsDialog::apply()
 {
     const auto result = m_settings->commit();
-    if (!result.success) { QMessageBox::critical(this, tr("应用参数"), result.error); return; }
+    // 中文翻译：应用参数
+    if (!result.success) { QMessageBox::critical(this, tr("Application parameters"), result.error); return; }
     if (m_settingsApplied)
         m_settingsApplied(result.changes);
     rebuildObjectTree();

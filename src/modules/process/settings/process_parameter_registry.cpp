@@ -51,7 +51,8 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
 {
     QVector<ParameterObjectDescriptor> objects;
 
-    ParameterObjectDescriptor controller{QStringLiteral("controller"), QObject::tr("运动控制器"), QObject::tr("运动与轴系")};
+    // 中文翻译：运动控制器；运动与轴系
+    ParameterObjectDescriptor controller{QStringLiteral("controller"), QObject::tr("motion controller"), QObject::tr("Movement and Axis Systems")};
 #if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
     const QString defaultController = QStringLiteral("SimulatorCMHP");
 #elif defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
@@ -59,7 +60,8 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
 #else
     const QString defaultController = QStringLiteral("Simulator");
 #endif
-    auto controllerType = field("type", QObject::tr("控制器类型"), QObject::tr("连接"), ParameterValueType::Enum,
+    // 中文翻译：控制器类型；连接
+    auto controllerType = field("type", QObject::tr("Controller type"), QObject::tr("connect"), ParameterValueType::Enum,
                                 ProcessConfigArea::Devices, "MotionControl", "sType", defaultController);
     controllerType.enumValues = {QStringLiteral("Simulator")};
 #if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
@@ -78,45 +80,71 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
             ParameterObjectDescriptor object;
             object.id = QStringLiteral("axis:%1").arg(axis.axis.name);
             object.title = axis.axis.name;
-            object.category = QObject::tr("运动与轴系");
+            // 中文翻译：运动与轴系
+            object.category = QObject::tr("Movement and Axis Systems");
             object.fields = {
-                machineField("controllerIndex", QObject::tr("控制器索引"), QObject::tr("基本"), ParameterValueType::Int, "controllerIndex", {}, 0, 128, 0),
-                machineField("homeIndex", QObject::tr("回零索引"), QObject::tr("基本"), ParameterValueType::Int, "homeIndex", {}, 0, 128, 0),
-                machineField("resolution", QObject::tr("分辨率"), QObject::tr("基本"), ParameterValueType::Double, "resolution", {}, 0.000001),
-                machineField("motionSpeed", QObject::tr("运动速度"), QObject::tr("基本"), ParameterValueType::Double, "motionSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
-                machineField("min", QObject::tr("负限位"), QObject::tr("限位"), ParameterValueType::Double, "min", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm"),
-                machineField("max", QObject::tr("正限位"), QObject::tr("限位"), ParameterValueType::Double, "max", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm"),
-                machineField("lowSpeed", QObject::tr("低速"), QObject::tr("手动速度"), ParameterValueType::Double, "lowSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
-                machineField("mediumSpeed", QObject::tr("中速"), QObject::tr("手动速度"), ParameterValueType::Double, "mediumSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
-                machineField("highSpeed", QObject::tr("高速"), QObject::tr("手动速度"), ParameterValueType::Double, "highSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
-                machineField("acceleration", QObject::tr("加速度"), QObject::tr("运动学"), ParameterValueType::Double, "acceleration", {}, 0.0),
-                machineField("jerk", QObject::tr("加加速度"), QObject::tr("运动学"), ParameterValueType::Double, "jerk", {}, 0.0)
+                // 中文翻译：控制器索引；基本
+                machineField("controllerIndex", QObject::tr("Controller index"), QObject::tr("Basic"), ParameterValueType::Int, "controllerIndex", {}, 0, 128, 0),
+                // 中文翻译：回零索引；基本
+                machineField("homeIndex", QObject::tr("Zero index"), QObject::tr("Basic"), ParameterValueType::Int, "homeIndex", {}, 0, 128, 0),
+                // 中文翻译：分辨率；基本
+                machineField("resolution", QObject::tr("resolution"), QObject::tr("Basic"), ParameterValueType::Double, "resolution", {}, 0.000001),
+                // 中文翻译：运动速度；基本
+                machineField("motionSpeed", QObject::tr("Movement speed"), QObject::tr("Basic"), ParameterValueType::Double, "motionSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
+                // 中文翻译：负限位；限位
+                machineField("min", QObject::tr("Negative limit"), QObject::tr("Limit"), ParameterValueType::Double, "min", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm"),
+                // 中文翻译：正限位；限位
+                machineField("max", QObject::tr("Positive limit"), QObject::tr("Limit"), ParameterValueType::Double, "max", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm"),
+                // 中文翻译：低速；手动速度
+                machineField("lowSpeed", QObject::tr("low speed"), QObject::tr("manual speed"), ParameterValueType::Double, "lowSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
+                // 中文翻译：中速；手动速度
+                machineField("mediumSpeed", QObject::tr("medium speed"), QObject::tr("manual speed"), ParameterValueType::Double, "mediumSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
+                // 中文翻译：高速；手动速度
+                machineField("highSpeed", QObject::tr("high speed"), QObject::tr("manual speed"), ParameterValueType::Double, "highSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
+                // 中文翻译：加速度；运动学
+                machineField("acceleration", QObject::tr("acceleration"), QObject::tr("Kinesiology"), ParameterValueType::Double, "acceleration", {}, 0.0),
+                // 中文翻译：加加速度；运动学
+                machineField("jerk", QObject::tr("Jerk"), QObject::tr("Kinesiology"), ParameterValueType::Double, "jerk", {}, 0.0)
             };
             if (axis.axis.motionType == MachineAxisDef::Rotary)
-                object.fields.append(machineField("pipeDiameter", QObject::tr("管径"), QObject::tr("旋转轴"), ParameterValueType::Double, "pipeDiameter", "mm", 0.0));
+                // 中文翻译：管径；旋转轴
+                object.fields.append(machineField("pipeDiameter", QObject::tr("Pipe diameter"), QObject::tr("axis of rotation"), ParameterValueType::Double, "pipeDiameter", "mm", 0.0));
             objects.append(object);
         }
     }
 
-    ParameterObjectDescriptor laser{QStringLiteral("laser"), QObject::tr("激光器"), QObject::tr("激光与外设")};
-    auto laserType = field("type", QObject::tr("设备类型"), QObject::tr("基本"), ParameterValueType::Enum, ProcessConfigArea::Devices, "Laser", "sType", "Simulator");
+    // 中文翻译：激光器；激光与外设
+    ParameterObjectDescriptor laser{QStringLiteral("laser"), QObject::tr("laser"), QObject::tr("Lasers and Peripherals")};
+    // 中文翻译：设备类型；基本
+    auto laserType = field("type", QObject::tr("Device type"), QObject::tr("Basic"), ParameterValueType::Enum, ProcessConfigArea::Devices, "Laser", "sType", "Simulator");
     laserType.enumValues = {"Simulator", "AnalogControl", "IPG", "Raycus", "Pharos", "ULTRON"};
     laser.fields = {laserType,
-        field("resolution", QObject::tr("模拟分辨率"), QObject::tr("基本"), ParameterValueType::Double, ProcessConfigArea::Devices, "Laser", "fResolution", 0.0),
-        field("serialPort", QObject::tr("串口"), QObject::tr("串口"), ParameterValueType::String, ProcessConfigArea::Devices, "ComSetting", "sPort", "COM1"),
-        field("baud", QObject::tr("波特率"), QObject::tr("串口"), ParameterValueType::String, ProcessConfigArea::Devices, "ComSetting", "sBaudRate", "9600")};
+        // 中文翻译：模拟分辨率；基本
+        field("resolution", QObject::tr("Analog resolution"), QObject::tr("Basic"), ParameterValueType::Double, ProcessConfigArea::Devices, "Laser", "fResolution", 0.0),
+        // 中文翻译：串口；串口
+        field("serialPort", QObject::tr("serial port"), QObject::tr("serial port"), ParameterValueType::String, ProcessConfigArea::Devices, "ComSetting", "sPort", "COM1"),
+        // 中文翻译：波特率；串口
+        field("baud", QObject::tr("baud rate"), QObject::tr("serial port"), ParameterValueType::String, ProcessConfigArea::Devices, "ComSetting", "sBaudRate", "9600")};
     objects.append(laser);
 
-    ParameterObjectDescriptor gas{QStringLiteral("gas"), QObject::tr("气体"), QObject::tr("介质与流程")};
-    gas.fields = {field("enabled", QObject::tr("启用吹气"), QObject::tr("基本"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Gas", "bBlow", false),
-                  field("delay", QObject::tr("吹气延时"), QObject::tr("基本"), ParameterValueType::Double, ProcessConfigArea::Operations, "Gas", "fBlowDelay", 0.0, "s", 0.0),
-                  field("pressure", QObject::tr("气压"), QObject::tr("基本"), ParameterValueType::Double, ProcessConfigArea::Operations, "Gas", "fPressure", 0.0, "MPa", 0.0)};
+    // 中文翻译：气体；介质与流程
+    ParameterObjectDescriptor gas{QStringLiteral("gas"), QObject::tr("gas"), QObject::tr("Medium and process")};
+    // 中文翻译：启用吹气；基本
+    gas.fields = {field("enabled", QObject::tr("Enable blowing"), QObject::tr("Basic"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Gas", "bBlow", false),
+                  // 中文翻译：吹气延时；基本
+                  field("delay", QObject::tr("blow delay"), QObject::tr("Basic"), ParameterValueType::Double, ProcessConfigArea::Operations, "Gas", "fBlowDelay", 0.0, "s", 0.0),
+                  // 中文翻译：气压；基本
+                  field("pressure", QObject::tr("air pressure"), QObject::tr("Basic"), ParameterValueType::Double, ProcessConfigArea::Operations, "Gas", "fPressure", 0.0, "MPa", 0.0)};
     objects.append(gas);
 
-    ParameterObjectDescriptor water{QStringLiteral("water"), QObject::tr("水路与回水泵"), QObject::tr("介质与流程")};
-    water.fields = {field("enabled", QObject::tr("启用水路"), QObject::tr("水路"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Water", "bWater", false),
-                    field("delay", QObject::tr("水路延时"), QObject::tr("水路"), ParameterValueType::Double, ProcessConfigArea::Operations, "Water", "fWaterDelay", 0.0, "s", 0.0),
-                    field("pump", QObject::tr("启用回水泵"), QObject::tr("回水泵"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Pump", "bPump", false)};
+    // 中文翻译：水路与回水泵；介质与流程
+    ParameterObjectDescriptor water{QStringLiteral("water"), QObject::tr("Waterway and return pump"), QObject::tr("Medium and process")};
+    // 中文翻译：启用水路；水路
+    water.fields = {field("enabled", QObject::tr("Activate waterways"), QObject::tr("waterway"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Water", "bWater", false),
+                    // 中文翻译：水路延时；水路
+                    field("delay", QObject::tr("waterway delay"), QObject::tr("waterway"), ParameterValueType::Double, ProcessConfigArea::Operations, "Water", "fWaterDelay", 0.0, "s", 0.0),
+                    // 中文翻译：启用回水泵；回水泵
+                    field("pump", QObject::tr("Enable return water pump"), QObject::tr("Return water pump"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Pump", "bPump", false)};
     objects.append(water);
 
     // IO channels are a collection editor, not property objects.  Keeping
@@ -126,36 +154,55 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
         ParameterObjectDescriptor io;
         io.id = id;
         io.title = title;
-        io.category = QObject::tr("I/O 与安全");
+        // 中文翻译：I/O 与安全
+        io.category = QObject::tr("I/O and security");
         io.ioTableObject = true;
         io.ioBucket = bucket;
         objects.append(io);
     };
-    appendIoTable(QStringLiteral("io:digital-input"), QObject::tr("数字量输入"), ProcessIoBucket::DigitalInput);
-    appendIoTable(QStringLiteral("io:digital-output"), QObject::tr("数字量输出"), ProcessIoBucket::DigitalOutput);
-    appendIoTable(QStringLiteral("io:analog-input"), QObject::tr("模拟量输入"), ProcessIoBucket::AnalogInput);
-    appendIoTable(QStringLiteral("io:analog-output"), QObject::tr("模拟量输出"), ProcessIoBucket::AnalogOutput);
+    // 中文翻译：数字量输入
+    appendIoTable(QStringLiteral("io:digital-input"), QObject::tr("digital input"), ProcessIoBucket::DigitalInput);
+    // 中文翻译：数字量输出
+    appendIoTable(QStringLiteral("io:digital-output"), QObject::tr("Digital output"), ProcessIoBucket::DigitalOutput);
+    // 中文翻译：模拟量输入
+    appendIoTable(QStringLiteral("io:analog-input"), QObject::tr("Analog input"), ProcessIoBucket::AnalogInput);
+    // 中文翻译：模拟量输出
+    appendIoTable(QStringLiteral("io:analog-output"), QObject::tr("Analog output"), ProcessIoBucket::AnalogOutput);
 
-    ParameterObjectDescriptor monitor{QStringLiteral("monitor"), QObject::tr("安全监控"), QObject::tr("I/O 与安全")};
-    monitor.fields = {field("interlock", QObject::tr("互锁启用"), QObject::tr("基本"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Cutting", "bInterLock", true),
-                      field("curtain", QObject::tr("安全光幕"), QObject::tr("基本"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Cutting", "bSafetyLightCurtain", false),
-                      field("pressure", QObject::tr("气压监控"), QObject::tr("气体"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Gas", "bPressureMonitor", false),
-                      field("waterPressure", QObject::tr("水压监控"), QObject::tr("水路"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Water", "bWaterPressureMonitor", false)};
+    // 中文翻译：安全监控；I/O 与安全
+    ParameterObjectDescriptor monitor{QStringLiteral("monitor"), QObject::tr("security monitoring"), QObject::tr("I/O and security")};
+    // 中文翻译：互锁启用；基本
+    monitor.fields = {field("interlock", QObject::tr("Interlock enabled"), QObject::tr("Basic"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Cutting", "bInterLock", true),
+                      // 中文翻译：安全光幕；基本
+                      field("curtain", QObject::tr("safety light curtain"), QObject::tr("Basic"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Cutting", "bSafetyLightCurtain", false),
+                      // 中文翻译：气压监控；气体
+                      field("pressure", QObject::tr("Air pressure monitoring"), QObject::tr("gas"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Gas", "bPressureMonitor", false),
+                      // 中文翻译：水压监控；水路
+                      field("waterPressure", QObject::tr("water pressure monitoring"), QObject::tr("waterway"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Water", "bWaterPressureMonitor", false)};
     objects.append(monitor);
 
-    ParameterObjectDescriptor camera{QStringLiteral("camera"), QObject::tr("相机"), QObject::tr("激光与外设")};
-    camera.fields = {field("host", QObject::tr("主机"), QObject::tr("连接"), ParameterValueType::String, ProcessConfigArea::Devices, "CameraConnect", "sHost", "127.0.0.1"),
-                     field("port", QObject::tr("端口"), QObject::tr("连接"), ParameterValueType::Int, ProcessConfigArea::Devices, "CameraConnect", "iPort", 0, {}, 0, 65535, 0),
-                     field("accuracy", QObject::tr("像素精度"), QObject::tr("标定"), ParameterValueType::Double, ProcessConfigArea::Devices, "CameraCalibration", "fPixelAccuracy", 0.0, "mm", 0.0)};
+    // 中文翻译：相机；激光与外设
+    ParameterObjectDescriptor camera{QStringLiteral("camera"), QObject::tr("camera"), QObject::tr("Lasers and Peripherals")};
+    // 中文翻译：主机；连接
+    camera.fields = {field("host", QObject::tr("Host"), QObject::tr("connect"), ParameterValueType::String, ProcessConfigArea::Devices, "CameraConnect", "sHost", "127.0.0.1"),
+                     // 中文翻译：端口；连接
+                     field("port", QObject::tr("port"), QObject::tr("connect"), ParameterValueType::Int, ProcessConfigArea::Devices, "CameraConnect", "iPort", 0, {}, 0, 65535, 0),
+                     // 中文翻译：像素精度；标定
+                     field("accuracy", QObject::tr("Pixel accuracy"), QObject::tr("Calibration"), ParameterValueType::Double, ProcessConfigArea::Devices, "CameraCalibration", "fPixelAccuracy", 0.0, "mm", 0.0)};
     objects.append(camera);
 
-    ParameterObjectDescriptor positions{QStringLiteral("positions"), QObject::tr("上下料位置"), QObject::tr("运动与轴系")};
+    // 中文翻译：上下料位置；运动与轴系
+    ParameterObjectDescriptor positions{QStringLiteral("positions"), QObject::tr("Loading and unloading position"), QObject::tr("Movement and Axis Systems")};
     if (machine) for (const auto& axis : machine->axisConfigurations()) {
         const QString axisName = axis.axis.name;
-        positions.fields.append(field(QStringLiteral("loading.enabled.%1").arg(axisName), QObject::tr("启用上料 %1").arg(axisName), QObject::tr("上料"), ParameterValueType::Bool, ProcessConfigArea::Operations, "LoadingPos", QStringLiteral("bLoadingPos%1").arg(axisName), false));
-        positions.fields.append(field(QStringLiteral("loading.%1").arg(axisName), QObject::tr("上料 %1").arg(axisName), QObject::tr("上料"), ParameterValueType::Double, ProcessConfigArea::Operations, "LoadingPos", QStringLiteral("fLoadingPos%1").arg(axisName), 0.0));
-        positions.fields.append(field(QStringLiteral("blanking.enabled.%1").arg(axisName), QObject::tr("启用下料 %1").arg(axisName), QObject::tr("下料"), ParameterValueType::Bool, ProcessConfigArea::Operations, "BlankingPos", QStringLiteral("bBlankingPos%1").arg(axisName), false));
-        positions.fields.append(field(QStringLiteral("blanking.%1").arg(axisName), QObject::tr("下料 %1").arg(axisName), QObject::tr("下料"), ParameterValueType::Double, ProcessConfigArea::Operations, "BlankingPos", QStringLiteral("fBlankingPos%1").arg(axisName), 0.0));
+        // 中文翻译：启用上料 %1；上料
+        positions.fields.append(field(QStringLiteral("loading.enabled.%1").arg(axisName), QObject::tr("Enable loading %1").arg(axisName), QObject::tr("Feeding"), ParameterValueType::Bool, ProcessConfigArea::Operations, "LoadingPos", QStringLiteral("bLoadingPos%1").arg(axisName), false));
+        // 中文翻译：上料 %1；上料
+        positions.fields.append(field(QStringLiteral("loading.%1").arg(axisName), QObject::tr("Loading %1").arg(axisName), QObject::tr("Feeding"), ParameterValueType::Double, ProcessConfigArea::Operations, "LoadingPos", QStringLiteral("fLoadingPos%1").arg(axisName), 0.0));
+        // 中文翻译：启用下料 %1；下料
+        positions.fields.append(field(QStringLiteral("blanking.enabled.%1").arg(axisName), QObject::tr("Enable blanking %1").arg(axisName), QObject::tr("blanking"), ParameterValueType::Bool, ProcessConfigArea::Operations, "BlankingPos", QStringLiteral("bBlankingPos%1").arg(axisName), false));
+        // 中文翻译：下料 %1；下料
+        positions.fields.append(field(QStringLiteral("blanking.%1").arg(axisName), QObject::tr("Blanking %1").arg(axisName), QObject::tr("blanking"), ParameterValueType::Double, ProcessConfigArea::Operations, "BlankingPos", QStringLiteral("fBlankingPos%1").arg(axisName), 0.0));
     }
     objects.append(positions);
 
@@ -163,25 +210,39 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
         ParameterObjectDescriptor tool;
         tool.id = QStringLiteral("tool:%1").arg(toolName);
         tool.title = toolName;
-        tool.category = QObject::tr("工具库");
+        // 中文翻译：工具库
+        tool.category = QObject::tr("Tool library");
         tool.toolObject = true;
         tool.fields = {
-            field("lineVelocity", QObject::tr("切割速度"), QObject::tr("切割"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fLineVel", 10.0, "mm/s", 0.0),
-            field("cutAcceleration", QObject::tr("切割加速度"), QObject::tr("切割"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutAcc", 100.0, {}, 0.0),
-            field("cutJerk", QObject::tr("切割加加速度"), QObject::tr("切割"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutJerk", 1000.0, {}, 0.0),
-            field("cuttingHeight", QObject::tr("切割高度增量"), QObject::tr("高度"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCuttingHeight", 0.0, "mm"),
-            field("idleHeight", QObject::tr("空程高度增量"), QObject::tr("高度"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdleHeight", 0.0, "mm"),
-            field("jumpAcceleration", QObject::tr("空程加速度"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelAcc", 100.0, {}, 0.0),
-            field("jumpJerk", QObject::tr("空程加加速度"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelJerk", 1000.0, {}, 0.0),
-            field("energy", QObject::tr("能量"), QObject::tr("激光"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fEnergy", 20.0, "%", 0.0),
-            field("frequency", QObject::tr("频率"), QObject::tr("激光"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fFrequency", 30.0, "kHz", 0.0),
-            field("pulseWidth", QObject::tr("脉宽"), QObject::tr("激光"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fPluse", 20.0, "μs", 0.0),
-            field("beforeOpen", QObject::tr("开光前延时"), QObject::tr("激光延时"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fBeforeOpenLaser", 0.0, "s", 0.0),
-            field("afterClose", QObject::tr("关光后延时"), QObject::tr("激光延时"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fAfterCloseLaser", 0.0, "s", 0.0)
+            // 中文翻译：切割速度；切割
+            field("lineVelocity", QObject::tr("cutting speed"), QObject::tr("cutting"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fLineVel", 10.0, "mm/s", 0.0),
+            // 中文翻译：切割加速度；切割
+            field("cutAcceleration", QObject::tr("Cutting acceleration"), QObject::tr("cutting"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutAcc", 100.0, {}, 0.0),
+            // 中文翻译：切割加加速度；切割
+            field("cutJerk", QObject::tr("Cutting jerk"), QObject::tr("cutting"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutJerk", 1000.0, {}, 0.0),
+            // 中文翻译：切割高度增量；高度
+            field("cuttingHeight", QObject::tr("Cutting height increment"), QObject::tr("height"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCuttingHeight", 0.0, "mm"),
+            // 中文翻译：空程高度增量；高度
+            field("idleHeight", QObject::tr("Idle height increment"), QObject::tr("height"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdleHeight", 0.0, "mm"),
+            // 中文翻译：空程加速度
+            field("jumpAcceleration", QObject::tr("Idle acceleration"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelAcc", 100.0, {}, 0.0),
+            // 中文翻译：空程加加速度
+            field("jumpJerk", QObject::tr("Idle acceleration"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelJerk", 1000.0, {}, 0.0),
+            // 中文翻译：能量；激光
+            field("energy", QObject::tr("energy"), QObject::tr("laser"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fEnergy", 20.0, "%", 0.0),
+            // 中文翻译：频率；激光
+            field("frequency", QObject::tr("Frequency"), QObject::tr("laser"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fFrequency", 30.0, "kHz", 0.0),
+            // 中文翻译：脉宽；激光
+            field("pulseWidth", QObject::tr("pulse width"), QObject::tr("laser"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fPluse", 20.0, "μs", 0.0),
+            // 中文翻译：开光前延时；激光延时
+            field("beforeOpen", QObject::tr("Delay before lighting"), QObject::tr("Laser delay"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fBeforeOpenLaser", 0.0, "s", 0.0),
+            // 中文翻译：关光后延时；激光延时
+            field("afterClose", QObject::tr("Delay after light off"), QObject::tr("Laser delay"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fAfterCloseLaser", 0.0, "s", 0.0)
         };
         if (machine) for (const auto& axis : machine->axisConfigurations()) {
             const QString name = axis.axis.name;
-            tool.fields.append(field(QStringLiteral("jump.%1").arg(name), QObject::tr("%1 空程速度").arg(name), QObject::tr("Jump"),
+            // 中文翻译：%1 空程速度
+            tool.fields.append(field(QStringLiteral("jump.%1").arg(name), QObject::tr("%1 idle speed").arg(name), QObject::tr("Jump"),
                                      ParameterValueType::Double, ProcessConfigArea::Tools, toolName,
                                      QStringLiteral("f%1Vel").arg(name), 10.0,
                                      axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0));

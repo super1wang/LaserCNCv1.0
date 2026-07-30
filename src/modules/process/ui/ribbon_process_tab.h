@@ -17,7 +17,8 @@ namespace lcnc::process {
 void registerCommands(CommandContainer* container);
 
 /**
- * @brief 把 激光加工 Ribbon 选项卡填充到 @p category（"激光加工" 标签页）。
+ // 中文翻译：激光加工
+ * @brief 把 激光加工 Ribbon 选项卡填充到 @p category（"Laser processing" 标签页）。
  *
  * 包括"连接 / 流程（占位）/ 运行 / 参数（占位）"四个面板。
  *

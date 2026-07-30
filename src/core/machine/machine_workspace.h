@@ -14,7 +14,8 @@ class MachineKinematics;
 namespace lcnc::cam {
 
 /**
- * @brief CAM 模块拥有的"机台工作台"——把机台几何 + 运动学 + 工件挂载从工程包里抽出来。
+ // 中文翻译：机台工作台
+ * @brief CAM 模块拥有的"Machine workbench"——把机台几何 + 运动学 + 工件挂载从工程包里抽出来。
  *
  * 设计要点
  * ---------

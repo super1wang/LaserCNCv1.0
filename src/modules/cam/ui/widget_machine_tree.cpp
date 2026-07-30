@@ -124,14 +124,16 @@ void WidgetMachineTree::rebuild()
 
     if (nameByEntry.isEmpty()) {
         auto* item = new QTreeWidgetItem(m_tree);
-        item->setText(0, tr("（未加载机台模型）"));
+        // 中文翻译：（未加载机台模型）
+        item->setText(0, tr("(Machine model not loaded)"));
         item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
         m_rebuilding = false;
         return;
     }
 
     auto* root = new QTreeWidgetItem(m_tree);
-    root->setText(0, tr("机台模型"));
+    // 中文翻译：机台模型
+    root->setText(0, tr("Machine model"));
     root->setExpanded(true);
     root->setFlags(root->flags() & ~Qt::ItemIsUserCheckable);
 
@@ -179,7 +181,8 @@ QTreeWidgetItem* WidgetMachineTree::buildAxisNode(const QString& axisName,
         return nullptr;
 
     auto* node = new QTreeWidgetItem();
-    node->setText(0, tr("%1 轴").arg(axisName));
+    // 中文翻译：%1 轴
+    node->setText(0, tr("%1 axis").arg(axisName));
     node->setExpanded(true);
     node->setFlags(node->flags() | Qt::ItemIsUserCheckable);
     node->setData(0, kRoleIsAxis, true);
@@ -211,7 +214,8 @@ QTreeWidgetItem* WidgetMachineTree::buildUnassignedNode(const QMap<QString, QStr
         return nullptr;
 
     auto* node = new QTreeWidgetItem();
-    node->setText(0, tr("未分配"));
+    // 中文翻译：未分配
+    node->setText(0, tr("Not allocated"));
     node->setExpanded(true);
     node->setFlags(node->flags() | Qt::ItemIsUserCheckable);
     node->setData(0, kRoleIsAxis, true);

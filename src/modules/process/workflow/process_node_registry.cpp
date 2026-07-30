@@ -76,9 +76,11 @@ QString ProcessNodeRegistry::summary(const ProcessNode& node) const
     const QVariantMap& p = node.parameters;
     switch (node.type) {
     case ProcessNodeType::Start:
-        return QStringLiteral("入口 / 全局变量 %1 项").arg(p.value(QStringLiteral("variables"), QVariantList{}).toList().size());
+        // 中文翻译：入口 / 全局变量 %1 项
+        return QStringLiteral("Entry/global variable %1 item").arg(p.value(QStringLiteral("variables"), QVariantList{}).toList().size());
     case ProcessNodeType::Stop:
-        return valueText(p, QStringLiteral("message"), QStringLiteral("流程结束"));
+        // 中文翻译：流程结束
+        return valueText(p, QStringLiteral("message"), QStringLiteral("End of process"));
     case ProcessNodeType::Axis:
         return QStringLiteral("%1 %2 %3 F%4").arg(
             valueText(p, QStringLiteral("axis"), QStringLiteral("X")),
@@ -86,7 +88,8 @@ QString ProcessNodeRegistry::summary(const ProcessNode& node) const
             valueText(p, QStringLiteral("target"), 0.0),
             valueText(p, QStringLiteral("velocity"), 5.0));
     case ProcessNodeType::AxesMove:
-        return QStringLiteral("%1，多轴 %2 项").arg(
+        // 中文翻译：%1，多轴 %2 项
+        return QStringLiteral("%1, multi-axis %2 items").arg(
             valueText(p, QStringLiteral("multiMode"), QStringLiteral("sequential")),
             QString::number(p.value(QStringLiteral("axes"), QVariantList{}).toList().size()));
     case ProcessNodeType::IO:
@@ -95,12 +98,14 @@ QString ProcessNodeRegistry::summary(const ProcessNode& node) const
             valueText(p, QStringLiteral("ioName"), QStringLiteral("aLaser")),
             valueText(p, QStringLiteral("value"), 1));
     case ProcessNodeType::Monitor:
-        return QStringLiteral("等待 %1=%2 timeout=%3ms").arg(
+        // 中文翻译：等待 %1=%2 timeout=%3ms
+        return QStringLiteral("Wait %1=%2 timeout=%3ms").arg(
             valueText(p, QStringLiteral("ioName"), QStringLiteral("aStart")),
             valueText(p, QStringLiteral("targetValue"), true),
             valueText(p, QStringLiteral("timeoutMs"), 5000));
     case ProcessNodeType::Cutting:
-        return QStringLiteral("普通切割");
+        // 中文翻译：普通切割
+        return QStringLiteral("Ordinary cutting");
     default:
         return QStringLiteral("Ready");
     }
@@ -163,7 +168,8 @@ void ProcessNodeRegistry::registerBuiltIns()
     add(ProcessNodeType::Start, QStringLiteral("Structure"), false, true,
         map({ { QStringLiteral("variables"), QVariantList{} } }), QStringLiteral("start"), true, false);
     add(ProcessNodeType::Stop, QStringLiteral("Structure"), false, true,
-        map({ { QStringLiteral("message"), QStringLiteral("流程结束") }, { QStringLiteral("safeStopOutputs"), true }, { QStringLiteral("stopMotion"), false } }), QStringLiteral("stop"), true, false);
+        // 中文翻译：流程结束
+        map({ { QStringLiteral("message"), QStringLiteral("End of process") }, { QStringLiteral("safeStopOutputs"), true }, { QStringLiteral("stopMotion"), false } }), QStringLiteral("stop"), true, false);
 
     add(ProcessNodeType::SingleAxisMove, QStringLiteral("Motion"), false, false,
         map({ { QStringLiteral("axis"), QStringLiteral("X") },

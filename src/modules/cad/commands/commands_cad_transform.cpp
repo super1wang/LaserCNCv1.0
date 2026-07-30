@@ -25,8 +25,10 @@ using namespace lcnc::cad::commands;
 
 CmdMoveShape::CmdMoveShape(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/move.svg"), tr("移动"), this);
-    action->setStatusTip(tr("沿 X/Y/Z 方向平移形体"));
+    // 中文翻译：移动
+    auto* action = new QAction(QIcon(":/icons/move.svg"), tr("move"), this);
+    // 中文翻译：沿 X/Y/Z 方向平移形体
+    action->setStatusTip(tr("Translate the shape along the X/Y/Z direction"));
     setAction(action);
 }
 
@@ -46,19 +48,22 @@ void CmdMoveShape::execute()
                "CmdMoveShape::execute entities={} machineView={}",
                entities.size(), context()->isMachineViewActive());
     if (entities.isEmpty()) {
-        QMessageBox::information(nullptr, tr("移动"), tr("当前视图无可移动的形体"));
+        // 中文翻译：移动；当前视图无可移动的形体
+        QMessageBox::information(nullptr, tr("move"), tr("There are no movable shapes in the current view"));
         return;
     }
 
     const auto selected = selectedEntities(context(), entities);
 
     QDialog dlg;
-    dlg.setWindowTitle(tr("平移形体"));
+    // 中文翻译：平移形体
+    dlg.setWindowTitle(tr("Translate the shape"));
     auto* form = new QFormLayout;
 
     auto* combo = new QComboBox;
     const bool hasSentinel = setupEntityCombo(combo, entities, selected);
-    form->addRow(tr("形体:"), combo);
+    // 中文翻译：形体:
+    form->addRow(tr("Shape:"), combo);
 
     auto* spinX = makeSpin(0, -1e6, 1e6, 3, " mm");
     auto* spinY = makeSpin(0, -1e6, 1e6, 3, " mm");
@@ -97,8 +102,10 @@ void CmdMoveShape::execute()
 
 CmdRotateShape::CmdRotateShape(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/rotate.svg"), tr("旋转"), this);
-    action->setStatusTip(tr("绕轴旋转形体"));
+    // 中文翻译：旋转
+    auto* action = new QAction(QIcon(":/icons/rotate.svg"), tr("rotate"), this);
+    // 中文翻译：绕轴旋转形体
+    action->setStatusTip(tr("Rotate a shape around an axis"));
     setAction(action);
 }
 
@@ -118,29 +125,36 @@ void CmdRotateShape::execute()
                "CmdRotateShape::execute entities={} machineView={}",
                entities.size(), context()->isMachineViewActive());
     if (entities.isEmpty()) {
-        QMessageBox::information(nullptr, tr("旋转"), tr("当前视图无可旋转的形体"));
+        // 中文翻译：旋转；当前视图无可旋转的形体
+        QMessageBox::information(nullptr, tr("rotate"), tr("There is no rotatable shape in the current view"));
         return;
     }
 
     const auto selected = selectedEntities(context(), entities);
 
     QDialog dlg;
-    dlg.setWindowTitle(tr("旋转形体"));
+    // 中文翻译：旋转形体
+    dlg.setWindowTitle(tr("rotating shape"));
     auto* form = new QFormLayout;
 
     auto* combo = new QComboBox;
     const bool hasSentinel = setupEntityCombo(combo, entities, selected);
-    form->addRow(tr("形体:"), combo);
+    // 中文翻译：形体:
+    form->addRow(tr("Shape:"), combo);
 
     auto* spinAxisX = makeSpin(0, -1, 1, 4, "");
     auto* spinAxisY = makeSpin(0, -1, 1, 4, "");
     auto* spinAxisZ = makeSpin(1, -1, 1, 4, "");
-    form->addRow(tr("轴向 X:"), spinAxisX);
-    form->addRow(tr("轴向 Y:"), spinAxisY);
-    form->addRow(tr("轴向 Z:"), spinAxisZ);
+    // 中文翻译：轴向 X:
+    form->addRow(tr("Axial X:"), spinAxisX);
+    // 中文翻译：轴向 Y:
+    form->addRow(tr("Axial Y:"), spinAxisY);
+    // 中文翻译：轴向 Z:
+    form->addRow(tr("Axial Z:"), spinAxisZ);
 
     auto* spinAngle = makeSpin(90, -360, 360, 2, " °");
-    form->addRow(tr("旋转角度:"), spinAngle);
+    // 中文翻译：旋转角度:
+    form->addRow(tr("Rotation angle:"), spinAngle);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
@@ -156,7 +170,8 @@ void CmdRotateShape::execute()
     const double axisY = spinAxisY->value();
     const double axisZ = spinAxisZ->value();
     if (std::abs(axisX) < 1e-9 && std::abs(axisY) < 1e-9 && std::abs(axisZ) < 1e-9) {
-        QMessageBox::warning(nullptr, tr("旋转"), tr("轴向量不能为零向量"));
+        // 中文翻译：旋转；轴向量不能为零向量
+        QMessageBox::warning(nullptr, tr("rotate"), tr("The axis vector cannot be a zero vector"));
         return;
     }
 

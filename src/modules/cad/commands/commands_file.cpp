@@ -13,9 +13,11 @@
 CmdNewDocument::CmdNewDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/new_doc.svg"), tr("新建"), this);
+    // 中文翻译：新建
+    auto* a = new QAction(QIcon(":/icons/new_doc.svg"), tr("New"), this);
     a->setShortcut(QKeySequence::New);
-    a->setStatusTip(tr("新建空白文档"));
+    // 中文翻译：新建空白文档
+    a->setStatusTip(tr("Create a new blank document"));
     setAction(a);
 }
 
@@ -29,9 +31,11 @@ void CmdNewDocument::execute()
 CmdOpenDocument::CmdOpenDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/open.svg"), tr("打开"), this);
+    // 中文翻译：打开
+    auto* a = new QAction(QIcon(":/icons/open.svg"), tr("open"), this);
     a->setShortcut(QKeySequence::Open);
-    a->setStatusTip(tr("打开 LaserCNC 项目或工件模型"));
+    // 中文翻译：打开 LaserCNC 项目或工件模型
+    a->setStatusTip(tr("Open a LaserCNC project or workpiece model"));
     setAction(a);
 }
 
@@ -39,9 +43,12 @@ void CmdOpenDocument::execute()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CmdOpenDocument::execute begin");
     const QString path = QFileDialog::getOpenFileName(
-        nullptr, tr("打开文件"), QString(),
-          tr("所有支持格式 (*.lcnc project.toml *.stp *.step *.igs *.iges *.stl *.brep);;"
-              "LaserCNC 项目 (*.lcnc project.toml);;"
+        // 中文翻译：打开文件
+        nullptr, tr("open file"), QString(),
+          // 中文翻译：所有支持格式 (*.lcnc project.toml *.stp *.step *.igs *.iges *.stl *.brep);;
+          tr("All supported formats (*.lcnc project.toml *.stp *.step *.igs *.iges *.stl *.brep);;"
+              // 中文翻译：LaserCNC 项目 (*.lcnc project.toml);;
+              "LaserCNC project (*.lcnc project.toml);;"
            "STEP (*.stp *.step);;"
            "IGES (*.igs *.iges);;"
            "STL (*.stl);;"
@@ -67,9 +74,11 @@ void CmdOpenDocument::execute()
 CmdSaveDocument::CmdSaveDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/save.svg"), tr("保存"), this);
+    // 中文翻译：保存
+    auto* a = new QAction(QIcon(":/icons/save.svg"), tr("save"), this);
     a->setShortcut(QKeySequence::Save);
-    a->setStatusTip(tr("保存当前项目"));
+    // 中文翻译：保存当前项目
+    a->setStatusTip(tr("Save current project"));
     setAction(a);
 }
 
@@ -95,7 +104,8 @@ void CmdSaveDocument::execute()
 CmdSaveDocumentAs::CmdSaveDocumentAs(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/save_as.svg"), tr("另存为"), this);
+    // 中文翻译：另存为
+    auto* a = new QAction(QIcon(":/icons/save_as.svg"), tr("save as"), this);
     a->setShortcut(QKeySequence::SaveAs);
     setAction(a);
 }
@@ -110,8 +120,10 @@ void CmdSaveDocumentAs::execute()
     LcncDocument* doc = context()->workpieceDocument();
     if (!doc) return;
     const QString path = QFileDialog::getSaveFileName(
-        nullptr, tr("另存为"), doc->name(),
-        tr("LaserCNC 项目 (*.lcnc);;STEP (*.stp *.step)"));
+        // 中文翻译：另存为
+        nullptr, tr("save as"), doc->name(),
+        // 中文翻译：LaserCNC 项目 (*.lcnc);;STEP (*.stp *.step)
+        tr("LaserCNC Project (*.lcnc);;STEP (*.stp *.step)"));
     if (path.isEmpty()) return;
     context()->cadModule()->saveDocument(doc->id(), path);
 }
@@ -120,16 +132,20 @@ void CmdSaveDocumentAs::execute()
 CmdImportStep::CmdImportStep(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/import.svg"), tr("导入STEP"), this);
-    a->setStatusTip(tr("导入 STEP 文件到当前文档"));
+    // 中文翻译：导入STEP
+    auto* a = new QAction(QIcon(":/icons/import.svg"), tr("Import STEP"), this);
+    // 中文翻译：导入 STEP 文件到当前文档
+    a->setStatusTip(tr("Import STEP files into the current document"));
     setAction(a);
 }
 
 void CmdImportStep::execute()
 {
     const QString path = QFileDialog::getOpenFileName(
-        nullptr, tr("导入 STEP"), QString(),
-        tr("STEP 文件 (*.stp *.step)"));
+        // 中文翻译：导入 STEP
+        nullptr, tr("Import STEP"), QString(),
+        // 中文翻译：STEP 文件 (*.stp *.step)
+        tr("STEP files (*.stp *.step)"));
     if (path.isEmpty()) return;
 
     context()->cadModule()->importStep(path, context()->workpieceDocumentId());
@@ -139,16 +155,20 @@ void CmdImportStep::execute()
 CmdImportStl::CmdImportStl(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/import.svg"), tr("导入STL"), this);
-    a->setStatusTip(tr("导入 STL 文件（机台/工件模型）"));
+    // 中文翻译：导入STL
+    auto* a = new QAction(QIcon(":/icons/import.svg"), tr("Import STL"), this);
+    // 中文翻译：导入 STL 文件（机台/工件模型）
+    a->setStatusTip(tr("Import STL file (machine/workpiece model)"));
     setAction(a);
 }
 
 void CmdImportStl::execute()
 {
     const QString path = QFileDialog::getOpenFileName(
-        nullptr, tr("导入 STL"), QString(),
-        tr("STL 文件 (*.stl)"));
+        // 中文翻译：导入 STL
+        nullptr, tr("Import STL"), QString(),
+        // 中文翻译：STL 文件 (*.stl)
+        tr("STL files (*.stl)"));
     if (path.isEmpty()) return;
 
     context()->cadModule()->importStl(path, context()->workpieceDocumentId());
@@ -158,7 +178,8 @@ void CmdImportStl::execute()
 CmdExportStep::CmdExportStep(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/export.svg"), tr("导出STEP"), this);
+    // 中文翻译：导出STEP
+    auto* a = new QAction(QIcon(":/icons/export.svg"), tr("Export STEP"), this);
     setAction(a);
 }
 
@@ -170,8 +191,10 @@ bool CmdExportStep::isEnabled() const
 void CmdExportStep::execute()
 {
     const QString path = QFileDialog::getSaveFileName(
-        nullptr, tr("导出 STEP"), QString(),
-        tr("STEP 文件 (*.stp *.step)"));
+        // 中文翻译：导出 STEP
+        nullptr, tr("Export STEP"), QString(),
+        // 中文翻译：STEP 文件 (*.stp *.step)
+        tr("STEP files (*.stp *.step)"));
     if (path.isEmpty()) return;
 
     LcncDocument* doc = context()->workpieceDocument();
@@ -184,7 +207,8 @@ void CmdExportStep::execute()
 CmdCloseDocument::CmdCloseDocument(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/close.svg"), tr("关闭"), this);
+    // 中文翻译：关闭
+    auto* a = new QAction(QIcon(":/icons/close.svg"), tr("Close"), this);
     a->setShortcut(QKeySequence::Close);
     setAction(a);
 }

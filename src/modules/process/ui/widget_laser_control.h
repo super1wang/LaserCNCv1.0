@@ -12,7 +12,8 @@
 #include "modules/process/process_module.h"
 
 /**
- * @brief Right-panel widget shown when the "执行" tab is active.
+ // 中文翻译：执行
+ * @brief Right-panel widget shown when the "execute" tab is active.
  *
  * Displays real-time axis positions, jog controls, start/pause/stop
  * buttons, and system status indicators.

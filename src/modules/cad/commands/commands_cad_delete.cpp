@@ -27,9 +27,11 @@ using namespace lcnc::cad::commands;
 
 CmdDeleteShape::CmdDeleteShape(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/delete.svg"), tr("删除"), this);
+    // 中文翻译：删除
+    auto* action = new QAction(QIcon(":/icons/delete.svg"), tr("Delete"), this);
     action->setShortcut(QKeySequence::Delete);
-    action->setStatusTip(tr("删除选中的形体（同步移除三维视图和树节点）"));
+    // 中文翻译：删除选中的形体（同步移除三维视图和树节点）
+    action->setStatusTip(tr("Delete the selected shape (remove the 3D view and tree nodes simultaneously)"));
     setAction(action);
 }
 
@@ -70,7 +72,8 @@ void CmdDeleteShape::execute()
     }
 
     if (all.isEmpty()) {
-        QMessageBox::information(nullptr, tr("删除"), tr("文档中没有可删除的形体"));
+        // 中文翻译：删除；文档中没有可删除的形体
+        QMessageBox::information(nullptr, tr("Delete"), tr("There are no shapes in the document that can be deleted"));
         return;
     }
 
@@ -81,12 +84,14 @@ void CmdDeleteShape::execute()
         targets = selected;
     } else {
         QDialog dlg;
-        dlg.setWindowTitle(tr("删除形体"));
+        // 中文翻译：删除形体
+        dlg.setWindowTitle(tr("Delete shape"));
         auto* form = new QFormLayout;
         auto* combo = new QComboBox;
         for (const auto& entity : all)
             combo->addItem(entity.name);
-        form->addRow(tr("形体:"), combo);
+        // 中文翻译：形体:
+        form->addRow(tr("Shape:"), combo);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -101,8 +106,10 @@ void CmdDeleteShape::execute()
     if (targets.size() > 1) {
         const int ret = QMessageBox::question(
             nullptr,
-            tr("删除"),
-            tr("将删除 %1 个形体，确认继续？").arg(targets.size()),
+            // 中文翻译：删除
+            tr("Delete"),
+            // 中文翻译：将删除 %1 个形体，确认继续？
+            tr("%1 shapes will be deleted, are you sure to continue?").arg(targets.size()),
             QMessageBox::Yes | QMessageBox::No);
         if (ret != QMessageBox::Yes)
             return;
@@ -118,8 +125,10 @@ void CmdDeleteShape::execute()
 
 CmdExplodeShape::CmdExplodeShape(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/explode.svg"), tr("拆解"), this);
-    action->setStatusTip(tr("将选中的复合体拆解为下一层级子形体（一级拆解）"));
+    // 中文翻译：拆解
+    auto* action = new QAction(QIcon(":/icons/explode.svg"), tr("Explode"), this);
+    // 中文翻译：将选中的复合体拆解为下一层级子形体（一级拆解）
+    action->setStatusTip(tr("Disassemble the selected complex into next-level sub-shapes (first-level disassembly)"));
     setAction(action);
 }
 
@@ -196,13 +205,15 @@ void CmdExplodeShape::execute()
             return;
 
         QDialog dlg;
-        dlg.setWindowTitle(tr("拆解形体"));
+        // 中文翻译：拆解形体
+        dlg.setWindowTitle(tr("Explode Shape"));
         auto* form = new QFormLayout;
         auto* combo = new QComboBox;
         Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
         for (int index = 1; index <= labels.Length(); ++index)
             combo->addItem(XcafUtils::name(labels.Value(index)));
-        form->addRow(tr("选择形体:"), combo);
+        // 中文翻译：选择形体:
+        form->addRow(tr("Select shape:"), combo);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -229,13 +240,17 @@ void CmdExplodeShape::execute()
         ++childCount;
 
     if (childCount == 0) {
-        QMessageBox::information(nullptr, tr("拆解"),
-            tr("所选形体 \"%1\" 无法继续拆解（已是基本形体）。").arg(hit.name));
+        // 中文翻译：拆解
+        QMessageBox::information(nullptr, tr("Explode"),
+            // 中文翻译：所选形体 "%1" 无法继续拆解（已是基本形体）。
+            tr("The selected shape \"%1\" cannot be further disassembled (it is already a basic shape).").arg(hit.name));
         return;
     }
 
-    if (QMessageBox::question(nullptr, tr("拆解形体"),
-            tr("将 \"%1\" 拆解为 %2 个子形体，原形体将被替换。\n继续？")
+    // 中文翻译：拆解形体
+    if (QMessageBox::question(nullptr, tr("Explode Shape"),
+            // 中文翻译：将 "%1" 拆解为 %2 个子形体，原形体将被替换。\n继续？
+            tr("Disassemble \"%1\" into %2 sub-shapes, and the original shape will be replaced.\ncontinue?")
                 .arg(hit.name).arg(childCount),
             QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
         return;

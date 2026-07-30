@@ -23,8 +23,10 @@ ProcessNodeDescriptor SingleAxisMoveStep::descriptor() const
 {
     ProcessNodeDescriptor d;
     d.type = ProcessNodeType::SingleAxisMove;
-    d.displayName = QObject::tr("单轴运动");
-    d.category = QObject::tr("运动");
+    // 中文翻译：单轴运动
+    d.displayName = QObject::tr("Single axis motion");
+    // 中文翻译：运动
+    d.category = QObject::tr("sports");
     d.executorKey = QStringLiteral("singleAxisMove");
     d.defaultParameters.insert(QString::fromLatin1(kAxis), QStringLiteral("X"));
     d.defaultParameters.insert(QString::fromLatin1(kMode), QStringLiteral("absolute"));
@@ -51,36 +53,43 @@ QWidget* SingleAxisMoveStep::createParameterEditor(const ProcessNode& node, QWid
 
     auto* axisEdit = new QLineEdit(node.parameters.value(QString::fromLatin1(kAxis), QStringLiteral("X")).toString(), page);
     axisEdit->setObjectName(QString::fromLatin1(kAxis));
-    form->addRow(QObject::tr("轴"), axisEdit);
+    // 中文翻译：轴
+    form->addRow(QObject::tr("axis"), axisEdit);
 
     auto* modeCombo = new QComboBox(page);
     modeCombo->setObjectName(QString::fromLatin1(kMode));
-    modeCombo->addItem(QObject::tr("绝对"), QStringLiteral("absolute"));
-    modeCombo->addItem(QObject::tr("相对"), QStringLiteral("relative"));
+    // 中文翻译：绝对
+    modeCombo->addItem(QObject::tr("Absolutely"), QStringLiteral("absolute"));
+    // 中文翻译：相对
+    modeCombo->addItem(QObject::tr("relatively"), QStringLiteral("relative"));
     const int modeIndex = modeCombo->findData(node.parameters.value(QString::fromLatin1(kMode), QStringLiteral("absolute")).toString());
     modeCombo->setCurrentIndex(modeIndex < 0 ? 0 : modeIndex);
-    form->addRow(QObject::tr("模式"), modeCombo);
+    // 中文翻译：模式
+    form->addRow(QObject::tr("mode"), modeCombo);
 
     auto* targetSpin = new QDoubleSpinBox(page);
     targetSpin->setObjectName(QString::fromLatin1(kTarget));
     targetSpin->setRange(-1000000.0, 1000000.0);
     targetSpin->setDecimals(3);
     targetSpin->setValue(node.parameters.value(QString::fromLatin1(kTarget), 0.0).toDouble());
-    form->addRow(QObject::tr("目标位置"), targetSpin);
+    // 中文翻译：目标位置
+    form->addRow(QObject::tr("Target location"), targetSpin);
 
     auto* velocitySpin = new QDoubleSpinBox(page);
     velocitySpin->setObjectName(QString::fromLatin1(kVelocity));
     velocitySpin->setRange(0.0, 1000000.0);
     velocitySpin->setDecimals(3);
     velocitySpin->setValue(node.parameters.value(QString::fromLatin1(kVelocity), 5.0).toDouble());
-    form->addRow(QObject::tr("速度"), velocitySpin);
+    // 中文翻译：速度
+    form->addRow(QObject::tr("speed"), velocitySpin);
 
     auto* timeoutSpin = new QSpinBox(page);
     timeoutSpin->setObjectName(QString::fromLatin1(kTimeoutMs));
     timeoutSpin->setRange(0, 24 * 60 * 60 * 1000);
     timeoutSpin->setSuffix(QStringLiteral(" ms"));
     timeoutSpin->setValue(node.parameters.value(QString::fromLatin1(kTimeoutMs), 30000).toInt());
-    form->addRow(QObject::tr("超时"), timeoutSpin);
+    // 中文翻译：超时
+    form->addRow(QObject::tr("timeout"), timeoutSpin);
     return page;
 }
 
@@ -105,7 +114,8 @@ bool SingleAxisMoveStep::execute(const ProcessNodeExecutionRequest& request,
 {
     if (!context.motion) {
         if (errorMessage)
-            *errorMessage = QObject::tr("运动服务不可用");
+            // 中文翻译：运动服务不可用
+            *errorMessage = QObject::tr("Motion service unavailable");
         return false;
     }
     const auto& p = request.parameters;

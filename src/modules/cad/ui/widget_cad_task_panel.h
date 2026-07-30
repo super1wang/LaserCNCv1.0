@@ -88,7 +88,8 @@ public:
                          bool hasSelectedSketch);
     /// Refresh available home commands from a normalized CAD selection context.
     void setSelectionContext(const lcnc::cad::selection::CadSelectionContext& context);
-    /// Replace the home-page "草图列表" entries (id + label + used flag).
+    // 中文翻译：草图列表
+    /// Replace the home-page "sketch list" entries (id + label + used flag).
     void setFinishedSketches(const QVector<FinishedSketchEntry>& entries,
                              int selectedSketchId);
 

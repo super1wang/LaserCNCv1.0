@@ -25,20 +25,27 @@ void WidgetToolpathPanel::buildUi()
     mainLayout->setSpacing(8);
 
     // ── Title ──────────────────────────────────────────────────────────────
-    auto* lblTitle = new QLabel(tr("<b>刀路参数</b>"), this);
+    // 中文翻译：<b>刀路参数</b>
+    auto* lblTitle = new QLabel(tr("<b>Tool path parameters</b>"), this);
     mainLayout->addWidget(lblTitle);
 
     // ── 参数 group ─────────────────────────────────────────────────────────
-    auto* paramGroup = new QGroupBox(tr("参数"), this);
+    // 中文翻译：参数
+    auto* paramGroup = new QGroupBox(tr("parameters"), this);
     auto* paramForm  = new QFormLayout(paramGroup);
 
     m_comboParameterScope = new QComboBox(paramGroup);
-    m_comboParameterScope->addItem(tr("全局"), static_cast<int>(ParameterScope::Global));
-    m_comboParameterScope->addItem(tr("当前轮廓"), static_cast<int>(ParameterScope::CurrentContour));
-    paramForm->addRow(tr("作用域:"), m_comboParameterScope);
+    // 中文翻译：全局
+    m_comboParameterScope->addItem(tr("overall situation"), static_cast<int>(ParameterScope::Global));
+    // 中文翻译：当前轮廓
+    m_comboParameterScope->addItem(tr("current profile"), static_cast<int>(ParameterScope::CurrentContour));
+    // 中文翻译：作用域:
+    paramForm->addRow(tr("Scope:"), m_comboParameterScope);
 
-    m_labelCurrentContour = new QLabel(tr("未选择轮廓"), paramGroup);
-    paramForm->addRow(tr("当前轮廓:"), m_labelCurrentContour);
+    // 中文翻译：未选择轮廓
+    m_labelCurrentContour = new QLabel(tr("No outline selected"), paramGroup);
+    // 中文翻译：当前轮廓:
+    paramForm->addRow(tr("Current profile:"), m_labelCurrentContour);
 
     m_spinLeadInLength = new QDoubleSpinBox(paramGroup);
     m_spinLeadInLength->setRange(0.001, 100.0);
@@ -46,7 +53,8 @@ void WidgetToolpathPanel::buildUi()
     m_spinLeadInLength->setDecimals(3);
     m_spinLeadInLength->setSuffix(tr(" mm"));
     m_spinLeadInLength->setSingleStep(0.001);
-    paramForm->addRow(tr("引刀长度:"), m_spinLeadInLength);
+    // 中文翻译：引刀长度:
+    paramForm->addRow(tr("Lead length:"), m_spinLeadInLength);
 
     m_spinDeflection = new QDoubleSpinBox(paramGroup);
     m_spinDeflection->setRange(0.001, 50.0);
@@ -54,13 +62,16 @@ void WidgetToolpathPanel::buildUi()
     m_spinDeflection->setDecimals(3);
     m_spinDeflection->setSuffix(tr(" mm"));
     m_spinDeflection->setSingleStep(0.001);
-    m_spinDeflection->setToolTip(tr("轮廓离散采样间隔，越小越精细但计算越慢"));
-    paramForm->addRow(tr("离散间隔:"), m_spinDeflection);
+    // 中文翻译：轮廓离散采样间隔，越小越精细但计算越慢
+    m_spinDeflection->setToolTip(tr("Contour discrete sampling interval, the smaller the more precise but the slower the calculation"));
+    // 中文翻译：离散间隔:
+    paramForm->addRow(tr("Discrete interval:"), m_spinDeflection);
 
     mainLayout->addWidget(paramGroup);
 
     // ── 面分类 group ───────────────────────────────────────────────────────
-    auto* classGroup = new QGroupBox(tr("全局面分类"), this);
+    // 中文翻译：全局面分类
+    auto* classGroup = new QGroupBox(tr("Overall situation classification"), this);
     m_classificationGroup = classGroup;
     auto* classForm  = new QFormLayout(classGroup);
 
@@ -70,28 +81,41 @@ void WidgetToolpathPanel::buildUi()
     m_spinSmoothAngle->setDecimals(1);
     m_spinSmoothAngle->setSuffix(tr(" °"));
     m_spinSmoothAngle->setSingleStep(0.5);
-    m_spinSmoothAngle->setToolTip(tr("相邻面法线夹角小于此阈值视为光滑连接"));
-    classForm->addRow(tr("光滑阈值:"), m_spinSmoothAngle);
+    // 中文翻译：相邻面法线夹角小于此阈值视为光滑连接
+    m_spinSmoothAngle->setToolTip(tr("The angle between the normals of adjacent surfaces is less than this threshold and is considered a smooth connection."));
+    // 中文翻译：光滑阈值:
+    classForm->addRow(tr("Smooth threshold:"), m_spinSmoothAngle);
 
     m_comboClassMode = new QComboBox(classGroup);
-    m_comboClassMode->addItem(tr("自动识别"),   static_cast<int>(ExtractionStrategy::Auto));
-    m_comboClassMode->addItem(tr("平面(取孔)"), static_cast<int>(ExtractionStrategy::PlanarFaceWires));
-    m_comboClassMode->addItem(tr("管材(截面)"), static_cast<int>(ExtractionStrategy::TubeClassification));
-    m_comboClassMode->addItem(tr("手动选面"),   static_cast<int>(ExtractionStrategy::ManualFaceSelection));
+    // 中文翻译：自动识别
+    m_comboClassMode->addItem(tr("automatic recognition"),   static_cast<int>(ExtractionStrategy::Auto));
+    // 中文翻译：平面(取孔)
+    m_comboClassMode->addItem(tr("Plane (hole)"), static_cast<int>(ExtractionStrategy::PlanarFaceWires));
+    // 中文翻译：管材(截面)
+    m_comboClassMode->addItem(tr("Pipe (section)"), static_cast<int>(ExtractionStrategy::TubeClassification));
+    // 中文翻译：手动选面
+    m_comboClassMode->addItem(tr("Manual face selection"),   static_cast<int>(ExtractionStrategy::ManualFaceSelection));
     m_comboClassMode->setToolTip(
-        tr("自动识别: 按机台构型与装夹姿态自动选取加工面（平板取外环+孔，管材取截面）\n"
-           "平面(取孔): 取加工面的全部 Wire（外轮廓 + 每个孔）\n"
-           "管材(截面): 外表面 ∩ 截面交线（管端切割）\n"
-           "手动选面: 在视图点选工件加工面"));
-    classForm->addRow(tr("提取模式:"), m_comboClassMode);
+        // 中文翻译：自动识别: 按机台构型与装夹姿态自动选取加工面（平板取外环+孔，管材取截面）\n
+        tr("Automatic identification: Automatically select the processing surface according to the machine configuration and clamping posture (the outer ring + hole is selected for the flat plate, and the cross-section is selected for the pipe)"
+           // 中文翻译：平面(取孔): 取加工面的全部 Wire（外轮廓 + 每个孔）\n
+           "Plane (hole taking): Take all wires on the processing surface (outer contour + each hole)"
+           // 中文翻译：管材(截面): 外表面 ∩ 截面交线（管端切割）\n
+           "Pipe (section): Outer surface ∩ Section intersection (pipe end cutting)"
+           // 中文翻译：手动选面: 在视图点选工件加工面
+           "Manual face selection: Select the workpiece processing face in the view"));
+    // 中文翻译：提取模式:
+    classForm->addRow(tr("Extraction mode:"), m_comboClassMode);
 
     mainLayout->addWidget(classGroup);
 
     // ── 法线显示 group ───────────────────────────────────────────────
-    auto* normalGroup = new QGroupBox(tr("法线显示"), this);
+    // 中文翻译：法线显示
+    auto* normalGroup = new QGroupBox(tr("normal display"), this);
     auto* normalForm  = new QFormLayout(normalGroup);
 
-    m_checkShowNormals = new QCheckBox(tr("显示法线"), normalGroup);
+    // 中文翻译：显示法线
+    m_checkShowNormals = new QCheckBox(tr("Show normals"), normalGroup);
     m_checkShowNormals->setChecked(false);
     normalForm->addRow(m_checkShowNormals);
 
@@ -101,26 +125,40 @@ void WidgetToolpathPanel::buildUi()
     m_spinNormalStep->setDecimals(2);
     m_spinNormalStep->setSuffix(tr(" mm"));
     m_spinNormalStep->setSingleStep(0.5);
-    m_spinNormalStep->setToolTip(tr("法线抽样步长，越小越密集，越大越稀疏"));
-    normalForm->addRow(tr("抽样步长:"), m_spinNormalStep);
+    // 中文翻译：法线抽样步长，越小越密集，越大越稀疏
+    m_spinNormalStep->setToolTip(tr("Normal sampling step size, the smaller it is, the denser it is, the larger it is, the sparser it is."));
+    // 中文翻译：抽样步长:
+    normalForm->addRow(tr("Sampling step size:"), m_spinNormalStep);
 
     mainLayout->addWidget(normalGroup);
 
     // ── 分阶段操作 group ───────────────────────────────────────────────────
-    auto* opsGroup  = new QGroupBox(tr("加工流程"), this);
+    // 中文翻译：加工流程
+    auto* opsGroup  = new QGroupBox(tr("Processing process"), this);
     auto* opsLayout = new QVBoxLayout(opsGroup);
 
-    m_btnGenerate  = new QPushButton(tr("全自动执行全部阶段"), opsGroup);
-    m_btnGenerate->setToolTip(tr("从工件开始，依次执行分离面、提取轮廓、离散点、构造刀路和机床求解。"));
-    m_btnSeparateFaces = new QPushButton(tr("1. 自动分离加工面"), opsGroup);
-    m_btnPickMachiningFaces = new QPushButton(tr("1. 手动选择加工面"), opsGroup);
-    m_btnApplyMachiningFaces = new QPushButton(tr("应用加工面并继续"), opsGroup);
-    m_btnExtractContours = new QPushButton(tr("2. 从当前加工面提取轮廓"), opsGroup);
-    m_btnDiscretizePoints = new QPushButton(tr("3. 离散当前轮廓"), opsGroup);
-    m_btnBuildToolpath = new QPushButton(tr("4. 构造下刀线与几何刀路"), opsGroup);
-    m_btnSolveMachinePath = new QPushButton(tr("5. 求解机床坐标"), opsGroup);
-    m_btnPickMachiningFaces->setToolTip(tr("连续点击工件面；右键或 Esc 结束拾取，然后点击“应用加工面并继续”。"));
-    m_btnApplyMachiningFaces->setToolTip(tr("提交当前加工面集合，并使下游轮廓、点和刀路失效。"));
+    // 中文翻译：全自动执行全部阶段
+    m_btnGenerate  = new QPushButton(tr("Fully automated execution of all stages"), opsGroup);
+    // 中文翻译：从工件开始，依次执行分离面、提取轮廓、离散点、构造刀路和机床求解。
+    m_btnGenerate->setToolTip(tr("Starting from the workpiece, separate surfaces, extracted contours, discrete points, constructed toolpaths, and machine solutions are performed in sequence."));
+    // 中文翻译：1. 自动分离加工面
+    m_btnSeparateFaces = new QPushButton(tr("1. Automatic separation of processing surfaces"), opsGroup);
+    // 中文翻译：1. 手动选择加工面
+    m_btnPickMachiningFaces = new QPushButton(tr("1. Manually select the processing surface"), opsGroup);
+    // 中文翻译：应用加工面并继续
+    m_btnApplyMachiningFaces = new QPushButton(tr("Apply work surface and continue"), opsGroup);
+    // 中文翻译：2. 从当前加工面提取轮廓
+    m_btnExtractContours = new QPushButton(tr("2. Extract the contour from the current processing surface"), opsGroup);
+    // 中文翻译：3. 离散当前轮廓
+    m_btnDiscretizePoints = new QPushButton(tr("3. Discretize the current contour"), opsGroup);
+    // 中文翻译：4. 构造下刀线与几何刀路
+    m_btnBuildToolpath = new QPushButton(tr("4. Construct the lower cutting line and geometric tool path"), opsGroup);
+    // 中文翻译：5. 求解机床坐标
+    m_btnSolveMachinePath = new QPushButton(tr("5. Solve the machine tool coordinates"), opsGroup);
+    // 中文翻译：连续点击工件面；右键或 Esc 结束拾取，然后点击“应用加工面并继续”。
+    m_btnPickMachiningFaces->setToolTip(tr("Continuously click on the workpiece surface; right-click or Esc to end picking, then click \"Apply Machining Surface and Continue\"."));
+    // 中文翻译：提交当前加工面集合，并使下游轮廓、点和刀路失效。
+    m_btnApplyMachiningFaces->setToolTip(tr("Commits the current set of machined surfaces and invalidates downstream contours, points, and toolpaths."));
     opsLayout->addWidget(m_btnGenerate);
     opsLayout->addWidget(m_btnSeparateFaces);
     opsLayout->addWidget(m_btnPickMachiningFaces);
@@ -137,9 +175,11 @@ void WidgetToolpathPanel::buildUi()
     auto* coordinatePageLayout = new QVBoxLayout(m_machineCoordinatesPage);
     coordinatePageLayout->setContentsMargins(6, 6, 6, 6);
     coordinatePageLayout->setSpacing(8);
-    coordinatePageLayout->addWidget(new QLabel(tr("<b>机床坐标</b>"), m_machineCoordinatesPage));
+    // 中文翻译：<b>机床坐标</b>
+    coordinatePageLayout->addWidget(new QLabel(tr("<b>Machine coordinates</b>"), m_machineCoordinatesPage));
 
-    auto* coordGroup  = new QGroupBox(tr("当前轮廓"), m_machineCoordinatesPage);
+    // 中文翻译：当前轮廓
+    auto* coordGroup  = new QGroupBox(tr("current profile"), m_machineCoordinatesPage);
     auto* coordLayout = new QVBoxLayout(coordGroup);
 
     m_coordTable = new QTableWidget(0, 6, coordGroup);
@@ -231,10 +271,12 @@ void WidgetToolpathPanel::refreshParameterEditors()
         if (hasContour) {
             const LaserContour& contour = m_toolpath->contour(m_activeContourIndex);
             m_labelCurrentContour->setText(contour.needsRecalculation
-                ? tr("%1（待重新计算）").arg(contour.name)
+                // 中文翻译：%1（待重新计算）
+                ? tr("%1 (to be recalculated)").arg(contour.name)
                 : contour.name);
         } else {
-            m_labelCurrentContour->setText(tr("未选择轮廓"));
+            // 中文翻译：未选择轮廓
+            m_labelCurrentContour->setText(tr("No outline selected"));
         }
     }
     if (currentScope && hasContour) {

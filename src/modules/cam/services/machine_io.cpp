@@ -44,7 +44,8 @@ bool loadMachineFromFile(LcncDocument* doc,
 
     if (ext == "stp" || ext == "step") {
         if (progress)
-            progress->setStepName(QStringLiteral("读取 STEP..."));
+            // 中文翻译：读取 STEP...
+            progress->setStepName(QStringLiteral("Read STEP..."));
         Handle(TDocStd_Document) xdeDoc =
             new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
         XCAFDoc_DocumentTool::Set(xdeDoc->Main());
@@ -57,7 +58,8 @@ bool loadMachineFromFile(LcncDocument* doc,
         }
         if (progress) {
             progress->setValue(50);
-            progress->setStepName(QStringLiteral("转换形体..."));
+            // 中文翻译：转换形体...
+            progress->setStepName(QStringLiteral("Transform body..."));
         }
         cafReader.Transfer(xdeDoc);
         if (progress)
@@ -82,7 +84,8 @@ bool loadMachineFromFile(LcncDocument* doc,
         }
     } else if (ext == "stl") {
         if (progress)
-            progress->setStepName(QStringLiteral("读取 STL..."));
+            // 中文翻译：读取 STL...
+            progress->setStepName(QStringLiteral("Read STL..."));
         TopoDS_Shape shape;
         StlAPI_Reader stlReader;
         stlReader.Read(shape, filePath.toUtf8().constData());
@@ -95,7 +98,8 @@ bool loadMachineFromFile(LcncDocument* doc,
             onShapeLoaded(XcafUtils::entry(label), shape);
     } else if (ext == "brep") {
         if (progress)
-            progress->setStepName(QStringLiteral("读取 BREP..."));
+            // 中文翻译：读取 BREP...
+            progress->setStepName(QStringLiteral("Read BREP..."));
         TopoDS_Shape shape;
         BRep_Builder builder;
         BRepTools::Read(shape, filePath.toUtf8().constData(), builder);

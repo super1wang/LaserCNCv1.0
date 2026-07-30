@@ -43,8 +43,10 @@
 CmdGenerateToolpath::CmdGenerateToolpath(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/toolpath.svg"), tr("全局生成刀路"), this);
-    a->setStatusTip(tr("使用全局待应用参数重建全部激光刀路"));
+    // 中文翻译：全局生成刀路
+    auto* a = new QAction(QIcon(":/icons/toolpath.svg"), tr("Generate toolpath globally"), this);
+    // 中文翻译：使用全局待应用参数重建全部激光刀路
+    a->setStatusTip(tr("Rebuild all laser tool paths using global parameters to be applied"));
     setAction(a);
 }
 
@@ -59,14 +61,18 @@ void CmdGenerateToolpath::execute()
     CamModule* cam = context()->camModule();
     if (cam->extractionStrategy() == static_cast<int>(ExtractionStrategy::ManualFaceSelection)
         && cam->machiningFaceCount() == 0) {
-        QMessageBox::information(nullptr, tr("生成刀路"),
-            tr("手动选面模式下请先点击工件表面拾取加工面（可多次拾取），再生成刀路。"));
+        // 中文翻译：生成刀路
+        QMessageBox::information(nullptr, tr("Generate tool path"),
+            // 中文翻译：手动选面模式下请先点击工件表面拾取加工面（可多次拾取），再生成刀路。
+            tr("In manual surface selection mode, please click on the workpiece surface first to pick the processing surface (can be picked multiple times), and then generate the tool path."));
         context()->updateCommandStates();
         return;
     }
     if (!cam->runAutoPipeline()) {
-        QMessageBox::warning(nullptr, tr("生成刀路"),
-            tr("加工流程未完成，请检查当前阶段的错误信息。"));
+        // 中文翻译：生成刀路
+        QMessageBox::warning(nullptr, tr("Generate tool path"),
+            // 中文翻译：加工流程未完成，请检查当前阶段的错误信息。
+            tr("The processing process is not completed, please check the error message at the current stage."));
     }
     context()->updateCommandStates();
 }
@@ -78,8 +84,10 @@ void CmdGenerateToolpath::execute()
 CmdSetLeadIn::CmdSetLeadIn(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/toolpath_32.svg"), tr("选择轮廓起点"), this);
-    a->setStatusTip(tr("在3D视图中点击轮廓采样点设置真实加工起点"));
+    // 中文翻译：选择轮廓起点
+    auto* a = new QAction(QIcon(":/icons/toolpath_32.svg"), tr("Select outline start point"), this);
+    // 中文翻译：在3D视图中点击轮廓采样点设置真实加工起点
+    a->setStatusTip(tr("Click the contour sampling point in the 3D view to set the real processing starting point"));
     setAction(a);
 }
 
@@ -104,7 +112,8 @@ void CmdSetLeadIn::execute()
 
     occView->beginLeadInPick();
     QToolTip::showText(occView->mapToGlobal(QPoint(24, 24)),
-                       tr("移动鼠标预览下刀线，左键确认轮廓起点，右键或 Esc 取消"),
+                       // 中文翻译：移动鼠标预览下刀线，左键确认轮廓起点，右键或 Esc 取消
+                       tr("Move the mouse to preview the lower cut line, left-click to confirm the starting point of the outline, right-click or Esc to cancel."),
                        occView);
 }
 
@@ -115,8 +124,10 @@ void CmdSetLeadIn::execute()
 CmdToolpathPreview::CmdToolpathPreview(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/preview.svg"), tr("刀路预览"), this);
-    a->setStatusTip(tr("切换刀路显示/隐藏"));
+    // 中文翻译：刀路预览
+    auto* a = new QAction(QIcon(":/icons/preview.svg"), tr("Tool path preview"), this);
+    // 中文翻译：切换刀路显示/隐藏
+    a->setStatusTip(tr("Switch tool path display/hide"));
     a->setCheckable(true);
     a->setChecked(true);
     setAction(a);
@@ -142,8 +153,10 @@ void CmdToolpathPreview::execute()
 CmdRecalcToolpath::CmdRecalcToolpath(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/toolpath_5x.svg"), tr("重新计算当前轮廓"), this);
-    a->setStatusTip(tr("应用当前轮廓的待应用参数并仅重建该轮廓"));
+    // 中文翻译：重新计算当前轮廓
+    auto* a = new QAction(QIcon(":/icons/toolpath_5x.svg"), tr("Recalculate the current contour"), this);
+    // 中文翻译：应用当前轮廓的待应用参数并仅重建该轮廓
+    a->setStatusTip(tr("Apply the to-be-applied parameters of the current contour and rebuild only that contour"));
     setAction(a);
 }
 
@@ -165,8 +178,10 @@ void CmdRecalcToolpath::execute()
 CmdSelectMachiningFace::CmdSelectMachiningFace(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("选择加工面"), this);
-    a->setStatusTip(tr("在3D视图中点击工件表面拾取加工面（手动选面模式）"));
+    // 中文翻译：选择加工面
+    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("Select processing surface"), this);
+    // 中文翻译：在3D视图中点击工件表面拾取加工面（手动选面模式）
+    a->setStatusTip(tr("Click on the workpiece surface in the 3D view to select the processing surface (manual surface selection mode)"));
     setAction(a);
 }
 
@@ -191,7 +206,8 @@ void CmdSelectMachiningFace::execute()
 
     occView->beginFacePick();
     QToolTip::showText(occView->mapToGlobal(QPoint(24, 24)),
-                       tr("点击工件表面拾取加工面（可多次拾取），右键或 Esc 结束"),
+                       // 中文翻译：点击工件表面拾取加工面（可多次拾取），右键或 Esc 结束
+                       tr("Click the workpiece surface to pick the processing surface (can be picked multiple times), right-click or Esc to end"),
                        occView);
 }
 
@@ -202,8 +218,10 @@ void CmdSelectMachiningFace::execute()
 CmdClearMachiningFaces::CmdClearMachiningFaces(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("清除加工面"), this);
-    a->setStatusTip(tr("清除所有手动拾取的加工面"));
+    // 中文翻译：清除加工面
+    auto* a = new QAction(QIcon(":/icons/shape.svg"), tr("Clear the machined surface"), this);
+    // 中文翻译：清除所有手动拾取的加工面
+    a->setStatusTip(tr("Clear all manually picked work surfaces"));
     setAction(a);
 }
 

@@ -40,7 +40,8 @@ bool ProcessWorkflowExecutor::start(ProcessFlowDocument& document, QString* erro
 {
     if (m_state == State::Running) {
         if (errorMessage)
-            *errorMessage = tr("流程正在运行");
+            // 中文翻译：流程正在运行
+            *errorMessage = tr("Process is running");
         return false;
     }
 
@@ -56,7 +57,8 @@ bool ProcessWorkflowExecutor::start(ProcessFlowDocument& document, QString* erro
         collectNode(node, 0);
 
     if (m_plan.isEmpty()) {
-        const QString message = tr("流程为空，进入空运行仿真");
+        // 中文翻译：流程为空，进入空运行仿真
+        const QString message = tr("The process is empty and enters dry run simulation.");
         LCNC_WARN(lcnc::LogCode::Generic, "process.executor: empty workflow plan");
         emit messageLogged(message);
     } else {
@@ -103,7 +105,8 @@ void ProcessWorkflowExecutor::pause()
         if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
             setNodeState(m_plan.at(m_currentIndex).nodeId, ProcessNodeState::Paused);
         setState(State::Paused);
-        emit messageLogged(tr("已请求暂停，当前轮廓完成后暂停"));
+        // 中文翻译：已请求暂停，当前轮廓完成后暂停
+        emit messageLogged(tr("Pause requested, pause after completion of current contour"));
     }
 }
 
@@ -126,7 +129,8 @@ void ProcessWorkflowExecutor::resume()
         } else {
             runNextStep();
         }
-        emit messageLogged(tr("流程继续运行"));
+        // 中文翻译：流程继续运行
+        emit messageLogged(tr("The process continues to run"));
     }
 }
 
@@ -142,7 +146,8 @@ void ProcessWorkflowExecutor::stop()
     if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
         setNodeState(m_plan.at(m_currentIndex).nodeId, ProcessNodeState::Stopped);
     setState(State::Idle);
-    emit messageLogged(tr("流程已停止"));
+    // 中文翻译：流程已停止
+    emit messageLogged(tr("Process has stopped"));
 }
 
 bool ProcessWorkflowExecutor::waitForIdle(int timeoutMs)
@@ -166,9 +171,11 @@ void ProcessWorkflowExecutor::emergencyStop()
         m_deviceStopper(true);
     m_stepTimer->stop();
     if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
-        failCurrentStep(tr("急停中断"));
+        // 中文翻译：急停中断
+        failCurrentStep(tr("emergency stop interrupt"));
     setState(State::EmergencyStop);
-    emit messageLogged(tr("流程急停中断"));
+    // 中文翻译：流程急停中断
+    emit messageLogged(tr("Process emergency stop and interruption"));
 }
 
 void ProcessWorkflowExecutor::collectNode(const ProcessNode& node, int depth)
@@ -210,7 +217,8 @@ void ProcessWorkflowExecutor::runNextStep()
         ++m_currentIndex;
         if (m_currentIndex >= m_plan.size()) {
             setState(State::Idle);
-            emit messageLogged(tr("流程运行完成"));
+            // 中文翻译：流程运行完成
+            emit messageLogged(tr("The process is completed"));
             emit workflowFinished();
             return;
         }
@@ -219,12 +227,14 @@ void ProcessWorkflowExecutor::runNextStep()
         setNodeState(step.nodeId, ProcessNodeState::Running);
         emit nodeStarted(step.nodeId);
         if (!m_stepRegistry || !m_stepContext) {
-            failCurrentStep(tr("流程步骤运行环境未初始化"));
+            // 中文翻译：流程步骤运行环境未初始化
+            failCurrentStep(tr("The process step running environment is not initialized"));
             return;
         }
         const auto plugin = m_stepRegistry->stepByExecutorKey(step.executorKey);
         if (!plugin) {
-            failCurrentStep(tr("未注册或已禁用的流程步骤插件: %1").arg(step.executorKey));
+            // 中文翻译：未注册或已禁用的流程步骤插件: %1
+            failCurrentStep(tr("Unregistered or disabled process step plugin: %1").arg(step.executorKey));
             return;
         }
         ProcessNodeExecutionRequest request;
@@ -243,7 +253,8 @@ void ProcessWorkflowExecutor::runNextStep()
     } catch (const std::exception& ex) {
         failCurrentStep(QString::fromUtf8(ex.what()));
     } catch (...) {
-        failCurrentStep(tr("未知执行异常"));
+        // 中文翻译：未知执行异常
+        failCurrentStep(tr("Unknown execution exception"));
     }
 }
 
@@ -257,7 +268,8 @@ void ProcessWorkflowExecutor::completeStepDispatch()
                       "process.executor: current step interrupted by stop/emergency");
             return;
         }
-        failCurrentStep(result.second.isEmpty() ? tr("流程步骤执行失败") : result.second);
+        // 中文翻译：流程步骤执行失败
+        failCurrentStep(result.second.isEmpty() ? tr("Process step execution failed") : result.second);
         return;
     }
     if (m_state != State::Running)
@@ -325,13 +337,15 @@ bool ProcessWorkflowExecutor::dispatchStepSideEffects(const ProcessExecutionStep
 {
     if (!m_stepRegistry || !m_stepContext) {
         if (errorMessage)
-            *errorMessage = tr("流程步骤运行环境未初始化");
+            // 中文翻译：流程步骤运行环境未初始化
+            *errorMessage = tr("The process step running environment is not initialized");
         return false;
     }
     auto plugin = m_stepRegistry->stepByExecutorKey(step.executorKey);
     if (!plugin) {
         if (errorMessage)
-            *errorMessage = tr("未注册或已禁用的流程步骤插件: %1").arg(step.executorKey);
+            // 中文翻译：未注册或已禁用的流程步骤插件: %1
+            *errorMessage = tr("Unregistered or disabled process step plugin: %1").arg(step.executorKey);
         return false;
     }
 

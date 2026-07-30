@@ -29,8 +29,10 @@ void addAxisRow(QTableWidget* table, const QVariantMap& row = {})
     auto* axis = new QLineEdit(row.value("axis", "X").toString(), table);
     table->setCellWidget(r, 0, axis);
     auto* mode = new QComboBox(table);
-    mode->addItem(QObject::tr("绝对"), "absolute");
-    mode->addItem(QObject::tr("相对"), "relative");
+    // 中文翻译：绝对
+    mode->addItem(QObject::tr("Absolutely"), "absolute");
+    // 中文翻译：相对
+    mode->addItem(QObject::tr("relatively"), "relative");
     const int mi = mode->findData(row.value("mode", "absolute").toString());
     mode->setCurrentIndex(mi < 0 ? 0 : mi);
     table->setCellWidget(r, 1, mode);
@@ -40,7 +42,8 @@ void addAxisRow(QTableWidget* table, const QVariantMap& row = {})
     auto* velocity = new QDoubleSpinBox(table);
     velocity->setRange(0, 1000000); velocity->setDecimals(3); velocity->setValue(row.value("velocity", 5.0).toDouble());
     table->setCellWidget(r, 3, velocity);
-    auto* del = new QPushButton(QObject::tr("删除"), table);
+    // 中文翻译：删除
+    auto* del = new QPushButton(QObject::tr("Delete"), table);
     QObject::connect(del, &QPushButton::clicked, table, [table, del] {
         for (int i = 0; i < table->rowCount(); ++i) {
             if (table->cellWidget(i, 4) == del) { table->removeRow(i); break; }
@@ -68,8 +71,10 @@ ProcessNodeDescriptor MultiAxisMoveStep::descriptor() const
 {
     ProcessNodeDescriptor d;
     d.type = ProcessNodeType::MultiAxisMove;
-    d.displayName = QObject::tr("多轴运动");
-    d.category = QObject::tr("运动");
+    // 中文翻译：多轴运动
+    d.displayName = QObject::tr("multi-axis motion");
+    // 中文翻译：运动
+    d.category = QObject::tr("sports");
     d.executorKey = QStringLiteral("multiAxisMove");
     d.defaultParameters.insert(QString::fromLatin1(kMode), QStringLiteral("sequential"));
     d.defaultParameters.insert(QString::fromLatin1(kAxes), QVariantList{});
@@ -79,7 +84,8 @@ ProcessNodeDescriptor MultiAxisMoveStep::descriptor() const
 
 QString MultiAxisMoveStep::summary(const ProcessNode& node) const
 {
-    return QObject::tr("%1，多轴 %2 项").arg(node.parameters.value(kMode, "sequential").toString(), QString::number(node.parameters.value(kAxes, QVariantList{}).toList().size()));
+    // 中文翻译：%1，多轴 %2 项
+    return QObject::tr("%1, multi-axis %2 items").arg(node.parameters.value(kMode, "sequential").toString(), QString::number(node.parameters.value(kAxes, QVariantList{}).toList().size()));
 }
 
 QWidget* MultiAxisMoveStep::createParameterEditor(const ProcessNode& node, QWidget* parent) const
@@ -87,16 +93,21 @@ QWidget* MultiAxisMoveStep::createParameterEditor(const ProcessNode& node, QWidg
     auto* page = new QWidget(parent);
     auto* layout = new QVBoxLayout(page);
     auto* form = new QFormLayout();
-    auto* mode = new QComboBox(page); mode->setObjectName(kModeBox); mode->addItem(QObject::tr("顺序执行"), "sequential"); mode->addItem(QObject::tr("同步执行"), "sync");
+    // 中文翻译：顺序执行；同步执行
+    auto* mode = new QComboBox(page); mode->setObjectName(kModeBox); mode->addItem(QObject::tr("sequential execution"), "sequential"); mode->addItem(QObject::tr("Synchronous execution"), "sync");
     const int mi = mode->findData(node.parameters.value(kMode, "sequential").toString()); mode->setCurrentIndex(mi < 0 ? 0 : mi);
-    form->addRow(QObject::tr("多轴模式"), mode);
+    // 中文翻译：多轴模式
+    form->addRow(QObject::tr("multi-axis mode"), mode);
     auto* timeout = new QSpinBox(page); timeout->setObjectName(kTimeoutSpin); timeout->setRange(0, 24*60*60*1000); timeout->setSuffix(" ms"); timeout->setValue(node.parameters.value(kTimeout, 30000).toInt());
-    form->addRow(QObject::tr("超时"), timeout);
+    // 中文翻译：超时
+    form->addRow(QObject::tr("timeout"), timeout);
     layout->addLayout(form);
-    auto* table = new QTableWidget(page); table->setObjectName(kTable); table->setColumnCount(5); table->setHorizontalHeaderLabels({QObject::tr("轴"), QObject::tr("模式"), QObject::tr("目标位置"), QObject::tr("速度"), QObject::tr("操作")}); table->horizontalHeader()->setStretchLastSection(true);
+    // 中文翻译：轴；模式；目标位置；速度；操作
+    auto* table = new QTableWidget(page); table->setObjectName(kTable); table->setColumnCount(5); table->setHorizontalHeaderLabels({QObject::tr("axis"), QObject::tr("mode"), QObject::tr("Target location"), QObject::tr("speed"), QObject::tr("Operation")}); table->horizontalHeader()->setStretchLastSection(true);
     layout->addWidget(table);
     for (const QVariant& v : node.parameters.value(kAxes, QVariantList{}).toList()) addAxisRow(table, v.toMap());
-    auto* add = new QPushButton(QObject::tr("添加轴"), page); QObject::connect(add, &QPushButton::clicked, table, [table]{ addAxisRow(table); }); layout->addWidget(add);
+    // 中文翻译：添加轴
+    auto* add = new QPushButton(QObject::tr("Add axis"), page); QObject::connect(add, &QPushButton::clicked, table, [table]{ addAxisRow(table); }); layout->addWidget(add);
     return page;
 }
 
@@ -110,9 +121,11 @@ bool MultiAxisMoveStep::applyParameterEditor(QWidget* editor, ProcessNode& node,
 
 bool MultiAxisMoveStep::execute(const ProcessNodeExecutionRequest& request, ProcessStepContext& context, QString* errorMessage)
 {
-    if (!context.motion) { if (errorMessage) *errorMessage = QObject::tr("运动服务不可用"); return false; }
+    // 中文翻译：运动服务不可用
+    if (!context.motion) { if (errorMessage) *errorMessage = QObject::tr("Motion service unavailable"); return false; }
     const QVariantList rows = request.parameters.value(kAxes, QVariantList{}).toList();
-    if (rows.isEmpty()) { if (errorMessage) *errorMessage = QObject::tr("多轴运动轴表为空"); return false; }
+    // 中文翻译：多轴运动轴表为空
+    if (rows.isEmpty()) { if (errorMessage) *errorMessage = QObject::tr("Multi-axis motion axis table is empty"); return false; }
     return context.motion->moveAxes(rows, request.parameters.value(kMode, "sequential").toString(), request.parameters.value(kTimeout, 30000).toInt(), errorMessage);
 }
 

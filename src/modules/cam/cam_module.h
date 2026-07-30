@@ -185,7 +185,8 @@ public:
     /// 三段式模型对齐：用拾取到的模型参考交点平移机台几何，使其对齐到构型配置页
     /// 中手动填写的旋转中心。此流程不写入/修改 A/C 物理旋转中心。
     bool applyAxisCalibration(const AxisCalibrationInputs& inputs, QString* errorMessage = nullptr);
-    /// 进入"机台标定位"：记录切割头模型点，并把 A=0/C=0、X/Y 调整为
+    // 中文翻译：机台标定位
+    /// 进入"Machine mark positioning"：记录切割头模型点，并把 A=0/C=0、X/Y 调整为
     /// 让切割头世界 XY 与当前配置旋转中心 XY 对齐。不修改旋转中心、不持久化、不导出。
     /// 仅用于向导显示标定姿态下的当前 AC 中心 / 切割嘴位置。
     bool enterStandardCalibrationPose(const AxisCalibrationInputs& inputs,
@@ -406,7 +407,8 @@ public:
     void syncSelectionFromView();
 
     // ── Travel path 虚线显示 ────────────────────────────────────────────
-    /// 切换"切割路径显示"。OFF 时立即擦除；ON 时立刻按当前 plan 重绘。
+    // 中文翻译：切割路径显示
+    /// 切换"Cutting path display"。OFF 时立即擦除；ON 时立刻按当前 plan 重绘。
     void setTravelPathVisible(bool on);
     bool isTravelPathVisible() const;
     /// 按当前 IProcessCuttingPlanProvider 提供的顺序刷新虚线（仅 visible=true 时）。

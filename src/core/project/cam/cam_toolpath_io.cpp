@@ -106,7 +106,8 @@ bool writePointsBin(const QString& filePath,
 {
     QFile f(filePath);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (errorMsg) *errorMsg = QStringLiteral("无法写入: %1").arg(filePath);
+        // 中文翻译：无法写入: %1
+        if (errorMsg) *errorMsg = QStringLiteral("Unable to write: %1").arg(filePath);
         return false;
     }
     QDataStream ds(&f);
@@ -162,7 +163,8 @@ bool readPointsBin(const QString& filePath,
 {
     QFile f(filePath);
     if (!f.open(QIODevice::ReadOnly)) {
-        if (errorMsg) *errorMsg = QStringLiteral("无法读取: %1").arg(filePath);
+        // 中文翻译：无法读取: %1
+        if (errorMsg) *errorMsg = QStringLiteral("Unable to read: %1").arg(filePath);
         return false;
     }
     QDataStream ds(&f);
@@ -174,11 +176,13 @@ bool readPointsBin(const QString& filePath,
     quint32 version = 0, contourCount = 0;
     ds >> magic >> version >> contourCount;
     if (magic != kPointsBinMagic) {
-        if (errorMsg) *errorMsg = QStringLiteral("点集文件 magic 不匹配");
+        // 中文翻译：点集文件 magic 不匹配
+        if (errorMsg) *errorMsg = QStringLiteral("Point set file magic mismatch");
         return false;
     }
     if (version < 1 || version > kPointsBinVersion) {
-        if (errorMsg) *errorMsg = QStringLiteral("点集文件版本 %1 不支持").arg(version);
+        // 中文翻译：点集文件版本 %1 不支持
+        if (errorMsg) *errorMsg = QStringLiteral("Point set file version %1 is not supported").arg(version);
         return false;
     }
 
@@ -283,7 +287,8 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
         return true;
     }
     if (!QDir().mkpath(packageDir)) {
-        if (errorMsg) *errorMsg = QStringLiteral("无法创建目录: %1").arg(packageDir);
+        // 中文翻译：无法创建目录: %1
+        if (errorMsg) *errorMsg = QStringLiteral("Unable to create directory: %1").arg(packageDir);
         return false;
     }
 
@@ -432,7 +437,8 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
 
     std::ofstream out(camToolpathTomlPath(packageDir).toStdString(), std::ios::binary);
     if (!out.is_open()) {
-        if (errorMsg) *errorMsg = QStringLiteral("无法写入 cam_toolpath.toml");
+        // 中文翻译：无法写入 cam_toolpath.toml
+        if (errorMsg) *errorMsg = QStringLiteral("Unable to write to cam_toolpath.toml");
         return false;
     }
     out << toml::format(root);
@@ -454,7 +460,8 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
     const QString tomlPath  = camToolpathTomlPath(packageDir);
     const QString pointsPath = camToolpathPointsPath(packageDir);
     if (!QFileInfo::exists(tomlPath) || !QFileInfo::exists(pointsPath)) {
-        if (errorMsg) *errorMsg = QStringLiteral("项目无刀路缓存");
+        // 中文翻译：项目无刀路缓存
+        if (errorMsg) *errorMsg = QStringLiteral("Project has no toolpath cache");
         return false;
     }
 
@@ -467,12 +474,14 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
                  "cam.toolpath: failed to parse '{}': {}",
                  tomlPath.toStdString(),
                  e.what());
-        if (errorMsg) *errorMsg = QStringLiteral("解析 cam_toolpath.toml 失败: %1")
+        // 中文翻译：解析 cam_toolpath.toml 失败: %1
+        if (errorMsg) *errorMsg = QStringLiteral("Failed to parse cam_toolpath.toml: %1")
                                        .arg(QString::fromLocal8Bit(e.what()));
         return false;
     }
     if (!root.is_table()) {
-        if (errorMsg) *errorMsg = QStringLiteral("cam_toolpath.toml 根节点错误");
+        // 中文翻译：cam_toolpath.toml 根节点错误
+        if (errorMsg) *errorMsg = QStringLiteral("cam_toolpath.toml root node error");
         return false;
     }
     const int schemaVersion = root.contains("schemaVersion") && root.at("schemaVersion").is_integer()
@@ -723,12 +732,14 @@ bool migrateLegacyProcessCuttingPlan(CamDataManager& cam, const QString& package
                  filePath.toStdString(),
                  e.what());
         if (errorMsg)
-            *errorMsg = QStringLiteral("解析 process_cutting_plan.toml 失败: %1")
+            // 中文翻译：解析 process_cutting_plan.toml 失败: %1
+            *errorMsg = QStringLiteral("Failed to parse process_cutting_plan.toml: %1")
                             .arg(QString::fromLocal8Bit(e.what()));
         return false;
     }
     if (!root.is_table()) {
-        if (errorMsg) *errorMsg = QStringLiteral("process_cutting_plan.toml 根节点不是 table");
+        // 中文翻译：process_cutting_plan.toml 根节点不是 table
+        if (errorMsg) *errorMsg = QStringLiteral("process_cutting_plan.toml root node is not a table");
         return false;
     }
 

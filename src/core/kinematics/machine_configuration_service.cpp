@@ -21,7 +21,8 @@ QString motionTypeName(MachineAxisDef::MotionType type)
 MachineAxisDef::MotionType motionTypeFromName(const QString& name)
 {
     const QString normalized = name.trimmed().toLower();
-    return normalized == QStringLiteral("rotary") || normalized == QStringLiteral("旋转")
+    // 中文翻译：旋转
+    return normalized == QStringLiteral("rotary") || normalized == QStringLiteral("rotate")
         ? MachineAxisDef::Rotary
         : MachineAxisDef::Linear;
 }

@@ -31,7 +31,8 @@ namespace {
 QString defaultProjectName(const QString& name)
 {
     const QString trimmed = name.trimmed();
-    return trimmed.isEmpty() ? QStringLiteral("LaserCNC 项目") : trimmed;
+    // 中文翻译：LaserCNC 项目
+    return trimmed.isEmpty() ? QStringLiteral("LaserCNC project") : trimmed;
 }
 
 } // namespace
@@ -69,7 +70,8 @@ void LcncProjectManager::ensureProject()
         return;
 
     const ProjectWorkspaceId id = m_nextWorkspaceId++;
-    auto workspace = makeWorkspace(id, QStringLiteral("LaserCNC 项目"));
+    // 中文翻译：LaserCNC 项目
+    auto workspace = makeWorkspace(id, QStringLiteral("LaserCNC project"));
     m_workspaces.emplace(id, workspace);
     m_activeWorkspaceId = id;
     emit workspaceAdded(id);
@@ -213,7 +215,8 @@ LcncDocument* LcncProjectManager::openProject(const QString& filePath, QString* 
 {
     if (!LcncProjectPackage::isProjectPath(filePath)) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("不是 LaserCNC 项目文件: %1").arg(filePath);
+            // 中文翻译：不是 LaserCNC 项目文件: %1
+            *errorMsg = QStringLiteral("Not a LaserCNC project file: %1").arg(filePath);
         return nullptr;
     }
 
@@ -270,7 +273,8 @@ bool LcncProjectManager::saveProject(const QString& filePath, QString* errorMsg)
     ProjectWorkspace* current = activeWorkspace();
     if (!current) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("没有活动工程，无法保存");
+            // 中文翻译：没有活动工程，无法保存
+            *errorMsg = QStringLiteral("There is no active project and cannot be saved.");
         return false;
     }
 
@@ -278,7 +282,8 @@ bool LcncProjectManager::saveProject(const QString& filePath, QString* errorMsg)
     const QString targetPath = filePath.isEmpty() ? currentSession.projectPath() : filePath;
     if (targetPath.isEmpty()) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("项目路径为空，无法保存");
+            // 中文翻译：项目路径为空，无法保存
+            *errorMsg = QStringLiteral("The project path is empty and cannot be saved");
         return false;
     }
 
@@ -345,7 +350,8 @@ bool LcncProjectManager::exportDomainAsStep(ProjectDomain domain, const QString&
     LcncDocument* target = document(domain);
     if (!target) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("项目数据域不存在");
+            // 中文翻译：项目数据域不存在
+            *errorMsg = QStringLiteral("Project data field does not exist");
         return false;
     }
 
@@ -361,7 +367,8 @@ bool LcncProjectManager::exportDomainAsStep(ProjectDomain domain, const QString&
 
     const bool ok = writer.Write(filePath.toUtf8().constData()) == IFSelect_RetDone;
     if (!ok && errorMsg)
-        *errorMsg = QStringLiteral("保存失败: %1").arg(filePath);
+        // 中文翻译：保存失败: %1
+        *errorMsg = QStringLiteral("Save failed: %1").arg(filePath);
     return ok;
 }
 
@@ -515,7 +522,8 @@ int LcncProjectManager::reserveDocumentId()
 
 LcncDocument* LcncProjectManager::createMachineDocument()
 {
-    return createDomainDocument(ProjectDomain::Machine, QStringLiteral("机台工作台"));
+    // 中文翻译：机台工作台
+    return createDomainDocument(ProjectDomain::Machine, QStringLiteral("Machine workbench"));
 }
 
 void LcncProjectManager::attachMachineDocument(LcncDocument* borrowed)
@@ -550,7 +558,8 @@ bool LcncProjectManager::importGeometryFile(LcncDocument* document, const QStrin
     QFileInfo fileInfo(filePath);
     if (!document || filePath.isEmpty() || !fileInfo.exists()) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("文件不存在: %1").arg(filePath);
+            // 中文翻译：文件不存在: %1
+            *errorMsg = QStringLiteral("File does not exist: %1").arg(filePath);
         return false;
     }
 
@@ -590,12 +599,14 @@ bool LcncProjectManager::importGeometryFile(LcncDocument* document, const QStrin
         }
     } else {
         if (errorMsg)
-            *errorMsg = QStringLiteral("暂不支持的文件格式: %1").arg(fileInfo.suffix());
+            // 中文翻译：暂不支持的文件格式: %1
+            *errorMsg = QStringLiteral("File format not supported yet: %1").arg(fileInfo.suffix());
         return false;
     }
 
     if (!ok && errorMsg)
-        *errorMsg = QStringLiteral("无法读取文件: %1").arg(filePath);
+        // 中文翻译：无法读取文件: %1
+        *errorMsg = QStringLiteral("Unable to read file: %1").arg(filePath);
     return ok;
 }
 

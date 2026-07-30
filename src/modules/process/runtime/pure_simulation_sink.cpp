@@ -91,7 +91,8 @@ bool PureSimulationSink::isProgramRunning(QString* errorMessage)
         });
         if (m_token->isStopping()) {
             invokeOnObjectThread(m_ticker, [this] { m_ticker->stop(); });
-            if (errorMessage) *errorMessage = QStringLiteral("仿真已被中断");
+            // 中文翻译：仿真已被中断
+            if (errorMessage) *errorMessage = QStringLiteral("Simulation has been interrupted");
             return false;
         }
     }

@@ -13,14 +13,16 @@ ProcessPropertyModel::ProcessPropertyModel(ProcessSettingsService* settings, QOb
     : QStandardItemModel(parent), m_settings(settings)
 {
     setColumnCount(2);
-    setHorizontalHeaderLabels({tr("参数"), tr("值")});
+    // 中文翻译：参数；值
+    setHorizontalHeaderLabels({tr("parameters"), tr("value")});
 }
 
 void ProcessPropertyModel::setObject(const ParameterObjectDescriptor& object, const QString& filter)
 {
     clear();
     setColumnCount(2);
-    setHorizontalHeaderLabels({tr("参数"), tr("值")});
+    // 中文翻译：参数；值
+    setHorizontalHeaderLabels({tr("parameters"), tr("value")});
     m_objectId = object.id;
     m_fields.clear();
     QMap<QString, QStandardItem*> groups;

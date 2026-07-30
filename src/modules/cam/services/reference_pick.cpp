@@ -38,7 +38,8 @@ bool resolveReferencePlaneCenter(WidgetOccView* occView,
 {
     if (!occView || occView->view().IsNull() || occView->context().IsNull()) {
         if (errorMessage)
-            *errorMessage = tr("当前没有可用的机台视图用于参考面拾取。");
+            // 中文翻译：当前没有可用的机台视图用于参考面拾取。
+            *errorMessage = tr("There are currently no machine views available for reference surface picking.");
         return false;
     }
 
@@ -49,14 +50,16 @@ bool resolveReferencePlaneCenter(WidgetOccView* occView,
     Handle(StdSelect_BRepOwner) brepOwner = Handle(StdSelect_BRepOwner)::DownCast(owner);
     if (brepOwner.IsNull() || !brepOwner->HasShape()) {
         if (errorMessage)
-            *errorMessage = tr("请将光标放在机台模型或挂载工件的平面上。\n当前未检测到可用参考面。");
+            // 中文翻译：请将光标放在机台模型或挂载工件的平面上。\n当前未检测到可用参考面。
+            *errorMessage = tr("Please place the cursor on the machine model or the plane where the workpiece is mounted.\nNo available reference surfaces are currently detected.");
         return false;
     }
 
     const TopoDS_Shape pickedShape = brepOwner->Shape();
     if (pickedShape.IsNull() || pickedShape.ShapeType() != TopAbs_FACE) {
         if (errorMessage)
-            *errorMessage = tr("当前拾取的不是平面面片，请重新选择参考平面。");
+            // 中文翻译：当前拾取的不是平面面片，请重新选择参考平面。
+            *errorMessage = tr("What is currently picked is not a plane patch, please reselect the reference plane.");
         return false;
     }
 
@@ -64,7 +67,8 @@ bool resolveReferencePlaneCenter(WidgetOccView* occView,
     const BRepAdaptor_Surface surface(face);
     if (surface.GetType() != GeomAbs_Plane) {
         if (errorMessage)
-            *errorMessage = tr("当前拾取的面不是平面，请选择平面参考面。");
+            // 中文翻译：当前拾取的面不是平面，请选择平面参考面。
+            *errorMessage = tr("The currently picked face is not a plane, please select a planar reference face.");
         return false;
     }
 

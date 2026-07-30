@@ -6,6 +6,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -216,7 +217,8 @@ void WidgetCadTaskPanel::setFinishedSketches(const QVector<FinishedSketchEntry>&
     for (const auto& entry : entries) {
         QString label = entry.label;
         if (entry.usedByFeature)
-            label += tr("（已用）");
+            // 中文翻译：（已用）
+            label += tr("(used)");
         auto* item = new QListWidgetItem(label, m_listFinishedSketches);
         item->setData(Qt::UserRole, entry.sketchId);
         item->setData(Qt::UserRole + 1, entry.visible);
@@ -334,7 +336,8 @@ void WidgetCadTaskPanel::buildUi()
     mainLayout->setContentsMargins(6, 6, 6, 6);
     mainLayout->setSpacing(8);
 
-    auto* title = new QLabel(tr("<b>CAD 建模</b>"), this);
+    // 中文翻译：<b>CAD 建模</b>
+    auto* title = new QLabel(tr("<b>CAD Modeling</b>"), this);
     mainLayout->addWidget(title);
 
     m_stack = new QStackedWidget(this);
@@ -352,7 +355,11 @@ QPushButton* WidgetCadTaskPanel::makeToolButton(
     const lcnc::cad::task::CadToolDescriptor& tool,
     QWidget* parent)
 {
-    auto* button = new QPushButton(tool.title, parent);
+    // 中文翻译：CAD 工具按钮标题
+    const QByteArray titleKey = tool.title.toUtf8();
+    auto* button = new QPushButton(
+        QCoreApplication::translate("lcnc::cad::ui::WidgetCadTaskPanel", titleKey.constData()),
+        parent);
     button->setMinimumHeight(28);
     m_toolButtons.insert(tool.toolId, button);
     connect(button, &QPushButton::clicked, this, [this, tool]() {
@@ -415,21 +422,24 @@ void WidgetCadTaskPanel::buildHomePage()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
-    m_groupDocument = new QGroupBox(tr("文档"), m_pageHome);
+    // 中文翻译：文档
+    m_groupDocument = new QGroupBox(tr("Documentation"), m_pageHome);
     auto* docLayout = new QGridLayout(m_groupDocument);
     addToolButtons(docLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::Document),
                    m_groupDocument);
     layout->addWidget(m_groupDocument);
 
-    m_groupBase = new QGroupBox(tr("基础建模"), m_pageHome);
+    // 中文翻译：基础建模
+    m_groupBase = new QGroupBox(tr("Basic modeling"), m_pageHome);
     auto* baseLayout = new QGridLayout(m_groupBase);
     addToolButtons(baseLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::BaseModeling),
                    m_groupBase);
     layout->addWidget(m_groupBase);
 
-    m_groupProfile = new QGroupBox(tr("草图特征"), m_pageHome);
+    // 中文翻译：草图特征
+    m_groupProfile = new QGroupBox(tr("sketch features"), m_pageHome);
     auto* profileLayout = new QGridLayout(m_groupProfile);
     addToolButtons(profileLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::SketchFeature),
@@ -437,14 +447,17 @@ void WidgetCadTaskPanel::buildHomePage()
     layout->addWidget(m_groupProfile);
 
     // 草图列表：显示当前文档已完成草图，选中后可进入拉伸/旋转。
-    m_groupSketches = new QGroupBox(tr("草图列表"), m_pageHome);
+    // 中文翻译：草图列表
+    m_groupSketches = new QGroupBox(tr("sketch list"), m_pageHome);
     auto* sketchListLayout = new QVBoxLayout(m_groupSketches);
     m_listFinishedSketches = new QListWidget(m_groupSketches);
     m_listFinishedSketches->setMinimumHeight(80);
     sketchListLayout->addWidget(m_listFinishedSketches);
     auto* sketchBtnRow = new QHBoxLayout();
-    m_btnToggleSketchVisible = new QPushButton(tr("显示/隐藏"), m_groupSketches);
-    m_btnDeleteFinishedSketch = new QPushButton(tr("删除"), m_groupSketches);
+    // 中文翻译：显示/隐藏
+    m_btnToggleSketchVisible = new QPushButton(tr("show/hide"), m_groupSketches);
+    // 中文翻译：删除
+    m_btnDeleteFinishedSketch = new QPushButton(tr("Delete"), m_groupSketches);
     sketchBtnRow->addWidget(m_btnToggleSketchVisible);
     sketchBtnRow->addWidget(m_btnDeleteFinishedSketch);
     sketchListLayout->addLayout(sketchBtnRow);
@@ -468,42 +481,48 @@ void WidgetCadTaskPanel::buildHomePage()
         emit sketchVisibilityToggled(id, !currentlyVisible);
     });
 
-    m_groupSelection = new QGroupBox(tr("已选对象"), m_pageHome);
+    // 中文翻译：已选对象
+    m_groupSelection = new QGroupBox(tr("Selected objects"), m_pageHome);
     auto* selectionLayout = new QGridLayout(m_groupSelection);
     addToolButtons(selectionLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::Selection),
                    m_groupSelection);
     layout->addWidget(m_groupSelection);
 
-    m_groupBoolean = new QGroupBox(tr("布尔运算"), m_pageHome);
+    // 中文翻译：布尔运算
+    m_groupBoolean = new QGroupBox(tr("Boolean operations"), m_pageHome);
     auto* booleanLayout = new QGridLayout(m_groupBoolean);
     addToolButtons(booleanLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::Boolean),
                    m_groupBoolean);
     layout->addWidget(m_groupBoolean);
 
-    m_groupMeasure = new QGroupBox(tr("测量"), m_pageHome);
+    // 中文翻译：测量
+    m_groupMeasure = new QGroupBox(tr("Measure"), m_pageHome);
     auto* measureLayout = new QGridLayout(m_groupMeasure);
     addToolButtons(measureLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::Measure),
                    m_groupMeasure);
     layout->addWidget(m_groupMeasure);
 
-    m_groupDelete = new QGroupBox(tr("编辑"), m_pageHome);
+    // 中文翻译：编辑
+    m_groupDelete = new QGroupBox(tr("Edit"), m_pageHome);
     auto* deleteLayout = new QGridLayout(m_groupDelete);
     addToolButtons(deleteLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::Delete),
                    m_groupDelete);
     layout->addWidget(m_groupDelete);
 
-    m_groupFaceTools = new QGroupBox(tr("面工具"), m_pageHome);
+    // 中文翻译：面工具
+    m_groupFaceTools = new QGroupBox(tr("Surface tool"), m_pageHome);
     auto* faceLayout = new QGridLayout(m_groupFaceTools);
     addToolButtons(faceLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::FaceTool),
                    m_groupFaceTools);
     layout->addWidget(m_groupFaceTools);
 
-    m_groupEdgeTools = new QGroupBox(tr("边工具"), m_pageHome);
+    // 中文翻译：边工具
+    m_groupEdgeTools = new QGroupBox(tr("Edge tool"), m_pageHome);
     auto* edgeLayout = new QGridLayout(m_groupEdgeTools);
     addToolButtons(edgeLayout,
                    registry.toolsByCategory(lcnc::cad::task::CadToolCategory::EdgeTool),
@@ -521,31 +540,44 @@ void WidgetCadTaskPanel::buildSketchPage()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
-    auto* group = new QGroupBox(tr("新建草图"), m_pageSketch);
+    // 中文翻译：新建草图
+    auto* group = new QGroupBox(tr("Create a new sketch"), m_pageSketch);
     auto* form = new QFormLayout(group);
 
     m_comboPlane = new QComboBox(group);
-    m_comboPlane->addItem(tr("XY 平面"), 0);
-    m_comboPlane->addItem(tr("YZ 平面"), 1);
-    m_comboPlane->addItem(tr("ZX 平面"), 2);
-    form->addRow(tr("平面:"), m_comboPlane);
+    // 中文翻译：XY 平面
+    m_comboPlane->addItem(tr("XY plane"), 0);
+    // 中文翻译：YZ 平面
+    m_comboPlane->addItem(tr("YZ plane"), 1);
+    // 中文翻译：ZX 平面
+    m_comboPlane->addItem(tr("ZX plane"), 2);
+    // 中文翻译：平面:
+    form->addRow(tr("Plane:"), m_comboPlane);
 
     layout->addWidget(group);
 
     // 草图工具调色板（开始草图后启用）。
-    m_groupSketchTool = new QGroupBox(tr("草图工具"), m_pageSketch);
+    // 中文翻译：草图工具
+    m_groupSketchTool = new QGroupBox(tr("Sketch tools"), m_pageSketch);
     auto* toolLayout = new QVBoxLayout(m_groupSketchTool);
     toolLayout->setContentsMargins(8, 8, 8, 8);
     toolLayout->setSpacing(6);
 
     m_comboSketchTool = new QComboBox(m_groupSketchTool);
-    m_comboSketchTool->addItem(tr("未选择"), 0);
-    m_comboSketchTool->addItem(tr("点"), 1);
-    m_comboSketchTool->addItem(tr("直线"), 2);
-    m_comboSketchTool->addItem(tr("圆弧"), 3);
-    m_comboSketchTool->addItem(tr("圆"), 4);
-    m_comboSketchTool->addItem(tr("矩形"), 5);
-    m_comboSketchTool->addItem(tr("多边形"), 6);
+    // 中文翻译：未选择
+    m_comboSketchTool->addItem(tr("Not selected"), 0);
+    // 中文翻译：点
+    m_comboSketchTool->addItem(tr("point"), 1);
+    // 中文翻译：直线
+    m_comboSketchTool->addItem(tr("straight line"), 2);
+    // 中文翻译：圆弧
+    m_comboSketchTool->addItem(tr("Arc"), 3);
+    // 中文翻译：圆
+    m_comboSketchTool->addItem(tr("round"), 4);
+    // 中文翻译：矩形
+    m_comboSketchTool->addItem(tr("Rectangle"), 5);
+    // 中文翻译：多边形
+    m_comboSketchTool->addItem(tr("polygon"), 6);
     toolLayout->addWidget(m_comboSketchTool);
 
     m_sketchToolForm = new QWidget(m_groupSketchTool);
@@ -554,8 +586,10 @@ void WidgetCadTaskPanel::buildSketchPage()
     toolLayout->addWidget(m_sketchToolForm);
 
     auto* toolBtnRow = new QHBoxLayout();
-    m_btnAddSketchElement = new QPushButton(tr("添加"), m_groupSketchTool);
-    m_btnRemoveSketchElement = new QPushButton(tr("移除选中"), m_groupSketchTool);
+    // 中文翻译：添加
+    m_btnAddSketchElement = new QPushButton(tr("add"), m_groupSketchTool);
+    // 中文翻译：移除选中
+    m_btnRemoveSketchElement = new QPushButton(tr("Remove selection"), m_groupSketchTool);
     toolBtnRow->addWidget(m_btnAddSketchElement);
     toolBtnRow->addWidget(m_btnRemoveSketchElement);
     toolLayout->addLayout(toolBtnRow);
@@ -567,9 +601,12 @@ void WidgetCadTaskPanel::buildSketchPage()
     layout->addWidget(m_groupSketchTool);
     rebuildSketchToolForm(0);
 
-    m_btnStartSketch = new QPushButton(tr("开始草图"), m_pageSketch);
-    m_btnExitSketch = new QPushButton(tr("完成草图"), m_pageSketch);
-    m_btnCancelSketch = new QPushButton(tr("取消"), m_pageSketch);
+    // 中文翻译：开始草图
+    m_btnStartSketch = new QPushButton(tr("Start sketching"), m_pageSketch);
+    // 中文翻译：完成草图
+    m_btnExitSketch = new QPushButton(tr("Complete sketch"), m_pageSketch);
+    // 中文翻译：取消
+    m_btnCancelSketch = new QPushButton(tr("Cancel"), m_pageSketch);
     layout->addWidget(m_btnStartSketch);
     layout->addWidget(m_btnExitSketch);
     layout->addWidget(m_btnCancelSketch);
@@ -617,16 +654,23 @@ void WidgetCadTaskPanel::buildSketchPage()
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(8);
 
-        auto* group = new QGroupBox(tr("基础体参数"), m_pagePrimitive);
+        // 中文翻译：基础体参数
+        auto* group = new QGroupBox(tr("Basic body parameters"), m_pagePrimitive);
         auto* form = new QFormLayout(group);
 
         m_comboPrimitive = new QComboBox(group);
-        m_comboPrimitive->addItem(tr("长方体"), 0);
-        m_comboPrimitive->addItem(tr("圆柱体"), 1);
-        m_comboPrimitive->addItem(tr("球体"), 2);
-        m_comboPrimitive->addItem(tr("圆锥体"), 3);
-        m_comboPrimitive->addItem(tr("圆环体"), 4);
-        form->addRow(tr("类型:"), m_comboPrimitive);
+        // 中文翻译：长方体
+        m_comboPrimitive->addItem(tr("cuboid"), 0);
+        // 中文翻译：圆柱体
+        m_comboPrimitive->addItem(tr("cylinder"), 1);
+        // 中文翻译：球体
+        m_comboPrimitive->addItem(tr("sphere"), 2);
+        // 中文翻译：圆锥体
+        m_comboPrimitive->addItem(tr("cone"), 3);
+        // 中文翻译：圆环体
+        m_comboPrimitive->addItem(tr("torus"), 4);
+        // 中文翻译：类型:
+        form->addRow(tr("Type:"), m_comboPrimitive);
 
         m_spinPrimitiveSizeX = new QDoubleSpinBox(group);
         m_spinPrimitiveSizeX->setRange(0.001, 100000.0);
@@ -634,7 +678,8 @@ void WidgetCadTaskPanel::buildSketchPage()
         m_spinPrimitiveSizeX->setSingleStep(1.0);
         m_spinPrimitiveSizeX->setValue(100.0);
         m_spinPrimitiveSizeX->setSuffix(tr(" mm"));
-        m_labelPrimitiveSizeX = new QLabel(tr("长度 X:"), group);
+        // 中文翻译：长度 X:
+        m_labelPrimitiveSizeX = new QLabel(tr("Length X:"), group);
         form->addRow(m_labelPrimitiveSizeX, m_spinPrimitiveSizeX);
 
         m_spinPrimitiveSizeY = new QDoubleSpinBox(group);
@@ -643,7 +688,8 @@ void WidgetCadTaskPanel::buildSketchPage()
         m_spinPrimitiveSizeY->setSingleStep(1.0);
         m_spinPrimitiveSizeY->setValue(100.0);
         m_spinPrimitiveSizeY->setSuffix(tr(" mm"));
-        m_labelPrimitiveSizeY = new QLabel(tr("宽度 Y:"), group);
+        // 中文翻译：宽度 Y:
+        m_labelPrimitiveSizeY = new QLabel(tr("Width Y:"), group);
         form->addRow(m_labelPrimitiveSizeY, m_spinPrimitiveSizeY);
 
         m_spinPrimitiveSizeZ = new QDoubleSpinBox(group);
@@ -652,7 +698,8 @@ void WidgetCadTaskPanel::buildSketchPage()
         m_spinPrimitiveSizeZ->setSingleStep(1.0);
         m_spinPrimitiveSizeZ->setValue(50.0);
         m_spinPrimitiveSizeZ->setSuffix(tr(" mm"));
-        m_labelPrimitiveSizeZ = new QLabel(tr("高度 Z:"), group);
+        // 中文翻译：高度 Z:
+        m_labelPrimitiveSizeZ = new QLabel(tr("Height Z:"), group);
         form->addRow(m_labelPrimitiveSizeZ, m_spinPrimitiveSizeZ);
 
         m_spinPrimitiveRadius1 = new QDoubleSpinBox(group);
@@ -661,7 +708,8 @@ void WidgetCadTaskPanel::buildSketchPage()
         m_spinPrimitiveRadius1->setSingleStep(1.0);
         m_spinPrimitiveRadius1->setValue(50.0);
         m_spinPrimitiveRadius1->setSuffix(tr(" mm"));
-        m_labelPrimitiveRadius1 = new QLabel(tr("半径:"), group);
+        // 中文翻译：半径:
+        m_labelPrimitiveRadius1 = new QLabel(tr("Radius:"), group);
         form->addRow(m_labelPrimitiveRadius1, m_spinPrimitiveRadius1);
 
         m_spinPrimitiveRadius2 = new QDoubleSpinBox(group);
@@ -670,16 +718,20 @@ void WidgetCadTaskPanel::buildSketchPage()
         m_spinPrimitiveRadius2->setSingleStep(1.0);
         m_spinPrimitiveRadius2->setValue(15.0);
         m_spinPrimitiveRadius2->setSuffix(tr(" mm"));
-        m_labelPrimitiveRadius2 = new QLabel(tr("管半径:"), group);
+        // 中文翻译：管半径:
+        m_labelPrimitiveRadius2 = new QLabel(tr("Tube radius:"), group);
         form->addRow(m_labelPrimitiveRadius2, m_spinPrimitiveRadius2);
 
-        m_checkPrimitivePreview = new QCheckBox(tr("预览"), group);
+        // 中文翻译：预览
+        m_checkPrimitivePreview = new QCheckBox(tr("Preview"), group);
         m_checkPrimitivePreview->setChecked(true);
         form->addRow(m_checkPrimitivePreview);
         layout->addWidget(group);
 
-        m_btnApplyPrimitive = new QPushButton(tr("应用"), m_pagePrimitive);
-        m_btnCancelPrimitive = new QPushButton(tr("取消"), m_pagePrimitive);
+        // 中文翻译：应用
+        m_btnApplyPrimitive = new QPushButton(tr("Application"), m_pagePrimitive);
+        // 中文翻译：取消
+        m_btnCancelPrimitive = new QPushButton(tr("Cancel"), m_pagePrimitive);
         layout->addWidget(m_btnApplyPrimitive);
         layout->addWidget(m_btnCancelPrimitive);
         layout->addStretch(1);
@@ -725,13 +777,17 @@ void WidgetCadTaskPanel::buildFeaturePage()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
-    auto* group = new QGroupBox(tr("特征参数"), m_pageFeature);
+    // 中文翻译：特征参数
+    auto* group = new QGroupBox(tr("Characteristic parameters"), m_pageFeature);
     auto* form = new QFormLayout(group);
 
     m_comboFeature = new QComboBox(group);
-    m_comboFeature->addItem(tr("拉伸凸台"), 0);
-    m_comboFeature->addItem(tr("旋转凸台"), 1);
-    form->addRow(tr("方式:"), m_comboFeature);
+    // 中文翻译：拉伸凸台
+    m_comboFeature->addItem(tr("extrude boss"), 0);
+    // 中文翻译：旋转凸台
+    m_comboFeature->addItem(tr("rotating boss"), 1);
+    // 中文翻译：方式:
+    form->addRow(tr("Method:"), m_comboFeature);
 
     m_spinFeatureLength = new QDoubleSpinBox(group);
     m_spinFeatureLength->setRange(-100000.0, 100000.0);
@@ -739,7 +795,8 @@ void WidgetCadTaskPanel::buildFeaturePage()
     m_spinFeatureLength->setSingleStep(1.0);
     m_spinFeatureLength->setValue(10.0);
     m_spinFeatureLength->setSuffix(tr(" mm"));
-    form->addRow(tr("长度:"), m_spinFeatureLength);
+    // 中文翻译：长度:
+    form->addRow(tr("Length:"), m_spinFeatureLength);
 
     m_spinFeatureAngle = new QDoubleSpinBox(group);
     m_spinFeatureAngle->setRange(-360.0, 360.0);
@@ -747,15 +804,19 @@ void WidgetCadTaskPanel::buildFeaturePage()
     m_spinFeatureAngle->setSingleStep(5.0);
     m_spinFeatureAngle->setValue(360.0);
     m_spinFeatureAngle->setSuffix(tr(" °"));
-    form->addRow(tr("角度:"), m_spinFeatureAngle);
+    // 中文翻译：角度:
+    form->addRow(tr("Angle:"), m_spinFeatureAngle);
 
-    m_checkPreview = new QCheckBox(tr("预览"), group);
+    // 中文翻译：预览
+    m_checkPreview = new QCheckBox(tr("Preview"), group);
     m_checkPreview->setChecked(true);
     form->addRow(m_checkPreview);
     layout->addWidget(group);
 
-    m_btnApplyFeature = new QPushButton(tr("应用"), m_pageFeature);
-    m_btnCancelFeature = new QPushButton(tr("取消"), m_pageFeature);
+    // 中文翻译：应用
+    m_btnApplyFeature = new QPushButton(tr("Application"), m_pageFeature);
+    // 中文翻译：取消
+    m_btnCancelFeature = new QPushButton(tr("Cancel"), m_pageFeature);
     layout->addWidget(m_btnApplyFeature);
     layout->addWidget(m_btnCancelFeature);
     layout->addStretch(1);
@@ -786,13 +847,17 @@ void WidgetCadTaskPanel::buildTransformPage()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
-    auto* group = new QGroupBox(tr("变换"), m_pageTransform);
+    // 中文翻译：变换
+    auto* group = new QGroupBox(tr("transform"), m_pageTransform);
     auto* form = new QFormLayout(group);
 
     m_comboTransformReference = new QComboBox(group);
-    m_comboTransformReference->addItem(tr("模型中心"), 0);
-    m_comboTransformReference->addItem(tr("世界原点"), 1);
-    form->addRow(tr("参考:"), m_comboTransformReference);
+    // 中文翻译：模型中心
+    m_comboTransformReference->addItem(tr("model center"), 0);
+    // 中文翻译：世界原点
+    m_comboTransformReference->addItem(tr("world origin"), 1);
+    // 中文翻译：参考:
+    form->addRow(tr("Reference:"), m_comboTransformReference);
 
     auto makeDistanceSpin = [group, this]() {
         auto* spin = new QDoubleSpinBox(group);
@@ -814,24 +879,33 @@ void WidgetCadTaskPanel::buildTransformPage()
     m_spinTransformTranslateX = makeDistanceSpin();
     m_spinTransformTranslateY = makeDistanceSpin();
     m_spinTransformTranslateZ = makeDistanceSpin();
-    form->addRow(tr("平移 X:"), m_spinTransformTranslateX);
-    form->addRow(tr("平移 Y:"), m_spinTransformTranslateY);
-    form->addRow(tr("平移 Z:"), m_spinTransformTranslateZ);
+    // 中文翻译：平移 X:
+    form->addRow(tr("Pan X:"), m_spinTransformTranslateX);
+    // 中文翻译：平移 Y:
+    form->addRow(tr("Translate Y:"), m_spinTransformTranslateY);
+    // 中文翻译：平移 Z:
+    form->addRow(tr("Translate Z:"), m_spinTransformTranslateZ);
 
     m_spinTransformRotateX = makeAngleSpin();
     m_spinTransformRotateY = makeAngleSpin();
     m_spinTransformRotateZ = makeAngleSpin();
-    form->addRow(tr("旋转 X:"), m_spinTransformRotateX);
-    form->addRow(tr("旋转 Y:"), m_spinTransformRotateY);
-    form->addRow(tr("旋转 Z:"), m_spinTransformRotateZ);
+    // 中文翻译：旋转 X:
+    form->addRow(tr("Rotate X:"), m_spinTransformRotateX);
+    // 中文翻译：旋转 Y:
+    form->addRow(tr("Rotate Y:"), m_spinTransformRotateY);
+    // 中文翻译：旋转 Z:
+    form->addRow(tr("Rotate Z:"), m_spinTransformRotateZ);
 
-    m_checkTransformPreview = new QCheckBox(tr("预览"), group);
+    // 中文翻译：预览
+    m_checkTransformPreview = new QCheckBox(tr("Preview"), group);
     m_checkTransformPreview->setChecked(true);
     form->addRow(m_checkTransformPreview);
     layout->addWidget(group);
 
-    m_btnApplyTransform = new QPushButton(tr("应用"), m_pageTransform);
-    m_btnCancelTransform = new QPushButton(tr("取消"), m_pageTransform);
+    // 中文翻译：应用
+    m_btnApplyTransform = new QPushButton(tr("Application"), m_pageTransform);
+    // 中文翻译：取消
+    m_btnCancelTransform = new QPushButton(tr("Cancel"), m_pageTransform);
     layout->addWidget(m_btnApplyTransform);
     layout->addWidget(m_btnCancelTransform);
     layout->addStretch(1);
@@ -915,7 +989,8 @@ void WidgetCadTaskPanel::updateHomeAvailability()
         m_groupEdgeTools->setVisible(hasVisibleCategory(lcnc::cad::task::CadToolCategory::EdgeTool));
 
     if (m_btnOpenSketchPage)
-        m_btnOpenSketchPage->setText(m_sketchEditing ? tr("继续草图") : tr("新建草图"));
+        // 中文翻译：继续草图；新建草图
+        m_btnOpenSketchPage->setText(m_sketchEditing ? tr("Continue sketching") : tr("Create a new sketch"));
     if (m_btnStartSketch)
         m_btnStartSketch->setEnabled(!m_sketchEditing);
     if (m_btnExitSketch)
@@ -945,17 +1020,22 @@ void WidgetCadTaskPanel::updatePrimitiveParameterVisibility()
                         isCone || isTorus);
 
     if (m_labelPrimitiveSizeZ)
-        m_labelPrimitiveSizeZ->setText(isBox ? tr("高度 Z:") : tr("高度:"));
+        // 中文翻译：高度 Z:；高度:
+        m_labelPrimitiveSizeZ->setText(isBox ? tr("Height Z:") : tr("Height:"));
     if (m_labelPrimitiveRadius1) {
         if (isCone)
-            m_labelPrimitiveRadius1->setText(tr("底部半径:"));
+            // 中文翻译：底部半径:
+            m_labelPrimitiveRadius1->setText(tr("Bottom radius:"));
         else if (isTorus)
-            m_labelPrimitiveRadius1->setText(tr("主半径:"));
+            // 中文翻译：主半径:
+            m_labelPrimitiveRadius1->setText(tr("Main radius:"));
         else
-            m_labelPrimitiveRadius1->setText(tr("半径:"));
+            // 中文翻译：半径:
+            m_labelPrimitiveRadius1->setText(tr("Radius:"));
     }
     if (m_labelPrimitiveRadius2)
-        m_labelPrimitiveRadius2->setText(isCone ? tr("顶部半径:") : tr("管半径:"));
+        // 中文翻译：顶部半径:；管半径:
+        m_labelPrimitiveRadius2->setText(isCone ? tr("Top radius:") : tr("Tube radius:"));
 }
 
 void WidgetCadTaskPanel::emitPrimitiveParametersChanged()
@@ -1022,35 +1102,56 @@ void WidgetCadTaskPanel::rebuildSketchToolForm(int toolKind)
         addDoubleField(tr("Y:"), 0.0, -1e6, 1e6);
         break;
     case 2: // Line
-        addDoubleField(tr("起点 X:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("起点 Y:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("终点 X:"), 50.0, -1e6, 1e6);
-        addDoubleField(tr("终点 Y:"), 0.0, -1e6, 1e6);
+        // 中文翻译：起点 X:
+        addDoubleField(tr("Starting point X:"), 0.0, -1e6, 1e6);
+        // 中文翻译：起点 Y:
+        addDoubleField(tr("Starting point Y:"), 0.0, -1e6, 1e6);
+        // 中文翻译：终点 X:
+        addDoubleField(tr("End point X:"), 50.0, -1e6, 1e6);
+        // 中文翻译：终点 Y:
+        addDoubleField(tr("End point Y:"), 0.0, -1e6, 1e6);
         break;
     case 3: // Arc
-        addDoubleField(tr("起点 X:"), -25.0, -1e6, 1e6);
-        addDoubleField(tr("起点 Y:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("中点 X:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("中点 Y:"), 25.0, -1e6, 1e6);
-        addDoubleField(tr("终点 X:"), 25.0, -1e6, 1e6);
-        addDoubleField(tr("终点 Y:"), 0.0, -1e6, 1e6);
+        // 中文翻译：起点 X:
+        addDoubleField(tr("Starting point X:"), -25.0, -1e6, 1e6);
+        // 中文翻译：起点 Y:
+        addDoubleField(tr("Starting point Y:"), 0.0, -1e6, 1e6);
+        // 中文翻译：中点 X:
+        addDoubleField(tr("Midpoint X:"), 0.0, -1e6, 1e6);
+        // 中文翻译：中点 Y:
+        addDoubleField(tr("Midpoint Y:"), 25.0, -1e6, 1e6);
+        // 中文翻译：终点 X:
+        addDoubleField(tr("End point X:"), 25.0, -1e6, 1e6);
+        // 中文翻译：终点 Y:
+        addDoubleField(tr("End point Y:"), 0.0, -1e6, 1e6);
         break;
     case 4: // Circle
-        addDoubleField(tr("圆心 X:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("圆心 Y:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("半径:"), 25.0, 0.001, 1e6);
+        // 中文翻译：圆心 X:
+        addDoubleField(tr("Circle center X:"), 0.0, -1e6, 1e6);
+        // 中文翻译：圆心 Y:
+        addDoubleField(tr("Circle center Y:"), 0.0, -1e6, 1e6);
+        // 中文翻译：半径:
+        addDoubleField(tr("Radius:"), 25.0, 0.001, 1e6);
         break;
     case 5: // Rectangle
-        addDoubleField(tr("中心 X:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("中心 Y:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("宽度:"), 80.0, 0.001, 1e6);
-        addDoubleField(tr("高度:"), 50.0, 0.001, 1e6);
+        // 中文翻译：中心 X:
+        addDoubleField(tr("Center X:"), 0.0, -1e6, 1e6);
+        // 中文翻译：中心 Y:
+        addDoubleField(tr("Center Y:"), 0.0, -1e6, 1e6);
+        // 中文翻译：宽度:
+        addDoubleField(tr("Width:"), 80.0, 0.001, 1e6);
+        // 中文翻译：高度:
+        addDoubleField(tr("Height:"), 50.0, 0.001, 1e6);
         break;
     case 6: // Polygon
-        addDoubleField(tr("中心 X:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("中心 Y:"), 0.0, -1e6, 1e6);
-        addDoubleField(tr("半径:"), 30.0, 0.001, 1e6);
-        addIntField(tr("边数:"), 6, 3, 64);
+        // 中文翻译：中心 X:
+        addDoubleField(tr("Center X:"), 0.0, -1e6, 1e6);
+        // 中文翻译：中心 Y:
+        addDoubleField(tr("Center Y:"), 0.0, -1e6, 1e6);
+        // 中文翻译：半径:
+        addDoubleField(tr("Radius:"), 30.0, 0.001, 1e6);
+        // 中文翻译：边数:
+        addIntField(tr("Number of sides:"), 6, 3, 64);
         break;
     default:
         break;

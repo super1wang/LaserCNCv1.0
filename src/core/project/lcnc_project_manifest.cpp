@@ -9,17 +9,20 @@ bool LcncProjectManifest::validate(QString* errorMsg, bool allowLegacyFormat) co
 {
     if (schema != QStringLiteral("lcnc.project")) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("不支持的项目 schema: %1").arg(schema);
+            // 中文翻译：不支持的项目 schema: %1
+            *errorMsg = QStringLiteral("Unsupported project schema: %1").arg(schema);
         return false;
     }
     if (formatVersion <= 0 || formatVersion > kCurrentFormatVersion) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("不支持的项目版本: %1").arg(formatVersion);
+            // 中文翻译：不支持的项目版本: %1
+            *errorMsg = QStringLiteral("Unsupported project version: %1").arg(formatVersion);
         return false;
     }
     if (!allowLegacyFormat && formatVersion != kCurrentFormatVersion) {
         if (errorMsg) {
-            *errorMsg = QStringLiteral("项目版本 %1 必须先使用 lcnc_project_upgrade 迁移到 v%2")
+            // 中文翻译：项目版本 %1 必须先使用 lcnc_project_upgrade 迁移到 v%2
+            *errorMsg = QStringLiteral("Project version %1 must first be migrated to v%2 using lcnc_project_upgrade")
                             .arg(formatVersion)
                             .arg(kCurrentFormatVersion);
         }
@@ -29,7 +32,8 @@ bool LcncProjectManifest::validate(QString* errorMsg, bool allowLegacyFormat) co
     const QString xbf = formatVersion >= 2 ? workpieceXcafPath : projectXcafPath;
     if (xbf.trimmed().isEmpty()) {
         if (errorMsg)
-            *errorMsg = QStringLiteral("项目 manifest 缺少 XBF 资源路径");
+            // 中文翻译：项目 manifest 缺少 XBF 资源路径
+            *errorMsg = QStringLiteral("Project manifest is missing XBF resource path");
         return false;
     }
     if (formatVersion >= 4) {
@@ -38,7 +42,8 @@ bool LcncProjectManifest::validate(QString* errorMsg, bool allowLegacyFormat) co
             || normalizedSnapshot == QStringLiteral("..")
             || normalizedSnapshot.startsWith(QStringLiteral("../"))) {
             if (errorMsg)
-                *errorMsg = QStringLiteral("项目 manifest 包含无效的工具快照路径");
+                // 中文翻译：项目 manifest 包含无效的工具快照路径
+                *errorMsg = QStringLiteral("Project manifest contains invalid tools snapshot path");
             return false;
         }
     }

@@ -12,8 +12,10 @@ using namespace lcnc::cad::commands;
 
 CmdBoolUnion::CmdBoolUnion(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/bool_union.svg"), tr("布尔并"), this);
-    action->setStatusTip(tr("布尔并运算 (A ∪ B)"));
+    // 中文翻译：布尔并
+    auto* action = new QAction(QIcon(":/icons/bool_union.svg"), tr("Boolean"), this);
+    // 中文翻译：布尔并运算 (A ∪ B)
+    action->setStatusTip(tr("Boolean union operation (A ∪ B)"));
     setAction(action);
 }
 
@@ -32,23 +34,28 @@ void CmdBoolUnion::execute()
     const auto selected = selectedEntities(context(), entities);
     int indexA = 0;
     int indexB = 1;
-    if (!pickTwoEntities(tr("布尔并"), entities, indexA, indexB, selected))
+    // 中文翻译：布尔并
+    if (!pickTwoEntities(tr("Boolean"), entities, indexA, indexB, selected))
         return;
 
     QString err;
     TopoDS_Shape shape = lcnc::cad_algo::fuseShapes(
         entities[indexA].shape, entities[indexB].shape, &err);
     if (shape.IsNull()) {
-        QMessageBox::critical(nullptr, tr("布尔并"), err);
+        // 中文翻译：布尔并
+        QMessageBox::critical(nullptr, tr("Boolean"), err);
         return;
     }
-    commitShape(context(), shape, tr("布尔并结果"));
+    // 中文翻译：布尔并结果
+    commitShape(context(), shape, tr("boolean union result"));
 }
 
 CmdBoolCut::CmdBoolCut(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/bool_cut.svg"), tr("布尔差"), this);
-    action->setStatusTip(tr("布尔差运算 (A − B)"));
+    // 中文翻译：布尔差
+    auto* action = new QAction(QIcon(":/icons/bool_cut.svg"), tr("Boolean difference"), this);
+    // 中文翻译：布尔差运算 (A − B)
+    action->setStatusTip(tr("Boolean difference operation (A − B)"));
     setAction(action);
 }
 
@@ -67,23 +74,28 @@ void CmdBoolCut::execute()
     const auto selected = selectedEntities(context(), entities);
     int indexA = 0;
     int indexB = 1;
-    if (!pickTwoEntities(tr("布尔差 (A − B)"), entities, indexA, indexB, selected))
+    // 中文翻译：布尔差 (A − B)
+    if (!pickTwoEntities(tr("Boolean difference (A − B)"), entities, indexA, indexB, selected))
         return;
 
     QString err;
     TopoDS_Shape shape = lcnc::cad_algo::cutShapes(
         entities[indexA].shape, entities[indexB].shape, &err);
     if (shape.IsNull()) {
-        QMessageBox::critical(nullptr, tr("布尔差"), err);
+        // 中文翻译：布尔差
+        QMessageBox::critical(nullptr, tr("Boolean difference"), err);
         return;
     }
-    commitShape(context(), shape, tr("布尔差结果"));
+    // 中文翻译：布尔差结果
+    commitShape(context(), shape, tr("Boolean difference result"));
 }
 
 CmdBoolCommon::CmdBoolCommon(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/bool_common.svg"), tr("布尔交"), this);
-    action->setStatusTip(tr("布尔交运算 (A ∩ B)"));
+    // 中文翻译：布尔交
+    auto* action = new QAction(QIcon(":/icons/bool_common.svg"), tr("Bourgeois"), this);
+    // 中文翻译：布尔交运算 (A ∩ B)
+    action->setStatusTip(tr("Boolean intersection operation (A ∩ B)"));
     setAction(action);
 }
 
@@ -102,15 +114,18 @@ void CmdBoolCommon::execute()
     const auto selected = selectedEntities(context(), entities);
     int indexA = 0;
     int indexB = 1;
-    if (!pickTwoEntities(tr("布尔交 (A ∩ B)"), entities, indexA, indexB, selected))
+    // 中文翻译：布尔交 (A ∩ B)
+    if (!pickTwoEntities(tr("Boolean intersection (A ∩ B)"), entities, indexA, indexB, selected))
         return;
 
     QString err;
     TopoDS_Shape shape = lcnc::cad_algo::commonShapes(
         entities[indexA].shape, entities[indexB].shape, &err);
     if (shape.IsNull()) {
-        QMessageBox::critical(nullptr, tr("布尔交"), err);
+        // 中文翻译：布尔交
+        QMessageBox::critical(nullptr, tr("Bourgeois"), err);
         return;
     }
-    commitShape(context(), shape, tr("布尔交结果"));
+    // 中文翻译：布尔交结果
+    commitShape(context(), shape, tr("Boolean intersection result"));
 }

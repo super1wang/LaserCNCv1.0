@@ -122,9 +122,11 @@ bool ProcessSettingsService::writeTomlAtomically(const QString& filePath, const 
 {
     QDir().mkpath(QFileInfo(filePath).absolutePath());
     QSaveFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) { if (error) *error = QObject::tr("无法写入 %1: %2").arg(filePath, file.errorString()); return false; }
+    // 中文翻译：无法写入 %1: %2
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) { if (error) *error = QObject::tr("Unable to write to %1: %2").arg(filePath, file.errorString()); return false; }
     const QByteArray content = QByteArray::fromStdString(toml::format(value));
-    if (file.write(content) != content.size() || !file.commit()) { if (error) *error = QObject::tr("无法提交 %1: %2").arg(filePath, file.errorString()); return false; }
+    // 中文翻译：无法提交 %1: %2
+    if (file.write(content) != content.size() || !file.commit()) { if (error) *error = QObject::tr("Unable to submit %1: %2").arg(filePath, file.errorString()); return false; }
     return true;
 }
 
@@ -195,13 +197,15 @@ bool ProcessSettingsService::loadDomain(const QString& fileName, QString* error)
     try {
         const toml::value parsed = toml::parse(path.toStdString());
         if (!parsed.is_table() || !parsed.contains("Setting") || !parsed.at("Setting").is_table()) {
-            if (error) *error = QObject::tr("配置文件 %1 的 schema 无效。").arg(path);
+            // 中文翻译：配置文件 %1 的 schema 无效。
+            if (error) *error = QObject::tr("The schema for configuration file %1 is invalid.").arg(path);
             return false;
         }
         const auto& parsedSettings = parsed.at("Setting").as_table();
         for (const auto& item : parsedSettings) {
             if (!item.second.is_table()) {
-                if (error) *error = QObject::tr("配置文件 %1 中的域 %2 不是表。").arg(path, QString::fromStdString(item.first));
+                // 中文翻译：配置文件 %1 中的域 %2 不是表。
+                if (error) *error = QObject::tr("Field %2 in configuration file %1 is not a table.").arg(path, QString::fromStdString(item.first));
                 return false;
             }
         }
@@ -214,7 +218,8 @@ bool ProcessSettingsService::loadDomain(const QString& fileName, QString* error)
         LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
                  "process.settings: failed to read '{}': {}",
                  path.toStdString(), ex.what());
-        if (error) *error = QObject::tr("无法读取 %1: %2").arg(path, QString::fromLocal8Bit(ex.what()));
+        // 中文翻译：无法读取 %1: %2
+        if (error) *error = QObject::tr("Unable to read %1: %2").arg(path, QString::fromLocal8Bit(ex.what()));
         return false;
     }
 }
@@ -230,7 +235,8 @@ bool ProcessSettingsService::initialize()
         const QString backup = path + QStringLiteral(".invalid-") + stamp;
         if (!QFile::copy(path, backup)) {
             if (backupError)
-                *backupError = QObject::tr("无法备份损坏配置 %1 到 %2。").arg(path, backup);
+                // 中文翻译：无法备份损坏配置 %1 到 %2。
+                *backupError = QObject::tr("Unable to back up corrupted configurations %1 to %2.").arg(path, backup);
             return false;
         }
         LCNC_WARN(lcnc::LogCode::SettingsParseFailed,
@@ -410,11 +416,14 @@ bool ProcessSettingsService::setMachineAxisValue(const QString& axisName, const 
         else if (key == "min") axis.axis.minVal = value.toDouble(); else if (key == "max") axis.axis.maxVal = value.toDouble();
         else if (key == "lowSpeed") axis.lowSpeed = value.toDouble(); else if (key == "mediumSpeed") axis.mediumSpeed = value.toDouble(); else if (key == "highSpeed") axis.highSpeed = value.toDouble();
         else if (key == "acceleration") axis.acceleration = value.toDouble(); else if (key == "jerk") axis.jerk = value.toDouble(); else if (key == "pipeDiameter") axis.pipeDiameter = value.toDouble();
-        else { if (error) *error = QObject::tr("未知轴参数：%1").arg(key); return false; }
-        if (axis.axis.minVal > axis.axis.maxVal) { if (error) *error = QObject::tr("轴 %1 的负限位不能大于正限位。").arg(axisName); return false; }
+        // 中文翻译：未知轴参数：%1
+        else { if (error) *error = QObject::tr("Unknown axis parameter: %1").arg(key); return false; }
+        // 中文翻译：轴 %1 的负限位不能大于正限位。
+        if (axis.axis.minVal > axis.axis.maxVal) { if (error) *error = QObject::tr("The negative limit of axis %1 cannot be greater than the positive limit.").arg(axisName); return false; }
         m_axisDirty = true; return true;
     }
-    if (error) *error = QObject::tr("找不到轴：%1").arg(axisName); return false;
+    // 中文翻译：找不到轴：%1
+    if (error) *error = QObject::tr("Axis not found: %1").arg(axisName); return false;
 }
 
 QVariant ProcessSettingsService::fieldValue(const ParameterDescriptor& field, const QString& objectId) const
@@ -425,9 +434,11 @@ QVariant ProcessSettingsService::fieldValue(const ParameterDescriptor& field, co
 
 bool ProcessSettingsService::setFieldValue(const ParameterDescriptor& field, const QString& objectId, const QVariant& value, QString* error)
 {
-    if (field.readOnly) { if (error) *error = QObject::tr("该参数为只读。"); return false; }
+    // 中文翻译：该参数为只读。
+    if (field.readOnly) { if (error) *error = QObject::tr("This parameter is read-only."); return false; }
     if (field.machineAxisField) return setMachineAxisValue(objectId.section(':', 1), field.key, value, error);
-    if ((field.type == ParameterValueType::Int || field.type == ParameterValueType::Double) && (value.toDouble() < field.minimum || value.toDouble() > field.maximum)) { if (error) *error = QObject::tr("%1 超出允许范围。").arg(field.title); return false; }
+    // 中文翻译：%1 超出允许范围。
+    if ((field.type == ParameterValueType::Int || field.type == ParameterValueType::Double) && (value.toDouble() < field.minimum || value.toDouble() > field.maximum)) { if (error) *error = QObject::tr("%1 is outside the allowed range.").arg(field.title); return false; }
     ensureChildTable(sectionRef(field.area, field.tableName), field.tableName.toStdString())[field.key.toStdString()] = tomlFromVariant(value, field.type);
     return true;
 }
@@ -461,8 +472,10 @@ QStringList ProcessSettingsService::ioDisplayNames(ProcessIoBucket bucket) const
 
 bool ProcessSettingsService::setIoChannel(ProcessIoBucket bucket, const QString& id, const ProcessIoChannel& channel, QString* error)
 {
-    if (id.isEmpty() || channel.name.trimmed().isEmpty()) { if (error) *error = QObject::tr("I/O 名称不能为空。"); return false; }
-    for (const auto& other : ioChannels(bucket)) if (other.id != id && other.name.compare(channel.name.trimmed(), Qt::CaseInsensitive) == 0) { if (error) *error = QObject::tr("同类 I/O 名称不能重复。"); return false; }
+    // 中文翻译：I/O 名称不能为空。
+    if (id.isEmpty() || channel.name.trimmed().isEmpty()) { if (error) *error = QObject::tr("I/O name cannot be empty."); return false; }
+    // 中文翻译：同类 I/O 名称不能重复。
+    for (const auto& other : ioChannels(bucket)) if (other.id != id && other.name.compare(channel.name.trimmed(), Qt::CaseInsensitive) == 0) { if (error) *error = QObject::tr("I/O names of the same type cannot be repeated."); return false; }
     table row; row["name"] = channel.name.trimmed().toStdString(); row["index"] = channel.hardwareIndex.trimmed().toStdString(); row["enabled"] = channel.enabled; row["builtin"] = channel.builtin;
     if (isDigital(bucket)) row["active"] = channel.activeHigh; if (bucket == ProcessIoBucket::DigitalOutput) row["showInMain"] = channel.showInMain;
     ensureChildTable(sectionRef(isDigital(bucket) ? ProcessConfigArea::DigitalIo : ProcessConfigArea::AnalogIo),
@@ -472,7 +485,8 @@ bool ProcessSettingsService::setIoChannel(ProcessIoBucket bucket, const QString&
 
 bool ProcessSettingsService::addIoChannel(ProcessIoBucket bucket, QString* createdId, QString* error)
 {
-    ProcessIoChannel channel; channel.id = QStringLiteral("custom-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)); channel.name = QObject::tr("新%1").arg(ioBucketName(bucket)); channel.hardwareIndex = isDigital(bucket) ? QStringLiteral("0.0") : QStringLiteral("0");
+    // 中文翻译：新%1
+    ProcessIoChannel channel; channel.id = QStringLiteral("custom-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)); channel.name = QObject::tr("New %1").arg(ioBucketName(bucket)); channel.hardwareIndex = isDigital(bucket) ? QStringLiteral("0.0") : QStringLiteral("0");
     if (!setIoChannel(bucket, channel.id, channel, error)) return false; if (createdId) *createdId = channel.id; return true;
 }
 
@@ -481,24 +495,30 @@ QStringList ProcessSettingsService::ioReferenceLocations(const QString& id) cons
 bool ProcessSettingsService::removeIoChannel(ProcessIoBucket bucket, const QString& id, QString* error)
 {
     const auto items = ioChannels(bucket); const auto it = std::find_if(items.cbegin(), items.cend(), [&id](const ProcessIoChannel& item) { return item.id == id; });
-    if (it == items.cend()) { if (error) *error = QObject::tr("I/O 通道不存在。"); return false; }
-    if (it->builtin) { if (error) *error = QObject::tr("内置 I/O 通道不能删除，可将其禁用。"); return false; }
-    const auto refs = ioReferenceLocations(id); if (!refs.isEmpty()) { if (error) *error = QObject::tr("I/O 通道正在被引用：%1").arg(refs.join(QStringLiteral("、"))); return false; }
+    // 中文翻译：I/O 通道不存在。
+    if (it == items.cend()) { if (error) *error = QObject::tr("I/O channel does not exist."); return false; }
+    // 中文翻译：内置 I/O 通道不能删除，可将其禁用。
+    if (it->builtin) { if (error) *error = QObject::tr("Built-in I/O channels cannot be deleted, they can be disabled."); return false; }
+    // 中文翻译：I/O 通道正在被引用：%1
+    const auto refs = ioReferenceLocations(id); if (!refs.isEmpty()) { if (error) *error = QObject::tr("I/O channel is being referenced: %1").arg(refs.join(QStringLiteral("、"))); return false; }
     ensureChildTable(sectionRef(isDigital(bucket) ? ProcessConfigArea::DigitalIo : ProcessConfigArea::AnalogIo),
                      ioBucketName(bucket).toStdString()).erase(id.toStdString()); return true;
 }
 
 bool ProcessSettingsService::createTool(const QString& name, QString* error)
 {
-    const QString clean = name.trimmed(); if (clean.isEmpty() || toolNames().contains(clean)) { if (error) *error = QObject::tr("工具名称为空或重复。"); return false; }
+    // 中文翻译：工具名称为空或重复。
+    const QString clean = name.trimmed(); if (clean.isEmpty() || toolNames().contains(clean)) { if (error) *error = QObject::tr("Tool name is empty or duplicate."); return false; }
     table tool; tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0; tool["fCuttingHeight"] = 0.0; tool["fIdleHeight"] = 0.0; tool["fEnergy"] = 20.0;
     for (const auto& axis : m_axisDraft) tool[("f" + axis.axis.name + "Vel").toStdString()] = 10.0;
     table& all = sectionRef(ProcessConfigArea::Tools); all[clean.toStdString()] = tool; table& index = ensureChildTable(all, "ToolIndex"); index["sTool_" + std::to_string(toolNames().size())] = clean.toStdString(); if (!index.count("sToolIndex")) index["sToolIndex"] = clean.toStdString(); return true;
 }
 
-bool ProcessSettingsService::copyTool(const QString& source, const QString& target, QString* error) { const table all = sectionRef(ProcessConfigArea::Tools); const auto it = all.find(source.toStdString()); if (it == all.end()) { if (error) *error = QObject::tr("源工具不存在。"); return false; } if (!createTool(target, error)) return false; sectionRef(ProcessConfigArea::Tools)[target.trimmed().toStdString()] = it->second; return true; }
+// 中文翻译：源工具不存在。
+bool ProcessSettingsService::copyTool(const QString& source, const QString& target, QString* error) { const table all = sectionRef(ProcessConfigArea::Tools); const auto it = all.find(source.toStdString()); if (it == all.end()) { if (error) *error = QObject::tr("The source tool does not exist."); return false; } if (!createTool(target, error)) return false; sectionRef(ProcessConfigArea::Tools)[target.trimmed().toStdString()] = it->second; return true; }
 bool ProcessSettingsService::renameTool(const QString& source, const QString& target, QString* error) { if (source == target) return true; if (!copyTool(source, target, error)) return false; return deleteTool(source, error); }
-bool ProcessSettingsService::deleteTool(const QString& name, QString* error) { auto names = toolNames(); if (names.size() <= 1 || !names.removeOne(name)) { if (error) *error = QObject::tr("至少保留一个工具。"); return false; } table& all = sectionRef(ProcessConfigArea::Tools); all.erase(name.toStdString()); table idx; idx["sToolIndex"] = names.first().toStdString(); for (int i = 0; i < names.size(); ++i) idx["sTool_" + std::to_string(i)] = names[i].toStdString(); all["ToolIndex"] = idx; return true; }
+// 中文翻译：至少保留一个工具。
+bool ProcessSettingsService::deleteTool(const QString& name, QString* error) { auto names = toolNames(); if (names.size() <= 1 || !names.removeOne(name)) { if (error) *error = QObject::tr("Keep at least one tool."); return false; } table& all = sectionRef(ProcessConfigArea::Tools); all.erase(name.toStdString()); table idx; idx["sToolIndex"] = names.first().toStdString(); for (int i = 0; i < names.size(); ++i) idx["sTool_" + std::to_string(i)] = names[i].toStdString(); all["ToolIndex"] = idx; return true; }
 
 ProcessSettingsChangeSet ProcessSettingsService::changesSinceCommitted() const
 {
@@ -511,7 +531,8 @@ ProcessSettingsChangeSet ProcessSettingsService::changesSinceCommitted() const
 }
 
 bool ProcessSettingsService::hasChanges() const { return !changesSinceCommitted().empty(); }
-bool ProcessSettingsService::validate(QString* error) const { if (toolNames().isEmpty()) { if (error) *error = QObject::tr("至少需要保留一个工具。"); return false; } return true; }
+// 中文翻译：至少需要保留一个工具。
+bool ProcessSettingsService::validate(QString* error) const { if (toolNames().isEmpty()) { if (error) *error = QObject::tr("At least one tool needs to be kept."); return false; } return true; }
 
 bool ProcessSettingsService::writeDomain(const QString& fileName, const QStringList& sections, QString* error) const
 {
@@ -531,7 +552,8 @@ ProcessSettingsCommitResult ProcessSettingsService::commit()
     ProcessSettingsCommitResult result; result.changes = changesSinceCommitted(); if (result.changes.empty()) { result.success = true; return result; } if (!validate(&result.error)) return result;
     QString error; const auto has = [&result](const QString& name) { return result.changes.domains.contains(name); };
     if ((has("devices") && !writeDomain(QStringLiteral("devices.toml"), {"MotionControl", "Laser", "Internet", "Camera"}, &error)) || (has("io") && !writeDomain(QStringLiteral("io.toml"), {"Digital", "Analog"}, &error)) || (has("operations") && !writeDomain(QStringLiteral("operations.toml"), {"Gas", "Water", "Monitor", "LoadingPos"}, &error)) || (has("workflow") && !writeDomain(QStringLiteral("workflow.toml"), {"Special"}, &error)) || (has("tools") && !writeTools(&error, &result.changes))) { result.error = error; return result; }
-    if (has("machine")) { auto machine = Kernel::current().services().getService<MachineConfigurationService>(); if (!machine) { result.error = QObject::tr("机台配置服务不可用。"); return result; } machine->setAxisHardwareConfigurations(m_axisDraft); }
+    // 中文翻译：机台配置服务不可用。
+    if (has("machine")) { auto machine = Kernel::current().services().getService<MachineConfigurationService>(); if (!machine) { result.error = QObject::tr("The machine configuration service is unavailable."); return result; } machine->setAxisHardwareConfigurations(m_axisDraft); }
     m_committed.value = m_draft; beginEdit(); result.success = true; return result;
 }
 

@@ -78,7 +78,8 @@ void ProcessFlowTreeView::showContextMenu(const QPoint& pos)
                                 [this, type = descriptor.type] { addNode(type); });
     }
     if (m_addMenu->isEmpty())
-        m_addMenu->addAction(tr("无可用步骤"))->setEnabled(false);
+        // 中文翻译：无可用步骤
+        m_addMenu->addAction(tr("No steps available"))->setEnabled(false);
 
     const QModelIndex idx = indexAt(pos);
     const bool hasNode = idx.isValid();
@@ -127,7 +128,8 @@ void ProcessFlowTreeView::loadFromFile()
 
     const QString filePath = QFileDialog::getOpenFileName(
         this,
-        tr("加载流程"),
+        // 中文翻译：加载流程
+        tr("Loading process"),
         QString(),
         tr("Process Flow (*.toml);;All Files (*.*)"));
     if (filePath.isEmpty())
@@ -139,7 +141,8 @@ void ProcessFlowTreeView::loadFromFile()
                   "process.flow.view: load '{}' failed: {}",
                   filePath.toStdString(),
                   errorMessage.toStdString());
-        QMessageBox::warning(this, tr("加载失败"), errorMessage);
+        // 中文翻译：加载失败
+        QMessageBox::warning(this, tr("Loading failed"), errorMessage);
         return;
     }
 
@@ -154,7 +157,8 @@ void ProcessFlowTreeView::saveToFile()
 
     const QString filePath = QFileDialog::getSaveFileName(
         this,
-        tr("保存流程"),
+        // 中文翻译：保存流程
+        tr("Save process"),
         QString(),
         tr("Process Flow (*.toml);;All Files (*.*)"));
     if (filePath.isEmpty())
@@ -166,7 +170,8 @@ void ProcessFlowTreeView::saveToFile()
                   "process.flow.view: save '{}' failed: {}",
                   filePath.toStdString(),
                   errorMessage.toStdString());
-        QMessageBox::warning(this, tr("保存失败"), errorMessage);
+        // 中文翻译：保存失败
+        QMessageBox::warning(this, tr("Save failed"), errorMessage);
         return;
     }
 

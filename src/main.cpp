@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QSurfaceFormat>
+#include <QTranslator>
 
 #include "app/main_window.h"
 #include "core/kernel/kernel.h"
@@ -87,6 +88,24 @@ QString industrialStyleSheet()
     )QSS");
 }
 
+bool installApplicationTranslator(QApplication& app, const QString& language)
+{
+    // 翻译资源内置于可执行文件，避免运行目录缺失 qm 文件导致语言设置失效。
+    if (!language.startsWith(QStringLiteral("zh"), Qt::CaseInsensitive))
+        return true;
+
+    auto* translator = new QTranslator(&app);
+    if (!translator->load(QStringLiteral(":/i18n/lasercnc_zh_CN.qm"))) {
+        LCNC_ERR(lcnc::LogCode::SettingsLoaded,
+                 "Unable to load application translation for language '{}'",
+                 language.toStdString());
+        delete translator;
+        return false;
+    }
+    app.installTranslator(translator);
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -100,10 +119,9 @@ int main(int argc, char* argv[])
 
     QApplication app(argc, argv);
     app.setStyleSheet(industrialStyleSheet());
-    app.setApplicationName("LaserCNC");
-    app.setApplicationVersion("1.0.0");
-    app.setApplicationDisplayName("五轴激光加工CAM软件");
-    app.setOrganizationName("LaserCNC");
+    app.setApplicationName(QStringLiteral("LaserCNC"));
+    app.setApplicationVersion(QStringLiteral("1.0.0"));
+    app.setOrganizationName(QStringLiteral("LaserCNC"));
 
     // ── Core infrastructure ──────────────────────────────────────────────
     const QString exeDir = QCoreApplication::applicationDirPath();
@@ -138,6 +156,10 @@ int main(int argc, char* argv[])
     lcnc::Kernel kernel;
     kernel.registerCoreServices();
     kernel.appSettings()->loadDefault();   // mainwindow.toml
+    installApplicationTranslator(app, kernel.appSettings()->language);
+    // 中文翻译：五轴激光加工 CAM
+    app.setApplicationDisplayName(
+        QCoreApplication::translate("Application", "Five-Axis Laser Machining CAM"));
     if (auto* project = kernel.projectManager())
         project->setDocumentOpenMode(kernel.appSettings()->documentOpenMode);
 

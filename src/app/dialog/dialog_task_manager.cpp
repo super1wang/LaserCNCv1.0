@@ -11,7 +11,8 @@
 DialogTaskManager::DialogTaskManager(QWidget* parent)
     : QDialog(parent, Qt::Tool | Qt::WindowStaysOnTopHint)
 {
-    setWindowTitle(tr("任务进度"));
+    // 中文翻译：任务进度
+    setWindowTitle(tr("Task progress"));
     setMinimumWidth(380);
 
     auto* outer = new QVBoxLayout(this);
@@ -61,7 +62,8 @@ void DialogTaskManager::addRow(TaskId id, const QString& label)
     auto* topRow = new QHBoxLayout();
     auto* lbl    = new QLabel(label,  this);
     lbl->setStyleSheet("font-weight: bold;");
-    auto* abortBtn = new QPushButton(tr("中止"), this);
+    // 中文翻译：中止
+    auto* abortBtn = new QPushButton(tr("abort"), this);
     abortBtn->setMaximumWidth(55);
     topRow->addWidget(lbl);
     topRow->addStretch();
@@ -73,7 +75,8 @@ void DialogTaskManager::addRow(TaskId id, const QString& label)
     bar->setValue(0);
     rowLay->addWidget(bar);
 
-    auto* step = new QLabel(tr("初始化..."), this);
+    // 中文翻译：初始化...
+    auto* step = new QLabel(tr("Initialize..."), this);
     step->setStyleSheet("color: gray; font-size: 10px;");
     rowLay->addWidget(step);
 

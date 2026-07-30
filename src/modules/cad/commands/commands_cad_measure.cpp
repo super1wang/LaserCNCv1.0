@@ -21,8 +21,10 @@ using namespace lcnc::cad::commands;
 
 CmdMeasureDistance::CmdMeasureDistance(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/measure_dist.svg"), tr("距离"), this);
-    action->setStatusTip(tr("测量两形体间的最小距离"));
+    // 中文翻译：距离
+    auto* action = new QAction(QIcon(":/icons/measure_dist.svg"), tr("distance"), this);
+    // 中文翻译：测量两形体间的最小距离
+    action->setStatusTip(tr("Measure the minimum distance between two shapes"));
     setAction(action);
 }
 
@@ -41,16 +43,20 @@ void CmdMeasureDistance::execute()
     const auto selected = selectedEntities(context(), entities);
     int indexA = 0;
     int indexB = 1;
-    if (!pickTwoEntities(tr("距离测量"), entities, indexA, indexB, selected))
+    // 中文翻译：距离测量
+    if (!pickTwoEntities(tr("distance measurement"), entities, indexA, indexB, selected))
         return;
 
     const double distance = lcnc::cad_algo::minDistance(entities[indexA].shape, entities[indexB].shape);
     if (distance < 0.0) {
-        QMessageBox::critical(nullptr, tr("距离测量"), tr("距离计算失败"));
+        // 中文翻译：距离测量；距离计算失败
+        QMessageBox::critical(nullptr, tr("distance measurement"), tr("Distance calculation failed"));
         return;
     }
-    QMessageBox::information(nullptr, tr("距离测量"),
-        tr("形体 \"%1\" 与 \"%2\" 之间的最小距离:\n\n%3 mm")
+    // 中文翻译：距离测量
+    QMessageBox::information(nullptr, tr("distance measurement"),
+        // 中文翻译：形体 "%1" 与 "%2" 之间的最小距离:\n\n%3 mm
+        tr("Minimum distance between shapes \"%1\" and \"%2\":\n\n%3 mm")
             .arg(entities[indexA].name)
             .arg(entities[indexB].name)
             .arg(distance, 0, 'f', 4));
@@ -58,8 +64,10 @@ void CmdMeasureDistance::execute()
 
 CmdMeasureAngle::CmdMeasureAngle(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/measure_angle.svg"), tr("角度"), this);
-    action->setStatusTip(tr("测量两形体第一个面的法向夹角"));
+    // 中文翻译：角度
+    auto* action = new QAction(QIcon(":/icons/measure_angle.svg"), tr("angle"), this);
+    // 中文翻译：测量两形体第一个面的法向夹角
+    action->setStatusTip(tr("Measure the normal angle between the first faces of the two shapes"));
     setAction(action);
 }
 
@@ -78,19 +86,23 @@ void CmdMeasureAngle::execute()
     const auto selected = selectedEntities(context(), entities);
     int indexA = 0;
     int indexB = 1;
-    if (!pickTwoEntities(tr("角度测量"), entities, indexA, indexB, selected))
+    // 中文翻译：角度测量
+    if (!pickTwoEntities(tr("angle measurement"), entities, indexA, indexB, selected))
         return;
 
     const gp_Vec normalA = lcnc::cad_algo::firstFaceNormal(entities[indexA].shape);
     const gp_Vec normalB = lcnc::cad_algo::firstFaceNormal(entities[indexB].shape);
     const double angleDeg = lcnc::cad_algo::angleBetween(normalA, normalB);
     if (angleDeg < 0.0) {
-        QMessageBox::warning(nullptr, tr("角度测量"), tr("无法获取面法向量"));
+        // 中文翻译：角度测量；无法获取面法向量
+        QMessageBox::warning(nullptr, tr("angle measurement"), tr("Unable to get face normal vector"));
         return;
     }
 
-    QMessageBox::information(nullptr, tr("角度测量"),
-        tr("形体 \"%1\" 与 \"%2\" 首面法向夹角:\n\n%3°")
+    // 中文翻译：角度测量
+    QMessageBox::information(nullptr, tr("angle measurement"),
+        // 中文翻译：形体 "%1" 与 "%2" 首面法向夹角:\n\n%3°
+        tr("The angle between the normal directions of the first faces of shapes \"%1\" and \"%2\":\n\n%3°")
             .arg(entities[indexA].name)
             .arg(entities[indexB].name)
             .arg(angleDeg, 0, 'f', 2));
@@ -98,8 +110,10 @@ void CmdMeasureAngle::execute()
 
 CmdMeasureArea::CmdMeasureArea(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* action = new QAction(QIcon(":/icons/measure_area.svg"), tr("面积"), this);
-    action->setStatusTip(tr("计算形体的表面积"));
+    // 中文翻译：面积
+    auto* action = new QAction(QIcon(":/icons/measure_area.svg"), tr("area"), this);
+    // 中文翻译：计算形体的表面积
+    action->setStatusTip(tr("Calculate the surface area of a shape"));
     setAction(action);
 }
 
@@ -116,7 +130,8 @@ void CmdMeasureArea::execute()
 
     auto entities = collectEntities(doc);
     if (entities.isEmpty()) {
-        QMessageBox::information(nullptr, tr("面积"), tr("文档中没有工件"));
+        // 中文翻译：面积；文档中没有工件
+        QMessageBox::information(nullptr, tr("area"), tr("There are no workpieces in the document"));
         return;
     }
 
@@ -127,12 +142,14 @@ void CmdMeasureArea::execute()
         targets = selected;
     } else {
         QDialog dlg;
-        dlg.setWindowTitle(tr("面积测量"));
+        // 中文翻译：面积测量
+        dlg.setWindowTitle(tr("area measurement"));
         auto* form = new QFormLayout;
         auto* combo = new QComboBox;
         for (const auto& entity : entities)
             combo->addItem(entity.name);
-        form->addRow(tr("形体:"), combo);
+        // 中文翻译：形体:
+        form->addRow(tr("Shape:"), combo);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -147,8 +164,10 @@ void CmdMeasureArea::execute()
     if (targets.size() == 1) {
         GProp_GProps props;
         BRepGProp::SurfaceProperties(targets[0].shape, props);
-        QMessageBox::information(nullptr, tr("面积测量"),
-            tr("形体 \"%1\" 的总表面积:\n\n%2 mm²")
+        // 中文翻译：面积测量
+        QMessageBox::information(nullptr, tr("area measurement"),
+            // 中文翻译：形体 "%1" 的总表面积:\n\n%2 mm²
+            tr("Total surface area of shape \"%1\":\n\n%2 mm²")
                 .arg(targets[0].name)
                 .arg(props.Mass(), 0, 'f', 3));
     } else {
@@ -159,7 +178,8 @@ void CmdMeasureArea::execute()
             message += tr("%1: %2 mm²\n").arg(entity.name).arg(props.Mass(), 0, 'f', 3);
         }
         QMessageBox::information(nullptr,
-            tr("面积测量 (已选中 %1 个)").arg(targets.size()),
+            // 中文翻译：面积测量 (已选中 %1 个)
+            tr("Area measurement (%1 selected)").arg(targets.size()),
             message.trimmed());
     }
 }

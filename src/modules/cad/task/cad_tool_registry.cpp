@@ -95,7 +95,8 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto newFile = commandTool(QStringLiteral("cad.document.new"),
                                QStringLiteral("file.new"),
-                               QStringLiteral("新建文件"),
+                               // 中文翻译：新建文件
+                               QStringLiteral("Create new file"),
                                CadToolCategory::Document,
                                10);
     newFile.showWhenHasDocument = false;
@@ -103,51 +104,59 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto openFile = commandTool(QStringLiteral("cad.document.open"),
                                 QStringLiteral("file.open"),
-                                QStringLiteral("打开文件"),
+                                // 中文翻译：打开文件
+                                QStringLiteral("open file"),
                                 CadToolCategory::Document,
                                 20);
     openFile.showWhenHasDocument = false;
     registry.registerTool(openFile);
 
     registry.registerTool(pageTool(QStringLiteral("cad.sketch.begin"),
-                                   QStringLiteral("新建草图"),
+                                   // 中文翻译：新建草图
+                                   QStringLiteral("Create a new sketch"),
                                    CadToolCategory::BaseModeling,
                                    CadToolActivation::SketchPage,
                                    -1,
                                    10));
     registry.registerTool(pageTool(QStringLiteral("cad.primitive.box"),
-                                   QStringLiteral("长方体"),
+                                   // 中文翻译：长方体
+                                   QStringLiteral("cuboid"),
                                    CadToolCategory::BaseModeling,
                                    CadToolActivation::PrimitivePage,
                                    0,
                                    20));
     registry.registerTool(pageTool(QStringLiteral("cad.primitive.cylinder"),
-                                   QStringLiteral("圆柱体"),
+                                   // 中文翻译：圆柱体
+                                   QStringLiteral("cylinder"),
                                    CadToolCategory::BaseModeling,
                                    CadToolActivation::PrimitivePage,
                                    1,
                                    30));
     registry.registerTool(pageTool(QStringLiteral("cad.primitive.sphere"),
-                                   QStringLiteral("球体"),
+                                   // 中文翻译：球体
+                                   QStringLiteral("sphere"),
                                    CadToolCategory::BaseModeling,
                                    CadToolActivation::PrimitivePage,
                                    2,
                                    40));
     registry.registerTool(pageTool(QStringLiteral("cad.primitive.cone"),
-                                   QStringLiteral("圆锥体"),
+                                   // 中文翻译：圆锥体
+                                   QStringLiteral("cone"),
                                    CadToolCategory::BaseModeling,
                                    CadToolActivation::PrimitivePage,
                                    3,
                                    50));
     registry.registerTool(pageTool(QStringLiteral("cad.primitive.torus"),
-                                   QStringLiteral("圆环体"),
+                                   // 中文翻译：圆环体
+                                   QStringLiteral("torus"),
                                    CadToolCategory::BaseModeling,
                                    CadToolActivation::PrimitivePage,
                                    4,
                                    60));
 
     auto extrude = pageTool(QStringLiteral("cad.feature.extrude"),
-                            QStringLiteral("拉伸凸台"),
+                            // 中文翻译：拉伸凸台
+                            QStringLiteral("extrude boss"),
                             CadToolCategory::SketchFeature,
                             CadToolActivation::FeaturePage,
                             0,
@@ -156,7 +165,8 @@ CadToolRegistry CadToolRegistry::createDefault()
     registry.registerTool(extrude);
 
     auto revolve = pageTool(QStringLiteral("cad.feature.revolve"),
-                            QStringLiteral("旋转凸台"),
+                            // 中文翻译：旋转凸台
+                            QStringLiteral("rotating boss"),
                             CadToolCategory::SketchFeature,
                             CadToolActivation::FeaturePage,
                             1,
@@ -165,7 +175,8 @@ CadToolRegistry CadToolRegistry::createDefault()
     registry.registerTool(revolve);
 
     auto transform = pageTool(QStringLiteral("cad.transform"),
-                              QStringLiteral("变换"),
+                              // 中文翻译：变换
+                              QStringLiteral("transform"),
                               CadToolCategory::Selection,
                               CadToolActivation::TransformPage,
                               0,
@@ -177,7 +188,8 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto deleteShape = commandTool(QStringLiteral("cad.shape.delete"),
                                    QStringLiteral("cad.deleteShape"),
-                                   QStringLiteral("删除"),
+                                   // 中文翻译：删除
+                                   QStringLiteral("Delete"),
                                    CadToolCategory::Delete,
                                    30);
     deleteShape.showWhenNoDocument = false;
@@ -187,7 +199,8 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto explode = commandTool(QStringLiteral("cad.shape.explode"),
                                QStringLiteral("cad.explode"),
-                               QStringLiteral("拆解"),
+                               // 中文翻译：拆解
+                               QStringLiteral("Explode"),
                                CadToolCategory::Selection,
                                40);
     explode.showWhenNoDocument = false;
@@ -197,7 +210,8 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto measure = commandTool(QStringLiteral("cad.measure.distance"),
                                QStringLiteral("cad.measureDist"),
-                               QStringLiteral("测距"),
+                               // 中文翻译：测距
+                               QStringLiteral("Ranging"),
                                CadToolCategory::Measure,
                                50);
     measure.showWhenNoDocument = false;
@@ -207,7 +221,8 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto boolUnion = commandTool(QStringLiteral("cad.boolean.union"),
                                  QStringLiteral("cad.boolUnion"),
-                                 QStringLiteral("并集"),
+                                 // 中文翻译：并集
+                                 QStringLiteral("union"),
                                  CadToolCategory::Boolean,
                                  10);
     boolUnion.showWhenNoDocument = false;
@@ -217,7 +232,8 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto boolCut = commandTool(QStringLiteral("cad.boolean.cut"),
                                QStringLiteral("cad.boolCut"),
-                               QStringLiteral("差集"),
+                               // 中文翻译：差集
+                               QStringLiteral("difference set"),
                                CadToolCategory::Boolean,
                                20);
     boolCut.showWhenNoDocument = false;
@@ -227,7 +243,8 @@ CadToolRegistry CadToolRegistry::createDefault()
 
     auto boolCommon = commandTool(QStringLiteral("cad.boolean.common"),
                                   QStringLiteral("cad.boolCommon"),
-                                  QStringLiteral("交集"),
+                                  // 中文翻译：交集
+                                  QStringLiteral("intersection"),
                                   CadToolCategory::Boolean,
                                   30);
     boolCommon.showWhenNoDocument = false;

@@ -55,7 +55,8 @@ void buildRibbonTab(SARibbonCategory* cat,
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab begin");
 
     // ── 连接 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelConn = cat->addPanel(QObject::tr("连接"));
+    // 中文翻译：连接
+    SARibbonPanel* panelConn = cat->addPanel(QObject::tr("connect"));
     panelConn->addLargeAction(container->findAction(CmdConnectDevices::Name));
     panelConn->addLargeAction(container->findAction(CmdHome::Name));
     panelConn->addLargeAction(container->findAction(CmdMoveToLoadingPosition::Name));
@@ -63,13 +64,15 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelConn->addLargeAction(container->findAction(CmdDisconnectDevices::Name));
 
     // ── 流程 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelProc = cat->addPanel(QObject::tr("流程"));
+    // 中文翻译：流程
+    SARibbonPanel* panelProc = cat->addPanel(QObject::tr("process"));
     panelProc->addLargeAction(container->findAction(CmdNewProcess::Name));
     panelProc->addLargeAction(container->findAction(CmdLoadProcess::Name));
     panelProc->addLargeAction(container->findAction(CmdSaveProcess::Name));
 
     // ── 加工顺序 ──────────────────────────────────────────────────────────
-    SARibbonPanel* panelOrder = cat->addPanel(QObject::tr("加工顺序"));
+    // 中文翻译：加工顺序
+    SARibbonPanel* panelOrder = cat->addPanel(QObject::tr("Processing sequence"));
     panelOrder->addLargeAction(container->findAction(CmdManualAppendSelectedToCuttingOrder::Name));
 
     auto* axisCombo = new QComboBox();
@@ -101,8 +104,10 @@ void buildRibbonTab(SARibbonCategory* cat,
     autoSortLayout->setSpacing(1);
     auto* autoSortButton = new QToolButton(autoSortControl);
     autoSortButton->setDefaultAction(container->findAction(CmdAutoSortCuttingOrder::Name));
-    autoSortButton->setText(QObject::tr("自动排序"));
-    autoSortButton->setToolTip(QObject::tr("自动设置加工顺序"));
+    // 中文翻译：自动排序
+    autoSortButton->setText(QObject::tr("Automatic sorting"));
+    // 中文翻译：自动设置加工顺序
+    autoSortButton->setToolTip(QObject::tr("Automatically set processing sequence"));
     autoSortButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     autoSortButton->setIconSize(QSize(18, 18));
     autoSortButton->setFixedHeight(30);
@@ -115,18 +120,21 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelOrder->addLargeAction(container->findAction(CmdToggleTravelPath::Name));
 
     // ── 运行 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelRun = cat->addPanel(QObject::tr("运行"));
+    // 中文翻译：运行
+    SARibbonPanel* panelRun = cat->addPanel(QObject::tr("run"));
     panelRun->addLargeAction(container->findAction(CmdRunStart::Name));
     panelRun->addLargeAction(container->findAction(CmdRunPause::Name));
     panelRun->addLargeAction(container->findAction(CmdRunStop::Name));
 
     // ── 安全 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelSafe = cat->addPanel(QObject::tr("安全"));
+    // 中文翻译：安全
+    SARibbonPanel* panelSafe = cat->addPanel(QObject::tr("safe"));
     panelSafe->addLargeAction(container->findAction(CmdEmergencyStop::Name));
     panelSafe->addLargeAction(container->findAction(CmdResetEmergencyStop::Name));
 
     // ── 参数 (唯一设置按钮) ────────────────────────────────────────────────
-    SARibbonPanel* panelParam = cat->addPanel(QObject::tr("参数"));
+    // 中文翻译：参数
+    SARibbonPanel* panelParam = cat->addPanel(QObject::tr("parameters"));
     panelParam->addLargeAction(container->findAction(CmdOpenProcessSettings::Name));
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab end");

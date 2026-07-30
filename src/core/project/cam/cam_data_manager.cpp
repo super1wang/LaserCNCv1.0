@@ -38,7 +38,8 @@ void CamDataManager::commitPipelineStage(CamPipelineStage stage, std::uint64_t i
     state.inputRevision = inputRevision;
     ++state.revision;
     state.failureReason.clear();
-    invalidatePipelineAfter(stage, QStringLiteral("上游 CAM 阶段已更新"));
+    // 中文翻译：上游 CAM 阶段已更新
+    invalidatePipelineAfter(stage, QStringLiteral("Upstream CAM stage updated"));
     m_dirty = true;
 }
 
@@ -201,7 +202,8 @@ void CamDataManager::ensureToolpathLayers()
                 layer.layerId   = lid;
                 layer.signature = layerSig;
                 layer.name      = (key == QStringLiteral("Default"))
-                                    ? QStringLiteral("未分组") : key;
+                                    // 中文翻译：未分组
+                                    ? QStringLiteral("Not grouped") : key;
                 layer.color     = palette.at((layerIdByKey.size()) % palette.size());
                 m_toolpath.layers().push_back(layer);
                 layerIdByKey.insert(key, lid);
@@ -229,7 +231,8 @@ std::uint64_t CamDataManager::addLayer(const QString& name, const QColor& color)
     ToolpathLayer layer;
     layer.layerId = nextLayerId();
     const QString trimmed = name.trimmed();
-    layer.name = trimmed.isEmpty() ? QStringLiteral("图层 %1").arg(layer.layerId) : trimmed;
+    // 中文翻译：图层 %1
+    layer.name = trimmed.isEmpty() ? QStringLiteral("Layer %1").arg(layer.layerId) : trimmed;
     if (color.isValid())
         layer.color = color;
     m_toolpath.layers().push_back(layer);

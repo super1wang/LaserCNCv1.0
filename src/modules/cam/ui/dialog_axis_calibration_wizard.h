@@ -101,7 +101,8 @@ private:
     QPushButton* m_btnCancel{nullptr};
     QLabel*      m_lblHint{nullptr};
     QLabel*      m_lblCalibStatus{nullptr};  ///< 顶部“当前旋转中心”状态指示
-    bool m_standardPoseEntered{false};  ///< 是否已进入"机台标定位"
+    // 中文翻译：机台标定位
+    bool m_standardPoseEntered{false};  ///< 是否已进入"Machine mark positioning"
 };
 
 } // namespace lcnc::cam::ui

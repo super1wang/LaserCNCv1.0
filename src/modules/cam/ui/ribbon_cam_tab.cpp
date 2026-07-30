@@ -44,29 +44,37 @@ void buildRibbonTab(SARibbonCategory* cat,
     };
 
     // ── 机台 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelMach = cat->addPanel(QObject::tr("机台"));
+    // 中文翻译：机台
+    SARibbonPanel* panelMach = cat->addPanel(QObject::tr("machine"));
     panelMach->addLargeAction(container->findAction(CmdLoadMachine::Name));
     panelMach->addLargeAction(container->findAction(CmdUnloadMachine::Name));
     panelMach->addLargeAction(container->findAction(CmdExportMachine::Name));
 
     // ── 刀路 ───────────────────────────────────────────────────────────────
-    SARibbonPanel* panelPath = cat->addPanel(QObject::tr("刀路"));
+    // 中文翻译：刀路
+    SARibbonPanel* panelPath = cat->addPanel(QObject::tr("knife path"));
     panelPath->addLargeAction(container->findAction(CmdGenerateToolpath::Name));
     panelPath->addLargeAction(container->findAction(CmdSetLeadIn::Name));
     panelPath->addLargeAction(container->findAction(CmdRecalcToolpath::Name));
     panelPath->addLargeAction(container->findAction(CmdToolpathPreview::Name));
 
     // ── 加工面 ─────────────────────────────────────────────────────────────
-    SARibbonPanel* panelFace = cat->addPanel(QObject::tr("加工面"));
+    // 中文翻译：加工面
+    SARibbonPanel* panelFace = cat->addPanel(QObject::tr("Processing surface"));
     panelFace->addLargeAction(container->findAction(CmdSelectMachiningFace::Name));
     panelFace->addLargeAction(container->findAction(CmdClearMachiningFaces::Name));
 
     // ── G代码（占位） ─────────────────────────────────────────────────────
-    SARibbonPanel* panelNC = cat->addPanel(QObject::tr("G代码"));
-    panelNC->addLargeAction(makeAct(QObject::tr("生成G代码"), QStringLiteral(":/icons/gcode.svg")));
-    panelNC->addLargeAction(makeAct(QObject::tr("导入G代码"), QStringLiteral(":/icons/import.svg")));
-    panelNC->addLargeAction(makeAct(QObject::tr("导出G代码"), QStringLiteral(":/icons/export.svg")));
-    panelNC->addLargeAction(makeAct(QObject::tr("代码查看"),  QStringLiteral(":/icons/code.svg")));
+    // 中文翻译：G代码
+    SARibbonPanel* panelNC = cat->addPanel(QObject::tr("G code"));
+    // 中文翻译：生成G代码
+    panelNC->addLargeAction(makeAct(QObject::tr("Generate G-code"), QStringLiteral(":/icons/gcode.svg")));
+    // 中文翻译：导入G代码
+    panelNC->addLargeAction(makeAct(QObject::tr("Import G code"), QStringLiteral(":/icons/import.svg")));
+    // 中文翻译：导出G代码
+    panelNC->addLargeAction(makeAct(QObject::tr("Export G-code"), QStringLiteral(":/icons/export.svg")));
+    // 中文翻译：代码查看
+    panelNC->addLargeAction(makeAct(QObject::tr("code view"),  QStringLiteral(":/icons/code.svg")));
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::buildRibbonTab end");
 }

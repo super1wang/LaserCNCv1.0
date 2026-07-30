@@ -15,8 +15,10 @@ ProcessNodeDescriptor StartStep::descriptor() const
 {
     ProcessNodeDescriptor d;
     d.type = ProcessNodeType::Start;
-    d.displayName = QObject::tr("开始");
-    d.category = QObject::tr("结构");
+    // 中文翻译：开始
+    d.displayName = QObject::tr("start");
+    // 中文翻译：结构
+    d.category = QObject::tr("structure");
     d.topLevelOnly = true;
     d.required = true;
     d.addable = false;
@@ -31,7 +33,8 @@ ProcessNodeDescriptor StartStep::descriptor() const
 QString StartStep::summary(const ProcessNode& node) const
 {
     const QString variables = node.parameters.value(QStringLiteral("variables"), QStringLiteral("[]")).toString();
-    return QObject::tr("入口 / 变量声明 %1 字符").arg(variables.size());
+    // 中文翻译：入口 / 变量声明 %1 字符
+    return QObject::tr("Entry/variable declaration %1 characters").arg(variables.size());
 }
 
 QWidget* StartStep::createParameterEditor(const ProcessNode& node, QWidget* parent) const
@@ -40,7 +43,8 @@ QWidget* StartStep::createParameterEditor(const ProcessNode& node, QWidget* pare
     auto* layout = new QVBoxLayout(page);
     auto* editor = new QPlainTextEdit(page);
     editor->setObjectName(QString::fromLatin1(kVariablesEditorProperty));
-    editor->setPlaceholderText(QObject::tr("JSON 数组，例如：\n[\n  {\"name\":\"speed\",\"type\":\"number\",\"default\":5}\n]"));
+    // 中文翻译：JSON 数组，例如：\n[\n  {"name":"speed","type":"number","default":5}\n]
+    editor->setPlaceholderText(QObject::tr("JSON array, for example:\n[\n  {\"name\":\"speed\",\"type\":\"number\",\"default\":5}\n]"));
     editor->setPlainText(node.parameters.value(QStringLiteral("variables"), QStringLiteral("[]")).toString());
     layout->addWidget(editor);
     return page;
@@ -62,7 +66,8 @@ bool StartStep::execute(const ProcessNodeExecutionRequest& request,
     Q_UNUSED(request);
     Q_UNUSED(errorMessage);
     if (context.logMessage)
-        context.logMessage(QObject::tr("流程开始"));
+        // 中文翻译：流程开始
+        context.logMessage(QObject::tr("Process starts"));
     return true;
 }
 

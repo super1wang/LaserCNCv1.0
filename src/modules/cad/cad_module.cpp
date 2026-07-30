@@ -174,15 +174,20 @@ QString primitiveName(int primitiveIndex)
 {
     switch (primitiveIndex) {
     case 1:
-        return QObject::tr("圆柱体");
+        // 中文翻译：圆柱体
+        return QObject::tr("cylinder");
     case 2:
-        return QObject::tr("球体");
+        // 中文翻译：球体
+        return QObject::tr("sphere");
     case 3:
-        return QObject::tr("圆锥体");
+        // 中文翻译：圆锥体
+        return QObject::tr("cone");
     case 4:
-        return QObject::tr("圆环体");
+        // 中文翻译：圆环体
+        return QObject::tr("torus");
     default:
-        return QObject::tr("长方体");
+        // 中文翻译：长方体
+        return QObject::tr("cuboid");
     }
 }
 
@@ -237,7 +242,8 @@ bool modelCenterForLabels(LcncDocument* doc,
 {
     if (!doc || labels.isEmpty() || !outCenter) {
         if (errMsg)
-            *errMsg = QObject::tr("请先选择要变换的形体");
+            // 中文翻译：请先选择要变换的形体
+            *errMsg = QObject::tr("Please select the shape you want to transform first");
         return false;
     }
 
@@ -250,7 +256,8 @@ bool modelCenterForLabels(LcncDocument* doc,
     }
     if (box.IsVoid()) {
         if (errMsg)
-            *errMsg = QObject::tr("无法计算选中形体中心");
+            // 中文翻译：无法计算选中形体中心
+            *errMsg = QObject::tr("Unable to calculate center of selected shape");
         return false;
     }
 
@@ -289,7 +296,8 @@ bool importStepAsSingleShape(const QString& filePath,
     STEPControl_Reader reader;
     if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
         if (error)
-            *error = QObject::tr("无法读取 STEP 文件: %1").arg(filePath);
+            // 中文翻译：无法读取 STEP 文件: %1
+            *error = QObject::tr("Unable to read STEP file: %1").arg(filePath);
         return false;
     }
 
@@ -297,7 +305,8 @@ bool importStepAsSingleShape(const QString& filePath,
     TopoDS_Shape shape = reader.OneShape();
     if (transferred <= 0 || shape.IsNull()) {
         if (error)
-            *error = QObject::tr("STEP 文件未解析出可显示形体: %1").arg(filePath);
+            // 中文翻译：STEP 文件未解析出可显示形体: %1
+            *error = QObject::tr("The STEP file did not parse a displayable shape: %1").arg(filePath);
         return false;
     }
 
@@ -317,7 +326,8 @@ bool importIgesAsSingleShape(const QString& filePath,
     IGESControl_Reader reader;
     if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
         if (error)
-            *error = QObject::tr("无法读取 IGES 文件: %1").arg(filePath);
+            // 中文翻译：无法读取 IGES 文件: %1
+            *error = QObject::tr("Unable to read IGES file: %1").arg(filePath);
         return false;
     }
 
@@ -325,7 +335,8 @@ bool importIgesAsSingleShape(const QString& filePath,
     TopoDS_Shape shape = reader.OneShape();
     if (transferred <= 0 || shape.IsNull()) {
         if (error)
-            *error = QObject::tr("IGES 文件未解析出可显示形体: %1").arg(filePath);
+            // 中文翻译：IGES 文件未解析出可显示形体: %1
+            *error = QObject::tr("The IGES file did not resolve a displayable shape: %1").arg(filePath);
         return false;
     }
 
@@ -350,7 +361,8 @@ bool importStepWithFallback(const QString& filePath,
     reader.SetNameMode(Standard_True);
     if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
         if (error)
-            *error = QObject::tr("无法读取 STEP 文件: %1").arg(filePath);
+            // 中文翻译：无法读取 STEP 文件: %1
+            *error = QObject::tr("Unable to read STEP file: %1").arg(filePath);
         return false;
     }
 
@@ -381,7 +393,8 @@ bool importIgesWithFallback(const QString& filePath,
     reader.SetNameMode(Standard_True);
     if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
         if (error)
-            *error = QObject::tr("无法读取 IGES 文件: %1").arg(filePath);
+            // 中文翻译：无法读取 IGES 文件: %1
+            *error = QObject::tr("Unable to read IGES file: %1").arg(filePath);
         return false;
     }
 
@@ -445,7 +458,8 @@ bool prepareMayoStyleDisplayMesh(LcncDocument* doc,
             BRepMesh_IncrementalMesh mesher(shape, params);
             if (!mesher.IsDone()) {
                 if (error)
-                    *error = QObject::tr("模型显示网格生成未完成");
+                    // 中文翻译：模型显示网格生成未完成
+                    *error = QObject::tr("Model shows mesh generation not completed");
                 return false;
             }
 
@@ -465,7 +479,8 @@ bool prepareMayoStyleDisplayMesh(LcncDocument* doc,
                       params.Angle);
         } catch (const Standard_Failure& ex) {
             if (error) {
-                *error = QObject::tr("模型显示网格生成失败: %1")
+                // 中文翻译：模型显示网格生成失败: %1
+                *error = QObject::tr("Model display mesh generation failed: %1")
                     .arg(QString::fromUtf8(ex.GetMessageString()));
             }
             return false;
@@ -519,7 +534,8 @@ lcnc::ModuleInfo CadModule::info() const
 {
     return {
         QStringLiteral("cad"),
-        QStringLiteral("CAD模块"),
+        // 中文翻译：CAD模块
+        QStringLiteral("CAD module"),
         QStringLiteral("1.0.0"),
         {}                       // 无依赖
     };
@@ -677,7 +693,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::openDocument missing file path={}",
                   filePath.toStdString());
-        emit operationFailed(tr("打开失败"), tr("文件不存在: %1").arg(filePath));
+        // 中文翻译：打开失败；文件不存在: %1
+        emit operationFailed(tr("Open failed"), tr("File does not exist: %1").arg(filePath));
         return kInvalidDocumentId;
     }
 
@@ -690,7 +707,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::openDocument unsupported suffix path={} suffix={}",
                   filePath.toStdString(), fileInfo.suffix().toStdString());
-        emit operationFailed(tr("打开失败"), tr("暂不支持的文件格式: %1").arg(fileInfo.suffix()));
+        // 中文翻译：打开失败；暂不支持的文件格式: %1
+        emit operationFailed(tr("Open failed"), tr("File format not supported yet: %1").arg(fileInfo.suffix()));
         return kInvalidDocumentId;
     }
 
@@ -699,7 +717,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
     auto pendingWorkspace = project->createDetachedWorkspace(fileInfo.completeBaseName());
     LcncDocument* pendingDoc = pendingWorkspace ? pendingWorkspace->workpieceDocument() : nullptr;
     if (!pendingDoc) {
-        emit operationFailed(tr("打开失败"), tr("无法创建目标文档"));
+        // 中文翻译：打开失败；无法创建目标文档
+        emit operationFailed(tr("Open failed"), tr("Unable to create target document"));
         return kInvalidDocumentId;
     }
     const DocumentId docId = pendingDoc->id();
@@ -708,10 +727,12 @@ DocumentId CadModule::openDocument(const QString& filePath)
         auto error = std::make_shared<QString>();
         auto loadResult = std::make_shared<lcnc::ProjectLoadResult>();
         const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-            tr("打开工程: %1").arg(fileInfo.fileName()),
+            // 中文翻译：打开工程: %1
+            tr("Open project: %1").arg(fileInfo.fileName()),
             [filePath, pendingWorkspace, error, loadResult](TaskProgress* prog) {
                 prog->setRange(0, 100);
-                prog->setStepName(QStringLiteral("读取工程包..."));
+                // 中文翻译：读取工程包...
+                prog->setStepName(QStringLiteral("Read project package..."));
                 if (prog->isAbortRequested())
                     throw std::runtime_error("project open cancelled");
                 prog->setValue(10);
@@ -725,7 +746,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
                                                      pendingWorkspace->camData())) {
                     throw std::runtime_error("project open failed");
                 }
-                prog->setStepName(QStringLiteral("生成显示网格..."));
+                // 中文翻译：生成显示网格...
+                prog->setStepName(QStringLiteral("Generate display grid..."));
                 if (!prepareMayoStyleDisplayMesh(pendingWorkspace->workpieceDocument(),
                                                  prog,
                                                  error.get())) {
@@ -743,8 +765,10 @@ DocumentId CadModule::openDocument(const QString& filePath)
             if (!project->isSingleDocumentOpenCurrent(openGeneration))
                 return;
             if (!success) {
-                emit operationFailed(tr("打开失败"),
-                                     error->isEmpty() ? tr("无法读取项目文件") : *error);
+                // 中文翻译：打开失败
+                emit operationFailed(tr("Open failed"),
+                                     // 中文翻译：无法读取项目文件
+                                     error->isEmpty() ? tr("Unable to read project file") : *error);
                 return;
             }
 
@@ -779,7 +803,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
 
     auto error = std::make_shared<QString>();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        tr("打开: %1").arg(fileInfo.fileName()),
+        // 中文翻译：打开: %1
+        tr("Open: %1").arg(fileInfo.fileName()),
         [filePath, ext, pendingWorkspace, error](TaskProgress* prog) {
             LcncDocument* doc = pendingWorkspace ? pendingWorkspace->workpieceDocument() : nullptr;
             LCNC_DEBUG(lcnc::LogCode::Generic,
@@ -792,9 +817,11 @@ DocumentId CadModule::openDocument(const QString& filePath)
                 throw std::runtime_error("document open cancelled");
 
             if (ext == "stp" || ext == "step") {
-                prog->setStepName(QStringLiteral("读取 STEP..."));
+                // 中文翻译：读取 STEP...
+                prog->setStepName(QStringLiteral("Read STEP..."));
                 prog->setValue(50);
-                prog->setStepName(QStringLiteral("转换形体..."));
+                // 中文翻译：转换形体...
+                prog->setStepName(QStringLiteral("Transform body..."));
                 if (!importStepWithFallback(filePath,
                                             doc,
                                             LcncDocument::EntityKind::Workpiece,
@@ -803,9 +830,11 @@ DocumentId CadModule::openDocument(const QString& filePath)
                     throw std::runtime_error("step open failed");
                 }
             } else if (ext == "igs" || ext == "iges") {
-                prog->setStepName(QStringLiteral("读取 IGES..."));
+                // 中文翻译：读取 IGES...
+                prog->setStepName(QStringLiteral("Read IGES..."));
                 prog->setValue(50);
-                prog->setStepName(QStringLiteral("转换形体..."));
+                // 中文翻译：转换形体...
+                prog->setStepName(QStringLiteral("Transform body..."));
                 if (!importIgesWithFallback(filePath,
                                             doc,
                                             LcncDocument::EntityKind::Workpiece,
@@ -814,12 +843,14 @@ DocumentId CadModule::openDocument(const QString& filePath)
                     throw std::runtime_error("iges open failed");
                 }
             } else if (ext == "stl") {
-                prog->setStepName(QStringLiteral("读取 STL..."));
+                // 中文翻译：读取 STL...
+                prog->setStepName(QStringLiteral("Read STL..."));
                 TopoDS_Shape shape;
                 StlAPI_Reader reader;
                 reader.Read(shape, filePath.toUtf8().constData());
                 if (shape.IsNull()) {
-                    *error = QObject::tr("无法读取 STL 文件: %1").arg(filePath);
+                    // 中文翻译：无法读取 STL 文件: %1
+                    *error = QObject::tr("Unable to read STL file: %1").arg(filePath);
                     throw std::runtime_error("stl open failed");
                 }
 
@@ -827,12 +858,14 @@ DocumentId CadModule::openDocument(const QString& filePath)
                 doc->addShapeEntity(shape, QFileInfo(filePath).baseName(),
                                     LcncDocument::EntityKind::Workpiece);
             } else if (ext == "brep") {
-                prog->setStepName(QStringLiteral("读取 BREP..."));
+                // 中文翻译：读取 BREP...
+                prog->setStepName(QStringLiteral("Read BREP..."));
                 TopoDS_Shape shape;
                 BRep_Builder builder;
                 BRepTools::Read(shape, filePath.toUtf8().constData(), builder);
                 if (shape.IsNull()) {
-                    *error = QObject::tr("无法读取 BREP 文件: %1").arg(filePath);
+                    // 中文翻译：无法读取 BREP 文件: %1
+                    *error = QObject::tr("Unable to read BREP file: %1").arg(filePath);
                     throw std::runtime_error("brep open failed");
                 }
 
@@ -840,7 +873,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
                                     LcncDocument::EntityKind::Workpiece);
             }
 
-            prog->setStepName(QStringLiteral("生成显示网格..."));
+            // 中文翻译：生成显示网格...
+            prog->setStepName(QStringLiteral("Generate display grid..."));
             if (!prepareMayoStyleDisplayMesh(doc, prog, error.get()))
                 throw std::runtime_error("display mesh preparation failed");
 
@@ -870,8 +904,10 @@ DocumentId CadModule::openDocument(const QString& filePath)
                    "CadModule::openDocument task done docId={} success={}",
                    docId, success);
         if (!success) {
-            emit operationFailed(tr("打开失败"),
-                                 error->isEmpty() ? tr("打开文件失败") : *error);
+            // 中文翻译：打开失败
+            emit operationFailed(tr("Open failed"),
+                                 // 中文翻译：打开文件失败
+                                 error->isEmpty() ? tr("Failed to open file") : *error);
             return;
         }
 
@@ -889,7 +925,8 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
 {
     QFileInfo fileInfo(filePath);
     if (filePath.isEmpty() || !fileInfo.exists()) {
-        emit operationFailed(tr("导入 STEP 失败"), tr("文件不存在: %1").arg(filePath));
+        // 中文翻译：导入 STEP 失败；文件不存在: %1
+        emit operationFailed(tr("Import STEP failed"), tr("File does not exist: %1").arg(filePath));
         return kInvalidDocumentId;
     }
 
@@ -897,21 +934,25 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
     const DocumentId docId = ensureTargetDocument(this, targetDocId, fileInfo.baseName(), &createdNew);
     LcncDocument* doc = domainDocumentById(docId);
     if (!doc) {
-        emit operationFailed(tr("导入 STEP 失败"), tr("无法创建目标文档"));
+        // 中文翻译：导入 STEP 失败；无法创建目标文档
+        emit operationFailed(tr("Import STEP failed"), tr("Unable to create target document"));
         return kInvalidDocumentId;
     }
 
     auto error = std::make_shared<QString>();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        tr("导入 STEP: %1").arg(fileInfo.fileName()),
+        // 中文翻译：导入 STEP: %1
+        tr("Import STEP: %1").arg(fileInfo.fileName()),
         [filePath, doc, error](TaskProgress* prog) {
             prog->setRange(0, 100);
-            prog->setStepName(QStringLiteral("读取 STEP..."));
+            // 中文翻译：读取 STEP...
+            prog->setStepName(QStringLiteral("Read STEP..."));
             if (prog->isAbortRequested())
                 throw std::runtime_error("step import cancelled");
 
             prog->setValue(50);
-            prog->setStepName(QStringLiteral("转换形体..."));
+            // 中文翻译：转换形体...
+            prog->setStepName(QStringLiteral("Transform body..."));
             if (!importStepWithFallback(filePath,
                                         doc,
                                         LcncDocument::EntityKind::Workpiece,
@@ -919,7 +960,8 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
                                         error.get())) {
                 throw std::runtime_error("step import failed");
             }
-            prog->setStepName(QStringLiteral("生成显示网格..."));
+            // 中文翻译：生成显示网格...
+            prog->setStepName(QStringLiteral("Generate display grid..."));
             if (!prepareMayoStyleDisplayMesh(doc, prog, error.get()))
                 throw std::runtime_error("display mesh preparation failed");
             if (prog->isAbortRequested())
@@ -935,8 +977,10 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
-            emit operationFailed(tr("导入 STEP 失败"),
-                                 error->isEmpty() ? tr("导入 STEP 失败") : *error);
+            // 中文翻译：导入 STEP 失败
+            emit operationFailed(tr("Import STEP failed"),
+                                 // 中文翻译：导入 STEP 失败
+                                 error->isEmpty() ? tr("Import STEP failed") : *error);
             return;
         }
 
@@ -955,7 +999,8 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
 {
     QFileInfo fileInfo(filePath);
     if (filePath.isEmpty() || !fileInfo.exists()) {
-        emit operationFailed(tr("导入 STL 失败"), tr("文件不存在: %1").arg(filePath));
+        // 中文翻译：导入 STL 失败；文件不存在: %1
+        emit operationFailed(tr("Import STL failed"), tr("File does not exist: %1").arg(filePath));
         return kInvalidDocumentId;
     }
 
@@ -963,16 +1008,19 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
     const DocumentId docId = ensureTargetDocument(this, targetDocId, fileInfo.baseName(), &createdNew);
     LcncDocument* doc = domainDocumentById(docId);
     if (!doc) {
-        emit operationFailed(tr("导入 STL 失败"), tr("无法创建目标文档"));
+        // 中文翻译：导入 STL 失败；无法创建目标文档
+        emit operationFailed(tr("Import STL failed"), tr("Unable to create target document"));
         return kInvalidDocumentId;
     }
 
     auto error = std::make_shared<QString>();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        tr("导入 STL: %1").arg(fileInfo.fileName()),
+        // 中文翻译：导入 STL: %1
+        tr("Import STL: %1").arg(fileInfo.fileName()),
         [filePath, doc, error](TaskProgress* prog) {
             prog->setRange(0, 100);
-            prog->setStepName(QStringLiteral("读取 STL..."));
+            // 中文翻译：读取 STL...
+            prog->setStepName(QStringLiteral("Read STL..."));
             if (prog->isAbortRequested())
                 throw std::runtime_error("stl import cancelled");
 
@@ -980,7 +1028,8 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
             StlAPI_Reader reader;
             reader.Read(shape, filePath.toUtf8().constData());
             if (shape.IsNull()) {
-                *error = QObject::tr("无法读取 STL 文件: %1").arg(filePath);
+                // 中文翻译：无法读取 STL 文件: %1
+                *error = QObject::tr("Unable to read STL file: %1").arg(filePath);
                 throw std::runtime_error("stl import failed");
             }
 
@@ -1000,8 +1049,10 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
-            emit operationFailed(tr("导入 STL 失败"),
-                                 error->isEmpty() ? tr("导入 STL 失败") : *error);
+            // 中文翻译：导入 STL 失败
+            emit operationFailed(tr("Import STL failed"),
+                                 // 中文翻译：导入 STL 失败
+                                 error->isEmpty() ? tr("Import STL failed") : *error);
             return;
         }
 
@@ -1020,12 +1071,14 @@ bool CadModule::saveDocument(DocumentId id, const QString& path)
 {
     LcncDocument* doc = domainDocumentById(id);
     if (!doc) {
-        emit operationFailed(tr("保存失败"), tr("找不到目标文档"));
+        // 中文翻译：保存失败；找不到目标文档
+        emit operationFailed(tr("Save failed"), tr("Target document not found"));
         return false;
     }
     const QString target = path.isEmpty() ? doc->filePath() : path;
     if (target.isEmpty()) {
-        emit operationFailed(tr("保存失败"), tr("未指定保存路径"));
+        // 中文翻译：保存失败；未指定保存路径
+        emit operationFailed(tr("Save failed"), tr("No save path specified"));
         return false;
     }
     QString err;
@@ -1033,7 +1086,8 @@ bool CadModule::saveDocument(DocumentId id, const QString& path)
         ? lcnc::Kernel::current().projectManager()->saveProject(target, &err)
         : lcnc::Kernel::current().projectManager()->exportDomainAsStep(lcnc::ProjectDomain::Workpiece, target, &err);
     if (!ok)
-        emit operationFailed(tr("保存失败"), err.isEmpty() ? tr("保存文档失败") : err);
+        // 中文翻译：保存失败；保存文档失败
+        emit operationFailed(tr("Save failed"), err.isEmpty() ? tr("Failed to save document") : err);
     return ok;
 }
 
@@ -1041,20 +1095,24 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
 {
     LcncDocument* doc = domainDocumentById(id);
     if (!doc) {
-        emit operationFailed(tr("导出 STEP 失败"), tr("找不到目标文档"));
+        // 中文翻译：导出 STEP 失败；找不到目标文档
+        emit operationFailed(tr("Export STEP failed"), tr("Target document not found"));
         return;
     }
     if (filePath.isEmpty()) {
-        emit operationFailed(tr("导出 STEP 失败"), tr("未指定导出路径"));
+        // 中文翻译：导出 STEP 失败；未指定导出路径
+        emit operationFailed(tr("Export STEP failed"), tr("No export path specified"));
         return;
     }
 
     auto error = std::make_shared<QString>();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        tr("导出 STEP: %1").arg(QFileInfo(filePath).fileName()),
+        // 中文翻译：导出 STEP: %1
+        tr("Export STEP: %1").arg(QFileInfo(filePath).fileName()),
         [doc, filePath, error](TaskProgress* prog) {
             prog->setRange(0, 100);
-            prog->setStepName(QStringLiteral("写入 STEP..."));
+            // 中文翻译：写入 STEP...
+            prog->setStepName(QStringLiteral("Write STEP..."));
             if (prog->isAbortRequested())
                 throw std::runtime_error("step export cancelled");
 
@@ -1070,7 +1128,8 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
             }
 
             if (writer.Write(filePath.toUtf8().constData()) != IFSelect_RetDone) {
-                *error = QObject::tr("导出 STEP 失败: %1").arg(filePath);
+                // 中文翻译：导出 STEP 失败: %1
+                *error = QObject::tr("Export STEP failed: %1").arg(filePath);
                 throw std::runtime_error("step export failed");
             }
 
@@ -1083,8 +1142,10 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
     watchTask(this, taskId, [this, taskId, error](bool success) {
         releaseOwnedTask(taskId);
         if (!success) {
-            emit operationFailed(tr("导出 STEP 失败"),
-                                 error->isEmpty() ? tr("导出 STEP 失败") : *error);
+            // 中文翻译：导出 STEP 失败
+            emit operationFailed(tr("Export STEP failed"),
+                                 // 中文翻译：导出 STEP 失败
+                                 error->isEmpty() ? tr("Export STEP failed") : *error);
         }
     });
 }
@@ -1317,7 +1378,8 @@ bool CadModule::moveShapes(DocumentId docId, const QList<TDF_Label>& labels,
     if (!doc || labels.isEmpty())
         return false;
 
-    doc->openCommand(tr("移动形体"));
+    // 中文翻译：移动形体
+    doc->openCommand(tr("moving body"));
     for (const TDF_Label& label : labels) {
         if (!ShapeService::moveShape(doc, label, translation)) {
             doc->abortCommand();
@@ -1343,7 +1405,8 @@ bool CadModule::rotateShapes(DocumentId docId, const QList<TDF_Label>& labels,
     if (!doc || labels.isEmpty())
         return false;
 
-    doc->openCommand(tr("旋转形体"));
+    // 中文翻译：旋转形体
+    doc->openCommand(tr("rotating shape"));
     for (const TDF_Label& label : labels) {
         if (!ShapeService::rotateShape(doc, label, axis, angleDeg)) {
             doc->abortCommand();
@@ -1367,7 +1430,8 @@ bool CadModule::deleteShapes(DocumentId docId, const QStringList& entries)
     if (!doc || entries.isEmpty())
         return false;
 
-    doc->openCommand(tr("删除形体"));
+    // 中文翻译：删除形体
+    doc->openCommand(tr("Delete shape"));
     if (auto* gd = activeGuiDocument()) {
         for (const QString& entry : entries)
             gd->eraseEntity(docId, entry);
@@ -1386,7 +1450,8 @@ int CadModule::explodeShape(DocumentId docId, const TDF_Label& label, int entity
     LcncDocument* doc = domainDocumentById(docId);
     if (!doc) return 0;
 
-    doc->openCommand(tr("拆解形体"));
+    // 中文翻译：拆解形体
+    doc->openCommand(tr("Explode Shape"));
 
     // Erase original AIS object
     const QString entry = XcafUtils::entry(label);
@@ -1410,7 +1475,8 @@ TDF_Label CadModule::createShape(DocumentId docId, const TopoDS_Shape& shape,
     LcncDocument* doc = domainDocumentById(docId);
     if (!doc) return TDF_Label();
 
-    doc->openCommand(tr("创建形体"));
+    // 中文翻译：创建形体
+    doc->openCommand(tr("Create shapes"));
     TDF_Label label = ShapeService::addShape(doc, shape, name, entityKind);
     if (label.IsNull()) {
         doc->abortCommand();
@@ -1468,7 +1534,8 @@ bool CadModule::createPrimitive(int primitiveIndex, const PrimitiveParameters& p
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::createPrimitive build failed: {}",
                   buildError.toStdString());
-        emit operationFailed(tr("创建基础体失败"), buildError);
+        // 中文翻译：创建基础体失败
+        emit operationFailed(tr("Failed to create base body"), buildError);
         return false;
     }
 
@@ -1478,7 +1545,8 @@ bool CadModule::createPrimitive(int primitiveIndex, const PrimitiveParameters& p
     if (docId == kInvalidDocumentId || !domainDocumentById(docId)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::createPrimitive failed to prepare document");
-        emit operationFailed(tr("创建基础体失败"), tr("无法创建或激活目标文档"));
+        // 中文翻译：创建基础体失败；无法创建或激活目标文档
+        emit operationFailed(tr("Failed to create base body"), tr("Unable to create or activate target document"));
         return false;
     }
 
@@ -1490,7 +1558,8 @@ bool CadModule::createPrimitive(int primitiveIndex, const PrimitiveParameters& p
     if (label.IsNull()) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::createPrimitive createShape failed docId={}", docId);
-        emit operationFailed(tr("创建基础体失败"), tr("无法写入目标文档"));
+        // 中文翻译：创建基础体失败；无法写入目标文档
+        emit operationFailed(tr("Failed to create base body"), tr("Unable to write to target document"));
         return false;
     }
 
@@ -1507,7 +1576,8 @@ bool CadModule::previewTool(const QString& toolId,
 {
     if (!m_commandDispatcher) {
         if (errMsg)
-            *errMsg = tr("CAD 工具调度器未初始化");
+            // 中文翻译：CAD 工具调度器未初始化
+            *errMsg = tr("CAD tool scheduler not initialized");
         return false;
     }
 
@@ -1524,7 +1594,8 @@ bool CadModule::executeTool(const QString& toolId,
 {
     if (!m_commandDispatcher) {
         if (errMsg)
-            *errMsg = tr("CAD 工具调度器未初始化");
+            // 中文翻译：CAD 工具调度器未初始化
+            *errMsg = tr("CAD tool scheduler not initialized");
         return false;
     }
 
@@ -1534,7 +1605,8 @@ bool CadModule::executeTool(const QString& toolId,
     request.preview = false;
     const bool ok = m_commandDispatcher->execute(toolId, request, errMsg);
     if (!ok && errMsg && !errMsg->isEmpty())
-        emit operationFailed(tr("CAD 工具失败"), *errMsg);
+        // 中文翻译：CAD 工具失败
+        emit operationFailed(tr("CAD tool failed"), *errMsg);
     return ok;
 }
 
@@ -1552,7 +1624,8 @@ bool CadModule::buildTransformPreview(const TransformParameters& params,
     LcncDocument* doc = domainDocumentById(docId);
     if (!doc) {
         if (errMsg)
-            *errMsg = tr("请先导入或创建工件模型");
+            // 中文翻译：请先导入或创建工件模型
+            *errMsg = tr("Please import or create an workpiece model first");
         return false;
     }
 
@@ -1560,7 +1633,8 @@ bool CadModule::buildTransformPreview(const TransformParameters& params,
     const QList<TDF_Label> labels = selectedShapeLabels(doc, entries);
     if (labels.isEmpty()) {
         if (errMsg)
-            *errMsg = tr("请先选择要变换的形体");
+            // 中文翻译：请先选择要变换的形体
+            *errMsg = tr("Please select the shape you want to transform first");
         return false;
     }
 
@@ -1598,7 +1672,8 @@ bool CadModule::buildTransformPreview(const TransformParameters& params,
 
     if (compound.IsNull()) {
         if (errMsg)
-            *errMsg = tr("变换预览为空");
+            // 中文翻译：变换预览为空
+            *errMsg = tr("Transform preview is empty");
         return false;
     }
     if (outShape)
@@ -1611,29 +1686,34 @@ bool CadModule::applyTransform(const TransformParameters& params, QString* errMs
     auto fail = [this, errMsg](const QString& message) {
         if (errMsg)
             *errMsg = message;
-        emit operationFailed(tr("CAD 变换失败"), message);
+        // 中文翻译：CAD 变换失败
+        emit operationFailed(tr("CAD transformation failed"), message);
         return false;
     };
 
     const DocumentId docId = workpieceDocumentId();
     LcncDocument* doc = domainDocumentById(docId);
     if (!doc)
-        return fail(tr("请先导入或创建工件模型"));
+        // 中文翻译：请先导入或创建工件模型
+        return fail(tr("Please import or create an workpiece model first"));
 
     const QStringList entries = selectedEntries(docId);
     const QList<TDF_Label> labels = selectedShapeLabels(doc, entries);
     if (labels.isEmpty())
-        return fail(tr("请先选择要变换的形体"));
+        // 中文翻译：请先选择要变换的形体
+        return fail(tr("Please select the shape you want to transform first"));
 
     gp_Pnt referencePoint(0.0, 0.0, 0.0);
     if (params.referenceMode == 0
         && !modelCenterForLabels(doc, labels, &referencePoint, errMsg)) {
-        return fail(errMsg ? *errMsg : tr("无法计算选中形体中心"));
+        // 中文翻译：无法计算选中形体中心
+        return fail(errMsg ? *errMsg : tr("Unable to calculate center of selected shape"));
     }
 
     const auto algoParams = toAlgorithmTransform(params, referencePoint);
     const Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
-    doc->openCommand(tr("变换形体"));
+    // 中文翻译：变换形体
+    doc->openCommand(tr("Transform shape"));
     for (const TDF_Label& label : labels) {
         const TopoDS_Shape shape = shapeTool->GetShape(label);
         QString transformError;
@@ -1656,17 +1736,20 @@ bool CadModule::beginSketch(int planeIndex)
     if (!m_modelingSession) {
         LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
                  "CadModule::beginSketch missing modeling session");
-        emit operationFailed(tr("新建草图失败"), tr("CAD 建模会话未初始化"));
+        // 中文翻译：新建草图失败；CAD 建模会话未初始化
+        emit operationFailed(tr("New sketch failed"), tr("CAD modeling session not initialized"));
         return false;
     }
 
     DocumentId docId = workpieceDocumentId();
     if (docId == kInvalidDocumentId)
-        docId = newDocument(tr("草图建模"));
+        // 中文翻译：草图建模
+        docId = newDocument(tr("Sketch modeling"));
     if (docId == kInvalidDocumentId || !domainDocumentById(docId)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::beginSketch failed to prepare document");
-        emit operationFailed(tr("新建草图失败"), tr("无法创建或激活目标文档"));
+        // 中文翻译：新建草图失败；无法创建或激活目标文档
+        emit operationFailed(tr("New sketch failed"), tr("Unable to create or activate target document"));
         return false;
     }
 
@@ -1697,7 +1780,8 @@ bool CadModule::finishSketch()
     if (!m_modelingSession) {
         LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
                  "CadModule::finishSketch missing modeling session");
-        emit operationFailed(tr("完成草图失败"), tr("CAD 建模会话未初始化"));
+        // 中文翻译：完成草图失败；CAD 建模会话未初始化
+        emit operationFailed(tr("Failed to complete sketch"), tr("CAD modeling session not initialized"));
         return false;
     }
 
@@ -1706,7 +1790,8 @@ bool CadModule::finishSketch()
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::finishSketch failed: {}",
                   errMsg.toStdString());
-        emit operationFailed(tr("完成草图失败"), errMsg);
+        // 中文翻译：完成草图失败
+        emit operationFailed(tr("Failed to complete sketch"), errMsg);
         return false;
     }
 
@@ -1714,14 +1799,16 @@ bool CadModule::finishSketch()
     if (docId == kInvalidDocumentId) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::finishSketch no project document active");
-        emit operationFailed(tr("完成草图失败"), tr("项目文档不可用"));
+        // 中文翻译：完成草图失败；项目文档不可用
+        emit operationFailed(tr("Failed to complete sketch"), tr("Project documentation is not available"));
         return false;
     }
 
     auto* state = m_documentRegistry->ensure(docId);
     auto* manager = state ? &state->sketchManager() : nullptr;
     if (!manager) {
-        emit operationFailed(tr("完成草图失败"), tr("无法获取草图管理器"));
+        // 中文翻译：完成草图失败；无法获取草图管理器
+        emit operationFailed(tr("Failed to complete sketch"), tr("Unable to get sketch manager"));
         return false;
     }
 
@@ -1764,12 +1851,14 @@ bool CadModule::applyFeature(int featureIndex, double length, double angleDeg)
         docId = workpieceDocumentId();
     auto* manager = m_documentRegistry->sketchManager(docId);
     if (!manager || m_selectedSketchId <= 0) {
-        emit operationFailed(tr("应用特征失败"), tr("请先完成并选择一个草图"));
+        // 中文翻译：应用特征失败；请先完成并选择一个草图
+        emit operationFailed(tr("Apply feature failed"), tr("Please complete and select a sketch first"));
         return false;
     }
     auto* record = manager->sketch(m_selectedSketchId);
     if (!record || record->profileFace.IsNull()) {
-        emit operationFailed(tr("应用特征失败"), tr("选中草图不包含可用轮廓"));
+        // 中文翻译：应用特征失败；选中草图不包含可用轮廓
+        emit operationFailed(tr("Apply feature failed"), tr("Selected sketch does not contain usable outlines"));
         return false;
     }
 
@@ -1792,12 +1881,14 @@ bool CadModule::applyFeature(int featureIndex, double length, double angleDeg)
         LCNC_WARN(lcnc::LogCode::Generic,
                   "CadModule::applyFeature build failed: {}",
                   featureErr.toStdString());
-        emit operationFailed(tr("应用特征失败"), featureErr);
+        // 中文翻译：应用特征失败
+        emit operationFailed(tr("Apply feature failed"), featureErr);
         return false;
     }
 
     if (!domainDocumentById(docId)) {
-        emit operationFailed(tr("应用特征失败"), tr("目标文档不存在"));
+        // 中文翻译：应用特征失败；目标文档不存在
+        emit operationFailed(tr("Apply feature failed"), tr("The target document does not exist"));
         return false;
     }
 
@@ -1807,7 +1898,8 @@ bool CadModule::applyFeature(int featureIndex, double length, double angleDeg)
         m_modelingSession->defaultFeatureName(featureKind),
         static_cast<int>(LcncDocument::EntityKind::Workpiece));
     if (label.IsNull()) {
-        emit operationFailed(tr("应用特征失败"), tr("无法写入目标文档"));
+        // 中文翻译：应用特征失败；无法写入目标文档
+        emit operationFailed(tr("Apply feature failed"), tr("Unable to write to target document"));
         return false;
     }
 
@@ -1832,13 +1924,15 @@ bool CadModule::buildFeaturePreview(int featureIndex,
     auto* manager = m_documentRegistry->sketchManager(docId);
     if (!manager || m_selectedSketchId <= 0) {
         if (errMsg)
-            *errMsg = tr("请先选择一个草图");
+            // 中文翻译：请先选择一个草图
+            *errMsg = tr("Please select a sketch first");
         return false;
     }
     auto* record = manager->sketch(m_selectedSketchId);
     if (!record || record->profileFace.IsNull()) {
         if (errMsg)
-            *errMsg = tr("选中草图不包含可用轮廓");
+            // 中文翻译：选中草图不包含可用轮廓
+            *errMsg = tr("Selected sketch does not contain usable outlines");
         return false;
     }
 
@@ -2001,7 +2095,8 @@ int CadModule::addSketchElement(int toolKind, const QVector<double>& params, QSt
 {
     if (!m_modelingSession) {
         if (errMsg)
-            *errMsg = tr("CAD 建模会话未初始化");
+            // 中文翻译：CAD 建模会话未初始化
+            *errMsg = tr("CAD modeling session not initialized");
         return -1;
     }
     QString sessionError;
@@ -2030,7 +2125,8 @@ bool CadModule::moveSketchElement(int elementId, double deltaX, double deltaY, Q
 {
     if (!m_modelingSession) {
         if (errMsg)
-            *errMsg = tr("CAD 建模会话未初始化");
+            // 中文翻译：CAD 建模会话未初始化
+            *errMsg = tr("CAD modeling session not initialized");
         return false;
     }
     QString sessionError;
@@ -2051,7 +2147,8 @@ bool CadModule::moveSketchElementHandle(int elementId,
 {
     if (!m_modelingSession) {
         if (errMsg)
-            *errMsg = tr("CAD 建模会话未初始化");
+            // 中文翻译：CAD 建模会话未初始化
+            *errMsg = tr("CAD modeling session not initialized");
         return false;
     }
     QString sessionError;

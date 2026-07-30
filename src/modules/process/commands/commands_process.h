@@ -172,7 +172,8 @@ public:
     bool isEnabled() const override;
 };
 
-/// 切换"切割路径显示"——在 OCC 视图中用虚线绘制空程路径。
+// 中文翻译：切割路径显示
+/// 切换"Cutting path display"——在 OCC 视图中用虚线绘制空程路径。
 class CmdToggleTravelPath : public CommandBase {
     Q_OBJECT
 public:

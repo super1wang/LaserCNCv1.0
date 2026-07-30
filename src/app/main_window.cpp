@@ -240,7 +240,8 @@ bool isStepFile(const QString& filePath)
 MainWindow::MainWindow(QWidget* parent)
     : SARibbonMainWindow(parent)
 {
-    setWindowTitle(tr("LaserCNC — 五轴激光加工CAM软件"));
+    // 中文翻译：LaserCNC — 五轴激光加工CAM软件
+    setWindowTitle(tr("LaserCNC — five-axis laser processing CAM software"));
     setWindowIcon(QIcon(":/icons/app_icon.svg"));
     resize(1440, 900);
 
@@ -275,9 +276,12 @@ MainWindow::MainWindow(QWidget* parent)
             });
         connect(project, &lcnc::LcncProjectManager::projectMachineConfigurationMismatch,
             this, [this](const QString& filePath, const QString&, const QString&) {
-                QMessageBox::warning(this, tr("机台构型不匹配"),
-                    tr("工程“%1”保存时使用的机台构型与当前机台不一致。"
-                       "可以继续查看或仿真，但真实加工已被禁止；请确认机台、轴映射和安全 IO 后重新保存工程。")
+                // 中文翻译：机台构型不匹配
+                QMessageBox::warning(this, tr("Machine configuration does not match"),
+                    // 中文翻译：工程“%1”保存时使用的机台构型与当前机台不一致。
+                    tr("The machine configuration used when saving project \"%1\" is inconsistent with the current machine."
+                       // 中文翻译：可以继续查看或仿真，但真实加工已被禁止；请确认机台、轴映射和安全 IO 后重新保存工程。
+                       "You can continue to view or simulate, but real processing has been prohibited; please confirm the machine, axis mapping and safety IO before re-saving the project.")
                         .arg(QFileInfo(filePath).fileName()));
             });
         connect(project, &lcnc::LcncProjectManager::projectSaved,
@@ -450,8 +454,10 @@ void MainWindow::createCentralLayout()
 
     m_centerTabs = new QTabWidget(this);
     m_centerTabs->setDocumentMode(true);
-    m_centerTabs->addTab(m_startGuide, tr("开始"));
-    m_centerTabs->addTab(viewPage, tr("视图"));
+    // 中文翻译：开始
+    m_centerTabs->addTab(m_startGuide, tr("start"));
+    // 中文翻译：视图
+    m_centerTabs->addTab(viewPage, tr("view"));
 
     // ── Left panel ─────────────────────────────────────────────────────────
     createLeftPanel();
@@ -620,7 +626,8 @@ void MainWindow::connectOccViewSignals(WidgetOccView* view)
                         // deliberately built from multiple operator picks and is
                         // committed only by the explicit Apply action.
                         QToolTip::showText(view->mapToGlobal(pos),
-                            tr("已加入加工面；可继续选择，右键或 Esc 结束后点击“应用加工面并继续”。"),
+                            // 中文翻译：已加入加工面；可继续选择，右键或 Esc 结束后点击“应用加工面并继续”。
+                            tr("The machining surface has been added; you can continue to select, right-click or press Esc and click \"Apply machining surface and continue\"."),
                             view);
                     } else if (!err.isEmpty()) {
                         QToolTip::showText(view->mapToGlobal(pos), err, view);
@@ -744,7 +751,8 @@ void MainWindow::createLeftPanel()
 
     m_projectExplorerTree = new QTreeWidget(this);
     m_projectExplorerTree->setColumnCount(2);
-    m_projectExplorerTree->setHeaderLabels({tr("项目"), tr("信息")});
+    // 中文翻译：项目；信息
+    m_projectExplorerTree->setHeaderLabels({tr("Project"), tr("information")});
     m_projectExplorerTree->header()->setStretchLastSection(false);
     m_projectExplorerTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_projectExplorerTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
@@ -831,15 +839,20 @@ void MainWindow::createLeftPanel()
         syncMachineTreeVisibilityState();
     }
 
-    m_leftTabs->addTab(m_projectExplorerTree, tr("项目"));
-    m_leftTabs->addTab(m_machineTree, tr("机台"));
-    m_leftTabs->addTab(m_processLeftPanel, tr("执行"));
+    // 中文翻译：项目
+    m_leftTabs->addTab(m_projectExplorerTree, tr("Project"));
+    // 中文翻译：机台
+    m_leftTabs->addTab(m_machineTree, tr("machine"));
+    // 中文翻译：执行
+    m_leftTabs->addTab(m_processLeftPanel, tr("execute"));
     connect(m_leftTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if (index == 1) {
-            // "机台" tab：切到机台视图
+            // 中文翻译：机台
+            // "machine" tab：切到机台视图
             m_appContext->camModule()->requestMachineView();
         } else if (index == 2) {
-            // "执行" tab：也切到机台视图（仿真监控）
+            // 中文翻译：执行
+            // "execute" tab：也切到机台视图（仿真监控）
             m_appContext->camModule()->requestMachineView();
         } else if (m_projectExplorerTree && m_projectExplorerTree->currentItem()) {
             onProjectExplorerCurrentItemChanged(m_projectExplorerTree->currentItem(), nullptr);
@@ -872,9 +885,12 @@ void MainWindow::createRightPanel()
     m_camRightTabs = new QTabWidget(this);
     m_camRightTabs->setTabPosition(QTabWidget::North);
     m_camRightTabs->setDocumentMode(true);
-    m_camRightTabs->addTab(m_machinePanel,  tr("机床"));
-    m_camRightTabs->addTab(m_toolpathPanel, tr("刀路参数"));
-    m_camRightTabs->addTab(m_toolpathPanel->machineCoordinatesPage(), tr("机床坐标"));
+    // 中文翻译：机床
+    m_camRightTabs->addTab(m_machinePanel,  tr("Machine tools"));
+    // 中文翻译：刀路参数
+    m_camRightTabs->addTab(m_toolpathPanel, tr("Tool path parameters"));
+    // 中文翻译：机床坐标
+    m_camRightTabs->addTab(m_toolpathPanel->machineCoordinatesPage(), tr("Machine coordinates"));
 
     m_rightStack->addWidget(m_camRightTabs);   // index 0 — CAM ribbon page
     m_rightStack->addWidget(m_laserControl);   // index 1 — laser/process ribbon page
@@ -1563,11 +1579,14 @@ void MainWindow::createRibbon()
     // reserving a dead button at the far left of the tab strip.
     ribbon->setApplicationButton(nullptr);
 
-    buildFileTab(ribbon->addCategoryPage(tr("文件")));
-    buildViewTab(ribbon->addCategoryPage(tr("视图")));
+    // 中文翻译：文件
+    buildFileTab(ribbon->addCategoryPage(tr("File")));
+    // 中文翻译：视图
+    buildViewTab(ribbon->addCategoryPage(tr("view")));
     buildCadTab(ribbon->addCategoryPage(tr("CAD")));
     buildCamTab(ribbon->addCategoryPage(tr("CAM")));
-    buildLaserTab(ribbon->addCategoryPage(tr("激光加工")));
+    // 中文翻译：激光加工
+    buildLaserTab(ribbon->addCategoryPage(tr("Laser processing")));
 
     connect(ribbon, &SARibbonBar::currentRibbonTabChanged,
             this, &MainWindow::syncRightPanelForRibbonIndex);
@@ -1576,25 +1595,29 @@ void MainWindow::createRibbon()
 
 void MainWindow::buildFileTab(SARibbonCategory* cat)
 {
-    SARibbonPanel* panelDoc = cat->addPanel(tr("文档"));
+    // 中文翻译：文档
+    SARibbonPanel* panelDoc = cat->addPanel(tr("Documentation"));
     panelDoc->addLargeAction(m_cmdContainer->findAction(CmdNewDocument::Name));
     panelDoc->addLargeAction(m_cmdContainer->findAction(CmdOpenDocument::Name));
     panelDoc->addLargeAction(m_cmdContainer->findAction(CmdSaveDocument::Name));
 
-    SARibbonPanel* panelIO = cat->addPanel(tr("导入/导出"));
+    // 中文翻译：导入/导出
+    SARibbonPanel* panelIO = cat->addPanel(tr("Import/Export"));
     panelIO->addLargeAction(m_cmdContainer->findAction(CmdImportStep::Name));
     panelIO->addLargeAction(m_cmdContainer->findAction(CmdImportStl::Name));
     panelIO->addLargeAction(m_cmdContainer->findAction(CmdExportStep::Name));
     panelIO->addLargeAction(m_cmdContainer->findAction(CmdCloseDocument::Name));
 
     // ── 应用 — 选项按钮 ─────────────────────────────────────────────────
-    SARibbonPanel* panelApp = cat->addPanel(tr("应用"));
+    // 中文翻译：应用
+    SARibbonPanel* panelApp = cat->addPanel(tr("Application"));
     panelApp->addLargeAction(m_cmdContainer->findAction(CmdShowOptions::Name));
 }
 
 void MainWindow::buildViewTab(SARibbonCategory* cat)
 {
-    SARibbonPanel* panelView = cat->addPanel(tr("视图"));
+    // 中文翻译：视图
+    SARibbonPanel* panelView = cat->addPanel(tr("view"));
     panelView->addLargeAction(m_cmdContainer->findAction(CmdFitAll::Name));
 
     // 抓取是视图拾取过滤器，而不是 CAD 建模命令：放在视图页，且作用于当前工作区。
@@ -1608,7 +1631,8 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     snapGroup->addAction(snapVertex);
     snapGroup->addAction(snapEdge);
     snapGroup->addAction(snapFace);
-    auto* menuSnap = new QMenu(tr("抓取"), cat);
+    // 中文翻译：抓取
+    auto* menuSnap = new QMenu(tr("crawl"), cat);
     menuSnap->setIcon(QIcon(":/icons/snap.svg"));
     menuSnap->addAction(snapNone);
     menuSnap->addAction(snapVertex);
@@ -1619,10 +1643,14 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     // View orientation quick actions
     struct OrientInfo { QString label; QString key; QString iconPath; V3d_TypeOfOrientation orient; };
     const QList<OrientInfo> orients = {
-        { tr("正视"),   "1", QStringLiteral(":/icons/view_front.svg"), V3d_Xpos              },
-        { tr("俯视"),   "2", QStringLiteral(":/icons/view_top.svg"),   V3d_Zpos              },
-        { tr("侧视"),   "3", QStringLiteral(":/icons/view_side.svg"),  V3d_Ypos              },
-        { tr("等轴测"), "0", QStringLiteral(":/icons/view_iso.svg"),   V3d_XposYnegZpos      },
+        // 中文翻译：正视
+        { tr("Front"),   "1", QStringLiteral(":/icons/view_front.svg"), V3d_Xpos              },
+        // 中文翻译：俯视
+        { tr("Top"),   "2", QStringLiteral(":/icons/view_top.svg"),   V3d_Zpos              },
+        // 中文翻译：侧视
+        { tr("Side"),   "3", QStringLiteral(":/icons/view_side.svg"),  V3d_Ypos              },
+        // 中文翻译：等轴测
+        { tr("Isometric"), "0", QStringLiteral(":/icons/view_iso.svg"),   V3d_XposYnegZpos      },
     };
     for (auto& info : orients) {
         auto* act = new QAction(QIcon(info.iconPath), info.label + " [" + info.key + "]", this);
@@ -1634,7 +1662,8 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
         panelView->addLargeAction(act);
     }
 
-    SARibbonPanel* panelDisplay = cat->addPanel(tr("显示"));
+    // 中文翻译：显示
+    SARibbonPanel* panelDisplay = cat->addPanel(tr("show"));
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleShaded::Name));
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleWireframe::Name));
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name));
@@ -1664,20 +1693,27 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
         });
     }
 
-    SARibbonPanel* panelMachineView = cat->addPanel(tr("机台显示"));
-    m_actRotaryAxisGuides = new QAction(QIcon(":/icons/machine.svg"), tr("旋转轴线"), this);
+    // 中文翻译：机台显示
+    SARibbonPanel* panelMachineView = cat->addPanel(tr("Machine display"));
+    // 中文翻译：旋转轴线
+    m_actRotaryAxisGuides = new QAction(QIcon(":/icons/machine.svg"), tr("axis of rotation"), this);
     m_actRotaryAxisGuides->setCheckable(true);
-    m_actRotaryAxisGuides->setStatusTip(tr("显示/隐藏机台 A/C 旋转轴辅助线"));
+    // 中文翻译：显示/隐藏机台 A/C 旋转轴辅助线
+    m_actRotaryAxisGuides->setStatusTip(tr("Show/hide machine A/C rotation axis auxiliary line"));
     panelMachineView->addLargeAction(m_actRotaryAxisGuides);
 
-    m_actCutterHeadGuide = new QAction(QIcon(":/icons/machine.svg"), tr("模拟刀头"), this);
+    // 中文翻译：模拟刀头
+    m_actCutterHeadGuide = new QAction(QIcon(":/icons/machine.svg"), tr("Simulated cutter head"), this);
     m_actCutterHeadGuide->setCheckable(true);
-    m_actCutterHeadGuide->setStatusTip(tr("显示/隐藏模拟刀头辅助线和锥形指示"));
+    // 中文翻译：显示/隐藏模拟刀头辅助线和锥形指示
+    m_actCutterHeadGuide->setStatusTip(tr("Show/hide simulated tool head guide lines and taper indicators"));
     panelMachineView->addLargeAction(m_actCutterHeadGuide);
 
-    m_actMachineModelVisible = new QAction(QIcon(":/icons/machine.svg"), tr("机台模型"), this);
+    // 中文翻译：机台模型
+    m_actMachineModelVisible = new QAction(QIcon(":/icons/machine.svg"), tr("Machine model"), this);
     m_actMachineModelVisible->setCheckable(true);
-    m_actMachineModelVisible->setStatusTip(tr("显示/隐藏机台模型；开启后可在机台节点树中局部显示轴系"));
+    // 中文翻译：显示/隐藏机台模型；开启后可在机台节点树中局部显示轴系
+    m_actMachineModelVisible->setStatusTip(tr("Show/hide the machine model; after turning it on, the axis system can be partially displayed in the machine node tree"));
     panelMachineView->addLargeAction(m_actMachineModelVisible);
 
     connect(m_actRotaryAxisGuides, &QAction::toggled, this, [this](bool checked) {
@@ -1715,11 +1751,13 @@ void MainWindow::buildLaserTab(SARibbonCategory* cat)
 // ── Status bar ────────────────────────────────────────────────────────────────
 void MainWindow::createStatusBar()
 {
-    m_sbDocName = new QLabel(tr("无文档"), this);
+    // 中文翻译：无文档
+    m_sbDocName = new QLabel(tr("No documentation"), this);
     m_sbCoords  = new QLabel("X: 0.000  Y: 0.000  Z: 0.000", this);
     const QString statusText = m_appContext
         ? m_appContext->processModule()->statusMessage()
-        : tr("就绪");
+        // 中文翻译：就绪
+        : tr("ready");
     m_sbStatus  = new QLabel(statusText, this);
     m_sbDeviceProgress = new QProgressBar(this);
 
@@ -1986,7 +2024,8 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
         return;
 
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("图层配置"));
+    // 中文翻译：图层配置
+    dialog.setWindowTitle(tr("Layer configuration"));
     auto* layout = new QVBoxLayout(&dialog);
     auto* form = new QFormLayout();
     auto* nameEdit = new QLineEdit(sourceLayer->name, &dialog);
@@ -2002,16 +2041,20 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
     refreshColorButton();
 
     connect(colorButton, &QPushButton::clicked, &dialog, [&]() {
-        const QColor color = QColorDialog::getColor(selectedColor, &dialog, tr("选择图层颜色"));
+        // 中文翻译：选择图层颜色
+        const QColor color = QColorDialog::getColor(selectedColor, &dialog, tr("Select layer color"));
         if (!color.isValid())
             return;
         selectedColor = color;
         refreshColorButton();
     });
 
-    form->addRow(tr("名称"), nameEdit);
-    form->addRow(tr("颜色"), colorButton);
-    toolCombo->addItem(tr("未指定工具"), QString());
+    // 中文翻译：名称
+    form->addRow(tr("Name"), nameEdit);
+    // 中文翻译：颜色
+    form->addRow(tr("color"), colorButton);
+    // 中文翻译：未指定工具
+    toolCombo->addItem(tr("No tool specified"), QString());
     if (auto* planService = lcnc::Kernel::current().service<lcnc::process::ProcessCuttingPlanService>()) {
         const QStringList tools = planService->availableToolNames();
         for (const QString& toolName : tools) {
@@ -2026,7 +2069,8 @@ void MainWindow::onProjectExplorerItemDoubleClicked(QTreeWidgetItem* item, int /
         toolCombo->addItem(currentTool, currentTool);
     const int currentToolIndex = toolCombo->findData(currentTool);
     toolCombo->setCurrentIndex(currentToolIndex >= 0 ? currentToolIndex : 0);
-    form->addRow(tr("工具"), toolCombo);
+    // 中文翻译：工具
+    form->addRow(tr("Tools"), toolCombo);
     layout->addLayout(form);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -2057,10 +2101,14 @@ void MainWindow::onProjectExplorerContextMenuRequested(const QPoint& pos)
         const std::uint64_t faceId = item->data(
             0, lcnc::app::ProjectExplorerRoles::MachiningFaceId).toULongLong();
         QMenu menu(this);
-        QMenu* roleMenu = menu.addMenu(tr("设置面角色"));
-        QAction* machiningAction = roleMenu->addAction(tr("加工面"));
-        QAction* crossSectionAction = roleMenu->addAction(tr("横截面"));
-        QAction* removeAction = menu.addAction(tr("删除加工面"));
+        // 中文翻译：设置面角色
+        QMenu* roleMenu = menu.addMenu(tr("Set up the character"));
+        // 中文翻译：加工面
+        QAction* machiningAction = roleMenu->addAction(tr("Processing surface"));
+        // 中文翻译：横截面
+        QAction* crossSectionAction = roleMenu->addAction(tr("cross section"));
+        // 中文翻译：删除加工面
+        QAction* removeAction = menu.addAction(tr("Delete machining surface"));
         QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
         CamModule* cam = m_appContext->camModule();
         if (chosen == machiningAction)
@@ -2073,7 +2121,8 @@ void MainWindow::onProjectExplorerContextMenuRequested(const QPoint& pos)
     }
     if (kind == lcnc::app::ProjectExplorerNodeKind::MachiningFaceRoot) {
         QMenu menu(this);
-        QAction* clearAction = menu.addAction(tr("清除所有加工面"));
+        // 中文翻译：清除所有加工面
+        QAction* clearAction = menu.addAction(tr("Clear all work surfaces"));
         QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
         if (chosen == clearAction)
             m_appContext->camModule()->clearMachiningFaces();
@@ -2512,7 +2561,8 @@ void MainWindow::refreshDocumentTabs()
         if (title.trimmed().isEmpty() && workspace && workspace->workpieceDocument())
             title = workspace->workpieceDocument()->name();
         if (title.trimmed().isEmpty())
-            title = tr("未命名");
+            // 中文翻译：未命名
+            title = tr("Unnamed");
         const int index = m_documentTabs->addTab(title);
         m_documentTabs->setTabData(index, id);
         if (id == activeId)
@@ -2614,7 +2664,8 @@ void MainWindow::addRecentFile(const QString& filePath)
 void MainWindow::openStartGuideFile(const QString& filePath)
 {
     if (!isStartGuideSupportedFile(filePath)) {
-        QMessageBox::warning(this, tr("打开文件"), tr("文件不存在或格式不支持: %1").arg(filePath));
+        // 中文翻译：打开文件；文件不存在或格式不支持: %1
+        QMessageBox::warning(this, tr("open file"), tr("File does not exist or format is not supported: %1").arg(filePath));
         refreshStartGuide();
         return;
     }

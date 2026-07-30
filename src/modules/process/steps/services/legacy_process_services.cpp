@@ -21,7 +21,8 @@ MotionControl* motionControl(Service* service, QString* errorMessage)
     MotionControl* mc = service ? service->GetMotionControl() : nullptr;
     if (!mc || !mc->IsConnected()) {
         if (errorMessage)
-            *errorMessage = QObject::tr("运动控制器未连接");
+            // 中文翻译：运动控制器未连接
+            *errorMessage = QObject::tr("Motion controller not connected");
         return nullptr;
     }
     return mc;
@@ -35,7 +36,8 @@ bool resolveAxis(MotionControl* mc, const QString& axis, Axis* out, QString* err
     auto eAxis = enum_cast<Axis>(key.toStdString());
     if (!eAxis.has_value() || !mc->IsMotorCreated(eAxis.value())) {
         if (errorMessage)
-            *errorMessage = QObject::tr("轴 %1 未注册").arg(key);
+            // 中文翻译：轴 %1 未注册
+            *errorMessage = QObject::tr("Axis %1 is not registered").arg(key);
         return false;
     }
     *out = eAxis.value();
@@ -45,7 +47,8 @@ bool resolveAxis(MotionControl* mc, const QString& axis, Axis* out, QString* err
 bool isRelativeMode(const QString& mode)
 {
     return mode.compare(QStringLiteral("relative"), Qt::CaseInsensitive) == 0
-        || mode.compare(QStringLiteral("相对"), Qt::CaseInsensitive) == 0;
+        // 中文翻译：相对
+        || mode.compare(QStringLiteral("relatively"), Qt::CaseInsensitive) == 0;
 }
 
 QString stripIoKeyPrefix(const QString& tomlKey)
@@ -72,7 +75,8 @@ bool executeDeviceCommand(DeviceCommandQueue* queue,
 {
     if (!queue) {
         if (errorMessage)
-            *errorMessage = QObject::tr("设备命令队列不可用");
+            // 中文翻译：设备命令队列不可用
+            *errorMessage = QObject::tr("Device command queue is unavailable");
         return false;
     }
     const DeviceCommandResult result = queue->executeAndWait(
@@ -113,7 +117,8 @@ bool LegacyProcessMotionService::moveAxis(const QString& axis,
                 ? mc->MoveRelative(eAxis, target, velocity)
                 : mc->MoveAbsolute(eAxis, target, velocity);
             if (!ok)
-                error = QObject::tr("轴 %1 运动失败").arg(axis);
+                // 中文翻译：轴 %1 运动失败
+                error = QObject::tr("Axis %1 movement failed").arg(axis);
             return DeviceCommandResult{ok, error};
         }, errorMessage);
 }
@@ -125,7 +130,8 @@ bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
 {
     const bool sync = mode.compare(QStringLiteral("sync"), Qt::CaseInsensitive) == 0
         || mode.compare(QStringLiteral("synchronous"), Qt::CaseInsensitive) == 0
-        || mode.compare(QStringLiteral("同步"), Qt::CaseInsensitive) == 0;
+        // 中文翻译：同步
+        || mode.compare(QStringLiteral("sync"), Qt::CaseInsensitive) == 0;
     if (!sync) {
         for (const QVariant& item : rows) {
             const QVariantMap row = item.toMap();
@@ -151,7 +157,8 @@ bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
                 return DeviceCommandResult{false, error};
             if (QString::fromStdString(mc->GetName()) == QStringLiteral("GTN"))
                 return DeviceCommandResult{false,
-                    QObject::tr("GTN 控制器暂不支持同步多轴运动，请改为顺序执行")};
+                    // 中文翻译：GTN 控制器暂不支持同步多轴运动，请改为顺序执行
+                    QObject::tr("The GTN controller does not currently support synchronous multi-axis motion. Please execute it sequentially instead.")};
             vector<Axis> axes;
             vector<double> positions;
             double velocity = 5.0;
@@ -169,7 +176,8 @@ bool LegacyProcessMotionService::moveAxes(const QVariantList& rows,
             const bool ok = relative ? mc->MoveMRelative(axes, positions, velocity)
                                      : mc->MoveMAbsolute(axes, positions, velocity);
             if (!ok)
-                error = QObject::tr("同步多轴运动失败");
+                // 中文翻译：同步多轴运动失败
+                error = QObject::tr("Synchronized multi-axis motion failed");
             return DeviceCommandResult{ok, error};
         }, errorMessage);
 }
@@ -186,7 +194,8 @@ bool LegacyProcessMotionService::stopMotion(QString* errorMessage)
                 return DeviceCommandResult{false, error};
             const bool ok = mc->StopMotion() && mc->StopAllBuffer();
             if (!ok)
-                error = QObject::tr("停止运动失败");
+                // 中文翻译：停止运动失败
+                error = QObject::tr("Stop motion failed");
             return DeviceCommandResult{ok, error};
         }, errorMessage);
 }
@@ -218,16 +227,19 @@ bool LegacyProcessIoService::setOutput(const QString& signalType,
                     if (mc->m_mapDigitalOUT.count(e.value()))
                         ok = mc->DigitalOutputSet(e.value(), value.toBool() ? 1 : 0);
                     else
-                        error = QObject::tr("数字量输出 %1 未注册").arg(ioName);
+                        // 中文翻译：数字量输出 %1 未注册
+                        error = QObject::tr("Digital output %1 is not registered").arg(ioName);
                 }
             } else if (auto e = ioEnumFromKey<AnalogOUT>(ioName)) {
                 if (mc->m_mapAnalogOUT.count(e.value()))
                     ok = mc->AnalogOutputSet(e.value(), value.toDouble());
                 else
-                    error = QObject::tr("模拟量输出 %1 未注册").arg(ioName);
+                    // 中文翻译：模拟量输出 %1 未注册
+                    error = QObject::tr("Analog output %1 is not registered").arg(ioName);
             }
             if (!ok && error.isEmpty())
-                error = QObject::tr("输出信号 %1 设置失败").arg(ioName);
+                // 中文翻译：输出信号 %1 设置失败
+                error = QObject::tr("Output signal %1 setup failed").arg(ioName);
             return DeviceCommandResult{ok, error};
         }, errorMessage);
 }
@@ -244,7 +256,8 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
     auto analogEnum = analog ? ioEnumFromKey<AnalogIN>(ioName) : std::optional<AnalogIN>{};
     if ((!analog && !digitalEnum.has_value()) || (analog && !analogEnum.has_value())) {
         if (errorMessage)
-            *errorMessage = QObject::tr("输入信号 %1 未注册").arg(ioName);
+            // 中文翻译：输入信号 %1 未注册
+            *errorMessage = QObject::tr("Input signal %1 is not registered").arg(ioName);
         return false;
     }
     QElapsedTimer timer;
@@ -263,7 +276,8 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
                     return DeviceCommandResult{false, error};
             if (analog) {
                 if (!mc->m_mapAnalogIN.count(analogEnum.value()))
-                    return DeviceCommandResult{false, QObject::tr("输入信号 %1 未注册").arg(ioName)};
+                    // 中文翻译：输入信号 %1 未注册
+                    return DeviceCommandResult{false, QObject::tr("Input signal %1 is not registered").arg(ioName)};
                 double value = 0.0;
                 if (mc->AnalogInputGet(analogEnum.value(), value)
                     && std::abs(value - targetValue.toDouble()) < 1e-6) {
@@ -271,7 +285,8 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
                 }
             } else {
                 if (!mc->m_mapDigitalIN.count(digitalEnum.value()))
-                    return DeviceCommandResult{false, QObject::tr("输入信号 %1 未注册").arg(ioName)};
+                    // 中文翻译：输入信号 %1 未注册
+                    return DeviceCommandResult{false, QObject::tr("Input signal %1 is not registered").arg(ioName)};
                 int value = 0;
                 if (mc->DigitalInputGet(digitalEnum.value(), value)
                     && (value != 0) == targetValue.toBool()) {
@@ -287,7 +302,8 @@ bool LegacyProcessIoService::waitInput(const QString& signalType,
         QThread::msleep(static_cast<unsigned long>(interval));
     }
     if (errorMessage)
-        *errorMessage = QObject::tr("等待输入 %1 超时").arg(ioName);
+        // 中文翻译：等待输入 %1 超时
+        *errorMessage = QObject::tr("Timed out waiting for input %1").arg(ioName);
     return false;
 }
 

@@ -46,7 +46,8 @@ ProcessNodeEditDialog::ProcessNodeEditDialog(ProcessNode node, QWidget* parent)
     : QDialog(parent)
     , m_node(std::move(node))
 {
-    setWindowTitle(tr("编辑流程节点"));
+    // 中文翻译：编辑流程节点
+    setWindowTitle(tr("Edit process node"));
     resize(360, 240);
 
     auto* layout = new QVBoxLayout(this);
@@ -83,13 +84,17 @@ QWidget* ProcessNodeEditDialog::buildGeneralPage()
     auto* form = new QFormLayout(page);
 
     auto* typeLabel = new QLabel(processNodeTypeToString(m_node.type), page);
-    form->addRow(tr("类型"), typeLabel);
+    // 中文翻译：类型
+    form->addRow(tr("Type"), typeLabel);
 
     m_nameEdit = new QLineEdit(page);
-    form->addRow(tr("名称"), m_nameEdit);
+    // 中文翻译：名称
+    form->addRow(tr("Name"), m_nameEdit);
 
-    m_enabledCheck = new QCheckBox(tr("启用"), page);
-    form->addRow(tr("状态"), m_enabledCheck);
+    // 中文翻译：启用
+    m_enabledCheck = new QCheckBox(tr("enable"), page);
+    // 中文翻译：状态
+    form->addRow(tr("Status"), m_enabledCheck);
     return page;
 }
 
@@ -100,13 +105,16 @@ QWidget* ProcessNodeEditDialog::buildParameterPage()
 
     m_parameterTable = new QTableWidget(page);
     m_parameterTable->setColumnCount(2);
-    m_parameterTable->setHorizontalHeaderLabels({ tr("参数"), tr("值") });
+    // 中文翻译：参数；值
+    m_parameterTable->setHorizontalHeaderLabels({ tr("parameters"), tr("value") });
     m_parameterTable->horizontalHeader()->setStretchLastSection(true);
     layout->addWidget(m_parameterTable);
 
     auto* buttons = new QHBoxLayout();
-    auto* addButton = new QPushButton(tr("添加"), page);
-    auto* removeButton = new QPushButton(tr("删除"), page);
+    // 中文翻译：添加
+    auto* addButton = new QPushButton(tr("add"), page);
+    // 中文翻译：删除
+    auto* removeButton = new QPushButton(tr("Delete"), page);
     buttons->addWidget(addButton);
     buttons->addWidget(removeButton);
     buttons->addStretch(1);
@@ -137,7 +145,8 @@ QWidget* ProcessNodeEditDialog::buildPluginParameterPage()
     }
     auto* page = new QWidget(this);
     auto* layout = new QVBoxLayout(page);
-    layout->addWidget(new QLabel(tr("该步骤暂无插件参数页，使用兼容参数表。"), page));
+    // 中文翻译：该步骤暂无插件参数页，使用兼容参数表。
+    layout->addWidget(new QLabel(tr("There is currently no plug-in parameter page for this step, so use the compatible parameter table."), page));
     return page;
 }
 
@@ -149,7 +158,8 @@ QWidget* ProcessNodeEditDialog::buildWaitPage()
     m_waitDurationSpin = new QSpinBox(page);
     m_waitDurationSpin->setRange(0, 24 * 60 * 60 * 1000);
     m_waitDurationSpin->setSuffix(QStringLiteral(" ms"));
-    form->addRow(tr("等待时间"), m_waitDurationSpin);
+    // 中文翻译：等待时间
+    form->addRow(tr("waiting time"), m_waitDurationSpin);
     return page;
 }
 
@@ -196,54 +206,75 @@ QWidget* ProcessNodeEditDialog::buildTypedParameterPage()
 
     switch (m_node.type) {
     case ProcessNodeType::Start:
-        addText(QStringLiteral("variables"), tr("全局变量(JSON)"), QStringLiteral("[]"));
+        // 中文翻译：全局变量(JSON)
+        addText(QStringLiteral("variables"), tr("Global variables (JSON)"), QStringLiteral("[]"));
         break;
     case ProcessNodeType::Stop:
-        addText(QStringLiteral("message"), tr("停止消息"), QStringLiteral("流程结束"));
-        addBool(QStringLiteral("safeStopOutputs"), tr("停止时复位安全输出"));
-        addBool(QStringLiteral("stopMotion"), tr("停止时停止运动"));
+        // 中文翻译：停止消息；流程结束
+        addText(QStringLiteral("message"), tr("stop message"), QStringLiteral("End of process"));
+        // 中文翻译：停止时复位安全输出
+        addBool(QStringLiteral("safeStopOutputs"), tr("Reset safety outputs when stopped"));
+        // 中文翻译：停止时停止运动
+        addBool(QStringLiteral("stopMotion"), tr("Stop movement when stopped"));
         break;
     case ProcessNodeType::Axis:
-        addText(QStringLiteral("axis"), tr("轴"), QStringLiteral("X"));
-        addText(QStringLiteral("mode"), tr("模式 absolute/relative"), QStringLiteral("absolute"));
-        addDouble(QStringLiteral("target"), tr("目标位置"), -1000000.0, 1000000.0, QStringLiteral(" mm"));
-        addDouble(QStringLiteral("velocity"), tr("速度"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
-        addInt(QStringLiteral("timeoutMs"), tr("超时"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));
+        // 中文翻译：轴
+        addText(QStringLiteral("axis"), tr("axis"), QStringLiteral("X"));
+        // 中文翻译：模式 absolute/relative
+        addText(QStringLiteral("mode"), tr("Mode absolute/relative"), QStringLiteral("absolute"));
+        // 中文翻译：目标位置
+        addDouble(QStringLiteral("target"), tr("Target location"), -1000000.0, 1000000.0, QStringLiteral(" mm"));
+        // 中文翻译：速度
+        addDouble(QStringLiteral("velocity"), tr("speed"), 0.0, 1000000.0, QStringLiteral(" mm/s"));
+        // 中文翻译：超时
+        addInt(QStringLiteral("timeoutMs"), tr("timeout"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));
         break;
     case ProcessNodeType::AxesMove:
         // 多轴运动使用独立表格页 buildMultiAxisPage()。
         break;
     case ProcessNodeType::IO: {
-        auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("输出类型"), { QStringLiteral("digital"), QStringLiteral("analog") });
-        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("IO 名"), ioNames(ProcessIoBucket::DigitalOutput));
+        // 中文翻译：输出类型
+        auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("Output type"), { QStringLiteral("digital"), QStringLiteral("analog") });
+        // 中文翻译：IO 名
+        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("IO name"), ioNames(ProcessIoBucket::DigitalOutput));
         connect(typeCombo, &QComboBox::currentTextChanged, this, [ioCombo](const QString& text) {
             ioCombo->clear();
             ioCombo->addItems(text == QStringLiteral("analog")
                 ? ioNames(ProcessIoBucket::AnalogOutput)
                 : ioNames(ProcessIoBucket::DigitalOutput));
         });
-        addText(QStringLiteral("value"), tr("值"), QStringLiteral("true"));
+        // 中文翻译：值
+        addText(QStringLiteral("value"), tr("value"), QStringLiteral("true"));
         break;
     }
     case ProcessNodeType::Monitor: {
-        auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("输入类型"), { QStringLiteral("digital"), QStringLiteral("analog") });
-        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("输入 IO"), ioNames(ProcessIoBucket::DigitalInput));
+        // 中文翻译：输入类型
+        auto* typeCombo = addCombo(QStringLiteral("signalType"), tr("input type"), { QStringLiteral("digital"), QStringLiteral("analog") });
+        // 中文翻译：输入 IO
+        auto* ioCombo = addCombo(QStringLiteral("ioName"), tr("Enter IO"), ioNames(ProcessIoBucket::DigitalInput));
         connect(typeCombo, &QComboBox::currentTextChanged, this, [ioCombo](const QString& text) {
             ioCombo->clear();
             ioCombo->addItems(text == QStringLiteral("analog")
                 ? ioNames(ProcessIoBucket::AnalogInput)
                 : ioNames(ProcessIoBucket::DigitalInput));
         });
-        addBool(QStringLiteral("targetValue"), tr("目标为 true"));
-        addInt(QStringLiteral("timeoutMs"), tr("超时"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));
-        addInt(QStringLiteral("pollIntervalMs"), tr("刷新间隔"), 10, 60000, QStringLiteral(" ms"));
+        // 中文翻译：目标为 true
+        addBool(QStringLiteral("targetValue"), tr("target is true"));
+        // 中文翻译：超时
+        addInt(QStringLiteral("timeoutMs"), tr("timeout"), 0, 24 * 60 * 60 * 1000, QStringLiteral(" ms"));
+        // 中文翻译：刷新间隔
+        addInt(QStringLiteral("pollIntervalMs"), tr("refresh interval"), 10, 60000, QStringLiteral(" ms"));
         break;
     }
     case ProcessNodeType::Cutting:
-        addText(QStringLiteral("selectionMode"), tr("选择模式"), QStringLiteral("allEnabled"));
-        addInt(QStringLiteral("startNumber"), tr("起始序号"), 1, 1000000);
-        addInt(QStringLiteral("endNumber"), tr("结束序号(0=不限)"), 0, 1000000);
-        addText(QStringLiteral("compensationIndex"), tr("补偿索引"));
+        // 中文翻译：选择模式
+        addText(QStringLiteral("selectionMode"), tr("Select mode"), QStringLiteral("allEnabled"));
+        // 中文翻译：起始序号
+        addInt(QStringLiteral("startNumber"), tr("Starting sequence number"), 1, 1000000);
+        // 中文翻译：结束序号(0=不限)
+        addInt(QStringLiteral("endNumber"), tr("End sequence number (0=no limit)"), 0, 1000000);
+        // 中文翻译：补偿索引
+        addText(QStringLiteral("compensationIndex"), tr("Compensation Index"));
         break;
     default:
         break;
@@ -258,12 +289,14 @@ QWidget* ProcessNodeEditDialog::buildAxisPage()
 
     m_axisNameEdit = new QLineEdit(page);
     m_axisNameEdit->setPlaceholderText(QStringLiteral("X"));
-    form->addRow(tr("轴名称"), m_axisNameEdit);
+    // 中文翻译：轴名称
+    form->addRow(tr("axis name"), m_axisNameEdit);
 
     m_axisPositionSpin = new QDoubleSpinBox(page);
     m_axisPositionSpin->setRange(-1000000.0, 1000000.0);
     m_axisPositionSpin->setDecimals(3);
-    form->addRow(tr("目标位置"), m_axisPositionSpin);
+    // 中文翻译：目标位置
+    form->addRow(tr("Target location"), m_axisPositionSpin);
     return page;
 }
 
@@ -273,19 +306,24 @@ QWidget* ProcessNodeEditDialog::buildMultiAxisPage()
     auto* layout = new QVBoxLayout(page);
     auto* form = new QFormLayout();
     m_multiModeCombo = new QComboBox(page);
-    m_multiModeCombo->addItem(tr("顺序执行"), QStringLiteral("sequential"));
-    m_multiModeCombo->addItem(tr("同步执行"), QStringLiteral("sync"));
-    form->addRow(tr("多轴模式"), m_multiModeCombo);
+    // 中文翻译：顺序执行
+    m_multiModeCombo->addItem(tr("sequential execution"), QStringLiteral("sequential"));
+    // 中文翻译：同步执行
+    m_multiModeCombo->addItem(tr("Synchronous execution"), QStringLiteral("sync"));
+    // 中文翻译：多轴模式
+    form->addRow(tr("multi-axis mode"), m_multiModeCombo);
     layout->addLayout(form);
 
     m_axesTable = new QTableWidget(page);
     m_axesTable->setColumnCount(5);
-    m_axesTable->setHorizontalHeaderLabels({ tr("轴"), tr("模式"), tr("目标位置"), tr("速度"), tr("操作") });
+    // 中文翻译：轴；模式；目标位置；速度；操作
+    m_axesTable->setHorizontalHeaderLabels({ tr("axis"), tr("mode"), tr("Target location"), tr("speed"), tr("Operation") });
     m_axesTable->horizontalHeader()->setStretchLastSection(true);
     layout->addWidget(m_axesTable);
 
     auto* row = new QHBoxLayout();
-    auto* addButton = new QPushButton(tr("添加轴"), page);
+    // 中文翻译：添加轴
+    auto* addButton = new QPushButton(tr("Add axis"), page);
     row->addWidget(addButton);
     row->addStretch();
     layout->addLayout(row);
@@ -304,8 +342,10 @@ void ProcessNodeEditDialog::addAxisRow(const QVariantMap& row)
     m_axesTable->setCellWidget(r, 0, axis);
 
     auto* mode = new QComboBox(m_axesTable);
-    mode->addItem(tr("绝对"), QStringLiteral("absolute"));
-    mode->addItem(tr("相对"), QStringLiteral("relative"));
+    // 中文翻译：绝对
+    mode->addItem(tr("Absolutely"), QStringLiteral("absolute"));
+    // 中文翻译：相对
+    mode->addItem(tr("relatively"), QStringLiteral("relative"));
     const int modeIndex = mode->findData(row.value(QStringLiteral("mode"), QStringLiteral("absolute")).toString());
     mode->setCurrentIndex(modeIndex < 0 ? 0 : modeIndex);
     m_axesTable->setCellWidget(r, 1, mode);
@@ -322,7 +362,8 @@ void ProcessNodeEditDialog::addAxisRow(const QVariantMap& row)
     velocity->setValue(row.value(QStringLiteral("velocity"), 5.0).toDouble());
     m_axesTable->setCellWidget(r, 3, velocity);
 
-    auto* del = new QPushButton(tr("删除"), m_axesTable);
+    // 中文翻译：删除
+    auto* del = new QPushButton(tr("Delete"), m_axesTable);
     connect(del, &QPushButton::clicked, this, [this, del] {
         for (int i = 0; i < m_axesTable->rowCount(); ++i) {
             if (m_axesTable->cellWidget(i, 4) == del) {

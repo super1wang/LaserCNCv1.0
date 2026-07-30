@@ -131,45 +131,58 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
     if (coneMaker.IsDone()) {
         TopoDS_Shape coneShape = coneMaker.Shape();
         BRepMesh_IncrementalMesh(coneShape, 0.5);
-        Handle(AIS_Shape) coneAis = new AIS_Shape(coneShape);
-        coneAis->SetColor(Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB));
-        coneAis->SetMaterial(Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_ShinyPlastified));
-        // 模拟刀头是置顶辅助对象。实体锥若留在默认 Z 层，会被机床实体遮住，
-        // 而同组的置顶线框仍然可见，最终看起来就像刀头只能以线框显示。
-        // 同时设置对象自己的显示模式，保证隐藏后再次显示以及全局线框切换时
-        // 仍使用实体着色 presentation。
+        // 与工件/机台模型使用相同的 GraphicsScene + InteractiveContext
+        // 显示链。先注册 AIS，再通过 context 设置 own display mode 和
+        // 着色属性，最后重建 presentation，避免只留下 mode 0 的线框缓存。
+        Handle(AIS_Shape) coneAis =
+            scene->displayShape(coneShape, false, false, false);
         coneAis->SetDisplayMode(AIS_Shaded);
-        ctx->Display(coneAis, AIS_Shaded, 0, Standard_False);
+        ctx->SetDisplayMode(coneAis, AIS_Shaded, Standard_False);
+        ctx->SetColor(coneAis,
+                      Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB),
+                      Standard_False);
+        ctx->SetMaterial(
+            coneAis,
+            Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_ShinyPlastified),
+            Standard_False);
+        coneAis->Attributes()->SetFaceBoundaryDraw(Standard_False);
         ctx->SetZLayer(coneAis, Graphic3d_ZLayerId_Topmost);
         ctx->Deactivate(coneAis);
+        ctx->Redisplay(coneAis, Standard_False);
         axisGuideAis.insert(QStringLiteral("head:cone"), coneAis);
     } else {
         LCNC_WARN(lcnc::LogCode::Generic,
-                  "MachineGuideRenderer::refresh failed to create cutter head cone");
-    }
+                  "MachineGuideRenderer::refresh failed to create shaded cutter head cone; "
+                  "using wireframe fallback");
 
-    TopoDS_Compound coneWire;
-    BRep_Builder builder;
-    builder.MakeCompound(coneWire);
-    BRepBuilderAPI_MakeEdge baseMaker(
-        gp_Circ(gp_Ax2(coneBaseCenter, gp_Dir(0.0, 0.0, 1.0)), kHeadConeRadius));
-    if (baseMaker.IsDone())
-        builder.Add(coneWire, baseMaker.Edge());
-    for (int i = 0; i < 8; ++i) {
-        const double angle = (2.0 * M_PI * i) / 8.0;
-        const gp_Pnt basePoint(kHeadConeRadius * std::cos(angle),
-                               kHeadConeRadius * std::sin(angle),
-                               kHeadConeHeight);
-        BRepBuilderAPI_MakeEdge sideMaker(coneTip, basePoint);
-        if (sideMaker.IsDone())
-            builder.Add(coneWire, sideMaker.Edge());
+        // 只有实体构建失败时才退化为线框，不能再用置顶线框覆盖正常的着色实体。
+        TopoDS_Compound coneWire;
+        BRep_Builder builder;
+        builder.MakeCompound(coneWire);
+        BRepBuilderAPI_MakeEdge baseMaker(
+            gp_Circ(gp_Ax2(coneBaseCenter, gp_Dir(0.0, 0.0, 1.0)), kHeadConeRadius));
+        if (baseMaker.IsDone())
+            builder.Add(coneWire, baseMaker.Edge());
+        for (int i = 0; i < 8; ++i) {
+            const double angle = (2.0 * M_PI * i) / 8.0;
+            const gp_Pnt basePoint(kHeadConeRadius * std::cos(angle),
+                                   kHeadConeRadius * std::sin(angle),
+                                   kHeadConeHeight);
+            BRepBuilderAPI_MakeEdge sideMaker(coneTip, basePoint);
+            if (sideMaker.IsDone())
+                builder.Add(coneWire, sideMaker.Edge());
+        }
+        Handle(AIS_Shape) wireAis =
+            scene->displayShape(coneWire, false, false, false);
+        scene->setShapeColor(
+            wireAis,
+            Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB),
+            false);
+        wireAis->SetWidth(3.0);
+        ctx->SetZLayer(wireAis, Graphic3d_ZLayerId_Topmost);
+        ctx->Deactivate(wireAis);
+        axisGuideAis.insert(QStringLiteral("head:wire"), wireAis);
     }
-    Handle(AIS_Shape) wireAis = scene->displayShape(coneWire, false, false, false);
-    scene->setShapeColor(wireAis, Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB), false);
-    wireAis->SetWidth(3.0);
-    ctx->SetZLayer(wireAis, Graphic3d_ZLayerId_Topmost);
-    ctx->Deactivate(wireAis);
-    axisGuideAis.insert(QStringLiteral("head:wire"), wireAis);
 
     applyVisibility(gd);
     updateTransforms(gd, kin, cutterHeadWorldTip);

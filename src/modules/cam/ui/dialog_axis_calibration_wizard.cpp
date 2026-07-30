@@ -42,7 +42,8 @@ DialogAxisCalibrationWizard::DialogAxisCalibrationWizard(CamModule* camModule, Q
     , m_camModule(camModule)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "DialogAxisCalibrationWizard ctor");
-    setWindowTitle(tr("机台坐标系标定向导"));
+    // 中文翻译：机台坐标系标定向导
+    setWindowTitle(tr("Machine coordinate system calibration wizard"));
     // 非模态：用户在向导打开时仍能与 OCC 视图交互完成拾取。
     setWindowFlags(windowFlags() | Qt::Tool);
     setAttribute(Qt::WA_DeleteOnClose, false);
@@ -78,25 +79,34 @@ void DialogAxisCalibrationWizard::buildUi()
     root->addWidget(m_lblCalibStatus);
 
     m_lblHint = new QLabel(
-        tr("依次拾取 A 轴、C 轴参考面，再拾取切割头下端面。\n"
-           "提交时只平移机台模型几何，使拾取到的模型交点对齐到构型配置页填写的旋转中心。"),
+        // 中文翻译：依次拾取 A 轴、C 轴参考面，再拾取切割头下端面。\n
+        tr("Select the A-axis and C-axis reference surfaces in sequence, and then select the lower end surface of the cutting head."
+           // 中文翻译：提交时只平移机台模型几何，使拾取到的模型交点对齐到构型配置页填写的旋转中心。
+           "When submitting, only translate the machine model geometry so that the picked model intersection is aligned to the rotation center filled in the configuration configuration page."),
         this);
     m_lblHint->setWordWrap(true);
     m_lblHint->setStyleSheet("color: #555; font-size: 11px;");
     root->addWidget(m_lblHint);
 
-    auto* groupPick = new QGroupBox(tr("第 1-3 步：拾取参考点"), this);
+    // 中文翻译：第 1-3 步：拾取参考点
+    auto* groupPick = new QGroupBox(tr("Steps 1-3: Pick a reference point"), this);
     auto* pickGrid = new QGridLayout(groupPick);
     pickGrid->setHorizontalSpacing(8);
     pickGrid->setVerticalSpacing(6);
     pickGrid->setColumnStretch(1, 1);
 
-    m_btnPickA = new QPushButton(tr("拾取 A 轴参考面..."), groupPick);
-    m_btnPickC = new QPushButton(tr("拾取 C 轴参考面..."), groupPick);
-    m_btnPickHead = new QPushButton(tr("拾取切割头下端面..."), groupPick);
-    m_lblAStatus = new QLabel(tr("（未拾取）"), groupPick);
-    m_lblCStatus = new QLabel(tr("（未拾取）"), groupPick);
-    m_lblHeadStatus = new QLabel(tr("（未拾取）"), groupPick);
+    // 中文翻译：拾取 A 轴参考面...
+    m_btnPickA = new QPushButton(tr("Pick the A-axis reference plane..."), groupPick);
+    // 中文翻译：拾取 C 轴参考面...
+    m_btnPickC = new QPushButton(tr("Pick the C-axis reference plane..."), groupPick);
+    // 中文翻译：拾取切割头下端面...
+    m_btnPickHead = new QPushButton(tr("Pick up the lower end face of the cutting head..."), groupPick);
+    // 中文翻译：（未拾取）
+    m_lblAStatus = new QLabel(tr("(not picked up)"), groupPick);
+    // 中文翻译：（未拾取）
+    m_lblCStatus = new QLabel(tr("(not picked up)"), groupPick);
+    // 中文翻译：（未拾取）
+    m_lblHeadStatus = new QLabel(tr("(not picked up)"), groupPick);
     for (QLabel* lbl : {m_lblAStatus, m_lblCStatus, m_lblHeadStatus}) {
         lbl->setStyleSheet("color: #888;");
         lbl->setMinimumWidth(280);
@@ -111,25 +121,34 @@ void DialogAxisCalibrationWizard::buildUi()
     root->addWidget(groupPick);
 
     // ── 机台标定位（snap 显示姿态 + 实时显示当前 AC 中心 / 切割嘴） ──
-    auto* groupPose = new QGroupBox(tr("机台标定位"), this);
+    // 中文翻译：机台标定位
+    auto* groupPose = new QGroupBox(tr("Machine mark positioning"), this);
     auto* poseLayout = new QFormLayout(groupPose);
-    m_btnEnterStandardPose = new QPushButton(tr("进入机台标定位（A=0, C=0, XY 对齐）"), groupPose);
+    // 中文翻译：进入机台标定位（A=0, C=0, XY 对齐）
+    m_btnEnterStandardPose = new QPushButton(tr("Enter the machine calibration position (A=0, C=0, XY alignment)"), groupPose);
     m_btnEnterStandardPose->setEnabled(false);
     m_btnEnterStandardPose->setToolTip(
-        tr("将模型显示姿态归位：A 轴角=0、C 轴角=0、XY 把切割头与 AC 中心对齐。"
-           "需要先完成上方三段拾取。"));
-    m_lblCurrentAcCenter = new QLabel(tr("（待进入标定位）"), groupPose);
-    m_lblCurrentCutterHead = new QLabel(tr("（待进入标定位）"), groupPose);
+        // 中文翻译：将模型显示姿态归位：A 轴角=0、C 轴角=0、XY 把切割头与 AC 中心对齐。
+        tr("Return the model display attitude to its original position: A-axis angle=0, C-axis angle=0, XY, and align the cutting head with the AC center."
+           // 中文翻译：需要先完成上方三段拾取。
+           "You need to complete the three pickups above first."));
+    // 中文翻译：（待进入标定位）
+    m_lblCurrentAcCenter = new QLabel(tr("(To be entered into the target position)"), groupPose);
+    // 中文翻译：（待进入标定位）
+    m_lblCurrentCutterHead = new QLabel(tr("(To be entered into the target position)"), groupPose);
     for (QLabel* lbl : {m_lblCurrentAcCenter, m_lblCurrentCutterHead}) {
         lbl->setStyleSheet("color:#888;");
         lbl->setMinimumWidth(280);
     }
     poseLayout->addRow(m_btnEnterStandardPose);
-    poseLayout->addRow(tr("当前 AC 中心:"), m_lblCurrentAcCenter);
-    poseLayout->addRow(tr("当前切割嘴 (世界):"), m_lblCurrentCutterHead);
+    // 中文翻译：当前 AC 中心:
+    poseLayout->addRow(tr("Current AC Center:"), m_lblCurrentAcCenter);
+    // 中文翻译：当前切割嘴 (世界):
+    poseLayout->addRow(tr("Current cutting mouth (world):"), m_lblCurrentCutterHead);
     root->addWidget(groupPose);
 
-    auto* groupPhys = new QGroupBox(tr("第 4 步：确认构型旋转中心（只读）"), this);
+    // 中文翻译：第 4 步：确认构型旋转中心（只读）
+    auto* groupPhys = new QGroupBox(tr("Step 4: Confirm configuration center of rotation (read only)"), this);
     auto* physForm = new QFormLayout(groupPhys);
     m_physX = makeMillimeterSpin(groupPhys);
     m_physY = makeMillimeterSpin(groupPhys);
@@ -137,11 +156,15 @@ void DialogAxisCalibrationWizard::buildUi()
     m_physX->setEnabled(false);
     m_physY->setEnabled(false);
     m_physZ->setEnabled(false);
-    physForm->addRow(tr("旋转中心 X:"), m_physX);
-    physForm->addRow(tr("旋转中心 Y:"), m_physY);
-    physForm->addRow(tr("旋转中心 Z:"), m_physZ);
+    // 中文翻译：旋转中心 X:
+    physForm->addRow(tr("Center of rotation X:"), m_physX);
+    // 中文翻译：旋转中心 Y:
+    physForm->addRow(tr("Rotation center Y:"), m_physY);
+    // 中文翻译：旋转中心 Z:
+    physForm->addRow(tr("Center of rotation Z:"), m_physZ);
     auto* lblAngleHint = new QLabel(
-        tr("如需修改旋转中心，请在“应用程序选项 / 机台构型”页填写；本向导不会修改物理中心。"),
+        // 中文翻译：如需修改旋转中心，请在“应用程序选项 / 机台构型”页填写；本向导不会修改物理中心。
+        tr("If you need to modify the rotation center, please fill it in the \"Application Options/Machine Configuration\" page; this wizard will not modify the physical center."),
         groupPhys);
     lblAngleHint->setWordWrap(true);
     lblAngleHint->setStyleSheet("color:#888;font-size:11px;");
@@ -149,9 +172,12 @@ void DialogAxisCalibrationWizard::buildUi()
     root->addWidget(groupPhys);
 
     auto* btnRow = new QHBoxLayout();
-    m_btnReset = new QPushButton(tr("重置"), this);
-    m_btnSubmit = new QPushButton(tr("提交标定"), this);
-    m_btnCancel = new QPushButton(tr("关闭"), this);
+    // 中文翻译：重置
+    m_btnReset = new QPushButton(tr("reset"), this);
+    // 中文翻译：提交标定
+    m_btnSubmit = new QPushButton(tr("Submit calibration"), this);
+    // 中文翻译：关闭
+    m_btnCancel = new QPushButton(tr("Close"), this);
     m_btnSubmit->setDefault(true);
     btnRow->addWidget(m_btnReset);
     btnRow->addStretch(1);
@@ -172,9 +198,12 @@ void DialogAxisCalibrationWizard::buildUi()
 QString DialogAxisCalibrationWizard::stageDisplayName(Stage stage) const
 {
     switch (stage) {
-    case Stage::AAxis:      return tr("A 轴参考面");
-    case Stage::CAxis:      return tr("C 轴参考面");
-    case Stage::CutterHead: return tr("切割头下端面");
+    // 中文翻译：A 轴参考面
+    case Stage::AAxis:      return tr("A-axis reference plane");
+    // 中文翻译：C 轴参考面
+    case Stage::CAxis:      return tr("C-axis reference plane");
+    // 中文翻译：切割头下端面
+    case Stage::CutterHead: return tr("Lower end of cutting head");
     }
     return {};
 }
@@ -223,7 +252,8 @@ void DialogAxisCalibrationWizard::refreshSummary()
             lbl->setText(formatPoint(p));
             lbl->setStyleSheet("color: #1f7a1f;");
         } else {
-            lbl->setText(tr("（未拾取）"));
+            // 中文翻译：（未拾取）
+            lbl->setText(tr("(not picked up)"));
             lbl->setStyleSheet("color: #888;");
         }
     };
@@ -232,11 +262,13 @@ void DialogAxisCalibrationWizard::refreshSummary()
     setStatus(m_lblHeadStatus, m_headFilled, m_headCenter);
 
     if (m_awaitingPick && m_lblHint) {
-        m_lblHint->setText(tr("正在拾取：%1。请在 3D 视图左键点击平面，右键 / ESC 取消。")
+        // 中文翻译：正在拾取：%1。请在 3D 视图左键点击平面，右键 / ESC 取消。
+        m_lblHint->setText(tr("Picking up: %1. Please left-click the plane in the 3D view, right-click/ESC to cancel.")
                                .arg(stageDisplayName(m_awaitingStage)));
         m_lblHint->setStyleSheet("color: #c98512; font-size: 11px; font-weight: bold;");
     } else {
-        m_lblHint->setText(tr("依次拾取 A 轴、C 轴参考面，再拾取切割头下端面，然后提交模型对齐。"));
+        // 中文翻译：依次拾取 A 轴、C 轴参考面，再拾取切割头下端面，然后提交模型对齐。
+        m_lblHint->setText(tr("Select the A-axis and C-axis reference surfaces in sequence, then select the lower end surface of the cutting head, and then submit the model for alignment."));
         m_lblHint->setStyleSheet("color: #555; font-size: 11px;");
     }
 
@@ -250,11 +282,13 @@ void DialogAxisCalibrationWizard::refreshSummary()
         gp_Pnt c;
         if (m_camModule->currentAcRotationCenter(c)) {
             m_lblCalibStatus->setText(tr(
-                "● 当前构型旋转中心: %1").arg(formatPoint(c)));
+                // 中文翻译：● 当前构型旋转中心: %1
+                "● Current configuration rotation center: %1").arg(formatPoint(c)));
             m_lblCalibStatus->setStyleSheet(
                 "color:#fff;background:#1f7a1f;padding:4px 6px;border-radius:3px;font-weight:bold;");
         } else {
-            m_lblCalibStatus->setText(tr("○ 尚未配置旋转中心  请先到应用程序选项 / 机台构型页填写"));
+            // 中文翻译：○ 尚未配置旋转中心  请先到应用程序选项 / 机台构型页填写
+            m_lblCalibStatus->setText(tr("○ The rotation center has not been configured yet. Please go to the application options/machine configuration page to fill it in first."));
             m_lblCalibStatus->setStyleSheet(
                 "color:#fff;background:#a55;padding:4px 6px;border-radius:3px;font-weight:bold;");
         }
@@ -306,11 +340,13 @@ void DialogAxisCalibrationWizard::onResetClicked()
     m_awaitingPick = false;
     m_standardPoseEntered = false;
     if (m_lblCurrentAcCenter) {
-        m_lblCurrentAcCenter->setText(tr("（待进入标定位）"));
+        // 中文翻译：（待进入标定位）
+        m_lblCurrentAcCenter->setText(tr("(To be entered into the target position)"));
         m_lblCurrentAcCenter->setStyleSheet("color:#888;");
     }
     if (m_lblCurrentCutterHead) {
-        m_lblCurrentCutterHead->setText(tr("（待进入标定位）"));
+        // 中文翻译：（待进入标定位）
+        m_lblCurrentCutterHead->setText(tr("(To be entered into the target position)"));
         m_lblCurrentCutterHead->setStyleSheet("color:#888;");
     }
     refreshSummary();

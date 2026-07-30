@@ -47,7 +47,8 @@ bool GtnBufferedCommandSink::flush(QString* errorMessage)
             while (m_token->isPaused())
                 QThread::msleep(10);
             if (m_token->isStopping()) {
-                if (errorMessage) *errorMessage = QStringLiteral("切割已被中断");
+                // 中文翻译：切割已被中断
+                if (errorMessage) *errorMessage = QStringLiteral("Cutting has been interrupted");
                 return false;
             }
         }
@@ -64,7 +65,8 @@ bool GtnBufferedCommandSink::startProgram(QString* errorMessage)
     }
     // 与 ACS 的 LoadBuffer+RunBuffer 对应：GTN 走 GTN_CrdDataEx + GTN_CrdStart。
     if (!m_gtn->SendCommand()) {
-        if (errorMessage) *errorMessage = QStringLiteral("GTN SendCommand 失败");
+        // 中文翻译：GTN SendCommand 失败
+        if (errorMessage) *errorMessage = QStringLiteral("GTN SendCommand failed");
         LCNC_ERR(lcnc::LogCode::Generic, "GtnBufferedCommandSink::flush SendCommand failed");
         return false;
     }

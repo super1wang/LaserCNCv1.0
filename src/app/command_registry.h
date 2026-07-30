@@ -13,7 +13,8 @@ namespace lcnc::app {
  * 调用顺序：
  *   1. 创建/赋值 AppContext 与 CommandContainer 后调用本函数；
  *   2. 函数内部依次调用 cad/cam/process 模块的 registerCommands；
- *   3. 注册"显示"模块自有命令（FitAll、Wireframe、Shaded 等）；
+ // 中文翻译：显示
+ *   3. 注册"show"模块自有命令（FitAll、Wireframe、Shaded 等）；
  *   4. 显示命令执行时通过 AppContext 动态取得当前 active OccView。
  *
  * 不持有任何对象指针；调用方负责对象生命周期。

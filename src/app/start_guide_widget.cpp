@@ -65,14 +65,16 @@ StartGuideWidget::StartGuideWidget(QWidget* parent)
     root->setContentsMargins(24, 22, 24, 22);
     root->setSpacing(14);
 
-    auto* title = new QLabel(tr("开始"), this);
+    // 中文翻译：开始
+    auto* title = new QLabel(tr("start"), this);
     QFont titleFont = title->font();
     titleFont.setPointSize(22);
     titleFont.setBold(true);
     title->setFont(titleFont);
     root->addWidget(title);
 
-    auto* hint = new QLabel(tr("最近打开的工程和 STEP 文件"), this);
+    // 中文翻译：最近打开的工程和 STEP 文件
+    auto* hint = new QLabel(tr("Recently opened projects and STEP files"), this);
     hint->setStyleSheet(QStringLiteral("color: #687385;"));
     root->addWidget(hint);
 
@@ -105,7 +107,8 @@ void StartGuideWidget::rebuild()
     }
 
     if (m_recentFiles.isEmpty()) {
-        auto* empty = new QLabel(tr("还没有最近文件。通过“打开”载入 .lcnc 工程或 STEP 文件后会显示在这里。"), this);
+        // 中文翻译：还没有最近文件。通过“打开”载入 .lcnc 工程或 STEP 文件后会显示在这里。
+        auto* empty = new QLabel(tr("There are no recent files yet. After loading the .lcnc project or STEP file via \"Open\", it will be displayed here."), this);
         empty->setAlignment(Qt::AlignCenter);
         empty->setMinimumHeight(220);
         empty->setStyleSheet(QStringLiteral("color: #7B8794;"));

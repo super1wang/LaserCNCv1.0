@@ -29,8 +29,10 @@ bool readDigitalValue(const ProcessMonitorPollContext& context,
     *value = false;
     if (errorMessage)
         *errorMessage = context.simulationMode
-            ? QObject::tr("仿真模式：IO 不可用")
-            : QObject::tr("数字量读取器未配置");
+            // 中文翻译：仿真模式：IO 不可用
+            ? QObject::tr("Emulation mode: IO not available")
+            // 中文翻译：数字量读取器未配置
+            : QObject::tr("Digital reader not configured");
     return false;
 }
 
@@ -49,14 +51,17 @@ bool readAnalogValue(const ProcessMonitorPollContext& context,
     *value = 0.0;
     if (errorMessage)
         *errorMessage = context.simulationMode
-            ? QObject::tr("仿真模式：模拟量不可用")
-            : QObject::tr("模拟量读取器未配置");
+            // 中文翻译：仿真模式：模拟量不可用
+            ? QObject::tr("Simulation mode: Analog values are not available")
+            // 中文翻译：模拟量读取器未配置
+            : QObject::tr("Analog reader not configured");
     return false;
 }
 
 QString channelText(const QString& channel)
 {
-    return channel.trimmed().isEmpty() ? QObject::tr("未配置") : channel.trimmed();
+    // 中文翻译：未配置
+    return channel.trimmed().isEmpty() ? QObject::tr("Not configured") : channel.trimmed();
 }
 
 ProcessMonitorStateItem makeDigitalState(const ProcessMonitorPollContext& context,
@@ -83,7 +88,8 @@ ProcessMonitorStateItem makeDigitalState(const ProcessMonitorPollContext& contex
     item.boolValue = value;
     item.alarm = item.available && gateEnabled && value;
     if (!item.available) {
-        item.detail = errorMessage.isEmpty() ? QObject::tr("信号不可用") : errorMessage;
+        // 中文翻译：信号不可用
+        item.detail = errorMessage.isEmpty() ? QObject::tr("Signal not available") : errorMessage;
     } else {
         item.detail = item.alarm ? activeDetail : inactiveDetail;
     }
@@ -113,13 +119,15 @@ ProcessMonitorStateItem makeAnalogState(const ProcessMonitorPollContext& context
     QString errorMessage;
     item.available = readAnalogValue(context, channel, &item.numericValue, &errorMessage);
     if (!item.available) {
-        item.detail = errorMessage.isEmpty() ? QObject::tr("信号不可用") : errorMessage;
+        // 中文翻译：信号不可用
+        item.detail = errorMessage.isEmpty() ? QObject::tr("Signal not available") : errorMessage;
         return item;
     }
 
     item.displayValue = item.numericValue * static_cast<double>(conversion);
     item.alarm = item.displayValue < threshold;
-    item.detail = QObject::tr("当前值 %1 %2，阈值 %3 %2")
+    // 中文翻译：当前值 %1 %2，阈值 %3 %2
+    item.detail = QObject::tr("Current value %1 %2, threshold %3 %2")
         .arg(QString::number(item.displayValue, 'f', 3),
              unit,
              QString::number(threshold, 'f', 3));
@@ -129,8 +137,10 @@ ProcessMonitorStateItem makeAnalogState(const ProcessMonitorPollContext& context
 QString alarmMessageForState(const ProcessMonitorStateItem& state)
 {
     if (state.digital)
-        return QObject::tr("%1 异常").arg(state.title);
-    return QObject::tr("%1 异常: %2").arg(state.title, state.detail);
+        // 中文翻译：%1 异常
+        return QObject::tr("%1 exception").arg(state.title);
+    // 中文翻译：%1 异常: %2
+    return QObject::tr("%1 Exception: %2").arg(state.title, state.detail);
 }
 
 ProcessMonitorSnapshot buildSnapshot(const ProcessMonitorPollContext& context)
@@ -147,55 +157,73 @@ ProcessMonitorSnapshot buildSnapshot(const ProcessMonitorPollContext& context)
         bool value = false;
         QString errorMessage;
         if (!readDigitalValue(context, output.channel, &value, &errorMessage) && !errorMessage.isEmpty()) {
-            snapshot.warnings.append(QObject::tr("%1 读取失败: %2").arg(output.name, errorMessage));
+            // 中文翻译：%1 读取失败: %2
+            snapshot.warnings.append(QObject::tr("%1 read failed: %2").arg(output.name, errorMessage));
         }
         snapshot.digitalOutputs.insert(output.name, value);
     }
 
-    const bool blowOn = snapshot.digitalOutputs.value(QObject::tr("吹气"), false);
+    // 中文翻译：吹气
+    const bool blowOn = snapshot.digitalOutputs.value(QObject::tr("blow air"), false);
     snapshot.states.append(makeDigitalState(context,
                                             QStringLiteral("interlock"),
-                                            QObject::tr("门禁"),
+                                            // 中文翻译：门禁
+                                            QObject::tr("access control"),
                                             context.interlockChannel,
                                             context.settings.interLockEnabled,
                                             true,
-                                            QObject::tr("门禁已触发"),
-                                            QObject::tr("门禁正常")));
+                                            // 中文翻译：门禁已触发
+                                            QObject::tr("Access control has been triggered"),
+                                            // 中文翻译：门禁正常
+                                            QObject::tr("Access control is normal")));
     snapshot.states.append(makeDigitalState(context,
                                             QStringLiteral("safetyLightCurtain"),
-                                            QObject::tr("安全光栅"),
+                                            // 中文翻译：安全光栅
+                                            QObject::tr("Safety grating"),
                                             context.safetyLightCurtainChannel,
                                             context.settings.safetyLightCurtainEnabled,
                                             true,
-                                            QObject::tr("安全光栅已触发"),
-                                            QObject::tr("安全光栅正常")));
+                                            // 中文翻译：安全光栅已触发
+                                            QObject::tr("Safety light barrier triggered"),
+                                            // 中文翻译：安全光栅正常
+                                            QObject::tr("Safety grating normal")));
     snapshot.states.append(makeDigitalState(context,
                                             QString::fromLatin1(kPressureMonitorId),
-                                            QObject::tr("气压监控"),
+                                            // 中文翻译：气压监控
+                                            QObject::tr("Air pressure monitoring"),
                                             context.pressureMonitorChannel,
                                             context.settings.pressureMonitorEnabled,
                                             blowOn,
-                                            QObject::tr("吹气开启且气压异常"),
-                                            blowOn ? QObject::tr("吹气开启，气压正常") : QObject::tr("吹气关闭，跳过判定")));
+                                            // 中文翻译：吹气开启且气压异常
+                                            QObject::tr("Blowing is on and the air pressure is abnormal"),
+                                            // 中文翻译：吹气开启，气压正常；吹气关闭，跳过判定
+                                            blowOn ? QObject::tr("Blowing is on and the air pressure is normal") : QObject::tr("Blowing off, skipping judgment")));
     snapshot.states.append(makeDigitalState(context,
                                             QStringLiteral("waterLeakage"),
-                                            QObject::tr("漏水监控"),
+                                            // 中文翻译：漏水监控
+                                            QObject::tr("Water leakage monitoring"),
                                             context.waterLeakageChannel,
                                             context.settings.waterLeakageMonitorEnabled,
                                             true,
-                                            QObject::tr("漏水监控已触发"),
-                                            QObject::tr("漏水监控正常")));
+                                            // 中文翻译：漏水监控已触发
+                                            QObject::tr("Water leakage monitoring has been triggered"),
+                                            // 中文翻译：漏水监控正常
+                                            QObject::tr("Water leakage monitoring is normal")));
     snapshot.states.append(makeDigitalState(context,
                                             QStringLiteral("waterTank"),
-                                            QObject::tr("水箱监控"),
+                                            // 中文翻译：水箱监控
+                                            QObject::tr("Water tank monitoring"),
                                             context.waterTankChannel,
                                             context.settings.waterTankMonitorEnabled,
                                             true,
-                                            QObject::tr("水箱监控已触发"),
-                                            QObject::tr("水箱监控正常")));
+                                            // 中文翻译：水箱监控已触发
+                                            QObject::tr("Water tank monitoring has been triggered"),
+                                            // 中文翻译：水箱监控正常
+                                            QObject::tr("Water tank monitoring is normal")));
     snapshot.states.append(makeAnalogState(context,
                                            QStringLiteral("waterPressure"),
-                                           QObject::tr("水压监控"),
+                                           // 中文翻译：水压监控
+                                           QObject::tr("water pressure monitoring"),
                                            context.waterPressureChannel,
                                            context.settings.waterPressureMonitorEnabled,
                                            context.settings.waterPressureConversions,
@@ -203,7 +231,8 @@ ProcessMonitorSnapshot buildSnapshot(const ProcessMonitorPollContext& context)
                                            QStringLiteral("MPa")));
     snapshot.states.append(makeAnalogState(context,
                                            QStringLiteral("waterLevel"),
-                                           QObject::tr("水位监控"),
+                                           // 中文翻译：水位监控
+                                           QObject::tr("water level monitoring"),
                                            context.waterLevelChannel,
                                            context.settings.waterLevelMonitorEnabled,
                                            context.settings.waterLevelConversions,
@@ -345,7 +374,8 @@ void ProcessMonitorService::applyAlarmState(ProcessMonitorSnapshot& snapshot)
     m_activeAlarms = nextAlarms;
     snapshot.activeAlarms = activeAlarms;
     if (snapshot.activeAlarms.isEmpty()) {
-        snapshot.summary = QObject::tr("监控正常");
+        // 中文翻译：监控正常
+        snapshot.summary = QObject::tr("Monitoring is normal");
     } else {
         QStringList messages;
         for (const ProcessMonitorAlarm& alarm : snapshot.activeAlarms)

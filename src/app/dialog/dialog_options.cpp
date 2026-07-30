@@ -35,6 +35,7 @@
 #include <QWidget>
 #include <QMessageBox>
 #include <QAbstractSpinBox>
+#include <QObject>
 
 namespace lcnc {
 
@@ -56,17 +57,23 @@ QStringList machinePresetNames()
 QString machinePresetText(const QString& preset)
 {
     if (preset == QStringLiteral("XYZ"))
-        return QStringLiteral("三轴 XYZ");
+        // 中文翻译：三轴 XYZ
+        return QObject::tr("Three-axis XYZ");
     if (preset == QStringLiteral("XYZA"))
-        return QStringLiteral("四轴 XYZA");
+        // 中文翻译：四轴 XYZA
+        return QObject::tr("Four-axis XYZA");
     if (preset == QStringLiteral("VERTICAL_AC_TABLE"))
-        return QStringLiteral("立式 AC 转台");
+        // 中文翻译：立式 AC 转台
+        return QObject::tr("Vertical AC turntable");
     if (preset == QStringLiteral("VERTICAL_BC_TABLE"))
-        return QStringLiteral("立式 BC 转台");
+        // 中文翻译：立式 BC 转台
+        return QObject::tr("Vertical BC turntable");
     if (preset == QStringLiteral("AB_HEAD"))
-        return QStringLiteral("AB 摆头");
+        // 中文翻译：AB 摆头
+        return QObject::tr("AB head");
     if (preset == QStringLiteral("AC_HEAD"))
-        return QStringLiteral("AC 摆头");
+        // 中文翻译：AC 摆头
+        return QObject::tr("AC head");
     return preset;
 }
 
@@ -326,7 +333,8 @@ DialogOptions::DialogOptions(QWidget* parent)
     : QDialog(parent)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions ctor");
-    setWindowTitle(tr("应用程序选项"));
+    // 中文翻译：应用程序选项
+    setWindowTitle(tr("Application Options"));
     resize(980, 680);
     m_machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
     buildUi();
@@ -353,16 +361,21 @@ void DialogOptions::buildUi()
     m_nav->setMinimumWidth(230);
 
     m_stack = new QStackedWidget(this);
-    auto* itemRender = new QTreeWidgetItem(m_nav, QStringList(tr("视图渲染")));
+    // 中文翻译：视图渲染
+    auto* itemRender = new QTreeWidgetItem(m_nav, QStringList(tr("View rendering")));
     itemRender->setData(0, Qt::UserRole, 0);
-    auto* itemColors = new QTreeWidgetItem(m_nav, QStringList(tr("颜色配置")));
+    // 中文翻译：颜色配置
+    auto* itemColors = new QTreeWidgetItem(m_nav, QStringList(tr("Color configuration")));
     itemColors->setData(0, Qt::UserRole, 1);
-    auto* itemApp = new QTreeWidgetItem(m_nav, QStringList(tr("应用程序")));
+    // 中文翻译：应用程序
+    auto* itemApp = new QTreeWidgetItem(m_nav, QStringList(tr("application")));
     itemApp->setData(0, Qt::UserRole, 2);
-    auto* itemMachine = new QTreeWidgetItem(m_nav, QStringList(tr("机台构型")));
+    // 中文翻译：机台构型
+    auto* itemMachine = new QTreeWidgetItem(m_nav, QStringList(tr("Machine configuration")));
     itemMachine->setData(0, Qt::UserRole, 3);
 
-    buildRenderPage(tr("视图渲染"), true, m_renderControls);
+    // 中文翻译：视图渲染
+    buildRenderPage(tr("View rendering"), true, m_renderControls);
     buildColorPage();
     buildApplicationPage();
     buildMachineConfigurationPage();
@@ -424,40 +437,63 @@ void DialogOptions::buildRenderPage(const QString& title, bool camView, RenderCo
     auto* displayGroup = new QGroupBox(title, content);
     auto* displayForm = new QFormLayout(displayGroup);
     c.defaultDisplay = new QComboBox(displayGroup);
-    c.defaultDisplay->addItem(tr("线框"), static_cast<int>(StartupDisplayMode::Wireframe));
-    c.defaultDisplay->addItem(tr("着色"), static_cast<int>(StartupDisplayMode::Shaded));
-    c.defaultDisplay->addItem(tr("带边着色"), static_cast<int>(StartupDisplayMode::ShadedWithEdges));
-    displayForm->addRow(tr("启动/新 View 默认显示模式:"), c.defaultDisplay);
+    // 中文翻译：线框
+    c.defaultDisplay->addItem(tr("Wireframe"), static_cast<int>(StartupDisplayMode::Wireframe));
+    // 中文翻译：着色
+    c.defaultDisplay->addItem(tr("Coloring"), static_cast<int>(StartupDisplayMode::Shaded));
+    // 中文翻译：带边着色
+    c.defaultDisplay->addItem(tr("Shading with edges"), static_cast<int>(StartupDisplayMode::ShadedWithEdges));
+    // 中文翻译：启动/新 View 默认显示模式:
+    displayForm->addRow(tr("Start/new View default display mode:"), c.defaultDisplay);
 
     c.quality = new QComboBox(displayGroup);
-    c.quality->addItem(tr("低 (Low)"), static_cast<int>(RenderQualityPreset::Low));
-    c.quality->addItem(tr("中 (Medium)"), static_cast<int>(RenderQualityPreset::Medium));
-    c.quality->addItem(tr("高 (High)"), static_cast<int>(RenderQualityPreset::High));
-    c.quality->addItem(tr("自定义 (Custom)"), static_cast<int>(RenderQualityPreset::Custom));
-    displayForm->addRow(tr("质量预设:"), c.quality);
+    // 中文翻译：低 (Low)
+    c.quality->addItem(tr("Low"), static_cast<int>(RenderQualityPreset::Low));
+    // 中文翻译：中 (Medium)
+    c.quality->addItem(tr("Medium"), static_cast<int>(RenderQualityPreset::Medium));
+    // 中文翻译：高 (High)
+    c.quality->addItem(tr("High"), static_cast<int>(RenderQualityPreset::High));
+    // 中文翻译：自定义 (Custom)
+    c.quality->addItem(tr("Custom"), static_cast<int>(RenderQualityPreset::Custom));
+    // 中文翻译：质量预设:
+    displayForm->addRow(tr("Quality preset:"), c.quality);
 
     c.renderMethod = new QComboBox(displayGroup);
-    c.renderMethod->addItem(tr("光栅化"), static_cast<int>(RenderMethod::Rasterization));
-    c.renderMethod->addItem(tr("光线追踪"), static_cast<int>(RenderMethod::RayTracing));
-    displayForm->addRow(tr("渲染方法:"), c.renderMethod);
+    // 中文翻译：光栅化
+    c.renderMethod->addItem(tr("rasterization"), static_cast<int>(RenderMethod::Rasterization));
+    // 中文翻译：光线追踪
+    c.renderMethod->addItem(tr("Ray tracing"), static_cast<int>(RenderMethod::RayTracing));
+    // 中文翻译：渲染方法:
+    displayForm->addRow(tr("Rendering method:"), c.renderMethod);
 
     c.material = new QComboBox(displayGroup);
-    c.material->addItem(tr("塑料"), QStringLiteral("plastic"));
-    c.material->addItem(tr("亮塑料"), QStringLiteral("shiny_plastic"));
-    c.material->addItem(tr("钢"), QStringLiteral("steel"));
-    c.material->addItem(tr("铝"), QStringLiteral("aluminum"));
-    c.material->addItem(tr("金属"), QStringLiteral("metal"));
-    c.material->addItem(tr("铬"), QStringLiteral("chrome"));
-    c.material->addItem(tr("缎面"), QStringLiteral("satin"));
-    displayForm->addRow(tr("模型材质:"), c.material);
+    // 中文翻译：塑料
+    c.material->addItem(tr("plastic"), QStringLiteral("plastic"));
+    // 中文翻译：亮塑料
+    c.material->addItem(tr("bright plastic"), QStringLiteral("shiny_plastic"));
+    // 中文翻译：钢
+    c.material->addItem(tr("steel"), QStringLiteral("steel"));
+    // 中文翻译：铝
+    c.material->addItem(tr("Aluminum"), QStringLiteral("aluminum"));
+    // 中文翻译：金属
+    c.material->addItem(tr("metal"), QStringLiteral("metal"));
+    // 中文翻译：铬
+    c.material->addItem(tr("Chromium"), QStringLiteral("chrome"));
+    // 中文翻译：缎面
+    c.material->addItem(tr("satin"), QStringLiteral("satin"));
+    // 中文翻译：模型材质:
+    displayForm->addRow(tr("Model material:"), c.material);
     root->addWidget(displayGroup);
 
-    auto* performanceGroup = new QGroupBox(tr("性能 / 质量"), content);
+    // 中文翻译：性能 / 质量
+    auto* performanceGroup = new QGroupBox(tr("Performance/Quality"), content);
     auto* performanceForm = new QFormLayout(performanceGroup);
-    c.antiAliasing = new QCheckBox(tr("启用抗锯齿"), performanceGroup);
+    // 中文翻译：启用抗锯齿
+    c.antiAliasing = new QCheckBox(tr("Enable anti-aliasing"), performanceGroup);
     performanceForm->addRow(QString(), c.antiAliasing);
     c.msaaSamples = new QComboBox(performanceGroup);
-    c.msaaSamples->addItem(tr("关闭"), 0);
+    // 中文翻译：关闭
+    c.msaaSamples->addItem(tr("Close"), 0);
     c.msaaSamples->addItem(tr("2x"), 2);
     c.msaaSamples->addItem(tr("4x"), 4);
     c.msaaSamples->addItem(tr("8x"), 8);
@@ -466,33 +502,45 @@ void DialogOptions::buildRenderPage(const QString& title, bool camView, RenderCo
     c.renderResolutionScale->setRange(0.25, 2.0);
     c.renderResolutionScale->setSingleStep(0.05);
     c.renderResolutionScale->setDecimals(2);
-    performanceForm->addRow(tr("渲染分辨率比例:"), c.renderResolutionScale);
+    // 中文翻译：渲染分辨率比例:
+    performanceForm->addRow(tr("Rendering resolution ratio:"), c.renderResolutionScale);
     c.deviationCoefficient = noWheel(new QDoubleSpinBox(performanceGroup));
     c.deviationCoefficient->setRange(0.001, 1.0);
     c.deviationCoefficient->setSingleStep(0.005);
     c.deviationCoefficient->setDecimals(3);
-    performanceForm->addRow(tr("LOD 偏差系数:"), c.deviationCoefficient);
+    // 中文翻译：LOD 偏差系数:
+    performanceForm->addRow(tr("LOD deviation coefficient:"), c.deviationCoefficient);
     c.deviationAngle = noWheel(new QDoubleSpinBox(performanceGroup));
     c.deviationAngle->setRange(0.01, 2.0);
     c.deviationAngle->setSingleStep(0.05);
     c.deviationAngle->setDecimals(3);
-    performanceForm->addRow(tr("LOD 角度:"), c.deviationAngle);
+    // 中文翻译：LOD 角度:
+    performanceForm->addRow(tr("LOD angle:"), c.deviationAngle);
     c.edgeWidth = noWheel(new QDoubleSpinBox(performanceGroup));
     c.edgeWidth->setRange(0.1, 5.0);
     c.edgeWidth->setSingleStep(0.1);
     c.edgeWidth->setDecimals(1);
-    performanceForm->addRow(tr("边线宽度:"), c.edgeWidth);
+    // 中文翻译：边线宽度:
+    performanceForm->addRow(tr("Edge width:"), c.edgeWidth);
     root->addWidget(performanceGroup);
 
-    auto* renderGroup = new QGroupBox(tr("渲染特性"), content);
+    // 中文翻译：渲染特性
+    auto* renderGroup = new QGroupBox(tr("Rendering properties"), content);
     auto* renderForm = new QFormLayout(renderGroup);
-    c.shadows = new QCheckBox(tr("阴影"), renderGroup);
-    c.reflections = new QCheckBox(tr("反射"), renderGroup);
-    c.adaptiveSampling = new QCheckBox(tr("自适应采样"), renderGroup);
-    c.frustumCulling = new QCheckBox(tr("视锥体裁剪"), renderGroup);
-    c.backFaceCulling = new QCheckBox(tr("背面剔除"), renderGroup);
-    c.geometryMerge = new QCheckBox(tr("几何合并（机台代理/压缩路径）"), renderGroup);
-    c.proxyGeometry = new QCheckBox(tr("代理几何"), renderGroup);
+    // 中文翻译：阴影
+    c.shadows = new QCheckBox(tr("shadow"), renderGroup);
+    // 中文翻译：反射
+    c.reflections = new QCheckBox(tr("reflection"), renderGroup);
+    // 中文翻译：自适应采样
+    c.adaptiveSampling = new QCheckBox(tr("adaptive sampling"), renderGroup);
+    // 中文翻译：视锥体裁剪
+    c.frustumCulling = new QCheckBox(tr("frustum clipping"), renderGroup);
+    // 中文翻译：背面剔除
+    c.backFaceCulling = new QCheckBox(tr("Backface culling"), renderGroup);
+    // 中文翻译：几何合并（机台代理/压缩路径）
+    c.geometryMerge = new QCheckBox(tr("Geometry merging (machine proxy/compression path)"), renderGroup);
+    // 中文翻译：代理几何
+    c.proxyGeometry = new QCheckBox(tr("proxy geometry"), renderGroup);
     renderForm->addRow(QString(), c.shadows);
     renderForm->addRow(QString(), c.reflections);
     renderForm->addRow(QString(), c.adaptiveSampling);
@@ -504,30 +552,39 @@ void DialogOptions::buildRenderPage(const QString& title, bool camView, RenderCo
     c.ambientLight->setRange(0.0, 1.0);
     c.ambientLight->setSingleStep(0.05);
     c.ambientLight->setDecimals(2);
-    renderForm->addRow(tr("环境光:"), c.ambientLight);
+    // 中文翻译：环境光:
+    renderForm->addRow(tr("Ambient light:"), c.ambientLight);
     root->addWidget(renderGroup);
 
-    auto* rayGroup = new QGroupBox(tr("光线追踪 / 采样"), content);
+    // 中文翻译：光线追踪 / 采样
+    auto* rayGroup = new QGroupBox(tr("Ray tracing/sampling"), content);
     auto* rayForm = new QFormLayout(rayGroup);
     c.raytracingDepth = noWheel(new QSpinBox(rayGroup));
     c.raytracingDepth->setRange(1, 8);
-    rayForm->addRow(tr("光追深度:"), c.raytracingDepth);
+    // 中文翻译：光追深度:
+    rayForm->addRow(tr("Ray tracing depth:"), c.raytracingDepth);
     c.rayTracingTileSize = noWheel(new QSpinBox(rayGroup));
     c.rayTracingTileSize->setRange(8, 128);
     c.rayTracingTileSize->setSingleStep(8);
-    rayForm->addRow(tr("Tile 大小:"), c.rayTracingTileSize);
+    // 中文翻译：Tile 大小:
+    rayForm->addRow(tr("Tile size:"), c.rayTracingTileSize);
     c.rayTracingTileCount = noWheel(new QSpinBox(rayGroup));
     c.rayTracingTileCount->setRange(1, 1024);
-    rayForm->addRow(tr("每帧 Tile 数:"), c.rayTracingTileCount);
+    // 中文翻译：每帧 Tile 数:
+    rayForm->addRow(tr("Number of Tiles per frame:"), c.rayTracingTileCount);
     root->addWidget(rayGroup);
 
-    auto* simulationGroup = new QGroupBox(tr("仿真效率"), content);
+    // 中文翻译：仿真效率
+    auto* simulationGroup = new QGroupBox(tr("Simulation efficiency"), content);
     auto* simulationForm = new QFormLayout(simulationGroup);
     c.targetFps = noWheel(new QSpinBox(simulationGroup));
     c.targetFps->setRange(15, 240);
-    simulationForm->addRow(tr("目标帧率:"), c.targetFps);
-    c.lowLodWhileMoving = new QCheckBox(tr("运动中使用低 LOD"), simulationGroup);
-    c.disableHeavyEffectsDuringSimulation = new QCheckBox(tr("仿真时禁用阴影/反射等重效果"), simulationGroup);
+    // 中文翻译：目标帧率:
+    simulationForm->addRow(tr("Target frame rate:"), c.targetFps);
+    // 中文翻译：运动中使用低 LOD
+    c.lowLodWhileMoving = new QCheckBox(tr("Use low LOD in motion"), simulationGroup);
+    // 中文翻译：仿真时禁用阴影/反射等重效果
+    c.disableHeavyEffectsDuringSimulation = new QCheckBox(tr("Disable shadow/reflection effects during simulation"), simulationGroup);
     simulationForm->addRow(QString(), c.lowLodWhileMoving);
     simulationForm->addRow(QString(), c.disableHeavyEffectsDuringSimulation);
     simulationGroup->setVisible(camView);
@@ -546,7 +603,8 @@ void DialogOptions::buildColorPage()
     auto* page = new QWidget(this);
     auto* root = new QVBoxLayout(page);
 
-    auto* modelGroup = new QGroupBox(tr("模型与背景"), page);
+    // 中文翻译：模型与背景
+    auto* modelGroup = new QGroupBox(tr("Models and backgrounds"), page);
     auto* modelForm = new QFormLayout(modelGroup);
     m_btnWorkpieceColor = makeColorButton(&m_colorDraft.workpieceColor);
     m_btnBackgroundColor = makeColorButton(&m_colorDraft.backgroundColor);
@@ -560,13 +618,18 @@ void DialogOptions::buildColorPage()
     m_spMachineTransparency->setDecimals(0);
     m_spMachineTransparency->setSingleStep(5.0);
     m_spMachineTransparency->setSuffix(tr(" %"));
-    modelForm->addRow(tr("工件颜色:"), m_btnWorkpieceColor);
-    modelForm->addRow(tr("工件模型透明度:"), m_spWorkpieceTransparency);
-    modelForm->addRow(tr("机台模型透明度:"), m_spMachineTransparency);
-    modelForm->addRow(tr("视图背景:"), m_btnBackgroundColor);
+    // 中文翻译：工件颜色:
+    modelForm->addRow(tr("Work piece color:"), m_btnWorkpieceColor);
+    // 中文翻译：工件模型透明度:
+    modelForm->addRow(tr("Workpiece model transparency:"), m_spWorkpieceTransparency);
+    // 中文翻译：机台模型透明度:
+    modelForm->addRow(tr("Machine model transparency:"), m_spMachineTransparency);
+    // 中文翻译：视图背景:
+    modelForm->addRow(tr("View background:"), m_btnBackgroundColor);
     root->addWidget(modelGroup);
 
-    auto* axisGroup = new QGroupBox(tr("机台分轴颜色"), page);
+    // 中文翻译：机台分轴颜色
+    auto* axisGroup = new QGroupBox(tr("Machine axis color"), page);
     auto* axisForm = new QFormLayout(axisGroup);
     for (const char* axis : kAxes) {
         const QString name(axis);
@@ -574,7 +637,8 @@ void DialogOptions::buildColorPage()
         btn->setMinimumWidth(150);
         connect(btn, &QPushButton::clicked, this, [this, btn, name] {
             const QColor current = m_colorDraft.machineAxisColors.value(name);
-            const QColor picked = QColorDialog::getColor(current, this, tr("选择颜色"));
+            // 中文翻译：选择颜色
+            const QColor picked = QColorDialog::getColor(current, this, tr("Choose color"));
             if (!picked.isValid())
                 return;
             m_colorDraft.machineAxisColors.insert(name, picked);
@@ -585,24 +649,33 @@ void DialogOptions::buildColorPage()
     }
     root->addWidget(axisGroup);
 
-    auto* highlightGroup = new QGroupBox(tr("选择 / 悬停 / 树节点"), page);
+    // 中文翻译：选择 / 悬停 / 树节点
+    auto* highlightGroup = new QGroupBox(tr("Select / Hover / Tree Node"), page);
     auto* highlightForm = new QFormLayout(highlightGroup);
     m_btnSelectionColor = makeColorButton(&m_colorDraft.selectionColor);
     m_btnHoverColor = makeColorButton(&m_colorDraft.hoverColor);
     m_btnTreeSelectionColor = makeColorButton(&m_colorDraft.treeSelectionColor);
     m_cbHighlightMode = new QComboBox(highlightGroup);
-    m_cbHighlightMode->addItem(tr("沿用对象 displayMode"), -1);
-    m_cbHighlightMode->addItem(tr("线框高亮"), 0);
-    m_cbHighlightMode->addItem(tr("着色高亮"), 1);
+    // 中文翻译：沿用对象 displayMode
+    m_cbHighlightMode->addItem(tr("Inherit object displayMode"), -1);
+    // 中文翻译：线框高亮
+    m_cbHighlightMode->addItem(tr("Wireframe highlighting"), 0);
+    // 中文翻译：着色高亮
+    m_cbHighlightMode->addItem(tr("shading highlight"), 1);
     m_spHighlightLineWidth = noWheel(new QDoubleSpinBox(highlightGroup));
     m_spHighlightLineWidth->setRange(0.5, 10.0);
     m_spHighlightLineWidth->setSingleStep(0.5);
     m_spHighlightLineWidth->setDecimals(1);
-    highlightForm->addRow(tr("选中高亮色:"), m_btnSelectionColor);
-    highlightForm->addRow(tr("悬停高亮色:"), m_btnHoverColor);
-    highlightForm->addRow(tr("树节点选中色:"), m_btnTreeSelectionColor);
-    highlightForm->addRow(tr("高亮模式:"), m_cbHighlightMode);
-    highlightForm->addRow(tr("高亮线宽:"), m_spHighlightLineWidth);
+    // 中文翻译：选中高亮色:
+    highlightForm->addRow(tr("Select highlight color:"), m_btnSelectionColor);
+    // 中文翻译：悬停高亮色:
+    highlightForm->addRow(tr("Hover highlight color:"), m_btnHoverColor);
+    // 中文翻译：树节点选中色:
+    highlightForm->addRow(tr("Tree node selection color:"), m_btnTreeSelectionColor);
+    // 中文翻译：高亮模式:
+    highlightForm->addRow(tr("Highlight mode:"), m_cbHighlightMode);
+    // 中文翻译：高亮线宽:
+    highlightForm->addRow(tr("Highlight line width:"), m_spHighlightLineWidth);
     root->addWidget(highlightGroup);
 
     root->addStretch(1);
@@ -613,36 +686,52 @@ void DialogOptions::buildApplicationPage()
 {
     auto* page = new QWidget(this);
     auto* root = new QVBoxLayout(page);
-    auto* group = new QGroupBox(tr("通用"), page);
+    // 中文翻译：通用
+    auto* group = new QGroupBox(tr("Universal"), page);
     auto* form = new QFormLayout(group);
 
     m_cbLanguage = new QComboBox(group);
-    m_cbLanguage->addItem(tr("简体中文"), QStringLiteral("zh_CN"));
-    m_cbLanguage->addItem(QStringLiteral("English"), QStringLiteral("en"));
-    form->addRow(tr("语言:"), m_cbLanguage);
+    // 中文翻译：简体中文
+    m_cbLanguage->addItem(tr("Chinese (Simplified)"), QStringLiteral("zh_CN"));
+    // 中文翻译：English
+    m_cbLanguage->addItem(tr("English"), QStringLiteral("en"));
+    // 中文翻译：语言：
+    form->addRow(tr("Language:"), m_cbLanguage);
 
     m_cbTheme = new QComboBox(group);
-    m_cbTheme->addItem(tr("浅色"), QStringLiteral("light"));
-    m_cbTheme->addItem(tr("深色（开发中）"), QStringLiteral("dark"));
-    form->addRow(tr("主题:"), m_cbTheme);
+    // 中文翻译：浅色
+    m_cbTheme->addItem(tr("Light"), QStringLiteral("light"));
+    // 中文翻译：深色（开发中）
+    m_cbTheme->addItem(tr("Dark (in development)"), QStringLiteral("dark"));
+    // 中文翻译：主题：
+    form->addRow(tr("Theme:"), m_cbTheme);
 
     m_cbUnits = new QComboBox(group);
-    m_cbUnits->addItem(tr("毫米 (mm)"), QStringLiteral("mm"));
-    m_cbUnits->addItem(tr("英寸 (inch)"), QStringLiteral("inch"));
-    form->addRow(tr("单位制:"), m_cbUnits);
+    // 中文翻译：毫米 (mm)
+    m_cbUnits->addItem(tr("Millimetres (mm)"), QStringLiteral("mm"));
+    // 中文翻译：英寸 (in)
+    m_cbUnits->addItem(tr("Inches (in)"), QStringLiteral("inch"));
+    // 中文翻译：单位制：
+    form->addRow(tr("Units:"), m_cbUnits);
 
     m_cbDocumentOpenMode = new QComboBox(group);
-    m_cbDocumentOpenMode->addItem(tr("单文档（打开新文件时关闭当前文件）"),
+    // 中文翻译：单文档（打开新文件时关闭当前文件）
+    m_cbDocumentOpenMode->addItem(tr("Single document (close the current document when opening a file)"),
                                   static_cast<int>(DocumentOpenMode::SingleDocument));
-    m_cbDocumentOpenMode->addItem(tr("多文档（保留多个项目工作区）"),
+    // 中文翻译：多文档（保留多个项目工作区）
+    m_cbDocumentOpenMode->addItem(tr("Multiple documents (keep project workspaces open)"),
                                   static_cast<int>(DocumentOpenMode::MultiDocument));
-    form->addRow(tr("打开模式:"), m_cbDocumentOpenMode);
+    // 中文翻译：打开模式：
+    form->addRow(tr("Open mode:"), m_cbDocumentOpenMode);
 
     m_spRecentLimit = noWheel(new QSpinBox(group));
     m_spRecentLimit->setRange(1, 50);
-    form->addRow(tr("最近文件数:"), m_spRecentLimit);
+    // 中文翻译：最近文件数：
+    form->addRow(tr("Recent files:"), m_spRecentLimit);
 
-    auto* hint = new QLabel(tr("提示：语言/主题修改后需要重启软件才会完全生效。"), group);
+    // 中文翻译：语言和主题修改后，重启应用程序即可完全生效。
+    // 语言切换在下一次启动时加载，避免在运行中重建含状态的加工 UI。
+    auto* hint = new QLabel(tr("Language and theme changes take full effect after restarting the application."), group);
     hint->setStyleSheet("color:#888;");
     form->addRow(hint);
 
@@ -656,12 +745,14 @@ void DialogOptions::buildMachineConfigurationPage()
     auto* page = new QWidget(this);
     auto* root = new QVBoxLayout(page);
 
-    auto* group = new QGroupBox(tr("机台构型"), page);
+    // 中文翻译：机台构型
+    auto* group = new QGroupBox(tr("Machine configuration"), page);
     auto* form = new QFormLayout(group);
     m_cbMachinePreset = new QComboBox(group);
     for (const QString& preset : machinePresetNames())
         m_cbMachinePreset->addItem(machinePresetText(preset), preset);
-    form->addRow(tr("构型"), m_cbMachinePreset);
+    // 中文翻译：构型
+    form->addRow(tr("configuration"), m_cbMachinePreset);
 
     auto* pathRow = new QWidget(group);
     auto* pathLayout = new QHBoxLayout(pathRow);
@@ -669,21 +760,27 @@ void DialogOptions::buildMachineConfigurationPage()
     pathLayout->setSpacing(4);
     m_editMachineModelPath = new QLineEdit(pathRow);
     m_editMachineModelPath->setClearButtonEnabled(true);
-    m_editMachineModelPath->setPlaceholderText(tr("选择或输入机台模型文件路径"));
-    m_btnBrowseMachineModel = new QPushButton(tr("浏览..."), pathRow);
+    // 中文翻译：选择或输入机台模型文件路径
+    m_editMachineModelPath->setPlaceholderText(tr("Select or enter the machine model file path"));
+    // 中文翻译：浏览...
+    m_btnBrowseMachineModel = new QPushButton(tr("Browse..."), pathRow);
     pathLayout->addWidget(m_editMachineModelPath, 1);
     pathLayout->addWidget(m_btnBrowseMachineModel);
-    form->addRow(tr("机台模型路径"), pathRow);
+    // 中文翻译：机台模型路径
+    form->addRow(tr("Machine model path"), pathRow);
 
-    m_chkAutoLoadMachineModel = new QCheckBox(tr("启动时自动加载机台模型"), group);
+    // 中文翻译：启动时自动加载机台模型
+    m_chkAutoLoadMachineModel = new QCheckBox(tr("Automatically load the machine model at startup"), group);
     form->addRow(QString(), m_chkAutoLoadMachineModel);
 
     m_lblMachineAlgorithm = new QLabel(group);
     m_lblMachineAlgorithm->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    form->addRow(tr("刀路算法"), m_lblMachineAlgorithm);
+    // 中文翻译：刀路算法
+    form->addRow(tr("Tool path algorithm"), m_lblMachineAlgorithm);
     root->addWidget(group);
 
-    auto* centerGroup = new QGroupBox(tr("旋转中心"), page);
+    // 中文翻译：旋转中心
+    auto* centerGroup = new QGroupBox(tr("center of rotation"), page);
     auto* centerForm = new QFormLayout(centerGroup);
     auto* centerRow = new QWidget(centerGroup);
     auto* centerLayout = new QHBoxLayout(centerRow);
@@ -699,7 +796,8 @@ void DialogOptions::buildMachineConfigurationPage()
     centerLayout->addWidget(new QLabel(QStringLiteral("Z"), centerRow));
     centerLayout->addWidget(m_spRotationCenterZ);
     centerLayout->addStretch(1);
-    centerForm->addRow(tr("中心坐标"), centerRow);
+    // 中文翻译：中心坐标
+    centerForm->addRow(tr("Center coordinates"), centerRow);
     m_lblRotationCenterHint = new QLabel(centerGroup);
     m_lblRotationCenterHint->setWordWrap(true);
     m_lblRotationCenterHint->setStyleSheet("color:#666;");
@@ -709,8 +807,10 @@ void DialogOptions::buildMachineConfigurationPage()
     m_machineAxesTable = new QTableWidget(page);
     m_machineAxesTable->setColumnCount(9);
     m_machineAxesTable->setHorizontalHeaderLabels({
-        tr("轴名"), tr("类型"), tr("父轴"), tr("方向X"), tr("方向Y"), tr("方向Z"),
-        tr("原点X"), tr("原点Y"), tr("原点Z")
+        // 中文翻译：轴名；类型；父轴；方向X；方向Y；方向Z
+        tr("Axis name"), tr("Type"), tr("parent axis"), tr("DirectionX"), tr("Direction Y"), tr("Direction Z"),
+        // 中文翻译：原点X；原点Y；原点Z
+        tr("OriginX"), tr("Origin Y"), tr("Origin Z")
     });
     m_machineAxesTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_machineAxesTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -720,9 +820,12 @@ void DialogOptions::buildMachineConfigurationPage()
     m_machineAxesTable->setAlternatingRowColors(true);
     root->addWidget(m_machineAxesTable, 1);
     auto* coordinateHint = new QLabel(
-        tr("线性 X/Y/Z 轴的方向同时用于机台模型运动和视图坐标提示。"
-           "例如 Z 轴零点在上方且向下为正时，将 Z 方向设为 (0, 0, -1)。"
-           "坐标三轴提示需要 X/Y/Z 构成正交右手系。"), page);
+        // 中文翻译：线性 X/Y/Z 轴的方向同时用于机台模型运动和视图坐标提示。
+        tr("The directions of the linear X/Y/Z axes are used for both machine model motion and view coordinate prompts."
+           // 中文翻译：例如 Z 轴零点在上方且向下为正时，将 Z 方向设为 (0, 0, -1)。
+           "For example, when the Z-axis zero point is above and downward is positive, set the Z direction to (0, 0, -1)."
+           // 中文翻译：坐标三轴提示需要 X/Y/Z 构成正交右手系。
+           "The coordinate three-axis prompt requires X/Y/Z to form an orthogonal right-handed system."), page);
     coordinateHint->setWordWrap(true);
     coordinateHint->setStyleSheet("color:#666;");
     root->addWidget(coordinateHint);
@@ -753,9 +856,11 @@ void DialogOptions::buildMachineConfigurationPage()
                 const QString dir = currentPath.isEmpty() ? QString() : QFileInfo(currentPath).absolutePath();
                 const QString path = QFileDialog::getOpenFileName(
                     this,
-                    tr("选择机台模型文件"),
+                    // 中文翻译：选择机台模型文件
+                    tr("Select machine model file"),
                     dir,
-                    tr("三维模型文件 (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;所有文件 (*)"));
+                    // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;所有文件 (*)
+                    tr("3D model files (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;All files (*)"));
                 if (!path.isEmpty() && m_editMachineModelPath)
                     m_editMachineModelPath->setText(QFileInfo(path).absoluteFilePath());
             });
@@ -788,8 +893,10 @@ void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeCon
         m_machineAxesTable->setItem(row, 0, nameItem);
 
         auto* typeCombo = new QComboBox(m_machineAxesTable);
-        typeCombo->addItem(tr("线性"), static_cast<int>(MachineAxisDef::Linear));
-        typeCombo->addItem(tr("旋转"), static_cast<int>(MachineAxisDef::Rotary));
+        // 中文翻译：线性
+        typeCombo->addItem(tr("Linear"), static_cast<int>(MachineAxisDef::Linear));
+        // 中文翻译：旋转
+        typeCombo->addItem(tr("rotate"), static_cast<int>(MachineAxisDef::Rotary));
         typeCombo->setCurrentIndex(config.axis.motionType == MachineAxisDef::Rotary ? 1 : 0);
         connect(typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
                 [this] {
@@ -929,10 +1036,12 @@ void DialogOptions::setRotationCenterUiFromAxes(const QList<MachineAxisDef>& axe
     if (m_lblRotationCenterHint) {
         if (enabled) {
             m_lblRotationCenterHint->setText(
-                tr("该坐标会写入旋转轴 %1 的原点；AC 转台请填写 A 轴与 C 轴的物理交点。")
+                // 中文翻译：该坐标会写入旋转轴 %1 的原点；AC 转台请填写 A 轴与 C 轴的物理交点。
+                tr("This coordinate will be written as the origin of the rotation axis %1; for AC turntable, please fill in the physical intersection point of the A-axis and C-axis.")
                     .arg(rotaryNames.join(QStringLiteral("/"))));
         } else {
-            m_lblRotationCenterHint->setText(tr("当前构型没有旋转轴，不需要填写旋转中心。"));
+            // 中文翻译：当前构型没有旋转轴，不需要填写旋转中心。
+            m_lblRotationCenterHint->setText(tr("The current configuration does not have an axis of rotation, so there is no need to fill in the center of rotation."));
         }
     }
 }
@@ -1165,7 +1274,8 @@ QPushButton* DialogOptions::makeColorButton(QColor* target)
     auto* button = new QPushButton(this);
     button->setMinimumWidth(150);
     connect(button, &QPushButton::clicked, this, [this, button, target] {
-        const QColor picked = QColorDialog::getColor(*target, this, tr("选择颜色"));
+        // 中文翻译：选择颜色
+        const QColor picked = QColorDialog::getColor(*target, this, tr("Choose color"));
         if (!picked.isValid())
             return;
         *target = picked;
@@ -1306,8 +1416,9 @@ bool DialogOptions::applyChanges()
         applyTreeSelectionColor(m_colorDraft.treeSelectionColor);
 
     if (m_originalLanguage != newLanguage) {
-        QMessageBox::information(this, tr("应用程序选项"),
-            tr("语言修改将在重启软件后生效。"));
+        // 中文翻译：应用程序选项；语言修改将在重启应用程序后生效。
+        QMessageBox::information(this, tr("Application Options"),
+            tr("The language change will take effect after restarting the application."));
     }
 
     if (machineDirty) {

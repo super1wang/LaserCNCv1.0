@@ -51,7 +51,8 @@ QVariant ProcessIoTableModel::data(const QModelIndex& index, int role) const
     if (!index.isValid() || index.row() >= m_channels.size()) return {};
     const ProcessIoChannel& channel = m_channels.at(index.row());
     if (role == Qt::ToolTipRole && index.column() == Name)
-        return channel.builtin ? tr("内置通道：名称和标识不可删除") : channel.id;
+        // 中文翻译：内置通道：名称和标识不可删除
+        return channel.builtin ? tr("Built-in channel: name and logo cannot be deleted") : channel.id;
     if (index.column() == Name && (role == Qt::DisplayRole || role == Qt::EditRole)) return channel.name;
     if (index.column() == HardwareIndex && (role == Qt::DisplayRole || role == Qt::EditRole)) return channel.hardwareIndex;
     if (role == Qt::CheckStateRole) {
@@ -103,11 +104,16 @@ Qt::ItemFlags ProcessIoTableModel::flags(const QModelIndex& index) const
 QVariant ProcessIoTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
     if (orientation != Qt::Horizontal || role != Qt::DisplayRole) return {};
-    if (section == Name) return tr("名称");
-    if (section == HardwareIndex) return tr("通道索引");
-    if (hasActiveHigh() && section == ActiveHigh) return tr("高电平有效");
-    if (section == (hasActiveHigh() ? Enabled : ActiveHigh)) return tr("启用");
-    if (hasShowInMain() && section == ShowInMain) return tr("显示到主界面");
+    // 中文翻译：名称
+    if (section == Name) return tr("Name");
+    // 中文翻译：通道索引
+    if (section == HardwareIndex) return tr("Channel index");
+    // 中文翻译：高电平有效
+    if (hasActiveHigh() && section == ActiveHigh) return tr("Active high level");
+    // 中文翻译：启用
+    if (section == (hasActiveHigh() ? Enabled : ActiveHigh)) return tr("enable");
+    // 中文翻译：显示到主界面
+    if (hasShowInMain() && section == ShowInMain) return tr("Show to main interface");
     return {};
 }
 

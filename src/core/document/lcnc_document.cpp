@@ -61,12 +61,18 @@ void LcncDocument::initXcaf()
     m_processGroup    = XcafUtils::findOrCreateChild(root, kTagProcess);
     m_auxiliaryGroup  = XcafUtils::findOrCreateChild(root, kTagAuxiliary);
 
-    XcafUtils::setName(m_projectGroup,    QStringLiteral("项目"));
-    XcafUtils::setName(m_workpieceGroup,  QStringLiteral("工件模型"));
-    XcafUtils::setName(m_machineGroup,    QStringLiteral("机台模型"));
-    XcafUtils::setName(m_camGroup,        QStringLiteral("CAM 数据"));
-    XcafUtils::setName(m_processGroup,    QStringLiteral("加工过程"));
-    XcafUtils::setName(m_auxiliaryGroup,  QStringLiteral("辅助对象"));
+    // 中文翻译：项目
+    XcafUtils::setName(m_projectGroup,    QStringLiteral("Project"));
+    // 中文翻译：工件模型
+    XcafUtils::setName(m_workpieceGroup,  QStringLiteral("workpiece model"));
+    // 中文翻译：机台模型
+    XcafUtils::setName(m_machineGroup,    QStringLiteral("Machine model"));
+    // 中文翻译：CAM 数据
+    XcafUtils::setName(m_camGroup,        QStringLiteral("CAM data"));
+    // 中文翻译：加工过程
+    XcafUtils::setName(m_processGroup,    QStringLiteral("Process"));
+    // 中文翻译：辅助对象
+    XcafUtils::setName(m_auxiliaryGroup,  QStringLiteral("helper object"));
 }
 
 // ── Identity helpers ───────────────────────────────────────────────────────────

@@ -11,38 +11,61 @@ namespace {
 
 constexpr BuiltinIODef kDigitalOUT[] = {
     // sectionKey,    tomlKey,        nameZh,    defaultIndex, active, enabled, showInMain
-    { "DigitalOUT",   "aLaser",       "激光",     "0.4",        true,   true,    true  },
-    { "DigitalOUT",   "aBlow",        "吹气",     "0.2",        true,   true,    true  },
-    { "DigitalOUT",   "aChuck",       "夹头",     "0.0",        true,   true,    true  },
-    { "DigitalOUT",   "aPliers",      "夹爪",     "0.1",        true,   true,    false },
-    { "DigitalOUT",   "aWater",       "出水泵",   "0.10",       true,   true,    true  },
-    { "DigitalOUT",   "aPump",        "回水泵",   "0.11",       true,   true,    true  },
-    { "DigitalOUT",   "aRedLight",    "红灯",     "0.7",        true,   true,    false },
-    { "DigitalOUT",   "aYellowLight", "黄灯",     "0.6",        true,   true,    false },
-    { "DigitalOUT",   "aGreenLight",  "绿灯",     "0.5",        true,   true,    false },
-    { "DigitalOUT",   "aBuzzer",      "蜂鸣器",   "1.0",        true,   true,    false },
+    // 中文翻译：激光
+    { "DigitalOUT",   "aLaser",       "laser",     "0.4",        true,   true,    true  },
+    // 中文翻译：吹气
+    { "DigitalOUT",   "aBlow",        "blow air",     "0.2",        true,   true,    true  },
+    // 中文翻译：夹头
+    { "DigitalOUT",   "aChuck",       "chuck",     "0.0",        true,   true,    true  },
+    // 中文翻译：夹爪
+    { "DigitalOUT",   "aPliers",      "Gripper",     "0.1",        true,   true,    false },
+    // 中文翻译：出水泵
+    { "DigitalOUT",   "aWater",       "Outlet pump",   "0.10",       true,   true,    true  },
+    // 中文翻译：回水泵
+    { "DigitalOUT",   "aPump",        "Return water pump",   "0.11",       true,   true,    true  },
+    // 中文翻译：红灯
+    { "DigitalOUT",   "aRedLight",    "red light",     "0.7",        true,   true,    false },
+    // 中文翻译：黄灯
+    { "DigitalOUT",   "aYellowLight", "yellow light",     "0.6",        true,   true,    false },
+    // 中文翻译：绿灯
+    { "DigitalOUT",   "aGreenLight",  "green light",     "0.5",        true,   true,    false },
+    // 中文翻译：蜂鸣器
+    { "DigitalOUT",   "aBuzzer",      "buzzer",   "1.0",        true,   true,    false },
 };
 
 constexpr BuiltinIODef kDigitalIN[] = {
-    { "DigitalIN",    "aStart",                "开始",      "0.0", true, true, false },
-    { "DigitalIN",    "aStop",                 "停止",      "0.1", true, true, false },
-    { "DigitalIN",    "aInterLock",            "互锁",      "0.3", true, true, false },
-    { "DigitalIN",    "aSafetyLightCurtain",   "安全光幕",  "0.7", true, true, false },
-    { "DigitalIN",    "aPressureMonitor",      "气压监控",  "0.2", true, true, false },
-    { "DigitalIN",    "aRemnantsMonitor",      "余料监控",  "0.5", true, true, false },
-    { "DigitalIN",    "aWaterLeakageMonitor",  "液位监控",  "0.4", true, true, false },
-    { "DigitalIN",    "aWaterTankMonitor",     "水箱监控",  "0.6", true, true, false },
+    // 中文翻译：开始
+    { "DigitalIN",    "aStart",                "start",      "0.0", true, true, false },
+    // 中文翻译：停止
+    { "DigitalIN",    "aStop",                 "stop",      "0.1", true, true, false },
+    // 中文翻译：互锁
+    { "DigitalIN",    "aInterLock",            "interlock",      "0.3", true, true, false },
+    // 中文翻译：安全光幕
+    { "DigitalIN",    "aSafetyLightCurtain",   "safety light curtain",  "0.7", true, true, false },
+    // 中文翻译：气压监控
+    { "DigitalIN",    "aPressureMonitor",      "Air pressure monitoring",  "0.2", true, true, false },
+    // 中文翻译：余料监控
+    { "DigitalIN",    "aRemnantsMonitor",      "Remaining material monitoring",  "0.5", true, true, false },
+    // 中文翻译：液位监控
+    { "DigitalIN",    "aWaterLeakageMonitor",  "Liquid level monitoring",  "0.4", true, true, false },
+    // 中文翻译：水箱监控
+    { "DigitalIN",    "aWaterTankMonitor",     "Water tank monitoring",  "0.6", true, true, false },
 };
 
 constexpr BuiltinIODef kAnalogOUT[] = {
-    { "AnalogOUT",    "aLaser",      "激光功率",  "1", true, true, false },
-    { "AnalogOUT",    "aPressure",   "气压设定",  "0", true, true, false },
+    // 中文翻译：激光功率
+    { "AnalogOUT",    "aLaser",      "Laser power",  "1", true, true, false },
+    // 中文翻译：气压设定
+    { "AnalogOUT",    "aPressure",   "Air pressure setting",  "0", true, true, false },
 };
 
 constexpr BuiltinIODef kAnalogIN[] = {
-    { "AnalogIN",     "aWaterLevel",     "液位",  "0", true, true, false },
-    { "AnalogIN",     "aWaterPressure",  "水压",  "1", true, true, false },
-    { "AnalogIN",     "aPressure",       "气压",  "2", true, true, false },
+    // 中文翻译：液位
+    { "AnalogIN",     "aWaterLevel",     "liquid level",  "0", true, true, false },
+    // 中文翻译：水压
+    { "AnalogIN",     "aWaterPressure",  "water pressure",  "1", true, true, false },
+    // 中文翻译：气压
+    { "AnalogIN",     "aPressure",       "air pressure",  "2", true, true, false },
 };
 
 template <std::size_t N>

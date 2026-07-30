@@ -9,9 +9,11 @@
 // ── CAD view modeling aids ───────────────────────────────────────────────────
 CmdToggleCadGrid::CmdToggleCadGrid(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/grid.svg"), tr("网格"), this);
+    // 中文翻译：网格
+    auto* a = new QAction(QIcon(":/icons/grid.svg"), tr("grid"), this);
     a->setCheckable(true);
-    a->setStatusTip(tr("显示或隐藏建模网格"));
+    // 中文翻译：显示或隐藏建模网格
+    a->setStatusTip(tr("Show or hide the modeling mesh"));
     setAction(a);
 }
 
@@ -28,9 +30,11 @@ void CmdToggleCadGrid::execute()
 
 CmdToggleGridSnap::CmdToggleGridSnap(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/snap.svg"), tr("网格吸附"), this);
+    // 中文翻译：网格吸附
+    auto* a = new QAction(QIcon(":/icons/snap.svg"), tr("Grid adsorption"), this);
     a->setCheckable(true);
-    a->setStatusTip(tr("启用或关闭网格点吸附"));
+    // 中文翻译：启用或关闭网格点吸附
+    a->setStatusTip(tr("Turn grid point snapping on or off"));
     setAction(a);
 }
 
@@ -47,9 +51,11 @@ void CmdToggleGridSnap::execute()
 
 CmdSnapNone::CmdSnapNone(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(tr("无抓取"), this);
+    // 中文翻译：无抓取
+    auto* a = new QAction(tr("No crawling"), this);
     a->setCheckable(true);
-    a->setStatusTip(tr("关闭 CAD 几何抓取"));
+    // 中文翻译：关闭 CAD 几何抓取
+    a->setStatusTip(tr("Turn off CAD geometry grabbing"));
     setAction(a);
 }
 
@@ -66,9 +72,11 @@ void CmdSnapNone::execute()
 
 CmdSnapVertex::CmdSnapVertex(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(tr("顶点"), this);
+    // 中文翻译：顶点
+    auto* a = new QAction(tr("vertex"), this);
     a->setCheckable(true);
-    a->setStatusTip(tr("抓取 CAD 顶点"));
+    // 中文翻译：抓取 CAD 顶点
+    a->setStatusTip(tr("Grab CAD vertices"));
     setAction(a);
 }
 
@@ -85,9 +93,11 @@ void CmdSnapVertex::execute()
 
 CmdSnapEdge::CmdSnapEdge(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(tr("边"), this);
+    // 中文翻译：边
+    auto* a = new QAction(tr("side"), this);
     a->setCheckable(true);
-    a->setStatusTip(tr("抓取 CAD 边"));
+    // 中文翻译：抓取 CAD 边
+    a->setStatusTip(tr("Grab CAD edges"));
     setAction(a);
 }
 
@@ -104,10 +114,12 @@ void CmdSnapEdge::execute()
 
 CmdSnapFace::CmdSnapFace(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(tr("面"), this);
+    // 中文翻译：面
+    auto* a = new QAction(tr("noodles"), this);
     a->setCheckable(true);
     a->setChecked(true);
-    a->setStatusTip(tr("抓取 CAD 面"));
+    // 中文翻译：抓取 CAD 面
+    a->setStatusTip(tr("Grab CAD face"));
     setAction(a);
 }
 

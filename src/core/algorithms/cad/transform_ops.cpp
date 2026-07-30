@@ -21,13 +21,15 @@ void setErr(QString* errMsg, const QString& message)
 bool applyTrsf(TopoDS_Shape* shape, const gp_Trsf& trsf, QString* errMsg)
 {
     if (!shape || shape->IsNull()) {
-        setErr(errMsg, QStringLiteral("变换输入形体为空"));
+        // 中文翻译：变换输入形体为空
+        setErr(errMsg, QStringLiteral("Transform input shape to empty"));
         return false;
     }
 
     BRepBuilderAPI_Transform transform(*shape, trsf, Standard_True);
     if (!transform.IsDone()) {
-        setErr(errMsg, QStringLiteral("形体变换失败"));
+        // 中文翻译：形体变换失败
+        setErr(errMsg, QStringLiteral("Body transformation failed"));
         return false;
     }
     *shape = transform.Shape();
@@ -55,7 +57,8 @@ TopoDS_Shape transformShape(const TopoDS_Shape& shape,
                             QString* errMsg)
 {
     if (shape.IsNull()) {
-        setErr(errMsg, QStringLiteral("变换输入形体为空"));
+        // 中文翻译：变换输入形体为空
+        setErr(errMsg, QStringLiteral("Transform input shape to empty"));
         return {};
     }
 

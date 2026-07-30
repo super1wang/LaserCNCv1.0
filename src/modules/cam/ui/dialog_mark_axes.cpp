@@ -27,7 +27,8 @@ DialogMarkAxes::DialogMarkAxes(LcncDocument*     doc,
     , m_doc(doc)
     , m_kin(kin)
 {
-    setWindowTitle(tr("标记轴系零部件"));
+    // 中文翻译：标记轴系零部件
+    setWindowTitle(tr("Mark shafting components"));
     setMinimumSize(560, 560);
     buildUi();
     populateRows();
@@ -44,7 +45,8 @@ void DialogMarkAxes::buildUi()
 
     // ── Info banner ───────────────────────────────────────────────────────
     auto* infoLabel = new QLabel(
-        tr("机台构型: %1 · 请为每个机台零件指定所属轴系").arg(m_kin->configType()),
+        // 中文翻译：机台构型: %1 · 请为每个机台零件指定所属轴系
+        tr("Machine configuration: %1 · Please specify the axis system for each machine part").arg(m_kin->configType()),
         this);
     infoLabel->setStyleSheet("color: #888; font-size: 11px;");
     mainLayout->addWidget(infoLabel);
@@ -63,8 +65,10 @@ void DialogMarkAxes::buildUi()
     m_grid->setSpacing(4);
 
     // Header
-    auto* hdrName = new QLabel(tr("零件名称"), m_rowContainer);
-    auto* hdrAxis = new QLabel(tr("所属轴系"), m_rowContainer);
+    // 中文翻译：零件名称
+    auto* hdrName = new QLabel(tr("Part name"), m_rowContainer);
+    // 中文翻译：所属轴系
+    auto* hdrAxis = new QLabel(tr("Belonging axis system"), m_rowContainer);
     hdrName->setStyleSheet("font-weight: bold;");
     hdrAxis->setStyleSheet("font-weight: bold;");
     m_grid->addWidget(hdrName, 0, 0);
@@ -81,7 +85,8 @@ void DialogMarkAxes::buildUi()
     originSep->setFrameShadow(QFrame::Sunken);
     mainLayout->addWidget(originSep);
 
-    auto* originLabel = new QLabel(tr("旋转轴轴心（用于仿真时绕真实轴心旋转）"), this);
+    // 中文翻译：旋转轴轴心（用于仿真时绕真实轴心旋转）
+    auto* originLabel = new QLabel(tr("The axis of rotation (used to rotate around the real axis during simulation)"), this);
     originLabel->setStyleSheet("color: #888; font-size: 11px;");
     mainLayout->addWidget(originLabel);
 
@@ -95,8 +100,10 @@ void DialogMarkAxes::buildUi()
     mainLayout->addWidget(m_originContainer);
 
     // ── Bottom button row ─────────────────────────────────────────────────
-    auto* autoBtn = new QPushButton(tr("🔍 自动识别"), this);
-    autoBtn->setToolTip(tr("根据零件名称自动匹配轴系（可再手动调整）"));
+    // 中文翻译：🔍 自动识别
+    auto* autoBtn = new QPushButton(tr("🔍 Automatic recognition"), this);
+    // 中文翻译：根据零件名称自动匹配轴系（可再手动调整）
+    autoBtn->setToolTip(tr("Automatically match the axis system according to the part name (can be adjusted manually)"));
     auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     auto* btnRow = new QHBoxLayout;
     btnRow->addWidget(autoBtn);
@@ -118,15 +125,19 @@ void DialogMarkAxes::populateRows()
 
     // Build axis name list for combo items
     QStringList axisNames;
-    axisNames << tr("— 未分配 —");
+    // 中文翻译：— 未分配 —
+    axisNames << tr("— not assigned —");
     for (const auto& axis : m_kin->axes()) {
         QString label = axis.name;
         if (axis.name == "BASE") {
-            label = tr("BASE（固定基座）");
+            // 中文翻译：BASE（固定基座）
+            label = tr("BASE (fixed base)");
         } else if (axis.motionType == MachineAxisDef::Linear) {
-            label = tr("%1 轴（线性 ±%2 mm）").arg(axis.name).arg(axis.maxVal, 0, 'f', 0);
+            // 中文翻译：%1 轴（线性 ±%2 mm）
+            label = tr("%1 axis (linear ±%2 mm)").arg(axis.name).arg(axis.maxVal, 0, 'f', 0);
         } else {
-            label = tr("%1 轴（旋转）").arg(axis.name);
+            // 中文翻译：%1 轴（旋转）
+            label = tr("%1 axis (rotation)").arg(axis.name);
         }
         axisNames << label;
     }
@@ -148,7 +159,8 @@ void DialogMarkAxes::populateRows()
         if (!currentAxis.isEmpty()) {
             for (int j = 0; j < m_kin->axes().size(); ++j) {
                 if (m_kin->axes()[j].name == currentAxis) {
-                    combo->setCurrentIndex(j + 1);  // +1 for "— 未分配 —"
+                    // 中文翻译：— 未分配 —
+                    combo->setCurrentIndex(j + 1);  // +1 for "— not assigned —"
                     break;
                 }
             }
@@ -173,7 +185,8 @@ void DialogMarkAxes::populateOriginRows()
         delete item;
     }
 
-    auto* hdrAxis = new QLabel(tr("轴"), m_originContainer);
+    // 中文翻译：轴
+    auto* hdrAxis = new QLabel(tr("axis"), m_originContainer);
     auto* hdrX = new QLabel(tr("X"), m_originContainer);
     auto* hdrY = new QLabel(tr("Y"), m_originContainer);
     auto* hdrZ = new QLabel(tr("Z"), m_originContainer);
@@ -215,7 +228,8 @@ void DialogMarkAxes::populateOriginRows()
     }
 
     if (m_originEditors.isEmpty()) {
-        auto* lbl = new QLabel(tr("当前构型没有旋转轴需要配置轴心。"), m_originContainer);
+        // 中文翻译：当前构型没有旋转轴需要配置轴心。
+        auto* lbl = new QLabel(tr("In the current configuration, there is no rotation axis that needs to be configured with an axis center."), m_originContainer);
         lbl->setStyleSheet("color: gray; font-size: 11px;");
         m_originGrid->addWidget(lbl, 1, 0, 1, 4);
     }
@@ -242,7 +256,8 @@ void DialogMarkAxes::onAutoDetect()
     // Update combos
     for (auto& r : m_rows) {
         const QString axisName = m_kin->axisForShape(r.entry);
-        int idx = 0;  // "— 未分配 —"
+        // 中文翻译：— 未分配 —
+        int idx = 0;  // "— not assigned —"
         if (!axisName.isEmpty()) {
             for (int j = 0; j < m_kin->axes().size(); ++j) {
                 if (m_kin->axes()[j].name == axisName) {

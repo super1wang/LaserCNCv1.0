@@ -435,13 +435,15 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
 
     if (!m_provider) {
         if (errorMessage)
-            *errorMessage = QObject::tr("尚未关联 CAM 刀路数据源");
+            // 中文翻译：尚未关联 CAM 刀路数据源
+            *errorMessage = QObject::tr("The CAM tool path data source has not been associated");
         return false;
     }
     const auto snapshot = m_provider->exportToolpathSnapshot();
     if (snapshot.contours.isEmpty()) {
         if (errorMessage)
-            *errorMessage = QObject::tr("当前 CAM 中没有可排序的轮廓");
+            // 中文翻译：当前 CAM 中没有可排序的轮廓
+            *errorMessage = QObject::tr("There are currently no sortable contours in CAM");
         return false;
     }
 
@@ -461,7 +463,8 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
     }
     if (inputs.isEmpty()) {
         if (errorMessage)
-            *errorMessage = QObject::tr("当前没有可参与排序的启用轮廓");
+            // 中文翻译：当前没有可参与排序的启用轮廓
+            *errorMessage = QObject::tr("There are currently no enabled profiles to participate in sorting");
         return false;
     }
 
@@ -503,7 +506,8 @@ bool ProcessCuttingPlanService::applyAutoSort(AutoSortAxis axis, QString* errorM
         : lcnc::cam::planContourOrder(selectedInputs, params);
     if (ordered.isEmpty()) {
         if (errorMessage)
-            *errorMessage = QObject::tr("自动排序未生成有效轮廓顺序");
+            // 中文翻译：自动排序未生成有效轮廓顺序
+            *errorMessage = QObject::tr("Autosort does not generate valid contour order");
         return false;
     }
 

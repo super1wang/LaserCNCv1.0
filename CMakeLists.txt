@@ -55,7 +55,7 @@ endif()
 # ─── Qt ───────────────────────────────────────────────────────────────────────
 set(LCNC_QT6_ROOT "E:/Qt6.9.1/6.9.1/msvc2022_64" CACHE PATH "Qt6 installation root")
 set(Qt6_DIR "${LCNC_QT6_ROOT}/lib/cmake/Qt6" CACHE PATH "Qt6 CMake package directory")
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network SerialPort UiTools)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network SerialPort UiTools LinguistTools)
 
 # ─── OpenCASCADE ──────────────────────────────────────────────────────────────
 set(LCNC_OCCT_ROOT "G:/environment/occt7.9-vc144-64-combined/occt-vc144-64" CACHE PATH "OpenCASCADE installation root")
@@ -573,6 +573,20 @@ target_link_libraries(lcnc_app PUBLIC
 add_executable(LaserCNC WIN32
     src/main.cpp
     resources/resources.qrc
+)
+qt_add_lrelease(LaserCNC
+    TS_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/translations/lasercnc_zh_CN.ts"
+    QM_FILES_OUTPUT_VARIABLE LCNC_TRANSLATION_QM_FILES
+)
+# qt_add_lrelease writes .qm files into the build tree, so its output paths are
+# absolute.  Qt 6 requires an explicit resource alias for such generated files.
+set_source_files_properties(${LCNC_TRANSLATION_QM_FILES}
+    PROPERTIES QT_RESOURCE_ALIAS "lasercnc_zh_CN.qm"
+)
+qt_add_resources(LaserCNC "lcnc_translations"
+    PREFIX "/i18n"
+    FILES ${LCNC_TRANSLATION_QM_FILES}
 )
 # Both supported generator trees deploy the application to the same canonical
 # runtime root. This is intentionally not a cache variable: build trees contain

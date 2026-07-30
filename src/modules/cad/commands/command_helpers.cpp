@@ -50,7 +50,8 @@ QList<EntityInfo> collectEntities(LcncDocument* doc, LcncDocument::EntityKind ki
         info.label = label;
         info.name = XcafUtils::name(label);
         if (info.name.isEmpty())
-            info.name = QStringLiteral("形体 %1").arg(index);
+            // 中文翻译：形体 %1
+            info.name = QStringLiteral("Shape %1").arg(index);
         info.shape = shapeTool->GetShape(label);
         out.append(info);
     }
@@ -68,9 +69,11 @@ QList<EntityInfo> collectContextualEntities(IAppContext* ctx)
     QList<EntityInfo> machine = collectEntities(doc, LcncDocument::EntityKind::Machine);
     QList<EntityInfo> workpiece = collectEntities(doc, LcncDocument::EntityKind::Workpiece);
     for (auto& entity : machine)
-        entity.name = QObject::tr("[机台] %1").arg(entity.name);
+        // 中文翻译：[机台] %1
+        entity.name = QObject::tr("[Machine] %1").arg(entity.name);
     for (auto& entity : workpiece)
-        entity.name = QObject::tr("[工件] %1").arg(entity.name);
+        // 中文翻译：[工件] %1
+        entity.name = QObject::tr("[Workpiece] %1").arg(entity.name);
 
     QList<EntityInfo> all;
     all.reserve(workpiece.size() + machine.size());
@@ -156,9 +159,11 @@ bool setupEntityCombo(QComboBox* cb,
     const bool hasSentinel = !sel.isEmpty();
     if (hasSentinel) {
         if (sel.size() == 1)
-            cb->addItem(QObject::tr("[当前选中] %1").arg(sel.front().name));
+            // 中文翻译：[当前选中] %1
+            cb->addItem(QObject::tr("[Currently selected] %1").arg(sel.front().name));
         else
-            cb->addItem(QObject::tr("[当前选中] %1 个形体").arg(sel.size()));
+            // 中文翻译：[当前选中] %1 个形体
+            cb->addItem(QObject::tr("[Currently selected] %1 shapes").arg(sel.size()));
     }
     for (const auto& entity : all)
         cb->addItem(entity.name);
@@ -173,7 +178,8 @@ bool pickTwoEntities(const QString& title,
                      const QList<EntityInfo>& sel)
 {
     if (entities.size() < 2) {
-        QMessageBox::information(nullptr, title, QObject::tr("需要至少两个工件"));
+        // 中文翻译：需要至少两个工件
+        QMessageBox::information(nullptr, title, QObject::tr("Requires at least two workpieces"));
         return false;
     }
 
@@ -201,8 +207,10 @@ bool pickTwoEntities(const QString& title,
         cbB->setCurrentIndex(1);
     }
 
-    form->addRow(QObject::tr("形体 A:"), cbA);
-    form->addRow(QObject::tr("形体 B:"), cbB);
+    // 中文翻译：形体 A:
+    form->addRow(QObject::tr("Shape A:"), cbA);
+    // 中文翻译：形体 B:
+    form->addRow(QObject::tr("Shape B:"), cbB);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -215,7 +223,8 @@ bool pickTwoEntities(const QString& title,
     idxA = cbA->currentIndex();
     idxB = cbB->currentIndex();
     if (idxA == idxB) {
-        QMessageBox::warning(nullptr, title, QObject::tr("请选择不同的两个形体"));
+        // 中文翻译：请选择不同的两个形体
+        QMessageBox::warning(nullptr, title, QObject::tr("Please choose two different shapes"));
         return false;
     }
     return true;

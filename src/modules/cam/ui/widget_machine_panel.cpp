@@ -126,11 +126,13 @@ void WidgetMachinePanel::buildConfigPage()
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(8);
 
-    m_assignGroup = new QGroupBox(tr("标记所选部件"), m_configPage);
+    // 中文翻译：标记所选部件
+    m_assignGroup = new QGroupBox(tr("Mark selected parts"), m_configPage);
     auto* assignLayout = new QVBoxLayout(m_assignGroup);
     assignLayout->setContentsMargins(6, 6, 6, 6);
     assignLayout->setSpacing(6);
-    m_lblAssignSelection = new QLabel(tr("请在机台视图或模型树中选择机台部件。"), m_assignGroup);
+    // 中文翻译：请在机台视图或模型树中选择机台部件。
+    m_lblAssignSelection = new QLabel(tr("Please select the machine part in the machine view or model tree."), m_assignGroup);
     m_lblAssignSelection->setWordWrap(true);
     m_lblAssignSelection->setStyleSheet("color: #888; font-size: 11px;");
     assignLayout->addWidget(m_lblAssignSelection);
@@ -142,17 +144,21 @@ void WidgetMachinePanel::buildConfigPage()
     assignLayout->addLayout(m_assignGrid);
     mainLayout->addWidget(m_assignGroup);
 
-    auto* calibrationGroup = new QGroupBox(tr("坐标系转换"), m_configPage);
+    // 中文翻译：坐标系转换
+    auto* calibrationGroup = new QGroupBox(tr("Coordinate system conversion"), m_configPage);
     auto* calibrationLayout = new QVBoxLayout(calibrationGroup);
     calibrationLayout->setContentsMargins(6, 6, 6, 6);
     calibrationLayout->setSpacing(8);
 
     // 唯一入口：打开三段式标定向导（需求 3：移除旧的轴心/AC 中心/切割头独立控件）
     m_btnOpenCalibrationWizard = new QPushButton(
-        tr("打开标定向导..."), calibrationGroup);
+        // 中文翻译：打开标定向导...
+        tr("Open the Calibration Wizard..."), calibrationGroup);
     m_btnOpenCalibrationWizard->setToolTip(
-        tr("依次拾取 A 轴、C 轴参考面与切割头下端面，填入物理 AC 中心与 A/C 角度，"
-           "一次性完成机台坐标系标定，并自动持久化到 cam.toml 与机台 STEP。"));
+        // 中文翻译：依次拾取 A 轴、C 轴参考面与切割头下端面，填入物理 AC 中心与 A/C 角度，
+        tr("Select the A-axis and C-axis reference planes and the lower end face of the cutting head in sequence, and fill in the physical AC center and A/C angle."
+           // 中文翻译：一次性完成机台坐标系标定，并自动持久化到 cam.toml 与机台 STEP。
+           "The machine coordinate system calibration is completed in one go and automatically persisted to cam.toml and machine STEP."));
     calibrationLayout->addWidget(m_btnOpenCalibrationWizard);
     connect(m_btnOpenCalibrationWizard, &QPushButton::clicked,
             this, &WidgetMachinePanel::axisCalibrationWizardRequested);
@@ -170,19 +176,25 @@ void WidgetMachinePanel::buildWorkpiecePage()
     if (!mainLayout)
         return;
 
-    m_installGroup = new QGroupBox(tr("工件安装位置"), m_configPage);
+    // 中文翻译：工件安装位置
+    m_installGroup = new QGroupBox(tr("Workpiece installation position"), m_configPage);
     auto* installLayout = new QFormLayout(m_installGroup);
     installLayout->setContentsMargins(6, 6, 6, 6);
     installLayout->setSpacing(6);
-    m_chkAutoInstallWorkpiece = new QCheckBox(tr("自动安装工件"), m_installGroup);
+    // 中文翻译：自动安装工件
+    m_chkAutoInstallWorkpiece = new QCheckBox(tr("Automatically install workpieces"), m_installGroup);
     m_wpcInstallX = createMillimeterSpin(m_installGroup);
     m_wpcInstallY = createMillimeterSpin(m_installGroup);
     m_wpcInstallZ = createMillimeterSpin(m_installGroup);
-    m_btnAlignRotationCenter = new QPushButton(tr("对齐旋转中心"), m_installGroup);
+    // 中文翻译：对齐旋转中心
+    m_btnAlignRotationCenter = new QPushButton(tr("Align center of rotation"), m_installGroup);
     installLayout->addRow(m_chkAutoInstallWorkpiece);
-    installLayout->addRow(tr("安装 X:"), m_wpcInstallX);
-    installLayout->addRow(tr("安装 Y:"), m_wpcInstallY);
-    installLayout->addRow(tr("安装 Z:"), m_wpcInstallZ);
+    // 中文翻译：安装 X:
+    installLayout->addRow(tr("Install X:"), m_wpcInstallX);
+    // 中文翻译：安装 Y:
+    installLayout->addRow(tr("Install Y:"), m_wpcInstallY);
+    // 中文翻译：安装 Z:
+    installLayout->addRow(tr("Install Z:"), m_wpcInstallZ);
     installLayout->addRow(m_btnAlignRotationCenter);
     mainLayout->addWidget(m_installGroup);
 
@@ -213,8 +225,10 @@ void WidgetMachinePanel::refreshCalibrationSection()
     if (m_lblCalibrationHint) {
         m_lblCalibrationHint->setText(
             supported
-                ? tr("适用于 AC 转台：A 轴参考面写入 Y/Z，C 轴参考面写入 X。整机对齐只做平移。切割头模型点与物理点可独立录入和对齐。")
-                : tr("当前页用于轴心与切割头位置配置。AC 轴心快填和 AC 中心对齐仅在 AC 转台构型下显示。"));
+                // 中文翻译：适用于 AC 转台：A 轴参考面写入 Y/Z，C 轴参考面写入 X。整机对齐只做平移。切割头模型点与物理点可独立录入和对齐。
+                ? tr("Applicable to AC rotary tables: Write Y/Z for the A-axis reference plane and X for the C-axis reference plane. The whole machine is aligned only for translation. The cutting head model points and physical points can be entered and aligned independently.")
+                // 中文翻译：当前页用于轴心与切割头位置配置。AC 轴心快填和 AC 中心对齐仅在 AC 转台构型下显示。
+                : tr("The current page is used for axis and cutting head position configuration. AC Pivot Quick Fill and AC Center Align are only shown in AC rotary configuration."));
     }
 
     if (m_axisAySpin && kin && kin->findAxis(QStringLiteral("A"))) {
@@ -238,7 +252,8 @@ void WidgetMachinePanel::refreshCalibrationSection()
             m_lblCurrentAcCenter->setText(formatPointText(center));
             m_lblCurrentAcCenter->setStyleSheet(QString());
         } else {
-            m_lblCurrentAcCenter->setText(tr("当前构型暂不支持 AC 中心对齐。"));
+            // 中文翻译：当前构型暂不支持 AC 中心对齐。
+            m_lblCurrentAcCenter->setText(tr("The current configuration does not support AC center alignment."));
             m_lblCurrentAcCenter->setStyleSheet("color: gray; font-size: 11px;");
         }
     }
@@ -279,7 +294,8 @@ void WidgetMachinePanel::refreshCalibrationSection()
     }
 
     if (m_lblHeadModelPoint)
-        m_lblHeadModelPoint->setText(tr("当前切割头模型点: %1")
+        // 中文翻译：当前切割头模型点: %1
+        m_lblHeadModelPoint->setText(tr("Current cutting head model point: %1")
                                          .arg(formatPointText(cutterHeadModel)));
 
     if (!m_lblPickStatus)
@@ -287,22 +303,27 @@ void WidgetMachinePanel::refreshCalibrationSection()
 
     if (!m_pendingCalibrationAxis.isEmpty()) {
         const QString targetText = (m_pendingCalibrationAxis == QStringLiteral("CUTTER_HEAD"))
-            ? tr("切割头对齐")
-            : tr("%1 轴参考平面").arg(m_pendingCalibrationAxis);
+            // 中文翻译：切割头对齐
+            ? tr("Cutting head alignment")
+            // 中文翻译：%1 轴参考平面
+            : tr("%1 axis reference plane").arg(m_pendingCalibrationAxis);
         m_lblPickStatus->setText(
-            tr("正在拾取 %1：左键确认，右键或 ESC 取消。")
+            // 中文翻译：正在拾取 %1：左键确认，右键或 ESC 取消。
+            tr("Picking %1: left click to confirm, right click or ESC to cancel.")
                 .arg(targetText));
         m_lblPickStatus->setStyleSheet("color: #c98512; font-size: 11px; font-weight: bold;");
         return;
     }
 
     if (!supported) {
-        m_lblPickStatus->setText(tr("左键选择参考平面，右键或 ESC 取消。切割头拾取始终可用，AC 轴心快填仅在 AC 转台构型下显示。"));
+        // 中文翻译：左键选择参考平面，右键或 ESC 取消。切割头拾取始终可用，AC 轴心快填仅在 AC 转台构型下显示。
+        m_lblPickStatus->setText(tr("Left click to select the reference plane, right click or ESC to cancel. Cutting head pick-up is always available, AC pivot fill is only shown in AC rotary configuration."));
         m_lblPickStatus->setStyleSheet("color: #888; font-size: 11px;");
         return;
     }
 
-    m_lblPickStatus->setText(tr("左键选择参考平面，右键或 ESC 取消。"));
+    // 中文翻译：左键选择参考平面，右键或 ESC 取消。
+    m_lblPickStatus->setText(tr("Left click to select the reference plane, right click or ESC to cancel."));
     m_lblPickStatus->setStyleSheet("color: #888; font-size: 11px;");
 }
 
@@ -317,13 +338,15 @@ void WidgetMachinePanel::rebuildAssignmentSection()
     const bool hasMachineEntities = m_doc
         && m_doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0;
     if (!m_doc || !kin || !hasMachineEntities) {
-        m_lblAssignSelection->setText(tr("加载机台模型后，可为选中机台部件直接标记所属轴系。"));
+        // 中文翻译：加载机台模型后，可为选中机台部件直接标记所属轴系。
+        m_lblAssignSelection->setText(tr("After loading the machine model, you can directly mark the axis system to which the selected machine component belongs."));
         m_lblAssignSelection->setStyleSheet("color: #888; font-size: 11px;");
         return;
     }
 
     if (m_selectedEntries.isEmpty()) {
-        m_lblAssignSelection->setText(tr("请在机台视图或模型树中选择机台部件。"));
+        // 中文翻译：请在机台视图或模型树中选择机台部件。
+        m_lblAssignSelection->setText(tr("Please select the machine part in the machine view or model tree."));
         m_lblAssignSelection->setStyleSheet("color: #888; font-size: 11px;");
         return;
     }
@@ -341,13 +364,16 @@ void WidgetMachinePanel::rebuildAssignmentSection()
 
     QString summaryText;
     if (selectedNames.size() == 1) {
-        summaryText = tr("当前选中: %1").arg(selectedNames.first());
+        // 中文翻译：当前选中: %1
+        summaryText = tr("Currently selected: %1").arg(selectedNames.first());
     } else if (selectedNames.size() <= 3) {
-        summaryText = tr("当前选中 %1 个部件: %2")
+        // 中文翻译：当前选中 %1 个部件: %2
+        summaryText = tr("Currently %1 components are selected: %2")
             .arg(selectedNames.size())
             .arg(selectedNames.join(tr("、")));
     } else {
-        summaryText = tr("当前选中 %1 个机台部件，可直接点击下方按钮归轴。")
+        // 中文翻译：当前选中 %1 个机台部件，可直接点击下方按钮归轴。
+        summaryText = tr("%1 machine components are currently selected. You can directly click the button below to return to the axis.")
             .arg(selectedNames.size());
     }
     m_lblAssignSelection->setText(summaryText);
@@ -358,12 +384,15 @@ void WidgetMachinePanel::rebuildAssignmentSection()
         const QString axisName = axis.name;
         QString buttonText;
         if (axisName == QStringLiteral("BASE"))
-            buttonText = tr("标记为 BASE");
+            // 中文翻译：标记为 BASE
+            buttonText = tr("Marked BASE");
         else
-            buttonText = tr("标记为 %1").arg(axisName);
+            // 中文翻译：标记为 %1
+            buttonText = tr("Marked with %1").arg(axisName);
 
         auto* button = new QPushButton(buttonText, m_assignGroup);
-        button->setToolTip(tr("将当前选中的机台部件归到 %1 轴").arg(axisName));
+        // 中文翻译：将当前选中的机台部件归到 %1 轴
+        button->setToolTip(tr("Assign the currently selected machine parts to the %1 axis").arg(axisName));
         connect(button, &QPushButton::clicked, this, [this, axisName] {
             if (m_selectedEntries.isEmpty())
                 return;
@@ -376,8 +405,10 @@ void WidgetMachinePanel::rebuildAssignmentSection()
         ++index;
     }
 
-    auto* clearButton = new QPushButton(tr("解除所选归轴"), m_assignGroup);
-    clearButton->setToolTip(tr("清除当前选中机台部件已有的轴系归属"));
+    // 中文翻译：解除所选归轴
+    auto* clearButton = new QPushButton(tr("Unselect homing"), m_assignGroup);
+    // 中文翻译：清除当前选中机台部件已有的轴系归属
+    clearButton->setToolTip(tr("Clear the existing axis system ownership of the currently selected machine parts"));
     connect(clearButton, &QPushButton::clicked, this, [this] {
         for (const QString& entry : m_selectedEntries)
             lcnc::Kernel::current().service<CamModule>()->unassignShape(entry);
@@ -429,11 +460,14 @@ void WidgetMachinePanel::rebuildWpcSection()
         m_btnAlignRotationCenter->setVisible(showRotationButton);
         m_btnAlignRotationCenter->setEnabled(showRotationButton && hasPreset);
         if (configType == QStringLiteral("VERTICAL_AC_TABLE")) {
-            m_btnAlignRotationCenter->setToolTip(tr("将安装位置 X/Y 回填为 AC 旋转中心。"));
+            // 中文翻译：将安装位置 X/Y 回填为 AC 旋转中心。
+            m_btnAlignRotationCenter->setToolTip(tr("Backfill the mounting position X/Y to the AC rotation center."));
         } else if (configType == QStringLiteral("VERTICAL_BC_TABLE")) {
-            m_btnAlignRotationCenter->setToolTip(tr("将安装位置 X/Y 回填为 BC 旋转中心。"));
+            // 中文翻译：将安装位置 X/Y 回填为 BC 旋转中心。
+            m_btnAlignRotationCenter->setToolTip(tr("Backfill the mounting position X/Y to the BC center of rotation."));
         } else if (configType == QStringLiteral("XYZA")) {
-            m_btnAlignRotationCenter->setToolTip(tr("将安装位置 X/Y 回填为 A 转台中心。"));
+            // 中文翻译：将安装位置 X/Y 回填为 A 转台中心。
+            m_btnAlignRotationCenter->setToolTip(tr("Backfill the installation position X/Y to the A turntable center."));
         } else {
             m_btnAlignRotationCenter->setToolTip(QString());
         }

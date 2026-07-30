@@ -59,13 +59,15 @@ public:
     {
         if (!m_cadModule) {
             if (errMsg)
-                *errMsg = QStringLiteral("CAD 模块不可用");
+                // 中文翻译：CAD 模块不可用
+                *errMsg = QStringLiteral("CAD module is not available");
             return false;
         }
         const bool ok = m_cadModule->createPrimitive(m_descriptor.targetIndex,
                                                      primitiveParams(request.params));
         if (!ok && errMsg && errMsg->isEmpty())
-            *errMsg = QStringLiteral("创建基础体失败");
+            // 中文翻译：创建基础体失败
+            *errMsg = QStringLiteral("Failed to create base body");
         return ok;
     }
 
@@ -103,7 +105,8 @@ public:
     {
         if (!m_cadModule) {
             if (errMsg)
-                *errMsg = QStringLiteral("CAD 模块不可用");
+                // 中文翻译：CAD 模块不可用
+                *errMsg = QStringLiteral("CAD module is not available");
             return false;
         }
         const bool ok = m_cadModule->applyFeature(
@@ -111,7 +114,8 @@ public:
             request.params.value(QStringLiteral("length"), 10.0).toDouble(),
             request.params.value(QStringLiteral("angle"), 360.0).toDouble());
         if (!ok && errMsg && errMsg->isEmpty())
-            *errMsg = QStringLiteral("应用特征失败");
+            // 中文翻译：应用特征失败
+            *errMsg = QStringLiteral("Apply feature failed");
         return ok;
     }
 
@@ -131,35 +135,43 @@ void CadCommandDispatcher::registerDefaultTools()
 {
     registerCommand(std::make_unique<PrimitiveToolCommand>(m_cadModule,
                                                            QStringLiteral("cad.primitive.box"),
-                                                           QStringLiteral("长方体"),
+                                                           // 中文翻译：长方体
+                                                           QStringLiteral("cuboid"),
                                                            0));
     registerCommand(std::make_unique<PrimitiveToolCommand>(m_cadModule,
                                                            QStringLiteral("cad.primitive.cylinder"),
-                                                           QStringLiteral("圆柱体"),
+                                                           // 中文翻译：圆柱体
+                                                           QStringLiteral("cylinder"),
                                                            1));
     registerCommand(std::make_unique<PrimitiveToolCommand>(m_cadModule,
                                                            QStringLiteral("cad.primitive.sphere"),
-                                                           QStringLiteral("球体"),
+                                                           // 中文翻译：球体
+                                                           QStringLiteral("sphere"),
                                                            2));
     registerCommand(std::make_unique<PrimitiveToolCommand>(m_cadModule,
                                                            QStringLiteral("cad.primitive.cone"),
-                                                           QStringLiteral("圆锥体"),
+                                                           // 中文翻译：圆锥体
+                                                           QStringLiteral("cone"),
                                                            3));
     registerCommand(std::make_unique<PrimitiveToolCommand>(m_cadModule,
                                                            QStringLiteral("cad.primitive.torus"),
-                                                           QStringLiteral("圆环体"),
+                                                           // 中文翻译：圆环体
+                                                           QStringLiteral("torus"),
                                                            4));
     registerCommand(std::make_unique<FeatureToolCommand>(m_cadModule,
                                                          QStringLiteral("cad.feature.extrude"),
-                                                         QStringLiteral("拉伸凸台"),
+                                                         // 中文翻译：拉伸凸台
+                                                         QStringLiteral("extrude boss"),
                                                          0));
     registerCommand(std::make_unique<FeatureToolCommand>(m_cadModule,
                                                          QStringLiteral("cad.feature.revolve"),
-                                                         QStringLiteral("旋转凸台"),
+                                                         // 中文翻译：旋转凸台
+                                                         QStringLiteral("rotating boss"),
                                                          1));
     registerCommand(std::make_unique<FeatureToolCommand>(m_cadModule,
                                                          QStringLiteral("cad.feature.sweep"),
-                                                         QStringLiteral("扫掠"),
+                                                         // 中文翻译：扫掠
+                                                         QStringLiteral("sweep"),
                                                          2));
 }
 
@@ -181,7 +193,8 @@ bool CadCommandDispatcher::preview(const QString& toolId,
     auto it = m_commands.find(toolId);
     if (it == m_commands.end()) {
         if (errMsg)
-            *errMsg = QStringLiteral("未注册 CAD 工具: %1").arg(toolId);
+            // 中文翻译：未注册 CAD 工具: %1
+            *errMsg = QStringLiteral("Unregistered CAD tool: %1").arg(toolId);
         return false;
     }
     return it.value()->preview(request, outShape, errMsg);
@@ -194,7 +207,8 @@ bool CadCommandDispatcher::execute(const QString& toolId,
     auto it = m_commands.find(toolId);
     if (it == m_commands.end()) {
         if (errMsg)
-            *errMsg = QStringLiteral("未注册 CAD 工具: %1").arg(toolId);
+            // 中文翻译：未注册 CAD 工具: %1
+            *errMsg = QStringLiteral("Unregistered CAD tool: %1").arg(toolId);
         return false;
     }
     return it.value()->execute(request, errMsg);

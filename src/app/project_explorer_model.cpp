@@ -95,7 +95,8 @@ void appendSketchNodes(ProjectExplorerNode& documentNode, CadModule* cad, Docume
         sketchNode.kind = ProjectExplorerNodeKind::CadTemporarySketch;
         sketchNode.documentId = docId;
         sketchNode.nodeKey = QStringLiteral("__sketch_temp__");
-        sketchNode.displayName = QObject::tr("[新草图]");
+        // 中文翻译：[新草图]
+        sketchNode.displayName = QObject::tr("[new sketch]");
         for (const auto& element : cad->sketchElementSnapshots()) {
             ProjectExplorerNode elementNode;
             elementNode.kind = ProjectExplorerNodeKind::CadSketchElement;
@@ -114,7 +115,8 @@ void appendSketchNodes(ProjectExplorerNode& documentNode, CadModule* cad, Docume
         sketchNode.documentId = docId;
         sketchNode.nodeKey = QStringLiteral("__sketch_finished_%1__").arg(sketch.sketchId);
         sketchNode.displayName = sketch.usedByFeature
-            ? QObject::tr("%1（已用）").arg(sketch.name)
+            // 中文翻译：%1（已用）
+            ? QObject::tr("%1 (used)").arg(sketch.name)
             : sketch.name;
         sketchNode.checked = sketch.visible;
         sketchNode.muted = sketch.usedByFeature;
@@ -148,8 +150,10 @@ void appendWorkpieceSection(ProjectExplorerSnapshot& snapshot, CadModule* cad)
     ProjectExplorerNode root;
     root.kind = ProjectExplorerNodeKind::WorkpieceRoot;
     root.nodeKey = QStringLiteral("project.workpiece");
-    root.displayName = QObject::tr("工件");
-    root.infoText = (!doc || workpieceCount <= 0) ? QObject::tr("未加载") : QString();
+    // 中文翻译：工件
+    root.displayName = QObject::tr("workpiece");
+    // 中文翻译：未加载
+    root.infoText = (!doc || workpieceCount <= 0) ? QObject::tr("not loaded") : QString();
     root.selectable = true;
     root.checked = true;
 
@@ -159,7 +163,8 @@ void appendWorkpieceSection(ProjectExplorerSnapshot& snapshot, CadModule* cad)
         documentNode.documentId = doc->id();
         documentNode.nodeKey = QStringLiteral("workpiece:%1").arg(doc->id());
         documentNode.displayName = stateDisplayName.isEmpty()
-            ? (doc->name().trimmed().isEmpty() ? QObject::tr("工件模型") : doc->name().trimmed())
+            // 中文翻译：工件模型
+            ? (doc->name().trimmed().isEmpty() ? QObject::tr("workpiece model") : doc->name().trimmed())
             : stateDisplayName;
 
         const auto& hierarchy = doc->entityTree(LcncDocument::EntityKind::Workpiece);
@@ -189,13 +194,15 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     root.nodeKey = QStringLiteral("project.cam");
     // The tree represents the user-editable machining result, not an opaque
     // implementation cache.  Keep the label aligned with the staged CAM flow.
-    root.displayName = QObject::tr("加工轮廓");
+    // 中文翻译：加工轮廓
+    root.displayName = QObject::tr("Machining contour");
     root.selectable = true;
     root.droppable = true;
     root.checked = true;
 
     if (!cam) {
-        root.infoText = QObject::tr("未生成");
+        // 中文翻译：未生成
+        root.infoText = QObject::tr("Not generated");
         snapshot.roots.append(std::move(root));
         return;
     }
@@ -203,22 +210,31 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     const LaserToolpath& toolpath = cam->toolpath();
     const auto& layers = cam->toolpathLayers();
     root.infoText = toolpath.contourCount() > 0
-        ? QObject::tr("%1 图层 / %2 条轮廓")
+        // 中文翻译：%1 图层 / %2 条轮廓
+        ? QObject::tr("%1 layer / %2 outlines")
             .arg(static_cast<int>(layers.size()))
             .arg(toolpath.contourCount())
-        : QObject::tr("未生成");
+        // 中文翻译：未生成
+        : QObject::tr("Not generated");
     const struct { lcnc::cam::CamPipelineStage stage; const char* name; } stages[] = {
-        {lcnc::cam::CamPipelineStage::FaceSeparation, "分离面"},
-        {lcnc::cam::CamPipelineStage::ContourExtraction, "提取轮廓"},
-        {lcnc::cam::CamPipelineStage::PointDiscretization, "离散点"},
-        {lcnc::cam::CamPipelineStage::GeometricToolpath, "几何刀路"},
-        {lcnc::cam::CamPipelineStage::MachineSolve, "机床求解"},
+        // 中文翻译：分离面
+        {lcnc::cam::CamPipelineStage::FaceSeparation, "separation surface"},
+        // 中文翻译：提取轮廓
+        {lcnc::cam::CamPipelineStage::ContourExtraction, "Extract contours"},
+        // 中文翻译：离散点
+        {lcnc::cam::CamPipelineStage::PointDiscretization, "discrete points"},
+        // 中文翻译：几何刀路
+        {lcnc::cam::CamPipelineStage::GeometricToolpath, "Geometric tool path"},
+        // 中文翻译：机床求解
+        {lcnc::cam::CamPipelineStage::MachineSolve, "Machine tool solution"},
     };
     QStringList stageSummary;
     for (const auto& item : stages) {
         const auto state = cam->pipelineStageState(item.stage);
-        const QString status = !state.available ? QObject::tr("未执行")
-            : state.dirty ? QObject::tr("过期") : QObject::tr("完成");
+        // 中文翻译：未执行
+        const QString status = !state.available ? QObject::tr("Not executed")
+            // 中文翻译：过期；完成
+            : state.dirty ? QObject::tr("Expired") : QObject::tr("Complete");
         stageSummary << QObject::tr("%1:%2").arg(QString::fromUtf8(item.name), status);
     }
     root.toolTip = stageSummary.join(QStringLiteral(" · "));
@@ -235,7 +251,8 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
                 ? QString::number(static_cast<qulonglong>(node.contourId))
                 : QString::number(index));
         node.displayName = contour.name;
-        node.infoText = QObject::tr("%1 点").arg(contour.points.size());
+        // 中文翻译：%1 点
+        node.infoText = QObject::tr("%1 points").arg(contour.points.size());
         node.contourIndex = index;
         node.checkable = true;
         node.checked = contour.enabled;
@@ -255,15 +272,18 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
         layerNode.nodeKey = QStringLiteral("project.toolpath.layer.%1").arg(
             QString::number(static_cast<qulonglong>(layer.layerId)));
         layerNode.displayName = layer.name.trimmed().isEmpty()
-            ? QObject::tr("图层 %1").arg(root.children.size() + 1)
+            // 中文翻译：图层 %1
+            ? QObject::tr("Layer %1").arg(root.children.size() + 1)
             : layer.name;
         layerNode.checkable = true;
         layerNode.checked = layer.enabled;
         layerNode.selectable = true;
         layerNode.droppable = true;
         layerNode.infoText = layer.toolName.trimmed().isEmpty()
-            ? QObject::tr("工具: 未指定")
-            : QObject::tr("工具: %1").arg(layer.toolName.trimmed());
+            // 中文翻译：工具: 未指定
+            ? QObject::tr("Tools: unspecified")
+            // 中文翻译：工具: %1
+            : QObject::tr("Tool: %1").arg(layer.toolName.trimmed());
 
         for (std::uint64_t contourId : layer.contourIds) {
             const int index = cam->contourIndexById(static_cast<lcnc::cam::ContourId>(contourId));
@@ -293,7 +313,8 @@ void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* ca
     ProjectExplorerNode root;
     root.kind = ProjectExplorerNodeKind::MachiningFaceRoot;
     root.nodeKey = QStringLiteral("project.machiningfaces");
-    root.displayName = QObject::tr("加工面");
+    // 中文翻译：加工面
+    root.displayName = QObject::tr("Processing surface");
     root.selectable = true;
     root.checkable = true;
     root.checked = cam && cam->machiningFacesVisible();
@@ -302,13 +323,15 @@ void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* ca
     const QList<CamModule::MachiningFaceInfo> faces = cam ? cam->machiningFacesForTree()
                                                            : QList<CamModule::MachiningFaceInfo>{};
     if (faces.isEmpty()) {
-        root.infoText = QObject::tr("未选择");
+        // 中文翻译：未选择
+        root.infoText = QObject::tr("Not selected");
         collectLeafEntries(root);
         snapshot.roots.append(std::move(root));
         return;
     }
 
-    root.infoText = QObject::tr("%1 个").arg(faces.size());
+    // 中文翻译：%1 个
+    root.infoText = QObject::tr("%1").arg(faces.size());
     for (const CamModule::MachiningFaceInfo& info : faces) {
         ProjectExplorerNode node;
         node.kind = ProjectExplorerNodeKind::MachiningFace;
@@ -318,17 +341,21 @@ void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* ca
         QString role;
         switch (info.role) {
         case lcnc::cam::MachiningFaceRole::LegacyOuterSurface:
-            role = QObject::tr("加工面");
+            // 中文翻译：加工面
+            role = QObject::tr("Processing surface");
             break;
         case lcnc::cam::MachiningFaceRole::CrossSection:
-            role = QObject::tr("横截面");
+            // 中文翻译：横截面
+            role = QObject::tr("cross section");
             break;
         case lcnc::cam::MachiningFaceRole::MachiningSurface:
-            role = QObject::tr("加工面");
+            // 中文翻译：加工面
+            role = QObject::tr("Processing surface");
             break;
         }
         node.infoText = QObject::tr("%1 · %2")
-            .arg(info.manual ? QObject::tr("手动") : QObject::tr("自动"), role);
+            // 中文翻译：手动；自动
+            .arg(info.manual ? QObject::tr("Manual") : QObject::tr("automatic"), role);
         node.machiningFaceId = info.faceId;
         node.selectable = true;
         node.checkable = false;

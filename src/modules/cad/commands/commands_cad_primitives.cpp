@@ -9,8 +9,10 @@
 // ── CmdCreateBox ──────────────────────────────────────────────────────────────
 CmdCreateBox::CmdCreateBox(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/box.svg"), tr("长方体"), this);
-    a->setStatusTip(tr("创建长方体基本体"));
+    // 中文翻译：长方体
+    auto* a = new QAction(QIcon(":/icons/box.svg"), tr("cuboid"), this);
+    // 中文翻译：创建长方体基本体
+    a->setStatusTip(tr("Create a cuboid primitive"));
     setAction(a);
 }
 
@@ -24,8 +26,10 @@ void CmdCreateBox::execute()
 // ── CmdCreateCylinder ─────────────────────────────────────────────────────────
 CmdCreateCylinder::CmdCreateCylinder(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/cylinder.svg"), tr("圆柱体"), this);
-    a->setStatusTip(tr("创建圆柱体基本体"));
+    // 中文翻译：圆柱体
+    auto* a = new QAction(QIcon(":/icons/cylinder.svg"), tr("cylinder"), this);
+    // 中文翻译：创建圆柱体基本体
+    a->setStatusTip(tr("Create a cylinder primitive"));
     setAction(a);
 }
 
@@ -39,8 +43,10 @@ void CmdCreateCylinder::execute()
 // ── CmdCreateSphere ───────────────────────────────────────────────────────────
 CmdCreateSphere::CmdCreateSphere(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/sphere.svg"), tr("球体"), this);
-    a->setStatusTip(tr("创建球体基本体"));
+    // 中文翻译：球体
+    auto* a = new QAction(QIcon(":/icons/sphere.svg"), tr("sphere"), this);
+    // 中文翻译：创建球体基本体
+    a->setStatusTip(tr("Create a sphere primitive"));
     setAction(a);
 }
 
@@ -54,8 +60,10 @@ void CmdCreateSphere::execute()
 // ── CmdCreateCone ─────────────────────────────────────────────────────────────
 CmdCreateCone::CmdCreateCone(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/cone.svg"), tr("圆锥体"), this);
-    a->setStatusTip(tr("创建圆锥体（或截锥体）"));
+    // 中文翻译：圆锥体
+    auto* a = new QAction(QIcon(":/icons/cone.svg"), tr("cone"), this);
+    // 中文翻译：创建圆锥体（或截锥体）
+    a->setStatusTip(tr("Create a cone (or frustum)"));
     setAction(a);
 }
 
@@ -69,8 +77,10 @@ void CmdCreateCone::execute()
 // ── CmdCreateTorus ────────────────────────────────────────────────────────────
 CmdCreateTorus::CmdCreateTorus(IAppContext* ctx) : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/torus.svg"), tr("圆环体"), this);
-    a->setStatusTip(tr("创建圆环体基本体"));
+    // 中文翻译：圆环体
+    auto* a = new QAction(QIcon(":/icons/torus.svg"), tr("torus"), this);
+    // 中文翻译：创建圆环体基本体
+    a->setStatusTip(tr("Create a torus primitive"));
     setAction(a);
 }
 

@@ -47,8 +47,10 @@
 CmdLoadMachine::CmdLoadMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("加载机台"), this);
-    a->setStatusTip(tr("加载机台三维模型，保留当前轴系配置"));
+    // 中文翻译：加载机台
+    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("Loading machine"), this);
+    // 中文翻译：加载机台三维模型，保留当前轴系配置
+    a->setStatusTip(tr("Load the 3D model of the machine and retain the current axis configuration"));
     setAction(a);
 }
 
@@ -56,8 +58,10 @@ void CmdLoadMachine::execute()
 {
     LcncDocument* doc = context()->machineDocument();
     if (!doc || doc->machineKinematics()->axes().isEmpty()) {
-        QMessageBox::information(nullptr, tr("加载机台"),
-            tr("请先在准备页的轴系配置页面中选择机台构型并完成轴系配置。"));
+        // 中文翻译：加载机台
+        QMessageBox::information(nullptr, tr("Loading machine"),
+            // 中文翻译：请先在准备页的轴系配置页面中选择机台构型并完成轴系配置。
+            tr("Please first select the machine configuration and complete the axis system configuration on the axis system configuration page of the preparation page."));
         return;
     }
 
@@ -67,8 +71,10 @@ void CmdLoadMachine::execute()
         pathToLoad = configuredPath;
     } else {
         pathToLoad = QFileDialog::getOpenFileName(
-            nullptr, tr("选择机台模型文件"), configuredPath,
-            tr("三维模型文件 (*.stp *.step *.stl *.brep);;"
+            // 中文翻译：选择机台模型文件
+            nullptr, tr("Select machine model file"), configuredPath,
+            // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;
+            tr("3D model files (*.stp *.step *.stl *.brep);;"
                "STEP (*.stp *.step);;"
                "STL (*.stl);;"
                "BREP (*.brep)"));
@@ -87,8 +93,10 @@ void CmdLoadMachine::execute()
 CmdMarkAxes::CmdMarkAxes(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/coordinate.svg"), tr("标记轴系"), this);
-    a->setStatusTip(tr("手动为机台各零件指定所属轴系"));
+    // 中文翻译：标记轴系
+    auto* a = new QAction(QIcon(":/icons/coordinate.svg"), tr("Mark axis system"), this);
+    // 中文翻译：手动为机台各零件指定所属轴系
+    a->setStatusTip(tr("Manually assign the axis system to each part of the machine"));
     setAction(a);
 }
 
@@ -105,8 +113,10 @@ void CmdMarkAxes::execute()
     if (!doc) return;
 
     if (context()->camModule()->axisOptions().isEmpty()) {
-        QMessageBox::information(nullptr, tr("标记轴系"),
-            tr("请先在准备页的轴系配置页面中配置机台构型，并加载机台模型。"));
+        // 中文翻译：标记轴系
+        QMessageBox::information(nullptr, tr("Mark axis system"),
+            // 中文翻译：请先在准备页的轴系配置页面中配置机台构型，并加载机台模型。
+            tr("Please configure the machine configuration in the axis system configuration page of the preparation page first, and load the machine model."));
         return;
     }
 
@@ -121,8 +131,10 @@ void CmdMarkAxes::execute()
 CmdMountWorkpiece::CmdMountWorkpiece(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/workpiece.svg"), tr("安装工件"), this);
-    a->setStatusTip(tr("将工件源模型平移到当前安装位置"));
+    // 中文翻译：安装工件
+    auto* a = new QAction(QIcon(":/icons/workpiece.svg"), tr("Install workpieces"), this);
+    // 中文翻译：将工件源模型平移到当前安装位置
+    a->setStatusTip(tr("Translate the workpiece source model to the current installation location"));
     setAction(a);
 }
 
@@ -137,8 +149,10 @@ void CmdMountWorkpiece::execute()
 {
     const auto mountCandidates = context()->camModule()->mountableWorkpieces();
     if (mountCandidates.isEmpty()) {
-        QMessageBox::information(nullptr, tr("安装工件"),
-            tr("请先导入一个工件模型。"));
+        // 中文翻译：安装工件
+        QMessageBox::information(nullptr, tr("Install workpieces"),
+            // 中文翻译：请先导入一个工件模型。
+            tr("Please import an workpiece model first."));
         return;
     }
 
@@ -151,8 +165,10 @@ void CmdMountWorkpiece::execute()
 CmdUnloadMachine::CmdUnloadMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("卸载机台"), this);
-    a->setStatusTip(tr("删除当前机台参考模型，保留工件、刀路和轴系配置"));
+    // 中文翻译：卸载机台
+    auto* a = new QAction(QIcon(":/icons/machine.svg"), tr("Unload the machine"), this);
+    // 中文翻译：删除当前机台参考模型，保留工件、刀路和轴系配置
+    a->setStatusTip(tr("Delete the current machine reference model and retain the workpiece, tool path and axis system configuration"));
     setAction(a);
 }
 
@@ -165,8 +181,10 @@ bool CmdUnloadMachine::isEnabled() const
 
 void CmdUnloadMachine::execute()
 {
-    if (QMessageBox::question(nullptr, tr("卸载机台"),
-            tr("确定要卸载当前机台参考模型吗？此操作仅删除机台几何，工件、刀路和轴系配置会保留。"),
+    // 中文翻译：卸载机台
+    if (QMessageBox::question(nullptr, tr("Unload the machine"),
+            // 中文翻译：确定要卸载当前机台参考模型吗？此操作仅删除机台几何，工件、刀路和轴系配置会保留。
+            tr("Are you sure you want to uninstall the current machine reference model? This operation only deletes the machine geometry; the workpiece, tool path and axis configuration will be retained."),
             QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
         return;
     context()->camModule()->unloadMachine();
@@ -178,8 +196,10 @@ void CmdUnloadMachine::execute()
 CmdExportMachine::CmdExportMachine(IAppContext* ctx)
     : CommandBase(ctx)
 {
-    auto* a = new QAction(QIcon(":/icons/export.svg"), tr("导出机台"), this);
-    a->setStatusTip(tr("导出机台模型为 STEP 文件，轴系按 LCNC_AXIS_* 命名以支持自动识别"));
+    // 中文翻译：导出机台
+    auto* a = new QAction(QIcon(":/icons/export.svg"), tr("Export machine"), this);
+    // 中文翻译：导出机台模型为 STEP 文件，轴系按 LCNC_AXIS_* 命名以支持自动识别
+    a->setStatusTip(tr("Export the machine model as a STEP file, and name the axis system according to LCNC_AXIS_* to support automatic identification."));
     setAction(a);
 }
 
@@ -193,8 +213,10 @@ bool CmdExportMachine::isEnabled() const
 void CmdExportMachine::execute()
 {
     const QString path = QFileDialog::getSaveFileName(
-        nullptr, tr("导出机台模型"), QString(),
-        tr("STEP 文件 (*.stp *.step);;所有文件 (*)"));
+        // 中文翻译：导出机台模型
+        nullptr, tr("Export machine model"), QString(),
+        // 中文翻译：STEP 文件 (*.stp *.step);;所有文件 (*)
+        tr("STEP files (*.stp *.step);;all files (*)"));
     if (path.isEmpty()) return;
     context()->camModule()->exportMachine(path);
 }

@@ -73,30 +73,40 @@ QString defaultStatusText(bool simulationMode, bool connected)
 {
     if (simulationMode) {
         return connected
-            ? QObject::tr("仿真模式 — 控制器已连接")
-            : QObject::tr("仿真模式 — 未连接");
+            // 中文翻译：仿真模式 — 控制器已连接
+            ? QObject::tr("Simulation mode - controller connected")
+            // 中文翻译：仿真模式 — 未连接
+            : QObject::tr("Emulation mode - not connected");
     }
 
     return connected
-        ? QObject::tr("控制器模式 — 待机")
-        : QObject::tr("控制器模式 — 未连接");
+        // 中文翻译：控制器模式 — 待机
+        ? QObject::tr("Controller Mode - Standby")
+        // 中文翻译：控制器模式 — 未连接
+        : QObject::tr("Controller mode - not connected");
 }
 
 QString processStateText(lcnc::ProcessRunState state)
 {
     switch (state) {
     case lcnc::ProcessRunState::Idle:
-        return QObject::tr("空闲");
+        // 中文翻译：空闲
+        return QObject::tr("free");
     case lcnc::ProcessRunState::Running:
-        return QObject::tr("运行中");
+        // 中文翻译：运行中
+        return QObject::tr("Running");
     case lcnc::ProcessRunState::Paused:
-        return QObject::tr("暂停");
+        // 中文翻译：暂停
+        return QObject::tr("pause");
     case lcnc::ProcessRunState::Error:
-        return QObject::tr("错误");
+        // 中文翻译：错误
+        return QObject::tr("Error");
     case lcnc::ProcessRunState::EmergencyStop:
-        return QObject::tr("急停");
+        // 中文翻译：急停
+        return QObject::tr("emergency stop");
     }
-    return QObject::tr("未知");
+    // 中文翻译：未知
+    return QObject::tr("unknown");
 }
 
 bool stopProcessHardware(const std::shared_ptr<Service>& service)
@@ -140,15 +150,21 @@ struct HardwarePreflightChannels {
 
 QString logLevelForMessage(const QString& message)
 {
-    if (message.contains(QObject::tr("失败")) ||
-        message.contains(QObject::tr("错误")) ||
-        message.contains(QObject::tr("无法")) ||
-        message.contains(QObject::tr("急停"))) {
+    // 中文翻译：失败
+    if (message.contains(QObject::tr("failed")) ||
+        // 中文翻译：错误
+        message.contains(QObject::tr("Error")) ||
+        // 中文翻译：无法
+        message.contains(QObject::tr("Unable")) ||
+        // 中文翻译：急停
+        message.contains(QObject::tr("emergency stop"))) {
         return QStringLiteral("error");
     }
-    if (message.contains(QObject::tr("警告")) || message.contains(QStringLiteral("warning"), Qt::CaseInsensitive))
+    // 中文翻译：警告
+    if (message.contains(QObject::tr("warning")) || message.contains(QStringLiteral("warning"), Qt::CaseInsensitive))
         return QStringLiteral("warn");
-    if (message.contains(QObject::tr("流程")) || message.contains(QObject::tr("加工")) || message.contains(QObject::tr("切割")))
+    // 中文翻译：流程；加工；切割
+    if (message.contains(QObject::tr("process")) || message.contains(QObject::tr("processing")) || message.contains(QObject::tr("cutting")))
         return QStringLiteral("process");
     return QStringLiteral("info");
 }
@@ -211,7 +227,8 @@ lcnc::ModuleInfo ProcessModule::info() const
 {
     return {
         QStringLiteral("process"),
-        QStringLiteral("加工进程模块"),
+        // 中文翻译：加工进程模块
+        QStringLiteral("Process module"),
         QStringLiteral("1.0.0"),
         { QStringLiteral("cam") }
     };
@@ -289,7 +306,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
             this, &ProcessModule::setStatusMessage);
     connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::contourStarted,
             this, [this](int index, int total, const QString& desc) {
-                setStatusMessage(tr("切割中 %1/%2: %3").arg(index).arg(total).arg(desc));
+                // 中文翻译：切割中 %1/%2: %3
+                setStatusMessage(tr("Cutting %1/%2: %3").arg(index).arg(total).arg(desc));
                 emit processingProgressChanged(index - 1, total);
             });
     connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::contourFinished,
@@ -351,12 +369,14 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
             [](const QString& stagingDirectory, const lcnc::LcncProjectManifest& manifest, QString* error) {
                 QSaveFile file(QDir(stagingDirectory).filePath(manifest.toolSnapshotPath));
                 if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                    if (error) *error = QStringLiteral("无法写入工具快照");
+                    // 中文翻译：无法写入工具快照
+                    if (error) *error = QStringLiteral("Unable to write tool snapshot");
                     return false;
                 }
                 toml::value root(ToolFactory::snapshot());
                 if (file.write(QByteArray::fromStdString(toml::format(root))) < 0 || !file.commit()) {
-                    if (error) *error = QStringLiteral("提交工具快照失败");
+                    // 中文翻译：提交工具快照失败
+                    if (error) *error = QStringLiteral("Failed to submit tool snapshot");
                     return false;
                 }
                 return true;
@@ -367,7 +387,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 try {
                     const toml::value root = toml::parse(path.toStdString());
                     if (!root.is_table() || !ToolFactory::restoreSnapshot(root.as_table())) {
-                        if (error) *error = QStringLiteral("项目工具快照无效");
+                        // 中文翻译：项目工具快照无效
+                        if (error) *error = QStringLiteral("Project tool snapshot is invalid");
                         return false;
                     }
                     return true;
@@ -375,7 +396,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                     LCNC_ERR(lcnc::LogCode::Generic,
                              "ProcessModule: failed to parse project tool snapshot: {}",
                              exception.what());
-                    if (error) *error = QStringLiteral("解析项目工具快照失败: %1").arg(exception.what());
+                    // 中文翻译：解析项目工具快照失败: %1
+                    if (error) *error = QStringLiteral("Failed to parse project tools snapshot: %1").arg(exception.what());
                     return false;
                 }
             }
@@ -403,7 +425,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                lcnc::process::ProcessInterruptContext* interrupt,
                QString* errorMessage) -> bool {
             if (!m_normalCuttingManager) {
-                if (errorMessage) *errorMessage = tr("普通切割管理器未初始化");
+                // 中文翻译：普通切割管理器未初始化
+                if (errorMessage) *errorMessage = tr("Normal cutting manager not initialized");
                 return false;
             }
             return m_normalCuttingManager->run(nodeId, parameters, interrupt, errorMessage);
@@ -458,11 +481,13 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                     if (!self)
                         return;
                     if (!result.success && emergency)
-                        self->setStatusMessage(self->tr("急停触发后安全输出复位失败"));
+                        // 中文翻译：急停触发后安全输出复位失败
+                        self->setStatusMessage(self->tr("Safety output reset fails after emergency stop is triggered"));
                 }, Qt::QueuedConnection);
             });
         if (!queued && emergency)
-            setStatusMessage(tr("急停安全停机命令未能排队"));
+            // 中文翻译：急停安全停机命令未能排队
+            setStatusMessage(tr("Emergency stop safety shutdown command failed to be queued"));
     });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::messageLogged,
             this, &ProcessModule::setStatusMessage);
@@ -475,7 +500,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeFailed,
             this, [this](const QString&, const QString& message) {
                 emit processFlowChanged();
-                setState(State::Error, tr("流程节点失败: %1").arg(message));
+                // 中文翻译：流程节点失败: %1
+                setState(State::Error, tr("Process node failed: %1").arg(message));
             });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::axisPositionRequested,
             this, &ProcessModule::setAxisPosition);
@@ -503,7 +529,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 m_simTimer->stop();
                 clearSafeOutputCache();
                 if (!m_deviceCommandQueue) {
-                    setState(State::Error, tr("流程完成后设备命令队列不可用"));
+                    // 中文翻译：流程完成后设备命令队列不可用
+                    setState(State::Error, tr("The device command queue is unavailable after the process is completed"));
                     return;
                 }
                 const auto service = m_service;
@@ -513,7 +540,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                             const bool success = stopProcessHardware(service);
                             return lcnc::process::DeviceCommandResult{
                                 success,
-                                success ? QString() : QObject::tr("安全输出复位失败")};
+                                // 中文翻译：安全输出复位失败
+                                success ? QString() : QObject::tr("Safety output reset failed")};
                         },
                         TaskPriority::Stop,
                         [self](const lcnc::process::DeviceCommandResult& result) {
@@ -522,12 +550,15 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                                     return;
                                 self->setState(result.success ? State::Idle : State::Error,
                                     result.success
-                                        ? self->tr("流程运行完成")
-                                        : self->tr("流程完成后安全输出复位失败: %1").arg(result.error));
+                                        // 中文翻译：流程运行完成
+                                        ? self->tr("The process is completed")
+                                        // 中文翻译：流程完成后安全输出复位失败: %1
+                                        : self->tr("Safety output reset failed after process completion: %1").arg(result.error));
                                 emit self->processFlowChanged();
                             }, Qt::QueuedConnection);
                         })) {
-                    setState(State::Error, tr("流程完成后安全停机命令未能排队"));
+                    // 中文翻译：流程完成后安全停机命令未能排队
+                    setState(State::Error, tr("Safety shutdown command failed to queue after process completion"));
                 }
             });
 
@@ -558,7 +589,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                                             : Service::DeviceLock{};
             MotionControl* mc = service ? service->GetMotionControl() : nullptr;
             if (!mc || !mc->IsConnected()) {
-                if (errorMessage) *errorMessage = QObject::tr("运动控制器未连接");
+                // 中文翻译：运动控制器未连接
+                if (errorMessage) *errorMessage = QObject::tr("Motion controller not connected");
                 return false;
             }
             const QString enumName = enumNameFromTomlChannel(channel);
@@ -575,7 +607,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 *value = raw != 0;
                 return true;
             }
-            if (errorMessage) *errorMessage = QObject::tr("通道未配置或读取失败: %1").arg(channel);
+            // 中文翻译：通道未配置或读取失败: %1
+            if (errorMessage) *errorMessage = QObject::tr("Channel not configured or read failed: %1").arg(channel);
             return false;
         };
         context.readAnalog = [service](const QString& channel, double* value, QString* errorMessage) {
@@ -585,7 +618,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                                             : Service::DeviceLock{};
             MotionControl* mc = service ? service->GetMotionControl() : nullptr;
             if (!mc || !mc->IsConnected()) {
-                if (errorMessage) *errorMessage = QObject::tr("运动控制器未连接");
+                // 中文翻译：运动控制器未连接
+                if (errorMessage) *errorMessage = QObject::tr("Motion controller not connected");
                 return false;
             }
             const QString enumName = enumNameFromTomlChannel(channel);
@@ -594,14 +628,16 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 && mc->AnalogInputGet(eIn.value(), *value)) {
                 return true;
             }
-            if (errorMessage) *errorMessage = QObject::tr("模拟量通道未配置或读取失败: %1").arg(channel);
+            // 中文翻译：模拟量通道未配置或读取失败: %1
+            if (errorMessage) *errorMessage = QObject::tr("Analog channel is not configured or failed to read: %1").arg(channel);
             return false;
         };
         return context;
     });
     connect(m_monitorService.get(), &lcnc::process::ProcessMonitorService::alarmRaised,
             this, [this](const lcnc::process::ProcessMonitorAlarm& alarm) {
-                setStatusMessage(tr("加工环境报警: %1").arg(alarm.message));
+                // 中文翻译：加工环境报警: %1
+                setStatusMessage(tr("Processing environment alarm: %1").arg(alarm.message));
                 if (m_state != State::Running)
                     return;
                 if (alarm.action == lcnc::ProcessMonitorFaultAction::Stop)
@@ -612,7 +648,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     connect(m_monitorService.get(), &lcnc::process::ProcessMonitorService::snapshotUpdated,
             this, [this](const lcnc::process::ProcessMonitorSnapshot& snapshot) {
                 if (snapshot.hasActiveAlarm())
-                    setStatusMessage(tr("加工环境报警: %1").arg(snapshot.summary));
+                    // 中文翻译：加工环境报警: %1
+                    setStatusMessage(tr("Processing environment alarm: %1").arg(snapshot.summary));
             });
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
@@ -648,7 +685,8 @@ void ProcessModule::stop()
         }
         clearSafeOutputCache();
         setState(State::EmergencyStop,
-                 tr("Process 后台任务取消超时，已请求安全停机并保留设备运行时"));
+                 // 中文翻译：Process 后台任务取消超时，已请求安全停机并保留设备运行时
+                 tr("Process background task cancellation timeout, safe shutdown requested and device runtime preserved"));
         LCNC_ERR(lcnc::LogCode::Generic,
                  "ProcessModule::stop: owned task cancellation timed out");
     }
@@ -661,7 +699,8 @@ void ProcessModule::stop()
         if (!workflowFinished) {
             LCNC_ERR(lcnc::LogCode::Generic,
                      "ProcessModule::stop: workflow thread did not exit before timeout");
-            setState(State::EmergencyStop, tr("工作流停止超时，设备保持安全停机状态"));
+            // 中文翻译：工作流停止超时，设备保持安全停机状态
+            setState(State::EmergencyStop, tr("Workflow stop times out, device remains in safe shutdown state"));
         }
     }
 
@@ -683,7 +722,8 @@ void ProcessModule::stop()
         const bool disconnectOk = m_service->shutdownDevices() && outputsSafe;
         m_connected = false;
         if (!disconnectOk) {
-            setState(State::Error, tr("关闭设备时安全停机或断开失败"));
+            // 中文翻译：关闭设备时安全停机或断开失败
+            setState(State::Error, tr("Safety shutdown or disconnect failure when shutting down equipment"));
             LCNC_ERR(lcnc::LogCode::Generic,
                      "ProcessModule::stop: safe shutdown did not complete");
         }
@@ -773,16 +813,19 @@ bool ProcessModule::isConnected() const
 void ProcessModule::connectAllDevices()
 {
     if (m_deviceOperation != DeviceOperation::None) {
-        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        // 中文翻译：已有设备操作进行中，请等待完成
+        setStatusMessage(tr("Existing equipment operation is in progress, please wait for completion"));
         return;
     }
     if (m_connected) {
-        setStatusMessage(tr("设备已连接，无需重复连接"));
+        // 中文翻译：设备已连接，无需重复连接
+        setStatusMessage(tr("The device is already connected, no need to reconnect"));
         return;
     }
 
     if (!m_deviceCommandQueue || !m_service) {
-        setState(State::Error, tr("设备命令队列不可用"));
+        // 中文翻译：设备命令队列不可用
+        setState(State::Error, tr("Device command queue is unavailable"));
         return;
     }
 
@@ -805,16 +848,21 @@ void ProcessModule::connectAllDevices()
         QMetaObject::invokeMethod(self, [self, percent, step] {
             if (!self || self->m_deviceOperation != DeviceOperation::Connecting)
                 return;
-            emit self->deviceConnectProgress(QObject::tr("连接设备"), percent, step);
-            self->setStatusMessage(QObject::tr("正在连接设备：%1").arg(step));
+            // 中文翻译：连接设备
+            emit self->deviceConnectProgress(QObject::tr("Connect devices"), percent, step);
+            // 中文翻译：正在连接设备：%1
+            self->setStatusMessage(QObject::tr("Connecting device: %1").arg(step));
         }, Qt::QueuedConnection);
     };
-    emit deviceConnectProgress(tr("连接设备"), 0, tr("已提交连接任务"));
-    setStatusMessage(tr("正在连接设备：等待设备线程"));
+    // 中文翻译：连接设备；已提交连接任务
+    emit deviceConnectProgress(tr("Connect devices"), 0, tr("Connection task submitted"));
+    // 中文翻译：正在连接设备：等待设备线程
+    setStatusMessage(tr("Connecting device: waiting for device thread"));
     if (!m_deviceCommandQueue->submit([service, pureSimulation, self, reportProgress] {
             bool success = true;
             try {
-                reportProgress(10, QObject::tr("正在创建运动控制器"));
+                // 中文翻译：正在创建运动控制器
+                reportProgress(10, QObject::tr("Creating motion controller"));
                 if (pureSimulation)
                     service->SetMotionControl("Simulator");
                 else
@@ -823,33 +871,42 @@ void ProcessModule::connectAllDevices()
                 auto* motionControl = service->GetMotionControl();
                 if (!motionControl) {
                     throw std::runtime_error(
-                        QObject::tr("运动控制器实例化失败；当前构建未启用所选控制器").toStdString());
+                        // 中文翻译：运动控制器实例化失败；当前构建未启用所选控制器
+                        QObject::tr("Motion controller instantiation failed; the selected controller is not enabled for the current build").toStdString());
                 }
-                reportProgress(25, QObject::tr("正在连接运动控制器"));
+                // 中文翻译：正在连接运动控制器
+                reportProgress(25, QObject::tr("Connecting motion controller"));
                 if (!motionControl->Connect()) {
                     throw std::runtime_error(
-                        QObject::tr("运动控制器连接失败；禁止回退到纯软件仿真").toStdString());
+                        // 中文翻译：运动控制器连接失败；禁止回退到纯软件仿真
+                        QObject::tr("Motion controller connection failed; falling back to pure software simulation is prohibited").toStdString());
                 }
-                reportProgress(50, QObject::tr("正在初始化运动轴"));
+                // 中文翻译：正在初始化运动轴
+                reportProgress(50, QObject::tr("Initializing motion axes"));
                 motionControl->rebuildAxes();
 
-                reportProgress(65, QObject::tr("正在创建激光器"));
+                // 中文翻译：正在创建激光器
+                reportProgress(65, QObject::tr("Creating laser"));
                 service->SetLaserDevice();
                 auto* laserDevice = service->GetLaserDevice();
-                reportProgress(75, QObject::tr("正在连接激光器"));
+                // 中文翻译：正在连接激光器
+                reportProgress(75, QObject::tr("Connecting laser"));
                 if (!laserDevice || !laserDevice->Connect()) {
                     throw std::runtime_error(
-                        QObject::tr("激光器连接失败；已取消本次设备连接").toStdString());
+                        // 中文翻译：激光器连接失败；已取消本次设备连接
+                        QObject::tr("Laser connection failed; this device connection has been canceled").toStdString());
                 }
 
-                reportProgress(88, QObject::tr("正在加载设备参数"));
+                // 中文翻译：正在加载设备参数
+                reportProgress(88, QObject::tr("Loading device parameters"));
                 if (!pureSimulation) {
                     service->SetMotionControlTable();
                     service->SetDigitalTable();
                     service->SetAnalogTable();
                 }
                 service->SetLaserTable();
-                reportProgress(100, QObject::tr("设备初始化完成"));
+                // 中文翻译：设备初始化完成
+                reportProgress(100, QObject::tr("Device initialization completed"));
             } catch (const std::exception& exception) {
                 success = false;
                 LCNC_ERR(lcnc::LogCode::Generic,
@@ -871,49 +928,60 @@ void ProcessModule::connectAllDevices()
                     self->m_connected = success;
                     emit self->connectionChanged(success);
                     if (success) {
-                        self->setState(State::Idle, tr("设备已连接"));
+                        // 中文翻译：设备已连接
+                        self->setState(State::Idle, tr("Device is connected"));
                         self->startDeviceMonitoring();
                     } else {
-                        self->setState(State::Error, tr("设备连接失败；未切换到纯软件仿真"));
+                        // 中文翻译：设备连接失败；未切换到纯软件仿真
+                        self->setState(State::Error, tr("Device connection failed; not switched to software-only emulation"));
                     }
                     emit self->deviceConnectFinished(success,
-                        success ? tr("所有设备连接成功") : tr("设备连接失败，请检查设置"));
+                        // 中文翻译：所有设备连接成功；设备连接失败，请检查设置
+                        success ? tr("All devices connected successfully") : tr("Device connection failed, please check settings"));
                 }, Qt::QueuedConnection);
             }
         })) {
         m_deviceOperation = DeviceOperation::None;
-        setState(State::Error, tr("设备连接命令未能排队"));
-        emit deviceConnectFinished(false, tr("设备连接命令未能排队"));
+        // 中文翻译：设备连接命令未能排队
+        setState(State::Error, tr("Device connection command failed to queue"));
+        // 中文翻译：设备连接命令未能排队
+        emit deviceConnectFinished(false, tr("Device connection command failed to queue"));
     }
 }
 
 void ProcessModule::disconnectAllDevices()
 {
     if (m_deviceOperation != DeviceOperation::None) {
-        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        // 中文翻译：已有设备操作进行中，请等待完成
+        setStatusMessage(tr("Existing equipment operation is in progress, please wait for completion"));
         return;
     }
     if (!m_connected) {
-        setStatusMessage(tr("设备未连接"));
+        // 中文翻译：设备未连接
+        setStatusMessage(tr("Device not connected"));
         return;
     }
     if (m_preflightInFlight) {
-        setStatusMessage(tr("加工环境检查尚未结束，请先停止并等待检查退出"));
+        // 中文翻译：加工环境检查尚未结束，请先停止并等待检查退出
+        setStatusMessage(tr("The processing environment check has not ended yet. Please stop and wait for the check to exit."));
         return;
     }
     if (m_state == State::Running || m_state == State::Paused
         || (m_workflowExecutor && !m_workflowExecutor->waitForIdle(0))) {
-        setStatusMessage(tr("加工流程尚未完全停止，请先停止并等待当前设备步骤退出"));
+        // 中文翻译：加工流程尚未完全停止，请先停止并等待当前设备步骤退出
+        setStatusMessage(tr("The processing process has not stopped completely. Please stop it first and wait for the current equipment step to exit."));
         return;
     }
     if (m_homing) {
-        setStatusMessage(tr("回零进行中，请等待完成后再断开设备"));
+        // 中文翻译：回零进行中，请等待完成后再断开设备
+        setStatusMessage(tr("Return to zero is in progress, please wait until it is completed before disconnecting the device."));
         return;
     }
 
     auto* taskMgr = lcnc::Kernel::current().taskManager();
     if (!taskMgr) {
-        setState(State::Error, tr("TaskManager 不可用"));
+        // 中文翻译：TaskManager 不可用
+        setState(State::Error, tr("TaskManager is not available"));
         return;
     }
 
@@ -924,29 +992,35 @@ void ProcessModule::disconnectAllDevices()
     stopDeviceMonitoring();
     clearSafeOutputCache();
 
-    setStatusMessage(tr("正在断开设备..."));
+    // 中文翻译：正在断开设备...
+    setStatusMessage(tr("Disconnecting device..."));
 
     const auto service = m_service;
 
     m_deviceOperation = DeviceOperation::Disconnecting;
-    const TaskId taskId = taskMgr->run(tr("断开设备"),
+    // 中文翻译：断开设备
+    const TaskId taskId = taskMgr->run(tr("Disconnect device"),
         [service](TaskProgress* progress) {
             const auto deviceLock = service->lockDeviceAccess();
             const auto throwIfAborted = [progress]() {
                 if (progress->isAbortRequested())
-                    throw std::runtime_error("设备断开已取消");
+                    // 中文翻译：设备断开已取消
+                    throw std::runtime_error("Device disconnect canceled");
             };
             progress->setRange(0, 100);
 
-            progress->setStepName(QObject::tr("正在安全停止设备..."));
+            // 中文翻译：正在安全停止设备...
+            progress->setStepName(QObject::tr("Safely stopping the device..."));
             progress->setValue(0);
             if (!stopProcessHardware(service))
-                throw std::runtime_error("设备断开前安全输出复位失败");
+                // 中文翻译：设备断开前安全输出复位失败
+                throw std::runtime_error("Safety output reset fails before device disconnection");
             progress->setValue(20);
             throwIfAborted();
 
             // ── Step 1: 断开激光器 ──
-            progress->setStepName(QObject::tr("正在断开激光器..."));
+            // 中文翻译：正在断开激光器...
+            progress->setStepName(QObject::tr("Disconnecting laser..."));
             {
                 auto* ld = service->GetLaserDevice();
                 if (ld) {
@@ -957,7 +1031,8 @@ void ProcessModule::disconnectAllDevices()
             throwIfAborted();
 
             // ── Step 2: 断开运动控制器 ──
-            progress->setStepName(QObject::tr("正在断开运动控制器..."));
+            // 中文翻译：正在断开运动控制器...
+            progress->setStepName(QObject::tr("Disconnecting motion controller..."));
             {
                 auto* mc = service->GetMotionControl();
                 if (mc) {
@@ -978,8 +1053,10 @@ void ProcessModule::disconnectAllDevices()
         emit connectionChanged(false);
         emit stateChanged(m_state);
         setStatusMessage(success
-            ? tr("所有设备已断开")
-            : tr("设备断开过程中出现异常，请检查日志"));
+            // 中文翻译：所有设备已断开
+            ? tr("All devices are disconnected")
+            // 中文翻译：设备断开过程中出现异常，请检查日志
+            : tr("An exception occurred during device disconnection, please check the log."));
 
         if (success) {
             LCNC_INFO(lcnc::LogCode::Generic,
@@ -990,7 +1067,8 @@ void ProcessModule::disconnectAllDevices()
         }
 
         emit deviceConnectFinished(success,
-            success ? tr("所有设备已断开") : tr("设备断开过程中出现异常"));
+            // 中文翻译：所有设备已断开；设备断开过程中出现异常
+            success ? tr("All devices are disconnected") : tr("An exception occurred during device disconnection"));
     });
 }
 
@@ -1003,7 +1081,8 @@ void ProcessModule::setSimulationMode(bool on)
         const QString controller = QString::fromStdString(
             m_service->configuredMotionControllerName());
         setState(State::Error,
-                 tr("当前已选择控制器 %1，禁止切换到纯软件仿真；请先在设备设置中显式选择 Simulator")
+                 // 中文翻译：当前已选择控制器 %1，禁止切换到纯软件仿真；请先在设备设置中显式选择 Simulator
+                 tr("Controller %1 is currently selected and switching to software-only simulation is prohibited; please explicitly select Simulator in the device settings first")
                      .arg(controller));
         return;
     }
@@ -1043,17 +1122,20 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
 
     const QString normalizedAxis = axisName.trimmed().toUpper();
     if (!m_axisEnabled.value(normalizedAxis, true)) {
-        setStatusMessage(tr("%1 轴未使能，点动已忽略").arg(normalizedAxis));
+        // 中文翻译：%1 轴未使能，点动已忽略
+        setStatusMessage(tr("%1 axis is not enabled, jog has been ignored").arg(normalizedAxis));
         return;
     }
 
     auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
     if (!eAxis.has_value()) {
-        setStatusMessage(tr("%1 轴未注册，无法点动").arg(normalizedAxis));
+        // 中文翻译：%1 轴未注册，无法点动
+        setStatusMessage(tr("%1 axis is not registered and cannot be jogged").arg(normalizedAxis));
         return;
     }
     if (!m_service || !m_deviceCommandQueue) {
-        setStatusMessage(tr("设备命令队列不可用"));
+        // 中文翻译：设备命令队列不可用
+        setStatusMessage(tr("Device command queue is unavailable"));
         return;
     }
 
@@ -1062,19 +1144,24 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
     const double vel = jogVelocityForLevel(speedLevel);
     const auto service = m_service;
     QPointer<ProcessModule> self(this);
-    const QString successMessage = tr("点动 %1 轴 %2").arg(
-        normalizedAxis, direction > 0 ? tr("正向") : tr("负向"));
+    // 中文翻译：点动 %1 轴 %2
+    const QString successMessage = tr("Jog %1 axis %2").arg(
+        // 中文翻译：正向；负向
+        normalizedAxis, direction > 0 ? tr("forward") : tr("Negative"));
     if (!m_deviceCommandQueue->submit(
             [service, axis = eAxis.value(), delta, vel] {
                 const auto deviceLock = service->lockDeviceAccess();
                 auto* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("未连接控制器，请先连接设备")};
+                    // 中文翻译：未连接控制器，请先连接设备
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("The controller is not connected, please connect the device first")};
                 if (!mc->IsMotorCreated(axis))
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("轴未注册")};
+                    // 中文翻译：轴未注册
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("Axis not registered")};
                 const bool ok = mc->MoveRelative(axis, delta, vel);
                 return lcnc::process::DeviceCommandResult{
-                    ok, ok ? QString() : QObject::tr("相对运动命令失败")};
+                    // 中文翻译：相对运动命令失败
+                    ok, ok ? QString() : QObject::tr("Relative motion command failed")};
             },
             TaskPriority::Interactive,
             [self, successMessage](const lcnc::process::DeviceCommandResult& result) {
@@ -1083,7 +1170,8 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
                         self->setStatusMessage(result.success ? successMessage : result.error);
                 }, Qt::QueuedConnection);
             })) {
-        setStatusMessage(tr("点动命令未能排队"));
+        // 中文翻译：点动命令未能排队
+        setStatusMessage(tr("Jog command failed to queue"));
     }
 }
 
@@ -1094,17 +1182,20 @@ void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, i
 
     const QString normalizedAxis = axisName.trimmed().toUpper();
     if (!m_axisEnabled.value(normalizedAxis, true)) {
-        setStatusMessage(tr("%1 轴未使能，绝对运动已忽略").arg(normalizedAxis));
+        // 中文翻译：%1 轴未使能，绝对运动已忽略
+        setStatusMessage(tr("%1 axis is not enabled, absolute motion has been ignored").arg(normalizedAxis));
         return;
     }
 
     auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
     if (!eAxis.has_value()) {
-        setStatusMessage(tr("%1 轴未注册，无法绝对运动").arg(normalizedAxis));
+        // 中文翻译：%1 轴未注册，无法绝对运动
+        setStatusMessage(tr("%1 axis is not registered and cannot move absolutely").arg(normalizedAxis));
         return;
     }
     if (!m_service || !m_deviceCommandQueue) {
-        setStatusMessage(tr("设备命令队列不可用"));
+        // 中文翻译：设备命令队列不可用
+        setStatusMessage(tr("Device command queue is unavailable"));
         return;
     }
 
@@ -1112,18 +1203,22 @@ void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, i
     const double velocity = jogVelocityForLevel(speedLevel);
     QPointer<ProcessModule> self(this);
     const QString successMessage =
-        tr("%1 轴移动到 %2").arg(normalizedAxis).arg(position, 0, 'f', 3);
+        // 中文翻译：%1 轴移动到 %2
+        tr("%1 axis moved to %2").arg(normalizedAxis).arg(position, 0, 'f', 3);
     if (!m_deviceCommandQueue->submit(
             [service, axis = eAxis.value(), position, velocity] {
                 const auto deviceLock = service->lockDeviceAccess();
                 auto* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("未连接控制器，请先连接设备")};
+                    // 中文翻译：未连接控制器，请先连接设备
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("The controller is not connected, please connect the device first")};
                 if (!mc->IsMotorCreated(axis))
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("轴未注册")};
+                    // 中文翻译：轴未注册
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("Axis not registered")};
                 const bool ok = mc->MoveAbsolute(axis, position, velocity);
                 return lcnc::process::DeviceCommandResult{
-                    ok, ok ? QString() : QObject::tr("绝对运动命令失败")};
+                    // 中文翻译：绝对运动命令失败
+                    ok, ok ? QString() : QObject::tr("Absolute motion command failed")};
             },
             TaskPriority::Interactive,
             [self, successMessage](const lcnc::process::DeviceCommandResult& result) {
@@ -1132,7 +1227,8 @@ void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, i
                         self->setStatusMessage(result.success ? successMessage : result.error);
                 }, Qt::QueuedConnection);
             })) {
-        setStatusMessage(tr("绝对运动命令未能排队"));
+        // 中文翻译：绝对运动命令未能排队
+        setStatusMessage(tr("Absolute motion command failed to queue"));
     }
 }
 
@@ -1143,17 +1239,20 @@ void ProcessModule::startContinuousJog(const QString& axisName, int direction, i
 
     const QString normalizedAxis = axisName.trimmed().toUpper();
     if (!m_axisEnabled.value(normalizedAxis, true)) {
-        setStatusMessage(tr("%1 轴未使能，连续运动已忽略").arg(normalizedAxis));
+        // 中文翻译：%1 轴未使能，连续运动已忽略
+        setStatusMessage(tr("%1 axis is not enabled, continuous motion is ignored").arg(normalizedAxis));
         return;
     }
 
     auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
     if (!eAxis.has_value()) {
-        setStatusMessage(tr("%1 轴未注册，无法连续运动").arg(normalizedAxis));
+        // 中文翻译：%1 轴未注册，无法连续运动
+        setStatusMessage(tr("%1 axis is not registered and cannot move continuously.").arg(normalizedAxis));
         return;
     }
     if (!m_service || !m_deviceCommandQueue) {
-        setStatusMessage(tr("设备命令队列不可用"));
+        // 中文翻译：设备命令队列不可用
+        setStatusMessage(tr("Device command queue is unavailable"));
         return;
     }
 
@@ -1162,18 +1261,22 @@ void ProcessModule::startContinuousJog(const QString& axisName, int direction, i
     const double velocity = jogVelocityForLevel(speedLevel);
     QPointer<ProcessModule> self(this);
     const QString successMessage =
-        tr("连续点动 %1 轴 %2").arg(normalizedAxis, positive ? tr("正向") : tr("负向"));
+        // 中文翻译：连续点动 %1 轴 %2；正向；负向
+        tr("Continuously jog %1 axis %2").arg(normalizedAxis, positive ? tr("forward") : tr("Negative"));
     if (!m_deviceCommandQueue->submit(
             [service, axis = eAxis.value(), positive, velocity] {
                 const auto deviceLock = service->lockDeviceAccess();
                 auto* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("未连接控制器，请先连接设备")};
+                    // 中文翻译：未连接控制器，请先连接设备
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("The controller is not connected, please connect the device first")};
                 if (!mc->IsMotorCreated(axis))
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("轴未注册")};
+                    // 中文翻译：轴未注册
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("Axis not registered")};
                 const bool ok = mc->Jog(axis, positive, velocity);
                 return lcnc::process::DeviceCommandResult{
-                    ok, ok ? QString() : QObject::tr("连续运动命令失败")};
+                    // 中文翻译：连续运动命令失败
+                    ok, ok ? QString() : QObject::tr("Continuous motion command failed")};
             },
             TaskPriority::Interactive,
             [self, successMessage](const lcnc::process::DeviceCommandResult& result) {
@@ -1182,7 +1285,8 @@ void ProcessModule::startContinuousJog(const QString& axisName, int direction, i
                         self->setStatusMessage(result.success ? successMessage : result.error);
                 }, Qt::QueuedConnection);
             })) {
-        setStatusMessage(tr("连续点动命令未能排队"));
+        // 中文翻译：连续点动命令未能排队
+        setStatusMessage(tr("Continuous jog commands failed to be queued"));
     }
 }
 
@@ -1203,40 +1307,48 @@ void ProcessModule::stopContinuousJog(const QString& axisName)
                 const auto deviceLock = service->lockDeviceAccess();
                 auto* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected() || !mc->IsMotorCreated(axis))
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("轴停止条件不满足")};
+                    // 中文翻译：轴停止条件不满足
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("Axis stop conditions are not met")};
                 const bool ok = mc->StopMotion(axis);
                 return lcnc::process::DeviceCommandResult{
-                    ok, ok ? QString() : QObject::tr("轴停止命令失败")};
+                    // 中文翻译：轴停止命令失败
+                    ok, ok ? QString() : QObject::tr("Axis stop command failed")};
             },
             TaskPriority::Stop,
             [self, normalizedAxis](const lcnc::process::DeviceCommandResult& result) {
                 QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result, normalizedAxis] {
                     if (self)
                         self->setStatusMessage(result.success
-                            ? self->tr("%1 轴连续运动已停止").arg(normalizedAxis)
+                            // 中文翻译：%1 轴连续运动已停止
+                            ? self->tr("%1 axis continuous motion has stopped").arg(normalizedAxis)
                             : result.error);
                 }, Qt::QueuedConnection);
             })) {
-        setStatusMessage(tr("%1 轴停止命令未能排队").arg(normalizedAxis));
+        // 中文翻译：%1 轴停止命令未能排队
+        setStatusMessage(tr("%1 axis stop command failed to be queued").arg(normalizedAxis));
     }
 }
 
 void ProcessModule::home()
 {
     if (m_state == State::EmergencyStop) {
-        setStatusMessage(tr("急停状态，无法回零"));
+        // 中文翻译：急停状态，无法回零
+        setStatusMessage(tr("Emergency stop state, unable to return to zero"));
         return;
     }
     if (m_state == State::Running) {
-        setStatusMessage(tr("加工运行中，无法回零"));
+        // 中文翻译：加工运行中，无法回零
+        setStatusMessage(tr("During processing, it is impossible to return to zero."));
         return;
     }
     if (m_homing) {
-        setStatusMessage(tr("回零正在进行中"));
+        // 中文翻译：回零正在进行中
+        setStatusMessage(tr("Return to zero in progress"));
         return;
     }
     if (m_deviceOperation != DeviceOperation::None) {
-        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        // 中文翻译：已有设备操作进行中，请等待完成
+        setStatusMessage(tr("Existing equipment operation is in progress, please wait for completion"));
         return;
     }
 
@@ -1249,18 +1361,21 @@ void ProcessModule::home()
             axes.append(key);
     }
     if (axes.isEmpty()) {
-        setStatusMessage(tr("没有可回零的轴系"));
+        // 中文翻译：没有可回零的轴系
+        setStatusMessage(tr("No axis system that can be homed"));
         return;
     }
 
     if (!m_deviceCommandQueue || !m_service) {
-        setState(State::Error, tr("设备命令队列不可用"));
+        // 中文翻译：设备命令队列不可用
+        setState(State::Error, tr("Device command queue is unavailable"));
         return;
     }
 
     m_homing = true;
     m_deviceOperation = DeviceOperation::Homing;
-    setStatusMessage(tr("开始回零（共 %1 个轴）").arg(axes.size()));
+    // 中文翻译：开始回零（共 %1 个轴）
+    setStatusMessage(tr("Start zero return (total %1 axes)").arg(axes.size()));
 
     const bool connected = m_connected;
     const auto service = m_service;
@@ -1316,34 +1431,41 @@ void ProcessModule::home()
                     self->m_simPhase = 0.0;
 
                     if (success) {
-                        self->setStatusMessage(tr("回零完成 — 共 %1 个轴").arg(axes.size()));
+                        // 中文翻译：回零完成 — 共 %1 个轴
+                        self->setStatusMessage(tr("Zero return completed - %1 axes in total").arg(axes.size()));
                         LCNC_INFO(lcnc::LogCode::Generic,
                                   "ProcessModule::home: completed for {} axes", axes.size());
                     } else {
-                        self->setState(State::Error, tr("回零失败，请检查日志"));
+                        // 中文翻译：回零失败，请检查日志
+                        self->setState(State::Error, tr("Return to zero failed, please check the log"));
                     }
                 }, Qt::QueuedConnection);
             }
         })) {
         m_homing = false;
         m_deviceOperation = DeviceOperation::None;
-        setState(State::Error, tr("回零命令未能排队"));
+        // 中文翻译：回零命令未能排队
+        setState(State::Error, tr("Return to zero command failed to queue"));
     }
 }
 
 void ProcessModule::moveToConfiguredPosition(bool loading)
 {
-    const QString positionName = loading ? tr("上料位") : tr("下料位");
+    // 中文翻译：上料位；下料位
+    const QString positionName = loading ? tr("Loading position") : tr("Unloading position");
     if (m_state != State::Idle) {
-        setStatusMessage(tr("当前加工状态不允许移动至%1").arg(positionName));
+        // 中文翻译：当前加工状态不允许移动至%1
+        setStatusMessage(tr("The current processing status does not allow moving to %1").arg(positionName));
         return;
     }
     if (m_homing || m_deviceOperation != DeviceOperation::None) {
-        setStatusMessage(tr("已有设备操作进行中，请等待完成"));
+        // 中文翻译：已有设备操作进行中，请等待完成
+        setStatusMessage(tr("Existing equipment operation is in progress, please wait for completion"));
         return;
     }
     if (!m_settingsService || !m_deviceCommandQueue || !m_service) {
-        setStatusMessage(tr("设备命令队列或加工设置不可用"));
+        // 中文翻译：设备命令队列或加工设置不可用
+        setStatusMessage(tr("Device command queue or processing settings are not available"));
         return;
     }
 
@@ -1368,12 +1490,14 @@ void ProcessModule::moveToConfiguredPosition(bool loading)
         if (!positionEnabled)
             continue;
         if (!m_axisEnabled.value(axisName, true)) {
-            setStatusMessage(tr("%1 轴未使能，无法移动至%2").arg(axisName, positionName));
+            // 中文翻译：%1 轴未使能，无法移动至%2
+            setStatusMessage(tr("%1 axis is not enabled and cannot move to %2").arg(axisName, positionName));
             return;
         }
         const auto eAxis = enum_cast<Axis>(axisName.toStdString());
         if (!eAxis.has_value()) {
-            setStatusMessage(tr("%1 轴未注册，无法移动至%2").arg(axisName, positionName));
+            // 中文翻译：%1 轴未注册，无法移动至%2
+            setStatusMessage(tr("%1 axis is not registered and cannot be moved to %2").arg(axisName, positionName));
             return;
         }
         const QVariant targetValue = m_settingsService->rawValue(
@@ -1382,22 +1506,26 @@ void ProcessModule::moveToConfiguredPosition(bool loading)
         bool targetValid = false;
         const double target = targetValue.toDouble(&targetValid);
         if (!targetValid || !std::isfinite(target)) {
-            setStatusMessage(tr("%1 轴的%2未配置有效位置").arg(axisName, positionName));
+            // 中文翻译：%1 轴的%2未配置有效位置
+            setStatusMessage(tr("%1 axis %2 is not configured with a valid position").arg(axisName, positionName));
             return;
         }
         if (target < axis.minVal || target > axis.maxVal) {
-            setStatusMessage(tr("%1 轴的%2超出行程范围").arg(axisName, positionName));
+            // 中文翻译：%1 轴的%2超出行程范围
+            setStatusMessage(tr("%1 axis %2 exceeds the stroke range").arg(axisName, positionName));
             return;
         }
         targets.append({axisName, target});
     }
     if (targets.isEmpty()) {
-        setStatusMessage(tr("没有可移动至%1的轴").arg(positionName));
+        // 中文翻译：没有可移动至%1的轴
+        setStatusMessage(tr("No axis to move to %1").arg(positionName));
         return;
     }
 
     m_deviceOperation = DeviceOperation::PresetMove;
-    setStatusMessage(tr("正在移动至%1（共 %2 个轴）").arg(positionName).arg(targets.size()));
+    // 中文翻译：正在移动至%1（共 %2 个轴）
+    setStatusMessage(tr("Moving to %1 of %2 axes").arg(positionName).arg(targets.size()));
     const auto service = m_service;
     QPointer<ProcessModule> self(this);
     if (!m_deviceCommandQueue->submit(
@@ -1405,29 +1533,35 @@ void ProcessModule::moveToConfiguredPosition(bool loading)
                 const auto deviceLock = service->lockDeviceAccess();
                 auto* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("未连接控制器，请先连接设备")};
+                    // 中文翻译：未连接控制器，请先连接设备
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("The controller is not connected, please connect the device first")};
 
                 for (const AxisTarget& target : targets) {
                     const auto axis = enum_cast<Axis>(target.name.toStdString());
                     if (!axis.has_value() || !mc->IsMotorCreated(axis.value()))
                         return lcnc::process::DeviceCommandResult{false,
-                            QObject::tr("%1 轴未在控制器中创建").arg(target.name)};
+                            // 中文翻译：%1 轴未在控制器中创建
+                            QObject::tr("%1 axis was not created in the controller").arg(target.name)};
                     if (!mc->IsEnabled(axis.value()))
                         return lcnc::process::DeviceCommandResult{false,
-                            QObject::tr("%1 轴当前未使能").arg(target.name)};
+                            // 中文翻译：%1 轴当前未使能
+                            QObject::tr("%1 axis is not currently enabled").arg(target.name)};
                     if (!mc->IsHomed(axis.value()))
                         return lcnc::process::DeviceCommandResult{false,
-                            QObject::tr("%1 轴尚未回零").arg(target.name)};
+                            // 中文翻译：%1 轴尚未回零
+                            QObject::tr("%1 axis has not returned to zero yet").arg(target.name)};
                     if (mc->IsAxisMoving(axis.value()))
                         return lcnc::process::DeviceCommandResult{false,
-                            QObject::tr("%1 轴正在运动").arg(target.name)};
+                            // 中文翻译：%1 轴正在运动
+                            QObject::tr("%1 axis is moving").arg(target.name)};
                 }
                 for (const AxisTarget& target : targets) {
                     const auto axis = enum_cast<Axis>(target.name.toStdString());
                     if (!mc->MoveAbsolute(axis.value(), target.position, jogVelocityForLevel(1))) {
                         (void)mc->StopMotion();
                         return lcnc::process::DeviceCommandResult{false,
-                            QObject::tr("%1 轴移动至%2失败").arg(target.name, positionName)};
+                            // 中文翻译：%1 轴移动至%2失败
+                            QObject::tr("%1 axis movement to %2 failed").arg(target.name, positionName)};
                     }
                 }
                 return lcnc::process::DeviceCommandResult{true, {}};
@@ -1442,11 +1576,13 @@ void ProcessModule::moveToConfiguredPosition(bool loading)
                         self->setStatusMessage(result.error);
                         return;
                     }
-                    self->setStatusMessage(self->tr("已下发移动至%1的命令").arg(positionName));
+                    // 中文翻译：已下发移动至%1的命令
+                    self->setStatusMessage(self->tr("The command to move to %1 has been issued").arg(positionName));
                 }, Qt::QueuedConnection);
             })) {
         m_deviceOperation = DeviceOperation::None;
-        setStatusMessage(tr("移动至%1的命令未能排队").arg(positionName));
+        // 中文翻译：移动至%1的命令未能排队
+        setStatusMessage(tr("The command to move to %1 failed to be queued").arg(positionName));
     }
 }
 
@@ -1488,12 +1624,14 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage)
     };
 
     if (m_state != State::Idle)
-        return fail(tr("当前状态机不是空闲待机状态，不能开始加工"));
+        // 中文翻译：当前状态机不是空闲待机状态，不能开始加工
+        return fail(tr("The current state machine is not in idle standby state and cannot start processing."));
 
     if (!m_simulationMode) {
         const auto* project = lcnc::Kernel::current().projectManager();
         if (project && !project->session().machineConfigurationCompatible()) {
-            return fail(tr("当前工程的机台构型与本机不匹配；请确认机台、轴映射和安全 IO 后重新保存工程"));
+            // 中文翻译：当前工程的机台构型与本机不匹配；请确认机台、轴映射和安全 IO 后重新保存工程
+            return fail(tr("The machine configuration of the current project does not match the machine; please confirm the machine, axis mapping and safety IO before resave the project"));
         }
     }
 
@@ -1501,11 +1639,13 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage)
         m_processFlowDocument.rootNodes(), lcnc::process::ProcessNodeType::NormalCutting);
     if (hasNormalCutting) {
         if (!m_cuttingPlanService)
-            return fail(tr("切割计划服务未初始化"));
+            // 中文翻译：切割计划服务未初始化
+            return fail(tr("Cutting plan service not initialized"));
 
         const auto cuttingList = m_cuttingPlanService->buildCuttingList();
         if (cuttingList.isEmpty())
-            return fail(tr("没有可加工轮廓，请先生成刀路并启用需加工特征"));
+            // 中文翻译：没有可加工轮廓，请先生成刀路并启用需加工特征
+            return fail(tr("There is no machinable contour. Please generate a tool path and enable the features to be machined."));
 
         QSet<QString> availableTools;
         const QStringList toolNames = ToolFactory::toolNames();
@@ -1518,7 +1658,8 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage)
         for (const auto& entry : cuttingList) {
             const QString toolName = entry.toolName.trimmed();
             const QString layerText = entry.layerName.trimmed().isEmpty()
-                ? tr("图层 %1").arg(entry.layerId)
+                // 中文翻译：图层 %1
+                ? tr("Layer %1").arg(entry.layerId)
                 : entry.layerName;
             if (toolName.isEmpty()) {
                 if (!reportedMissingLayers.contains(entry.layerId)) {
@@ -1533,27 +1674,32 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage)
             }
         }
         if (!missingTools.isEmpty())
-            return fail(tr("需加工特征对应图层未配置工具: %1").arg(missingTools.join(tr("，"))));
+            // 中文翻译：需加工特征对应图层未配置工具: %1
+            return fail(tr("The layer corresponding to the feature to be processed does not have a tool configured: %1").arg(missingTools.join(tr("，"))));
         if (!unknownTools.isEmpty())
-            return fail(tr("图层配置了不存在的工具: %1").arg(unknownTools.join(tr("，"))));
+            // 中文翻译：图层配置了不存在的工具: %1
+            return fail(tr("The layer is configured with a tool that does not exist: %1").arg(unknownTools.join(tr("，"))));
     }
 
     if (m_simulationMode)
         return true;
 
     if (!m_connected)
-        return fail(tr("设备未连接，不能开始加工"));
+        // 中文翻译：设备未连接，不能开始加工
+        return fail(tr("The device is not connected and processing cannot be started."));
     return true;
 }
 
 void ProcessModule::runStart()
 {
     if (m_state == State::EmergencyStop) {
-        setStatusMessage(tr("急停状态，复位后才能运行"));
+        // 中文翻译：急停状态，复位后才能运行
+        setStatusMessage(tr("Emergency stop state, can only be run after reset."));
         return;
     }
     if (m_preflightInFlight) {
-        setStatusMessage(tr("加工环境检查正在进行中"));
+        // 中文翻译：加工环境检查正在进行中
+        setStatusMessage(tr("Processing environment inspection in progress"));
         return;
     }
 
@@ -1562,13 +1708,15 @@ void ProcessModule::runStart()
             m_workflowExecutor->resume();
         if (m_simulationMode)
             m_simTimer->start(std::max(30, static_cast<int>(100.0 / std::max(0.1, m_feedOverride))));
-        setState(State::Running, tr("运行继续"));
+        // 中文翻译：运行继续
+        setState(State::Running, tr("Run continues"));
         return;
     }
 
     QString environmentError;
     if (!validateProcessingConfiguration(&environmentError)) {
-        setState(State::Error, tr("加工环境检查失败: %1").arg(environmentError));
+        // 中文翻译：加工环境检查失败: %1
+        setState(State::Error, tr("Processing environment check failed: %1").arg(environmentError));
         return;
     }
 
@@ -1578,7 +1726,8 @@ void ProcessModule::runStart()
     }
 
     if (!m_deviceCommandQueue || !m_service) {
-        setState(State::Error, tr("加工环境检查失败: 设备命令队列不可用"));
+        // 中文翻译：加工环境检查失败: 设备命令队列不可用
+        setState(State::Error, tr("Processing environment check failed: Device command queue unavailable"));
         return;
     }
 
@@ -1604,7 +1753,8 @@ void ProcessModule::runStart()
     const auto service = m_service;
     const std::uint64_t requestGeneration = ++m_runRequestGeneration;
     m_preflightInFlight = true;
-    setStatusMessage(tr("正在后台检查加工环境..."));
+    // 中文翻译：正在后台检查加工环境...
+    setStatusMessage(tr("Checking the processing environment in the background..."));
 
     QPointer<ProcessModule> self(this);
     if (!m_deviceCommandQueue->submit(
@@ -1615,15 +1765,19 @@ void ProcessModule::runStart()
                 const auto deviceLock = service->lockDeviceAccess();
                 MotionControl* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
-                    return fail(QObject::tr("运动控制器未连接或连接已断开"));
+                    // 中文翻译：运动控制器未连接或连接已断开
+                    return fail(QObject::tr("Motion controller not connected or disconnected"));
                 if (mc->ErrorOccurred())
-                    return fail(QObject::tr("运动控制器存在异常，请清除故障后再加工"));
+                    // 中文翻译：运动控制器存在异常，请清除故障后再加工
+                    return fail(QObject::tr("There is an abnormality in the motion controller. Please clear the fault before processing."));
 
                 int fault = 0;
                 if (!mc->IsAxisStatusNormal(fault))
-                    return fail(QObject::tr("运动控制器状态读取失败，请检查控制器连接"));
+                    // 中文翻译：运动控制器状态读取失败，请检查控制器连接
+                    return fail(QObject::tr("Motion controller status reading failed, please check the controller connection"));
                 if (fault != 0) {
-                    return fail(QObject::tr("运动控制器故障码: %1，请清除故障后再加工")
+                    // 中文翻译：运动控制器故障码: %1，请清除故障后再加工
+                    return fail(QObject::tr("Motion controller fault code: %1, please clear the fault before processing")
                                     .arg(fault));
                 }
 
@@ -1649,30 +1803,36 @@ void ProcessModule::runStart()
                         disabledAxes.append(name);
                 }
                 if (!unregisteredAxes.isEmpty()) {
-                    return fail(QObject::tr("运动控制器轴系未注册: %1")
+                    // 中文翻译：运动控制器轴系未注册: %1
+                    return fail(QObject::tr("Motion controller axis is not registered: %1")
                                     .arg(unregisteredAxes.join(QObject::tr("，"))));
                 }
                 if (!disabledAxes.isEmpty()) {
-                    return fail(QObject::tr("运动控制器轴系未使能: %1")
+                    // 中文翻译：运动控制器轴系未使能: %1
+                    return fail(QObject::tr("Motion controller axis is not enabled: %1")
                                     .arg(disabledAxes.join(QObject::tr("，"))));
                 }
 
                 LaserDevice* laser = service->GetLaserDevice();
                 if (!laser)
-                    return fail(QObject::tr("激光器未创建，请先连接设备"));
+                    // 中文翻译：激光器未创建，请先连接设备
+                    return fail(QObject::tr("The laser has not been created, please connect the device first"));
                 const QString laserName = QString::fromStdString(laser->GetName());
                 const bool analogLaser =
                     laserName.compare(QStringLiteral("AnalogControl"), Qt::CaseInsensitive) == 0;
                 if (!analogLaser && !laser->IsConnected())
-                    return fail(QObject::tr("激光器未连接或连接已断开"));
+                    // 中文翻译：激光器未连接或连接已断开
+                    return fail(QObject::tr("Laser not connected or disconnected"));
                 if (!laser->IsInited())
-                    return fail(QObject::tr("激光器参数未初始化"));
+                    // 中文翻译：激光器参数未初始化
+                    return fail(QObject::tr("Laser parameters not initialized"));
                 if (!analogLaser) {
                     const QString laserFault =
                         QString::fromStdString(laser->GetTroubleshooting()).trimmed();
                     if (!laserFault.isEmpty()
                         && laserFault.compare(QStringLiteral("OK"), Qt::CaseInsensitive) != 0) {
-                        return fail(QObject::tr("激光器异常: %1").arg(laserFault));
+                        // 中文翻译：激光器异常: %1
+                        return fail(QObject::tr("Laser exception: %1").arg(laserFault));
                     }
                 }
 
@@ -1683,43 +1843,52 @@ void ProcessModule::runStart()
                         if (!enabled)
                             return lcnc::process::DeviceCommandResult{};
                         if (channel.trimmed().isEmpty())
-                            return fail(QObject::tr("%1监控通道未配置").arg(title));
+                            // 中文翻译：%1监控通道未配置
+                            return fail(QObject::tr("%1 monitoring channel is not configured").arg(title));
                         const QString enumName = enumNameFromTomlChannel(channel);
                         const auto eIn = enum_cast<DigitalIN>(enumName.toStdString());
                         if (!eIn.has_value() || !mc->m_mapDigitalIN.count(eIn.value()))
-                            return fail(QObject::tr("%1状态获取失败: 通道未配置: %2")
+                            // 中文翻译：%1状态获取失败: 通道未配置: %2
+                            return fail(QObject::tr("%1 status acquisition failed: Channel not configured: %2")
                                             .arg(title, channel));
                         int raw = 0;
                         if (!mc->DigitalInputGet(eIn.value(), raw))
-                            return fail(QObject::tr("%1状态获取失败: 通道读取失败: %2")
+                            // 中文翻译：%1状态获取失败: 通道读取失败: %2
+                            return fail(QObject::tr("%1 Status acquisition failed: Channel read failed: %2")
                                             .arg(title, channel));
                         if (raw != 0)
-                            return fail(QObject::tr("%1异常").arg(title));
+                            // 中文翻译：%1异常
+                            return fail(QObject::tr("%1Exception").arg(title));
                         return lcnc::process::DeviceCommandResult{};
                     };
 
                 auto digitalResult = requireDigitalNormal(
-                    monitorSettings.interLockEnabled, QObject::tr("门禁"), channels.interlock);
+                    // 中文翻译：门禁
+                    monitorSettings.interLockEnabled, QObject::tr("access control"), channels.interlock);
                 if (!digitalResult.success)
                     return digitalResult;
                 digitalResult = requireDigitalNormal(
                     monitorSettings.safetyLightCurtainEnabled,
-                    QObject::tr("安全光栅"), channels.safetyLightCurtain);
+                    // 中文翻译：安全光栅
+                    QObject::tr("Safety grating"), channels.safetyLightCurtain);
                 if (!digitalResult.success)
                     return digitalResult;
                 digitalResult = requireDigitalNormal(
                     monitorSettings.pressureMonitorEnabled,
-                    QObject::tr("气压监控"), channels.pressure);
+                    // 中文翻译：气压监控
+                    QObject::tr("Air pressure monitoring"), channels.pressure);
                 if (!digitalResult.success)
                     return digitalResult;
                 digitalResult = requireDigitalNormal(
                     monitorSettings.waterLeakageMonitorEnabled,
-                    QObject::tr("漏水监控"), channels.waterLeakage);
+                    // 中文翻译：漏水监控
+                    QObject::tr("Water leakage monitoring"), channels.waterLeakage);
                 if (!digitalResult.success)
                     return digitalResult;
                 digitalResult = requireDigitalNormal(
                     monitorSettings.waterTankMonitorEnabled,
-                    QObject::tr("水箱监控"), channels.waterTank);
+                    // 中文翻译：水箱监控
+                    QObject::tr("Water tank monitoring"), channels.waterTank);
                 if (!digitalResult.success)
                     return digitalResult;
 
@@ -1732,16 +1901,20 @@ void ProcessModule::runStart()
                         if (!enabled)
                             return lcnc::process::DeviceCommandResult{};
                         if (channel.trimmed().isEmpty())
-                            return fail(QObject::tr("%1通道未配置").arg(title));
+                            // 中文翻译：%1通道未配置
+                            return fail(QObject::tr("%1 channel is not configured").arg(title));
                         const QString enumName = enumNameFromTomlChannel(channel);
                         const auto eIn = enum_cast<AnalogIN>(enumName.toStdString());
                         if (!eIn.has_value() || !mc->m_mapAnalogIN.count(eIn.value()))
-                            return fail(QObject::tr("%1通道未配置: %2").arg(title, channel));
+                            // 中文翻译：%1通道未配置: %2
+                            return fail(QObject::tr("Channel %1 is not configured: %2").arg(title, channel));
                         double value = 0.0;
                         if (!mc->AnalogInputGet(eIn.value(), value))
-                            return fail(QObject::tr("%1状态获取失败: %2").arg(title, channel));
+                            // 中文翻译：%1状态获取失败: %2
+                            return fail(QObject::tr("%1 status acquisition failed: %2").arg(title, channel));
                         if (value < threshold) {
-                            return fail(QObject::tr("%1异常: 当前值 %2 %3，阈值 %4 %3")
+                            // 中文翻译：%1异常: 当前值 %2 %3，阈值 %4 %3
+                            return fail(QObject::tr("%1Exception: Current value %2 %3, threshold %4 %3")
                                 .arg(title,
                                      QString::number(value, 'f', 3),
                                      unit,
@@ -1751,13 +1924,15 @@ void ProcessModule::runStart()
                     };
                 const auto pressureResult = requireAnalogAtLeast(
                     monitorSettings.waterPressureMonitorEnabled,
-                    QObject::tr("水压监控"), channels.waterPressure,
+                    // 中文翻译：水压监控
+                    QObject::tr("water pressure monitoring"), channels.waterPressure,
                     monitorSettings.waterPressureLimitMpa, QStringLiteral("MPa"));
                 if (!pressureResult.success)
                     return pressureResult;
                 const auto levelResult = requireAnalogAtLeast(
                     monitorSettings.waterLevelMonitorEnabled,
-                    QObject::tr("水位监控"), channels.waterLevel,
+                    // 中文翻译：水位监控
+                    QObject::tr("water level monitoring"), channels.waterLevel,
                     monitorSettings.waterLevelLimitMm, QStringLiteral("mm"));
                 if (!levelResult.success)
                     return levelResult;
@@ -1775,7 +1950,8 @@ void ProcessModule::runStart()
                             return;
                         if (!result.success) {
                             self->setState(State::Error,
-                                self->tr("加工环境检查失败: %1").arg(result.error));
+                                // 中文翻译：加工环境检查失败: %1
+                                self->tr("Processing environment check failed: %1").arg(result.error));
                             return;
                         }
                         for (auto it = projection->axisPositions.cbegin();
@@ -1798,7 +1974,8 @@ void ProcessModule::runStart()
                     }, Qt::QueuedConnection);
             })) {
         m_preflightInFlight = false;
-        setState(State::Error, tr("加工环境检查命令未能排队"));
+        // 中文翻译：加工环境检查命令未能排队
+        setState(State::Error, tr("Processing environment check command failed to queue"));
     }
 }
 
@@ -1808,7 +1985,8 @@ void ProcessModule::startWorkflowAfterPreflight()
     if (m_workflowExecutor) {
         QString errorMessage;
         if (!m_workflowExecutor->start(m_processFlowDocument, &errorMessage)) {
-            setState(State::Error, tr("流程启动失败: %1").arg(errorMessage));
+            // 中文翻译：流程启动失败: %1
+            setState(State::Error, tr("Process start failed: %1").arg(errorMessage));
             return;
         }
         if (m_workflowExecutor->state() == lcnc::process::ProcessWorkflowExecutor::State::Error
@@ -1823,7 +2001,8 @@ void ProcessModule::startWorkflowAfterPreflight()
         m_simTimer->start(intervalMs);
     }
     setState(State::Running,
-             m_simulationMode ? tr("仿真运行中") : tr("控制器运行中"));
+             // 中文翻译：仿真运行中；控制器运行中
+             m_simulationMode ? tr("Simulation running") : tr("Controller is running"));
 }
 
 void ProcessModule::runPause()
@@ -1836,7 +2015,8 @@ void ProcessModule::runPause()
         m_workflowExecutor->pause();
     // 普通切割通过工作流 checkpoint 在轮廓边界暂停。不要暂停 ACS buffer：
     // 已下发的当前轮廓需完整执行，恢复时继续使用同一个连续缓冲流。
-    setState(State::Paused, tr("已请求暂停，当前轮廓完成后暂停"));
+    // 中文翻译：已请求暂停，当前轮廓完成后暂停
+    setState(State::Paused, tr("Pause requested, pause after completion of current contour"));
 }
 
 void ProcessModule::runStop()
@@ -1860,14 +2040,17 @@ void ProcessModule::runStop()
                 [self](const lcnc::process::DeviceCommandResult& result) {
                     QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result] {
                         if (self && !result.success)
-                            self->setStatusMessage(self->tr("运行已停止，但安全输出复位失败"));
+                            // 中文翻译：运行已停止，但安全输出复位失败
+                            self->setStatusMessage(self->tr("Operation stopped but safety output reset failed"));
                     }, Qt::QueuedConnection);
                 })) {
-            setState(State::Error, tr("停止命令未能排队"));
+            // 中文翻译：停止命令未能排队
+            setState(State::Error, tr("Stop command failed to queue"));
             return;
         }
     }
-    setState(State::Idle, m_simulationMode ? tr("仿真停止请求已提交") : tr("停止请求已提交"));
+    // 中文翻译：仿真停止请求已提交；停止请求已提交
+    setState(State::Idle, m_simulationMode ? tr("Simulation stop request submitted") : tr("Stop request submitted"));
 }
 
 void ProcessModule::emergencyStop()
@@ -1887,11 +2070,13 @@ void ProcessModule::emergencyStop()
                 lcnc::process::DeviceCommandQueue::ResultCommand(
                     [service] { return lcnc::process::DeviceCommandResult{stopProcessHardware(service), {}}; }),
                 TaskPriority::Stop)) {
-            setStatusMessage(tr("急停安全停机命令未能排队"));
+            // 中文翻译：急停安全停机命令未能排队
+            setStatusMessage(tr("Emergency stop safety shutdown command failed to be queued"));
         }
     }
     setState(State::EmergencyStop,
-             tr("急停请求已提交"));
+             // 中文翻译：急停请求已提交
+             tr("Emergency stop request has been submitted"));
 }
 
 void ProcessModule::resetEmergencyStop()
@@ -1906,13 +2091,15 @@ void ProcessModule::newProcess()
     m_processFlowDocument.resetToDefault();
     m_processFlowDocument.markClean();
     emit processFlowChanged();
-    setStatusMessage(tr("已新建流程"));
+    // 中文翻译：已新建流程
+    setStatusMessage(tr("New process has been created"));
 }
 
 bool ProcessModule::loadProcess(const QString& filePath)
 {
     if (filePath.trimmed().isEmpty()) {
-        setStatusMessage(tr("流程文件路径为空"));
+        // 中文翻译：流程文件路径为空
+        setStatusMessage(tr("Process file path is empty"));
         return false;
     }
 
@@ -1921,30 +2108,35 @@ bool ProcessModule::loadProcess(const QString& filePath)
         LCNC_WARN(lcnc::LogCode::Generic,
                   "ProcessModule: load process failed: {}",
                   errorMessage.toStdString());
-        setStatusMessage(tr("加载流程失败: %1").arg(errorMessage));
+        // 中文翻译：加载流程失败: %1
+        setStatusMessage(tr("Loading process failed: %1").arg(errorMessage));
         return false;
     }
 
     emit processFlowChanged();
-    setStatusMessage(tr("已加载流程: %1").arg(filePath));
+    // 中文翻译：已加载流程: %1
+    setStatusMessage(tr("Loaded process: %1").arg(filePath));
     return true;
 }
 
 bool ProcessModule::saveProcess(const QString& filePath)
 {
     if (filePath.trimmed().isEmpty()) {
-        setStatusMessage(tr("流程文件路径为空"));
+        // 中文翻译：流程文件路径为空
+        setStatusMessage(tr("Process file path is empty"));
         return false;
     }
 
     QString errorMessage;
     if (!lcnc::process::ProcessFlowStore::saveToFile(filePath, m_processFlowDocument, &errorMessage)) {
-        setStatusMessage(tr("保存流程失败: %1").arg(errorMessage));
+        // 中文翻译：保存流程失败: %1
+        setStatusMessage(tr("Save process failed: %1").arg(errorMessage));
         return false;
     }
 
     m_processFlowDocument.markClean();
-    setStatusMessage(tr("已保存流程: %1").arg(filePath));
+    // 中文翻译：已保存流程: %1
+    setStatusMessage(tr("Saved process: %1").arg(filePath));
     return true;
 }
 
@@ -1966,7 +2158,8 @@ void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
 
     const auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
     if (!eAxis.has_value() || !m_service || !m_deviceCommandQueue) {
-        setStatusMessage(tr("%1 轴未注册或设备队列不可用").arg(normalizedAxis));
+        // 中文翻译：%1 轴未注册或设备队列不可用
+        setStatusMessage(tr("%1 axis is not registered or the device queue is unavailable").arg(normalizedAxis));
         return;
     }
 
@@ -1977,12 +2170,15 @@ void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
                 const auto deviceLock = service->lockDeviceAccess();
                 auto* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("运动控制器未连接")};
+                    // 中文翻译：运动控制器未连接
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
                 if (!mc->IsMotorCreated(axis))
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("轴未注册")};
+                    // 中文翻译：轴未注册
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("Axis not registered")};
                 const bool ok = mc->SetAxisEnable(axis, enabled);
                 return lcnc::process::DeviceCommandResult{
-                    ok, ok ? QString() : QObject::tr("轴使能切换失败")};
+                    // 中文翻译：轴使能切换失败
+                    ok, ok ? QString() : QObject::tr("Axis enable switching failed")};
             },
             TaskPriority::Interactive,
             [self, normalizedAxis, enabled](const lcnc::process::DeviceCommandResult& result) {
@@ -1992,7 +2188,8 @@ void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
                             return;
                         if (!result.success) {
                             self->setStatusMessage(
-                                self->tr("%1 轴使能切换失败: %2").arg(normalizedAxis, result.error));
+                                // 中文翻译：%1 轴使能切换失败: %2
+                                self->tr("%1 Axis enable switching failed: %2").arg(normalizedAxis, result.error));
                             return;
                         }
                         if (self->m_axisEnabled.value(normalizedAxis, true) != enabled
@@ -2001,11 +2198,14 @@ void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
                             emit self->axisEnabledChanged(normalizedAxis, enabled);
                         }
                         self->setStatusMessage(enabled
-                            ? self->tr("%1 轴已使能").arg(normalizedAxis)
-                            : self->tr("%1 轴已禁用").arg(normalizedAxis));
+                            // 中文翻译：%1 轴已使能
+                            ? self->tr("%1 axis is enabled").arg(normalizedAxis)
+                            // 中文翻译：%1 轴已禁用
+                            : self->tr("%1 axis is disabled").arg(normalizedAxis));
                     }, Qt::QueuedConnection);
             })) {
-        setStatusMessage(tr("%1 轴使能命令未能排队").arg(normalizedAxis));
+        // 中文翻译：%1 轴使能命令未能排队
+        setStatusMessage(tr("%1 axis enable command failed to be queued").arg(normalizedAxis));
     }
 }
 
@@ -2023,10 +2223,12 @@ void ProcessModule::setDigitalOutput(const QString& outputName, bool value)
                 const auto deviceLock = service->lockDeviceAccess();
                 auto* mc = service->GetMotionControl();
                 if (!mc || !mc->IsConnected())
-                    return lcnc::process::DeviceCommandResult{false, QObject::tr("运动控制器未连接")};
+                    // 中文翻译：运动控制器未连接
+                    return lcnc::process::DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
                 const bool ok = mc->DigitalOutputSet(channel, value ? 1 : 0);
                 return lcnc::process::DeviceCommandResult{
-                    ok, ok ? QString() : QObject::tr("IO 输出切换失败")};
+                    // 中文翻译：IO 输出切换失败
+                    ok, ok ? QString() : QObject::tr("IO output switching failed")};
             },
             TaskPriority::Interactive,
             [self, name, channel, value](const lcnc::process::DeviceCommandResult& result) {
@@ -2036,7 +2238,8 @@ void ProcessModule::setDigitalOutput(const QString& outputName, bool value)
                             return;
                         if (!result.success) {
                             self->setStatusMessage(
-                                self->tr("IO 输出 %1 切换失败: %2").arg(name, result.error));
+                                // 中文翻译：IO 输出 %1 切换失败: %2
+                                self->tr("IO output %1 switching failed: %2").arg(name, result.error));
                             return;
                         }
                         if (self->m_digitalOutputs.value(name, false) != value
@@ -2045,11 +2248,14 @@ void ProcessModule::setDigitalOutput(const QString& outputName, bool value)
                             emit self->digitalOutputChanged(name, channel, value);
                         }
                         self->setStatusMessage(value
-                            ? self->tr("%1 已打开").arg(name)
-                            : self->tr("%1 已关闭").arg(name));
+                            // 中文翻译：%1 已打开
+                            ? self->tr("%1 is open").arg(name)
+                            // 中文翻译：%1 已关闭
+                            : self->tr("%1 is closed").arg(name));
                     }, Qt::QueuedConnection);
             })) {
-        setStatusMessage(tr("IO 输出 %1 命令未能排队").arg(name));
+        // 中文翻译：IO 输出 %1 命令未能排队
+        setStatusMessage(tr("IO output %1 command failed to be queued").arg(name));
     }
 }
 
@@ -2083,7 +2289,8 @@ void ProcessModule::setFeedOverride(double factor)
         m_simTimer->setInterval(intervalMs);
     }
 
-    setStatusMessage(tr("进给倍率: %1%").arg(qRound(m_feedOverride * 100.0)));
+    // 中文翻译：进给倍率: %1%
+    setStatusMessage(tr("Feed rate: %1%").arg(qRound(m_feedOverride * 100.0)));
 }
 
 double ProcessModule::feedOverride() const
@@ -2387,7 +2594,8 @@ void ProcessModule::pollHardwareStatus()
             if (!self->m_initialized || !self->m_connected)
                 return;
             if (!result.success) {
-                self->setStatusMessage(self->tr("设备状态读取失败: %1").arg(result.error));
+                // 中文翻译：设备状态读取失败: %1
+                self->setStatusMessage(self->tr("Failed to read device status: %1").arg(result.error));
                 return;
             }
             QStringList disabledAxesWhileRunning;
@@ -2405,7 +2613,8 @@ void ProcessModule::pollHardwareStatus()
                     disabledAxesWhileRunning.append(s.name);
             }
             if (!disabledAxesWhileRunning.isEmpty()) {
-                const QString message = self->tr("加工过程中检测到轴系未使能: %1；已停止流程")
+                // 中文翻译：加工过程中检测到轴系未使能: %1；已停止流程
+                const QString message = self->tr("It was detected during processing that the axis system is not enabled: %1; the process has been stopped")
                     .arg(disabledAxesWhileRunning.join(self->tr("，")));
                 LCNC_ERR(lcnc::LogCode::Generic,
                          "process: axis disabled while running: {}",
@@ -2476,7 +2685,8 @@ void ProcessModule::pollPeripheralStatus()
                                                sample->diagnostic);
             if (!sample->connected || !sample->initialized) {
                 const QString diagnostic = sample->diagnostic.isEmpty()
-                    ? self->tr("外设未连接或未初始化") : sample->diagnostic;
+                    // 中文翻译：外设未连接或未初始化
+                    ? self->tr("Peripheral is not connected or not initialized") : sample->diagnostic;
                 if (diagnostic != self->m_lastPeripheralDiagnostic) {
                     self->m_lastPeripheralDiagnostic = diagnostic;
                     LCNC_WARN(lcnc::LogCode::Generic,
@@ -2553,22 +2763,28 @@ void ProcessModule::applySettingsChanges(const lcnc::process::ProcessSettingsCha
                 QMetaObject::invokeMethod(self, [self, success] {
                     if (self)
                         self->setStatusMessage(success
-                            ? tr("加工设备设置已应用")
-                            : tr("加工设备设置应用失败"));
+                            // 中文翻译：加工设备设置已应用
+                            ? tr("Process equipment settings applied")
+                            // 中文翻译：加工设备设置应用失败
+                            : tr("Processing equipment settings application failed"));
                 }, Qt::QueuedConnection);
             }
         })) {
-        setStatusMessage(tr("加工设备设置未能排队"));
+        // 中文翻译：加工设备设置未能排队
+        setStatusMessage(tr("Processing equipment setup failed to queue"));
         return;
     }
-    setStatusMessage(tr("正在应用加工设备设置"));
+    // 中文翻译：正在应用加工设备设置
+    setStatusMessage(tr("Applying process equipment settings"));
 }
 
 void ProcessModule::clearSafeOutputCache()
 {
     const QStringList commonOutputs = {
-        QStringLiteral("激光"), QStringLiteral("吹气"),
-        QStringLiteral("夹头"), QStringLiteral("水冷"), QStringLiteral("气泵"),
+        // 中文翻译：激光；吹气
+        QStringLiteral("laser"), QStringLiteral("blow air"),
+        // 中文翻译：夹头；水冷；气泵
+        QStringLiteral("chuck"), QStringLiteral("water cooling"), QStringLiteral("air pump"),
         QStringLiteral("aLaser"), QStringLiteral("aBlow")
     };
     for (const QString& name : commonOutputs) {
@@ -2621,7 +2837,8 @@ void ProcessModule::setState(State state, const QString& statusMessage)
     if (m_state != state) {
         m_state = state;
         emit stateChanged(m_state);
-        emit processLogMessage(QStringLiteral("state"), tr("状态机切换为 %1").arg(processStateText(m_state)));
+        // 中文翻译：状态机切换为 %1
+        emit processLogMessage(QStringLiteral("state"), tr("State machine switches to %1").arg(processStateText(m_state)));
         // 任何流程被打断/异常的状态都强制关闭激光和吹气。
         if (m_state == State::Paused
             || m_state == State::Error

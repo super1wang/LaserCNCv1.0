@@ -808,7 +808,8 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(const TopoDS_Sha
     for (auto& owned : outerWires) {
         LaserContour c;
         c.wire = owned.wire;
-        c.name = QString::fromUtf8("外轮廓 %1").arg(++wireIdx);
+        // 中文翻译：外轮廓 %1
+        c.name = QString::fromUtf8("Outer contour %1").arg(++wireIdx);
         bindOwnedWireSurfaceContext(c, owned.owner, edgeToFaces);
         result.push_back(std::move(c));
     }
@@ -823,7 +824,8 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(const TopoDS_Sha
             if (wireMaker.IsDone()) {
                 LaserContour c;
                 c.wire = wireMaker.Wire();
-                c.name = QString::fromUtf8("边缘 %1").arg(++edgeIdx);
+                // 中文翻译：边缘 %1
+                c.name = QString::fromUtf8("Edge %1").arg(++edgeIdx);
                 result.push_back(std::move(c));
             }
         }
@@ -935,7 +937,8 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
         for (auto& owned : outerWires) {
             LaserContour c;
             c.wire = owned.wire;
-            c.name = QString::fromUtf8("外轮廓 %1").arg(++wireIdx);
+            // 中文翻译：外轮廓 %1
+            c.name = QString::fromUtf8("Outer contour %1").arg(++wireIdx);
             bindOwnedWireSurfaceContext(c, owned.owner, edgeToFaces);
             result.push_back(std::move(c));
         }
@@ -1002,9 +1005,11 @@ std::vector<LaserContour> LaserToolpathBuilder::extractTubeContoursFromFaceGroup
     for (const TopoDS_Wire& w : wires) {
         LaserContour c;
         c.wire = w;
-        c.name = QString::fromUtf8("加工轮廓 %1").arg(++wireIdx);
+        // 中文翻译：加工轮廓 %1
+        c.name = QString::fromUtf8("Machining contour %1").arg(++wireIdx);
         c.contourType = static_cast<int>(ContourKind::TubeCrossSection);
-        c.sourceInfo  = QString::fromUtf8("外表面(%1面) ∩ 截面(%2面)")
+        // 中文翻译：外表面(%1面) ∩ 截面(%2面)
+        c.sourceInfo  = QString::fromUtf8("Outer surface (%1 surface) ∩ Cross section (%2 surface)")
                             .arg(outerFaces.size()).arg(crossSectionFaces.size());
 
         computeContourSignature(c);
@@ -1186,16 +1191,22 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
         contour.wire = wire;
         if (hasNonPlanarFace) {
             contour.contourType = static_cast<int>(ContourKind::TubeCrossSection);
-            contour.name = QString::fromUtf8("加工轮廓 %1").arg(++tubeIdx);
-            contour.sourceInfo = QString::fromUtf8("手动加工面组边界");
+            // 中文翻译：加工轮廓 %1
+            contour.name = QString::fromUtf8("Machining contour %1").arg(++tubeIdx);
+            // 中文翻译：手动加工面组边界
+            contour.sourceInfo = QString::fromUtf8("Manually process quilt boundaries");
         } else {
             const bool isOuter = index == largestWire;
             contour.contourType = static_cast<int>(isOuter ? ContourKind::OuterBoundary
                                                             : ContourKind::InnerHole);
-            contour.name = isOuter ? QString::fromUtf8("外轮廓 %1").arg(++outerIdx)
-                                   : QString::fromUtf8("孔 %1").arg(++holeIdx);
-            contour.sourceInfo = isOuter ? QString::fromUtf8("加工面组外边界")
-                                         : QString::fromUtf8("加工面组孔边界");
+            // 中文翻译：外轮廓 %1
+            contour.name = isOuter ? QString::fromUtf8("Outer contour %1").arg(++outerIdx)
+                                   // 中文翻译：孔 %1
+                                   : QString::fromUtf8("Hole %1").arg(++holeIdx);
+            // 中文翻译：加工面组外边界
+            contour.sourceInfo = isOuter ? QString::fromUtf8("Processing outer boundary of dough group")
+                                         // 中文翻译：加工面组孔边界
+                                         : QString::fromUtf8("Machining quilt hole boundaries");
         }
         bindOwnedWireSurfaceContext(contour, owner, edgeToFaces);
         computeContourSignature(contour);
@@ -1529,7 +1540,8 @@ bool LaserToolpathBuilder::setContourStart(LaserContour& contour,
                                            QString* error)
 {
     if (pointIndex < 0 || pointIndex >= static_cast<int>(contour.points.size())) {
-        if (error) *error = QStringLiteral("轮廓起点索引无效");
+        // 中文翻译：轮廓起点索引无效
+        if (error) *error = QStringLiteral("Contour start index is invalid");
         return false;
     }
 
@@ -1541,7 +1553,8 @@ bool LaserToolpathBuilder::setContourStart(LaserContour& contour,
         contour.points.pop_back();
     }
     if (contour.points.empty()) {
-        if (error) *error = QStringLiteral("轮廓没有可用采样点");
+        // 中文翻译：轮廓没有可用采样点
+        if (error) *error = QStringLiteral("Contour has no available sample points");
         return false;
     }
 
@@ -1553,7 +1566,8 @@ bool LaserToolpathBuilder::setContourStart(LaserContour& contour,
     } else if (pointIndex == static_cast<int>(contour.points.size()) - 1) {
         reverseToolpathPoints(contour.points);
     } else if (pointIndex != 0) {
-        if (error) *error = QStringLiteral("开放轮廓只能选择端点作为加工起点");
+        // 中文翻译：开放轮廓只能选择端点作为加工起点
+        if (error) *error = QStringLiteral("For open contours, only the endpoint can be selected as the starting point for processing.");
         return false;
     }
 
@@ -1571,7 +1585,8 @@ bool LaserToolpathBuilder::setAutomaticContourStart(LaserContour& contour,
 {
     if (contour.points.empty()) {
         if (error)
-            *error = QStringLiteral("轮廓没有可用采样点");
+            // 中文翻译：轮廓没有可用采样点
+            *error = QStringLiteral("Contour has no available sample points");
         return false;
     }
 
@@ -1618,7 +1633,8 @@ bool LaserToolpathBuilder::setAutomaticContourStart(LaserContour& contour,
 
     if (error) {
         *error = lastError.isEmpty()
-            ? QStringLiteral("轮廓没有可确定悬空侧的安全起点")
+            // 中文翻译：轮廓没有可确定悬空侧的安全起点
+            ? QStringLiteral("The contour has no safe starting point from which to determine the overhanging side")
             : lastError;
     }
     return false;
@@ -1643,21 +1659,25 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
 {
     LeadInSolution result;
     if (!contour.leadIn.valid) {
-        result.error = QStringLiteral("未选择轮廓起点");
+        // 中文翻译：未选择轮廓起点
+        result.error = QStringLiteral("Contour start point not selected");
         return result;
     }
     if (length <= 0.0) {
-        result.error = QStringLiteral("下刀长度必须大于 0");
+        // 中文翻译：下刀长度必须大于 0
+        result.error = QStringLiteral("The cutting length must be greater than 0");
         return result;
     }
     if (contour.points.empty()) {
-        result.error = QStringLiteral("轮廓没有采样点");
+        // 中文翻译：轮廓没有采样点
+        result.error = QStringLiteral("Contour has no sampling points");
         return result;
     }
 
     const ToolpathPoint& start = contour.points.front();
     if (contour.sourceShape.IsNull()) {
-        result.error = QStringLiteral("无法判断悬空方向：缺少工件几何");
+        // 中文翻译：无法判断悬空方向：缺少工件几何
+        result.error = QStringLiteral("Unable to determine hanging direction: missing workpiece geometry");
         return result;
     }
 
@@ -1667,7 +1687,8 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
     // 测试点区分实体外表面与孔洞悬空侧，不用当前下刀长度做实体分类。
     gp_Vec direction = outer.Crossed(tangent);
     if (direction.Magnitude() <= 1e-9) {
-        result.error = QStringLiteral("轮廓切线与加工面法线无法确定面内方向");
+        // 中文翻译：轮廓切线与加工面法线无法确定面内方向
+        result.error = QStringLiteral("The contour tangent and the normal of the processing surface cannot determine the in-plane direction.");
         return result;
     }
     direction.Normalize();
@@ -1675,7 +1696,8 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
     const std::vector<MachiningFaceProbe> machiningFaces =
         findMachiningFacesAtStart(contour, start);
     if (machiningFaces.empty()) {
-        result.error = QStringLiteral("无法找到轮廓起点所在的加工外表面");
+        // 中文翻译：无法找到轮廓起点所在的加工外表面
+        result.error = QStringLiteral("Unable to find the machined outer surface where the contour start point is located");
         return result;
     }
 
@@ -1694,7 +1716,8 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
             direction.Reverse();
         sideResolved = true;
     } else if (forwardOnSurface) {
-        result.error = QStringLiteral("下刀线两侧投影均落在加工外表面，无法确定悬空侧");
+        // 中文翻译：下刀线两侧投影均落在加工外表面，无法确定悬空侧
+        result.error = QStringLiteral("The projections on both sides of the lower knife line fall on the outer surface of the process, and the suspended side cannot be determined.");
         return result;
     }
 
@@ -1732,7 +1755,8 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
 
         if (!sideResolved) {
             result.error = QStringLiteral(
-                "下刀线投影未落在加工外表面，且实体分类未能确认材料侧，无法确定悬空侧");
+                // 中文翻译：下刀线投影未落在加工外表面，且实体分类未能确认材料侧，无法确定悬空侧
+                "The projection of the lower knife line does not fall on the outer surface of the machining, and the material side cannot be confirmed by entity classification, and the suspended side cannot be determined.");
             return result;
         }
 
@@ -1808,7 +1832,8 @@ void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
             hasPrevious = true;
         } else {
             contour.leadInSolution.valid = false;
-            contour.leadInSolution.error = QStringLiteral("下刀点五轴坐标求解失败");
+            // 中文翻译：下刀点五轴坐标求解失败
+            contour.leadInSolution.error = QStringLiteral("The solution of the five-axis coordinates of the cutting point failed.");
         }
     }
 
