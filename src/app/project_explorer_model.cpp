@@ -11,13 +11,64 @@
 
 #include <QObject>
 #include <QMap>
+#include <QRegularExpression>
 #include <QSet>
 #include <QHash>
 
 #include <TDF_LabelSequence.hxx>
 
+#include <utility>
+
 namespace lcnc::app {
 namespace {
+
+QString localizedGeneratedToolpathName(const QString& value)
+{
+    // Generated names are persisted in English so project data remains stable
+    // across language changes. Translate only the recognised generated forms at
+    // the presentation boundary; user-provided names remain untouched.
+    const auto numberedName = [&value](const QString& prefix, const char* source) {
+        const QRegularExpression expression(
+            QStringLiteral("^%1 (\\d+)$").arg(QRegularExpression::escape(prefix)));
+        const QRegularExpressionMatch match = expression.match(value);
+        return match.hasMatch() ? QObject::tr(source).arg(match.captured(1)) : QString();
+    };
+
+    // 中文翻译：加工轮廓 %1；外轮廓 %1；孔 %1；边缘 %1
+    for (const auto& item : {std::pair{QStringLiteral("Machining contour"), "Machining contour %1"},
+                             std::pair{QStringLiteral("Outer contour"), "Outer contour %1"},
+                             std::pair{QStringLiteral("Hole"), "Hole %1"},
+                             std::pair{QStringLiteral("Edge"), "Edge %1"}}) {
+        const QString translated = numberedName(item.first, item.second);
+        if (!translated.isEmpty())
+            return translated;
+    }
+
+    // 中文翻译：外表面(%1面) ∩ 截面(%2面)
+    static const QRegularExpression tubeLayerExpression(
+        QStringLiteral("^Outer surface \\((\\d+) surface\\) ∩ Cross section \\((\\d+) surface\\)$"));
+    const QRegularExpressionMatch tubeLayerMatch = tubeLayerExpression.match(value);
+    if (tubeLayerMatch.hasMatch()) {
+        return QObject::tr("Outer surface (%1 surface) ∩ Cross section (%2 surface)")
+            .arg(tubeLayerMatch.captured(1), tubeLayerMatch.captured(2));
+    }
+
+    // 中文翻译：未分组；类型 %1；手动加工面组边界；加工面组外边界；加工面组孔边界
+    if (value == QStringLiteral("Not grouped"))
+        return QObject::tr("Not grouped");
+    if (value == QStringLiteral("Manually process quilt boundaries"))
+        return QObject::tr("Manually process quilt boundaries");
+    if (value == QStringLiteral("Processing outer boundary of dough group"))
+        return QObject::tr("Processing outer boundary of dough group");
+    if (value == QStringLiteral("Machining quilt hole boundaries"))
+        return QObject::tr("Machining quilt hole boundaries");
+
+    static const QRegularExpression typeExpression(QStringLiteral("^Type (\\d+)$"));
+    const QRegularExpressionMatch typeMatch = typeExpression.match(value);
+    if (typeMatch.hasMatch())
+        return QObject::tr("Type %1").arg(typeMatch.captured(1));
+    return value;
+}
 
 void collectLeafEntries(ProjectExplorerNode& node)
 {
@@ -250,14 +301,14 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
             node.contourId != 0
                 ? QString::number(static_cast<qulonglong>(node.contourId))
                 : QString::number(index));
-        node.displayName = contour.name;
+        node.displayName = localizedGeneratedToolpathName(contour.name);
         // 中文翻译：%1 点
         node.infoText = QObject::tr("%1 points").arg(contour.points.size());
         node.contourIndex = index;
         node.checkable = true;
         node.checked = contour.enabled;
         node.draggable = true;
-        node.toolTip = contour.sourceInfo;
+        node.toolTip = localizedGeneratedToolpathName(contour.sourceInfo);
         return node;
     };
 
@@ -274,7 +325,7 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
         layerNode.displayName = layer.name.trimmed().isEmpty()
             // 中文翻译：图层 %1
             ? QObject::tr("Layer %1").arg(root.children.size() + 1)
-            : layer.name;
+            : localizedGeneratedToolpathName(layer.name);
         layerNode.checkable = true;
         layerNode.checked = layer.enabled;
         layerNode.selectable = true;

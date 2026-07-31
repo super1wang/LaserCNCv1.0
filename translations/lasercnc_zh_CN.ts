@@ -5121,6 +5121,46 @@ continue?</source>
         <source>AC head</source>
         <translation>AC 摆头</translation>
     </message>
+    <message>
+        <source>Machining contour %1</source>
+        <translation>加工轮廓 %1</translation>
+    </message>
+    <message>
+        <source>Outer contour %1</source>
+        <translation>外轮廓 %1</translation>
+    </message>
+    <message>
+        <source>Hole %1</source>
+        <translation>孔 %1</translation>
+    </message>
+    <message>
+        <source>Edge %1</source>
+        <translation>边缘 %1</translation>
+    </message>
+    <message>
+        <source>Outer surface (%1 surface) ∩ Cross section (%2 surface)</source>
+        <translation>外表面（%1 个面）∩ 横截面（%2 个面）</translation>
+    </message>
+    <message>
+        <source>Not grouped</source>
+        <translation>未分组</translation>
+    </message>
+    <message>
+        <source>Manually process quilt boundaries</source>
+        <translation>手动加工面组边界</translation>
+    </message>
+    <message>
+        <source>Processing outer boundary of dough group</source>
+        <translation>加工面组外边界</translation>
+    </message>
+    <message>
+        <source>Machining quilt hole boundaries</source>
+        <translation>加工面组孔边界</translation>
+    </message>
+    <message>
+        <source>Type %1</source>
+        <translation>类型 %1</translation>
+    </message>
 </context>
 <context>
     <name>TaskManager</name>
