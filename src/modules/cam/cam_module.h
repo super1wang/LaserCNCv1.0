@@ -47,6 +47,10 @@ class TravelPathRenderer;
 } // namespace lcnc::view
 
 namespace lcnc::cam {
+class CamDisplayProjectionService;
+}
+
+namespace lcnc::cam {
 class CamDataManager;
 class MachineWorkspace;
 } // namespace lcnc::cam
@@ -539,6 +543,7 @@ private:
     std::unique_ptr<lcnc::view::ToolpathRenderer>      m_toolpathRenderer;
     std::unique_ptr<lcnc::view::MachineGuideRenderer>  m_guideRenderer;
     std::unique_ptr<lcnc::view::TravelPathRenderer>    m_travelPathRenderer;
+    std::unique_ptr<lcnc::cam::CamDisplayProjectionService> m_displayProjectionService;
 
     // ── CAM data managers ─────────────────────────────────────────────
     /// 借用自 LcncProjectManager（工程核心数据，core 层拥有）；本模块不负责其生命周期。
@@ -575,7 +580,6 @@ private:
     };
     std::vector<MachiningFaceEntry> m_machiningFaces;
     std::uint64_t               m_nextMachiningFaceId{1};
-    QMap<std::uint64_t, Handle(AIS_Shape)> m_machiningFaceAis;
     bool                        m_machiningFacesVisible{true};
 
     double                      m_deflection{0.1};

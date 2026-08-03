@@ -7,6 +7,7 @@
 #include "core/project/cam/layer_container.h"
 #include "core/project/cam/layer_manager.h"
 #include "modules/cam/services/machine_axis_detector.h"
+#include "modules/cam/services/cam_display_projection_service.h"
 #include "modules/cam/services/toolpath_generation_service.h"
 #include "modules/cam/services/machine_io.h"
 #include "modules/cam/services/reference_pick.h"
@@ -551,6 +552,7 @@ CamModule::CamModule(QObject* parent)
     , m_toolpathRenderer(std::make_unique<lcnc::view::ToolpathRenderer>())
     , m_guideRenderer(std::make_unique<lcnc::view::MachineGuideRenderer>())
     , m_travelPathRenderer(std::make_unique<lcnc::view::TravelPathRenderer>())
+    , m_displayProjectionService(std::make_unique<lcnc::cam::CamDisplayProjectionService>())
     , m_camData(lcnc::Kernel::current().projectManager()->camData())
 {
     // 加载当前持久化 TOML 配置。
@@ -5624,48 +5626,15 @@ void CamModule::setAutoMachiningFaces(const std::vector<TopoDS_Face>& faces,
 
 void CamModule::refreshMachiningFaceDisplay()
 {
-    GuiDocument* gd = activeGuiDocument();
-    if (!gd || gd->context().IsNull())
+    if (!m_displayProjectionService)
         return;
-    const Handle(AIS_InteractiveContext)& ctx = gd->context();
-    for (auto it = m_machiningFaceAis.cbegin(); it != m_machiningFaceAis.cend(); ++it) {
-        if (!it.value().IsNull())
-            ctx->Remove(it.value(), Standard_False);
-    }
-    m_machiningFaceAis.clear();
-    if (!m_machiningFacesVisible) {
-        ctx->UpdateCurrentViewer();
-        return;
-    }
+    std::vector<lcnc::cam::MachiningFaceDisplaySnapshot> snapshot;
+    snapshot.reserve(m_machiningFaces.size());
     for (const auto& entry : m_machiningFaces) {
-        if (entry.face.IsNull()
-            || entry.role != lcnc::cam::MachiningFaceRole::MachiningSurface)
-            continue;
-        const Quantity_Color highlightColor = entry.manual
-            ? Quantity_Color(1.0, 0.82, 0.0, Quantity_TOC_RGB)
-            : Quantity_Color(0.0, 0.85, 1.0, Quantity_TOC_RGB);
-        Handle(AIS_Shape) ais = new AIS_Shape(entry.face);
-        ais->SetDisplayMode(AIS_Shaded);
-        ais->SetColor(highlightColor);
-        ais->SetTransparency(entry.manual ? 0.25 : 0.45);
-        ais->SetPolygonOffsets(Aspect_POM_Fill, -1.0f, -1.0f);
-        if (!ais->Attributes().IsNull()) {
-            ais->Attributes()->SetFaceBoundaryDraw(true);
-            ais->Attributes()->SetFaceBoundaryAspect(
-                new Prs3d_LineAspect(highlightColor, Aspect_TOL_SOLID,
-                                     entry.manual ? 3.0 : 2.0));
-        }
-        ctx->Display(ais, AIS_Shaded, 0, Standard_False);
-        // Draw after the workpiece while inheriting its depth buffer.  This
-        // avoids coplanar Z-fighting without showing back-side faces through
-        // the solid.
-        ctx->SetZLayer(ais, Graphic3d_ZLayerId_Top);
-        // The confirmation overlay is presentation-only; otherwise it can
-        // intercept the next click in a multi-face pick session.
-        ctx->Deactivate(ais);
-        m_machiningFaceAis.insert(entry.faceId, ais);
+        snapshot.push_back({entry.faceId, entry.face, entry.manual, entry.role});
     }
-    ctx->UpdateCurrentViewer();
+    m_displayProjectionService->refreshMachiningFaces(
+        activeGuiDocument(), snapshot, m_machiningFacesVisible);
 }
 
 void CamModule::setMachiningFacesVisible(bool visible)
