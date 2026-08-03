@@ -2268,11 +2268,6 @@ bool CamModule::rejectConflictingPipelineOperation(const QString& operation)
     return true;
 }
 
-std::uint64_t CamModule::allocateMachiningFaceId()
-{
-    return m_machiningFacePipeline ? m_machiningFacePipeline->nextFaceId() : 0;
-}
-
 std::uint64_t CamModule::machiningFaceSetRevision() const
 {
     return m_machiningFacePipeline ? m_machiningFacePipeline->revision() : 0;
@@ -3836,33 +3831,15 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 // Capture the exact two face groups used by Auto/Tube.  They are
                 // project data, not a renderer-only side effect: later manual
                 // stages continue from these groups without reclassifying.
-                std::vector<MachiningFaceEntry> captured;
-                for (const MachiningFaceEntry& entry : m_machiningFaces)
-                    if (entry.manual)
-                        captured.push_back(entry);
+                std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> captured;
                 const ExtractionStrategy currentStrategy =
                     static_cast<ExtractionStrategy>(m_extractionStrategy);
                 for (const WorkpieceShapeSource& src : currentSources) {
                     if (src.shape.IsNull())
                         continue;
-                    auto appendCaptured = [this, &captured, &src](const TopoDS_Face& face,
-                                                                   lcnc::cam::MachiningFaceRole role) {
-                        if (face.IsNull())
-                            return;
-                        const auto duplicate = std::find_if(captured.cbegin(), captured.cend(),
-                            [&face, &src, role](const MachiningFaceEntry& entry) {
-                                return entry.workpieceEntry == src.workpieceEntry
-                                    && entry.role == role && !entry.face.IsNull()
-                                    && entry.face.IsSame(face);
-                            });
-                        if (duplicate != captured.cend())
-                            return;
-                        MachiningFaceEntry entry;
-                        entry.faceId = allocateMachiningFaceId();
-                        entry.face = face;
-                        entry.workpieceEntry = src.workpieceEntry;
-                        entry.role = role;
-                        captured.push_back(std::move(entry));
+                    auto appendCaptured = [&captured, &src](const TopoDS_Face& face,
+                                                            lcnc::cam::MachiningFaceRole role) {
+                        captured.push_back({face, src.workpieceEntry, role});
                     };
                     if (currentStrategy == ExtractionStrategy::Auto
                         || currentStrategy == ExtractionStrategy::TubeClassification) {
@@ -3882,10 +3859,11 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             lcnc::cam::MachiningFaceRole::MachiningSurface);
                     }
                 }
-                m_machiningFaces = std::move(captured);
-                pushMachiningFaceRecordsToCamData();
-                refreshMachiningFaceDisplay();
-                emit machiningFacesChanged();
+                if (m_machiningFacePipeline->replaceAutomaticFaces(captured)) {
+                    pushMachiningFaceRecordsToCamData();
+                    refreshMachiningFaceDisplay();
+                    emit machiningFacesChanged();
+                }
             }
             // This worker completed all five stages as one atomic automatic
             // operation.  Commit the persisted stage chain only now, after

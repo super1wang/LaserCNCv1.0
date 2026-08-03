@@ -474,7 +474,6 @@ private:
     TopoDS_Shape collectWorkpieceShape() const;
     QList<WorkpieceShapeSource> collectWorkpieceShapes() const;
     bool rejectConflictingPipelineOperation(const QString& operation);
-    std::uint64_t allocateMachiningFaceId();
     std::uint64_t machiningFaceSetRevision() const;
     std::uint64_t machineSetupRevision() const;
 
