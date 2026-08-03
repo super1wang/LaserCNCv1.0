@@ -2539,12 +2539,11 @@ TaskId CamModule::separateMachiningFacesAsync()
         return kInvalidTaskId;
     }
 
-    struct FaceCandidate {
-        TopoDS_Face face;
-        QString workpieceEntry;
-        lcnc::cam::MachiningFaceRole role{lcnc::cam::MachiningFaceRole::MachiningSurface};
+    struct Result {
+        std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> faces;
+        QString error;
+        bool ok{false};
     };
-    struct Result { std::vector<FaceCandidate> faces; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     const double smoothAngle = m_smoothAngle;
     QVector<gp_Dir> beamDirections;
@@ -2624,36 +2623,13 @@ TaskId CamModule::separateMachiningFacesAsync()
             return;
         }
 
-        // Keep any operator-picked faces added while the worker was running,
-        // then atomically replace only the automatic portion.
-        std::vector<MachiningFaceEntry> merged;
-        for (const MachiningFaceEntry& entry : m_machiningFaces) {
-            if (entry.manual)
-                merged.push_back(entry);
-        }
-        for (const FaceCandidate& candidate : result->faces) {
-            if (candidate.face.IsNull())
-                continue;
-            const auto duplicate = std::find_if(merged.cbegin(), merged.cend(), [&candidate](const MachiningFaceEntry& entry) {
-                return entry.workpieceEntry == candidate.workpieceEntry
-                    && entry.role == candidate.role && !entry.face.IsNull()
-                    && entry.face.IsSame(candidate.face);
-            });
-            if (duplicate != merged.cend())
-                continue;
-            MachiningFaceEntry entry;
-            entry.faceId = allocateMachiningFaceId();
-            entry.face = candidate.face;
-            entry.workpieceEntry = candidate.workpieceEntry;
-            entry.role = candidate.role;
-            merged.push_back(std::move(entry));
-        }
-        if (merged.empty()) {
+        // The service preserves manual picks made after the worker started and
+        // atomically replaces only the automatic portion after source checks.
+        if (!m_machiningFacePipeline->replaceAutomaticFaces(result->faces)) {
             // 中文翻译：分离加工面；加工面识别结果为空。
             emit operationFailed(tr("Separate processing surface"), tr("The processing surface identification result is empty."));
             return;
         }
-        m_machiningFaces = std::move(merged);
         applyMachiningFaces();
     });
     return taskId;
