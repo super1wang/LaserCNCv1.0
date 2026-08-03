@@ -703,10 +703,11 @@ DocumentId CadModule::openDocument(const QString& filePath)
     if (isProjectPackage) {
         auto error = std::make_shared<QString>();
         auto loadResult = std::make_shared<lcnc::ProjectLoadResult>();
+        const auto* documentIo = m_documentIoService.get();
         const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
             // 中文翻译：打开工程: %1
             tr("Open project: %1").arg(fileInfo.fileName()),
-            [filePath, pendingWorkspace, error, loadResult](TaskProgress* prog) {
+            [filePath, pendingWorkspace, error, loadResult, documentIo](TaskProgress* prog) {
                 prog->setRange(0, 100);
                 // 中文翻译：读取工程包...
                 prog->setStepName(QStringLiteral("Read project package..."));
@@ -725,9 +726,8 @@ DocumentId CadModule::openDocument(const QString& filePath)
                 }
                 // 中文翻译：生成显示网格...
                 prog->setStepName(QStringLiteral("Generate display grid..."));
-                if (!prepareMayoStyleDisplayMesh(pendingWorkspace->workpieceDocument(),
-                                                 prog,
-                                                 error.get())) {
+                if (!documentIo || !documentIo->prepareDisplayMesh(
+                        pendingWorkspace->workpieceDocument(), prog, error.get())) {
                     throw std::runtime_error("project display mesh preparation failed");
                 }
                 if (prog->isAbortRequested())
@@ -838,7 +838,7 @@ DocumentId CadModule::openDocument(const QString& filePath)
 
             // 中文翻译：生成显示网格...
             prog->setStepName(QStringLiteral("Generate display grid..."));
-            if (!prepareMayoStyleDisplayMesh(doc, prog, error.get()))
+            if (!documentIo || !documentIo->prepareDisplayMesh(doc, prog, error.get()))
                 throw std::runtime_error("display mesh preparation failed");
 
             LCNC_DEBUG(lcnc::LogCode::Generic,
@@ -903,10 +903,11 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
     }
 
     auto error = std::make_shared<QString>();
+    const auto* documentIo = m_documentIoService.get();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
         // 中文翻译：导入 STEP: %1
         tr("Import STEP: %1").arg(fileInfo.fileName()),
-        [filePath, doc, error](TaskProgress* prog) {
+        [filePath, doc, error, documentIo](TaskProgress* prog) {
             prog->setRange(0, 100);
             // 中文翻译：读取 STEP...
             prog->setStepName(QStringLiteral("Read STEP..."));
@@ -925,7 +926,7 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
             }
             // 中文翻译：生成显示网格...
             prog->setStepName(QStringLiteral("Generate display grid..."));
-            if (!prepareMayoStyleDisplayMesh(doc, prog, error.get()))
+            if (!documentIo || !documentIo->prepareDisplayMesh(doc, prog, error.get()))
                 throw std::runtime_error("display mesh preparation failed");
             if (prog->isAbortRequested())
                 throw std::runtime_error("step import cancelled");

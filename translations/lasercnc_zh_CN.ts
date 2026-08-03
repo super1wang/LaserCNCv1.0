@@ -6595,6 +6595,14 @@ No available reference surfaces are currently detected.</source>
         <source>Import BREP: %1</source>
         <translation>导入 BREP: %1</translation>
     </message>
+    <message>
+        <source>Model shows mesh generation not completed</source>
+        <translation>模型显示网格生成未完成</translation>
+    </message>
+    <message>
+        <source>Model display mesh generation failed: %1</source>
+        <translation>模型显示网格生成失败: %1</translation>
+    </message>
 </context>
 <context>
     <name>ProcessWorkflowService</name>

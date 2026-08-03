@@ -56,6 +56,9 @@ public:
                                 const QString& filePath,
                                 TaskProgress* progress,
                                 QString* errorMessage) const;
+    bool prepareDisplayMesh(LcncDocument* document,
+                            TaskProgress* progress,
+                            QString* errorMessage) const;
 
 private:
     lcnc::LcncProjectManager& m_projectManager;

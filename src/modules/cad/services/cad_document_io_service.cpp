@@ -5,12 +5,20 @@
 #include "core/project/lcnc_project_package.h"
 #include "core/project/project_workspace.h"
 #include "core/task/task_progress.h"
+#include "core/document/xcaf_utils.h"
 
 #include <QFileInfo>
 
 #include <IFSelect_ReturnStatus.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepTools.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
+#include <BRep_tool.hxx>
+#include <Bnd_Box.hxx>
+#include <IMeshTools_Parameters.hxx>
+#include <Standard_Failure.hxx>
+#include <TopExp_Explorer.hxx>
 #include <STEPControl_Writer.hxx>
 #include <StlAPI_Reader.hxx>
 #include <TDF_LabelSequence.hxx>
@@ -221,6 +229,56 @@ bool CadDocumentIoService::importBrepIntoDocument(LcncDocument* document,
         return false;
     if (progress)
         progress->setValue(100);
+    return true;
+}
+
+bool CadDocumentIoService::prepareDisplayMesh(LcncDocument* document,
+                                              TaskProgress* progress,
+                                              QString* errorMessage) const
+{
+    if (!document)
+        return false;
+    const TDF_LabelSequence labels =
+        document->entityLabels(LcncDocument::EntityKind::Workpiece);
+    const int count = labels.Length();
+    for (int index = 1; index <= count; ++index) {
+        if (progress && progress->isAbortRequested())
+            return false;
+        const TopoDS_Shape shape = XcafUtils::shape(labels.Value(index));
+        if (shape.IsNull())
+            continue;
+        try {
+            Bnd_Box box;
+            BRepBndLib::Add(shape, box, Standard_False);
+            Standard_Real xMin = 0.0, yMin = 0.0, zMin = 0.0;
+            Standard_Real xMax = 0.0, yMax = 0.0, zMax = 0.0;
+            if (!box.IsVoid())
+                box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+            const double maxSize = box.IsVoid() ? 1.0
+                : std::max({xMax - xMin, yMax - yMin, zMax - zMin});
+            IMeshTools_Parameters params;
+            params.InParallel = Standard_True;
+            params.AllowQualityDecrease = Standard_True;
+            params.Relative = Standard_False;
+            params.Deflection = std::max(1e-3, 0.004 * maxSize);
+            params.Angle = 20.0 * 3.14159265358979323846 / 180.0;
+            BRepMesh_IncrementalMesh mesher(shape, params);
+            if (!mesher.IsDone()) {
+                if (errorMessage)
+                    // 中文翻译：模型显示网格生成未完成
+                    *errorMessage = QObject::tr("Model shows mesh generation not completed");
+                return false;
+            }
+        } catch (const Standard_Failure& exception) {
+            if (errorMessage)
+                // 中文翻译：模型显示网格生成失败: %1
+                *errorMessage = QObject::tr("Model display mesh generation failed: %1")
+                    .arg(QString::fromUtf8(exception.GetMessageString()));
+            return false;
+        }
+        if (progress)
+            progress->setValue(60 + (35 * index) / std::max(1, count));
+    }
     return true;
 }
 
