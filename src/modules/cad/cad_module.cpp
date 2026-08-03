@@ -327,6 +327,29 @@ lcnc::ModuleInfo CadModule::info() const
     };
 }
 
+namespace {
+
+class CadProjectExplorerProjectionAdapter final
+    : public lcnc::cad::ICadProjectExplorerProjection
+{
+public:
+    explicit CadProjectExplorerProjectionAdapter(CadModule& module) : m_module(module) {}
+
+    LcncDocument* projectExplorerWorkpieceDocument() const override
+    { return m_module.projectExplorerWorkpieceDocument(); }
+    bool projectExplorerIsSketchEditing() const override
+    { return m_module.projectExplorerIsSketchEditing(); }
+    QList<lcnc::cad::ProjectExplorerSketchElement> projectExplorerActiveSketchElements() const override
+    { return m_module.projectExplorerActiveSketchElements(); }
+    QList<lcnc::cad::ProjectExplorerSketch> projectExplorerFinishedSketches(DocumentId id) const override
+    { return m_module.projectExplorerFinishedSketches(id); }
+
+private:
+    CadModule& m_module;
+};
+
+} // namespace
+
 bool CadModule::init(lcnc::IKernel& kernel)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CadModule::init begin");
@@ -337,6 +360,8 @@ bool CadModule::init(lcnc::IKernel& kernel)
     // 同时以 Phase 7 门面接口注册，供 UI/命令以抽象类型查找。
     auto facadePtr = std::shared_ptr<lcnc::ICadFacade>(svcPtr, static_cast<lcnc::ICadFacade*>(this));
     kernel.services().registerService<lcnc::ICadFacade>(facadePtr);
+    auto explorerProjection = std::make_shared<CadProjectExplorerProjectionAdapter>(*this);
+    kernel.services().registerService<lcnc::cad::ICadProjectExplorerProjection>(explorerProjection);
     m_documentIoService = std::make_unique<lcnc::cad::CadDocumentIoService>(
         *lcnc::Kernel::current().projectManager(),
         *lcnc::Kernel::current().taskManager(), this);
@@ -1640,6 +1665,42 @@ void CadModule::cancelModelingOperation()
 bool CadModule::isSketchEditing() const
 {
     return m_modelingSession && m_modelingSession->isSketchEditing();
+}
+
+LcncDocument* CadModule::projectExplorerWorkpieceDocument() const
+{
+    return workpieceDocument();
+}
+
+bool CadModule::projectExplorerIsSketchEditing() const
+{
+    return isSketchEditing();
+}
+
+QList<lcnc::cad::ProjectExplorerSketchElement>
+CadModule::projectExplorerActiveSketchElements() const
+{
+    QList<lcnc::cad::ProjectExplorerSketchElement> result;
+    for (const SketchElementSnapshot& element : sketchElementSnapshots())
+        result.append({element.id, element.label});
+    return result;
+}
+
+QList<lcnc::cad::ProjectExplorerSketch>
+CadModule::projectExplorerFinishedSketches(DocumentId documentId) const
+{
+    QList<lcnc::cad::ProjectExplorerSketch> result;
+    for (const FinishedSketchSnapshot& sketch : finishedSketchSnapshots(documentId)) {
+        lcnc::cad::ProjectExplorerSketch projected;
+        projected.sketchId = sketch.sketchId;
+        projected.name = sketch.name;
+        projected.visible = sketch.visible;
+        projected.usedByFeature = sketch.usedByFeature;
+        for (const SketchElementSnapshot& element : sketch.elements)
+            projected.elements.append({element.id, element.label});
+        result.append(std::move(projected));
+    }
+    return result;
 }
 
 bool CadModule::hasSelectedSketch() const

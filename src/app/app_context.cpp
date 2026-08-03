@@ -6,7 +6,9 @@
 #include "view/gui_application.h"
 #include "view/gui_document.h"
 #include "modules/cad/cad_module.h"
+#include "modules/cad/contracts/i_cad_project_explorer_projection.h"
 #include "modules/cam/cam_module.h"
+#include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 #include "modules/process/process_module.h"
 
 AppContext::AppContext(MainWindow* mainWindow, QObject* parent)
@@ -75,6 +77,16 @@ CamModule* AppContext::camModule() const
 ProcessModule* AppContext::processModule() const
 {
     return lcnc::Kernel::current().service<ProcessModule>();
+}
+
+lcnc::cad::ICadProjectExplorerProjection* AppContext::cadProjectExplorerProjection() const
+{
+    return lcnc::Kernel::current().service<lcnc::cad::ICadProjectExplorerProjection>();
+}
+
+lcnc::cam::ICamProjectExplorerProjection* AppContext::camProjectExplorerProjection() const
+{
+    return lcnc::Kernel::current().service<lcnc::cam::ICamProjectExplorerProjection>();
 }
 
 void AppContext::updateCommandStates()

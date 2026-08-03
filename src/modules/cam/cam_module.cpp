@@ -466,6 +466,23 @@ lcnc::ModuleInfo CamModule::info() const
     };
 }
 
+namespace {
+
+class CamProjectExplorerProjectionAdapter final
+    : public lcnc::cam::ICamProjectExplorerProjection
+{
+public:
+    explicit CamProjectExplorerProjectionAdapter(CamModule& module) : m_module(module) {}
+
+    lcnc::cam::ProjectExplorerSnapshot projectExplorerSnapshot() const override
+    { return m_module.projectExplorerSnapshot(); }
+
+private:
+    CamModule& m_module;
+};
+
+} // namespace
+
 bool CamModule::init(lcnc::IKernel& kernel)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CamModule::init begin");
@@ -473,6 +490,8 @@ bool CamModule::init(lcnc::IKernel& kernel)
     kernel.services().registerService<CamModule>(svc);
     auto facade = std::shared_ptr<lcnc::ICamFacade>(svc, static_cast<lcnc::ICamFacade*>(this));
     kernel.services().registerService<lcnc::ICamFacade>(facade);
+    auto explorerProjection = std::make_shared<CamProjectExplorerProjectionAdapter>(*this);
+    kernel.services().registerService<lcnc::cam::ICamProjectExplorerProjection>(explorerProjection);
     auto toolpathProvider = std::make_shared<CamToolpathProviderAdapter>(this);
     kernel.services().registerService<lcnc::cam::ICamToolpathProvider>(toolpathProvider);
 
@@ -4896,6 +4915,43 @@ const std::vector<ToolpathLayer>& CamModule::toolpathLayers() const
 {
     static const std::vector<ToolpathLayer> empty;
     return m_camData ? m_camData->toolpathLayers() : empty;
+}
+
+lcnc::cam::ProjectExplorerSnapshot CamModule::projectExplorerSnapshot() const
+{
+    lcnc::cam::ProjectExplorerSnapshot snapshot;
+    snapshot.documentId = camDocumentId();
+    const LaserToolpath& path = toolpath();
+    snapshot.contours.reserve(path.contourCount());
+    for (int index = 0; index < path.contourCount(); ++index) {
+        const LaserContour& contour = path.contour(index);
+        snapshot.contours.append({static_cast<lcnc::cam::ContourId>(contour.contourId),
+                                  contour.layerId,
+                                  contour.name,
+                                  contour.sourceInfo,
+                                  static_cast<int>(contour.points.size()),
+                                  index,
+                                  contour.enabled});
+    }
+    for (const ToolpathLayer& layer : toolpathLayers()) {
+        lcnc::cam::ProjectExplorerLayer projected;
+        projected.layerId = layer.layerId;
+        projected.name = layer.name;
+        projected.toolName = layer.toolName;
+        projected.color = layer.color;
+        projected.enabled = layer.enabled;
+        for (const std::uint64_t contourId : layer.contourIds)
+            projected.contourIds.append(static_cast<lcnc::cam::ContourId>(contourId));
+        snapshot.layers.append(std::move(projected));
+    }
+    for (const MachiningFaceInfo& face : machiningFacesForTree())
+        snapshot.faces.append({face.faceId, face.displayName, face.manual, face.role});
+    snapshot.facesVisible = machiningFacesVisible();
+    for (int index = 0; index < static_cast<int>(lcnc::cam::CamPipelineStage::Count); ++index) {
+        snapshot.stages[index] = pipelineStageState(
+            static_cast<lcnc::cam::CamPipelineStage>(index));
+    }
+    return snapshot;
 }
 
 std::uint64_t CamModule::addToolpathLayer(const QString& name, const QColor& color)

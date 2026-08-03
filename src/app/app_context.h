@@ -37,6 +37,8 @@ public:
     CadModule*     cadModule()     const override;
     CamModule*     camModule()     const override;
     ProcessModule* processModule() const override;
+    lcnc::cad::ICadProjectExplorerProjection* cadProjectExplorerProjection() const override;
+    lcnc::cam::ICamProjectExplorerProjection* camProjectExplorerProjection() const override;
 
     bool isMachineViewActive() const override;
 

@@ -17,6 +17,7 @@
 #include "core/project/cam/cam_data_manager.h"
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
+#include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kernel/i_module.h"
@@ -71,7 +72,9 @@ class MachineWorkspace;
  * 微内核集成：同 CadModule，实现 @ref lcnc::IModule + @ref lcnc::IService，
  * 生命周期由 Kernel 接管，依赖 "cad" 模块（三域文档由 LcncProjectManager 管理）。
  */
-class CamModule : public QObject, public lcnc::IModule, public lcnc::ICamFacade
+class CamModule : public QObject,
+                  public lcnc::IModule,
+                  public lcnc::ICamFacade
 {
     Q_OBJECT
 public:
@@ -130,6 +133,7 @@ public:
 
     /// ICamFacade：用于让调用方挂接 Qt 信号。
     QObject* asQObject() override { return this; }
+    lcnc::cam::ProjectExplorerSnapshot projectExplorerSnapshot() const;
 
     // ── Domain Workspaces ────────────────────────────────────────────────
     LcncDocument*      machineDocument() const;

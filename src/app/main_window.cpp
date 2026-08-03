@@ -2110,8 +2110,8 @@ void MainWindow::rebuildProjectExplorer()
         return;
 
     m_projectExplorerSnapshot = lcnc::app::ProjectExplorerModel::build(
-        m_appContext->cadModule(),
-        m_appContext->camModule());
+        m_appContext->cadProjectExplorerProjection(),
+        m_appContext->camProjectExplorerProjection());
 
     m_blockProjectExplorerSignals = true;
     if (m_projectExplorerController)

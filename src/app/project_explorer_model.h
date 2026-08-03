@@ -10,8 +10,8 @@
 
 #include <cstdint>
 
-class CadModule;
-class CamModule;
+namespace lcnc::cad { class ICadProjectExplorerProjection; }
+namespace lcnc::cam { class ICamProjectExplorerProjection; }
 
 namespace lcnc::app {
 
@@ -61,7 +61,8 @@ struct ProjectExplorerSnapshot {
 class ProjectExplorerModel
 {
 public:
-    static ProjectExplorerSnapshot build(CadModule* cad, CamModule* cam);
+    static ProjectExplorerSnapshot build(const lcnc::cad::ICadProjectExplorerProjection* cad,
+                                         const lcnc::cam::ICamProjectExplorerProjection* cam);
 };
 
 bool isCadProjectNode(ProjectExplorerNodeKind kind);

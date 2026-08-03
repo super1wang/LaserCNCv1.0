@@ -11,6 +11,8 @@ class CamModule;
 class ProcessModule;
 class WidgetOccView;
 namespace lcnc { class LcncProjectManager; }
+namespace lcnc::cad { class ICadProjectExplorerProjection; }
+namespace lcnc::cam { class ICamProjectExplorerProjection; }
 
 /**
  * @brief UI command context injected into QAction-backed commands.
@@ -41,6 +43,8 @@ public:
     virtual CadModule*        cadModule()         const = 0;
     virtual CamModule*        camModule()         const = 0;
     virtual ProcessModule*    processModule()     const = 0;
+    virtual lcnc::cad::ICadProjectExplorerProjection* cadProjectExplorerProjection() const = 0;
+    virtual lcnc::cam::ICamProjectExplorerProjection* camProjectExplorerProjection() const = 0;
 
     /// Returns true when the 准备 (machine) tab is currently active.
     virtual bool isMachineViewActive() const = 0;

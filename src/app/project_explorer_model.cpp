@@ -6,8 +6,8 @@
 #include "core/kernel/kernel.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/project/lcnc_project_manager.h"
-#include "modules/cad/cad_module.h"
-#include "modules/cam/cam_module.h"
+#include "modules/cad/contracts/i_cad_project_explorer_projection.h"
+#include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 
 #include <QObject>
 #include <QMap>
@@ -136,19 +136,22 @@ void appendFallbackWorkpieceShapes(ProjectExplorerNode& documentNode, LcncDocume
     }
 }
 
-void appendSketchNodes(ProjectExplorerNode& documentNode, CadModule* cad, DocumentId docId)
+void appendSketchNodes(ProjectExplorerNode& documentNode,
+                       const lcnc::cad::ICadProjectExplorerProjection* cad,
+                       DocumentId docId)
 {
     if (!cad)
         return;
 
-    if (cad->isSketchEditing() && docId == cad->workpieceDocumentId()) {
+    if (cad->projectExplorerIsSketchEditing()
+        && docId == cad->projectExplorerWorkpieceDocument()->id()) {
         ProjectExplorerNode sketchNode;
         sketchNode.kind = ProjectExplorerNodeKind::CadTemporarySketch;
         sketchNode.documentId = docId;
         sketchNode.nodeKey = QStringLiteral("__sketch_temp__");
         // 中文翻译：[新草图]
         sketchNode.displayName = QObject::tr("[new sketch]");
-        for (const auto& element : cad->sketchElementSnapshots()) {
+        for (const auto& element : cad->projectExplorerActiveSketchElements()) {
             ProjectExplorerNode elementNode;
             elementNode.kind = ProjectExplorerNodeKind::CadSketchElement;
             elementNode.documentId = docId;
@@ -159,7 +162,7 @@ void appendSketchNodes(ProjectExplorerNode& documentNode, CadModule* cad, Docume
         documentNode.children.append(sketchNode);
     }
 
-    const auto finishedSketches = cad->finishedSketchSnapshots(docId);
+    const auto finishedSketches = cad->projectExplorerFinishedSketches(docId);
     for (const auto& sketch : finishedSketches) {
         ProjectExplorerNode sketchNode;
         sketchNode.kind = ProjectExplorerNodeKind::CadSketch;
@@ -185,9 +188,10 @@ void appendSketchNodes(ProjectExplorerNode& documentNode, CadModule* cad, Docume
     }
 }
 
-void appendWorkpieceSection(ProjectExplorerSnapshot& snapshot, CadModule* cad)
+void appendWorkpieceSection(ProjectExplorerSnapshot& snapshot,
+                            const lcnc::cad::ICadProjectExplorerProjection* cad)
 {
-    LcncDocument* doc = cad ? cad->workpieceDocument() : nullptr;
+    LcncDocument* doc = cad ? cad->projectExplorerWorkpieceDocument() : nullptr;
     const int workpieceCount = doc
         ? doc->entityLabels(LcncDocument::EntityKind::Workpiece).Length()
         : 0;
@@ -237,11 +241,14 @@ void appendWorkpieceSection(ProjectExplorerSnapshot& snapshot, CadModule* cad)
     snapshot.roots.append(std::move(root));
 }
 
-void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
+void appendToolpathSection(ProjectExplorerSnapshot& snapshot,
+                           const lcnc::cam::ICamProjectExplorerProjection* cam)
 {
     ProjectExplorerNode root;
     root.kind = ProjectExplorerNodeKind::ToolpathRoot;
-    root.documentId = cam ? cam->camDocumentId() : kInvalidDocumentId;
+    const lcnc::cam::ProjectExplorerSnapshot camSnapshot = cam
+        ? cam->projectExplorerSnapshot() : lcnc::cam::ProjectExplorerSnapshot{};
+    root.documentId = camSnapshot.documentId;
     root.nodeKey = QStringLiteral("project.cam");
     // The tree represents the user-editable machining result, not an opaque
     // implementation cache.  Keep the label aligned with the staged CAM flow.
@@ -258,13 +265,11 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
         return;
     }
 
-    const LaserToolpath& toolpath = cam->toolpath();
-    const auto& layers = cam->toolpathLayers();
-    root.infoText = toolpath.contourCount() > 0
+    root.infoText = !camSnapshot.contours.isEmpty()
         // 中文翻译：%1 图层 / %2 条轮廓
         ? QObject::tr("%1 layer / %2 outlines")
-            .arg(static_cast<int>(layers.size()))
-            .arg(toolpath.contourCount())
+            .arg(static_cast<int>(camSnapshot.layers.size()))
+            .arg(camSnapshot.contours.size())
         // 中文翻译：未生成
         : QObject::tr("Not generated");
     const struct { lcnc::cam::CamPipelineStage stage; const char* name; } stages[] = {
@@ -281,7 +286,7 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     };
     QStringList stageSummary;
     for (const auto& item : stages) {
-        const auto state = cam->pipelineStageState(item.stage);
+        const auto state = camSnapshot.stages[static_cast<int>(item.stage)];
         // 中文翻译：未执行
         const QString status = !state.available ? QObject::tr("Not executed")
             // 中文翻译：过期；完成
@@ -290,21 +295,23 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     }
     root.toolTip = stageSummary.join(QStringLiteral(" · "));
 
-    auto contourNode = [&](int index) {
-        const LaserContour& contour = toolpath.contour(index);
+    QHash<lcnc::cam::ContourId, lcnc::cam::ProjectExplorerContour> contoursById;
+    for (const auto& contour : camSnapshot.contours)
+        contoursById.insert(contour.contourId, contour);
+    auto contourNode = [&](const lcnc::cam::ProjectExplorerContour& contour) {
         ProjectExplorerNode node;
         node.kind = ProjectExplorerNodeKind::ToolpathContour;
         node.documentId = root.documentId;
         node.layerId = contour.layerId;
-        node.contourId = static_cast<lcnc::cam::ContourId>(contour.contourId);
+        node.contourId = contour.contourId;
         node.nodeKey = QStringLiteral("project.toolpath.contour.%1").arg(
             node.contourId != 0
                 ? QString::number(static_cast<qulonglong>(node.contourId))
-                : QString::number(index));
+                : QString::number(contour.contourIndex));
         node.displayName = localizedGeneratedToolpathName(contour.name);
         // 中文翻译：%1 点
-        node.infoText = QObject::tr("%1 points").arg(contour.points.size());
-        node.contourIndex = index;
+        node.infoText = QObject::tr("%1 points").arg(contour.pointCount);
+        node.contourIndex = contour.contourIndex;
         node.checkable = true;
         node.checked = contour.enabled;
         node.draggable = true;
@@ -313,7 +320,7 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     };
 
     QSet<int> placedContourIndexes;
-    for (const ToolpathLayer& layer : layers) {
+    for (const auto& layer : camSnapshot.layers) {
         ProjectExplorerNode layerNode;
         layerNode.kind = ProjectExplorerNodeKind::ToolpathLayer;
         layerNode.documentId = root.documentId;
@@ -336,21 +343,21 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
             // 中文翻译：工具: %1
             : QObject::tr("Tool: %1").arg(layer.toolName.trimmed());
 
-        for (std::uint64_t contourId : layer.contourIds) {
-            const int index = cam->contourIndexById(static_cast<lcnc::cam::ContourId>(contourId));
-            if (index < 0 || index >= toolpath.contourCount())
+        for (const lcnc::cam::ContourId contourId : layer.contourIds) {
+            const auto found = contoursById.constFind(contourId);
+            if (found == contoursById.cend())
                 continue;
-            layerNode.children.append(contourNode(index));
-            placedContourIndexes.insert(index);
+            layerNode.children.append(contourNode(found.value()));
+            placedContourIndexes.insert(found->contourIndex);
         }
 
         root.children.append(layerNode);
     }
 
-    for (int index = 0; index < toolpath.contourCount(); ++index) {
-        if (placedContourIndexes.contains(index))
+    for (const auto& contour : camSnapshot.contours) {
+        if (placedContourIndexes.contains(contour.contourIndex))
             continue;
-        root.children.append(contourNode(index));
+        root.children.append(contourNode(contour));
     }
 
     // Phase C：删除"无 toolpath 时按 CAM XCAF 还原轮廓节点"的兜底分支 ——
@@ -359,8 +366,11 @@ void appendToolpathSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
     snapshot.roots.append(std::move(root));
 }
 
-void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* cam)
+void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot,
+                                const lcnc::cam::ICamProjectExplorerProjection* cam)
 {
+    const lcnc::cam::ProjectExplorerSnapshot camSnapshot = cam
+        ? cam->projectExplorerSnapshot() : lcnc::cam::ProjectExplorerSnapshot{};
     ProjectExplorerNode root;
     root.kind = ProjectExplorerNodeKind::MachiningFaceRoot;
     root.nodeKey = QStringLiteral("project.machiningfaces");
@@ -368,11 +378,10 @@ void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* ca
     root.displayName = QObject::tr("Processing surface");
     root.selectable = true;
     root.checkable = true;
-    root.checked = cam && cam->machiningFacesVisible();
+    root.checked = cam && camSnapshot.facesVisible;
 
     // 横截面是内部工艺数据，不在“加工面”树节点中显示。
-    const QList<CamModule::MachiningFaceInfo> faces = cam ? cam->machiningFacesForTree()
-                                                           : QList<CamModule::MachiningFaceInfo>{};
+    const QList<lcnc::cam::ProjectExplorerFace>& faces = camSnapshot.faces;
     if (faces.isEmpty()) {
         // 中文翻译：未选择
         root.infoText = QObject::tr("Not selected");
@@ -383,7 +392,7 @@ void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* ca
 
     // 中文翻译：%1 个
     root.infoText = QObject::tr("%1").arg(faces.size());
-    for (const CamModule::MachiningFaceInfo& info : faces) {
+    for (const lcnc::cam::ProjectExplorerFace& info : faces) {
         ProjectExplorerNode node;
         node.kind = ProjectExplorerNodeKind::MachiningFace;
         node.nodeKey = QStringLiteral("project.machiningface.%1")
@@ -414,7 +423,9 @@ void appendMachiningFaceSection(ProjectExplorerSnapshot& snapshot, CamModule* ca
 
 } // namespace
 
-ProjectExplorerSnapshot ProjectExplorerModel::build(CadModule* cad, CamModule* cam)
+ProjectExplorerSnapshot ProjectExplorerModel::build(
+    const lcnc::cad::ICadProjectExplorerProjection* cad,
+    const lcnc::cam::ICamProjectExplorerProjection* cam)
 {
     ProjectExplorerSnapshot snapshot;
     appendWorkpieceSection(snapshot, cad);

@@ -18,6 +18,7 @@
 #include "core/project/project_types.h"
 #include "core/task/task_manager.h"
 #include "modules/cad/i_cad_facade.h"
+#include "modules/cad/contracts/i_cad_project_explorer_projection.h"
 #include "modules/cad/selection/cad_selection.h"
 
 class GuiDocument;
@@ -47,7 +48,9 @@ namespace lcnc::cad::task { class CadCommandDispatcher; }
  * 自动创建实例 —— 必须先 @c kernel.addModule(std::make_unique<CadModule>())
  * 并 @c bootstrap() 之后才能拿到非空指针。
  */
-class CadModule : public QObject, public lcnc::IModule, public lcnc::ICadFacade
+class CadModule : public QObject,
+                  public lcnc::IModule,
+                  public lcnc::ICadFacade
 {
     Q_OBJECT
 public:
@@ -153,6 +156,12 @@ public:
 
     /// ICadFacade：用于让调用方挂接 CadModule 的 Qt 信号。
     QObject* asQObject() override { return this; }
+
+    LcncDocument* projectExplorerWorkpieceDocument() const;
+    bool projectExplorerIsSketchEditing() const;
+    QList<lcnc::cad::ProjectExplorerSketchElement> projectExplorerActiveSketchElements() const;
+    QList<lcnc::cad::ProjectExplorerSketch> projectExplorerFinishedSketches(
+        DocumentId documentId) const;
 
     // ── Selection / Visibility ──────────────────────────────────────────
     void setEntityVisible(DocumentId docId, const QString& entry, bool visible);
