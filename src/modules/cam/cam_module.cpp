@@ -2436,44 +2436,21 @@ bool CamModule::separateMachiningFaces()
         return false;
     }
 
-    // Hand-picked faces are deliberate operator input.  An automatic refresh
-    // may replace only auto results; it must never silently resurrect or erase
-    // the manual set.
-    std::vector<MachiningFaceEntry> result;
-    for (const MachiningFaceEntry& entry : m_machiningFaces) {
-        if (entry.manual)
-            result.push_back(entry);
-    }
-
     const ExtractionStrategy strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
     if (strategy == ExtractionStrategy::ManualFaceSelection) {
-        if (result.empty()) {
+        if (!m_machiningFacePipeline->replaceAutomaticFaces({})) {
             // 中文翻译：应用加工面；手动选面模式下至少需要保留一个加工面。
             emit operationFailed(tr("Application processing surface"), tr("At least one processing surface needs to be reserved in manual surface selection mode."));
             return false;
         }
-        m_machiningFaces = std::move(result);
         return applyMachiningFaces();
     }
 
-    auto appendFace = [this, &result](const TopoDS_Face& face,
-                                      const QString& workpieceEntry,
-                                      lcnc::cam::MachiningFaceRole role) {
-        if (face.IsNull())
-            return;
-        const auto duplicate = std::find_if(result.cbegin(), result.cend(),
-            [&face, role](const MachiningFaceEntry& entry) {
-                return entry.role == role && !entry.face.IsNull() && entry.face.IsSame(face);
-            });
-        if (duplicate != result.cend())
-            return;
-        MachiningFaceEntry entry;
-        entry.faceId = allocateMachiningFaceId();
-        entry.face = face;
-        entry.workpieceEntry = workpieceEntry;
-        entry.manual = false;
-        entry.role = role;
-        result.push_back(std::move(entry));
+    std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> candidates;
+    auto appendFace = [&candidates](const TopoDS_Face& face,
+                                    const QString& workpieceEntry,
+                                    lcnc::cam::MachiningFaceRole role) {
+        candidates.push_back({face, workpieceEntry, role});
     };
 
     for (const WorkpieceShapeSource& source : sources) {
@@ -2505,13 +2482,12 @@ bool CamModule::separateMachiningFaces()
                    lcnc::cam::MachiningFaceRole::MachiningSurface);
     }
 
-    if (result.empty()) {
+    if (!m_machiningFacePipeline->replaceAutomaticFaces(candidates)) {
         // 中文翻译：分离加工面；未识别到可加工面，请改用手动选面。
         emit operationFailed(tr("Separate processing surface"), tr("No machinable surface is identified, please select manual surface instead."));
         return false;
     }
 
-    m_machiningFaces = std::move(result);
     return applyMachiningFaces();
 }
 
