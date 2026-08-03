@@ -5669,22 +5669,12 @@ void CamModule::rebindMachiningFacesFromRecords()
     if (records.empty())
         return;
 
-    struct RebindCandidate {
-        QString workpieceEntry;
-        TopoDS_Face face;
-        std::uint64_t signature{0};
-    };
-    std::vector<RebindCandidate> workpieceFaces;
+    std::vector<lcnc::cam::MachiningFacePipelineService::RebindSource> sources;
     for (const WorkpieceShapeSource& source : collectWorkpieceShapes()) {
-        for (TopExp_Explorer exp(source.shape, TopAbs_FACE); exp.More(); exp.Next()) {
-            const TopoDS_Face face = TopoDS::Face(exp.Current());
-            if (face.IsNull())
-                continue;
-            workpieceFaces.push_back({source.workpieceEntry, face,
-                LaserToolpathBuilder::computeFaceSignature(face)});
-        }
+        if (!source.shape.IsNull())
+            sources.push_back({source.workpieceEntry, source.shape});
     }
-    if (workpieceFaces.empty()) {
+    if (sources.empty()) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
                                      // 中文翻译：加工面无法在当前工件中重绑
                                      tr("The machining surface cannot be re-bound in the current workpiece"));
@@ -5692,36 +5682,14 @@ void CamModule::rebindMachiningFacesFromRecords()
         return;
     }
 
-    std::vector<MachiningFaceEntry> rebound;
-    for (const auto& rec : records) {
-        if (rec.signature == 0) continue;
-        MachiningFaceEntry entry;
-        entry.faceId = rec.faceId;
-        entry.workpieceEntry = rec.workpieceEntry;
-        entry.manual = rec.manual;
-        entry.role = rec.role;
-
-        // Find the face in the current workpiece by matching signature.
-        for (const RebindCandidate& candidate : workpieceFaces) {
-            if (candidate.signature == rec.signature
-                && (rec.workpieceEntry.isEmpty()
-                    || candidate.workpieceEntry == rec.workpieceEntry)) {
-                entry.face = candidate.face;
-                break;
-            }
-        }
-        if (entry.face.IsNull()) {
+    const auto result = m_machiningFacePipeline->rebindFromRecords(records, sources);
+    for (const auto& missing : result.missingFaces) {
             LCNC_WARN(lcnc::LogCode::Generic,
                       "cam.machiningFace: signature {:016x} not found in workpiece; "
                       "manual face {} dropped",
-                      rec.signature, rec.faceId);
-            continue;
-        }
-        rebound.push_back(std::move(entry));
+                      missing.signature, missing.faceId);
     }
-
-    m_machiningFacePipeline->replace(std::move(rebound));
-    if (m_machiningFaces.size() != records.size()) {
+    if (!result.missingFaces.empty()) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
                                      // 中文翻译：部分加工面或横截面无法在当前工件中重绑
                                      tr("Some machined surfaces or cross-sections cannot be re-bound in the current workpiece"));

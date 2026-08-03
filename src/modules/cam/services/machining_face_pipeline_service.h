@@ -3,6 +3,7 @@
 #include "core/project/cam/cam_data_manager.h"
 
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Shape.hxx>
 
 #include <QString>
 
@@ -35,6 +36,20 @@ public:
         MachiningFaceRole role{MachiningFaceRole::MachiningSurface};
     };
 
+    struct RebindSource {
+        QString workpieceEntry;
+        TopoDS_Shape shape;
+    };
+
+    struct RebindResult {
+        int reboundCount{0};
+        struct MissingFace {
+            std::uint64_t faceId{0};
+            std::uint64_t signature{0};
+        };
+        std::vector<MissingFace> missingFaces;
+    };
+
     const std::vector<Entry>& entries() const noexcept { return m_entries; }
     std::vector<Entry>& entries() noexcept { return m_entries; }
     std::uint64_t nextFaceId() noexcept { return m_nextFaceId++; }
@@ -47,6 +62,8 @@ public:
     enum class RoleChangeResult { Changed, NotFoundOrUnchanged, InvalidCrossSection };
     RoleChangeResult setFaceRole(std::uint64_t faceId, MachiningFaceRole role);
     bool replaceAutomaticFaces(const std::vector<Candidate>& candidates);
+    RebindResult rebindFromRecords(const std::vector<CamDataManager::MachiningFaceRecord>& records,
+                                   const std::vector<RebindSource>& sources);
     std::uint64_t revision() const;
     std::vector<CamDataManager::MachiningFaceRecord> persistenceRecords() const;
 

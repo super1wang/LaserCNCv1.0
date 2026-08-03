@@ -86,6 +86,12 @@ int main()
     assert(faces.replaceAutomaticFaces({duplicateCandidate}));
     assert(faces.entries().size() == 1);
     assert(faces.entries().front().manual);
+    lcnc::cam::MachiningFacePipelineService reboundFaces;
+    const auto rebind = reboundFaces.rebindFromRecords(
+        faces.persistenceRecords(), {{QStringLiteral("0:1"), faceSource}});
+    assert(rebind.missingFaces.empty());
+    assert(rebind.reboundCount == 1);
+    assert(reboundFaces.entries().front().faceId == face.faceId);
     assert(faces.removeFace(face.faceId));
     assert(faces.entries().empty());
     faces.reset();

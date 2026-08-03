@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include <TopAbs_ShapeEnum.hxx>
+#include <TopoDS.hxx>
 #include <TopExp_Explorer.hxx>
 
 namespace lcnc::cam {
@@ -104,6 +105,55 @@ MachiningFacePipelineService::setFaceRole(std::uint64_t faceId, MachiningFaceRol
     found->role = role;
     found->manual = true;
     return RoleChangeResult::Changed;
+}
+
+MachiningFacePipelineService::RebindResult
+MachiningFacePipelineService::rebindFromRecords(
+    const std::vector<CamDataManager::MachiningFaceRecord>& records,
+    const std::vector<RebindSource>& sources)
+{
+    struct CandidateFace {
+        QString workpieceEntry;
+        TopoDS_Face face;
+        std::uint64_t signature{0};
+    };
+    std::vector<CandidateFace> candidates;
+    for (const RebindSource& source : sources) {
+        for (TopExp_Explorer explorer(source.shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
+            const TopoDS_Face face = TopoDS::Face(explorer.Current());
+            if (!face.IsNull()) {
+                candidates.push_back({source.workpieceEntry, face,
+                    LaserToolpathBuilder::computeFaceSignature(face)});
+            }
+        }
+    }
+
+    RebindResult result;
+    std::vector<Entry> rebound;
+    rebound.reserve(records.size());
+    for (const CamDataManager::MachiningFaceRecord& record : records) {
+        if (record.signature == 0)
+            continue;
+        const auto found = std::find_if(candidates.cbegin(), candidates.cend(), [&record](const CandidateFace& candidate) {
+            return candidate.signature == record.signature
+                && (record.workpieceEntry.isEmpty()
+                    || candidate.workpieceEntry == record.workpieceEntry);
+        });
+        if (found == candidates.cend()) {
+            result.missingFaces.push_back({record.faceId, record.signature});
+            continue;
+        }
+        Entry entry;
+        entry.faceId = record.faceId;
+        entry.face = found->face;
+        entry.workpieceEntry = record.workpieceEntry;
+        entry.manual = record.manual;
+        entry.role = record.role;
+        rebound.push_back(std::move(entry));
+    }
+    replace(std::move(rebound));
+    result.reboundCount = static_cast<int>(m_entries.size());
+    return result;
 }
 
 bool MachiningFacePipelineService::replaceAutomaticFaces(const std::vector<Candidate>& candidates)
