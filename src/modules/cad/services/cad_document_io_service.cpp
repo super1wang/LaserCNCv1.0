@@ -1,6 +1,7 @@
 #include "modules/cad/services/cad_document_io_service.h"
 
 #include "core/document/lcnc_document.h"
+#include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/project/lcnc_project_package.h"
 #include "core/project/project_workspace.h"
@@ -20,9 +21,16 @@
 #include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
 #include <STEPControl_Writer.hxx>
+#include <STEPCAFControl_Reader.hxx>
+#include <STEPControl_Reader.hxx>
+#include <IGESCAFControl_Reader.hxx>
+#include <IGESControl_Reader.hxx>
 #include <StlAPI_Reader.hxx>
 #include <TDF_LabelSequence.hxx>
+#include <TCollection_ExtendedString.hxx>
+#include <TDocStd_Document.hxx>
 #include <TopoDS_Shape.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
 namespace lcnc::cad {
@@ -229,6 +237,112 @@ bool CadDocumentIoService::importBrepIntoDocument(LcncDocument* document,
         return false;
     if (progress)
         progress->setValue(100);
+    return true;
+}
+
+bool CadDocumentIoService::importStepIntoDocument(LcncDocument* document,
+                                                   const QString& filePath,
+                                                   QString* errorMessage) const
+{
+    if (!document)
+        return false;
+
+    const int beforeCount = document->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
+    Handle(TDocStd_Document) xdeDocument =
+        new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+    XCAFDoc_DocumentTool::Set(xdeDocument->Main());
+    STEPCAFControl_Reader reader;
+    reader.SetNameMode(Standard_True);
+    if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (errorMessage)
+            // 中文翻译：无法读取 STEP 文件: %1
+            *errorMessage = tr("Unable to read STEP file: %1").arg(filePath);
+        return false;
+    }
+
+    const Standard_Boolean transferOk = reader.Transfer(xdeDocument);
+    document->importFromXcaf(xdeDocument, LcncDocument::EntityKind::Workpiece);
+    const int importedCount = document->entityLabels(LcncDocument::EntityKind::Workpiece).Length()
+        - beforeCount;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "STEP XCAF transfer path={} ok={} imported={}",
+               filePath.toStdString(), static_cast<bool>(transferOk), importedCount);
+    if (importedCount > 0)
+        return true;
+
+    STEPControl_Reader fallbackReader;
+    if (fallbackReader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (errorMessage)
+            // 中文翻译：无法读取 STEP 文件: %1
+            *errorMessage = tr("Unable to read STEP file: %1").arg(filePath);
+        return false;
+    }
+    const Standard_Integer transferred = fallbackReader.TransferRoots();
+    const TopoDS_Shape shape = fallbackReader.OneShape();
+    if (transferred <= 0 || shape.IsNull()) {
+        if (errorMessage)
+            // 中文翻译：STEP 文件未解析出可显示形体: %1
+            *errorMessage = tr("The STEP file did not parse a displayable shape: %1").arg(filePath);
+        return false;
+    }
+    document->addShapeEntity(shape, QFileInfo(filePath).baseName(),
+                             LcncDocument::EntityKind::Workpiece);
+    LCNC_WARN(lcnc::LogCode::Generic,
+              "STEP XCAF import produced no entities; used single-shape fallback path={} transferred={}",
+              filePath.toStdString(), transferred);
+    return true;
+}
+
+bool CadDocumentIoService::importIgesIntoDocument(LcncDocument* document,
+                                                   const QString& filePath,
+                                                   QString* errorMessage) const
+{
+    if (!document)
+        return false;
+
+    const int beforeCount = document->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
+    Handle(TDocStd_Document) xdeDocument =
+        new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
+    XCAFDoc_DocumentTool::Set(xdeDocument->Main());
+    IGESCAFControl_Reader reader;
+    reader.SetNameMode(Standard_True);
+    if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (errorMessage)
+            // 中文翻译：无法读取 IGES 文件: %1
+            *errorMessage = tr("Unable to read IGES file: %1").arg(filePath);
+        return false;
+    }
+
+    const Standard_Boolean transferOk = reader.Transfer(xdeDocument);
+    document->importFromXcaf(xdeDocument, LcncDocument::EntityKind::Workpiece);
+    const int importedCount = document->entityLabels(LcncDocument::EntityKind::Workpiece).Length()
+        - beforeCount;
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "IGES XCAF transfer path={} ok={} imported={}",
+               filePath.toStdString(), static_cast<bool>(transferOk), importedCount);
+    if (importedCount > 0)
+        return true;
+
+    IGESControl_Reader fallbackReader;
+    if (fallbackReader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+        if (errorMessage)
+            // 中文翻译：无法读取 IGES 文件: %1
+            *errorMessage = tr("Unable to read IGES file: %1").arg(filePath);
+        return false;
+    }
+    const Standard_Integer transferred = fallbackReader.TransferRoots();
+    const TopoDS_Shape shape = fallbackReader.OneShape();
+    if (transferred <= 0 || shape.IsNull()) {
+        if (errorMessage)
+            // 中文翻译：IGES 文件未解析出可显示形体: %1
+            *errorMessage = tr("The IGES file did not resolve a displayable shape: %1").arg(filePath);
+        return false;
+    }
+    document->addShapeEntity(shape, QFileInfo(filePath).baseName(),
+                             LcncDocument::EntityKind::Workpiece);
+    LCNC_WARN(lcnc::LogCode::Generic,
+              "IGES XCAF import produced no entities; used single-shape fallback path={} transferred={}",
+              filePath.toStdString(), transferred);
     return true;
 }
 

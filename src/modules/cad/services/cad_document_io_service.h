@@ -56,6 +56,12 @@ public:
                                 const QString& filePath,
                                 TaskProgress* progress,
                                 QString* errorMessage) const;
+    bool importStepIntoDocument(LcncDocument* document,
+                                const QString& filePath,
+                                QString* errorMessage) const;
+    bool importIgesIntoDocument(LcncDocument* document,
+                                const QString& filePath,
+                                QString* errorMessage) const;
     bool prepareDisplayMesh(LcncDocument* document,
                             TaskProgress* progress,
                             QString* errorMessage) const;
