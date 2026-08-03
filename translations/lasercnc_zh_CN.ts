@@ -885,17 +885,6 @@ Please complete the configuration on the Machine Configuration page of the appli
     </message>
 </context>
 <context>
-    <name>lcnc::process::CmdEmergencyStop</name>
-    <message>
-        <source>emergency stop</source>
-        <translation>急停</translation>
-    </message>
-    <message>
-        <source>Trigger emergency stop immediately</source>
-        <translation>立即触发急停</translation>
-    </message>
-</context>
-<context>
     <name>CmdExplodeShape</name>
     <message>
         <source>Explode</source>
@@ -1372,14 +1361,14 @@ continue?</source>
     </message>
 </context>
 <context>
-    <name>lcnc::process::CmdResetEmergencyStop</name>
+    <name>lcnc::process::CmdResetStop</name>
     <message>
-        <source>Reset emergency stop</source>
-        <translation>复位急停</translation>
+        <source>Reset stop</source>
+        <translation>停止复位</translation>
     </message>
     <message>
-        <source>Release the emergency stop state and resume Idle</source>
-        <translation>解除急停状态并恢复 Idle</translation>
+        <source>Check devices and recover the idle state</source>
+        <translation>检查设备并恢复空闲状态</translation>
     </message>
 </context>
 <context>
@@ -2771,6 +2760,46 @@ continue?</source>
     <message>
         <source>Process node failed: %1</source>
         <translation>流程节点失败: %1</translation>
+    </message>
+    <message>
+        <source>Stop reset is required before returning to zero</source>
+        <translation>停止复位前无法回零</translation>
+    </message>
+    <message>
+        <source>Stop or reset has not completed</source>
+        <translation>停止或复位尚未完成</translation>
+    </message>
+    <message>
+        <source>Safety shutdown failed</source>
+        <translation>安全停机失败</translation>
+    </message>
+    <message>
+        <source>Safety shutdown failed while stopping: %1</source>
+        <translation>停止时安全停机失败: %1</translation>
+    </message>
+    <message>
+        <source>Stop reset requires an active device executor</source>
+        <translation>停止复位需要可用的设备执行器</translation>
+    </message>
+    <message>
+        <source>Safety shutdown failed during stop reset</source>
+        <translation>停止复位期间安全停机失败</translation>
+    </message>
+    <message>
+        <source>Stop reset health check failed: %1</source>
+        <translation>停止复位健康检查失败: %1</translation>
+    </message>
+    <message>
+        <source>Stop reset configuration check failed: %1</source>
+        <translation>停止复位配置检查失败: %1</translation>
+    </message>
+    <message>
+        <source>Stop reset completed and device health verified</source>
+        <translation>停止复位完成，设备健康状态已验证</translation>
+    </message>
+    <message>
+        <source>Stop reset command failed to queue</source>
+        <translation>停止复位命令未能排队</translation>
     </message>
     <message>
         <source>The device command queue is unavailable after the process is completed</source>
@@ -6666,8 +6695,8 @@ No available reference surfaces are currently detected.</source>
 <context>
     <name>ProcessInteractiveIoService</name>
     <message>
-        <source>Interactive IO is locked until emergency recovery succeeds</source>
-        <translation>急停恢复成功前交互 IO 已锁定</translation>
+        <source>Interactive IO is locked until safety shutdown completes</source>
+        <translation>安全停机完成前交互 IO 已锁定</translation>
     </message>
     <message>
         <source>Axis is not registered or the device queue is unavailable</source>

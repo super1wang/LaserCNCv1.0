@@ -89,11 +89,6 @@ void ProcessWorkflowExecutor::setStepContext(ProcessStepContext* context)
     }
 }
 
-void ProcessWorkflowExecutor::setDeviceStopper(DeviceStopper stopper)
-{
-    m_deviceStopper = std::move(stopper);
-}
-
 void ProcessWorkflowExecutor::pause()
 {
     if (m_state == State::Running) {
@@ -139,13 +134,13 @@ void ProcessWorkflowExecutor::stop()
     if (m_state == State::Idle)
         return;
     m_token.requestStop();
-    if (m_deviceStopper)
-        m_deviceStopper(false);
     m_stepTimer->stop();
-    setState(State::Stopped);
-    if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
-        setNodeState(m_plan.at(m_currentIndex).nodeId, ProcessNodeState::Stopped);
-    setState(State::Idle);
+    if (m_state != State::Error) {
+        setState(State::Stopped);
+        if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
+            setNodeState(m_plan.at(m_currentIndex).nodeId, ProcessNodeState::Stopped);
+        setState(State::Idle);
+    }
     // 中文翻译：流程已停止
     emit messageLogged(tr("Process has stopped"));
 }
@@ -162,20 +157,6 @@ bool ProcessWorkflowExecutor::waitForIdle(int timeoutMs)
         QThread::msleep(10);
     }
     return true;
-}
-
-void ProcessWorkflowExecutor::emergencyStop()
-{
-    m_token.requestEmergencyStop();
-    if (m_deviceStopper)
-        m_deviceStopper(true);
-    m_stepTimer->stop();
-    if (m_currentIndex >= 0 && m_currentIndex < m_plan.size())
-        // 中文翻译：急停中断
-        failCurrentStep(tr("emergency stop interrupt"));
-    setState(State::EmergencyStop);
-    // 中文翻译：流程急停中断
-    emit messageLogged(tr("Process emergency stop and interruption"));
 }
 
 void ProcessWorkflowExecutor::collectNode(const ProcessNode& node, int depth)
@@ -269,7 +250,7 @@ void ProcessWorkflowExecutor::completeStepDispatch()
     if (!result.first) {
         if (m_token.isStopping()) {
             LCNC_INFO(lcnc::LogCode::Generic,
-                      "process.executor: current step interrupted by stop/emergency");
+                      "process.executor: current step interrupted by stop");
             return;
         }
         // 中文翻译：流程步骤执行失败

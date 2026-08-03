@@ -148,7 +148,7 @@ CAM ToolpathExportSnapshot
   -> 运动控制器与激光/IO
 ```
 
-`runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。普通 Stop 仅在 Stop lane 已确认安全输出复位和设备停机后进入 `Stopped`；EmergencyStop 会锁存 stop-only admission，交互 IO 在显式 executor 恢复并复核设备状态前不得重新开启。
+`runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。Stop 是唯一的软件安全停机入口，仅在 Stop lane 已确认全部轴/缓冲停止并关闭激光、吹气后进入 `Stopped`；Stop 与加工错误只在安全停机事务未完成期间启用 stop-only admission，成功后立即恢复队列通道。停止复位会复查加工配置和设备健康状态，只有成功才恢复 `Idle`。
 
 供应商 SDK 类型不得出现在跨模块 facade/DTO。`ProcessDeviceRuntime` 持有当前控制器和激光器，真实硬件 sink 的创建、方法调用和销毁均由设备队列线程执行，禁止函数内 static 控制器。当前 Process 内部的 `MotionSinkFactory` contract 仍接收基类设备指针和 `ProcessModule*`，后续应封装进 executor 私有实现。设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
 

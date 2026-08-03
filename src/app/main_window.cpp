@@ -332,6 +332,12 @@ void MainWindow::createContext()
                 // 否则“连接设备”会保持断开前的禁用状态。
                 updateCommandStates();
             });
+    connect(m_appContext->processModule(), &ProcessModule::stateChanged,
+            this, [this](lcnc::ProcessRunState) {
+                // 预检/运行期错误在后台切换状态；必须立即刷新“停止复位”等
+                // Ribbon 命令，不能等待下一次用户交互。
+                updateCommandStates();
+            });
 
     connect(m_appContext->processModule(), &ProcessModule::deviceConnectProgress,
             this, [this](const QString& deviceName, int percent, const QString& step) {

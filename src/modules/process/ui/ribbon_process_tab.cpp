@@ -38,8 +38,7 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdHome>(CmdHome::Name);
     container->addCommand<CmdMoveToLoadingPosition>(CmdMoveToLoadingPosition::Name);
     container->addCommand<CmdMoveToBlankingPosition>(CmdMoveToBlankingPosition::Name);
-    container->addCommand<CmdEmergencyStop>(CmdEmergencyStop::Name);
-    container->addCommand<CmdResetEmergencyStop>(CmdResetEmergencyStop::Name);
+    container->addCommand<CmdResetStop>(CmdResetStop::Name);
 
     container->addCommand<CmdManualAppendSelectedToCuttingOrder>(CmdManualAppendSelectedToCuttingOrder::Name);
     container->addCommand<CmdAutoSortCuttingOrder>(CmdAutoSortCuttingOrder::Name);
@@ -125,12 +124,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelRun->addLargeAction(container->findAction(CmdRunStart::Name));
     panelRun->addLargeAction(container->findAction(CmdRunPause::Name));
     panelRun->addLargeAction(container->findAction(CmdRunStop::Name));
-
-    // ── 安全 ───────────────────────────────────────────────────────────────
-    // 中文翻译：安全
-    SARibbonPanel* panelSafe = cat->addPanel(QObject::tr("safe"));
-    panelSafe->addLargeAction(container->findAction(CmdEmergencyStop::Name));
-    panelSafe->addLargeAction(container->findAction(CmdResetEmergencyStop::Name));
+    panelRun->addLargeAction(container->findAction(CmdResetStop::Name));
 
     // ── 参数 (唯一设置按钮) ────────────────────────────────────────────────
     // 中文翻译：参数

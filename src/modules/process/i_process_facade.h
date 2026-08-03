@@ -14,7 +14,6 @@ enum class ProcessRunState {
     Paused,
     Stopped,
     Error,
-    EmergencyStop,
 };
 
 /**
@@ -45,12 +44,12 @@ public:
 
     virtual ProcessRunState state() const = 0;
 
-    /// 加工流程：开始 / 暂停 / 停止。
+    /// 加工流程：开始 / 暂停 / 停止。Stop 是唯一的软件安全停机入口。
     virtual void runStart() = 0;
     virtual void runPause() = 0;
     virtual void runStop()  = 0;
-    virtual void emergencyStop() = 0;
-    virtual void resetEmergencyStop() = 0;
+    /// 在 Stop 或加工错误后复核设备状态；成功后恢复 Idle。
+    virtual void resetStop() = 0;
     virtual void home() = 0;
 
     virtual void newProcess() = 0;

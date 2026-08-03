@@ -522,8 +522,7 @@ void WidgetLaserControl::updateRunState(lcnc::ProcessRunState state)
         pauseProcessingClock();
     } else if (state == lcnc::ProcessRunState::Idle
                || state == lcnc::ProcessRunState::Stopped
-               || state == lcnc::ProcessRunState::Error
-               || state == lcnc::ProcessRunState::EmergencyStop) {
+               || state == lcnc::ProcessRunState::Error) {
         pauseProcessingClock();
     }
 
@@ -691,9 +690,7 @@ void WidgetLaserControl::refreshStatusBanner()
     const QString text = tr("State machine: %1\n%2").arg(stateText(m_runState), status);
 
     QString style = QStringLiteral("background: #333; color: #AAFFAA; padding: 2px 4px; border-radius: 3px;");
-    if (m_runState == lcnc::ProcessRunState::EmergencyStop) {
-        style = QStringLiteral("background: #7F1D1D; color: white; padding: 2px 4px; border-radius: 3px;");
-    } else if (m_runState == lcnc::ProcessRunState::Error) {
+    if (m_runState == lcnc::ProcessRunState::Error) {
         style = QStringLiteral("background: #92400E; color: white; padding: 2px 4px; border-radius: 3px;");
     } else if (m_runState == lcnc::ProcessRunState::Paused) {
         style = QStringLiteral("background: #B45309; color: white; padding: 2px 4px; border-radius: 3px;");
@@ -725,9 +722,6 @@ QString WidgetLaserControl::stateText(lcnc::ProcessRunState state) const
     case lcnc::ProcessRunState::Error:
         // 中文翻译：错误
         return tr("Error");
-    case lcnc::ProcessRunState::EmergencyStop:
-        // 中文翻译：急停
-        return tr("emergency stop");
     }
     // 中文翻译：未知
     return tr("unknown");

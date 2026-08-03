@@ -174,11 +174,6 @@ DeviceCommandResult DeviceCommandQueue::executeAndWait(ResultCommand command,
     return state->result;
 }
 
-bool DeviceCommandQueue::submitEmergency(Command command)
-{
-    return submitStop(std::move(command));
-}
-
 bool DeviceCommandQueue::submitStop(Command command)
 {
     return submit(std::move(command), TaskPriority::Stop, {});
@@ -191,8 +186,27 @@ bool DeviceCommandQueue::submitWorkflow(Command command)
 
 void DeviceCommandQueue::beginStopOnly()
 {
-    QMutexLocker locker(&m_mutex);
-    m_stopOnly = true;
+    std::vector<Completion> dropped;
+    {
+        QMutexLocker locker(&m_mutex);
+        m_stopOnly = true;
+        // A command accepted before Stop must not run after the safety
+        // transaction. A currently executing vendor call remains bounded but
+        // cannot be preempted by this queue.
+        for (int index = priorityIndex(TaskPriority::Workflow);
+             index < static_cast<int>(m_commands.size()); ++index) {
+            for (QueuedCommand& command : m_commands[static_cast<std::size_t>(index)])
+                if (command.completion)
+                    dropped.push_back(std::move(command.completion));
+            m_commands[static_cast<std::size_t>(index)].clear();
+        }
+        m_workAvailable.wakeOne();
+    }
+
+    for (Completion& completion : dropped)
+        notifyCompletion(std::move(completion),
+                         completionResult(DeviceCommandCompletion::Cancelled,
+                                          QStringLiteral("Device command discarded by safety stop")));
 }
 
 void DeviceCommandQueue::endStopOnly()

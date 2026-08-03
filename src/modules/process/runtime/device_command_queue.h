@@ -81,12 +81,11 @@ public:
     DeviceCommandResult executeAndWait(ResultCommand command,
                                        TaskPriority priority,
                                        int timeoutMs = 5000);
-    bool submitEmergency(Command command);
     bool submitStop(Command command);
     bool submitWorkflow(Command command);
-    /// Rejects new non-Stop work while preserving the safety lane.
+    /// Cancels pending non-Stop work and rejects new non-Stop work while preserving the safety lane.
     void beginStopOnly();
-    /// Reopens non-Stop lanes after a successful, explicitly verified recovery.
+    /// Reopens non-Stop lanes after a successful safe-stop transaction.
     void endStopOnly();
     bool shutdown(int timeoutMs = 5000);
 

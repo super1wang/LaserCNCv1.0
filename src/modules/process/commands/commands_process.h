@@ -82,22 +82,12 @@ public:
     bool isEnabled() const override;
 };
 
-/// 紧急停止：立刻置为 EmergencyStop 状态。
-class CmdEmergencyStop : public CommandBase {
+/// 停止后的设备检查与状态复位。
+class CmdResetStop : public CommandBase {
     Q_OBJECT
 public:
-    inline static const QString Name = "process.emergencyStop";
-    explicit CmdEmergencyStop(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-/// 复位急停。
-class CmdResetEmergencyStop : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.resetEmergencyStop";
-    explicit CmdResetEmergencyStop(IAppContext* ctx);
+    inline static const QString Name = "process.resetStop";
+    explicit CmdResetStop(IAppContext* ctx);
     void execute() override;
     bool isEnabled() const override;
 };

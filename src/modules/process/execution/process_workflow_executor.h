@@ -45,11 +45,8 @@ public:
         Running,
         Paused,
         Stopped,
-        EmergencyStop,
         Error
     };
-
-    using DeviceStopper = std::function<void(bool emergency)>;
 
     explicit ProcessWorkflowExecutor(QObject* parent = nullptr);
     ~ProcessWorkflowExecutor() override;
@@ -58,13 +55,11 @@ public:
     void pause();
     void resume();
     void stop();
-    void emergencyStop();
 
     State state() const { return m_state; }
     const QVector<ProcessExecutionStep>& plan() const { return m_plan; }
     void setStepRegistry(ProcessStepRegistry* registry);
     void setStepContext(ProcessStepContext* context);
-    void setDeviceStopper(DeviceStopper stopper);
 
     ProcessCancellationToken* cancellationToken() { return &m_token; }
     /// Used during module teardown after stop() requested cooperative exit.
@@ -104,7 +99,6 @@ private:
     int m_currentIndex{-1};
     bool m_dispatching{false};   ///< true: 当前正同步运行 plugin->execute()，pause 在 checkpoint 内生效
     ProcessCancellationToken m_token;
-    DeviceStopper m_deviceStopper;
 };
 
 } // namespace lcnc::process

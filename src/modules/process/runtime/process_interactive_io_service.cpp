@@ -43,7 +43,8 @@ DeviceCommandTicket ProcessInteractiveIoService::setAxisEnabled(const QString& a
                                                                  Completion completion)
 {
     if (m_interactionAllowed && !m_interactionAllowed()) {
-        complete(std::move(completion), {false, tr("Interactive IO is locked until emergency recovery succeeds")});
+        // 中文翻译：安全停机完成前交互 IO 已锁定
+        complete(std::move(completion), {false, tr("Interactive IO is locked until safety shutdown completes")});
         return {};
     }
     const QString axisNameNormalized = axisName.trimmed().toUpper();
@@ -65,7 +66,8 @@ DeviceCommandTicket ProcessInteractiveIoService::setDigitalOutput(const QString&
                                                                    Completion completion)
 {
     if (m_interactionAllowed && !m_interactionAllowed()) {
-        complete(std::move(completion), {false, tr("Interactive IO is locked until emergency recovery succeeds")});
+        // 中文翻译：安全停机完成前交互 IO 已锁定
+        complete(std::move(completion), {false, tr("Interactive IO is locked until safety shutdown completes")});
         return {};
     }
     const QString normalizedChannel = channel.trimmed();

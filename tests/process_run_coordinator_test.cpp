@@ -23,17 +23,20 @@ int main()
     assert(coordinator.transitionTo(ProcessRunState::Stopped));
     assert(coordinator.transitionTo(ProcessRunState::Running));
 
-    assert(coordinator.transitionTo(ProcessRunState::EmergencyStop));
-    assert(!coordinator.transitionTo(ProcessRunState::Error));
-    assert(!coordinator.transitionTo(ProcessRunState::Stopped));
-    assert(coordinator.transitionTo(ProcessRunState::Idle));
-
     for (const auto state : {ProcessRunState::Idle, ProcessRunState::Running,
                             ProcessRunState::Paused, ProcessRunState::Stopped,
-                            ProcessRunState::Error, ProcessRunState::EmergencyStop}) {
+                            ProcessRunState::Error}) {
         ProcessRunCoordinator sameState;
-        if (state != ProcessRunState::Idle)
-            assert(sameState.transitionTo(ProcessRunState::EmergencyStop));
+        if (state == ProcessRunState::Running)
+            assert(sameState.transitionTo(ProcessRunState::Running));
+        else if (state == ProcessRunState::Paused) {
+            assert(sameState.transitionTo(ProcessRunState::Running));
+            assert(sameState.transitionTo(ProcessRunState::Paused));
+        } else if (state == ProcessRunState::Stopped) {
+            assert(sameState.transitionTo(ProcessRunState::Stopped));
+        } else if (state == ProcessRunState::Error) {
+            assert(sameState.transitionTo(ProcessRunState::Error));
+        }
         const auto current = sameState.state();
         assert(sameState.transitionTo(current));
     }

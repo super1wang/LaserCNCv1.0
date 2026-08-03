@@ -34,20 +34,10 @@ void ProcessInterruptContext::requestStop()
     m_pauseChanged.wakeAll();
 }
 
-void ProcessInterruptContext::requestEmergencyStop()
-{
-    emergencyStop.store(true);
-    stopRequested.store(true);
-    paused.store(false);
-    QMutexLocker lock(&m_pauseMutex);
-    m_pauseChanged.wakeAll();
-}
-
 void ProcessInterruptContext::reset()
 {
     paused.store(false);
     stopRequested.store(false);
-    emergencyStop.store(false);
     {
         QMutexLocker lock(&m_pauseMutex);
         m_pauseChanged.wakeAll();
@@ -60,7 +50,7 @@ bool ProcessInterruptContext::checkpoint(const QString& nodeId,
                                           const QString& label,
                                           const QVariantMap& env)
 {
-    if (stopRequested.load() || emergencyStop.load())
+    if (stopRequested.load())
         return false;
 
     // 1. 更新该节点最近一次到达的位置 / 环境（不论是否会阻塞）
@@ -75,22 +65,22 @@ bool ProcessInterruptContext::checkpoint(const QString& nodeId,
     // 2. 暂停态下进入条件等待。不得在工作流线程调用 processEvents：
     // 那会把 GUI 事件重入到错误的线程，也会让轮询干扰流程执行。
     while (paused.load()) {
-        if (stopRequested.load() || emergencyStop.load())
+        if (stopRequested.load())
             return false;
         QMutexLocker lock(&m_pauseMutex);
-        if (paused.load() && !stopRequested.load() && !emergencyStop.load())
+        if (paused.load() && !stopRequested.load())
             m_pauseChanged.wait(&m_pauseMutex, kPauseWaitSliceMs);
     }
 
     // 3. 离开断点前再检一次（极少：刚解除 pause 又被 stop）
-    return !(stopRequested.load() || emergencyStop.load());
+    return !stopRequested.load();
 }
 
 bool ProcessInterruptContext::noteCheckpoint(const QString& nodeId,
                                               const QString& label,
                                               const QVariantMap& env)
 {
-    if (stopRequested.load() || emergencyStop.load())
+    if (stopRequested.load())
         return false;
     QMutexLocker lk(&m_resumeMutex);
     ProcessResumePoint& p = m_resumePoints[nodeId];

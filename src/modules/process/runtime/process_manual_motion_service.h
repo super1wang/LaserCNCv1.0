@@ -40,11 +40,11 @@ public:
                                QObject* parent = nullptr);
 
     DeviceCommandTicket moveRelative(const QString& axisName, double distance, double velocity,
-                                     bool axisEnabled, bool emergencyStop, Completion completion);
+                                      bool axisEnabled, bool stopRecoveryRequired, Completion completion);
     DeviceCommandTicket moveAbsolute(const QString& axisName, double position, double velocity,
-                                     bool axisEnabled, bool emergencyStop, Completion completion);
+                                      bool axisEnabled, bool stopRecoveryRequired, Completion completion);
     DeviceCommandTicket startContinuous(const QString& axisName, bool positive, double velocity,
-                                        bool axisEnabled, bool emergencyStop, Completion completion);
+                                         bool axisEnabled, bool stopRecoveryRequired, Completion completion);
     DeviceCommandTicket stopContinuous(const QString& axisName, Completion completion);
 
 private:

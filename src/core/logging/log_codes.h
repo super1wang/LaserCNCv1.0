@@ -46,7 +46,7 @@ enum class LogCode : int {
     // ── 5xxx Process / controller ──────────────────────────────────────
     ControllerConnectFailed  = 5001,
     ControllerJogFailed      = 5002,
-    ControllerEmergencyStop  = 5003,
+    ControllerStop           = 5003,
 
     // ── 6xxx Task scheduler ────────────────────────────────────────────
     TaskUnhandled            = 6001,

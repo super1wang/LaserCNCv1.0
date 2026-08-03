@@ -37,13 +37,13 @@ struct ProcessResumePoint
  *
  * 线程模型
  * --------
- *   原子位（paused/stopRequested/emergencyStop）跨线程安全；恢复点容器以 QMutex 保护。
+ *   原子位（paused/stopRequested）跨线程安全；恢复点容器以 QMutex 保护。
  *   工作流运行在专属后台线程，GUI 可以无锁地 requestPause/requestStop。
  *
  * 与遗留命名的兼容
  * ----------------
  *   `using ProcessCancellationToken = ProcessInterruptContext;`（见
- *   process_cancellation_token.h），旧字段名 `paused / stopRequested / emergencyStop`
+ *   process_cancellation_token.h），旧字段名 `paused / stopRequested`
  *   仍以 atomic_bool 形式公开，可继续 `.load()`；新代码请用 API。
  */
 class ProcessInterruptContext
@@ -59,19 +59,17 @@ public:
     void requestPause();
     void requestResume();
     void requestStop();
-    void requestEmergencyStop();
     /// 清空所有标志位 + 清空所有恢复点（每次 start 新流程时调用）
     void reset();
 
     bool isPaused() const     { return paused.load(); }
-    bool isStopping() const   { return stopRequested.load() || emergencyStop.load(); }
-    bool isEmergency() const  { return emergencyStop.load(); }
+    bool isStopping() const   { return stopRequested.load(); }
 
     // ── 中断点 API（由步骤插件代码调用）──────────────────────────────────────────
     /**
      * 注册一次中断点。
      * @return  true  应继续执行；
-     *          false 收到停止/急停请求，请尽快沿正常 control flow 退出。
+     *          false 收到停止请求，请尽快沿正常 control flow 退出。
      * 暂停状态下函数会阻塞抽水（QCoreApplication::processEvents），直到收到 resume
      * 或 stop。期间会持续刷新本 nodeId 的 resumePoint。
      */
@@ -96,7 +94,6 @@ public:
     // 公开字段：保留遗留命名以兼容 NormalCuttingManager 等代码直接 .load()。
     std::atomic_bool paused{false};
     std::atomic_bool stopRequested{false};
-    std::atomic_bool emergencyStop{false};
 
 private:
     mutable QMutex m_resumeMutex;

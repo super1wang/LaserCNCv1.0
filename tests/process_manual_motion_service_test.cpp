@@ -127,6 +127,24 @@ int main(int argc, char* argv[])
         }).accepted);
     assert(spinUntil([&] { return lockedCompletion; }));
 
+    queue.beginStopOnly();
+    bool stopOnlyAxisRejected = false;
+    assert(!ioService.setAxisEnabled(QStringLiteral("A"), true,
+        [&stopOnlyAxisRejected](const lcnc::process::DeviceCommandResult& result) {
+            assert(!result.success);
+            stopOnlyAxisRejected = true;
+        }).accepted);
+    assert(spinUntil([&] { return stopOnlyAxisRejected; }));
+    queue.endStopOnly();
+    bool queueReopened = false;
+    assert(ioService.setDigitalOutput(QStringLiteral("aLaser"), true,
+        [&queueReopened](const lcnc::process::DeviceCommandResult& result) {
+            assert(result.success);
+            queueReopened = true;
+        }).accepted);
+    assert(spinUntil([&] { return queueReopened; }));
+    assert(axisEnableCalls == 1 && outputCalls == 2);
+
     assert(queue.shutdown(2000));
     return 0;
 }

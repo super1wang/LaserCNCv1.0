@@ -173,8 +173,7 @@ CmdRunStart::CmdRunStart(IAppContext* ctx) : CommandBase(ctx)
 bool CmdRunStart::isEnabled() const
 {
     auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
-    return p && p->state() != lcnc::ProcessRunState::EmergencyStop
-             && p->state() != lcnc::ProcessRunState::Running;
+    return p && p->state() != lcnc::ProcessRunState::Running;
 }
 void CmdRunStart::execute()
 {
@@ -221,42 +220,24 @@ void CmdRunStop::execute()
     if (auto* p = processFacade()) p->runStop();
 }
 
-// ── CmdEmergencyStop ────────────────────────────────────────────────────────
-CmdEmergencyStop::CmdEmergencyStop(IAppContext* ctx) : CommandBase(ctx)
+// ── CmdResetStop ────────────────────────────────────────────────────────────
+CmdResetStop::CmdResetStop(IAppContext* ctx) : CommandBase(ctx)
 {
-    // 中文翻译：急停
-    auto* a = new QAction(QIcon("themeicons:emergency_stop.svg"), tr("emergency stop"), this);
-    // 中文翻译：立即触发急停
-    a->setStatusTip(tr("Trigger emergency stop immediately"));
+    // 中文翻译：停止复位
+    auto* a = new QAction(QIcon("themeicons:reset.svg"), tr("Reset stop"), this);
+    // 中文翻译：检查设备并恢复空闲状态
+    a->setStatusTip(tr("Check devices and recover the idle state"));
     setAction(a);
 }
-bool CmdEmergencyStop::isEnabled() const
+bool CmdResetStop::isEnabled() const
 {
     auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
-    return p && p->state() != lcnc::ProcessRunState::EmergencyStop;
+    return p && (p->state() == lcnc::ProcessRunState::Stopped
+                 || p->state() == lcnc::ProcessRunState::Error);
 }
-void CmdEmergencyStop::execute()
+void CmdResetStop::execute()
 {
-    if (auto* p = processFacade()) p->emergencyStop();
-}
-
-// ── CmdResetEmergencyStop ───────────────────────────────────────────────────
-CmdResetEmergencyStop::CmdResetEmergencyStop(IAppContext* ctx) : CommandBase(ctx)
-{
-    // 中文翻译：复位急停
-    auto* a = new QAction(QIcon("themeicons:reset.svg"), tr("Reset emergency stop"), this);
-    // 中文翻译：解除急停状态并恢复 Idle
-    a->setStatusTip(tr("Release the emergency stop state and resume Idle"));
-    setAction(a);
-}
-bool CmdResetEmergencyStop::isEnabled() const
-{
-    auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
-    return p && p->state() == lcnc::ProcessRunState::EmergencyStop;
-}
-void CmdResetEmergencyStop::execute()
-{
-    if (auto* p = processFacade()) p->resetEmergencyStop();
+    if (auto* p = processFacade()) p->resetStop();
 }
 
 // ── CmdHome ─────────────────────────────────────────────────────────────────
@@ -271,8 +252,7 @@ CmdHome::CmdHome(IAppContext* ctx) : CommandBase(ctx)
 bool CmdHome::isEnabled() const
 {
     auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
-    return p && p->state() != lcnc::ProcessRunState::EmergencyStop
-             && p->state() != lcnc::ProcessRunState::Running;
+    return p && p->state() != lcnc::ProcessRunState::Running;
 }
 void CmdHome::execute()
 {

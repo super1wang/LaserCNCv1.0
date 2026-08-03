@@ -409,12 +409,23 @@ lcnc::process::DevicePeripheralSnapshot ProcessDeviceRuntime::pollPeripheralStat
 bool ProcessDeviceRuntime::stopMotionAndSafeOutputs()
 {
     const auto lock = lockDeviceAccess();
-    if (!m_motionControl || !m_motionControl->IsConnected())
-        return true;
+    bool success = true;
 
-    bool success = m_motionControl->StopMotion();
+    // Stop the laser device first. Controller digital outputs alone are not a
+    // sufficient guarantee for lasers with an independent control channel.
+    if (m_pLaserDevice && m_pLaserDevice->IsConnected()) {
+        success = m_pLaserDevice->StopLaser() && success;
+        success = m_pLaserDevice->StopAimingBeam() && success;
+    }
+    if (!m_motionControl || !m_motionControl->IsConnected())
+        return success;
+
+    success = m_motionControl->StopMotion() && success;
     success = m_motionControl->StopAllBuffer() && success;
-    const std::array<DigitalOUT, 2> outputs = {DigitalOUT::Laser, DigitalOUT::Blow};
+    // Only laser-emission and assist-gas outputs are forced off by Stop.  Other
+    // process IO (chuck and cooling, for example) keeps its commanded state.
+    const std::array<DigitalOUT, 3> outputs = {
+        DigitalOUT::Laser, DigitalOUT::Blow, DigitalOUT::Blow2};
     for (const DigitalOUT output : outputs) {
         if (m_motionControl->m_mapDigitalOUT.count(output)
             && !m_motionControl->DigitalOutputSet(output, 0)) {

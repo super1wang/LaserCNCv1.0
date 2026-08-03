@@ -16,10 +16,8 @@ bool ProcessRunCoordinator::canTransition(ProcessRunState current,
 {
     if (current == next)
         return true;
-    if (next == ProcessRunState::EmergencyStop)
-        return true;
     if (next == ProcessRunState::Error)
-        return current != ProcessRunState::EmergencyStop;
+        return true;
 
     switch (current) {
     case ProcessRunState::Idle:
@@ -34,8 +32,6 @@ bool ProcessRunCoordinator::canTransition(ProcessRunState current,
         return next == ProcessRunState::Idle || next == ProcessRunState::Running;
     case ProcessRunState::Error:
         return next == ProcessRunState::Idle || next == ProcessRunState::Stopped;
-    case ProcessRunState::EmergencyStop:
-        return next == ProcessRunState::Idle;
     }
     return false;
 }

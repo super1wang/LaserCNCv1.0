@@ -113,8 +113,7 @@ public:
     void runStart() override;
     void runPause() override;
     void runStop() override;
-    void emergencyStop() override;
-    void resetEmergencyStop() override;
+    void resetStop() override;
 
     void newProcess() override;
     bool loadProcess(const QString& filePath) override;
@@ -189,10 +188,13 @@ private slots:
 
 private:
     enum class DeviceOperation { None, Connecting, Disconnecting, Homing, PresetMove };
+    enum class StopOutcome { Stopped, Error, Idle };
 
     void initializeAxisPositions();
     void initializeAxisEnabledStates();
     void clearSafeOutputCache();
+    /// The sole software stop path for operator Stop, workflow faults and completion.
+    void requestStop(StopOutcome outcome, const QString& statusMessage);
     void setState(State state, const QString& statusMessage);
     void setStatusMessage(const QString& message);
     void startDeviceMonitoring();
@@ -201,7 +203,7 @@ private:
                              const lcnc::process::DeviceStatusSnapshot& batch);
     void applyPeripheralStatus(const lcnc::process::DeviceCommandResult& result,
                                const lcnc::process::DevicePeripheralSnapshot& sample);
-    bool validateProcessingConfiguration(QString* errorMessage);
+    bool validateProcessingConfiguration(QString* errorMessage, bool requireIdle = true);
     void startWorkflowAfterPreflight();
     /// 请求本模块任务取消并等待；false 表示仍有 worker 未在期限内退出。
     bool cancelOwnedTasks(int timeoutMs);
@@ -217,8 +219,10 @@ private:
     bool                  m_homing{false};
     bool                  m_preflightInFlight{false};
     bool                  m_stopInFlight{false};
-    bool                  m_emergencyRecoveryRequired{false};
-    bool                  m_emergencyRecoveryInFlight{false};
+    bool                  m_stopRecoveryRequired{false};
+    bool                  m_stopRecoveryInFlight{false};
+    StopOutcome           m_pendingStopOutcome{StopOutcome::Stopped};
+    QString               m_pendingStopMessage;
     std::uint64_t         m_runRequestGeneration{0};
     State                 m_state{State::Idle};
     lcnc::process::ProcessRunCoordinator m_runCoordinator;

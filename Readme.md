@@ -11,7 +11,7 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 - 当前视图统一由 `activeGuiDocument()` 取得；工作区切换使用带 `ProjectWorkspaceId` 的明确通知，避免同义文档 API。
 - Process 只消费 CAM 输出的 OCC-free `ToolpathExportSnapshot`，不依赖 OCC 类型。
 - Process 的回零顺序、轴定义比较与仿真轴坐标在独立 `process_axis_utilities` 中实现，不混入设备协调或 UI。
-- Process 的主要 ACS/GTN/激光/IO 调用由 `DeviceCommandQueue` 分优先级调度，并经过 `ProcessDeviceCoordinator` 串行租约；设备队列尚不是唯一 SDK 入口。ACS/GTN、激光设备和参数注册表均使用构造注入的设置服务，安全输出复位失败会进入 Error 或 EmergencyStop。
+- Process 的主要 ACS/GTN/激光/IO 调用由 `DeviceCommandQueue` 分优先级调度，并经过 `ProcessDeviceCoordinator` 串行租约；设备队列尚不是唯一 SDK 入口。ACS/GTN、激光设备和参数注册表均使用构造注入的设置服务；Stop 是唯一软件安全停机入口，安全停机失败会保持 Error，必须经设备检查复位后才能恢复 Idle。
 - ProcessModule 持有 `ProcessRuntimeConfiguration`；ACS/GTN 的轴选择、扩展轴和仿真模式通过它传入设备层，`BASE` 伪轴会在配置边界过滤；旧 `DT` 静态运行时状态已删除。
 - Process 连接、断开和回零任务具备模块级取消与有界关机等待；超时不会销毁仍被 SDK 调用的设备对象。`SimulatorCMHP` 属于 ACS Simulator 并加载随程序部署的 `Simulator.prg`；PureSimulation 仅可显式选择，启用 ACS 或 GTN 时默认关闭，实体控制器连接失败不会自动切换为仿真。
 - 设备停机统一先关闭激光输出，再停止运动和断开控制器。

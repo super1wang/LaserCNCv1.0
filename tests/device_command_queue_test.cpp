@@ -6,8 +6,9 @@
 #include <QTextStream>
 #include <QThread>
 
-#include <thread>
+#include <algorithm>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 
@@ -98,10 +99,10 @@ int main(int argc, char* argv[])
             order.append(QStringLiteral("workflow"));
             completed.release();
         })
-        || !queue.submitEmergency([&] {
+        || !queue.submitStop([&] {
             allCommandsUsedWorkerThread = allCommandsUsedWorkerThread && queue.isWorkerThread();
             QMutexLocker locker(&orderMutex);
-            order.append(QStringLiteral("emergency"));
+            order.append(QStringLiteral("stop"));
             completed.release();
         })) {
         return fail(QStringLiteral("Could not queue priority commands"));
@@ -116,7 +117,7 @@ int main(int argc, char* argv[])
     const QStringList expected = {
         QStringLiteral("normal-active"),
         QStringLiteral("normal-finished"),
-        QStringLiteral("emergency"),
+        QStringLiteral("stop"),
         QStringLiteral("workflow"),
         QStringLiteral("interactive"),
         QStringLiteral("normal-queued-1"),
@@ -124,7 +125,7 @@ int main(int argc, char* argv[])
         QStringLiteral("poll-latest"),
     };
     if (!allCommandsUsedWorkerThread || order != expected)
-        return fail(QStringLiteral("Device queue did not preserve worker affinity or emergency priority"));
+        return fail(QStringLiteral("Device queue did not preserve worker affinity or Stop priority"));
 
     lcnc::process::DeviceCommandQueue completionQueue;
     if (!completionQueue.start())
@@ -255,14 +256,67 @@ int main(int argc, char* argv[])
     lcnc::process::DeviceCommandQueue stopOnlyQueue;
     if (!stopOnlyQueue.start())
         return fail(QStringLiteral("Stop-only queue did not start"));
+    QSemaphore stopOnlyActiveStarted;
+    QSemaphore releaseStopOnlyActive;
+    QSemaphore stopOnlyCancelled;
+    QSemaphore stopOnlyStopRan;
+    QSemaphore stopOnlyRecoveredRan;
+    QMutex stopOnlyMutex;
+    QList<lcnc::process::DeviceCommandCompletion> stopOnlyCompletions;
+    bool staleStopOnlyCommandRan = false;
+    if (!stopOnlyQueue.submit([&] {
+            stopOnlyActiveStarted.release();
+            releaseStopOnlyActive.acquire();
+        })
+        || !stopOnlyActiveStarted.tryAcquire(1, 1000)) {
+        return fail(QStringLiteral("Stop-only queue active command did not start"));
+    }
+    const auto submitStaleCommand = [&](TaskPriority priority) {
+        return stopOnlyQueue.submit(
+            [&] {
+                staleStopOnlyCommandRan = true;
+                return lcnc::process::DeviceCommandResult{};
+            },
+            priority,
+            [&](const lcnc::process::DeviceCommandResult& result) {
+                QMutexLocker locker(&stopOnlyMutex);
+                stopOnlyCompletions.append(result.completion);
+                stopOnlyCancelled.release();
+            });
+    };
+    if (!submitStaleCommand(TaskPriority::Workflow)
+        || !submitStaleCommand(TaskPriority::Interactive)
+        || !submitStaleCommand(TaskPriority::Normal)
+        || !submitStaleCommand(TaskPriority::Polling)) {
+        releaseStopOnlyActive.release();
+        return fail(QStringLiteral("Could not queue stale Stop-only commands"));
+    }
     stopOnlyQueue.beginStopOnly();
     if (stopOnlyQueue.submit([] {}, TaskPriority::Polling)
         || stopOnlyQueue.submit([] {}, TaskPriority::Workflow)
-        || !stopOnlyQueue.submitStop([] {})) {
+        || !stopOnlyQueue.submitStop([&] { stopOnlyStopRan.release(); })
+        || !stopOnlyCancelled.tryAcquire(4, 1000)) {
+        releaseStopOnlyActive.release();
         return fail(QStringLiteral("Stop-only admission policy failed"));
     }
+    releaseStopOnlyActive.release();
+    if (!stopOnlyStopRan.tryAcquire(1, 1000)
+        || staleStopOnlyCommandRan) {
+        return fail(QStringLiteral("Stop-only queue executed stale commands after safety Stop"));
+    }
+    {
+        QMutexLocker locker(&stopOnlyMutex);
+        if (stopOnlyCompletions.size() != 4
+            || std::any_of(stopOnlyCompletions.cbegin(), stopOnlyCompletions.cend(),
+                           [](lcnc::process::DeviceCommandCompletion completion) {
+                               return completion != lcnc::process::DeviceCommandCompletion::Cancelled;
+                           })) {
+            return fail(QStringLiteral("Stop-only queue did not cancel every pending non-Stop command"));
+        }
+    }
     stopOnlyQueue.endStopOnly();
-    if (!stopOnlyQueue.submit([] {}, TaskPriority::Polling)
+    if (!stopOnlyQueue.submit([&] { stopOnlyRecoveredRan.release(); }, TaskPriority::Polling)
+        || !stopOnlyRecoveredRan.tryAcquire(1, 1000)
         || !stopOnlyQueue.shutdown(2000)) {
         return fail(QStringLiteral("Stop-only recovery policy failed"));
     }

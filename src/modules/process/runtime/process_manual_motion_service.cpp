@@ -68,11 +68,11 @@ DeviceCommandTicket ProcessManualMotionService::moveRelative(const QString& axis
                                                               double distance,
                                                               double velocity,
                                                               bool axisEnabled,
-                                                              bool emergencyStop,
+                                                               bool stopRecoveryRequired,
                                                               Completion completion)
 {
     const QString axis = axisName.trimmed().toUpper();
-    if (axis.isEmpty() || distance == 0.0 || emergencyStop)
+    if (axis.isEmpty() || distance == 0.0 || stopRecoveryRequired)
         return reject(tr("Manual motion request is unavailable"), std::move(completion));
     if (!axisEnabled)
         return reject(tr("%1 axis is not enabled, jog has been ignored").arg(axis), std::move(completion));
@@ -100,11 +100,11 @@ DeviceCommandTicket ProcessManualMotionService::moveAbsolute(const QString& axis
                                                               double position,
                                                               double velocity,
                                                               bool axisEnabled,
-                                                              bool emergencyStop,
+                                                               bool stopRecoveryRequired,
                                                               Completion completion)
 {
     const QString axis = axisName.trimmed().toUpper();
-    if (axis.isEmpty() || emergencyStop)
+    if (axis.isEmpty() || stopRecoveryRequired)
         return reject(tr("Manual motion request is unavailable"), std::move(completion));
     if (!axisEnabled)
         return reject(tr("%1 axis is not enabled, absolute motion has been ignored").arg(axis), std::move(completion));
@@ -132,11 +132,11 @@ DeviceCommandTicket ProcessManualMotionService::startContinuous(const QString& a
                                                                  bool positive,
                                                                  double velocity,
                                                                  bool axisEnabled,
-                                                                 bool emergencyStop,
+                                                                  bool stopRecoveryRequired,
                                                                  Completion completion)
 {
     const QString axis = axisName.trimmed().toUpper();
-    if (axis.isEmpty() || emergencyStop)
+    if (axis.isEmpty() || stopRecoveryRequired)
         return reject(tr("Manual motion request is unavailable"), std::move(completion));
     if (!axisEnabled)
         return reject(tr("%1 axis is not enabled, continuous motion is ignored").arg(axis), std::move(completion));

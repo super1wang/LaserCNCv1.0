@@ -46,7 +46,7 @@
 | 编号 | 文件/位置 | 问题与影响 | 必须完成的修正 |
 | --- | --- | --- | --- |
 | P0-1 | `process_module.cpp` 的 workflow device stopper、`runStop()` | 普通 Stop 先报告正常停止，失败可能被忽略。 | 已将普通 Stop 改为 Stop-lane completion 事务；排队/执行失败进入 Error，成功后才进入 Stopped。 |
-| P0-2 | `ProcessModule::emergencyStop()/resetEmergencyStop()/setDigitalOutput()/setAxisEnabled()` | E-stop 后交互 IO 可重新进入，恢复未复核。 | 已引入 stop-only/recovery 门禁；交互 IO 拒绝，恢复在 executor 中安全停机并执行 contour-boundary 健康复核后才回 Idle。 |
+| P0-2 | `ProcessModule::requestStop()/resetStop()/setDigitalOutput()/setAxisEnabled()` | Stop 后交互 IO 可重新进入，恢复未复核。 | 已引入 stop-only 门禁；安全停机事务未完成时交互 IO 拒绝，成功后恢复队列通道。停止复位在 executor 中安全停机，复查加工配置和 contour-boundary 健康状态后才回 Idle。 |
 
 ### P1：并发、所有权与数据一致性
 
@@ -81,7 +81,7 @@
 ### 仍未完成的入口瘦身
 
 1. `AppContext`、commands、module UI、`DialogOptions` 和 `MainWindow` 仍广泛获取 `CadModule/CamModule/ProcessModule`；具体 Module 也仍注册为公共 service。已批准的“外部只依赖 facade/service contract”尚未完成。
-2. `ProcessRunCoordinator` 仅是状态迁移表；run/preflight/stop/emergency completion、缓存和 UI 信号仍由 `ProcessModule` 组合。`ProcessDeviceRuntime::createMotionSink()` 的 public contract 仍暴露 `ProcessModule*`，`NormalCuttingManager` 和 simulation sink 反向持有入口。
+2. `ProcessRunCoordinator` 仅是状态迁移表；run/preflight/stop completion、缓存和 UI 信号仍由 `ProcessModule` 组合。`ProcessDeviceRuntime::createMotionSink()` 的 public contract 仍暴露 `ProcessModule*`，`NormalCuttingManager` 和 simulation sink 反向持有入口。
 3. `MachiningFacePipelineService` 暴露 mutable `entries()`，`CamModule` 长期持有其可变引用；“service 独占状态、下游只读 immutable snapshot”尚未成立。`CamDisplayProjectionService` 只覆盖加工面，机台、轴导引、刀路、travel path 仍在入口。
 4. `CadDocumentIoService` 已注册，但 `CadModelingController`、`CadSelectionController` 尚不存在；CAD facade 仍执行建模、草图、选择和显示业务。
 5. `CadTaskPanelController`、工程树写回、最近文件、CAM panel 和机器视图接线仍在 `MainWindow`。当前控制器拆分减少了局部复杂度，但还没有切断 concrete Module 耦合。
@@ -111,7 +111,7 @@
 - `lcnc_simulator_cmhp_sdk_integration_test`：通过，使用真实 ACS SDK Simulator；该证据不等于 ACS/GTN/激光物理硬件验证。
 - `lcnc_startup_smoke_test`：通过，Qt platform plugin 部署当前有效。
 
-新增回归已覆盖队列 completion 抛异常、status 快速 stop/start、自动面稳定 ID、交互 IO 锁存，以及 workspace 关闭被任务守卫拒绝后文档仍存活。Stop/Emergency 完整失败注入、CAD detached 提交和双工作区 AIS offscreen 场景仍未覆盖。
+新增回归已覆盖队列 completion 抛异常、status 快速 stop/start、自动面稳定 ID、交互 IO 锁存，以及 workspace 关闭被任务守卫拒绝后文档仍存活。Stop 完整失败注入、CAD detached 提交和双工作区 AIS offscreen 场景仍未覆盖。
 
 ## 5. 发布判断
 
