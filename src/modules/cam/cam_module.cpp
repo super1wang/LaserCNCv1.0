@@ -2306,20 +2306,6 @@ std::uint64_t CamModule::machineSetupRevision() const
     return hash;
 }
 
-bool facesShareBoundaryEdge(const TopoDS_Face& first, const TopoDS_Face& second)
-{
-    if (first.IsNull() || second.IsNull())
-        return false;
-    for (TopExp_Explorer firstEdges(first, TopAbs_EDGE); firstEdges.More(); firstEdges.Next()) {
-        const TopoDS_Shape edge = firstEdges.Current();
-        for (TopExp_Explorer secondEdges(second, TopAbs_EDGE); secondEdges.More(); secondEdges.Next()) {
-            if (edge.IsSame(secondEdges.Current()))
-                return true;
-        }
-    }
-    return false;
-}
-
 class AutoPipelineRunner final : public QObject
 {
 public:
@@ -5524,16 +5510,9 @@ void CamModule::addMachiningFace(const TopoDS_Face& face)
     // 中文翻译：编辑加工面
     if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return;
-    if (face.IsNull())
+    if (face.IsNull() || !m_machiningFacePipeline)
         return;
-    for (const auto& existing : m_machiningFaces)
-        if (!existing.face.IsNull() && existing.face.IsSame(face))
-            return;
-    MachiningFaceEntry entry;
-    entry.faceId = allocateMachiningFaceId();
-    entry.face = face;
-    entry.manual = true;
-    entry.role = lcnc::cam::MachiningFaceRole::MachiningSurface;
+    QString workpieceEntry;
     for (const WorkpieceShapeSource& source : collectWorkpieceShapes()) {
         bool found = false;
         for (TopExp_Explorer exp(source.shape, TopAbs_FACE); exp.More(); exp.Next()) {
@@ -5543,11 +5522,12 @@ void CamModule::addMachiningFace(const TopoDS_Face& face)
             }
         }
         if (found) {
-            entry.workpieceEntry = source.workpieceEntry;
+            workpieceEntry = source.workpieceEntry;
             break;
         }
     }
-    m_machiningFaces.push_back(std::move(entry));
+    if (!m_machiningFacePipeline->addManualFace(face, workpieceEntry))
+        return;
     // An explicit pick must always be visible so the operator can confirm the
     // growing face set, even when the machining-face tree was hidden earlier.
     m_machiningFacesVisible = true;
@@ -5567,11 +5547,8 @@ bool CamModule::removeMachiningFace(std::uint64_t faceId)
     // 中文翻译：编辑加工面
     if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return false;
-    auto it = std::find_if(m_machiningFaces.begin(), m_machiningFaces.end(),
-        [faceId](const MachiningFaceEntry& e) { return e.faceId == faceId; });
-    if (it == m_machiningFaces.end())
+    if (!m_machiningFacePipeline || !m_machiningFacePipeline->removeFace(faceId))
         return false;
-    m_machiningFaces.erase(it);
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
@@ -5590,30 +5567,18 @@ bool CamModule::setMachiningFaceRole(
     // 中文翻译：编辑加工面
     if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return false;
-    auto it = std::find_if(m_machiningFaces.begin(), m_machiningFaces.end(),
-        [faceId](const MachiningFaceEntry& entry) { return entry.faceId == faceId; });
-    if (it == m_machiningFaces.end() || it->role == role)
+    if (!m_machiningFacePipeline)
         return false;
-    if (role == lcnc::cam::MachiningFaceRole::CrossSection) {
-        const bool intersectsMachiningFace = std::any_of(
-            m_machiningFaces.cbegin(), m_machiningFaces.cend(), [it](const MachiningFaceEntry& other) {
-                return other.faceId != it->faceId
-                    && other.workpieceEntry == it->workpieceEntry
-                    && other.role == lcnc::cam::MachiningFaceRole::MachiningSurface
-                    && facesShareBoundaryEdge(other.face, it->face);
-            });
-        if (!intersectsMachiningFace) {
+    const auto result = m_machiningFacePipeline->setFaceRole(faceId, role);
+    if (result == lcnc::cam::MachiningFacePipelineService::RoleChangeResult::NotFoundOrUnchanged)
+        return false;
+    if (result == lcnc::cam::MachiningFacePipelineService::RoleChangeResult::InvalidCrossSection) {
             // 中文翻译：设置横截面
             emit operationFailed(tr("Set cross section"),
                                  // 中文翻译：横截面必须与同一工件的加工面相交或共享边。
                                  tr("The cross section must intersect or share an edge with a machined surface of the same workpiece."));
             return false;
-        }
     }
-    // Reclassifying an auto result is an operator decision; retain it across a
-    // later automatic refresh just like an explicitly picked face.
-    it->role = role;
-    it->manual = true;
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
@@ -5633,7 +5598,7 @@ void CamModule::clearMachiningFaces()
         return;
     if (m_machiningFaces.empty())
         return;
-    m_machiningFaces.clear();
+    m_machiningFacePipeline->clearEntries();
     pushMachiningFaceRecordsToCamData();
     if (m_camData) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
@@ -5649,26 +5614,14 @@ void CamModule::setAutoMachiningFaces(const std::vector<TopoDS_Face>& faces,
                                       const QString& workpieceEntry)
 {
     // Replace auto-captured entries; keep manual picks.
-    std::vector<MachiningFaceEntry> kept;
-    for (auto& entry : m_machiningFaces)
-        if (entry.manual)
-            kept.push_back(std::move(entry));
+    std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> candidates;
+    candidates.reserve(faces.size());
     for (const TopoDS_Face& face : faces) {
-        if (face.IsNull())
-            continue;
-        bool dup = false;
-        for (const auto& e : kept)
-            if (!e.face.IsNull() && e.face.IsSame(face)) { dup = true; break; }
-        if (dup)
-            continue;
-        MachiningFaceEntry entry;
-        entry.faceId = allocateMachiningFaceId();
-        entry.face = face;
-        entry.workpieceEntry = workpieceEntry;
-        entry.manual = false;
-        kept.push_back(std::move(entry));
+        candidates.push_back({face, workpieceEntry,
+                              lcnc::cam::MachiningFaceRole::MachiningSurface});
     }
-    m_machiningFaces = std::move(kept);
+    if (!m_machiningFacePipeline || !m_machiningFacePipeline->replaceAutomaticFaces(candidates))
+        return;
     pushMachiningFaceRecordsToCamData();
     refreshMachiningFaceDisplay();
     emit machiningFacesChanged();

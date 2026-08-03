@@ -81,6 +81,13 @@ int main()
     assert(records.front().signature != 0);
     faces.entries().front().manual = true;
     assert(faces.revision() != initialRevision);
+    const lcnc::cam::MachiningFacePipelineService::Candidate duplicateCandidate{
+        face.face, QStringLiteral("0:1"), lcnc::cam::MachiningFaceRole::MachiningSurface};
+    assert(faces.replaceAutomaticFaces({duplicateCandidate}));
+    assert(faces.entries().size() == 1);
+    assert(faces.entries().front().manual);
+    assert(faces.removeFace(face.faceId));
+    assert(faces.entries().empty());
     faces.reset();
     assert(faces.entries().empty());
     assert(faces.nextFaceId() == 1);

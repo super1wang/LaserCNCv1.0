@@ -4,12 +4,20 @@
 
 #include <algorithm>
 
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp_Explorer.hxx>
+
 namespace lcnc::cam {
 
 void MachiningFacePipelineService::reset() noexcept
 {
     m_entries.clear();
     m_nextFaceId = 1;
+}
+
+void MachiningFacePipelineService::clearEntries() noexcept
+{
+    m_entries.clear();
 }
 
 void MachiningFacePipelineService::replace(std::vector<Entry> entries)
@@ -19,6 +27,107 @@ void MachiningFacePipelineService::replace(std::vector<Entry> entries)
     for (const Entry& entry : m_entries)
         maxId = std::max(maxId, entry.faceId);
     m_nextFaceId = std::max<std::uint64_t>(1, maxId + 1);
+}
+
+bool MachiningFacePipelineService::facesShareBoundaryEdge(const TopoDS_Face& first,
+                                                           const TopoDS_Face& second)
+{
+    if (first.IsNull() || second.IsNull())
+        return false;
+    for (TopExp_Explorer firstEdges(first, TopAbs_EDGE); firstEdges.More(); firstEdges.Next()) {
+        const TopoDS_Shape edge = firstEdges.Current();
+        for (TopExp_Explorer secondEdges(second, TopAbs_EDGE); secondEdges.More(); secondEdges.Next()) {
+            if (edge.IsSame(secondEdges.Current()))
+                return true;
+        }
+    }
+    return false;
+}
+
+bool MachiningFacePipelineService::containsEquivalent(const std::vector<Entry>& entries,
+                                                       const Candidate& candidate)
+{
+    return std::any_of(entries.cbegin(), entries.cend(), [&candidate](const Entry& entry) {
+        return entry.workpieceEntry == candidate.workpieceEntry
+            && entry.role == candidate.role
+            && !entry.face.IsNull()
+            && entry.face.IsSame(candidate.face);
+    });
+}
+
+bool MachiningFacePipelineService::addManualFace(const TopoDS_Face& face,
+                                                  const QString& workpieceEntry)
+{
+    if (face.IsNull()
+        || std::any_of(m_entries.cbegin(), m_entries.cend(), [&face](const Entry& entry) {
+            return !entry.face.IsNull() && entry.face.IsSame(face);
+        })) {
+        return false;
+    }
+    Entry entry;
+    entry.faceId = nextFaceId();
+    entry.face = face;
+    entry.workpieceEntry = workpieceEntry;
+    entry.manual = true;
+    m_entries.push_back(std::move(entry));
+    return true;
+}
+
+bool MachiningFacePipelineService::removeFace(std::uint64_t faceId)
+{
+    const auto found = std::find_if(m_entries.cbegin(), m_entries.cend(),
+                                    [faceId](const Entry& entry) { return entry.faceId == faceId; });
+    if (found == m_entries.cend())
+        return false;
+    m_entries.erase(found);
+    return true;
+}
+
+MachiningFacePipelineService::RoleChangeResult
+MachiningFacePipelineService::setFaceRole(std::uint64_t faceId, MachiningFaceRole role)
+{
+    const auto found = std::find_if(m_entries.begin(), m_entries.end(),
+                                    [faceId](const Entry& entry) { return entry.faceId == faceId; });
+    if (found == m_entries.end() || found->role == role)
+        return RoleChangeResult::NotFoundOrUnchanged;
+    if (role == MachiningFaceRole::CrossSection) {
+        const bool intersectsMachiningFace = std::any_of(
+            m_entries.cbegin(), m_entries.cend(), [&found](const Entry& other) {
+                return other.faceId != found->faceId
+                    && other.workpieceEntry == found->workpieceEntry
+                    && other.role == MachiningFaceRole::MachiningSurface
+                    && facesShareBoundaryEdge(other.face, found->face);
+            });
+        if (!intersectsMachiningFace)
+            return RoleChangeResult::InvalidCrossSection;
+    }
+    found->role = role;
+    found->manual = true;
+    return RoleChangeResult::Changed;
+}
+
+bool MachiningFacePipelineService::replaceAutomaticFaces(const std::vector<Candidate>& candidates)
+{
+    std::vector<Entry> merged;
+    merged.reserve(m_entries.size() + candidates.size());
+    for (const Entry& entry : m_entries) {
+        if (entry.manual)
+            merged.push_back(entry);
+    }
+    for (const Candidate& candidate : candidates) {
+        if (candidate.face.IsNull() || containsEquivalent(merged, candidate))
+            continue;
+        Entry entry;
+        entry.faceId = nextFaceId();
+        entry.face = candidate.face;
+        entry.workpieceEntry = candidate.workpieceEntry;
+        entry.role = candidate.role;
+        merged.push_back(std::move(entry));
+    }
+    if (merged.empty())
+        return false;
+    m_entries = std::move(merged);
+    return true;
 }
 
 std::uint64_t MachiningFacePipelineService::revision() const
