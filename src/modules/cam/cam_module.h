@@ -18,6 +18,7 @@
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
 #include "modules/cam/contracts/i_cam_project_explorer_projection.h"
+#include "modules/cam/services/machining_face_pipeline_service.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kernel/i_module.h"
@@ -473,6 +474,7 @@ private:
     TopoDS_Shape collectWorkpieceShape() const;
     QList<WorkpieceShapeSource> collectWorkpieceShapes() const;
     bool rejectConflictingPipelineOperation(const QString& operation);
+    std::uint64_t allocateMachiningFaceId();
     std::uint64_t machiningFaceSetRevision() const;
     std::uint64_t machineSetupRevision() const;
 
@@ -574,16 +576,9 @@ private:
     bool                        m_useFaceClassification{true};
     int                         m_extractionStrategy{0}; ///< ExtractionStrategy (Auto)
 
-    /// One machining face (auto-captured or manually picked), with its highlight AIS.
-    struct MachiningFaceEntry {
-        std::uint64_t           faceId{0};
-        TopoDS_Face             face;
-        QString                 workpieceEntry;
-        bool                    manual{false};
-        lcnc::cam::MachiningFaceRole role{lcnc::cam::MachiningFaceRole::MachiningSurface};
-    };
-    std::vector<MachiningFaceEntry> m_machiningFaces;
-    std::uint64_t               m_nextMachiningFaceId{1};
+    using MachiningFaceEntry = lcnc::cam::MachiningFacePipelineService::Entry;
+    std::unique_ptr<lcnc::cam::MachiningFacePipelineService> m_machiningFacePipeline;
+    std::vector<MachiningFaceEntry>& m_machiningFaces;
     bool                        m_machiningFacesVisible{true};
 
     double                      m_deflection{0.1};

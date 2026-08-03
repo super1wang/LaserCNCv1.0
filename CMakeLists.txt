@@ -313,6 +313,7 @@ set(SRCS_MODULE_CAM
     src/modules/cam/settings/cam_config.cpp
     src/modules/cam/services/machine_axis_detector.cpp
     src/modules/cam/services/cam_display_projection_service.cpp
+    src/modules/cam/services/machining_face_pipeline_service.cpp
     src/modules/cam/services/toolpath_generation_service.cpp
     src/modules/cam/services/machine_io.cpp
     src/modules/cam/services/reference_pick.cpp

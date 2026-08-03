@@ -572,6 +572,8 @@ CamModule::CamModule(QObject* parent)
     , m_guideRenderer(std::make_unique<lcnc::view::MachineGuideRenderer>())
     , m_travelPathRenderer(std::make_unique<lcnc::view::TravelPathRenderer>())
     , m_displayProjectionService(std::make_unique<lcnc::cam::CamDisplayProjectionService>())
+    , m_machiningFacePipeline(std::make_unique<lcnc::cam::MachiningFacePipelineService>())
+    , m_machiningFaces(m_machiningFacePipeline->entries())
     , m_camData(lcnc::Kernel::current().projectManager()->camData())
 {
     // 加载当前持久化 TOML 配置。
@@ -616,8 +618,7 @@ CamModule::CamModule(QObject* parent)
                 // supplied them.  Drop them before exposing a replacement (or
                 // no) workspace; otherwise the explorer can show stale faces
                 // after the last file is closed.
-                m_machiningFaces.clear();
-                m_nextMachiningFaceId = 1;
+                m_machiningFacePipeline->reset();
                 refreshMachiningFaceDisplay();
                 m_camData = project->camData();
                 const auto activeId = project->activeWorkspaceId();
@@ -2267,21 +2268,14 @@ bool CamModule::rejectConflictingPipelineOperation(const QString& operation)
     return true;
 }
 
+std::uint64_t CamModule::allocateMachiningFaceId()
+{
+    return m_machiningFacePipeline ? m_machiningFacePipeline->nextFaceId() : 0;
+}
+
 std::uint64_t CamModule::machiningFaceSetRevision() const
 {
-    std::uint64_t hash = 1469598103934665603ull;
-    const auto mix = [&hash](std::uint64_t value) {
-        hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
-    };
-    for (const MachiningFaceEntry& entry : m_machiningFaces) {
-        mix(entry.faceId);
-        mix(entry.face.IsNull() ? 0 : LaserToolpathBuilder::computeFaceSignature(entry.face));
-        mix(static_cast<std::uint64_t>(entry.role));
-        mix(entry.manual ? 1 : 0);
-        for (const QChar ch : entry.workpieceEntry)
-            mix(ch.unicode());
-    }
-    return hash;
+    return m_machiningFacePipeline ? m_machiningFacePipeline->revision() : 0;
 }
 
 std::uint64_t CamModule::machineSetupRevision() const
@@ -2488,7 +2482,7 @@ bool CamModule::separateMachiningFaces()
         if (duplicate != result.cend())
             return;
         MachiningFaceEntry entry;
-        entry.faceId = m_nextMachiningFaceId++;
+        entry.faceId = allocateMachiningFaceId();
         entry.face = face;
         entry.workpieceEntry = workpieceEntry;
         entry.manual = false;
@@ -2662,7 +2656,7 @@ TaskId CamModule::separateMachiningFacesAsync()
             if (duplicate != merged.cend())
                 continue;
             MachiningFaceEntry entry;
-            entry.faceId = m_nextMachiningFaceId++;
+            entry.faceId = allocateMachiningFaceId();
             entry.face = candidate.face;
             entry.workpieceEntry = candidate.workpieceEntry;
             entry.role = candidate.role;
@@ -3926,7 +3920,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                         if (duplicate != captured.cend())
                             return;
                         MachiningFaceEntry entry;
-                        entry.faceId = m_nextMachiningFaceId++;
+                        entry.faceId = allocateMachiningFaceId();
                         entry.face = face;
                         entry.workpieceEntry = src.workpieceEntry;
                         entry.role = role;
@@ -5536,7 +5530,7 @@ void CamModule::addMachiningFace(const TopoDS_Face& face)
         if (!existing.face.IsNull() && existing.face.IsSame(face))
             return;
     MachiningFaceEntry entry;
-    entry.faceId = m_nextMachiningFaceId++;
+    entry.faceId = allocateMachiningFaceId();
     entry.face = face;
     entry.manual = true;
     entry.role = lcnc::cam::MachiningFaceRole::MachiningSurface;
@@ -5668,7 +5662,7 @@ void CamModule::setAutoMachiningFaces(const std::vector<TopoDS_Face>& faces,
         if (dup)
             continue;
         MachiningFaceEntry entry;
-        entry.faceId = m_nextMachiningFaceId++;
+        entry.faceId = allocateMachiningFaceId();
         entry.face = face;
         entry.workpieceEntry = workpieceEntry;
         entry.manual = false;
@@ -5708,21 +5702,9 @@ bool CamModule::machiningFacesVisible() const
 
 void CamModule::pushMachiningFaceRecordsToCamData()
 {
-    if (!m_camData)
+    if (!m_camData || !m_machiningFacePipeline)
         return;
-    std::vector<lcnc::cam::CamDataManager::MachiningFaceRecord> records;
-    records.reserve(m_machiningFaces.size());
-    for (const auto& entry : m_machiningFaces) {
-        lcnc::cam::CamDataManager::MachiningFaceRecord rec;
-        rec.faceId         = entry.faceId;
-        rec.workpieceEntry = entry.workpieceEntry;
-        rec.manual         = entry.manual;
-        rec.role           = entry.role;
-        rec.signature      = entry.face.IsNull()
-            ? 0 : LaserToolpathBuilder::computeFaceSignature(entry.face);
-        records.push_back(rec);
-    }
-    m_camData->setMachiningFaceRecords(std::move(records));
+    m_camData->setMachiningFaceRecords(m_machiningFacePipeline->persistenceRecords());
     m_camData->markDirty(true);
 }
 
@@ -5785,20 +5767,13 @@ void CamModule::rebindMachiningFacesFromRecords()
         rebound.push_back(std::move(entry));
     }
 
-    m_machiningFaces = std::move(rebound);
+    m_machiningFacePipeline->replace(std::move(rebound));
     if (m_machiningFaces.size() != records.size()) {
         m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::FaceSeparation,
                                      // 中文翻译：部分加工面或横截面无法在当前工件中重绑
                                      tr("Some machined surfaces or cross-sections cannot be re-bound in the current workpiece"));
         m_camData->setGenerationParamsDirty(true);
     }
-    if (!m_machiningFaces.empty()) {
-        std::uint64_t maxId = 0;
-        for (const auto& e : m_machiningFaces)
-            maxId = std::max(maxId, e.faceId);
-        m_nextMachiningFaceId = std::max(m_nextMachiningFaceId, maxId + 1);
-    }
-
     refreshMachiningFaceDisplay();
     emit machiningFacesChanged();
 

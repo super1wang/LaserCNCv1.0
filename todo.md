@@ -15,7 +15,7 @@
 ## P1：结构收口
 
 - [ ] 继续将 `process_module.cpp`（当前约 2,286 行）收敛至 900 行入口门限；`ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService`、`ProcessRunCoordinator` 和 `ProcessWorkflowService` 已落地，workflow 当前格式文档/读写/变更通知及流程树文件操作已脱离模块入口。剩余运行状态组合、手动控制 facade 与 UI 事件出口仍需下沉，且必须保持既有关闭顺序。
-- [ ] 完成 `cam_module.cpp`（当前约 6,560 行）的职责下沉；`ToolpathGenerationService` 已实现并覆盖 stale-result 拒绝，`CamDisplayProjectionService` 已接管加工面 AIS 投影；machining-face pipeline、machine calibration 和其余刀路/机台投影仍待独立 service。
+- [ ] 完成 `cam_module.cpp`（当前约 6,530 行）的职责下沉；`ToolpathGenerationService` 已实现并覆盖 stale-result 拒绝，`CamDisplayProjectionService` 已接管加工面 AIS 投影，`MachiningFacePipelineService` 已独占面集合、稳定 ID 分配、revision 与持久化记录快照；自动/手动合并、重绑任务编排、machine calibration 和其余刀路/机台投影仍待继续下沉。
 - [ ] 继续收敛 MainWindow/工程树耦合：工程树已通过 CAD/CAM 只读 projection contract 获取快照，不再包含或调用具体 Module；工作区、视图状态和 CAD TaskPanel controller 仍待下沉。
 - [ ] 继续将 CAD 入口收敛为生命周期与 facade：`CadDocumentIoService` 已接管新建、保存、关闭、STEP 导出、STEP/IGES/STL/BREP 解析及显示网格准备；工程包导入仍需迁入服务，且必须保持成功前不替换活动工程；草图/特征流程和选择刷新仍待 `CadModelingController`、`CadSelectionController` 下沉。
 - [ ] 收敛 real-laser 配置中旧厂商协议适配器的项目 `/W4` 告警，使该配置也能启用 `/WX`；ACS+GTN 质量预设已达到 `/W4 /WX`。
