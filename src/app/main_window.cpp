@@ -1680,132 +1680,42 @@ void MainWindow::onProjectExplorerCurrentItemChanged(QTreeWidgetItem* current,
 
 void MainWindow::onProjectExplorerItemChanged(QTreeWidgetItem* item, int /*column*/)
 {
-    if (m_blockProjectExplorerSignals || !item)
+    if (m_blockProjectExplorerSignals || !item || !m_projectExplorerController)
+        return;
+    m_blockProjectExplorerSignals = true;
+    const auto change = m_projectExplorerController->visibilityChange(item);
+    m_blockProjectExplorerSignals = false;
+    if (!change)
         return;
 
-    const auto kind = projectNodeKind(item);
-    const bool visible = item->checkState(0) == Qt::Checked;
+    for (const auto& cad : change->cadEntries)
+        m_appContext->cadModule()->setEntriesVisible(cad.documentId, cad.entries, change->visible);
+    for (const auto& sketch : change->sketches)
+        m_appContext->cadModule()->setSketchVisible(sketch.documentId, sketch.sketchId, change->visible);
 
-    auto cascadeCheckState = [this, visible](QTreeWidgetItem* root,
-                                             const std::function<bool(QTreeWidgetItem*)>& shouldChange) {
-        m_blockProjectExplorerSignals = true;
-        QSignalBlocker blocker(m_projectExplorerTree);
-        const bool updatesEnabled = m_projectExplorerTree->updatesEnabled();
-        m_projectExplorerTree->setUpdatesEnabled(false);
-        for (int index = 0; index < root->childCount(); ++index) {
-            QTreeWidgetItem* child = root->child(index);
-            std::function<void(QTreeWidgetItem*)> cascade = [&](QTreeWidgetItem* node) {
-                if ((node->flags() & Qt::ItemIsUserCheckable) && shouldChange(node))
-                    node->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
-                for (int childIndex = 0; childIndex < node->childCount(); ++childIndex)
-                    cascade(node->child(childIndex));
-            };
-            cascade(child);
-        }
-        m_projectExplorerTree->setUpdatesEnabled(updatesEnabled);
-        m_blockProjectExplorerSignals = false;
-    };
-
-    auto applyCadVisibility = [this, visible](QTreeWidgetItem* root) {
-        QMap<DocumentId, QSet<QString>> entriesByDocument;
-        QList<QPair<DocumentId, int>> sketches;
-
-        std::function<void(QTreeWidgetItem*)> collect = [&](QTreeWidgetItem* node) {
-            if (!node || !lcnc::app::isCadProjectNode(projectNodeKind(node)))
-                return;
-
-            const DocumentId nodeDocId = node->data(0, kRoleDocId).toInt();
-            const QString nodeKey = node->data(0, kRoleNodeKey).toString();
-            if (nodeDocId != kInvalidDocumentId
-                && lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(nodeKey)) {
-                sketches.append({nodeDocId,
-                    lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(nodeKey)});
-            }
-
-            if (nodeDocId != kInvalidDocumentId) {
-                const QStringList leafEntries = node->data(0, kRoleLeafEntries).toStringList();
-                for (const QString& leafEntry : leafEntries) {
-                    if (!leafEntry.isEmpty())
-                        entriesByDocument[nodeDocId].insert(leafEntry);
-                }
-            }
-
-            for (int childIndex = 0; childIndex < node->childCount(); ++childIndex)
-                collect(node->child(childIndex));
-        };
-
-        collect(root);
-
-        for (auto it = entriesByDocument.cbegin(); it != entriesByDocument.cend(); ++it) {
-            QStringList entries;
-            for (const QString& entry : it.value())
-                entries.append(entry);
-            m_appContext->cadModule()->setEntriesVisible(it.key(), entries, visible);
-        }
-
-        for (const auto& sketch : sketches)
-            m_appContext->cadModule()->setSketchVisible(sketch.first, sketch.second, visible);
-    };
-
-    if (lcnc::app::isCadProjectNode(kind)) {
-        const DocumentId docId = item->data(0, kRoleDocId).toInt();
-        const QString entry = item->data(0, kRoleEntry).toString();
-        const QString nodeKey = item->data(0, kRoleNodeKey).toString();
-        const QStringList leafEntries = item->data(0, kRoleLeafEntries).toStringList();
-
-        if (docId != kInvalidDocumentId
-            && lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(nodeKey)) {
-            const int sketchId = lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(nodeKey);
-            m_appContext->cadModule()->setSketchVisible(docId, sketchId, visible);
-            return;
-        }
-
-        if (entry.isEmpty()) {
-            cascadeCheckState(item, [](QTreeWidgetItem* child) {
-                return lcnc::app::isCadProjectNode(projectNodeKind(child));
-            });
-            applyCadVisibility(item);
-            return;
-        }
-
-        if (docId == kInvalidDocumentId)
-            return;
-
-        m_appContext->cadModule()->setEntriesVisible(docId, leafEntries, visible);
-        return;
-    }
-
-    if (kind == lcnc::app::ProjectExplorerNodeKind::MachiningFaceRoot) {
-        m_appContext->camModule()->setMachiningFacesVisible(visible);
-        return;
-    }
-
-    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathRoot) {
-        cascadeCheckState(item, [](QTreeWidgetItem* child) {
-            return lcnc::app::isToolpathProjectNode(projectNodeKind(child));
-        });
-
-        m_appContext->camModule()->setAllContoursEnabled(visible);
-        return;
-    }
-
-    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathLayer) {
-        cascadeCheckState(item, [](QTreeWidgetItem* child) {
-            return projectNodeKind(child) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour;
-        });
-        const std::uint64_t layerId = item->data(0, kRoleLayerId).toULongLong();
-        m_appContext->camModule()->setToolpathLayerEnabled(layerId, visible);
-        return;
-    }
-
-    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
-        const auto contourId = static_cast<lcnc::cam::ContourId>(item->data(0, kRoleContourId).toULongLong());
-        int contourIndex = m_appContext->camModule()->contourIndexById(contourId);
+    switch (change->target) {
+    case lcnc::app::ProjectExplorerController::VisibilityChange::Target::MachiningFaces:
+        m_appContext->camModule()->setMachiningFacesVisible(change->visible);
+        break;
+    case lcnc::app::ProjectExplorerController::VisibilityChange::Target::AllContours:
+        m_appContext->camModule()->setAllContoursEnabled(change->visible);
+        break;
+    case lcnc::app::ProjectExplorerController::VisibilityChange::Target::Layer:
+        m_appContext->camModule()->setToolpathLayerEnabled(change->layerId, change->visible);
+        break;
+    case lcnc::app::ProjectExplorerController::VisibilityChange::Target::Contour: {
+        int contourIndex = m_appContext->camModule()->contourIndexById(
+            static_cast<lcnc::cam::ContourId>(change->contourId));
         if (contourIndex < 0)
-            contourIndex = item->data(0, kRoleContourIndex).toInt();
-        m_appContext->camModule()->setContourEnabled(contourIndex, visible);
+            contourIndex = change->contourIndex;
+        m_appContext->camModule()->setContourEnabled(contourIndex, change->visible);
         if (item == m_projectExplorerTree->currentItem())
             highlightContourInView(contourIndex);
+        break;
+    }
+    case lcnc::app::ProjectExplorerController::VisibilityChange::Target::None:
+    case lcnc::app::ProjectExplorerController::VisibilityChange::Target::Cad:
+        break;
     }
 }
 

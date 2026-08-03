@@ -1,6 +1,7 @@
 #include "app/controllers/project_explorer_controller.h"
 
 #include "app/project_explorer_tree_utils.h"
+#include "modules/cad/selection/cad_selection_resolver.h"
 
 #include <QScrollBar>
 #include <QSet>
@@ -9,6 +10,7 @@
 #include <QTreeWidgetItemIterator>
 
 #include <algorithm>
+#include <functional>
 
 namespace lcnc::app {
 namespace {
@@ -191,6 +193,104 @@ ProjectExplorerController::contourOrder() const
         ++iterator;
     }
     return hasContourRoot ? std::optional<ContourOrder>(result) : std::nullopt;
+}
+
+std::optional<ProjectExplorerController::VisibilityChange>
+ProjectExplorerController::visibilityChange(QTreeWidgetItem* item)
+{
+    if (!m_tree || !item)
+        return std::nullopt;
+
+    const auto kind = projectNodeKind(item);
+    VisibilityChange result;
+    result.visible = item->checkState(0) == Qt::Checked;
+
+    const auto cascade = [this, &result](QTreeWidgetItem* root,
+                                          const std::function<bool(QTreeWidgetItem*)>& shouldChange) {
+        const QSignalBlocker blocker(m_tree);
+        const bool updatesEnabled = m_tree->updatesEnabled();
+        m_tree->setUpdatesEnabled(false);
+        std::function<void(QTreeWidgetItem*)> visit = [&](QTreeWidgetItem* node) {
+            if ((node->flags() & Qt::ItemIsUserCheckable) && shouldChange(node))
+                node->setCheckState(0, result.visible ? Qt::Checked : Qt::Unchecked);
+            for (int index = 0; index < node->childCount(); ++index)
+                visit(node->child(index));
+        };
+        for (int index = 0; index < root->childCount(); ++index)
+            visit(root->child(index));
+        m_tree->setUpdatesEnabled(updatesEnabled);
+    };
+
+    const auto collectCad = [&result](QTreeWidgetItem* root) {
+        QMap<DocumentId, QSet<QString>> entriesByDocument;
+        std::function<void(QTreeWidgetItem*)> visit = [&](QTreeWidgetItem* node) {
+            if (!node || !isCadProjectNode(projectNodeKind(node)))
+                return;
+            const DocumentId documentId = node->data(0, ProjectExplorerRoles::DocId).toInt();
+            const QString key = node->data(0, ProjectExplorerRoles::NodeKey).toString();
+            if (documentId != kInvalidDocumentId
+                && lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(key)) {
+                result.sketches.append({documentId,
+                    lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(key)});
+            }
+            if (documentId != kInvalidDocumentId) {
+                for (const QString& entry : node->data(0, ProjectExplorerRoles::LeafEntries).toStringList()) {
+                    if (!entry.isEmpty())
+                        entriesByDocument[documentId].insert(entry);
+                }
+            }
+            for (int index = 0; index < node->childCount(); ++index)
+                visit(node->child(index));
+        };
+        visit(root);
+        for (auto it = entriesByDocument.cbegin(); it != entriesByDocument.cend(); ++it)
+            result.cadEntries.append({it.key(), it.value().values()});
+    };
+
+    if (isCadProjectNode(kind)) {
+        result.target = VisibilityChange::Target::Cad;
+        const DocumentId documentId = item->data(0, ProjectExplorerRoles::DocId).toInt();
+        const QString key = item->data(0, ProjectExplorerRoles::NodeKey).toString();
+        const QString entry = item->data(0, ProjectExplorerRoles::Entry).toString();
+        if (documentId != kInvalidDocumentId
+            && lcnc::cad::selection::CadSelectionResolver::isFinishedSketchNode(key)) {
+            result.sketches.append({documentId,
+                lcnc::cad::selection::CadSelectionResolver::sketchIdFromNodeKey(key)});
+            return result;
+        }
+        if (entry.isEmpty()) {
+            cascade(item, [](QTreeWidgetItem* child) { return isCadProjectNode(projectNodeKind(child)); });
+            collectCad(item);
+        } else if (documentId != kInvalidDocumentId) {
+            result.cadEntries.append({documentId,
+                item->data(0, ProjectExplorerRoles::LeafEntries).toStringList()});
+        }
+        return result;
+    }
+    if (kind == ProjectExplorerNodeKind::MachiningFaceRoot) {
+        result.target = VisibilityChange::Target::MachiningFaces;
+        return result;
+    }
+    if (kind == ProjectExplorerNodeKind::ToolpathRoot) {
+        result.target = VisibilityChange::Target::AllContours;
+        cascade(item, [](QTreeWidgetItem* child) { return isToolpathProjectNode(projectNodeKind(child)); });
+        return result;
+    }
+    if (kind == ProjectExplorerNodeKind::ToolpathLayer) {
+        result.target = VisibilityChange::Target::Layer;
+        result.layerId = item->data(0, ProjectExplorerRoles::LayerId).toULongLong();
+        cascade(item, [](QTreeWidgetItem* child) {
+            return projectNodeKind(child) == ProjectExplorerNodeKind::ToolpathContour;
+        });
+        return result;
+    }
+    if (kind == ProjectExplorerNodeKind::ToolpathContour) {
+        result.target = VisibilityChange::Target::Contour;
+        result.contourId = item->data(0, ProjectExplorerRoles::ContourId).toULongLong();
+        result.contourIndex = item->data(0, ProjectExplorerRoles::ContourIndex).toInt();
+        return result;
+    }
+    return std::nullopt;
 }
 
 } // namespace lcnc::app

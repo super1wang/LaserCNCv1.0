@@ -77,6 +77,32 @@ int main(int argc, char** argv)
     controller.selectEntries(kInvalidDocumentId, {});
     assert(tree.selectedItems().isEmpty());
 
+    QTreeWidgetItem* toolpathItem = tree.topLevelItem(0);
+    toolpathItem->setCheckState(0, Qt::Unchecked);
+    const auto allContours = controller.visibilityChange(toolpathItem);
+    assert(allContours);
+    assert(allContours->target
+           == lcnc::app::ProjectExplorerController::VisibilityChange::Target::AllContours);
+    assert(!allContours->visible);
+    assert(toolpathItem->child(0)->checkState(0) == Qt::Unchecked);
+
+    lcnc::app::ProjectExplorerNode cadShape;
+    cadShape.kind = lcnc::app::ProjectExplorerNodeKind::CadShape;
+    cadShape.documentId = 42;
+    cadShape.nodeKey = QStringLiteral("cad:shape");
+    cadShape.entry = QStringLiteral("0:1:1");
+    cadShape.leafEntries = {cadShape.entry};
+    lcnc::app::ProjectExplorerNode cadRoot;
+    cadRoot.kind = lcnc::app::ProjectExplorerNodeKind::WorkpieceRoot;
+    cadRoot.nodeKey = QStringLiteral("cad-root");
+    cadRoot.children = {cadShape};
+    snapshot.roots = {cadRoot};
+    controller.rebuild(snapshot);
+    const auto cadVisibility = controller.visibilityChange(tree.topLevelItem(0));
+    assert(cadVisibility && cadVisibility->cadEntries.size() == 1);
+    assert(cadVisibility->cadEntries.first().documentId == 42);
+    assert(cadVisibility->cadEntries.first().entries == QStringList({QStringLiteral("0:1:1")}));
+
     lcnc::AppSettings settings;
     int persistCount = 0;
     lcnc::app::ViewStateController viewState(
