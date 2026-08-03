@@ -2,9 +2,11 @@
 
 #include "core/kernel/i_service.h"
 #include "core/project/project_types.h"
+#include "core/task/task_manager.h"
 
 #include <QObject>
 #include <QString>
+#include <memory>
 
 class LcncDocument;
 
@@ -26,16 +28,24 @@ class CadDocumentIoService final : public QObject, public lcnc::IService
     Q_OBJECT
 public:
     explicit CadDocumentIoService(lcnc::LcncProjectManager& projectManager,
+                                  TaskManager& taskManager,
                                   QObject* parent = nullptr);
+
+    struct ExportTask {
+        TaskId id{kInvalidTaskId};
+        std::shared_ptr<QString> error;
+    };
 
     DocumentId createDocument(const QString& name = QString()) const;
     bool saveDocument(LcncDocument* document,
                       const QString& path,
                       QString* errorMessage = nullptr) const;
     bool closeDocument(DocumentId documentId) const;
+    ExportTask exportStepAsync(LcncDocument* document, const QString& filePath) const;
 
 private:
     lcnc::LcncProjectManager& m_projectManager;
+    TaskManager& m_taskManager;
 };
 
 } // namespace lcnc::cad

@@ -6575,6 +6575,14 @@ No available reference surfaces are currently detected.</source>
         <source>No save path specified</source>
         <translation>未指定保存路径</translation>
     </message>
+    <message>
+        <source>No export path specified</source>
+        <translation>未指定导出路径</translation>
+    </message>
+    <message>
+        <source>Export STEP: %1</source>
+        <translation>导出 STEP: %1</translation>
+    </message>
 </context>
 <context>
     <name>ProcessWorkflowService</name>

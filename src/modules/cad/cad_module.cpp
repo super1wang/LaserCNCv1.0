@@ -38,7 +38,6 @@
 #include <IGESControl_Reader.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPControl_Reader.hxx>
-#include <STEPControl_Writer.hxx>
 #include <StlAPI_Reader.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <TDocStd_Document.hxx>
@@ -556,7 +555,8 @@ bool CadModule::init(lcnc::IKernel& kernel)
     auto facadePtr = std::shared_ptr<lcnc::ICadFacade>(svcPtr, static_cast<lcnc::ICadFacade*>(this));
     kernel.services().registerService<lcnc::ICadFacade>(facadePtr);
     m_documentIoService = std::make_unique<lcnc::cad::CadDocumentIoService>(
-        *lcnc::Kernel::current().projectManager(), this);
+        *lcnc::Kernel::current().projectManager(),
+        *lcnc::Kernel::current().taskManager(), this);
     auto documentIoService = std::shared_ptr<lcnc::cad::CadDocumentIoService>(
         m_documentIoService.get(), [](lcnc::cad::CadDocumentIoService*) {});
     kernel.services().registerService<lcnc::cad::CadDocumentIoService>(documentIoService);
@@ -1059,58 +1059,25 @@ bool CadModule::saveDocument(DocumentId id, const QString& path)
 void CadModule::exportStep(DocumentId id, const QString& filePath)
 {
     LcncDocument* doc = domainDocumentById(id);
-    if (!doc) {
-        // 中文翻译：导出 STEP 失败；找不到目标文档
-        emit operationFailed(tr("Export STEP failed"), tr("Target document not found"));
+    const auto task = m_documentIoService
+        ? m_documentIoService->exportStepAsync(doc, filePath)
+        : lcnc::cad::CadDocumentIoService::ExportTask{};
+    if (task.id == kInvalidTaskId) {
+        // 中文翻译：导出 STEP 失败
+        emit operationFailed(tr("Export STEP failed"),
+                             task.error && !task.error->isEmpty()
+                                 ? *task.error : tr("Export STEP failed"));
         return;
     }
-    if (filePath.isEmpty()) {
-        // 中文翻译：导出 STEP 失败；未指定导出路径
-        emit operationFailed(tr("Export STEP failed"), tr("No export path specified"));
-        return;
-    }
 
-    auto error = std::make_shared<QString>();
-    const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        // 中文翻译：导出 STEP: %1
-        tr("Export STEP: %1").arg(QFileInfo(filePath).fileName()),
-        [doc, filePath, error](TaskProgress* prog) {
-            prog->setRange(0, 100);
-            // 中文翻译：写入 STEP...
-            prog->setStepName(QStringLiteral("Write STEP..."));
-            if (prog->isAbortRequested())
-                throw std::runtime_error("step export cancelled");
-
-            Handle(XCAFDoc_ShapeTool) st = doc->shapeTool();
-            TDF_LabelSequence shapes;
-            st->GetFreeShapes(shapes);
-
-            STEPControl_Writer writer;
-            for (int i = 1; i <= shapes.Length(); ++i) {
-                TopoDS_Shape sh = st->GetShape(shapes.Value(i));
-                if (!sh.IsNull())
-                    writer.Transfer(sh, STEPControl_AsIs);
-            }
-
-            if (writer.Write(filePath.toUtf8().constData()) != IFSelect_RetDone) {
-                // 中文翻译：导出 STEP 失败: %1
-                *error = QObject::tr("Export STEP failed: %1").arg(filePath);
-                throw std::runtime_error("step export failed");
-            }
-
-            if (prog->isAbortRequested())
-                throw std::runtime_error("step export cancelled");
-            prog->setValue(100);
-        });
-
-    m_taskScope.track(taskId);
-    watchTask(this, taskId, [this, taskId, error](bool success) {
+    m_taskScope.track(task.id);
+    watchTask(this, task.id, [this, task, taskId = task.id](bool success) {
         m_taskScope.release(taskId);
         if (!success) {
             // 中文翻译：导出 STEP 失败
             emit operationFailed(tr("Export STEP failed"),
                                  // 中文翻译：导出 STEP 失败
-                                 error->isEmpty() ? tr("Export STEP failed") : *error);
+                                 task.error->isEmpty() ? tr("Export STEP failed") : *task.error);
         }
     });
 }
