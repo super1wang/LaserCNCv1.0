@@ -26,6 +26,7 @@
 #include "modules/process/runtime/process_device_runtime.h"
 #include "modules/process/runtime/process_preflight_service.h"
 #include "modules/process/runtime/process_connection_service.h"
+#include "modules/process/runtime/process_manual_motion_service.h"
 #include "modules/process/runtime/process_status_service.h"
 #include "modules/process/tool/tool_factory.h"
 #include "modules/process/workflow/process_workflow_service.h"
@@ -230,6 +231,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     auto workflowFacade = std::static_pointer_cast<lcnc::process::IProcessWorkflowService>(workflowService);
     kernel.services().registerService<lcnc::process::IProcessWorkflowService>(workflowFacade);
     m_connectionService = std::make_unique<lcnc::process::ProcessConnectionService>(
+        *m_service, *m_deviceCommandQueue, this);
+    m_manualMotionService = std::make_unique<lcnc::process::ProcessManualMotionService>(
         *m_service, *m_deviceCommandQueue, this);
     auto connectionService = std::shared_ptr<lcnc::process::ProcessConnectionService>(
         m_connectionService.get(), [](lcnc::process::ProcessConnectionService*) {});
@@ -993,175 +996,46 @@ void ProcessModule::setAxisDefinitions(const QList<MachineAxisDef>& axes)
 
 void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, double distance)
 {
-    if (axisName.trimmed().isEmpty() || direction == 0 || m_state == State::EmergencyStop)
+    if (direction == 0 || !m_manualMotionService)
         return;
-
     const QString normalizedAxis = axisName.trimmed().toUpper();
-    if (!m_axisEnabled.value(normalizedAxis, true)) {
-        // 中文翻译：%1 轴未使能，点动已忽略
-        setStatusMessage(tr("%1 axis is not enabled, jog has been ignored").arg(normalizedAxis));
-        return;
-    }
-
-    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
-    if (!eAxis.has_value()) {
-        // 中文翻译：%1 轴未注册，无法点动
-        setStatusMessage(tr("%1 axis is not registered and cannot be jogged").arg(normalizedAxis));
-        return;
-    }
-    if (!m_service || !m_deviceCommandQueue) {
-        // 中文翻译：设备命令队列不可用
-        setStatusMessage(tr("Device command queue is unavailable"));
-        return;
-    }
-
     const double step = distance > 1e-9 ? distance : jogStepForLevel(speedLevel);
     const double delta = step * (direction > 0 ? 1.0 : -1.0);
-    const double vel = jogVelocityForLevel(speedLevel);
-    const auto service = m_service;
     QPointer<ProcessModule> self(this);
-    // 中文翻译：点动 %1 轴 %2
-    const QString successMessage = tr("Jog %1 axis %2").arg(
-        // 中文翻译：正向；负向
-        normalizedAxis, direction > 0 ? tr("forward") : tr("Negative"));
-    if (!m_deviceCommandQueue->submit(
-            [service, axis = eAxis.value(), delta, vel] {
-                return service->moveRelative(axis, delta, vel);
-            },
-            TaskPriority::Interactive,
-            [self, successMessage](const lcnc::process::DeviceCommandResult& result) {
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result, successMessage] {
-                    if (self)
-                        self->setStatusMessage(result.success ? successMessage : result.error);
-                }, Qt::QueuedConnection);
-            })) {
-        // 中文翻译：点动命令未能排队
-        setStatusMessage(tr("Jog command failed to queue"));
-    }
+    m_manualMotionService->moveRelative(normalizedAxis, delta, jogVelocityForLevel(speedLevel),
+        m_axisEnabled.value(normalizedAxis, true), m_state == State::EmergencyStop,
+        [self](const QString& message) { if (self) self->setStatusMessage(message); });
 }
 
 void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, int speedLevel)
 {
-    if (axisName.trimmed().isEmpty() || m_state == State::EmergencyStop)
+    if (!m_manualMotionService)
         return;
-
     const QString normalizedAxis = axisName.trimmed().toUpper();
-    if (!m_axisEnabled.value(normalizedAxis, true)) {
-        // 中文翻译：%1 轴未使能，绝对运动已忽略
-        setStatusMessage(tr("%1 axis is not enabled, absolute motion has been ignored").arg(normalizedAxis));
-        return;
-    }
-
-    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
-    if (!eAxis.has_value()) {
-        // 中文翻译：%1 轴未注册，无法绝对运动
-        setStatusMessage(tr("%1 axis is not registered and cannot move absolutely").arg(normalizedAxis));
-        return;
-    }
-    if (!m_service || !m_deviceCommandQueue) {
-        // 中文翻译：设备命令队列不可用
-        setStatusMessage(tr("Device command queue is unavailable"));
-        return;
-    }
-
-    const auto service = m_service;
-    const double velocity = jogVelocityForLevel(speedLevel);
     QPointer<ProcessModule> self(this);
-    const QString successMessage =
-        // 中文翻译：%1 轴移动到 %2
-        tr("%1 axis moved to %2").arg(normalizedAxis).arg(position, 0, 'f', 3);
-    if (!m_deviceCommandQueue->submit(
-            [service, axis = eAxis.value(), position, velocity] {
-                return service->moveAbsolute(axis, position, velocity);
-            },
-            TaskPriority::Interactive,
-            [self, successMessage](const lcnc::process::DeviceCommandResult& result) {
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result, successMessage] {
-                    if (self)
-                        self->setStatusMessage(result.success ? successMessage : result.error);
-                }, Qt::QueuedConnection);
-            })) {
-        // 中文翻译：绝对运动命令未能排队
-        setStatusMessage(tr("Absolute motion command failed to queue"));
-    }
+    m_manualMotionService->moveAbsolute(normalizedAxis, position, jogVelocityForLevel(speedLevel),
+        m_axisEnabled.value(normalizedAxis, true), m_state == State::EmergencyStop,
+        [self](const QString& message) { if (self) self->setStatusMessage(message); });
 }
 
 void ProcessModule::startContinuousJog(const QString& axisName, int direction, int speedLevel)
 {
-    if (axisName.trimmed().isEmpty() || direction == 0 || m_state == State::EmergencyStop)
+    if (direction == 0 || !m_manualMotionService)
         return;
-
     const QString normalizedAxis = axisName.trimmed().toUpper();
-    if (!m_axisEnabled.value(normalizedAxis, true)) {
-        // 中文翻译：%1 轴未使能，连续运动已忽略
-        setStatusMessage(tr("%1 axis is not enabled, continuous motion is ignored").arg(normalizedAxis));
-        return;
-    }
-
-    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
-    if (!eAxis.has_value()) {
-        // 中文翻译：%1 轴未注册，无法连续运动
-        setStatusMessage(tr("%1 axis is not registered and cannot move continuously.").arg(normalizedAxis));
-        return;
-    }
-    if (!m_service || !m_deviceCommandQueue) {
-        // 中文翻译：设备命令队列不可用
-        setStatusMessage(tr("Device command queue is unavailable"));
-        return;
-    }
-
-    const auto service = m_service;
-    const bool positive = direction > 0;
-    const double velocity = jogVelocityForLevel(speedLevel);
     QPointer<ProcessModule> self(this);
-    const QString successMessage =
-        // 中文翻译：连续点动 %1 轴 %2；正向；负向
-        tr("Continuously jog %1 axis %2").arg(normalizedAxis, positive ? tr("forward") : tr("Negative"));
-    if (!m_deviceCommandQueue->submit(
-            [service, axis = eAxis.value(), positive, velocity] {
-                return service->jog(axis, positive, velocity);
-            },
-            TaskPriority::Interactive,
-            [self, successMessage](const lcnc::process::DeviceCommandResult& result) {
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result, successMessage] {
-                    if (self)
-                        self->setStatusMessage(result.success ? successMessage : result.error);
-                }, Qt::QueuedConnection);
-            })) {
-        // 中文翻译：连续点动命令未能排队
-        setStatusMessage(tr("Continuous jog commands failed to be queued"));
-    }
+    m_manualMotionService->startContinuous(normalizedAxis, direction > 0, jogVelocityForLevel(speedLevel),
+        m_axisEnabled.value(normalizedAxis, true), m_state == State::EmergencyStop,
+        [self](const QString& message) { if (self) self->setStatusMessage(message); });
 }
 
 void ProcessModule::stopContinuousJog(const QString& axisName)
 {
-    if (axisName.trimmed().isEmpty())
+    if (!m_manualMotionService)
         return;
-
-    const QString normalizedAxis = axisName.trimmed().toUpper();
-    auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
-    if (!eAxis.has_value() || !m_service || !m_deviceCommandQueue)
-        return;
-
-    const auto service = m_service;
     QPointer<ProcessModule> self(this);
-    if (!m_deviceCommandQueue->submit(
-            [service, axis = eAxis.value()] {
-                return service->stopAxis(axis);
-            },
-            TaskPriority::Stop,
-            [self, normalizedAxis](const lcnc::process::DeviceCommandResult& result) {
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result, normalizedAxis] {
-                    if (self)
-                        self->setStatusMessage(result.success
-                            // 中文翻译：%1 轴连续运动已停止
-                            ? self->tr("%1 axis continuous motion has stopped").arg(normalizedAxis)
-                            : result.error);
-                }, Qt::QueuedConnection);
-            })) {
-        // 中文翻译：%1 轴停止命令未能排队
-        setStatusMessage(tr("%1 axis stop command failed to be queued").arg(normalizedAxis));
-    }
+    m_manualMotionService->stopContinuous(axisName,
+        [self](const QString& message) { if (self) self->setStatusMessage(message); });
 }
 
 void ProcessModule::home()

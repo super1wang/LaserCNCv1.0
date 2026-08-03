@@ -348,6 +348,8 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/process_preflight_service.cpp
     src/modules/process/runtime/process_connection_service.h
     src/modules/process/runtime/process_connection_service.cpp
+    src/modules/process/runtime/process_manual_motion_service.h
+    src/modules/process/runtime/process_manual_motion_service.cpp
     src/modules/process/runtime/process_status_service.h
     src/modules/process/runtime/process_status_service.cpp
     src/modules/process/setting/builtin_io_defs.cpp
@@ -834,6 +836,10 @@ if(BUILD_TESTING)
         tests/process_connection_service_test.cpp
     )
     target_link_libraries(lcnc_process_connection_service_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_process_manual_motion_service_test
+        tests/process_manual_motion_service_test.cpp
+    )
+    target_link_libraries(lcnc_process_manual_motion_service_test PRIVATE lcnc_module_process Qt6::Core)
     add_executable(lcnc_process_workflow_service_test
         tests/process_workflow_service_test.cpp
     )
@@ -888,6 +894,7 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_process_cutting_safety_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_status_service_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_connection_service_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_process_manual_motion_service_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_workflow_service_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_current_schema_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_contour_order_planner_test lcnc_runtime_deploy_build)
@@ -911,6 +918,7 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_process_cutting_safety_test)
     lcnc_deploy_tbb_runtime(lcnc_process_status_service_test)
     lcnc_deploy_tbb_runtime(lcnc_process_connection_service_test)
+    lcnc_deploy_tbb_runtime(lcnc_process_manual_motion_service_test)
     lcnc_deploy_tbb_runtime(lcnc_process_workflow_service_test)
     lcnc_deploy_tbb_runtime(lcnc_process_current_schema_test)
     lcnc_deploy_tbb_runtime(lcnc_contour_order_planner_test)
@@ -937,6 +945,7 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_process_cutting_safety_test)
         lcnc_deploy_asan_runtime(lcnc_process_status_service_test)
         lcnc_deploy_asan_runtime(lcnc_process_connection_service_test)
+        lcnc_deploy_asan_runtime(lcnc_process_manual_motion_service_test)
         lcnc_deploy_asan_runtime(lcnc_process_workflow_service_test)
         lcnc_deploy_asan_runtime(lcnc_process_current_schema_test)
         lcnc_deploy_asan_runtime(lcnc_contour_order_planner_test)
@@ -974,6 +983,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_process_status_service_test)
     add_test(NAME lcnc_process_connection_service_test
         COMMAND lcnc_process_connection_service_test)
+    add_test(NAME lcnc_process_manual_motion_service_test
+        COMMAND lcnc_process_manual_motion_service_test)
     add_test(NAME lcnc_process_workflow_service_test
         COMMAND lcnc_process_workflow_service_test)
     add_test(NAME lcnc_process_current_schema_test
