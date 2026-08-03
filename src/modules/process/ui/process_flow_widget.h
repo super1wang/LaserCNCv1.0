@@ -6,6 +6,7 @@ namespace lcnc::process {
 class ProcessFlowDocument;
 class ProcessFlowModel;
 class ProcessFlowTreeView;
+class IProcessWorkflowService;
 }
 
 class ProcessFlowWidget : public QWidget
@@ -16,7 +17,7 @@ public:
     explicit ProcessFlowWidget(QWidget* parent = nullptr, const char* name = nullptr);
     ~ProcessFlowWidget();
 
-    void setFlowDocument(lcnc::process::ProcessFlowDocument* document);
+    void setWorkflowService(lcnc::process::IProcessWorkflowService* service);
     void reloadFlowModel();
     lcnc::process::ProcessFlowTreeView* flowTreeView() const { return m_flowTreeView; }
 

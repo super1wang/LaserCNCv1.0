@@ -50,6 +50,7 @@
 #include "core/machine/machine_workspace.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/process_module.h"
+#include "modules/process/workflow/process_workflow_service.h"
 
 #include <SARibbonBar.h>
 #include <SARibbonCategory.h>
@@ -785,10 +786,12 @@ void MainWindow::createLeftPanel()
 
     auto* processWidget = new ProcessFlowWidget(m_leftTabs);
     m_processLeftPanel = processWidget;
-    if (auto* process = m_appContext->processModule()) {
-        processWidget->setFlowDocument(&process->processFlowDocument());
-        connect(process, &ProcessModule::processFlowChanged,
-                processWidget, &ProcessFlowWidget::reloadFlowModel);
+    if (auto workflow = lcnc::Kernel::current()
+            .services()
+            .getService<lcnc::process::IProcessWorkflowService>()) {
+        processWidget->setWorkflowService(workflow.get());
+        connect(workflow->notifier(), SIGNAL(flowChanged()),
+                processWidget, SLOT(reloadFlowModel()));
     }
     // 机台模型树：独立 tab，展示已加载的机台几何结构（按轴分组）。
     m_machineTree = new WidgetMachineTree(m_leftTabs);

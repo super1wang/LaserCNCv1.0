@@ -2,6 +2,7 @@
 
 #include "modules/process/ui/process_flow_model.h"
 #include "modules/process/ui/process_flow_tree_view.h"
+#include "modules/process/workflow/process_workflow_service.h"
 
 #include <QVBoxLayout>
 
@@ -21,9 +22,10 @@ ProcessFlowWidget::ProcessFlowWidget(QWidget* parent, const char* name)
 
 ProcessFlowWidget::~ProcessFlowWidget() = default;
 
-void ProcessFlowWidget::setFlowDocument(lcnc::process::ProcessFlowDocument* document)
+void ProcessFlowWidget::setWorkflowService(lcnc::process::IProcessWorkflowService* service)
 {
-    m_flowModel->setDocument(document);
+    m_flowModel->setDocument(service ? &service->document() : nullptr);
+    m_flowTreeView->setWorkflowService(service);
     m_flowTreeView->expandAll();
 }
 

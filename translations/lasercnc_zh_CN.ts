@@ -6565,4 +6565,11 @@ No available reference surfaces are currently detected.</source>
         <translation>当前拾取的面不是平面，请选择平面参考面。</translation>
     </message>
 </context>
+<context>
+    <name>ProcessWorkflowService</name>
+    <message>
+        <source>Process file path is empty</source>
+        <translation>流程文件路径为空</translation>
+    </message>
+</context>
 </TS>

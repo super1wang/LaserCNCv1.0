@@ -63,6 +63,9 @@ $processModule = Join-Path $srcPath 'modules/process/process_module.cpp'
 foreach ($match in (Select-String -LiteralPath $processModule -Pattern '\b(?:connectDevices|disconnectDevices|pollStatus|pollPeripheralStatus)\s*\(')) {
     $violations.Add("ProcessModule must delegate connection/status device operations: $($processModule):$($match.LineNumber): $($match.Line.Trim())")
 }
+foreach ($match in (Select-String -LiteralPath $processModule -Pattern '\bProcessFlowStore::')) {
+    $violations.Add("ProcessModule must delegate workflow persistence to ProcessWorkflowService: $($processModule):$($match.LineNumber): $($match.Line.Trim())")
+}
 
 $processPath = Join-Path $srcPath 'modules/process'
 Get-ChildItem -LiteralPath $processPath -Recurse -Directory | ForEach-Object {

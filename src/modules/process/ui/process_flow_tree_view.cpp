@@ -3,7 +3,7 @@
 #include "modules/process/ui/process_flow_model.h"
 #include "modules/process/ui/process_node_edit_dialog.h"
 #include "modules/process/steps/process_step_registry.h"
-#include "modules/process/workflow/process_flow_store.h"
+#include "modules/process/workflow/process_workflow_service.h"
 #include "modules/process/workflow/process_node_registry.h"
 
 #include "core/logging/logger.h"
@@ -123,7 +123,7 @@ void ProcessFlowTreeView::clearNodes()
 
 void ProcessFlowTreeView::loadFromFile()
 {
-    if (!m_model || !m_model->document())
+    if (!m_model || !m_workflowService)
         return;
 
     const QString filePath = QFileDialog::getOpenFileName(
@@ -136,7 +136,7 @@ void ProcessFlowTreeView::loadFromFile()
         return;
 
     QString errorMessage;
-    if (!ProcessFlowStore::loadFromFile(filePath, *m_model->document(), &errorMessage)) {
+    if (!m_workflowService->load(filePath, &errorMessage)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "process.flow.view: load '{}' failed: {}",
                   filePath.toStdString(),
@@ -146,13 +146,11 @@ void ProcessFlowTreeView::loadFromFile()
         return;
     }
 
-    m_model->resetFromDocument();
-    expandAll();
 }
 
 void ProcessFlowTreeView::saveToFile()
 {
-    if (!m_model || !m_model->document())
+    if (!m_model || !m_workflowService)
         return;
 
     const QString filePath = QFileDialog::getSaveFileName(
@@ -165,7 +163,7 @@ void ProcessFlowTreeView::saveToFile()
         return;
 
     QString errorMessage;
-    if (!ProcessFlowStore::saveToFile(filePath, *m_model->document(), &errorMessage)) {
+    if (!m_workflowService->save(filePath, &errorMessage)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "process.flow.view: save '{}' failed: {}",
                   filePath.toStdString(),
@@ -175,7 +173,6 @@ void ProcessFlowTreeView::saveToFile()
         return;
     }
 
-    m_model->document()->markClean();
 }
 
 void ProcessFlowTreeView::editCurrentNode(const QModelIndex& index)

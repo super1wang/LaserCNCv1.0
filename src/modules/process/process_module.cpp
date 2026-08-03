@@ -28,7 +28,7 @@
 #include "modules/process/runtime/process_connection_service.h"
 #include "modules/process/runtime/process_status_service.h"
 #include "modules/process/tool/tool_factory.h"
-#include "modules/process/workflow/process_flow_store.h"
+#include "modules/process/workflow/process_workflow_service.h"
 
 #include <QList>
 #include <QCoreApplication>
@@ -224,6 +224,11 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_preflightService = std::make_shared<lcnc::process::ProcessPreflightService>(
         *m_service, *m_deviceCommandQueue);
     kernel.services().registerService<lcnc::process::ProcessPreflightService>(m_preflightService);
+    auto workflowService = std::shared_ptr<lcnc::process::ProcessWorkflowService>(
+        m_workflowService.get(), [](lcnc::process::ProcessWorkflowService*) {});
+    kernel.services().registerService<lcnc::process::ProcessWorkflowService>(workflowService);
+    auto workflowFacade = std::static_pointer_cast<lcnc::process::IProcessWorkflowService>(workflowService);
+    kernel.services().registerService<lcnc::process::IProcessWorkflowService>(workflowFacade);
     m_connectionService = std::make_unique<lcnc::process::ProcessConnectionService>(
         *m_service, *m_deviceCommandQueue, this);
     auto connectionService = std::shared_ptr<lcnc::process::ProcessConnectionService>(
@@ -243,6 +248,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     kernel.services().registerService<ProcessModule>(svc);
     auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
     kernel.services().registerService<lcnc::IProcessFacade>(facade);
+    connect(m_workflowService.get(), &lcnc::process::ProcessWorkflowService::flowChanged,
+            this, &ProcessModule::processFlowChanged);
 
     // 注册自定义信号类型，跨线程发射 / Qt::QueuedConnection 时需要。
     qRegisterMetaType<DigitalOutputDescriptor>("DigitalOutputDescriptor");
@@ -473,14 +480,14 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::messageLogged,
             this, &ProcessModule::setStatusMessage);
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeStateChanged,
-            this, [this](const QString&) { emit processFlowChanged(); });
+            this, [this](const QString&) { m_workflowService->notifyChanged(); });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeStarted,
-            this, [this](const QString&) { emit processFlowChanged(); });
+            this, [this](const QString&) { m_workflowService->notifyChanged(); });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeFinished,
-            this, [this](const QString&) { emit processFlowChanged(); });
+            this, [this](const QString&) { m_workflowService->notifyChanged(); });
     connect(m_workflowExecutor.get(), &lcnc::process::ProcessWorkflowExecutor::nodeFailed,
             this, [this](const QString&, const QString& message) {
-                emit processFlowChanged();
+                m_workflowService->notifyChanged();
                 // 中文翻译：流程节点失败: %1
                 setState(State::Error, tr("Process node failed: %1").arg(message));
             });
@@ -532,7 +539,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                                         ? self->tr("The process is completed")
                                         // 中文翻译：流程完成后安全输出复位失败: %1
                                         : self->tr("Safety output reset failed after process completion: %1").arg(result.error));
-                                emit self->processFlowChanged();
+                                self->m_workflowService->notifyChanged();
                             }, Qt::QueuedConnection);
                         })) {
                     // 中文翻译：流程完成后安全停机命令未能排队
@@ -783,8 +790,8 @@ void ProcessModule::stop()
 ProcessModule::ProcessModule(QObject* parent)
     : QObject(parent)
 {
-    m_processFlowDocument.resetToDefault();
-    m_processFlowDocument.markClean();
+    m_workflowService = std::make_unique<lcnc::process::ProcessWorkflowService>(this);
+    m_workflowService->createNew();
     initializeAxisPositions();
 
     m_simTimer = new QTimer(this);
@@ -1379,7 +1386,7 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage)
     }
 
     const bool hasNormalCutting = containsEnabledNodeType(
-        m_processFlowDocument.rootNodes(), lcnc::process::ProcessNodeType::NormalCutting);
+        m_workflowService->document().rootNodes(), lcnc::process::ProcessNodeType::NormalCutting);
     if (hasNormalCutting) {
         if (!m_cuttingPlanService)
             // 中文翻译：切割计划服务未初始化
@@ -1576,7 +1583,7 @@ void ProcessModule::startWorkflowAfterPreflight()
     emit processingRunStarted();
     if (m_workflowExecutor) {
         QString errorMessage;
-        if (!m_workflowExecutor->start(m_processFlowDocument, &errorMessage)) {
+        if (!m_workflowExecutor->start(m_workflowService->document(), &errorMessage)) {
             // 中文翻译：流程启动失败: %1
             setState(State::Error, tr("Process start failed: %1").arg(errorMessage));
             return;
@@ -1680,9 +1687,7 @@ void ProcessModule::resetEmergencyStop()
 
 void ProcessModule::newProcess()
 {
-    m_processFlowDocument.resetToDefault();
-    m_processFlowDocument.markClean();
-    emit processFlowChanged();
+    m_workflowService->createNew();
     // 中文翻译：已新建流程
     setStatusMessage(tr("New process has been created"));
 }
@@ -1696,7 +1701,7 @@ bool ProcessModule::loadProcess(const QString& filePath)
     }
 
     QString errorMessage;
-    if (!lcnc::process::ProcessFlowStore::loadFromFile(filePath, m_processFlowDocument, &errorMessage)) {
+    if (!m_workflowService->load(filePath, &errorMessage)) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "ProcessModule: load process failed: {}",
                   errorMessage.toStdString());
@@ -1705,7 +1710,6 @@ bool ProcessModule::loadProcess(const QString& filePath)
         return false;
     }
 
-    emit processFlowChanged();
     // 中文翻译：已加载流程: %1
     setStatusMessage(tr("Loaded process: %1").arg(filePath));
     return true;
@@ -1720,13 +1724,12 @@ bool ProcessModule::saveProcess(const QString& filePath)
     }
 
     QString errorMessage;
-    if (!lcnc::process::ProcessFlowStore::saveToFile(filePath, m_processFlowDocument, &errorMessage)) {
+    if (!m_workflowService->save(filePath, &errorMessage)) {
         // 中文翻译：保存流程失败: %1
         setStatusMessage(tr("Save process failed: %1").arg(errorMessage));
         return false;
     }
 
-    m_processFlowDocument.markClean();
     // 中文翻译：已保存流程: %1
     setStatusMessage(tr("Saved process: %1").arg(filePath));
     return true;

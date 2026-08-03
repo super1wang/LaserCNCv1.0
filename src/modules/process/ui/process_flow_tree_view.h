@@ -10,6 +10,7 @@ class QMenu;
 namespace lcnc::process {
 
 class ProcessFlowModel;
+class IProcessWorkflowService;
 
 /**
  * @brief Workflow tree view with process-node actions and edit dispatch.
@@ -21,6 +22,7 @@ public:
     explicit ProcessFlowTreeView(QWidget* parent = nullptr);
 
     void setFlowModel(ProcessFlowModel* model);
+    void setWorkflowService(IProcessWorkflowService* service) { m_workflowService = service; }
     ProcessFlowModel* flowModel() const { return m_model; }
 
 signals:
@@ -43,6 +45,7 @@ private:
     void editNode(const QString& nodeId);
 
     ProcessFlowModel* m_model{nullptr};
+    IProcessWorkflowService* m_workflowService{nullptr};
     QMenu* m_contextMenu{nullptr};
     QMenu* m_addMenu{nullptr};
     QAction* m_deleteAction{nullptr};

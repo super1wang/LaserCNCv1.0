@@ -18,7 +18,6 @@
 #include "modules/process/i_process_facade.h"
 #include "modules/process/runtime/process_run_coordinator.h"
 #include "modules/process/steps/process_step_context.h"
-#include "modules/process/workflow/process_flow_document.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
 
 class QTimer;
@@ -36,6 +35,7 @@ class ProcessConnectionService;
 class ProcessStatusService;
 class ProcessWorkflowExecutor;
 class ProcessSettingsService;
+class ProcessWorkflowService;
 class DeviceCommandQueue;
 struct DeviceCommandResult;
 struct DeviceStatusSnapshot;
@@ -126,8 +126,6 @@ public:
     void setFeedOverride(double factor);
     double feedOverride() const;
 
-    lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
-    const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
     lcnc::process::ProcessSettingsService* settingsService() const { return m_settingsService.get(); }
     QString statusMessage() const override;
 
@@ -229,7 +227,6 @@ private:
     double                m_simPhase{0.0};
     QString               m_statusMessage;
     lcnc::IKernel*        m_kernel{nullptr};
-    lcnc::process::ProcessFlowDocument m_processFlowDocument;
     lcnc::process::ProcessStepContext m_stepContext;
     // Background connect/disconnect/home tasks retain a shared ProcessDeviceRuntime lease so
     // a bounded module shutdown cannot destroy vendor objects while an SDK call
@@ -254,6 +251,7 @@ private:
     std::unique_ptr<lcnc::process::NormalCuttingManager> m_normalCuttingManager;
     std::unique_ptr<lcnc::process::ProcessMonitorService> m_monitorService;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
+    std::unique_ptr<lcnc::process::ProcessWorkflowService> m_workflowService;
     std::atomic_bool      m_normalCuttingActive{false};  ///< 见 setNormalCuttingActive
     lcnc::ModuleTaskScope m_taskScope;
     DeviceOperation       m_deviceOperation{DeviceOperation::None};

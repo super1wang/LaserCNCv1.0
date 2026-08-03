@@ -30,12 +30,15 @@ Visual Studio/MSBuild ACS+GTN Debug 已通过对应 CTest，可作为集成测�
   `motionControl()`、`laserDevice()` 或 `lockDeviceAccess()` 业务调用。
 - 连接/断开和状态轮询已分别迁入 `ProcessConnectionService`、
   `ProcessStatusService`；后者涵盖控制器、外设和安全监控生命周期调度。
+- 工作流当前 schema 的文档所有权、文件读写与变更通知已迁入
+  `ProcessWorkflowService`；流程树和 `MainWindow` 通过该服务契约接线，
+  `ProcessModule` 不再直接解析或保存流程 TOML。
 - MainWindow 已将工作区、工程树和视图状态下沉为三个 controller；CAM 已
   抽出带 revision 校验的 `ToolpathGenerationService`；CAD 算法异常统一在
   module/service 边界记录和转换。
 - 新增 `scripts/run_quality_gates.ps1`，统一空白检查、架构/旧格式扫描、配置、构建和 CTest 入口。
 - 两条 ACS+GTN Debug 路线均成功生成 `x64/Debug/LaserCNC.exe`。
-- 本轮质量树 `build-cmake-quality/` 的 CTest 为 17/17 通过，其中
+- 本轮质量树 `build-cmake-quality/` 的 CTest 为 22/22 通过，其中
   `lcnc_simulator_cmhp_sdk_integration_test` 使用真实
   `acsc_OpenCommSimulator()` 与部署的 `Simulator.prg`，并验证 100 次设备
   线程会话命令和同线程断开/销毁。这不替代 ACS/GTN/真实激光物理硬件验证。
