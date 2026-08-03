@@ -3,6 +3,7 @@
 #include "modules/cad/document/cad_document_registry.h"
 #include "modules/cad/selection/cad_selection_resolver.h"
 #include "modules/cad/services/cad_modeling_session.h"
+#include "modules/cad/services/cad_document_io_service.h"
 #include "modules/cad/services/cad_algorithm_boundary.h"
 #include "modules/cad/services/shape_service.h"
 #include "modules/cad/task/cad_command_dispatcher.h"
@@ -554,6 +555,11 @@ bool CadModule::init(lcnc::IKernel& kernel)
     // 同时以 Phase 7 门面接口注册，供 UI/命令以抽象类型查找。
     auto facadePtr = std::shared_ptr<lcnc::ICadFacade>(svcPtr, static_cast<lcnc::ICadFacade*>(this));
     kernel.services().registerService<lcnc::ICadFacade>(facadePtr);
+    m_documentIoService = std::make_unique<lcnc::cad::CadDocumentIoService>(
+        *lcnc::Kernel::current().projectManager(), this);
+    auto documentIoService = std::shared_ptr<lcnc::cad::CadDocumentIoService>(
+        m_documentIoService.get(), [](lcnc::cad::CadDocumentIoService*) {});
+    kernel.services().registerService<lcnc::cad::CadDocumentIoService>(documentIoService);
 
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "CadModule init done");
@@ -649,8 +655,8 @@ CadModule::CadModule(QObject* parent)
 
 DocumentId CadModule::newDocument(const QString& name)
 {
-    LcncDocument* doc = lcnc::Kernel::current().projectManager()->newProject(name);
-    return doc ? doc->id() : kInvalidDocumentId;
+    return m_documentIoService ? m_documentIoService->createDocument(name)
+                               : kInvalidDocumentId;
 }
 
 DocumentId CadModule::openDocument(const QString& filePath)
@@ -1041,21 +1047,9 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
 bool CadModule::saveDocument(DocumentId id, const QString& path)
 {
     LcncDocument* doc = domainDocumentById(id);
-    if (!doc) {
-        // 中文翻译：保存失败；找不到目标文档
-        emit operationFailed(tr("Save failed"), tr("Target document not found"));
-        return false;
-    }
-    const QString target = path.isEmpty() ? doc->filePath() : path;
-    if (target.isEmpty()) {
-        // 中文翻译：保存失败；未指定保存路径
-        emit operationFailed(tr("Save failed"), tr("No save path specified"));
-        return false;
-    }
     QString err;
-    const bool ok = lcnc::LcncProjectPackage::isProjectPath(target)
-        ? lcnc::Kernel::current().projectManager()->saveProject(target, &err)
-        : lcnc::Kernel::current().projectManager()->exportDomainAsStep(lcnc::ProjectDomain::Workpiece, target, &err);
+    const bool ok = m_documentIoService
+        && m_documentIoService->saveDocument(doc, path, &err);
     if (!ok)
         // 中文翻译：保存失败；保存文档失败
         emit operationFailed(tr("Save failed"), err.isEmpty() ? tr("Failed to save document") : err);
@@ -1123,16 +1117,8 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
 
 void CadModule::closeDocument(DocumentId id)
 {
-    auto* project = lcnc::Kernel::current().projectManager();
-    for (ProjectWorkspaceId workspaceId : project->workspaceIds()) {
-        if (auto* workspace = project->workspace(workspaceId)) {
-            if (workspace->workpieceDocument()
-                && workspace->workpieceDocument()->id() == id) {
-                project->closeWorkspace(workspaceId);
-                return;
-            }
-        }
-    }
+    if (m_documentIoService)
+        (void)m_documentIoService->closeDocument(id);
 }
 
 DocumentId CadModule::importFile(const QString& filePath)

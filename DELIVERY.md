@@ -33,6 +33,8 @@ Visual Studio/MSBuild ACS+GTN Debug 已通过对应 CTest，可作为集成测�
 - 工作流当前 schema 的文档所有权、文件读写与变更通知已迁入
   `ProcessWorkflowService`；流程树和 `MainWindow` 通过该服务契约接线，
   `ProcessModule` 不再直接解析或保存流程 TOML。
+- CAD 新建、保存及关闭的项目事务已迁入 `CadDocumentIoService`；`CadModule`
+  仅保留 facade 转发与后续导入/导出任务接线。
 - MainWindow 已将工作区、工程树和视图状态下沉为三个 controller；CAM 已
   抽出带 revision 校验的 `ToolpathGenerationService`；CAD 算法异常统一在
   module/service 边界记录和转换。

@@ -16,7 +16,7 @@
 
 - [ ] 继续将 `process_module.cpp`（当前约 2,286 行）收敛至 900 行入口门限；`ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService`、`ProcessRunCoordinator` 和 `ProcessWorkflowService` 已落地，workflow 当前格式文档/读写/变更通知及流程树文件操作已脱离模块入口。剩余运行状态组合、手动控制 facade 与 UI 事件出口仍需下沉，且必须保持既有关闭顺序。
 - [ ] 完成 `cam_module.cpp`（当前约 6,606 行）的职责下沉；`ToolpathGenerationService` 已实现并覆盖 stale-result 拒绝，machining-face pipeline、machine calibration 和 display projection 仍待独立 service。
-- [ ] 继续将 `cad_module.cpp`（当前约 2,297 行）的文档 IO、草图/特征流程和选择刷新下沉到正式 `CadDocumentIoService`、`CadModelingController`、`CadSelectionController`；本轮仅完成算法异常边界和部分已有 service 委托。
+- [ ] 继续将 CAD 入口收敛为生命周期与 facade：`CadDocumentIoService` 已接管新建、保存与关闭的项目事务，后续迁移 STEP/IGES/STL/BREP 导入、STEP 导出、异步取消与显示网格准备；草图/特征流程和选择刷新仍待 `CadModelingController`、`CadSelectionController` 下沉。
 - [ ] 收敛 real-laser 配置中旧厂商协议适配器的项目 `/W4` 告警，使该配置也能启用 `/WX`；ACS+GTN 质量预设已达到 `/W4 /WX`。
 
 ## P1：自动化回归

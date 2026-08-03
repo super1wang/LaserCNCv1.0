@@ -6566,6 +6566,17 @@ No available reference surfaces are currently detected.</source>
     </message>
 </context>
 <context>
+    <name>CadDocumentIoService</name>
+    <message>
+        <source>Target document not found</source>
+        <translation>找不到目标文档</translation>
+    </message>
+    <message>
+        <source>No save path specified</source>
+        <translation>未指定保存路径</translation>
+    </message>
+</context>
+<context>
     <name>ProcessWorkflowService</name>
     <message>
         <source>Process file path is empty</source>

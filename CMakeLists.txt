@@ -285,6 +285,8 @@ set(SRCS_MODULE_CAD
     src/modules/cad/document/cad_document_state.cpp
     src/modules/cad/document/cad_document_registry.cpp
     src/modules/cad/services/cad_modeling_session.cpp
+    src/modules/cad/services/cad_document_io_service.h
+    src/modules/cad/services/cad_document_io_service.cpp
     src/modules/cad/services/sketch_manager.cpp
     src/modules/cad/services/shape_service.cpp
     src/modules/cad/selection/cad_selection_resolver.cpp

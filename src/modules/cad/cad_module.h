@@ -25,7 +25,7 @@ class GuiApplication;
 class TaskManager;
 class gp_Vec;
 class gp_Ax1;
-namespace lcnc::cad { class CadDocumentRegistry; class CadModelingSession; class SketchManager; }
+namespace lcnc::cad { class CadDocumentRegistry; class CadDocumentIoService; class CadModelingSession; class SketchManager; }
 namespace lcnc::cad::task { class CadCommandDispatcher; }
 
 /**
@@ -308,6 +308,7 @@ private:
     DocumentId m_selectedSketchDocId{kInvalidDocumentId};
     std::unique_ptr<lcnc::cad::CadModelingSession> m_modelingSession;
     std::unique_ptr<lcnc::cad::CadDocumentRegistry> m_documentRegistry;
+    std::unique_ptr<lcnc::cad::CadDocumentIoService> m_documentIoService;
     std::unique_ptr<lcnc::cad::task::CadCommandDispatcher> m_commandDispatcher;
     lcnc::ModuleTaskScope m_taskScope;
 };
