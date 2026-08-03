@@ -255,6 +255,7 @@ set(SRCS_CORE
     src/core/algorithms/cam/contour_order_planner.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp
+    src/core/task/module_task_scope.cpp
     src/core/command/commands_api.cpp
     src/core/kernel/service_registry.cpp
     src/core/kernel/event_bus.cpp

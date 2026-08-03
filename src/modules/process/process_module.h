@@ -13,6 +13,7 @@
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "core/task/task_manager.h"
+#include "core/task/module_task_scope.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/runtime/process_run_coordinator.h"
@@ -195,8 +196,6 @@ private:
     void stopDeviceMonitoring();
     bool validateProcessingConfiguration(QString* errorMessage);
     void startWorkflowAfterPreflight();
-    void trackOwnedTask(TaskId taskId);
-    void releaseOwnedTask(TaskId taskId);
     /// 请求本模块任务取消并等待；false 表示仍有 worker 未在期限内退出。
     bool cancelOwnedTasks(int timeoutMs);
 
@@ -250,7 +249,7 @@ private:
     std::unique_ptr<lcnc::process::ProcessMonitorService> m_monitorService;
     std::unique_ptr<lcnc::process::ProcessWorkflowExecutor> m_workflowExecutor;
     std::atomic_bool      m_normalCuttingActive{false};  ///< 见 setNormalCuttingActive
-    QSet<TaskId>          m_ownedTaskIds;
+    lcnc::ModuleTaskScope m_taskScope;
     DeviceOperation       m_deviceOperation{DeviceOperation::None};
 
     // ── Ribbon「加工顺序」状态镜像 ────────────────────────────────────────

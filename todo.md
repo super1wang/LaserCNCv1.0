@@ -1,6 +1,6 @@
 # LaserCNC 剩余工作
 
-更新日期：2026-07-30
+更新日期：2026-08-03
 当前审计：[AUDIT.md](AUDIT.md)
 
 本文件只保留未完成事项；已经完成的工作与验证证据不再重复维护。
@@ -14,7 +14,7 @@
 
 ## P1：结构收口
 
-- [ ] 将 `process_module.cpp`（当前约 2,876 行）的连接会话、加工预检、轮询投影继续下沉为 `ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService`；`ProcessRunCoordinator` 已落地，后续迁移必须保持已修正的关闭顺序。
+- [ ] 将 `process_module.cpp`（当前约 2,876 行）的连接会话、加工预检、轮询投影继续下沉为 `ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService`；`ProcessRunCoordinator` 已落地，且 CAD/CAM/Process 的共用任务生命周期作用域已统一，后续迁移必须保持已修正的关闭顺序。
 - [ ] 让 `DeviceCommandQueue` 成为唯一 SDK 执行入口；当前静态扫描仍有 41 处 runtime 外的 `lockDeviceAccess()`、`motionControl()` 或 `laserDevice()` 使用。在全部迁移并完成真机验证前保留 `ProcessDeviceCoordinator` 防御锁。
 - [ ] 完成 `cam_module.cpp`（当前约 6,606 行）的职责下沉；`ToolpathGenerationService` 已实现并覆盖 stale-result 拒绝，machining-face pipeline、machine calibration 和 display projection 仍待独立 service。
 - [ ] 继续将 `cad_module.cpp`（当前约 2,297 行）的文档 IO、草图/特征流程和选择刷新下沉到正式 `CadDocumentIoService`、`CadModelingController`、`CadSelectionController`；本轮仅完成算法异常边界和部分已有 service 委托。

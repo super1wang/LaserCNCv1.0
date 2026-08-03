@@ -538,44 +538,12 @@ void CamModule::stop()
     LCNC_INFO(lcnc::LogCode::Generic, "CamModule stop done");
 }
 
-void CamModule::trackOwnedTask(TaskId taskId)
-{
-    if (taskId != kInvalidTaskId)
-        m_ownedTaskIds.insert(taskId);
-}
-
-void CamModule::releaseOwnedTask(TaskId taskId)
-{
-    m_ownedTaskIds.remove(taskId);
-}
-
 bool CamModule::cancelOwnedTasks(int timeoutMs)
 {
     auto* taskMgr = lcnc::Kernel::current().taskManager();
-    if (!taskMgr || m_ownedTaskIds.isEmpty())
+    if (!taskMgr || m_taskScope.empty())
         return true;
-
-    const QSet<TaskId> taskIds = m_ownedTaskIds;
-    for (TaskId taskId : taskIds)
-        if (taskMgr->isRunning(taskId))
-            taskMgr->requestAbort(taskId);
-
-    QElapsedTimer elapsed;
-    elapsed.start();
-    bool allFinished = true;
-    for (TaskId taskId : taskIds) {
-        if (!taskMgr->isRunning(taskId)) {
-            releaseOwnedTask(taskId);
-            continue;
-        }
-        const int remainingMs = std::max(0, timeoutMs - static_cast<int>(elapsed.elapsed()));
-        if (!taskMgr->waitForDone(taskId, remainingMs) && taskMgr->isRunning(taskId)) {
-            allFinished = false;
-            continue;
-        }
-        releaseOwnedTask(taskId);
-    }
-    return allFinished;
+    return m_taskScope.cancelAndWait(*taskMgr, timeoutMs);
 }
 
 CamModule::CamModule(QObject* parent)
@@ -835,9 +803,9 @@ void CamModule::loadMachine(const QString& filePath)
                 throw std::runtime_error("machine load cancelled");
         });
 
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, normalizedPath](bool ok) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!ok)
             return;
 
@@ -2628,9 +2596,9 @@ TaskId CamModule::separateMachiningFacesAsync()
             }
             result->ok = true;
         });
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, result, sources](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         setProperty("camFaceSeparationRunning", false);
         if (!success || !result->ok) {
             // 中文翻译：分离加工面
@@ -2984,9 +2952,9 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
             }
             result->ok = true;
         });
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, result, faceRevision = faceState.revision](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!success || !result->ok) {
             // 中文翻译：提取轮廓
             emit operationFailed(tr("Extract contours"), result->error.isEmpty()
@@ -3077,9 +3045,9 @@ TaskId CamModule::discretizeCurrentContoursAsync()
             }
             result->ok = true;
         });
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, result, contourRevision = contourState.revision](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!success || !result->ok) {
             // 中文翻译：离散点
             emit operationFailed(tr("discrete points"), result->error.isEmpty()
@@ -3154,9 +3122,9 @@ TaskId CamModule::buildCurrentGeometricToolpathAsync()
             }
             result->ok = true;
         });
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, result, sampleRevision = sampleState.revision](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!success || !result->ok) {
             // 中文翻译：构造刀路
             emit operationFailed(tr("Construct toolpath"), result->error.isEmpty()
@@ -3257,9 +3225,9 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
             result->ok = true;
             progress->setValue(100);
         });
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, result, pathRevision = pathState.revision](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!success || !result->ok) {
             // 中文翻译：求解机床坐标
             emit operationFailed(tr("Solve for machine coordinates"), result->error.isEmpty()
@@ -3854,12 +3822,12 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             progress->setValue(100);
         });
 
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId,
         [this, taskId, result, leadInLength, previousOrder,
          effectiveUseFaceClassification, smoothAngle, deflection,
          generationStamp, reuseCurrentFaces](bool success) {
-            releaseOwnedTask(taskId);
+            m_taskScope.release(taskId);
             if (!success || !result->ok) {
                 // 中文翻译：全局生成刀路
                 emit operationFailed(tr("Generate toolpath globally"),

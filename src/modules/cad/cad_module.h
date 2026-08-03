@@ -7,6 +7,8 @@
 #include <QVector>
 #include <QVariantMap>
 #include <memory>
+
+#include "core/task/module_task_scope.h"
 #include <TDF_Label.hxx>
 #include <TopoDS_Shape.hxx>
 
@@ -298,8 +300,6 @@ signals:
 
 private:
     void refreshDisplay(DocumentId docId);
-    void trackOwnedTask(TaskId taskId);
-    void releaseOwnedTask(TaskId taskId);
     bool cancelOwnedTasks(int timeoutMs);
 
     /// 标记 init() 是否已成功执行（避免重复注册）。
@@ -309,5 +309,5 @@ private:
     std::unique_ptr<lcnc::cad::CadModelingSession> m_modelingSession;
     std::unique_ptr<lcnc::cad::CadDocumentRegistry> m_documentRegistry;
     std::unique_ptr<lcnc::cad::task::CadCommandDispatcher> m_commandDispatcher;
-    QSet<TaskId> m_ownedTaskIds;
+    lcnc::ModuleTaskScope m_taskScope;
 };

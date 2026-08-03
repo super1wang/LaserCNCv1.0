@@ -1,4 +1,5 @@
 #include "core/task/task_manager.h"
+#include "core/task/module_task_scope.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -87,6 +88,26 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("Throwing task did not finish"));
     if (exceptionSuccess)
         return fail(QStringLiteral("Throwing task was reported as successful"));
+
+    // Module shutdown must request cooperative cancellation, wait only for the
+    // configured budget, and release terminal task ids from its local scope.
+    lcnc::ModuleTaskScope scope;
+    scope.track(kInvalidTaskId);
+    bool scopeAbortObserved = false;
+    const TaskId scopeTask = manager.run(QStringLiteral("module scope abort"),
+        [&scopeAbortObserved](TaskProgress* progress) {
+            while (!progress->isAbortRequested())
+                QThread::msleep(1);
+            scopeAbortObserved = true;
+        });
+    scope.track(scopeTask);
+    if (!pumpUntil([&manager, scopeTask] { return manager.isRunning(scopeTask); }, 500))
+        return fail(QStringLiteral("Module scope task did not start"));
+    if (!scope.cancelAndWait(manager, 2000)
+        || !pumpUntil([&scopeAbortObserved] { return scopeAbortObserved; }, 2000)
+        || !scope.empty() || manager.isRunning(scopeTask)) {
+        return fail(QStringLiteral("Module task scope did not cancel and release its task"));
+    }
 
     return 0;
 }

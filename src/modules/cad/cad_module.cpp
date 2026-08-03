@@ -580,44 +580,12 @@ void CadModule::stop()
     LCNC_INFO(lcnc::LogCode::Generic, "CadModule stop done");
 }
 
-void CadModule::trackOwnedTask(TaskId taskId)
-{
-    if (taskId != kInvalidTaskId)
-        m_ownedTaskIds.insert(taskId);
-}
-
-void CadModule::releaseOwnedTask(TaskId taskId)
-{
-    m_ownedTaskIds.remove(taskId);
-}
-
 bool CadModule::cancelOwnedTasks(int timeoutMs)
 {
     auto* taskMgr = lcnc::Kernel::current().taskManager();
-    if (!taskMgr || m_ownedTaskIds.isEmpty())
+    if (!taskMgr || m_taskScope.empty())
         return true;
-
-    const QSet<TaskId> taskIds = m_ownedTaskIds;
-    for (TaskId taskId : taskIds)
-        if (taskMgr->isRunning(taskId))
-            taskMgr->requestAbort(taskId);
-
-    QElapsedTimer elapsed;
-    elapsed.start();
-    bool allFinished = true;
-    for (TaskId taskId : taskIds) {
-        if (!taskMgr->isRunning(taskId)) {
-            releaseOwnedTask(taskId);
-            continue;
-        }
-        const int remainingMs = std::max(0, timeoutMs - static_cast<int>(elapsed.elapsed()));
-        if (!taskMgr->waitForDone(taskId, remainingMs) && taskMgr->isRunning(taskId)) {
-            allFinished = false;
-            continue;
-        }
-        releaseOwnedTask(taskId);
-    }
-    return allFinished;
+    return m_taskScope.cancelAndWait(*taskMgr, timeoutMs);
 }
 
 CadModule::CadModule(QObject* parent)
@@ -761,9 +729,9 @@ DocumentId CadModule::openDocument(const QString& filePath)
                 prog->setValue(100);
             });
 
-        trackOwnedTask(taskId);
+        m_taskScope.track(taskId);
         watchTask(this, taskId, [this, taskId, filePath, pendingWorkspace, loadResult, error, openGeneration](bool success) {
-            releaseOwnedTask(taskId);
+            m_taskScope.release(taskId);
             auto* project = lcnc::Kernel::current().projectManager();
             if (!project->isSingleDocumentOpenCurrent(openGeneration))
                 return;
@@ -896,9 +864,9 @@ DocumentId CadModule::openDocument(const QString& filePath)
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, pendingWorkspace, docId, displayName, sourceFilePath, error, openGeneration](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         auto* project = lcnc::Kernel::current().projectManager();
         if (!project->isSingleDocumentOpenCurrent(openGeneration))
             return;
@@ -974,9 +942,9 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, docId, createdNew, displayName, sourceFilePath, error](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
@@ -1046,9 +1014,9 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, docId, createdNew, displayName, sourceFilePath, error](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!success) {
             if (createdNew)
                 closeDocument(docId);
@@ -1141,9 +1109,9 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
             prog->setValue(100);
         });
 
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, error](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         if (!success) {
             // 中文翻译：导出 STEP 失败
             emit operationFailed(tr("Export STEP failed"),

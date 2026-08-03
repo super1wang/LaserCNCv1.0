@@ -776,45 +776,12 @@ ProcessModule::ProcessModule(QObject* parent)
 
 ProcessModule::~ProcessModule() = default;
 
-void ProcessModule::trackOwnedTask(TaskId taskId)
-{
-    if (taskId != kInvalidTaskId)
-        m_ownedTaskIds.insert(taskId);
-}
-
-void ProcessModule::releaseOwnedTask(TaskId taskId)
-{
-    m_ownedTaskIds.remove(taskId);
-}
-
 bool ProcessModule::cancelOwnedTasks(int timeoutMs)
 {
     auto* taskMgr = lcnc::Kernel::current().taskManager();
-    if (!taskMgr || m_ownedTaskIds.isEmpty())
+    if (!taskMgr || m_taskScope.empty())
         return true;
-
-    const QSet<TaskId> taskIds = m_ownedTaskIds;
-    for (TaskId taskId : taskIds) {
-        if (taskMgr->isRunning(taskId))
-            taskMgr->requestAbort(taskId);
-    }
-
-    QElapsedTimer timeout;
-    timeout.start();
-    bool allFinished = true;
-    for (TaskId taskId : taskIds) {
-        if (!taskMgr->isRunning(taskId)) {
-            releaseOwnedTask(taskId);
-            continue;
-        }
-        const int remainingMs = std::max(0, timeoutMs - static_cast<int>(timeout.elapsed()));
-        if (!taskMgr->waitForDone(taskId, remainingMs) && taskMgr->isRunning(taskId)) {
-            allFinished = false;
-            continue;
-        }
-        releaseOwnedTask(taskId);
-    }
-    return allFinished;
+    return m_taskScope.cancelAndWait(*taskMgr, timeoutMs);
 }
 
 bool ProcessModule::isConnected() const
@@ -1054,9 +1021,9 @@ void ProcessModule::disconnectAllDevices()
             progress->setValue(100);
         });
 
-    trackOwnedTask(taskId);
+    m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId](bool success) {
-        releaseOwnedTask(taskId);
+        m_taskScope.release(taskId);
         m_deviceOperation = DeviceOperation::None;
         m_connected = false;
         if (m_simTimer)
