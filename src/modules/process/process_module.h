@@ -33,6 +33,7 @@ class ProcessMonitorService;
 class ProcessPreflightService;
 class ProcessConnectionService;
 class ProcessManualMotionService;
+class ProcessInteractiveIoService;
 class ProcessStatusService;
 class ProcessWorkflowExecutor;
 class ProcessSettingsService;
@@ -245,6 +246,7 @@ private:
     std::shared_ptr<lcnc::process::ProcessPreflightService> m_preflightService;
     std::unique_ptr<lcnc::process::ProcessConnectionService> m_connectionService;
     std::unique_ptr<lcnc::process::ProcessManualMotionService> m_manualMotionService;
+    std::unique_ptr<lcnc::process::ProcessInteractiveIoService> m_interactiveIoService;
     std::unique_ptr<lcnc::process::ProcessStatusService> m_statusService;
     std::unique_ptr<lcnc::process::ProcessMotionWorkflowService> m_motionStepService;
     std::unique_ptr<lcnc::process::ProcessIoWorkflowService> m_ioStepService;

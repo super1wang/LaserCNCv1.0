@@ -1,4 +1,5 @@
 #include "modules/process/runtime/process_manual_motion_service.h"
+#include "modules/process/runtime/process_interactive_io_service.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -80,6 +81,36 @@ int main(int argc, char* argv[])
         [&stopCompleted](const QString&) { stopCompleted = true; }).accepted);
     assert(spinUntil([&] { return stopCompleted; }));
     assert(continuousCalls == 1 && stopCalls == 1);
+
+    int axisEnableCalls = 0;
+    int outputCalls = 0;
+    lcnc::process::ProcessInteractiveIoService ioService(
+        queue,
+        [&axisEnableCalls](Axis axis, bool enabled) {
+            assert(axis == Axis::A && enabled);
+            ++axisEnableCalls;
+            return lcnc::process::DeviceCommandResult{};
+        },
+        [&outputCalls](const QString& channel, bool value) {
+            assert(channel == QStringLiteral("aLaser") && value);
+            ++outputCalls;
+            return lcnc::process::DeviceCommandResult{};
+        });
+    bool axisEnabled = false;
+    assert(ioService.setAxisEnabled(QStringLiteral("A"), true,
+        [&axisEnabled](const lcnc::process::DeviceCommandResult& result) {
+            assert(result.success);
+            axisEnabled = true;
+        }).accepted);
+    assert(spinUntil([&] { return axisEnabled; }));
+    bool outputSet = false;
+    assert(ioService.setDigitalOutput(QStringLiteral("aLaser"), true,
+        [&outputSet](const lcnc::process::DeviceCommandResult& result) {
+            assert(result.success);
+            outputSet = true;
+        }).accepted);
+    assert(spinUntil([&] { return outputSet; }));
+    assert(axisEnableCalls == 1 && outputCalls == 1);
 
     assert(queue.shutdown(2000));
     return 0;

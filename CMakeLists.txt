@@ -350,6 +350,8 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/process_connection_service.cpp
     src/modules/process/runtime/process_manual_motion_service.h
     src/modules/process/runtime/process_manual_motion_service.cpp
+    src/modules/process/runtime/process_interactive_io_service.h
+    src/modules/process/runtime/process_interactive_io_service.cpp
     src/modules/process/runtime/process_status_service.h
     src/modules/process/runtime/process_status_service.cpp
     src/modules/process/setting/builtin_io_defs.cpp

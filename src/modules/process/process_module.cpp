@@ -27,6 +27,7 @@
 #include "modules/process/runtime/process_preflight_service.h"
 #include "modules/process/runtime/process_connection_service.h"
 #include "modules/process/runtime/process_manual_motion_service.h"
+#include "modules/process/runtime/process_interactive_io_service.h"
 #include "modules/process/runtime/process_status_service.h"
 #include "modules/process/tool/tool_factory.h"
 #include "modules/process/workflow/process_workflow_service.h"
@@ -233,6 +234,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_connectionService = std::make_unique<lcnc::process::ProcessConnectionService>(
         *m_service, *m_deviceCommandQueue, this);
     m_manualMotionService = std::make_unique<lcnc::process::ProcessManualMotionService>(
+        *m_service, *m_deviceCommandQueue, this);
+    m_interactiveIoService = std::make_unique<lcnc::process::ProcessInteractiveIoService>(
         *m_service, *m_deviceCommandQueue, this);
     auto connectionService = std::shared_ptr<lcnc::process::ProcessConnectionService>(
         m_connectionService.get(), [](lcnc::process::ProcessConnectionService*) {});
@@ -1622,91 +1625,50 @@ QMap<QString, double> ProcessModule::currentAxisPositions() const
 void ProcessModule::setAxisEnabled(const QString& axisName, bool enabled)
 {
     const QString normalizedAxis = axisName.trimmed().toUpper();
-    if (normalizedAxis.isEmpty())
+    if (normalizedAxis.isEmpty() || !m_interactiveIoService)
         return;
-
-    const auto eAxis = enum_cast<Axis>(normalizedAxis.toStdString());
-    if (!eAxis.has_value() || !m_service || !m_deviceCommandQueue) {
-        // 中文翻译：%1 轴未注册或设备队列不可用
-        setStatusMessage(tr("%1 axis is not registered or the device queue is unavailable").arg(normalizedAxis));
-        return;
-    }
-
-    const auto service = m_service;
     QPointer<ProcessModule> self(this);
-    if (!m_deviceCommandQueue->submit(
-            [service, axis = eAxis.value(), enabled] {
-                return service->setAxisEnabled(axis, enabled);
-            },
-            TaskPriority::Interactive,
-            [self, normalizedAxis, enabled](const lcnc::process::DeviceCommandResult& result) {
-                QMetaObject::invokeMethod(QCoreApplication::instance(),
-                    [self, result, normalizedAxis, enabled] {
-                        if (!self)
-                            return;
-                        if (!result.success) {
-                            self->setStatusMessage(
-                                // 中文翻译：%1 轴使能切换失败: %2
-                                self->tr("%1 Axis enable switching failed: %2").arg(normalizedAxis, result.error));
-                            return;
-                        }
-                        if (self->m_axisEnabled.value(normalizedAxis, true) != enabled
-                            || !self->m_axisEnabled.contains(normalizedAxis)) {
-                            self->m_axisEnabled.insert(normalizedAxis, enabled);
-                            emit self->axisEnabledChanged(normalizedAxis, enabled);
-                        }
-                        self->setStatusMessage(enabled
-                            // 中文翻译：%1 轴已使能
-                            ? self->tr("%1 axis is enabled").arg(normalizedAxis)
-                            // 中文翻译：%1 轴已禁用
-                            : self->tr("%1 axis is disabled").arg(normalizedAxis));
-                    }, Qt::QueuedConnection);
-            })) {
-        // 中文翻译：%1 轴使能命令未能排队
-        setStatusMessage(tr("%1 axis enable command failed to be queued").arg(normalizedAxis));
-    }
+    m_interactiveIoService->setAxisEnabled(normalizedAxis, enabled,
+        [self, normalizedAxis, enabled](const lcnc::process::DeviceCommandResult& result) {
+            if (!self)
+                return;
+            if (!result.success) {
+                self->setStatusMessage(self->tr("%1 Axis enable switching failed: %2")
+                                       .arg(normalizedAxis, result.error));
+                return;
+            }
+            if (self->m_axisEnabled.value(normalizedAxis, true) != enabled
+                || !self->m_axisEnabled.contains(normalizedAxis)) {
+                self->m_axisEnabled.insert(normalizedAxis, enabled);
+                emit self->axisEnabledChanged(normalizedAxis, enabled);
+            }
+            self->setStatusMessage(enabled ? self->tr("%1 axis is enabled").arg(normalizedAxis)
+                                           : self->tr("%1 axis is disabled").arg(normalizedAxis));
+        });
 }
 
 void ProcessModule::setDigitalOutput(const QString& outputName, bool value)
 {
     const QString name = outputName.trimmed();
-    if (name.isEmpty() || !m_service || !m_deviceCommandQueue)
+    if (name.isEmpty() || !m_interactiveIoService)
         return;
-
-    const QString channel = name;
-    const auto service = m_service;
     QPointer<ProcessModule> self(this);
-    if (!m_deviceCommandQueue->submit(
-            [service, channel, value] {
-                return service->setDigitalOutput(channel, value);
-            },
-            TaskPriority::Interactive,
-            [self, name, channel, value](const lcnc::process::DeviceCommandResult& result) {
-                QMetaObject::invokeMethod(QCoreApplication::instance(),
-                    [self, result, name, channel, value] {
-                        if (!self)
-                            return;
-                        if (!result.success) {
-                            self->setStatusMessage(
-                                // 中文翻译：IO 输出 %1 切换失败: %2
-                                self->tr("IO output %1 switching failed: %2").arg(name, result.error));
-                            return;
-                        }
-                        if (self->m_digitalOutputs.value(name, false) != value
-                            || !self->m_digitalOutputs.contains(name)) {
-                            self->m_digitalOutputs.insert(name, value);
-                            emit self->digitalOutputChanged(name, channel, value);
-                        }
-                        self->setStatusMessage(value
-                            // 中文翻译：%1 已打开
-                            ? self->tr("%1 is open").arg(name)
-                            // 中文翻译：%1 已关闭
-                            : self->tr("%1 is closed").arg(name));
-                    }, Qt::QueuedConnection);
-            })) {
-        // 中文翻译：IO 输出 %1 命令未能排队
-        setStatusMessage(tr("IO output %1 command failed to be queued").arg(name));
-    }
+    m_interactiveIoService->setDigitalOutput(name, value,
+        [self, name, value](const lcnc::process::DeviceCommandResult& result) {
+            if (!self)
+                return;
+            if (!result.success) {
+                self->setStatusMessage(self->tr("IO output %1 switching failed: %2").arg(name, result.error));
+                return;
+            }
+            if (self->m_digitalOutputs.value(name, false) != value
+                || !self->m_digitalOutputs.contains(name)) {
+                self->m_digitalOutputs.insert(name, value);
+                emit self->digitalOutputChanged(name, name, value);
+            }
+            self->setStatusMessage(value ? self->tr("%1 is open").arg(name)
+                                         : self->tr("%1 is closed").arg(name));
+        });
 }
 
 void ProcessModule::setAxisPosition(const QString& axisName, double value)
