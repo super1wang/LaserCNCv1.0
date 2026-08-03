@@ -35,6 +35,10 @@ public:
         TaskId id{kInvalidTaskId};
         std::shared_ptr<QString> error;
     };
+    struct ImportTask {
+        TaskId id{kInvalidTaskId};
+        std::shared_ptr<QString> error;
+    };
 
     DocumentId createDocument(const QString& name = QString()) const;
     bool saveDocument(LcncDocument* document,
@@ -42,6 +46,7 @@ public:
                       QString* errorMessage = nullptr) const;
     bool closeDocument(DocumentId documentId) const;
     ExportTask exportStepAsync(LcncDocument* document, const QString& filePath) const;
+    ImportTask importStlAsync(LcncDocument* document, const QString& filePath) const;
 
 private:
     lcnc::LcncProjectManager& m_projectManager;

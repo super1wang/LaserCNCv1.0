@@ -10,6 +10,7 @@
 
 #include <IFSelect_ReturnStatus.hxx>
 #include <STEPControl_Writer.hxx>
+#include <StlAPI_Reader.hxx>
 #include <TDF_LabelSequence.hxx>
 #include <TopoDS_Shape.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
@@ -108,6 +109,48 @@ CadDocumentIoService::ExportTask CadDocumentIoService::exportStepAsync(
             }
             if (progress->isAbortRequested())
                 throw std::runtime_error("step export cancelled");
+            progress->setValue(100);
+        });
+    return task;
+}
+
+CadDocumentIoService::ImportTask CadDocumentIoService::importStlAsync(
+    LcncDocument* document,
+    const QString& filePath) const
+{
+    ImportTask task;
+    task.error = std::make_shared<QString>();
+    if (!document || filePath.isEmpty()) {
+        // 中文翻译：找不到目标文档；文件不存在: %1
+        *task.error = !document ? tr("Target document not found")
+                                : tr("File does not exist: %1").arg(filePath);
+        return task;
+    }
+
+    task.id = m_taskManager.run(
+        // 中文翻译：导入 STL: %1
+        tr("Import STL: %1").arg(QFileInfo(filePath).fileName()),
+        [document, filePath, error = task.error](TaskProgress* progress) {
+            progress->setRange(0, 100);
+            // 中文翻译：读取 STL...
+            progress->setStepName(QStringLiteral("Read STL..."));
+            if (progress->isAbortRequested())
+                throw std::runtime_error("stl import cancelled");
+
+            TopoDS_Shape shape;
+            StlAPI_Reader reader;
+            reader.Read(shape, filePath.toUtf8().constData());
+            if (shape.IsNull()) {
+                // 中文翻译：无法读取 STL 文件: %1
+                *error = QObject::tr("Unable to read STL file: %1").arg(filePath);
+                throw std::runtime_error("stl import failed");
+            }
+            progress->setValue(80);
+            document->addShapeEntity(shape,
+                                     QFileInfo(filePath).baseName(),
+                                     LcncDocument::EntityKind::Workpiece);
+            if (progress->isAbortRequested())
+                throw std::runtime_error("stl import cancelled");
             progress->setValue(100);
         });
     return task;

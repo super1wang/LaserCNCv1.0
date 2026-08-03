@@ -990,38 +990,21 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
         return kInvalidDocumentId;
     }
 
-    auto error = std::make_shared<QString>();
-    const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        // 中文翻译：导入 STL: %1
-        tr("Import STL: %1").arg(fileInfo.fileName()),
-        [filePath, doc, error](TaskProgress* prog) {
-            prog->setRange(0, 100);
-            // 中文翻译：读取 STL...
-            prog->setStepName(QStringLiteral("Read STL..."));
-            if (prog->isAbortRequested())
-                throw std::runtime_error("stl import cancelled");
-
-            TopoDS_Shape shape;
-            StlAPI_Reader reader;
-            reader.Read(shape, filePath.toUtf8().constData());
-            if (shape.IsNull()) {
-                // 中文翻译：无法读取 STL 文件: %1
-                *error = QObject::tr("Unable to read STL file: %1").arg(filePath);
-                throw std::runtime_error("stl import failed");
-            }
-
-            prog->setValue(80);
-            doc->addShapeEntity(shape, QFileInfo(filePath).baseName(),
-                                LcncDocument::EntityKind::Workpiece);
-            if (prog->isAbortRequested())
-                throw std::runtime_error("stl import cancelled");
-            prog->setValue(100);
-        });
+    const auto task = m_documentIoService
+        ? m_documentIoService->importStlAsync(doc, filePath)
+        : lcnc::cad::CadDocumentIoService::ImportTask{};
+    if (task.id == kInvalidTaskId) {
+        // 中文翻译：导入 STL 失败
+        emit operationFailed(tr("Import STL failed"),
+                             task.error && !task.error->isEmpty()
+                                 ? *task.error : tr("Import STL failed"));
+        return kInvalidDocumentId;
+    }
 
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
-    m_taskScope.track(taskId);
-    watchTask(this, taskId, [this, taskId, docId, createdNew, displayName, sourceFilePath, error](bool success) {
+    m_taskScope.track(task.id);
+    watchTask(this, task.id, [this, task, taskId = task.id, docId, createdNew, displayName, sourceFilePath](bool success) {
         m_taskScope.release(taskId);
         if (!success) {
             if (createdNew)
@@ -1029,7 +1012,7 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
             // 中文翻译：导入 STL 失败
             emit operationFailed(tr("Import STL failed"),
                                  // 中文翻译：导入 STL 失败
-                                 error->isEmpty() ? tr("Import STL failed") : *error);
+                                 task.error->isEmpty() ? tr("Import STL failed") : *task.error);
             return;
         }
 
