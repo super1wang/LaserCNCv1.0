@@ -779,10 +779,11 @@ DocumentId CadModule::openDocument(const QString& filePath)
                docId, ext.toStdString(), filePath.toStdString());
 
     auto error = std::make_shared<QString>();
+    const auto* documentIo = m_documentIoService.get();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
         // 中文翻译：打开: %1
         tr("Open: %1").arg(fileInfo.fileName()),
-        [filePath, ext, pendingWorkspace, error](TaskProgress* prog) {
+        [filePath, ext, pendingWorkspace, error, documentIo](TaskProgress* prog) {
             LcncDocument* doc = pendingWorkspace ? pendingWorkspace->workpieceDocument() : nullptr;
             LCNC_DEBUG(lcnc::LogCode::Generic,
                        "CadModule::openDocument worker begin docId={} ext={} path={}",
@@ -820,34 +821,19 @@ DocumentId CadModule::openDocument(const QString& filePath)
                     throw std::runtime_error("iges open failed");
                 }
             } else if (ext == "stl") {
-                // 中文翻译：读取 STL...
-                prog->setStepName(QStringLiteral("Read STL..."));
-                TopoDS_Shape shape;
-                StlAPI_Reader reader;
-                reader.Read(shape, filePath.toUtf8().constData());
-                if (shape.IsNull()) {
-                    // 中文翻译：无法读取 STL 文件: %1
-                    *error = QObject::tr("Unable to read STL file: %1").arg(filePath);
+                if (!documentIo || !documentIo->importStlIntoDocument(doc,
+                                                                       filePath,
+                                                                       prog,
+                                                                       error.get())) {
                     throw std::runtime_error("stl open failed");
                 }
-
-                prog->setValue(80);
-                doc->addShapeEntity(shape, QFileInfo(filePath).baseName(),
-                                    LcncDocument::EntityKind::Workpiece);
             } else if (ext == "brep") {
-                // 中文翻译：读取 BREP...
-                prog->setStepName(QStringLiteral("Read BREP..."));
-                TopoDS_Shape shape;
-                BRep_Builder builder;
-                BRepTools::Read(shape, filePath.toUtf8().constData(), builder);
-                if (shape.IsNull()) {
-                    // 中文翻译：无法读取 BREP 文件: %1
-                    *error = QObject::tr("Unable to read BREP file: %1").arg(filePath);
+                if (!documentIo || !documentIo->importBrepIntoDocument(doc,
+                                                                        filePath,
+                                                                        prog,
+                                                                        error.get())) {
                     throw std::runtime_error("brep open failed");
                 }
-
-                doc->addShapeEntity(shape, QFileInfo(filePath).baseName(),
-                                    LcncDocument::EntityKind::Workpiece);
             }
 
             // 中文翻译：生成显示网格...

@@ -47,6 +47,15 @@ public:
     bool closeDocument(DocumentId documentId) const;
     ExportTask exportStepAsync(LcncDocument* document, const QString& filePath) const;
     ImportTask importStlAsync(LcncDocument* document, const QString& filePath) const;
+    bool importStlIntoDocument(LcncDocument* document,
+                               const QString& filePath,
+                               TaskProgress* progress,
+                               QString* errorMessage) const;
+    ImportTask importBrepAsync(LcncDocument* document, const QString& filePath) const;
+    bool importBrepIntoDocument(LcncDocument* document,
+                                const QString& filePath,
+                                TaskProgress* progress,
+                                QString* errorMessage) const;
 
 private:
     lcnc::LcncProjectManager& m_projectManager;
