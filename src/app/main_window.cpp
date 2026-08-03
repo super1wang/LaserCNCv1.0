@@ -1183,7 +1183,7 @@ void MainWindow::createRightPanel()
 
     // ── Toolpath panel signals ──────────────────────────────────────────
     connect(m_toolpathPanel, &WidgetToolpathPanel::generateRequested, this,
-            [this]{ m_appContext->camModule()->runAutoPipeline(); });
+            [this]{ m_cmdContainer->findCommand(CmdGenerateToolpath::Name)->execute(); });
     connect(m_toolpathPanel, &WidgetToolpathPanel::separateFacesRequested, this,
             [this]{ m_appContext->camModule()->separateMachiningFacesAsync(); });
     connect(m_toolpathPanel, &WidgetToolpathPanel::pickMachiningFacesRequested, this,

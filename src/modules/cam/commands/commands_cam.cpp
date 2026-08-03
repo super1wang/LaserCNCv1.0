@@ -16,6 +16,7 @@
 #include <QAction>
 #include <QIcon>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QTimer>
 #include <QToolTip>
 
@@ -67,6 +68,46 @@ void CmdGenerateToolpath::execute()
             tr("In manual surface selection mode, please click on the workpiece surface first to pick the processing surface (can be picked multiple times), and then generate the tool path."));
         context()->updateCommandStates();
         return;
+    }
+    // 已存在手动拾取的加工面时，全局生成会把自动分离面叠加到手选面之上。
+    // 询问操作者：清除并重新生成，或沿用当前加工面（不再叠加）。
+    if (cam->hasManualMachiningFaces()
+        && cam->extractionStrategy() != static_cast<int>(ExtractionStrategy::ManualFaceSelection)) {
+        // 中文翻译：生成刀路
+        QMessageBox box(QMessageBox::Question, tr("Generate tool path"),
+            // 中文翻译：已存在加工面。是清除并重新生成，还是使用当前的加工面继续？
+            tr("Machining faces already exist. Clear and regenerate, or use the current machining faces?"),
+            QMessageBox::NoButton);
+        QPushButton* clearBtn = box.addButton(
+            // 中文翻译：清除并重新生成
+            tr("Clear and regenerate"), QMessageBox::AcceptRole);
+        QPushButton* reuseBtn = box.addButton(
+            // 中文翻译：使用当前的加工面继续
+            tr("Use current machining faces"), QMessageBox::AcceptRole);
+        QPushButton* cancelBtn = box.addButton(
+            // 中文翻译：取消
+            tr("Cancel"), QMessageBox::RejectRole);
+        box.setDefaultButton(clearBtn);
+        box.setEscapeButton(cancelBtn);
+        box.exec();
+        QPushButton* clicked = qobject_cast<QPushButton*>(box.clickedButton());
+        if (clicked == clearBtn) {
+            cam->clearMachiningFaces();
+            // 落入下方常规 runAutoPipeline（AutoSeparate）重新自动分离。
+        } else if (clicked == reuseBtn) {
+            if (!cam->runAutoPipeline(CamModule::AutoPipelineFaceMode::ReuseCurrent)) {
+                // 中文翻译：生成刀路
+                QMessageBox::warning(nullptr, tr("Generate tool path"),
+                    // 中文翻译：加工流程未完成，请检查当前阶段的错误信息。
+                    tr("The processing process is not completed, please check the error message at the current stage."));
+            }
+            context()->updateCommandStates();
+            return;
+        } else {
+            // 取消（Cancel / Esc / X）：不启动自动流程。
+            context()->updateCommandStates();
+            return;
+        }
     }
     if (!cam->runAutoPipeline()) {
         // 中文翻译：生成刀路
@@ -235,4 +276,3 @@ void CmdClearMachiningFaces::execute()
     context()->camModule()->clearMachiningFaces();
     context()->updateCommandStates();
 }
-

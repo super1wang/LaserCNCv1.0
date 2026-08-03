@@ -990,6 +990,22 @@ continue?</source>
         <source>The processing process is not completed, please check the error message at the current stage.</source>
         <translation>加工流程未完成，请检查当前阶段的错误信息。</translation>
     </message>
+    <message>
+        <source>Machining faces already exist. Clear and regenerate, or use the current machining faces?</source>
+        <translation>已存在加工面。是清除并重新生成，还是使用当前的加工面继续？</translation>
+    </message>
+    <message>
+        <source>Clear and regenerate</source>
+        <translation>清除并重新生成</translation>
+    </message>
+    <message>
+        <source>Use current machining faces</source>
+        <translation>使用当前的加工面继续</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
 </context>
 <context>
     <name>lcnc::process::CmdHome</name>

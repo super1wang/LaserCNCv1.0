@@ -3290,7 +3290,7 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
     return taskId;
 }
 
-TaskId CamModule::runAutoPipelineAsync()
+TaskId CamModule::runAutoPipelineAsync(AutoPipelineFaceMode mode)
 {
     if (property("camAutoPipelineRunning").toBool()) {
         // 中文翻译：全自动执行；已有自动加工流程正在执行。
@@ -3307,7 +3307,8 @@ TaskId CamModule::runAutoPipelineAsync()
     setProperty("camAutoPipelineRunning", true);
     const TaskId automaticTask = generateToolpathAsync(m_smoothAngle,
                                                         m_useFaceClassification,
-                                                        m_deflection);
+                                                        m_deflection,
+                                                        mode);
     if (automaticTask == kInvalidTaskId) {
         setProperty("camAutoPipelineRunning", false);
         return automaticTask;
@@ -3318,9 +3319,9 @@ TaskId CamModule::runAutoPipelineAsync()
     return automaticTask;
 }
 
-bool CamModule::runAutoPipeline()
+bool CamModule::runAutoPipeline(AutoPipelineFaceMode mode)
 {
-    return runAutoPipelineAsync() != kInvalidTaskId;
+    return runAutoPipelineAsync(mode) != kInvalidTaskId;
 }
 
 bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification, double deflection)
@@ -3560,8 +3561,10 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     return true;
 }
 
-TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassification, double deflection)
+TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassification, double deflection,
+                                        AutoPipelineFaceMode mode)
 {
+    const bool reuseCurrentFaces = (mode == AutoPipelineFaceMode::ReuseCurrent);
     const QList<WorkpieceShapeSource> workpieceSources = collectWorkpieceShapes();
     auto* taskManager = lcnc::Kernel::current().taskManager();
     if (workpieceSources.isEmpty() || !taskManager)
@@ -3607,6 +3610,12 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = smoothAngle;
     params.strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
+    // Reusing the current face set means the operator confirmed "use current
+    // machining faces": drive the worker through the explicit-face path so the
+    // current m_machiningFaces is the sole face input, instead of re-running
+    // auto face selection and stacking detected faces on top of the manual picks.
+    if (reuseCurrentFaces)
+        params.strategy = ExtractionStrategy::ManualFaceSelection;
     if (params.strategy == ExtractionStrategy::ManualFaceSelection)
         params.selectedMachiningFaces = manualMachiningFaces();
     params.deflection = deflection;
@@ -3849,7 +3858,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     watchTask(this, taskId,
         [this, taskId, result, leadInLength, previousOrder,
          effectiveUseFaceClassification, smoothAngle, deflection,
-         generationStamp](bool success) {
+         generationStamp, reuseCurrentFaces](bool success) {
             releaseOwnedTask(taskId);
             if (!success || !result->ok) {
                 // 中文翻译：全局生成刀路
@@ -3902,59 +3911,61 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             m_useFaceClassification = effectiveUseFaceClassification;
             m_deflection = deflection;
             m_workpieceShape = collectWorkpieceShape();
-            // Capture the exact two face groups used by Auto/Tube.  They are
-            // project data, not a renderer-only side effect: later manual
-            // stages continue from these groups without reclassifying.
-            std::vector<MachiningFaceEntry> captured;
-            for (const MachiningFaceEntry& entry : m_machiningFaces)
-                if (entry.manual)
-                    captured.push_back(entry);
-            const ExtractionStrategy currentStrategy =
-                static_cast<ExtractionStrategy>(m_extractionStrategy);
-            for (const WorkpieceShapeSource& src : currentSources) {
-                if (src.shape.IsNull())
-                    continue;
-                auto appendCaptured = [this, &captured, &src](const TopoDS_Face& face,
-                                                               lcnc::cam::MachiningFaceRole role) {
-                    if (face.IsNull())
-                        return;
-                    const auto duplicate = std::find_if(captured.cbegin(), captured.cend(),
-                        [&face, &src, role](const MachiningFaceEntry& entry) {
-                            return entry.workpieceEntry == src.workpieceEntry
-                                && entry.role == role && !entry.face.IsNull()
-                                && entry.face.IsSame(face);
-                        });
-                    if (duplicate != captured.cend())
-                        return;
-                    MachiningFaceEntry entry;
-                    entry.faceId = m_nextMachiningFaceId++;
-                    entry.face = face;
-                    entry.workpieceEntry = src.workpieceEntry;
-                    entry.role = role;
-                    captured.push_back(std::move(entry));
-                };
-                if (currentStrategy == ExtractionStrategy::Auto
-                    || currentStrategy == ExtractionStrategy::TubeClassification) {
-                    const FaceClassification classification = FaceClassifier::classifyFaces(
-                        src.shape, m_smoothAngle);
-                    if (const auto* group = classification.outerGroup())
-                        for (const TopoDS_Face& face : group->faces)
-                            appendCaptured(face, lcnc::cam::MachiningFaceRole::MachiningSurface);
-                    for (const auto* group : classification.crossSectionGroups()) {
-                        if (!group) continue;
-                        for (const TopoDS_Face& face : group->faces)
-                            appendCaptured(face, lcnc::cam::MachiningFaceRole::CrossSection);
+            if (!reuseCurrentFaces) {
+                // Capture the exact two face groups used by Auto/Tube.  They are
+                // project data, not a renderer-only side effect: later manual
+                // stages continue from these groups without reclassifying.
+                std::vector<MachiningFaceEntry> captured;
+                for (const MachiningFaceEntry& entry : m_machiningFaces)
+                    if (entry.manual)
+                        captured.push_back(entry);
+                const ExtractionStrategy currentStrategy =
+                    static_cast<ExtractionStrategy>(m_extractionStrategy);
+                for (const WorkpieceShapeSource& src : currentSources) {
+                    if (src.shape.IsNull())
+                        continue;
+                    auto appendCaptured = [this, &captured, &src](const TopoDS_Face& face,
+                                                                   lcnc::cam::MachiningFaceRole role) {
+                        if (face.IsNull())
+                            return;
+                        const auto duplicate = std::find_if(captured.cbegin(), captured.cend(),
+                            [&face, &src, role](const MachiningFaceEntry& entry) {
+                                return entry.workpieceEntry == src.workpieceEntry
+                                    && entry.role == role && !entry.face.IsNull()
+                                    && entry.face.IsSame(face);
+                            });
+                        if (duplicate != captured.cend())
+                            return;
+                        MachiningFaceEntry entry;
+                        entry.faceId = m_nextMachiningFaceId++;
+                        entry.face = face;
+                        entry.workpieceEntry = src.workpieceEntry;
+                        entry.role = role;
+                        captured.push_back(std::move(entry));
+                    };
+                    if (currentStrategy == ExtractionStrategy::Auto
+                        || currentStrategy == ExtractionStrategy::TubeClassification) {
+                        const FaceClassification classification = FaceClassifier::classifyFaces(
+                            src.shape, m_smoothAngle);
+                        if (const auto* group = classification.outerGroup())
+                            for (const TopoDS_Face& face : group->faces)
+                                appendCaptured(face, lcnc::cam::MachiningFaceRole::MachiningSurface);
+                        for (const auto* group : classification.crossSectionGroups()) {
+                            if (!group) continue;
+                            for (const TopoDS_Face& face : group->faces)
+                                appendCaptured(face, lcnc::cam::MachiningFaceRole::CrossSection);
+                        }
+                    } else if (currentStrategy == ExtractionStrategy::PlanarFaceWires) {
+                        appendCaptured(LaserToolpathBuilder::selectMachiningFace(
+                            src.shape, beamDirectionWpc(src.workpieceEntry)),
+                            lcnc::cam::MachiningFaceRole::MachiningSurface);
                     }
-                } else if (currentStrategy == ExtractionStrategy::PlanarFaceWires) {
-                    appendCaptured(LaserToolpathBuilder::selectMachiningFace(
-                        src.shape, beamDirectionWpc(src.workpieceEntry)),
-                        lcnc::cam::MachiningFaceRole::MachiningSurface);
                 }
+                m_machiningFaces = std::move(captured);
+                pushMachiningFaceRecordsToCamData();
+                refreshMachiningFaceDisplay();
+                emit machiningFacesChanged();
             }
-            m_machiningFaces = std::move(captured);
-            pushMachiningFaceRecordsToCamData();
-            refreshMachiningFaceDisplay();
-            emit machiningFacesChanged();
             // This worker completed all five stages as one atomic automatic
             // operation.  Commit the persisted stage chain only now, after
             // the frozen inputs have passed the stale-result checks above.
@@ -5435,6 +5446,14 @@ void CamModule::setExtractionStrategy(int strategy)
 int CamModule::machiningFaceCount() const
 {
     return static_cast<int>(m_machiningFaces.size());
+}
+
+bool CamModule::hasManualMachiningFaces() const
+{
+    for (const auto& entry : m_machiningFaces)
+        if (entry.manual)
+            return true;
+    return false;
 }
 
 QList<CamModule::MachiningFaceInfo> CamModule::machiningFacesForTree() const

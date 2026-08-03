@@ -229,10 +229,20 @@ public:
     bool rotateShape(const QString& entry, const gp_Ax1& axis, double angleDeg);
     void deleteShape(const QString& entry);
 
+    /// Controls how the automatic pipeline treats an existing machining-face
+    /// set when a global generation is triggered.
+    ///  - \c AutoSeparate re-runs face separation and appends auto-detected
+    ///    faces on top of any manual picks (the default global behavior).
+    ///  - \c ReuseCurrent skips face separation and runs the remaining stages
+    ///    on the current face set as-is, so manual picks are not stacked with
+    ///    auto-detected faces.
+    enum class AutoPipelineFaceMode { AutoSeparate, ReuseCurrent };
+
     // ── Toolpath ─────────────────────────────────────────────────────────
     bool generateToolpath(double smoothAngle, bool useFaceClassification, double deflection = 0.1);
     TaskId generateToolpathAsync(double smoothAngle, bool useFaceClassification,
-                                 double deflection = 0.1);
+                                 double deflection = 0.1,
+                                 AutoPipelineFaceMode mode = AutoPipelineFaceMode::AutoSeparate);
     void clearToolpath();
 
     // ── Explicit CAM pipeline ───────────────────────────────────────────
@@ -255,9 +265,11 @@ public:
     TaskId buildCurrentGeometricToolpathAsync();
     TaskId solveCurrentGeometricToolpathAsync();
     /// Starts the automatic pipeline after face separation.  Remaining stages
-    /// are scheduled one-by-one as cancellable TaskManager jobs.
-    TaskId runAutoPipelineAsync();
-    bool runAutoPipeline();
+    /// are scheduled one-by-one as cancellable TaskManager jobs.  \p mode
+    /// selects how the existing machining-face set is treated (see
+    /// \c AutoPipelineFaceMode).
+    TaskId runAutoPipelineAsync(AutoPipelineFaceMode mode = AutoPipelineFaceMode::AutoSeparate);
+    bool runAutoPipeline(AutoPipelineFaceMode mode = AutoPipelineFaceMode::AutoSeparate);
     lcnc::cam::CamPipelineStageState pipelineStageState(lcnc::cam::CamPipelineStage stage) const;
 
     // 刀路持久化（cam_toolpath.toml + points.bin）已下沉到 core
@@ -342,6 +354,8 @@ public:
     /// @name Manual machining-face selection (ManualFaceSelection strategy)
     /// @{
     int    machiningFaceCount() const;
+    /// True when the current face set contains any manually picked face.
+    bool   hasManualMachiningFaces() const;
     QList<MachiningFaceInfo> machiningFacesForTree() const;
     void   addMachiningFace(const TopoDS_Face& face);
     bool   removeMachiningFace(std::uint64_t faceId);
