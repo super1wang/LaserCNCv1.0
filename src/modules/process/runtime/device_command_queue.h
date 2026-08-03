@@ -72,7 +72,9 @@ public:
     /**
      * @brief Submit a bounded command and wait outside the GUI thread.
      *
-     * This is intended for the workflow orchestration thread. A timeout does
+     * This is intended for the workflow orchestration thread.  The Stop lane
+     * is additionally permitted during GUI-thread module shutdown, where the
+     * application must synchronously retain or release device ownership. A timeout does
      * not cancel an already-running vendor call; individual device commands
      * must therefore remain short and cancellation-aware.
      */
@@ -84,6 +86,8 @@ public:
     bool submitWorkflow(Command command);
     /// Rejects new non-Stop work while preserving the safety lane.
     void beginStopOnly();
+    /// Reopens non-Stop lanes after a successful, explicitly verified recovery.
+    void endStopOnly();
     bool shutdown(int timeoutMs = 5000);
 
     bool isWorkerThread() const;
@@ -122,6 +126,7 @@ private:
     void markTimedOut(DeviceCommandId id);
     static DeviceCommandResult completionResult(DeviceCommandCompletion completion,
                                                 QString error = {});
+    static void notifyCompletion(Completion completion, const DeviceCommandResult& result);
     void runWorker();
 
     mutable QMutex m_mutex;

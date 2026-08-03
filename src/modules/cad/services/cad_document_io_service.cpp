@@ -61,6 +61,15 @@ bool CadDocumentIoService::saveDocument(LcncDocument* document,
         return false;
     }
 
+    // saveProject currently saves the active workspace.  Refuse a mismatched
+    // document rather than silently serializing another workspace.
+    if (m_projectManager.workpieceDocument() != document) {
+        if (errorMessage)
+            // 中文翻译：目标文档不是活动工程
+            *errorMessage = tr("Target document is not the active project");
+        return false;
+    }
+
     const QString targetPath = path.isEmpty() ? document->filePath() : path;
     if (targetPath.isEmpty()) {
         if (errorMessage)
@@ -176,11 +185,13 @@ bool CadDocumentIoService::importStlIntoDocument(LcncDocument* document,
             *errorMessage = QObject::tr("Unable to read STL file: %1").arg(filePath);
         return false;
     }
+    // Cancellation is transactional up to this commit point: do not report a
+    // cancelled import after it has already changed the target document.
+    if (progress && progress->isAbortRequested())
+        return false;
     document->addShapeEntity(shape,
                              QFileInfo(filePath).baseName(),
                              LcncDocument::EntityKind::Workpiece);
-    if (progress && progress->isAbortRequested())
-        return false;
     if (progress)
         progress->setValue(100);
     return true;
@@ -230,11 +241,12 @@ bool CadDocumentIoService::importBrepIntoDocument(LcncDocument* document,
             *errorMessage = QObject::tr("Unable to read BREP file: %1").arg(filePath);
         return false;
     }
+    // See STL import above: commit only after the final cancellation check.
+    if (progress && progress->isAbortRequested())
+        return false;
     document->addShapeEntity(shape,
                              QFileInfo(filePath).baseName(),
                              LcncDocument::EntityKind::Workpiece);
-    if (progress && progress->isAbortRequested())
-        return false;
     if (progress)
         progress->setValue(100);
     return true;
@@ -384,6 +396,9 @@ bool CadDocumentIoService::prepareDisplayMesh(LcncDocument* document,
                 return false;
             }
         } catch (const Standard_Failure& exception) {
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "CAD display mesh generation failed: {}",
+                     exception.GetMessageString());
             if (errorMessage)
                 // 中文翻译：模型显示网格生成失败: %1
                 *errorMessage = QObject::tr("Model display mesh generation failed: %1")

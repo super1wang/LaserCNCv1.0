@@ -7,6 +7,7 @@
 #include <QString>
 #include <QList>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 
@@ -47,8 +48,12 @@ public:
     std::shared_ptr<ProjectWorkspace> createDetachedWorkspace(const QString& name = QString());
     ProjectWorkspaceId adoptWorkspace(const std::shared_ptr<ProjectWorkspace>& workspace,
                                       bool emitProjectOpened = false);
+    /// Gives borrowers a veto point before a workspace releases its documents.
+    /// A false result leaves the workspace intact for a later retry.
+    using WorkspaceCloseGuard = std::function<bool(ProjectWorkspaceId)>;
+    void setWorkspaceCloseGuard(WorkspaceCloseGuard guard);
     bool closeWorkspace(ProjectWorkspaceId id);
-    void closeAllWorkspaces();
+    [[nodiscard]] bool closeAllWorkspaces();
     void setActiveWorkspace(ProjectWorkspaceId id);
     std::uint64_t beginSingleDocumentOpen();
     bool isSingleDocumentOpenCurrent(std::uint64_t generation) const;
@@ -122,6 +127,7 @@ private:
     std::unique_ptr<LcncDocument> m_machineDocument;       ///< 内部 owned 兜底；attachMachineDocument 后被借用指针取代。
     LcncDocument*                 m_machineBorrowed{nullptr}; ///< CAM 工作台登记的"借用"机台 doc（非拥有视图路由引用）。
     std::map<ProjectWorkspaceId, std::shared_ptr<ProjectWorkspace>> m_workspaces;
+    WorkspaceCloseGuard m_workspaceCloseGuard;
     ProjectWorkspaceId m_activeWorkspaceId{kInvalidProjectWorkspaceId};
     DocumentOpenMode m_documentOpenMode{DocumentOpenMode::MultiDocument};
     std::uint64_t m_singleDocumentOpenGeneration{0};

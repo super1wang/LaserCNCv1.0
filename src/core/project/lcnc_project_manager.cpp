@@ -133,6 +133,11 @@ bool LcncProjectManager::closeWorkspace(ProjectWorkspaceId id)
     if (it == m_workspaces.end())
         return false;
 
+    // The workspace owns the document borrowed by module tasks.  Do not erase
+    // it if a borrower cannot reach a safe cancellation point within its budget.
+    if (m_workspaceCloseGuard && !m_workspaceCloseGuard(id))
+        return false;
+
     const bool wasActive = (m_activeWorkspaceId == id);
     emit workspaceAboutToClose(id);
     m_workspaces.erase(it);
@@ -155,11 +160,19 @@ bool LcncProjectManager::closeWorkspace(ProjectWorkspaceId id)
     return true;
 }
 
-void LcncProjectManager::closeAllWorkspaces()
+void LcncProjectManager::setWorkspaceCloseGuard(WorkspaceCloseGuard guard)
+{
+    m_workspaceCloseGuard = std::move(guard);
+}
+
+bool LcncProjectManager::closeAllWorkspaces()
 {
     QList<ProjectWorkspaceId> ids = workspaceIds();
-    for (ProjectWorkspaceId id : ids)
-        closeWorkspace(id);
+    for (ProjectWorkspaceId id : ids) {
+        if (!closeWorkspace(id))
+            return false;
+    }
+    return true;
 }
 
 void LcncProjectManager::setActiveWorkspace(ProjectWorkspaceId id)
@@ -182,22 +195,26 @@ void LcncProjectManager::setActiveWorkspace(ProjectWorkspaceId id)
 
 std::uint64_t LcncProjectManager::beginSingleDocumentOpen()
 {
-    const std::uint64_t generation = ++m_singleDocumentOpenGeneration;
-    if (m_documentOpenMode == DocumentOpenMode::SingleDocument)
-        closeAllWorkspaces();
-    return generation;
+    if (m_documentOpenMode == DocumentOpenMode::SingleDocument
+        && !closeAllWorkspaces()) {
+        return 0;
+    }
+    return ++m_singleDocumentOpenGeneration;
 }
 
 bool LcncProjectManager::isSingleDocumentOpenCurrent(std::uint64_t generation) const
 {
-    return m_documentOpenMode != DocumentOpenMode::SingleDocument
-           || generation == m_singleDocumentOpenGeneration;
+    return generation != 0
+           && (m_documentOpenMode != DocumentOpenMode::SingleDocument
+               || generation == m_singleDocumentOpenGeneration);
 }
 
 LcncDocument* LcncProjectManager::newProject(const QString& name)
 {
-    if (m_documentOpenMode == DocumentOpenMode::SingleDocument)
-        closeAllWorkspaces();
+    if (m_documentOpenMode == DocumentOpenMode::SingleDocument
+        && !closeAllWorkspaces()) {
+        return nullptr;
+    }
 
     auto workspace = createDetachedWorkspace(defaultProjectName(name));
     resetWorkspace(workspace.get(), defaultProjectName(name));
@@ -220,8 +237,13 @@ LcncDocument* LcncProjectManager::openProject(const QString& filePath, QString* 
         return nullptr;
     }
 
-    if (m_documentOpenMode == DocumentOpenMode::SingleDocument)
-        closeAllWorkspaces();
+    if (m_documentOpenMode == DocumentOpenMode::SingleDocument
+        && !closeAllWorkspaces()) {
+        if (errorMsg)
+            // 中文翻译：当前工程仍有后台任务，无法关闭
+            *errorMsg = tr("The current project still has background tasks and cannot be closed");
+        return nullptr;
+    }
 
     const QString packagePath = LcncProjectPackage::packageDirectory(filePath);
     auto workspace = createDetachedWorkspace(QFileInfo(packagePath).completeBaseName());
@@ -324,8 +346,13 @@ LcncDocument* LcncProjectManager::importWorkpieceModel(const QString& filePath, 
         return openProject(filePath, errorMsg);
 
     QFileInfo fileInfo(filePath);
-    if (m_documentOpenMode == DocumentOpenMode::SingleDocument)
-        closeAllWorkspaces();
+    if (m_documentOpenMode == DocumentOpenMode::SingleDocument
+        && !closeAllWorkspaces()) {
+        if (errorMsg)
+            // 中文翻译：当前工程仍有后台任务，无法关闭
+            *errorMsg = tr("The current project still has background tasks and cannot be closed");
+        return nullptr;
+    }
 
     auto workspace = createDetachedWorkspace(fileInfo.completeBaseName());
     LcncDocument* target = workspace->workpieceDocument();

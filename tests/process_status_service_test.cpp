@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QSemaphore>
 #include <QThread>
 
 #include <atomic>
@@ -82,6 +83,50 @@ int main(int argc, char* argv[])
     service.requestPeripheralPoll();
     QCoreApplication::processEvents();
     assert(hardwareCalls == 1 && peripheralCalls == 1);
+
+    QSemaphore firstPollEntered;
+    QSemaphore releaseFirstPoll;
+    std::atomic_int generationPollCalls{0};
+    lcnc::process::ProcessStatusService generationService(
+        queue,
+        [&firstPollEntered, &releaseFirstPoll, &generationPollCalls](const QStringList&, const QVector<QPair<QString, QString>>&) {
+            const int call = ++generationPollCalls;
+            if (call == 1) {
+                firstPollEntered.release();
+                releaseFirstPoll.acquire();
+            }
+            lcnc::process::DeviceStatusSnapshot snapshot;
+            snapshot.connected = true;
+            snapshot.axes.push_back({QStringLiteral("X"), static_cast<double>(call), true, true});
+            return snapshot;
+        },
+        [] { return lcnc::process::DevicePeripheralSnapshot{}; });
+    generationService.setRequestProvider([] {
+        lcnc::process::ProcessStatusRequest request;
+        request.connected = true;
+        request.simulationMode = true;
+        request.acsSimulator = true;
+        request.axisNames = {QStringLiteral("X")};
+        return request;
+    });
+    int generationDeliveries = 0;
+    double deliveredPosition = 0.0;
+    generationService.setHardwareHandler([&](const lcnc::process::DeviceCommandResult& result,
+                                              const lcnc::process::DeviceStatusSnapshot& snapshot) {
+        assert(result.success);
+        ++generationDeliveries;
+        deliveredPosition = snapshot.axes.front().pos;
+    });
+    generationService.start();
+    assert(firstPollEntered.tryAcquire(1, 2000));
+    generationService.stop();
+    generationService.start();
+    releaseFirstPoll.release();
+    assert(spinUntil([&] { return generationDeliveries == 1; }));
+    assert(generationPollCalls == 2);
+    assert(deliveredPosition == 2.0);
+    generationService.stop();
+
     assert(queue.shutdown(2000));
     return 0;
 }

@@ -112,6 +112,21 @@ int main(int argc, char* argv[])
     assert(spinUntil([&] { return outputSet; }));
     assert(axisEnableCalls == 1 && outputCalls == 1);
 
+    bool lockedCompletion = false;
+    lcnc::process::ProcessInteractiveIoService lockedIoService(
+        queue,
+        [](Axis, bool) { return lcnc::process::DeviceCommandResult{}; },
+        [](const QString&, bool) { return lcnc::process::DeviceCommandResult{}; },
+        nullptr,
+        [] { return false; });
+    assert(!lockedIoService.setDigitalOutput(QStringLiteral("aLaser"), true,
+        [&lockedCompletion](const lcnc::process::DeviceCommandResult& result) {
+            assert(!result.success);
+            assert(result.error.contains(QStringLiteral("locked")));
+            lockedCompletion = true;
+        }).accepted);
+    assert(spinUntil([&] { return lockedCompletion; }));
+
     assert(queue.shutdown(2000));
     return 0;
 }

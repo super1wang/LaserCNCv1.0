@@ -8,10 +8,10 @@
 | 阶段 | 范围 | 状态 | 证据 / 后续 |
 | --- | --- | --- | --- |
 | 1 | 共用模块任务生命周期骨架 | 已完成 | `ModuleTaskScope` 统一 CAD、CAM、Process 的任务跟踪、协作取消和有限等待；见 v1.3.2。 |
-| 2 | Process typed executor 与入口下沉 | 进行中 | `ProcessConnectionService` 接管连接/断开队列事务，`ProcessPreflightService` 接管 generation 化预检，`ProcessStatusService` 接管 150 ms 控制器、2 s 外设与安全监控启停调度，`ProcessWorkflowService` 独占当前 schema 流程文档、文件读写及变更出口，`ProcessManualMotionService` 与 `ProcessInteractiveIoService` 分别独占手动运动、轴使能和数字 IO 的请求校验、优先级和 GUI completion；流程树与 `MainWindow` 通过 workflow 契约接线。普通切割 sink 生命周期和轮廓前二次健康门禁已收回 typed runtime。runtime 外原始设备指针/锁 API 已清零并由架构扫描防回退。仍需继续瘦身运行状态与 UI facade 组合。 |
-| 3 | CAM service 下沉 | 进行中 | `ToolpathGenerationService` 保证 generation 结果的 revision 校验；`CamDisplayProjectionService` 已独占加工面 AIS 对象、可见性投影和 GUI viewer 刷新；`MachiningFacePipelineService` 已持有集合、稳定 ID、revision、持久化快照、自动/手动合并、去重、角色边界校验、重绑、同步/异步分离及全局生成后的面捕获提交。机台标定与其余刀路/机台投影仍待迁移。 |
-| 4 | CAD service/controller 下沉 | 进行中 | `CadDocumentIoService` 已接管新建、保存、关闭、STEP 导出、STEP/IGES/STL/BREP 解析及显示网格准备；工程包导入事务、建模和选择控制器仍待迁移。 |
-| 5 | MainWindow controller 下沉与总门禁 | 进行中 | 工程树已改为只读 CAD/CAM projection contract；`ProjectExplorerModel` 不再依赖具体 Module。`WorkspacePresenter`、`ViewStateController` 和 `CadTaskPanelController` 已接管工作区视图、显示状态持久化，以及 CAD TaskPanel 的快照投影、预览和草图 overlay 交互；`ProjectExplorerController` 已接管轮廓定位、多选、CAD 条目选择、拖动排序快照和节点可见性意图/级联。命令、当前节点选择及状态写回仍通过既有 facade；右键菜单、最近文件和窗口级接线仍待迁移，并需执行最终矩阵验证。 |
+| 2 | Process typed executor 与入口下沉 | 进行中（主安全事务已修） | typed runtime、连接、预检、状态、workflow、手动运动和交互 IO service 已落地。普通 Stop 现等待安全输出/断开 completion 后才进入 `Stopped`；E-stop 开启 stop-only 门禁，交互 IO 被锁定，恢复经 executor 复核；状态服务以 generation 丢弃旧轮询 completion。仍需补全 Stop/E-stop 的失败、超时与 100 次关闭回归。 |
+| 3 | CAM service 下沉 | 进行中（immutable/投影回归待修） | `ToolpathGenerationService` 的 stale-result 校验已落地；自动加工面以 workpiece entry、role、签名复用稳定 ID；AIS 按 document 保存 owning context 并在 context 更换前清理旧对象。仍需移除 mutable entries、增加双工作区 offscreen 回归，并迁移机台标定与其余投影。 |
+| 4 | CAD service/controller 下沉 | 进行中（事务待修） | `CadDocumentIoService` 已承接新建、保存、关闭、STEP 导出、STEP/IGES/STL/BREP 解析及显示网格准备。关闭前现取消模块拥有任务，项目管理器直关 workspace 也受关闭守卫约束：任务超时会拒绝本次关闭而保留 document；非活动文档保存被明确拒绝，STL/BREP 在最后取消检查后才提交；但 worker 仍持有并直接修改裸 `LcncDocument*`，STEP/IGES 仍非 detached 原子提交。 |
+| 5 | MainWindow controller 下沉与总门禁 | 进行中 | 工程树读取已开始使用 CAD/CAM projection contract，Workspace/ViewState/TaskPanel/ProjectExplorer controller 已承担部分职责。但 `AppContext`、MainWindow、commands、module UI 和新 `CadTaskPanelController` 仍直接依赖具体 Module；预览与执行参数映射还有重复。下一阶段以切断 concrete Module 耦合为完成条件，不再设置硬性行数目标。 |
 
 ## 当前约束
 
@@ -20,3 +20,4 @@
 - 本阶段不改变 `.lcnc v4`、CAM v4、workflow 当前 schema 或 Process settings
   schema v2，也不恢复历史格式兼容。
 - `SimulatorCMHP` 仅作为 ACS SDK 模拟器自动化证据，不等同于物理设备验证。
+- 2026-08-03 文件级审阅的缺陷、证据和优先级以 `AUDIT.md` 与 `todo.md` 为准；此前版本交付文档只记录当时验证，不覆盖后续审阅发现。

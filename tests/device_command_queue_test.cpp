@@ -26,6 +26,15 @@ int main(int argc, char* argv[])
     if (!queue.start())
         return fail(QStringLiteral("Device command queue did not start"));
 
+    const auto guiNormalWait = queue.executeAndWait(
+        [] { return lcnc::process::DeviceCommandResult{}; }, TaskPriority::Normal, 100);
+    if (guiNormalWait.completion != lcnc::process::DeviceCommandCompletion::Failed)
+        return fail(QStringLiteral("GUI thread was allowed to block a normal device command"));
+    const auto guiStopWait = queue.executeAndWait(
+        [] { return lcnc::process::DeviceCommandResult{}; }, TaskPriority::Stop, 1000);
+    if (!guiStopWait.success)
+        return fail(QStringLiteral("GUI-thread shutdown Stop command did not complete"));
+
     QMutex orderMutex;
     QStringList order;
     QSemaphore normalStarted;
@@ -219,15 +228,43 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("Exception did not complete as Failed"));
     }
 
+    lcnc::process::DeviceCommandQueue completionThrowQueue;
+    if (!completionThrowQueue.start())
+        return fail(QStringLiteral("Completion-throw queue did not start"));
+    QSemaphore completionThrowCommandRan;
+    QSemaphore completionThrowFollowUpRan;
+    int throwingCompletionCalls = 0;
+    if (!completionThrowQueue.submit(
+            [&] {
+                completionThrowCommandRan.release();
+                return lcnc::process::DeviceCommandResult{};
+            },
+            TaskPriority::Normal,
+            [&](const lcnc::process::DeviceCommandResult&) {
+                ++throwingCompletionCalls;
+                throw std::runtime_error("expected completion failure");
+            })
+        || !completionThrowCommandRan.tryAcquire(1, 1000)
+        || !completionThrowQueue.submit([&] { completionThrowFollowUpRan.release(); })
+        || !completionThrowFollowUpRan.tryAcquire(1, 1000)
+        || throwingCompletionCalls != 1
+        || !completionThrowQueue.shutdown(2000)) {
+        return fail(QStringLiteral("Throwing completion was retried or stopped the device thread"));
+    }
+
     lcnc::process::DeviceCommandQueue stopOnlyQueue;
     if (!stopOnlyQueue.start())
         return fail(QStringLiteral("Stop-only queue did not start"));
     stopOnlyQueue.beginStopOnly();
     if (stopOnlyQueue.submit([] {}, TaskPriority::Polling)
         || stopOnlyQueue.submit([] {}, TaskPriority::Workflow)
-        || !stopOnlyQueue.submitStop([] {})
-        || !stopOnlyQueue.shutdown(2000)) {
+        || !stopOnlyQueue.submitStop([] {})) {
         return fail(QStringLiteral("Stop-only admission policy failed"));
+    }
+    stopOnlyQueue.endStopOnly();
+    if (!stopOnlyQueue.submit([] {}, TaskPriority::Polling)
+        || !stopOnlyQueue.shutdown(2000)) {
+        return fail(QStringLiteral("Stop-only recovery policy failed"));
     }
 
     lcnc::process::DeviceCommandQueue lifecycleQueue;

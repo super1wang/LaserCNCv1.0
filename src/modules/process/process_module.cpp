@@ -236,7 +236,11 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_manualMotionService = std::make_unique<lcnc::process::ProcessManualMotionService>(
         *m_service, *m_deviceCommandQueue, this);
     m_interactiveIoService = std::make_unique<lcnc::process::ProcessInteractiveIoService>(
-        *m_service, *m_deviceCommandQueue, this);
+        *m_service, *m_deviceCommandQueue, this,
+        [this] {
+            return m_state != State::EmergencyStop && !m_emergencyRecoveryRequired
+                && !m_emergencyRecoveryInFlight;
+        });
     auto connectionService = std::shared_ptr<lcnc::process::ProcessConnectionService>(
         m_connectionService.get(), [](lcnc::process::ProcessConnectionService*) {});
     kernel.services().registerService<lcnc::process::ProcessConnectionService>(connectionService);
@@ -474,9 +478,17 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 QMetaObject::invokeMethod(QCoreApplication::instance(), [self, emergency, result] {
                     if (!self)
                         return;
-                    if (!result.success && emergency)
-                        // 中文翻译：急停触发后安全输出复位失败
-                        self->setStatusMessage(self->tr("Safety output reset fails after emergency stop is triggered"));
+                    if (!result.success) {
+                        const QString message = emergency
+                            // 中文翻译：急停触发后安全输出复位失败
+                            ? self->tr("Safety output reset fails after emergency stop is triggered")
+                            // 中文翻译：停止后安全输出复位失败
+                            : self->tr("Safety output reset fails after stop is triggered");
+                        if (emergency || !self->m_stopInFlight)
+                            self->setState(State::Error, message);
+                        else
+                            self->setStatusMessage(message);
+                    }
                 }, Qt::QueuedConnection);
             });
         if (!queued && emergency)
@@ -1319,6 +1331,11 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage)
 
 void ProcessModule::runStart()
 {
+    if (m_stopInFlight || m_emergencyRecoveryRequired || m_emergencyRecoveryInFlight) {
+        // 中文翻译：安全停止或急停恢复尚未完成
+        setStatusMessage(tr("Safety stop or emergency recovery has not completed"));
+        return;
+    }
     if (m_state == State::EmergencyStop) {
         // 中文翻译：急停状态，复位后才能运行
         setStatusMessage(tr("Emergency stop state, can only be run after reset."));
@@ -1497,16 +1514,20 @@ void ProcessModule::runPause()
 
 void ProcessModule::runStop()
 {
+    if (m_stopInFlight)
+        return;
     ++m_runRequestGeneration;
     m_simTimer->stop();
-    bool workflowIssuedStop = false;
     if (m_workflowExecutor)
     {
-        workflowIssuedStop = m_workflowExecutor->state()
-            != lcnc::process::ProcessWorkflowExecutor::State::Idle;
         m_workflowExecutor->stop();
     }
-    if (!workflowIssuedStop && m_deviceCommandQueue) {
+    if (m_simulationMode) {
+        setState(State::Stopped, tr("Simulation stop request submitted"));
+        return;
+    }
+    if (m_deviceCommandQueue) {
+        m_stopInFlight = true;
         const auto service = m_service;
         QPointer<ProcessModule> self(this);
         if (!m_deviceCommandQueue->submit(
@@ -1515,23 +1536,38 @@ void ProcessModule::runStop()
                 TaskPriority::Stop,
                 [self](const lcnc::process::DeviceCommandResult& result) {
                     QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result] {
-                        if (self && !result.success)
-                            // 中文翻译：运行已停止，但安全输出复位失败
-                            self->setStatusMessage(self->tr("Operation stopped but safety output reset failed"));
+                        if (!self)
+                            return;
+                        self->m_stopInFlight = false;
+                        if (!result.success) {
+                            // 中文翻译：运行停止时安全输出复位失败
+                            self->setState(State::Error,
+                                           self->tr("Safety output reset failed while stopping: %1")
+                                               .arg(result.error));
+                            return;
+                        }
+                        // 中文翻译：停止请求已完成且安全输出已复位
+                        self->setState(State::Stopped,
+                                       self->tr("Stop completed and safety outputs reset"));
                     }, Qt::QueuedConnection);
                 })) {
+            m_stopInFlight = false;
             // 中文翻译：停止命令未能排队
             setState(State::Error, tr("Stop command failed to queue"));
             return;
         }
+        return;
     }
-    // 中文翻译：仿真停止请求已提交；停止请求已提交
-    setState(State::Stopped, m_simulationMode ? tr("Simulation stop request submitted") : tr("Stop request submitted"));
+    setState(State::Error, tr("Stop command queue is unavailable"));
 }
 
 void ProcessModule::emergencyStop()
 {
     ++m_runRequestGeneration;
+    m_emergencyRecoveryRequired = true;
+    m_emergencyRecoveryInFlight = false;
+    if (m_deviceCommandQueue)
+        m_deviceCommandQueue->beginStopOnly();
     m_simTimer->stop();
     bool workflowIssuedStop = false;
     if (m_workflowExecutor)
@@ -1557,9 +1593,51 @@ void ProcessModule::emergencyStop()
 
 void ProcessModule::resetEmergencyStop()
 {
-    if (m_state != State::EmergencyStop)
+    if (m_state != State::EmergencyStop || m_emergencyRecoveryInFlight)
         return;
-    setState(State::Idle, defaultStatusText(m_simulationMode, m_connected));
+    if (m_simulationMode) {
+        m_emergencyRecoveryRequired = false;
+        if (m_deviceCommandQueue)
+            m_deviceCommandQueue->endStopOnly();
+        setState(State::Idle, defaultStatusText(m_simulationMode, m_connected));
+        return;
+    }
+    if (!m_deviceCommandQueue || !m_service) {
+        setStatusMessage(tr("Emergency recovery requires an active device executor"));
+        return;
+    }
+
+    m_emergencyRecoveryInFlight = true;
+    const auto service = m_service;
+    QPointer<ProcessModule> self(this);
+    if (!m_deviceCommandQueue->submit(
+            lcnc::process::DeviceCommandQueue::ResultCommand([service] {
+                if (!stopProcessHardware(service))
+                    return lcnc::process::DeviceCommandResult{false,
+                        QObject::tr("Safety output reset failed during emergency recovery")};
+                return service->validateContourBoundary();
+            }),
+            TaskPriority::Stop,
+            [self](const lcnc::process::DeviceCommandResult& result) {
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result] {
+                    if (!self)
+                        return;
+                    self->m_emergencyRecoveryInFlight = false;
+                    if (!result.success) {
+                        self->setStatusMessage(self->tr("Emergency recovery health check failed: %1")
+                                               .arg(result.error));
+                        return;
+                    }
+                    self->m_emergencyRecoveryRequired = false;
+                    if (self->m_deviceCommandQueue)
+                        self->m_deviceCommandQueue->endStopOnly();
+                    self->setState(State::Idle,
+                                   self->tr("Emergency recovery completed and device health verified"));
+                }, Qt::QueuedConnection);
+            })) {
+        m_emergencyRecoveryInFlight = false;
+        setStatusMessage(tr("Emergency recovery command failed to queue"));
+    }
 }
 
 void ProcessModule::newProcess()
@@ -2073,7 +2151,6 @@ void ProcessModule::setState(State state, const QString& statusMessage)
         emit processLogMessage(QStringLiteral("state"), tr("State machine switches to %1").arg(processStateText(m_state)));
         // 任何流程被打断/异常的状态都强制关闭激光和吹气。
         if (m_state == State::Paused
-            || m_state == State::Stopped
             || m_state == State::Error
             || m_state == State::EmergencyStop) {
             if (m_deviceCommandQueue) {

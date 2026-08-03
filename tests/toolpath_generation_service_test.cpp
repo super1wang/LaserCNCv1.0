@@ -86,6 +86,23 @@ int main()
     assert(faces.replaceAutomaticFaces({duplicateCandidate}));
     assert(faces.entries().size() == 1);
     assert(faces.entries().front().manual);
+    lcnc::cam::MachiningFacePipelineService automaticFaces;
+    const TopoDS_Shape automaticSource = lcnc::cad_algo::makeBox(8.0, 6.0, 2.0);
+    TopExp_Explorer automaticExplorer(automaticSource, TopAbs_FACE);
+    assert(automaticExplorer.More());
+    const lcnc::cam::MachiningFacePipelineService::Candidate automaticCandidate{
+        TopoDS::Face(automaticExplorer.Current()), QStringLiteral("0:2"),
+        lcnc::cam::MachiningFaceRole::MachiningSurface};
+    assert(automaticFaces.replaceAutomaticFaces({automaticCandidate}));
+    const auto automaticFaceId = automaticFaces.entries().front().faceId;
+    const TopoDS_Shape rebuiltAutomaticSource = lcnc::cad_algo::makeBox(8.0, 6.0, 2.0);
+    TopExp_Explorer rebuiltAutomaticExplorer(rebuiltAutomaticSource, TopAbs_FACE);
+    assert(rebuiltAutomaticExplorer.More());
+    assert(automaticFaces.replaceAutomaticFaces({{
+        TopoDS::Face(rebuiltAutomaticExplorer.Current()), QStringLiteral("0:2"),
+        lcnc::cam::MachiningFaceRole::MachiningSurface}}));
+    assert(automaticFaces.entries().size() == 1);
+    assert(automaticFaces.entries().front().faceId == automaticFaceId);
     lcnc::cam::MachiningFacePipelineService reboundFaces;
     const auto rebind = reboundFaces.rebindFromRecords(
         faces.persistenceRecords(), {{QStringLiteral("0:1"), faceSource}});

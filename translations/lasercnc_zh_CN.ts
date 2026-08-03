@@ -193,6 +193,14 @@
         <source>Please select a sketch first</source>
         <translation>请先选择一个草图</translation>
     </message>
+    <message>
+        <source>The current project still has background tasks and cannot be closed</source>
+        <translation>当前工程仍有后台任务，无法关闭</translation>
+    </message>
+    <message>
+        <source>CAD background tasks are still running; the document remains open</source>
+        <translation>CAD 后台任务仍在运行，文档将保持打开</translation>
+    </message>
 </context>
 <context>
     <name>CamModule</name>
@@ -3228,6 +3236,42 @@ continue?</source>
         <source>State machine switches to %1</source>
         <translation>状态机切换为 %1</translation>
     </message>
+    <message>
+        <source>Safety output reset fails after stop is triggered</source>
+        <translation>停止触发后安全输出复位失败</translation>
+    </message>
+    <message>
+        <source>Safety stop or emergency recovery has not completed</source>
+        <translation>安全停止或急停恢复尚未完成</translation>
+    </message>
+    <message>
+        <source>Safety output reset failed while stopping: %1</source>
+        <translation>停止时安全输出复位失败：%1</translation>
+    </message>
+    <message>
+        <source>Stop completed and safety outputs reset</source>
+        <translation>停止已完成且安全输出已复位</translation>
+    </message>
+    <message>
+        <source>Stop command queue is unavailable</source>
+        <translation>停止命令队列不可用</translation>
+    </message>
+    <message>
+        <source>Emergency recovery requires an active device executor</source>
+        <translation>急停恢复需要活动的设备执行器</translation>
+    </message>
+    <message>
+        <source>Emergency recovery health check failed: %1</source>
+        <translation>急停恢复健康检查失败：%1</translation>
+    </message>
+    <message>
+        <source>Emergency recovery completed and device health verified</source>
+        <translation>急停恢复完成且设备健康状态已确认</translation>
+    </message>
+    <message>
+        <source>Emergency recovery command failed to queue</source>
+        <translation>急停恢复命令未能排队</translation>
+    </message>
 </context>
 <context>
     <name>lcnc::process::ProcessNodeEditDialog</name>
@@ -5197,6 +5241,10 @@ continue?</source>
         <source>Type %1</source>
         <translation>类型 %1</translation>
     </message>
+    <message>
+        <source>Safety output reset failed during emergency recovery</source>
+        <translation>急停恢复期间安全输出复位失败</translation>
+    </message>
 </context>
 <context>
     <name>TaskManager</name>
@@ -6602,6 +6650,40 @@ No available reference surfaces are currently detected.</source>
     <message>
         <source>Model display mesh generation failed: %1</source>
         <translation>模型显示网格生成失败: %1</translation>
+    </message>
+    <message>
+        <source>Target document is not the active project</source>
+        <translation>目标文档不是活动工程</translation>
+    </message>
+</context>
+<context>
+    <name>LcncProjectManager</name>
+    <message>
+        <source>The current project still has background tasks and cannot be closed</source>
+        <translation>当前工程仍有后台任务，无法关闭</translation>
+    </message>
+</context>
+<context>
+    <name>ProcessInteractiveIoService</name>
+    <message>
+        <source>Interactive IO is locked until emergency recovery succeeds</source>
+        <translation>急停恢复成功前交互 IO 已锁定</translation>
+    </message>
+    <message>
+        <source>Axis is not registered or the device queue is unavailable</source>
+        <translation>轴未注册或设备队列不可用</translation>
+    </message>
+    <message>
+        <source>Axis enable command failed to queue</source>
+        <translation>轴使能命令未能排队</translation>
+    </message>
+    <message>
+        <source>Digital-output runner unavailable</source>
+        <translation>数字输出执行器不可用</translation>
+    </message>
+    <message>
+        <source>IO output command failed to queue</source>
+        <translation>IO 输出命令未能排队</translation>
     </message>
 </context>
 <context>

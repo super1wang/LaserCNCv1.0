@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QTimer>
 
+#include <cstdint>
 #include <functional>
 
 class ProcessDeviceRuntime;
@@ -67,6 +68,9 @@ private:
     bool m_active{false};
     bool m_hardwareInFlight{false};
     bool m_peripheralInFlight{false};
+    std::uint64_t m_generation{0};
+    DeviceCommandId m_hardwareTicket{0};
+    DeviceCommandId m_peripheralTicket{0};
 };
 
 } // namespace lcnc::process

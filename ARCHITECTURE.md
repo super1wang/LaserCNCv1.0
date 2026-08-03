@@ -1,6 +1,6 @@
 # LaserCNC 架构说明
 
-本文描述 2026-07-30 源码基线的实际架构。若本文与阶段性设计记录冲突，以源码、`CMakeLists.txt` 和本文为准。
+本文描述 2026-08-03 源码基线的实际架构。若本文与阶段性设计记录冲突，以源码、`CMakeLists.txt` 和本文为准。已识别但尚未修复的偏差同时记录在 `AUDIT.md` 与 `todo.md`。
 
 ## 1. 系统定位
 
@@ -105,13 +105,15 @@ CMake 将源码拆为 `lcnc_core`、`lcnc_view`、`lcnc_module_cad`、`lcnc_modu
 
 ## 6. CAD 模块
 
-`CadModule` 负责 Workpiece 域的导入、导出、建模、草图、特征、变换、删除和选择路由。复杂 OCC 运算应位于 `core/algorithms/cad`，文档写回和刷新由模块/service 协调。
+`CadModule` 仍负责 Workpiece 域的导入接线、建模、草图、特征、变换、删除和选择路由。`CadDocumentIoService` 已承接新建、保存、关闭、STEP 导出、STEP/IGES/STL/BREP reader 和显示网格准备；`CadModelingController` 与 `CadSelectionController` 尚未落地。复杂 OCC 运算应位于 `core/algorithms/cad`，文档写回和刷新由模块/service 协调。
 
-异步导入通过 `TaskManager` 在 detached workspace 或明确的目标文档上计算，完成后再由主线程采纳结果；后台任务不得直接持有生命周期不受保护的 UI 对象。
+工程包打开使用 pending workspace，成功后再采纳。普通 STEP/IGES/STL/BREP 导入当前仍可能由 `TaskManager` worker 直接写入目标 `LcncDocument`，且文档关闭尚未按文档取消任务；这是待修复的事务/寿命偏差，不是允许的新模式。目标模式是 worker 只生成 detached 结果，generation 匹配后在文档所属线程一次提交。
 
 ## 7. CAM 模块
 
 `CamModule` 借用项目的统一 XCAF 文档、`CamDataManager`、机台工作区和机台配置服务，负责轮廓提取、离散、刀路求解、图层、排序、引线与渲染协调。
+
+`MachiningFacePipelineService` 已持有加工面集合，`CamDisplayProjectionService` 已承接加工面 AIS 投影；当前 `CamModule` 仍持有 pipeline 的可变 entries 引用，自动面 ID 复用和 projection 的 workspace 隔离尚未完成。其余机台、轴导引、刀路和 travel path 投影仍由入口协调。
 
 业务边界为：
 
@@ -146,13 +148,13 @@ CAM ToolpathExportSnapshot
   -> 运动控制器与激光/IO
 ```
 
-`runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。任何 Error、EmergencyStop 或停止路径必须关闭激光与吹气等安全输出。
+`runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。普通 Stop 仅在 Stop lane 已确认安全输出复位和设备停机后进入 `Stopped`；EmergencyStop 会锁存 stop-only admission，交互 IO 在显式 executor 恢复并复核设备状态前不得重新开启。
 
-硬件 SDK 类型只能存在于私有实现。`ProcessDeviceRuntime` 持有当前控制器和激光器，所有硬件操作由设备队列线程调用，禁止函数内 static 控制器。设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
+供应商 SDK 类型不得出现在跨模块 facade/DTO。`ProcessDeviceRuntime` 持有当前控制器和激光器，真实硬件 sink 的创建、方法调用和销毁均由设备队列线程执行，禁止函数内 static 控制器。当前 Process 内部的 `MotionSinkFactory` contract 仍接收基类设备指针和 `ProcessModule*`，后续应封装进 executor 私有实现。设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
 
 业务路径不再取得控制器、激光器或设备锁；预检通过 `ProcessPreflightService` 提交 generation 化请求，普通切割在每个轮廓下发前通过 runtime 再次检查连接、故障、电机创建和轴使能。架构门禁拒绝 runtime 外重新调用原始设备访问 API。`ProcessDeviceCoordinator` 暂留在 runtime 内部，不能作为跨模块入口。设备公共接口不得泄漏供应商类型；兼容 `MessageModule`、设备日志宏和旧 `LogModule` 均已删除，统一使用 `lcnc::Logger`。
 
-连接、断开、控制器状态和外设状态也不再由 `ProcessModule` 直接进入 runtime：`ProcessConnectionService` 只提交 typed 连接事务并把进度/完成回调投递回 GUI 线程；`ProcessStatusService` 独占 150 ms/2 s 定时调度、同 key 合并和防堆积，随后把不可变状态快照交给 facade 发射既有 Qt 信号。500 ms 安全 IO 的 `ProcessMonitorService` 生命周期由 status service 统一编排。
+连接、断开、控制器状态和外设状态也不再由 `ProcessModule` 直接进入 runtime：`ProcessConnectionService` 只提交 typed 连接事务并把进度/完成回调投递回 GUI 线程；`ProcessStatusService` 独占 150 ms/2 s 定时调度、同 key 合并和基本防堆积，随后把不可变状态快照交给 facade 发射既有 Qt 信号。500 ms 安全 IO 的 `ProcessMonitorService` 生命周期由 status service 统一编排。每次 start 分配 generation，stop 取消 pending ticket；旧 completion 不得投影到新会话或改变新会话的 in-flight 状态。
 Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `ProcessSettingsService`，不得回退到 `current()` 全局查询。
 
 构建时 ACS、GTN、BDAQ 与真实激光均由 CMake 开关控制。GTN adapter 仅在 `LCNC_WITH_GTN=ON` 时参与构建；ACS adapter、`SimulatorCMHP`、文本 sink、供应商头、import library 和随程序部署的 `Simulator.prg` 也只在 `LCNC_WITH_ACS=ON` 时形成完整 ACS 路径。all-off 构建中的本地状态控制器仅服务显式 PureSimulation，不代表 ACS Simulator。支持的验证预设见 `CMakePresets.json`。
@@ -168,8 +170,8 @@ Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `Proces
 - `TaskManager` 析构会先请求取消，再等待全部 worker 退出，最后释放任务实体。
 - CAD、CAM 与 Process 模块均对其 `TaskManager` 任务持有 task-id；模块停止时先请求取消并有界等待。Process 的 worker 持有 `shared_ptr<Service>`，超时降级时不会释放仍可能在供应商 SDK 调用中的对象；连接、断开和回零在同一设备会话中互斥。
 - Process 固定关闭顺序为：停止接收普通命令，取消并等待工作流/后台任务，停止监控，提交 Stop 优先级安全输出，断开设备，最后关闭执行线程。若活动供应商调用超时，则保活 SDK 对象并进入 Error，不得在调用仍活跃时释放。
-- 控制器坐标、轴使能和 IO 状态由 150 ms 定时器调度到独立单线程池；安全环境监控使用另一条 500 ms 单线程池。激光器等串口外设按 2 s 低频调度到外设单线程池，`QSerialPort` 本身归属独立 IO 线程，任何等待串口响应的调用都不得在 GUI 线程执行。
-- Process 硬件轮询和环境监控在停止时等待当前 future 完成，控制器和外设对象不得先于 worker 销毁。
+- 控制器坐标、轴使能、数字输出与 2 s 外设读取由 `ProcessStatusService` 定时提交到统一设备队列线程；500 ms 安全环境监控仍由 `ProcessMonitorService` 管理。`QSerialPort` 本身归属独立 IO 线程，任何等待串口响应的调用都不得在 GUI 线程执行。
+- Process 停止时禁止产生新轮询并在设备 runtime 销毁前停止队列；status completion 用 generation 隔离旧会话。控制器和外设对象不得先于活动 worker/设备调用销毁。
 - Qt GUI 只能在主线程访问；供应商 SDK 是否线程安全不能假定，硬件调用最终应串行化到单一设备执行上下文。
 - 所有 catch 必须记录错误；析构和停止路径不得向外抛异常。
 - `ModuleRegistry` 对 init/start/stop 的标准和未知异常均建立边界；失败模块和所有已初始化模块以反向顺序调用幂等 `stop()`。`main()` 是最后一道异常边界，并在 Logger 仍存活时记录错误。

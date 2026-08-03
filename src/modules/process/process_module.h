@@ -216,6 +216,9 @@ private:
 #endif
     bool                  m_homing{false};
     bool                  m_preflightInFlight{false};
+    bool                  m_stopInFlight{false};
+    bool                  m_emergencyRecoveryRequired{false};
+    bool                  m_emergencyRecoveryInFlight{false};
     std::uint64_t         m_runRequestGeneration{0};
     State                 m_state{State::Idle};
     lcnc::process::ProcessRunCoordinator m_runCoordinator;

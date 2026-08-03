@@ -59,6 +59,7 @@ void ProcessStatusService::start()
     const ProcessStatusRequest request = m_requestProvider ? m_requestProvider() : ProcessStatusRequest{};
     if (!request.connected || (request.simulationMode && !request.acsSimulator))
         return;
+    ++m_generation;
     m_active = true;
     m_hardwareTimer.start();
     if (!request.simulationMode)
@@ -71,9 +72,16 @@ void ProcessStatusService::start()
 
 void ProcessStatusService::stop()
 {
+    ++m_generation;
     m_active = false;
     m_hardwareTimer.stop();
     m_peripheralTimer.stop();
+    if (m_hardwareTicket != 0)
+        (void)m_queue.cancel(m_hardwareTicket);
+    if (m_peripheralTicket != 0)
+        (void)m_queue.cancel(m_peripheralTicket);
+    m_hardwareTicket = 0;
+    m_peripheralTicket = 0;
     m_hardwareInFlight = false;
     m_peripheralInFlight = false;
     if (m_safetyMonitoringHandler)
@@ -100,6 +108,7 @@ void ProcessStatusService::requestHardwarePoll()
         return;
     }
     m_hardwareInFlight = true;
+    const std::uint64_t generation = m_generation;
     auto snapshot = std::make_shared<DeviceStatusSnapshot>();
     const auto ticket = m_queue.submitWithTicket(
         [this, request, snapshot] {
@@ -108,9 +117,12 @@ void ProcessStatusService::requestHardwarePoll()
             return DeviceCommandResult{};
         },
         TaskPriority::Polling,
-        [this, snapshot](const DeviceCommandResult& result) {
-            QMetaObject::invokeMethod(this, [this, result, snapshot] {
+        [this, generation, snapshot](const DeviceCommandResult& result) {
+            QMetaObject::invokeMethod(this, [this, generation, result, snapshot] {
+                if (generation != m_generation)
+                    return;
                 m_hardwareInFlight = false;
+                m_hardwareTicket = 0;
                 if (m_active && m_hardwareHandler)
                     m_hardwareHandler(result, *snapshot);
             }, Qt::QueuedConnection);
@@ -118,6 +130,8 @@ void ProcessStatusService::requestHardwarePoll()
         QStringLiteral("controller-status"));
     if (!ticket.accepted)
         m_hardwareInFlight = false;
+    else
+        m_hardwareTicket = ticket.id;
 }
 
 void ProcessStatusService::requestPeripheralPoll()
@@ -128,6 +142,7 @@ void ProcessStatusService::requestPeripheralPoll()
     if (!request.connected || request.simulationMode)
         return;
     m_peripheralInFlight = true;
+    const std::uint64_t generation = m_generation;
     auto snapshot = std::make_shared<DevicePeripheralSnapshot>();
     const auto ticket = m_queue.submitWithTicket(
         [this, snapshot] {
@@ -136,9 +151,12 @@ void ProcessStatusService::requestPeripheralPoll()
             return DeviceCommandResult{};
         },
         TaskPriority::Polling,
-        [this, snapshot](const DeviceCommandResult& result) {
-            QMetaObject::invokeMethod(this, [this, result, snapshot] {
+        [this, generation, snapshot](const DeviceCommandResult& result) {
+            QMetaObject::invokeMethod(this, [this, generation, result, snapshot] {
+                if (generation != m_generation)
+                    return;
                 m_peripheralInFlight = false;
+                m_peripheralTicket = 0;
                 if (m_active && m_peripheralHandler)
                     m_peripheralHandler(result, *snapshot);
             }, Qt::QueuedConnection);
@@ -146,6 +164,8 @@ void ProcessStatusService::requestPeripheralPoll()
         QStringLiteral("peripheral-status"));
     if (!ticket.accepted)
         m_peripheralInFlight = false;
+    else
+        m_peripheralTicket = ticket.id;
 }
 
 } // namespace lcnc::process

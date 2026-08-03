@@ -1,5 +1,6 @@
 #include "modules/cam/services/cam_display_projection_service.h"
 
+#include "core/document/lcnc_document.h"
 #include "view/gui_document.h"
 
 #include <AIS_DisplayMode.hxx>
@@ -18,26 +19,56 @@ namespace lcnc::cam {
 class CamDisplayProjectionService::State
 {
 public:
-    QMap<std::uint64_t, Handle(AIS_Shape)> machiningFaceAis;
+    struct DocumentProjection {
+        Handle(AIS_InteractiveContext) context;
+        QMap<std::uint64_t, Handle(AIS_Shape)> machiningFaceAis;
+    };
+
+    static void clear(DocumentProjection& projection)
+    {
+        if (!projection.context.IsNull()) {
+            for (auto it = projection.machiningFaceAis.cbegin();
+                 it != projection.machiningFaceAis.cend(); ++it) {
+                if (!it.value().IsNull())
+                    projection.context->Remove(it.value(), Standard_False);
+            }
+            projection.context->UpdateCurrentViewer();
+        }
+        projection.machiningFaceAis.clear();
+    }
+
+    QMap<DocumentId, DocumentProjection> documents;
 };
 
 CamDisplayProjectionService::CamDisplayProjectionService() = default;
-CamDisplayProjectionService::~CamDisplayProjectionService() = default;
+CamDisplayProjectionService::~CamDisplayProjectionService()
+{
+    if (!m_state)
+        return;
+    for (auto it = m_state->documents.begin(); it != m_state->documents.end(); ++it) {
+        State::clear(*it);
+    }
+}
+
+namespace {
+
+DocumentId documentIdFor(const GuiDocument* document)
+{
+    return document && document->document() ? document->document()->id() : kInvalidDocumentId;
+}
+
+} // namespace
 
 void CamDisplayProjectionService::clearMachiningFaces(GuiDocument* document)
 {
     if (!m_state)
         return;
-    if (document && !document->context().IsNull()) {
-        const Handle(AIS_InteractiveContext)& context = document->context();
-        for (auto it = m_state->machiningFaceAis.cbegin();
-             it != m_state->machiningFaceAis.cend(); ++it) {
-            if (!it.value().IsNull())
-                context->Remove(it.value(), Standard_False);
-        }
-        context->UpdateCurrentViewer();
-    }
-    m_state->machiningFaceAis.clear();
+    const DocumentId id = documentIdFor(document);
+    auto it = m_state->documents.find(id);
+    if (it == m_state->documents.end())
+        return;
+    State::clear(*it);
+    m_state->documents.erase(it);
 }
 
 void CamDisplayProjectionService::refreshMachiningFaces(
@@ -50,13 +81,17 @@ void CamDisplayProjectionService::refreshMachiningFaces(
     if (!document || document->context().IsNull())
         return;
 
-    const Handle(AIS_InteractiveContext)& context = document->context();
-    for (auto it = m_state->machiningFaceAis.cbegin();
-         it != m_state->machiningFaceAis.cend(); ++it) {
-        if (!it.value().IsNull())
-            context->Remove(it.value(), Standard_False);
-    }
-    m_state->machiningFaceAis.clear();
+    const DocumentId id = documentIdFor(document);
+    if (id == kInvalidDocumentId)
+        return;
+    auto& projection = m_state->documents[id];
+    // A document can be reopened with a new viewer context.  Remove the old
+    // presentation from the context that owns it before retaining the new one.
+    if (!projection.context.IsNull() && projection.context != document->context())
+        State::clear(projection);
+    projection.context = document->context();
+    State::clear(projection);
+    const Handle(AIS_InteractiveContext)& context = projection.context;
     if (!visible) {
         context->UpdateCurrentViewer();
         return;
@@ -81,7 +116,7 @@ void CamDisplayProjectionService::refreshMachiningFaces(
         context->Display(ais, AIS_Shaded, 0, Standard_False);
         context->SetZLayer(ais, Graphic3d_ZLayerId_Top);
         context->Deactivate(ais);
-        m_state->machiningFaceAis.insert(entry.faceId, ais);
+        projection.machiningFaceAis.insert(entry.faceId, ais);
     }
     context->UpdateCurrentViewer();
 }

@@ -158,6 +158,7 @@ MachiningFacePipelineService::rebindFromRecords(
 
 bool MachiningFacePipelineService::replaceAutomaticFaces(const std::vector<Candidate>& candidates)
 {
+    const std::vector<Entry> previous = m_entries;
     std::vector<Entry> merged;
     merged.reserve(m_entries.size() + candidates.size());
     for (const Entry& entry : m_entries) {
@@ -167,8 +168,27 @@ bool MachiningFacePipelineService::replaceAutomaticFaces(const std::vector<Candi
     for (const Candidate& candidate : candidates) {
         if (candidate.face.IsNull() || containsEquivalent(merged, candidate))
             continue;
+
+        const std::uint64_t signature = LaserToolpathBuilder::computeFaceSignature(candidate.face);
+        const auto previousMatch = std::find_if(
+            previous.cbegin(), previous.cend(), [&candidate, signature, &merged](const Entry& entry) {
+                if (entry.manual || entry.workpieceEntry != candidate.workpieceEntry
+                    || entry.role != candidate.role || entry.face.IsNull()) {
+                    return false;
+                }
+                const bool alreadyReused = std::any_of(
+                    merged.cbegin(), merged.cend(), [&entry](const Entry& mergedEntry) {
+                        return mergedEntry.faceId == entry.faceId;
+                    });
+                return !alreadyReused
+                    && (entry.face.IsSame(candidate.face)
+                        || LaserToolpathBuilder::computeFaceSignature(entry.face) == signature);
+            });
         Entry entry;
-        entry.faceId = nextFaceId();
+        // Automatic extraction may rebuild equivalent OCC faces.  Preserve the
+        // persisted identity when the workpiece entry, role and face signature
+        // agree so downstream contour references do not churn on recompute.
+        entry.faceId = previousMatch == previous.cend() ? nextFaceId() : previousMatch->faceId;
         entry.face = candidate.face;
         entry.workpieceEntry = candidate.workpieceEntry;
         entry.role = candidate.role;

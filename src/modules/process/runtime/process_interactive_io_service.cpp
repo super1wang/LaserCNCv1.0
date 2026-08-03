@@ -7,23 +7,27 @@
 namespace lcnc::process {
 
 ProcessInteractiveIoService::ProcessInteractiveIoService(ProcessDeviceRuntime& runtime,
-                                                         DeviceCommandQueue& queue,
-                                                         QObject* parent)
+                                                          DeviceCommandQueue& queue,
+                                                          QObject* parent,
+                                                          InteractionAllowed interactionAllowed)
     : ProcessInteractiveIoService(queue,
         [&runtime](Axis axis, bool enabled) { return runtime.setAxisEnabled(axis, enabled); },
         [&runtime](const QString& channel, bool value) { return runtime.setDigitalOutput(channel, value); },
-        parent)
+        parent,
+        std::move(interactionAllowed))
 {
 }
 
 ProcessInteractiveIoService::ProcessInteractiveIoService(DeviceCommandQueue& queue,
-                                                         AxisRunner axisRunner,
-                                                         OutputRunner outputRunner,
-                                                         QObject* parent)
+                                                          AxisRunner axisRunner,
+                                                          OutputRunner outputRunner,
+                                                          QObject* parent,
+                                                          InteractionAllowed interactionAllowed)
     : QObject(parent)
     , m_queue(queue)
     , m_axisRunner(std::move(axisRunner))
     , m_outputRunner(std::move(outputRunner))
+    , m_interactionAllowed(std::move(interactionAllowed))
 {
 }
 
@@ -38,6 +42,10 @@ void ProcessInteractiveIoService::complete(Completion completion, DeviceCommandR
 DeviceCommandTicket ProcessInteractiveIoService::setAxisEnabled(const QString& axisName, bool enabled,
                                                                  Completion completion)
 {
+    if (m_interactionAllowed && !m_interactionAllowed()) {
+        complete(std::move(completion), {false, tr("Interactive IO is locked until emergency recovery succeeds")});
+        return {};
+    }
     const QString axisNameNormalized = axisName.trimmed().toUpper();
     const auto axis = enum_cast<Axis>(axisNameNormalized.toStdString());
     if (!axis || !m_axisRunner) {
@@ -56,6 +64,10 @@ DeviceCommandTicket ProcessInteractiveIoService::setAxisEnabled(const QString& a
 DeviceCommandTicket ProcessInteractiveIoService::setDigitalOutput(const QString& channel, bool value,
                                                                    Completion completion)
 {
+    if (m_interactionAllowed && !m_interactionAllowed()) {
+        complete(std::move(completion), {false, tr("Interactive IO is locked until emergency recovery succeeds")});
+        return {};
+    }
     const QString normalizedChannel = channel.trimmed();
     if (normalizedChannel.isEmpty() || !m_outputRunner) {
         complete(std::move(completion), {false, tr("Digital-output runner unavailable")});

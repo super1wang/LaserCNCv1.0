@@ -18,11 +18,14 @@ public:
     using Completion = std::function<void(const DeviceCommandResult&)>;
     using AxisRunner = std::function<DeviceCommandResult(Axis, bool)>;
     using OutputRunner = std::function<DeviceCommandResult(const QString&, bool)>;
+    using InteractionAllowed = std::function<bool()>;
 
     ProcessInteractiveIoService(ProcessDeviceRuntime& runtime, DeviceCommandQueue& queue,
-                                QObject* parent = nullptr);
+                                 QObject* parent = nullptr,
+                                 InteractionAllowed interactionAllowed = {});
     ProcessInteractiveIoService(DeviceCommandQueue& queue, AxisRunner axisRunner,
-                                OutputRunner outputRunner, QObject* parent = nullptr);
+                                 OutputRunner outputRunner, QObject* parent = nullptr,
+                                 InteractionAllowed interactionAllowed = {});
 
     DeviceCommandTicket setAxisEnabled(const QString& axisName, bool enabled, Completion completion);
     DeviceCommandTicket setDigitalOutput(const QString& channel, bool value, Completion completion);
@@ -32,6 +35,7 @@ private:
     DeviceCommandQueue& m_queue;
     AxisRunner m_axisRunner;
     OutputRunner m_outputRunner;
+    InteractionAllowed m_interactionAllowed;
 };
 
 } // namespace lcnc::process

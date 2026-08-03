@@ -251,8 +251,12 @@ void ProcessWorkflowExecutor::runNextStep()
                 return qMakePair(ok, errorMessage);
             }));
     } catch (const std::exception& ex) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.executor: step dispatch threw: {}", ex.what());
         failCurrentStep(QString::fromUtf8(ex.what()));
     } catch (...) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.executor: step dispatch threw an unknown exception");
         // 中文翻译：未知执行异常
         failCurrentStep(tr("Unknown execution exception"));
     }

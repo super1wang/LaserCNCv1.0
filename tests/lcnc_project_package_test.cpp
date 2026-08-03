@@ -1,5 +1,6 @@
 #include "core/document/lcnc_document.h"
 #include "core/project/lcnc_project_package.h"
+#include "core/project/lcnc_project_manager.h"
 #include "core/project/lcnc_project_session.h"
 
 #include <QCoreApplication>
@@ -73,6 +74,27 @@ int main(int argc, char* argv[])
     QTemporaryDir temporary;
     if (!temporary.isValid())
         return fail(QStringLiteral("Cannot create project-package test directory"));
+
+    {
+        lcnc::LcncProjectManager manager;
+        const auto originalIds = manager.workspaceIds();
+        if (originalIds.size() != 1)
+            return fail(QStringLiteral("Project manager did not create its initial workspace"));
+        manager.setWorkspaceCloseGuard([](ProjectWorkspaceId) { return false; });
+        if (manager.closeWorkspace(originalIds.front())
+            || manager.workspace(originalIds.front()) == nullptr) {
+            return fail(QStringLiteral("Rejected workspace close released the borrowed document"));
+        }
+        manager.setDocumentOpenMode(lcnc::DocumentOpenMode::SingleDocument);
+        if (manager.beginSingleDocumentOpen() != 0
+            || manager.newProject(QStringLiteral("Blocked replacement")) != nullptr
+            || manager.workspaceIds() != originalIds) {
+            return fail(QStringLiteral("Single-document replacement continued after close rejection"));
+        }
+        manager.setWorkspaceCloseGuard({});
+        if (!manager.closeWorkspace(originalIds.front()))
+            return fail(QStringLiteral("Workspace did not close after the guard was cleared"));
+    }
 
     lcnc::LcncProjectSession safetySession;
     safetySession.setMachineConfigurationCompatible(false);

@@ -14,17 +14,26 @@
 
 ## P1：结构收口
 
-- [ ] 继续将 `process_module.cpp`（当前约 2,286 行）收敛至 900 行入口门限；`ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService`、`ProcessRunCoordinator`、`ProcessWorkflowService`、`ProcessManualMotionService` 和 `ProcessInteractiveIoService` 已落地。后两者统一手动运动以及轴使能/数字 IO 的 typed executor 提交、请求校验与 GUI completion；workflow 当前格式文档/读写/变更通知及流程树文件操作已脱离模块入口。剩余运行状态组合和 UI 事件出口仍需下沉，且必须保持既有关闭顺序。
-- [ ] 完成 `cam_module.cpp`（当前约 6,340 行）的职责下沉；`ToolpathGenerationService` 已实现并覆盖 stale-result 拒绝，`CamDisplayProjectionService` 已接管加工面 AIS 投影，`MachiningFacePipelineService` 已独占面集合、稳定 ID 分配、revision、持久化记录、自动/手动合并、去重、角色边界校验、持久化重绑、同步/异步分离及全局生成后的加工面捕获；machine calibration 和其余刀路/机台投影仍待继续下沉。
-- [ ] 继续收敛 MainWindow/工程树耦合：工程树已通过 CAD/CAM 只读 projection contract 获取快照，不再包含或调用具体 Module；`WorkspacePresenter`、`ViewStateController` 和 `CadTaskPanelController` 已分别接管工作区切换、显示状态持久化及 CAD TaskPanel 的快照投影/预览/草图 overlay 交互。`ProjectExplorerController` 已接管轮廓定位、多选、CAD 条目选择、拖动排序快照及节点可见性意图/级联；窗口仅将意图通过 CAD/CAM facade 写回。剩余当前节点选择写回、右键菜单、最近文件和窗口级接线仍待收敛。
-- [ ] 继续将 CAD 入口收敛为生命周期与 facade：`CadDocumentIoService` 已接管新建、保存、关闭、STEP 导出、STEP/IGES/STL/BREP 解析及显示网格准备；工程包导入仍需迁入服务，且必须保持成功前不替换活动工程；草图/特征流程和选择刷新仍待 `CadModelingController`、`CadSelectionController` 下沉。
+- [ ] 完成 Process 运行安全事务下沉，不再以行数为目标：让 `ProcessRunCoordinator` 真正拥有 run/preflight/Stop/Emergency/Recovery completion 和合法状态迁移；`ProcessModule` 只转发 facade 与信号。移除 `NormalCuttingManager`、simulation ticker/sink 对 `ProcessModule*` 的反向持有，并把 motion sink 生命周期隐藏到 typed executor 私有 contract。
+- [ ] 完成 CAM 高收益下沉：`MachiningFacePipelineService` 不再暴露 mutable `entries()`，下游只消费 immutable snapshot；已为等价自动面重算复用稳定 ID，`CamDisplayProjectionService` 已按 document 记录 owning AIS context。仍需双工作区 offscreen 回归，并继续迁移机台、轴导引、刀路和 travel path 投影；machine calibration 独立成 service。
+- [ ] 完成 CAD 文档事务：异步 reader 只生成 detached 结果，generation 匹配后在文档所属线程一次提交；`CadModule` 关闭及项目管理器关闭 workspace 均先取消并等待模块任务，超时会拒绝关闭并保留 document，保存已拒绝非活动文档；仍需文档级任务归属与显式 workspace/document identity 的保存/导出 API。随后下沉 `CadModelingController`、`CadSelectionController`。
+- [ ] 继续收敛 MainWindow 和跨模块调用：`AppContext`、commands、module UI、`DialogOptions`、`CadTaskPanelController` 改用 facade/service/controller contract，迁移后删除具体 Module 的公共 service 注册。合并 MainWindow/controller 重复的 primitive/feature/transform 参数映射，避免预览与执行 schema 漂移。
 - [ ] 收敛 real-laser 配置中旧厂商协议适配器的项目 `/W4` 告警，使该配置也能启用 `/WX`；ACS+GTN 质量预设已达到 `/W4 /WX`。
 
 ## P1：自动化回归
 
+- [ ] 扩展 Stop 安全事务和 Emergency 锁存回归：已覆盖 E-stop 后交互数字输出拒绝；仍需覆盖 workflow/非 workflow 的排队失败、执行失败、超时、轴使能拒绝与恢复前完整健康复核；`SimulatorCMHP` 每轮验证所有安全输出保持关闭。
+- [ ] 增加 CAD 文档 IO 集成测试：已有/新建工作区的成功、失败、取消、关闭并发、非活动文档保存和失败不提交；用线程检查证明 worker 不直接修改活动 XCAF 文档。
+- [ ] 增加双工作区 AIS 投影回归及各并发关闭场景循环 100 次；Process status 快速 stop/start 旧 completion、DeviceCommandQueue completion 抛异常、CAM 等价自动面稳定 ID 已有独立回归。
 - [ ] 增加工作流专用线程、PureSimulation/SDK 线程亲和、轮询关闭和 Process 并发关闭测试，并分别重复运行 100 次；队列 lifecycle 和运行状态迁移已有独立回归。
 - [ ] 补齐 CAM 实际异步任务入口的全局生成/当前轮廓重算集成测试；当前 service 级测试已覆盖成功、取消、工件/加工面/参数/轮廓 revision 变化及陈旧结果拒绝。
 - [ ] 测量大模型轮廓提取、面分类、IK 和 GUI 提交阶段的取消延迟与最长卡顿。
+
+## P2：规范与门禁
+
+- [ ] 为 `CadDocumentIoService`、`ProcessWorkflowExecutor`、`CamModule` 等仍未记录的 catch 补 `LCNC_ERR`；架构检查增加“catch 必须有错误日志”的可维护规则。
+- [ ] 将 `ProcessManualMotionService`、`ProcessInteractiveIoService` 的新增可见文本加入 `translations/lasercnc_zh_CN.ts`，补齐相邻中文翻译注释，并增加新增 `tr()` catalog 检查。
+- [ ] 在上述结构债务清理后扩展架构扫描：禁止 app/commands/module UI 获取具体 Module，禁止 Process public runtime/sink contract 暴露 `ProcessModule*`，禁止 CAD worker 直接写活动文档。
 
 ## 每次提交最小检查
 

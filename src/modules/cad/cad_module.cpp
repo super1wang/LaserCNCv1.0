@@ -369,6 +369,19 @@ bool CadModule::init(lcnc::IKernel& kernel)
         m_documentIoService.get(), [](lcnc::cad::CadDocumentIoService*) {});
     kernel.services().registerService<lcnc::cad::CadDocumentIoService>(documentIoService);
 
+    // A workspace can also be closed by the project manager (for example when
+    // replacing a single-document workspace), bypassing CadModule::closeDocument.
+    // Reject that close if borrowed CAD work cannot reach a safe cancellation
+    // point; the project manager must retain the owning document in this case.
+    lcnc::Kernel::current().projectManager()->setWorkspaceCloseGuard(
+        [this](ProjectWorkspaceId) {
+            if (cancelOwnedTasks(10000))
+                return true;
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "CadModule: workspace close deferred because CAD tasks are still running");
+            return false;
+        });
+
     m_initialized = true;
     LCNC_INFO(lcnc::LogCode::Generic, "CadModule init done");
     return true;
@@ -390,6 +403,8 @@ void CadModule::stop()
         LCNC_ERR(lcnc::LogCode::Generic,
                  "CadModule::stop: file task cancellation timed out; retaining task-owned documents");
     }
+    if (auto* project = lcnc::Kernel::current().projectManager())
+        project->setWorkspaceCloseGuard({});
     m_initialized = false;
     LCNC_INFO(lcnc::LogCode::Generic, "CadModule stop done");
 }
@@ -499,6 +514,12 @@ DocumentId CadModule::openDocument(const QString& filePath)
 
     auto* project = lcnc::Kernel::current().projectManager();
     const std::uint64_t openGeneration = project->beginSingleDocumentOpen();
+    if (openGeneration == 0) {
+        // 中文翻译：打开失败；当前工程仍有后台任务，无法关闭
+        emit operationFailed(tr("Open failed"),
+                             tr("The current project still has background tasks and cannot be closed"));
+        return kInvalidDocumentId;
+    }
     auto pendingWorkspace = project->createDetachedWorkspace(fileInfo.completeBaseName());
     LcncDocument* pendingDoc = pendingWorkspace ? pendingWorkspace->workpieceDocument() : nullptr;
     if (!pendingDoc) {
@@ -850,6 +871,14 @@ void CadModule::exportStep(DocumentId id, const QString& filePath)
 
 void CadModule::closeDocument(DocumentId id)
 {
+    // Background import/export jobs borrow the document.  Closing must wait
+    // for their cooperative cancellation instead of invalidating that borrow.
+    if (!cancelOwnedTasks(10000)) {
+        // 中文翻译：仍有 CAD 后台任务在运行，无法关闭文档
+        emit operationFailed(tr("Close document failed"),
+                             tr("CAD background tasks are still running; the document remains open"));
+        return;
+    }
     if (m_documentIoService)
         (void)m_documentIoService->closeDocument(id);
 }
