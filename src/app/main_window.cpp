@@ -1959,52 +1959,25 @@ void MainWindow::handleProjectExplorerRowsMoved()
 {
     if (m_blockProjectExplorerSignals || !m_projectExplorerTree)
         return;
-
-    QTreeWidgetItem* toolpathRoot = nullptr;
-    for (int index = 0; index < m_projectExplorerTree->topLevelItemCount(); ++index) {
-        QTreeWidgetItem* item = m_projectExplorerTree->topLevelItem(index);
-        if (projectNodeKind(item) == lcnc::app::ProjectExplorerNodeKind::ToolpathRoot) {
-            toolpathRoot = item;
-            break;
-        }
-    }
-    if (!toolpathRoot)
-        return;
-
-    QList<int> order;
-    QList<lcnc::cam::ContourId> idOrder;
-    bool hasStableIds = true;
-    int selectedRow = -1;
-    lcnc::cam::ContourId selectedContourId = 0;
-    std::function<void(QTreeWidgetItem*)> collectContours = [&](QTreeWidgetItem* node) {
-        if (!node)
-            return;
-        if (projectNodeKind(node) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
-            order.append(node->data(0, kRoleContourIndex).toInt());
-            const auto contourId = static_cast<lcnc::cam::ContourId>(node->data(0, kRoleContourId).toULongLong());
-            idOrder.append(contourId);
-            hasStableIds = hasStableIds && contourId != 0;
-            if (node == m_projectExplorerTree->currentItem())
-                selectedRow = order.size() - 1;
-            if (node == m_projectExplorerTree->currentItem())
-                selectedContourId = contourId;
-        }
-        for (int index = 0; index < node->childCount(); ++index)
-            collectContours(node->child(index));
-    };
-    collectContours(toolpathRoot);
-
-    if (order.size() != m_appContext->camModule()->toolpath().contourCount()) {
+    const auto order = m_projectExplorerController
+        ? m_projectExplorerController->contourOrder()
+        : std::nullopt;
+    if (!order || order->indexes.size() != m_appContext->camModule()->toolpath().contourCount()) {
         rebuildProjectExplorer();
         return;
     }
 
-    if (hasStableIds)
-        m_appContext->camModule()->reorderContoursById(idOrder);
+    if (order->hasStableIds) {
+        QList<lcnc::cam::ContourId> ids;
+        for (const auto id : order->ids)
+            ids.append(static_cast<lcnc::cam::ContourId>(id));
+        m_appContext->camModule()->reorderContoursById(ids);
+    }
     else
-        m_appContext->camModule()->reorderContours(order);
+        m_appContext->camModule()->reorderContours(order->indexes);
     rebuildProjectExplorer();
-    selectProjectExplorerContourById(selectedContourId, selectedRow >= 0 ? selectedRow : 0);
+    selectProjectExplorerContourById(static_cast<lcnc::cam::ContourId>(order->selectedId),
+                                     order->selectedRow >= 0 ? order->selectedRow : 0);
 }
 
 void MainWindow::selectProjectExplorerContour(int contourIndex)
@@ -2017,39 +1990,20 @@ void MainWindow::selectProjectExplorerContour(int contourIndex)
 
 void MainWindow::selectProjectExplorerContourById(lcnc::cam::ContourId contourId, int fallbackIndex)
 {
-    if (!m_projectExplorerTree || (contourId == 0 && fallbackIndex < 0))
-        return;
-
-    QTreeWidgetItem* target = nullptr;
-    QTreeWidgetItemIterator iterator(m_projectExplorerTree);
-    while (*iterator) {
-        const auto itemContourId =
-            static_cast<lcnc::cam::ContourId>((*iterator)->data(0, kRoleContourId).toULongLong());
-        if (projectNodeKind(*iterator) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour
-            && ((contourId != 0 && itemContourId == contourId)
-                || (contourId == 0 && (*iterator)->data(0, kRoleContourIndex).toInt() == fallbackIndex))) {
-            target = *iterator;
-            break;
-        }
-        ++iterator;
-    }
-
-    if (!target)
-        return;
-
     m_blockProjectExplorerSignals = true;
-    QSignalBlocker blocker(m_projectExplorerTree);
-    m_projectExplorerTree->clearSelection();
-    m_projectExplorerTree->setCurrentItem(target);
-    target->setSelected(true);
-    m_projectExplorerTree->scrollToItem(target);
+    const auto selected = m_projectExplorerController
+        ? m_projectExplorerController->selectContour(contourId, fallbackIndex)
+        : std::nullopt;
     m_blockProjectExplorerSignals = false;
 
+    if (!selected)
+        return;
     int contourIndex = m_appContext && m_appContext->camModule()
-        ? m_appContext->camModule()->contourIndexById(contourId)
+        ? m_appContext->camModule()->contourIndexById(
+              static_cast<lcnc::cam::ContourId>(selected->contourId))
         : -1;
     if (contourIndex < 0)
-        contourIndex = fallbackIndex;
+        contourIndex = selected->contourIndex;
 
     m_toolpathPanel->showContourCoordinates(contourIndex);
     highlightContourInView(contourIndex);
@@ -2057,11 +2011,11 @@ void MainWindow::selectProjectExplorerContourById(lcnc::cam::ContourId contourId
 
 void MainWindow::selectProjectExplorerContours(const QList<int>& contourIndexes)
 {
-    if (!m_projectExplorerTree || contourIndexes.isEmpty())
+    if (!m_projectExplorerTree || contourIndexes.isEmpty() || !m_projectExplorerController)
         return;
 
-    QSet<lcnc::cam::ContourId> contourIds;
-    QSet<int> fallbackIndexes;
+    QList<std::uint64_t> contourIds;
+    QList<int> fallbackIndexes;
     for (int contourIndex : contourIndexes) {
         if (contourIndex < 0)
             continue;
@@ -2069,80 +2023,35 @@ void MainWindow::selectProjectExplorerContours(const QList<int>& contourIndexes)
             ? m_appContext->camModule()->contourIdAt(contourIndex)
             : 0;
         if (contourId != 0)
-            contourIds.insert(contourId);
-        fallbackIndexes.insert(contourIndex);
+            contourIds.append(contourId);
+        fallbackIndexes.append(contourIndex);
     }
 
     if (contourIds.isEmpty() && fallbackIndexes.isEmpty())
         return;
 
-    QTreeWidgetItem* firstSelected = nullptr;
-    QTreeWidgetItem* lastSelected = nullptr;
-
     m_blockProjectExplorerSignals = true;
-    QSignalBlocker blocker(m_projectExplorerTree);
-    m_projectExplorerTree->clearSelection();
-
-    QTreeWidgetItemIterator iterator(m_projectExplorerTree);
-    while (*iterator) {
-        if (projectNodeKind(*iterator) == lcnc::app::ProjectExplorerNodeKind::ToolpathContour) {
-            const auto itemContourId =
-                static_cast<lcnc::cam::ContourId>((*iterator)->data(0, kRoleContourId).toULongLong());
-            const int itemIndex = (*iterator)->data(0, kRoleContourIndex).toInt();
-            if ((itemContourId != 0 && contourIds.contains(itemContourId))
-                || fallbackIndexes.contains(itemIndex)) {
-                (*iterator)->setSelected(true);
-                if (!firstSelected)
-                    firstSelected = *iterator;
-                lastSelected = *iterator;
-            }
-        }
-        ++iterator;
-    }
-
-    if (lastSelected)
-        m_projectExplorerTree->setCurrentItem(lastSelected);
-    if (firstSelected)
-        m_projectExplorerTree->scrollToItem(firstSelected);
-
+    const auto selected = m_projectExplorerController->selectContours(contourIds, fallbackIndexes);
     m_blockProjectExplorerSignals = false;
 
-    if (lastSelected) {
-        const auto contourId = static_cast<lcnc::cam::ContourId>(
-            lastSelected->data(0, kRoleContourId).toULongLong());
+    if (selected) {
         int contourIndex = m_appContext && m_appContext->camModule()
-            ? m_appContext->camModule()->contourIndexById(contourId)
+            ? m_appContext->camModule()->contourIndexById(
+                  static_cast<lcnc::cam::ContourId>(selected->contourId))
             : -1;
         if (contourIndex < 0)
-            contourIndex = lastSelected->data(0, kRoleContourIndex).toInt();
+            contourIndex = selected->contourIndex;
         m_toolpathPanel->showContourCoordinates(contourIndex);
     }
 }
 
 void MainWindow::selectProjectExplorerEntries(DocumentId docId, const QStringList& entries)
 {
-    if (!m_projectExplorerTree)
+    if (!m_projectExplorerTree || !m_projectExplorerController)
         return;
 
     m_blockProjectExplorerSignals = true;
-    QSignalBlocker blocker(m_projectExplorerTree);
-    m_projectExplorerTree->clearSelection();
-
-    if (!entries.isEmpty()) {
-        QTreeWidgetItemIterator iterator(m_projectExplorerTree);
-        while (*iterator) {
-            const auto kind = projectNodeKind(*iterator);
-            const bool kindMatches = lcnc::app::isCadProjectNode(kind);
-            const bool docMatches = docId == kInvalidDocumentId
-                || (*iterator)->data(0, kRoleDocId).toInt() == docId;
-            const QString entry = (*iterator)->data(0, kRoleEntry).toString();
-            if (kindMatches && docMatches && !entry.isEmpty() && entries.contains(entry)) {
-                (*iterator)->setSelected(true);
-            }
-            ++iterator;
-        }
-    }
-
+    m_projectExplorerController->selectEntries(docId, entries);
     m_blockProjectExplorerSignals = false;
 }
 

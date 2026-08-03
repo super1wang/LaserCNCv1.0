@@ -8,6 +8,8 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 
+#include <algorithm>
+
 namespace lcnc::app {
 namespace {
 
@@ -78,6 +80,117 @@ void ProjectExplorerController::rebuild(const ProjectExplorerSnapshot& snapshot)
         m_tree->setCurrentItem(current);
     if (m_tree->verticalScrollBar())
         m_tree->verticalScrollBar()->setValue(scroll);
+}
+
+std::optional<ProjectExplorerController::ContourSelection>
+ProjectExplorerController::selectContour(std::uint64_t contourId, int fallbackIndex)
+{
+    if (!m_tree || (contourId == 0 && fallbackIndex < 0))
+        return std::nullopt;
+
+    QTreeWidgetItem* target = nullptr;
+    QTreeWidgetItemIterator iterator(m_tree);
+    while (*iterator) {
+        const auto id = (*iterator)->data(0, ProjectExplorerRoles::ContourId).toULongLong();
+        if (projectNodeKind(*iterator) == ProjectExplorerNodeKind::ToolpathContour
+            && ((contourId != 0 && id == contourId)
+                || (contourId == 0
+                    && (*iterator)->data(0, ProjectExplorerRoles::ContourIndex).toInt() == fallbackIndex))) {
+            target = *iterator;
+            break;
+        }
+        ++iterator;
+    }
+    if (!target)
+        return std::nullopt;
+
+    const QSignalBlocker blocker(m_tree);
+    m_tree->clearSelection();
+    m_tree->setCurrentItem(target);
+    target->setSelected(true);
+    m_tree->scrollToItem(target);
+    return ContourSelection{target->data(0, ProjectExplorerRoles::ContourId).toULongLong(),
+                            target->data(0, ProjectExplorerRoles::ContourIndex).toInt()};
+}
+
+std::optional<ProjectExplorerController::ContourSelection>
+ProjectExplorerController::selectContours(const QList<std::uint64_t>& contourIds,
+                                          const QList<int>& fallbackIndexes)
+{
+    if (!m_tree || (contourIds.isEmpty() && fallbackIndexes.isEmpty()))
+        return std::nullopt;
+
+    QTreeWidgetItem* first = nullptr;
+    QTreeWidgetItem* last = nullptr;
+    const QSignalBlocker blocker(m_tree);
+    m_tree->clearSelection();
+    QTreeWidgetItemIterator iterator(m_tree);
+    while (*iterator) {
+        if (projectNodeKind(*iterator) == ProjectExplorerNodeKind::ToolpathContour) {
+            const auto id = (*iterator)->data(0, ProjectExplorerRoles::ContourId).toULongLong();
+            const int index = (*iterator)->data(0, ProjectExplorerRoles::ContourIndex).toInt();
+            if ((id != 0 && contourIds.contains(id)) || fallbackIndexes.contains(index)) {
+                (*iterator)->setSelected(true);
+                if (!first)
+                    first = *iterator;
+                last = *iterator;
+            }
+        }
+        ++iterator;
+    }
+    if (!last)
+        return std::nullopt;
+    m_tree->setCurrentItem(last);
+    m_tree->scrollToItem(first ? first : last);
+    return ContourSelection{last->data(0, ProjectExplorerRoles::ContourId).toULongLong(),
+                            last->data(0, ProjectExplorerRoles::ContourIndex).toInt()};
+}
+
+void ProjectExplorerController::selectEntries(DocumentId documentId,
+                                              const QStringList& entries)
+{
+    if (!m_tree)
+        return;
+    const QSignalBlocker blocker(m_tree);
+    m_tree->clearSelection();
+    if (entries.isEmpty())
+        return;
+    QTreeWidgetItemIterator iterator(m_tree);
+    while (*iterator) {
+        const auto kind = projectNodeKind(*iterator);
+        const bool documentMatches = documentId == kInvalidDocumentId
+            || (*iterator)->data(0, ProjectExplorerRoles::DocId).toInt() == documentId;
+        const QString entry = (*iterator)->data(0, ProjectExplorerRoles::Entry).toString();
+        if (isCadProjectNode(kind) && documentMatches && !entry.isEmpty() && entries.contains(entry))
+            (*iterator)->setSelected(true);
+        ++iterator;
+    }
+}
+
+std::optional<ProjectExplorerController::ContourOrder>
+ProjectExplorerController::contourOrder() const
+{
+    if (!m_tree)
+        return std::nullopt;
+    ContourOrder result;
+    bool hasContourRoot = false;
+    QTreeWidgetItemIterator iterator(m_tree);
+    while (*iterator) {
+        if (projectNodeKind(*iterator) == ProjectExplorerNodeKind::ToolpathContour) {
+            hasContourRoot = true;
+            const int index = (*iterator)->data(0, ProjectExplorerRoles::ContourIndex).toInt();
+            const auto id = (*iterator)->data(0, ProjectExplorerRoles::ContourId).toULongLong();
+            result.indexes.append(index);
+            result.ids.append(id);
+            result.hasStableIds = result.hasStableIds && id != 0;
+            if (*iterator == m_tree->currentItem()) {
+                result.selectedRow = result.indexes.size() - 1;
+                result.selectedId = id;
+            }
+        }
+        ++iterator;
+    }
+    return hasContourRoot ? std::optional<ContourOrder>(result) : std::nullopt;
 }
 
 } // namespace lcnc::app

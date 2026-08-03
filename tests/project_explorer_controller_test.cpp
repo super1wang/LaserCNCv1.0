@@ -50,6 +50,33 @@ int main(int argc, char** argv)
            == QStringLiteral("shape:1"));
     assert(tree.currentItem()->text(0) == QStringLiteral("Renamed Shape"));
 
+    lcnc::app::ProjectExplorerNode contourA;
+    contourA.kind = lcnc::app::ProjectExplorerNodeKind::ToolpathContour;
+    contourA.nodeKey = QStringLiteral("contour:11");
+    contourA.displayName = QStringLiteral("Contour A");
+    contourA.contourIndex = 0;
+    contourA.contourId = 11;
+    lcnc::app::ProjectExplorerNode contourB = contourA;
+    contourB.nodeKey = QStringLiteral("contour:12");
+    contourB.displayName = QStringLiteral("Contour B");
+    contourB.contourIndex = 1;
+    contourB.contourId = 12;
+    lcnc::app::ProjectExplorerNode toolpathRoot;
+    toolpathRoot.kind = lcnc::app::ProjectExplorerNodeKind::ToolpathRoot;
+    toolpathRoot.nodeKey = QStringLiteral("toolpath");
+    toolpathRoot.children = {contourA, contourB};
+    snapshot.roots = {toolpathRoot};
+    controller.rebuild(snapshot);
+
+    const auto selectedContour = controller.selectContour(12, -1);
+    assert(selectedContour && selectedContour->contourIndex == 1);
+    const auto selectedContours = controller.selectContours({11, 12}, {});
+    assert(selectedContours && selectedContours->contourId == 12);
+    const auto order = controller.contourOrder();
+    assert(order && order->indexes == QList<int>({0, 1}) && order->hasStableIds);
+    controller.selectEntries(kInvalidDocumentId, {});
+    assert(tree.selectedItems().isEmpty());
+
     lcnc::AppSettings settings;
     int persistCount = 0;
     lcnc::app::ViewStateController viewState(
