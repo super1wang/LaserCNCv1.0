@@ -1,6 +1,6 @@
 # LaserCNC 当前交付状态
 
-复核日期：2026-07-30
+复核日期：2026-08-03
 
 ## 结论
 
@@ -24,7 +24,12 @@ Visual Studio/MSBuild ACS+GTN Debug 已通过对应 CTest，可作为集成测�
   合并、显式取消、超时和关闭丢弃均有确定结果；同 key 合并时新旧命令保持
   独立 ID 且每个已接受命令只完成一次。
 - 新增执行线程私有的 `ProcessDeviceRuntime` 与 `ProcessRunCoordinator`，
-  并修正模块停机顺序；剩余直接设备访问仍明确列入 `todo.md`。
+  并修正模块停机顺序；预检已下沉到 `ProcessPreflightService`，普通切割的
+  sink 生命周期和轮廓前二次安全门禁均通过 typed runtime 执行。
+- runtime 外原始设备指针/锁入口已删除；架构扫描禁止重新引入
+  `motionControl()`、`laserDevice()` 或 `lockDeviceAccess()` 业务调用。
+- 连接/断开和状态轮询已分别迁入 `ProcessConnectionService`、
+  `ProcessStatusService`；后者涵盖控制器、外设和安全监控生命周期调度。
 - MainWindow 已将工作区、工程树和视图状态下沉为三个 controller；CAM 已
   抽出带 revision 校验的 `ToolpathGenerationService`；CAD 算法异常统一在
   module/service 边界记录和转换。
@@ -52,10 +57,13 @@ Visual Studio/MSBuild ACS+GTN Debug 已通过对应 CTest，可作为集成测�
 ## 仅静态或构建验证
 
 - Process OCC-free、core/view 分层、淘汰 API、settings singleton、CMake 源文件收录。
-- DeviceCommandQueue 与 ProcessDeviceCoordinator 的结构关系；静态扫描仍有
-  41 处 runtime 外的设备锁或设备指针使用，因此唯一 SDK executor 尚未完成。
+- DeviceCommandQueue 与 ProcessDeviceRuntime 的线程边界；静态扫描确认业务层
+  原始设备锁和设备指针调用为 0，`ProcessDeviceCoordinator` 仅留在 runtime 内部。
 - 旧格式拒绝和设备队列 completion：`lcnc_project_package_test`、
   `lcnc_device_command_queue_test` 已通过。
+- 预检 generation/取消/不可变报告与普通切割断连、状态读取、故障、电机未创建、
+  轴失使能门禁分别由专用单元测试覆盖；本次证据不等同物理设备故障注入。
+- connection/status service 的异步回调、幂等启停和停止后不再调度由独立 CTest 覆盖。
 - real-laser 源码已构建并通过 CTest，但旧厂商协议适配器仍有项目 `/W4`
   告警，尚未达到该配置的 `/WX` 收口。
 

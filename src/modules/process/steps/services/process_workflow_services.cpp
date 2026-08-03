@@ -16,34 +16,6 @@ namespace lcnc::process {
 
 namespace {
 
-MotionControl* motionControl(ProcessDeviceRuntime* service, QString* errorMessage)
-{
-    MotionControl* mc = service ? service->motionControl() : nullptr;
-    if (!mc || !mc->IsConnected()) {
-        if (errorMessage)
-            // 中文翻译：运动控制器未连接
-            *errorMessage = QObject::tr("Motion controller not connected");
-        return nullptr;
-    }
-    return mc;
-}
-
-bool resolveAxis(MotionControl* mc, const QString& axis, Axis* out, QString* errorMessage)
-{
-    if (!out)
-        return false;
-    const QString key = axis.trimmed().toUpper();
-    auto eAxis = enum_cast<Axis>(key.toStdString());
-    if (!eAxis.has_value() || !mc->IsMotorCreated(eAxis.value())) {
-        if (errorMessage)
-            // 中文翻译：轴 %1 未注册
-            *errorMessage = QObject::tr("Axis %1 is not registered").arg(key);
-        return false;
-    }
-    *out = eAxis.value();
-    return true;
-}
-
 bool isRelativeMode(const QString& mode)
 {
     return mode.compare(QStringLiteral("relative"), Qt::CaseInsensitive) == 0
@@ -105,21 +77,16 @@ bool ProcessMotionWorkflowService::moveAxis(const QString& axis,
     ProcessDeviceRuntime* const service = m_service;
     return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
         [service, axis, mode, target, velocity] {
-            QString error;
-            const auto deviceLock = service ? service->lockDeviceAccess() : ProcessDeviceRuntime::DeviceLock{};
-            MotionControl* mc = motionControl(service, &error);
-            if (!mc)
-                return DeviceCommandResult{false, error};
-            Axis eAxis;
-            if (!resolveAxis(mc, axis, &eAxis, &error))
-                return DeviceCommandResult{false, error};
-            const bool ok = isRelativeMode(mode)
-                ? mc->MoveRelative(eAxis, target, velocity)
-                : mc->MoveAbsolute(eAxis, target, velocity);
-            if (!ok)
-                // 中文翻译：轴 %1 运动失败
-                error = QObject::tr("Axis %1 movement failed").arg(axis);
-            return DeviceCommandResult{ok, error};
+            const auto eAxis = enum_cast<Axis>(axis.trimmed().toUpper().toStdString());
+            if (!eAxis.has_value())
+                // 中文翻译：轴 %1 未注册
+                return DeviceCommandResult{false, QObject::tr("Axis %1 is not registered").arg(axis)};
+            if (!service)
+                // 中文翻译：运动控制器未连接
+                return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
+            return isRelativeMode(mode)
+                ? service->moveRelative(eAxis.value(), target, velocity)
+                : service->moveAbsolute(eAxis.value(), target, velocity);
         }, errorMessage);
 }
 
@@ -150,35 +117,26 @@ bool ProcessMotionWorkflowService::moveAxes(const QVariantList& rows,
     ProcessDeviceRuntime* const service = m_service;
     return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
         [service, rows] {
-            QString error;
-            const auto deviceLock = service ? service->lockDeviceAccess() : ProcessDeviceRuntime::DeviceLock{};
-            MotionControl* mc = motionControl(service, &error);
-            if (!mc)
-                return DeviceCommandResult{false, error};
-            if (QString::fromStdString(mc->GetName()) == QStringLiteral("GTN"))
-                return DeviceCommandResult{false,
-                    // 中文翻译：GTN 控制器暂不支持同步多轴运动，请改为顺序执行
-                    QObject::tr("The GTN controller does not currently support synchronous multi-axis motion. Please execute it sequentially instead.")};
-            vector<Axis> axes;
-            vector<double> positions;
+            if (!service)
+                // 中文翻译：运动控制器未连接
+                return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
+            QVector<Axis> axes;
+            QVector<double> positions;
             double velocity = 5.0;
             bool relative = false;
             for (const QVariant& item : rows) {
                 const QVariantMap row = item.toMap();
-                Axis eAxis;
-                if (!resolveAxis(mc, row.value(QStringLiteral("axis")).toString(), &eAxis, &error))
-                    return DeviceCommandResult{false, error};
-                axes.push_back(eAxis);
+                const QString axisName = row.value(QStringLiteral("axis")).toString().trimmed().toUpper();
+                const auto axis = enum_cast<Axis>(axisName.toStdString());
+                if (!axis.has_value())
+                    // 中文翻译：轴 %1 未注册
+                    return DeviceCommandResult{false, QObject::tr("Axis %1 is not registered").arg(axisName)};
+                axes.push_back(axis.value());
                 positions.push_back(row.value(QStringLiteral("target"), 0.0).toDouble());
                 velocity = row.value(QStringLiteral("velocity"), velocity).toDouble();
                 relative = isRelativeMode(row.value(QStringLiteral("mode"), QStringLiteral("absolute")).toString());
             }
-            const bool ok = relative ? mc->MoveMRelative(axes, positions, velocity)
-                                     : mc->MoveMAbsolute(axes, positions, velocity);
-            if (!ok)
-                // 中文翻译：同步多轴运动失败
-                error = QObject::tr("Synchronized multi-axis motion failed");
-            return DeviceCommandResult{ok, error};
+            return service->moveAxes(axes, positions, velocity, relative);
         }, errorMessage);
 }
 
@@ -187,16 +145,10 @@ bool ProcessMotionWorkflowService::stopMotion(QString* errorMessage)
     ProcessDeviceRuntime* const service = m_service;
     return executeDeviceCommand(m_deviceQueue, TaskPriority::Stop, 5000,
         [service] {
-            QString error;
-            const auto deviceLock = service ? service->lockDeviceAccess() : ProcessDeviceRuntime::DeviceLock{};
-            MotionControl* mc = motionControl(service, &error);
-            if (!mc)
-                return DeviceCommandResult{false, error};
-            const bool ok = mc->StopMotion() && mc->StopAllBuffer();
-            if (!ok)
-                // 中文翻译：停止运动失败
-                error = QObject::tr("Stop motion failed");
-            return DeviceCommandResult{ok, error};
+            if (!service)
+                // 中文翻译：运动控制器未连接
+                return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
+            return service->stopAllMotion();
         }, errorMessage);
 }
 
@@ -215,32 +167,18 @@ bool ProcessIoWorkflowService::setOutput(const QString& signalType,
     ProcessDeviceRuntime* const service = m_service;
     return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, 5000,
         [service, signalType, ioName, value] {
-            QString error;
-            const auto deviceLock = service ? service->lockDeviceAccess() : ProcessDeviceRuntime::DeviceLock{};
-            MotionControl* mc = motionControl(service, &error);
-            if (!mc)
-                return DeviceCommandResult{false, error};
+            if (!service)
+                // 中文翻译：运动控制器未连接
+                return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
             const bool digital = signalType.compare(QStringLiteral("digital"), Qt::CaseInsensitive) == 0;
-            bool ok = false;
             if (digital) {
-                if (auto e = ioEnumFromKey<DigitalOUT>(ioName)) {
-                    if (mc->m_mapDigitalOUT.count(e.value()))
-                        ok = mc->DigitalOutputSet(e.value(), value.toBool() ? 1 : 0);
-                    else
-                        // 中文翻译：数字量输出 %1 未注册
-                        error = QObject::tr("Digital output %1 is not registered").arg(ioName);
-                }
-            } else if (auto e = ioEnumFromKey<AnalogOUT>(ioName)) {
-                if (mc->m_mapAnalogOUT.count(e.value()))
-                    ok = mc->AnalogOutputSet(e.value(), value.toDouble());
-                else
-                    // 中文翻译：模拟量输出 %1 未注册
-                    error = QObject::tr("Analog output %1 is not registered").arg(ioName);
+                if (const auto output = ioEnumFromKey<DigitalOUT>(ioName))
+                    return service->setDigitalOutput(output.value(), value.toBool());
+            } else if (const auto output = ioEnumFromKey<AnalogOUT>(ioName)) {
+                return service->setAnalogOutput(output.value(), value.toDouble(), ioName);
             }
-            if (!ok && error.isEmpty())
-                // 中文翻译：输出信号 %1 设置失败
-                error = QObject::tr("Output signal %1 setup failed").arg(ioName);
-            return DeviceCommandResult{ok, error};
+            // 中文翻译：输出信号 %1 设置失败
+            return DeviceCommandResult{false, QObject::tr("Output signal %1 setup failed").arg(ioName)};
         }, errorMessage);
 }
 
@@ -268,31 +206,26 @@ bool ProcessIoWorkflowService::waitInput(const QString& signalType,
         ProcessDeviceRuntime* const service = m_service;
         if (!executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow,
                                   std::max(1000, interval * 2),
-            [service, analog, digitalEnum, analogEnum, targetValue, matched, ioName] {
+            [service, analog, targetValue, matched, ioName] {
                 QString error;
-                const auto deviceLock = service ? service->lockDeviceAccess() : ProcessDeviceRuntime::DeviceLock{};
-                MotionControl* mc = motionControl(service, &error);
-                if (!mc)
+                if (!service)
+                    // 中文翻译：运动控制器未连接
+                    return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
+                if (analog) {
+                    double value = 0.0;
+                    if (!service->readAnalogChannel(ioName, &value, &error))
+                        return DeviceCommandResult{false, error};
+                    if (std::abs(value - targetValue.toDouble()) < 1e-6)
+                        *matched = true;
+                } else {
+                    bool value = false;
+                    if (!service->readDigitalChannel(ioName, &value, &error))
+                        return DeviceCommandResult{false, error};
+                    if (value == targetValue.toBool())
+                        *matched = true;
+                }
+                if (!error.isEmpty())
                     return DeviceCommandResult{false, error};
-            if (analog) {
-                if (!mc->m_mapAnalogIN.count(analogEnum.value()))
-                    // 中文翻译：输入信号 %1 未注册
-                    return DeviceCommandResult{false, QObject::tr("Input signal %1 is not registered").arg(ioName)};
-                double value = 0.0;
-                if (mc->AnalogInputGet(analogEnum.value(), value)
-                    && std::abs(value - targetValue.toDouble()) < 1e-6) {
-                    *matched = true;
-                }
-            } else {
-                if (!mc->m_mapDigitalIN.count(digitalEnum.value()))
-                    // 中文翻译：输入信号 %1 未注册
-                    return DeviceCommandResult{false, QObject::tr("Input signal %1 is not registered").arg(ioName)};
-                int value = 0;
-                if (mc->DigitalInputGet(digitalEnum.value(), value)
-                    && (value != 0) == targetValue.toBool()) {
-                    *matched = true;
-                }
-            }
                 return DeviceCommandResult{};
             }, errorMessage)) {
             return false;

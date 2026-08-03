@@ -219,7 +219,9 @@ bool NormalCuttingManager::run(const QString& nodeId,
     std::shared_ptr<IMotionCommandSink> sink;
     QString backendLabel;
     if (simMode) {
-        auto created = MotionSinkFactory::create(nullptr, true, m_simTicker.get(), m_processModule);
+        auto created = m_service
+            ? m_service->createMotionSink(true, m_simTicker.get(), m_processModule)
+            : nullptr;
         sink = std::shared_ptr<IMotionCommandSink>(std::move(created));
         if (sink) {
             sink->setCancellation(&ic);
@@ -228,9 +230,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
     } else if (m_deviceQueue && m_service) {
         const DeviceCommandResult creation = m_deviceQueue->executeAndWait(
             DeviceCommandQueue::ResultCommand([this, &sink, &backendLabel, &ic] {
-                const auto deviceLock = m_service->lockDeviceAccess();
-                auto created = MotionSinkFactory::create(
-                    m_service->motionControl(), false, m_simTicker.get(), m_processModule);
+                auto created = m_service->createMotionSink(
+                    false, m_simTicker.get(), m_processModule);
                 if (!created) {
                     return DeviceCommandResult{
                         false,
@@ -398,9 +399,6 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     bool skippedEmptyContour = false;
     auto constructAndStart = [&](IMotionCommandSink& commandSink, QString* startError) {
         // Construct and start one complete contour on the device executor.
-        const auto deviceLock = !pureSimulation && m_service
-            ? m_service->lockDeviceAccess()
-            : ProcessDeviceRuntime::DeviceLock{};
         if (!row.tool) {
         // 中文翻译：轮廓 %1 没有绑定工具
             if (startError)
@@ -411,37 +409,13 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     // 运行中轴使能可能在启动预检之后被人为撤销或被驱动器切断。控制器的
     // 指令构建层会跳过失能轴，若这里不阻断，就会把该轮廓视为完成并继续
     // 下发下一轮廓。每次下发前直接读取硬件状态，将其作为不可恢复的步骤失败。
-    if (!m_processModule || !m_processModule->simulationMode()) {
-        MotionControl* mc = m_service ? m_service->motionControl() : nullptr;
-        if (!mc || !mc->IsConnected()) {
+    if (!pureSimulation) {
+        const DeviceCommandResult health = m_service
+            ? m_service->validateContourBoundary()
+            : DeviceCommandResult{false, tr("The motion controller is not connected during processing")};
+        if (!health.success) {
             if (startError)
-                // 中文翻译：加工过程中运动控制器未连接
-                *startError = tr("The motion controller is not connected during processing");
-            return false;
-        }
-        int fault = 0;
-        if (!mc->IsAxisStatusNormal(fault)) {
-            if (startError)
-                // 中文翻译：加工过程中无法读取运动控制器状态
-                *startError = tr("Unable to read motion controller status during processing");
-            return false;
-        }
-        if (fault != 0) {
-            if (startError)
-                // 中文翻译：加工过程中运动控制器故障码: %1
-                *startError = tr("Motion controller fault code during processing: %1").arg(fault);
-            return false;
-        }
-        QStringList disabledAxes;
-        for (Axis axis : mc->m_vecMotors) {
-            if (mc->IsMotorCreated(axis) && !mc->IsEnabled(axis))
-                disabledAxes.append(QString::fromLatin1(enum_name(axis).data()));
-        }
-        if (!disabledAxes.isEmpty()) {
-            if (startError)
-                // 中文翻译：加工过程中轴系未使能: %1
-                *startError = tr("The axis system is not enabled during machining: %1")
-                    .arg(disabledAxes.join(tr("，")));
+                *startError = health.error;
             return false;
         }
     }
@@ -566,8 +540,6 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
             const DeviceCommandResult result = m_deviceQueue->executeAndWait(
                 DeviceCommandQueue::ResultCommand([this, sink, state] {
                     QString pollError;
-                    const auto pollLock = m_service ? m_service->lockDeviceAccess()
-                                                     : ProcessDeviceRuntime::DeviceLock{};
                     *state = sink->isProgramRunning(&pollError);
                     return DeviceCommandResult{pollError.isEmpty(), pollError};
                 }), TaskPriority::Workflow, 1000);

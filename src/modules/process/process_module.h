@@ -31,9 +31,15 @@ class ProcessMotionWorkflowService;
 class NormalCuttingManager;
 class ProcessCuttingPlanService;
 class ProcessMonitorService;
+class ProcessPreflightService;
+class ProcessConnectionService;
+class ProcessStatusService;
 class ProcessWorkflowExecutor;
 class ProcessSettingsService;
 class DeviceCommandQueue;
+struct DeviceCommandResult;
+struct DeviceStatusSnapshot;
+struct DevicePeripheralSnapshot;
 struct ProcessSettingsChangeSet;
 }
 
@@ -46,8 +52,8 @@ class MachineConfigurationService;
  * @brief Process module — manages execution process, peripherals, and parameters.
  *
  * 使用 System/ProcessDeviceRuntime 作为现有设备适配器，参数界面由动态属性表提供。
- * 运动指令统一走 service->motionControl()（仿真模式下由 MCFactory
- * 返回 SimulatorCMHP / ACS 仿真器）。
+ * 运动、IO 与设备生命周期指令经 ProcessDeviceRuntime 的 typed 命令面和
+ * DeviceCommandQueue 执行；仿真控制器由 runtime 选择。
  */
 /**
  * @brief 主界面 IO 栏一条数字量输出按钮的描述符。
@@ -122,7 +128,6 @@ public:
 
     lcnc::process::ProcessFlowDocument& processFlowDocument() { return m_processFlowDocument; }
     const lcnc::process::ProcessFlowDocument& processFlowDocument() const { return m_processFlowDocument; }
-    ProcessDeviceRuntime* service() const { return m_service.get(); }
     lcnc::process::ProcessSettingsService* settingsService() const { return m_settingsService.get(); }
     QString statusMessage() const override;
 
@@ -181,8 +186,6 @@ signals:
 
 private slots:
     void onSimulationTick();
-    void pollHardwareStatus();          // 联机后周期性采集硬件轴位/使能
-    void pollPeripheralStatus();        // 低频采集串口外设状态
 
 private:
     enum class DeviceOperation { None, Connecting, Disconnecting, Homing, PresetMove };
@@ -194,6 +197,10 @@ private:
     void setStatusMessage(const QString& message);
     void startDeviceMonitoring();
     void stopDeviceMonitoring();
+    void applyHardwareStatus(const lcnc::process::DeviceCommandResult& result,
+                             const lcnc::process::DeviceStatusSnapshot& batch);
+    void applyPeripheralStatus(const lcnc::process::DeviceCommandResult& result,
+                               const lcnc::process::DevicePeripheralSnapshot& sample);
     bool validateProcessingConfiguration(QString* errorMessage);
     void startWorkflowAfterPreflight();
     /// 请求本模块任务取消并等待；false 表示仍有 worker 未在期限内退出。
@@ -217,10 +224,6 @@ private:
     QMap<QString, bool>   m_axisEnabled;
     QMap<QString, bool>   m_digitalOutputs;
     QTimer*               m_simTimer{nullptr};
-    QTimer*               m_hwStatusTimer{nullptr};   ///< 硬件状态轮询（联机模式下生效）
-    bool                  m_hwPollInFlight{false};    ///< 防止设备队列内轮询任务堆积
-    QTimer*               m_peripheralStatusTimer{nullptr}; ///< 串口外设低频轮询
-    bool                  m_peripheralPollInFlight{false};
     QString               m_lastPeripheralDiagnostic;
     double                m_feedOverride{1.0};
     double                m_simPhase{0.0};
@@ -241,6 +244,9 @@ private:
     // thread. ProcessDeviceRuntime ownership remains here until the remaining call paths
     // have moved behind this boundary.
     std::unique_ptr<lcnc::process::DeviceCommandQueue> m_deviceCommandQueue;
+    std::shared_ptr<lcnc::process::ProcessPreflightService> m_preflightService;
+    std::unique_ptr<lcnc::process::ProcessConnectionService> m_connectionService;
+    std::unique_ptr<lcnc::process::ProcessStatusService> m_statusService;
     std::unique_ptr<lcnc::process::ProcessMotionWorkflowService> m_motionStepService;
     std::unique_ptr<lcnc::process::ProcessIoWorkflowService> m_ioStepService;
     std::unique_ptr<lcnc::process::CallbackProcessCuttingService> m_cuttingStepService;

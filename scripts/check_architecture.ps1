@@ -46,6 +46,24 @@ Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules/process') -Recurse -File
     }
 }
 
+# Vendor pointers and the defensive SDK lease are runtime-private.  Process
+# services, workflows, cutting code and UI must use typed executor operations.
+Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules/process') -Recurse -File -Include *.h,*.hpp,*.cpp |
+    Where-Object { $_.FullName -notlike '*\runtime\process_device_runtime.cpp' -and
+                   $_.FullName -notlike '*\runtime\process_device_runtime.h' -and
+                   $_.FullName -notlike '*\device\laser\ld_factory.cpp' -and
+                   $_.FullName -notlike '*\device\laser\ld_factory.h' } |
+    ForEach-Object {
+    foreach ($match in (Select-String -LiteralPath $_.FullName -CaseSensitive -Pattern '\b(?:motionControl|laserDevice|lockDeviceAccess)\s*\(')) {
+        $violations.Add("Process raw device access escaped typed runtime: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+    }
+}
+
+$processModule = Join-Path $srcPath 'modules/process/process_module.cpp'
+foreach ($match in (Select-String -LiteralPath $processModule -Pattern '\b(?:connectDevices|disconnectDevices|pollStatus|pollPeripheralStatus)\s*\(')) {
+    $violations.Add("ProcessModule must delegate connection/status device operations: $($processModule):$($match.LineNumber): $($match.Line.Trim())")
+}
+
 $processPath = Join-Path $srcPath 'modules/process'
 Get-ChildItem -LiteralPath $processPath -Recurse -Directory | ForEach-Object {
     if ($_.Name -cmatch '[A-Z]') {

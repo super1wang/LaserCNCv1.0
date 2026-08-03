@@ -45,17 +45,11 @@ int main(int argc, char* argv[])
         QSemaphore completed;
         lcnc::process::DeviceCommandResult result;
         if (!queue.submit([runtimeHolder] {
-                bool disconnected = true;
-                if (*runtimeHolder) {
-                    if (MotionControl* motion = (*runtimeHolder)->motionControl();
-                        motion && motion->IsConnected()) {
-                        disconnected = motion->Disconnect();
-                    }
-                }
+                lcnc::process::DeviceCommandResult disconnected;
+                if (*runtimeHolder)
+                    disconnected = (*runtimeHolder)->disconnectMotionControllerSession();
                 runtimeHolder->reset();
-                return lcnc::process::DeviceCommandResult{
-                    disconnected,
-                    disconnected ? QString() : QObject::tr("SimulatorCMHP disconnect failed")};
+                return disconnected;
             }, TaskPriority::Stop,
             [&result, &completed](const lcnc::process::DeviceCommandResult& completion) {
                 result = completion;
@@ -74,21 +68,13 @@ int main(int argc, char* argv[])
         lcnc::process::DeviceCommandResult result;
         if (!queue.submit([runtimeHolder, iteration] {
             const auto& runtime = *runtimeHolder;
-            MotionControl* motion = runtime->motionControl();
             if (iteration == 0) {
-                runtime->setMotionControl("SimulatorCMHP");
-                motion = runtime->motionControl();
+                return runtime->connectMotionControllerSession(false);
             }
-            if (!motion)
-                return lcnc::process::DeviceCommandResult{false,
-                    QObject::tr("SimulatorCMHP controller was not created")};
-            if (iteration == 0 && !motion->Connect())
-                return lcnc::process::DeviceCommandResult{false,
-                    QObject::tr("acsc_OpenCommSimulator or Simulator.prg initialization failed")};
-            return lcnc::process::DeviceCommandResult{
-                motion->IsConnected(),
-                motion->IsConnected() ? QString()
-                                      : QObject::tr("SimulatorCMHP session disconnected unexpectedly")};
+            const bool connected = runtime->pollStatus({}, {}).connected;
+            return lcnc::process::DeviceCommandResult{connected,
+                connected ? QString()
+                          : QObject::tr("SimulatorCMHP session disconnected unexpectedly")};
         }, TaskPriority::Stop,
         [&result, &completed](const lcnc::process::DeviceCommandResult& completion) {
             result = completion;

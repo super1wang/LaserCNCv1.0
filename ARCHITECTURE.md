@@ -129,10 +129,10 @@ Process 不读取 OCC。CAM 通过 `ICamToolpathProvider` 输出 `ToolpathExport
 当前 `ProcessModule` 仍是较大的 facade/coordinator，实际拥有或协调：
 
 - typed settings 与参数/IO 模型。
-- `ProcessDeviceRuntime` 私有持有 `Service`、运动控制器、激光器和工具表；`DeviceCommandQueue` 承接分优先级调度，`ProcessDeviceCoordinator` 租约暂时仍是最终供应商 SDK 串行边界。
+- `ProcessDeviceRuntime` 私有持有运动控制器、激光器和工具表；`DeviceCommandQueue` 承接分优先级调度，`ProcessDeviceCoordinator` 租约仅作为 runtime 内部的供应商 SDK 防御串行边界。
 - `ProcessCuttingPlanService`、`NormalCuttingManager` 与 motion sink。
 - 流程文档、步骤插件注册表和 `ProcessWorkflowExecutor`。
-- `ProcessRunCoordinator` 的运行状态迁移，以及尚待继续下沉的加工前置检查、连接/断开、回零、急停、轮询和监控。
+- `ProcessConnectionService` 的连接/断开事务、`ProcessPreflightService` 的不可变硬件预检报告、`ProcessStatusService` 的控制器/外设轮询与安全监控启停，以及 `ProcessRunCoordinator` 的运行状态迁移；workflow/UI facade 组合仍待继续下沉。
 
 执行链路为：
 
@@ -140,6 +140,7 @@ Process 不读取 OCC。CAM 通过 `ICamToolpathProvider` 输出 `ToolpathExport
 CAM ToolpathExportSnapshot
   -> ProcessToolpathService / ProcessCuttingPlanService
   -> NormalCuttingManager
+  -> ProcessDeviceRuntime typed sink/轮廓边界门禁
   -> MotionSinkFactory
   -> PureSimulation / ACS text / GTN buffered sink
   -> 运动控制器与激光/IO
@@ -147,16 +148,18 @@ CAM ToolpathExportSnapshot
 
 `runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。任何 Error、EmergencyStop 或停止路径必须关闭激光与吹气等安全输出。
 
-硬件 SDK 类型只能存在于私有实现。`ProcessDeviceRuntime` 在设备线程内以 `unique_ptr` 持有 `Service`，后者持有当前控制器，禁止函数内 static 控制器。设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
+硬件 SDK 类型只能存在于私有实现。`ProcessDeviceRuntime` 持有当前控制器和激光器，所有硬件操作由设备队列线程调用，禁止函数内 static 控制器。设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
 
-当前仍有部分业务路径通过 `Service::motionControl()`、`laserDevice()` 和 `lockDeviceAccess()` 取得设备并依赖 `ProcessDeviceCoordinator` 防御锁，因此队列尚未成为唯一 SDK 入口。设备公共接口不得泄漏供应商类型；兼容 `MessageModule`、设备日志宏和旧 `LogModule` 均已删除，统一使用 `lcnc::Logger`。剩余入口迁移见 `todo.md`。
+业务路径不再取得控制器、激光器或设备锁；预检通过 `ProcessPreflightService` 提交 generation 化请求，普通切割在每个轮廓下发前通过 runtime 再次检查连接、故障、电机创建和轴使能。架构门禁拒绝 runtime 外重新调用原始设备访问 API。`ProcessDeviceCoordinator` 暂留在 runtime 内部，不能作为跨模块入口。设备公共接口不得泄漏供应商类型；兼容 `MessageModule`、设备日志宏和旧 `LogModule` 均已删除，统一使用 `lcnc::Logger`。
+
+连接、断开、控制器状态和外设状态也不再由 `ProcessModule` 直接进入 runtime：`ProcessConnectionService` 只提交 typed 连接事务并把进度/完成回调投递回 GUI 线程；`ProcessStatusService` 独占 150 ms/2 s 定时调度、同 key 合并和防堆积，随后把不可变状态快照交给 facade 发射既有 Qt 信号。500 ms 安全 IO 的 `ProcessMonitorService` 生命周期由 status service 统一编排。
 Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `ProcessSettingsService`，不得回退到 `current()` 全局查询。
 
 构建时 ACS、GTN、BDAQ 与真实激光均由 CMake 开关控制。GTN adapter 仅在 `LCNC_WITH_GTN=ON` 时参与构建；ACS adapter、`SimulatorCMHP`、文本 sink、供应商头、import library 和随程序部署的 `Simulator.prg` 也只在 `LCNC_WITH_ACS=ON` 时形成完整 ACS 路径。all-off 构建中的本地状态控制器仅服务显式 PureSimulation，不代表 ACS Simulator。支持的验证预设见 `CMakePresets.json`。
 
 ## 自动化架构门禁
 
-`scripts/check_architecture.ps1` 是 CTest 的 `architecture_checks`。它拒绝 core/view 反向依赖、纯算法依赖 UI/文档/Kernel、Process 对 OCC 的 include、设备公共头泄漏兼容日志、Process settings singleton、已淘汰文档 API，以及未纳入 `CMakeLists.txt` 的 `.cpp`。标准验证命令为 `ctest --test-dir build-cmake --build-config Debug --output-on-failure`。构建目录和应用输出约定以 `BUILD.md` 为准。
+`scripts/check_architecture.ps1` 是 CTest 的 `architecture_checks`。它拒绝 core/view 反向依赖、纯算法依赖 UI/文档/Kernel、Process 对 OCC 的 include、设备公共头泄漏兼容日志、Process settings singleton、runtime 外原始设备访问、已淘汰文档 API，以及未纳入 `CMakeLists.txt` 的 `.cpp`。标准验证命令为 `ctest --test-dir build-cmake --build-config Debug --output-on-failure`。构建目录和应用输出约定以 `BUILD.md` 为准。
 
 ## 9. 异步与内存安全规则
 

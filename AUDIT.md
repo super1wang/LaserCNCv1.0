@@ -2,7 +2,7 @@
 
 审计日期：2026-07-30
 审计基线：`main`，`3ae0fa8 feat: add initial Chinese localization` 加当前未提交工作区
-结论：当前改动可以作为阶段性收口提交。质量预设（ACS+GTN、`/W4 /WX`）、all-off、ACS-only、GTN-only、real-laser、ASan 和 Visual Studio ACS+GTN 构建矩阵均已通过对应 CTest；其中包含真实 ACS `SimulatorCMHP`/`Simulator.prg` 初始化与设备线程会话回归。Process 唯一设备执行入口、剩余大型 facade 拆分、真机、交互内存和长稳验证仍未完成，当前不是生产发布版本。
+结论：当前改动可以作为阶段性收口提交。质量预设（ACS+GTN、`/W4 /WX`）、all-off、ACS-only、GTN-only、real-laser、ASan 和 Visual Studio ACS+GTN 构建矩阵均已通过历史对应 CTest；其中包含真实 ACS `SimulatorCMHP`/`Simulator.prg` 初始化与设备线程会话回归。本阶段进一步完成 Process 预检与普通切割 typed 设备边界，runtime 外原始设备访问已清零；剩余大型 facade 拆分、真机、交互内存和长稳验证仍未完成，当前不是生产发布版本。
 
 ## 1. 审计范围与方法
 
@@ -73,6 +73,9 @@
 
 - `DeviceCommandQueue` 增加唯一命令 ID 和 `Succeeded / Failed / Superseded / Cancelled / Shutdown / TimedOut` completion；同 key 合并时新命令取得新 ID，被替换命令只完成一次并返回 `Superseded`。
 - 引入执行线程私有的 `ProcessDeviceRuntime` 和 `ProcessRunCoordinator`；停机顺序调整为停止接收普通命令、取消并等待任务、停止监控、提交 Stop 安全输出、断开设备、关闭执行线程。
+- `ProcessPreflightService` 以 generation 请求和不可变报告承接控制器、激光器、轴及安全 IO 预检；普通切割的 sink 和每轮廓连接/故障/电机创建/轴使能二次门禁全部进入 typed runtime。
+- `ProcessConnectionService` 和 `ProcessStatusService` 分别承接连接会话与控制器/外设轮询，状态服务统一编排安全监控启停，避免 `ProcessModule` 直接调度设备读取。
+- 删除 runtime 外公开设备指针和锁入口，并新增静态架构门禁；`ProcessDeviceCoordinator` 只保留为 runtime 内部防御锁。
 - Process 目录和文件迁移为 snake_case，删除 `MessageModule`、兼容日志层和 legacy workflow service 别名。
 - MainWindow 的 workspace、工程树和视图状态职责已下沉到三个 controller；CAM 增加 `ToolpathGenerationService`，提交结果前校验输入 revision；CAD 算法统一抛出参数/OCC 异常并由模块边界记录和转换。
 - 桌面和库仅接受项目/CAM v4、当前 workflow schema 与 Process settings schema v2；离线升级器和应用层迁移、双读双写逻辑已删除。
@@ -92,12 +95,10 @@
 
 | 优先级 | 文件/范围 | 问题 | 建议 |
 | --- | --- | --- | --- |
-| P0 | `modules/process/runtime/process_device_coordinator.h`、`system/service.*`、`process_module.cpp` | 静态扫描仍有 41 处 runtime 外的设备锁或控制器/激光器指针访问，队列尚不是唯一 SDK 入口。 | 真机验证前不得移除防御锁；分阶段把剩余访问迁入设备执行上下文，并保留 Stop 优先级、超时隔离和对象保活语义。 |
 | P0 | ACS/GTN/真实激光路径 | 构建矩阵和 SimulatorCMHP SDK 测试不能证明物理设备停机、急停、断开和超时安全。 | 完成故障注入、100 次连接/断开与加工停止循环、输出安全检查。 |
 | P1 | `modules/cam/cam_module.cpp` | 约 6,606 行；toolpath generation 已抽离，但加工面、机台标定和显示投影仍集中。 | 继续按 machining-face pipeline、machine calibration、display projection 拆 service。 |
-| P1 | `modules/process/process_module.cpp` | 约 2,876 行；run coordinator 已抽离，但连接、预检、监控和 UI 投影仍耦合。 | 继续下沉 connection、preflight 和 status service。 |
+| P1 | `modules/process/process_module.cpp` | 约 2,179 行；run coordinator 与 preflight 已抽离，但连接会话、监控和 UI 投影仍耦合。 | 继续下沉 connection 和 status service。 |
 | P1 | `modules/cad/cad_module.cpp` | 约 2,297 行，CAD facade 与多类建模会话仍偏重。 | 将文档 IO、草图/特征和选择刷新继续委托给正式 controller/service。 |
-| P1 | Process 公开设备 API | snake_case 文件迁移已完成，但 `Service::motionControl()`、`laserDevice()` 和 `lockDeviceAccess()` 仍被业务层使用。 | 与唯一 executor 迁移同步删除旧 API，不保留兼容别名。 |
 | P1 | real-laser 编译策略 | ACS+GTN 质量预设已通过 `/W4 /WX`，但 real-laser 仍有旧厂商协议适配器告警。 | 逐 target 修正告警并记录必要豁免，使 real-laser 也可启用 `/WX`。 |
 
 ## 4. 文件级热点

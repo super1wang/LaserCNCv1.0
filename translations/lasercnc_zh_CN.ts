@@ -3524,6 +3524,26 @@ continue?</source>
 <context>
     <name>QObject</name>
     <message>
+        <source>Motion controller disconnection failed</source>
+        <translation>运动控制器断开失败</translation>
+    </message>
+    <message>
+        <source>Preflight report unavailable</source>
+        <translation>预检报告不可用</translation>
+    </message>
+    <message>
+        <source>Preflight runner unavailable</source>
+        <translation>预检执行器不可用</translation>
+    </message>
+    <message>
+        <source>Connection runner unavailable</source>
+        <translation>连接执行器不可用</translation>
+    </message>
+    <message>
+        <source>Disconnection runner unavailable</source>
+        <translation>断开执行器不可用</translation>
+    </message>
+    <message>
         <source>[new sketch]</source>
         <translation>[新草图]</translation>
     </message>

@@ -14,11 +14,9 @@
 
 ## P1：结构收口
 
-- [ ] 将 `process_module.cpp`（当前约 2,876 行）的连接会话、加工预检、轮询投影继续下沉为 `ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService`；`ProcessRunCoordinator` 已落地，且 CAD/CAM/Process 的共用任务生命周期作用域已统一，后续迁移必须保持已修正的关闭顺序。
-- [ ] 让 `DeviceCommandQueue` 成为唯一 SDK 执行入口；当前静态扫描仍有 41 处 runtime 外的 `lockDeviceAccess()`、`motionControl()` 或 `laserDevice()` 使用。在全部迁移并完成真机验证前保留 `ProcessDeviceCoordinator` 防御锁。
+- [ ] 继续将 `process_module.cpp`（当前约 2,111 行）收敛至 900 行入口门限；`ProcessConnectionService`、`ProcessPreflightService`、`ProcessStatusService` 和 `ProcessRunCoordinator` 已落地，剩余 workflow/UI 状态组合与 facade 接线仍需下沉，且必须保持既有关闭顺序。
 - [ ] 完成 `cam_module.cpp`（当前约 6,606 行）的职责下沉；`ToolpathGenerationService` 已实现并覆盖 stale-result 拒绝，machining-face pipeline、machine calibration 和 display projection 仍待独立 service。
 - [ ] 继续将 `cad_module.cpp`（当前约 2,297 行）的文档 IO、草图/特征流程和选择刷新下沉到正式 `CadDocumentIoService`、`CadModelingController`、`CadSelectionController`；本轮仅完成算法异常边界和部分已有 service 委托。
-- [ ] 清理 Process 中仍公开的旧式 `Service::motionControl()`、`laserDevice()`、`lockDeviceAccess()` API；目录和文件 snake_case 迁移已完成，不再保留重复的 legacy 文件或别名。
 - [ ] 收敛 real-laser 配置中旧厂商协议适配器的项目 `/W4` 告警，使该配置也能启用 `/WX`；ACS+GTN 质量预设已达到 `/W4 /WX`。
 
 ## P1：自动化回归
