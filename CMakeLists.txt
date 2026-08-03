@@ -443,6 +443,7 @@ if(LCNC_WITH_REAL_LASER)
 endif()
 
 set(SRCS_APP
+    src/app/controllers/cad_task_panel_controller.cpp
     src/app/controllers/project_explorer_controller.cpp
     src/app/controllers/view_state_controller.cpp
     src/app/controllers/workspace_presenter.cpp

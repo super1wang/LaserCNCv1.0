@@ -11,7 +11,7 @@
 | 2 | Process typed executor 与入口下沉 | 进行中 | `ProcessConnectionService` 接管连接/断开队列事务，`ProcessPreflightService` 接管 generation 化预检，`ProcessStatusService` 接管 150 ms 控制器、2 s 外设与安全监控启停调度，`ProcessWorkflowService` 独占当前 schema 流程文档、文件读写及变更出口；流程树与 `MainWindow` 通过 workflow 契约接线。普通切割 sink 生命周期和轮廓前二次健康门禁已收回 typed runtime。runtime 外原始设备指针/锁 API 已清零并由架构扫描防回退。仍需继续瘦身运行状态与手动控制 UI facade 组合。 |
 | 3 | CAM service 下沉 | 进行中 | `ToolpathGenerationService` 保证 generation 结果的 revision 校验；`CamDisplayProjectionService` 已独占加工面 AIS 对象、可见性投影和 GUI viewer 刷新；`MachiningFacePipelineService` 已持有集合、稳定 ID、revision、持久化快照、自动/手动合并、去重、角色边界校验、重绑、同步/异步分离及全局生成后的面捕获提交。机台标定与其余刀路/机台投影仍待迁移。 |
 | 4 | CAD service/controller 下沉 | 进行中 | `CadDocumentIoService` 已接管新建、保存、关闭、STEP 导出、STEP/IGES/STL/BREP 解析及显示网格准备；工程包导入事务、建模和选择控制器仍待迁移。 |
-| 5 | MainWindow controller 下沉与总门禁 | 进行中 | 工程树已改为只读 CAD/CAM projection contract；`ProjectExplorerModel` 不再依赖具体 Module。工作区、视图状态及 CAD UI controller 仍待迁移，并需执行最终矩阵验证。 |
+| 5 | MainWindow controller 下沉与总门禁 | 进行中 | 工程树已改为只读 CAD/CAM projection contract；`ProjectExplorerModel` 不再依赖具体 Module。`WorkspacePresenter`、`ViewStateController` 和 `CadTaskPanelController` 已接管工作区视图、显示状态持久化，以及 CAD TaskPanel 的快照投影、预览和草图 overlay 交互；命令执行仍在命令层。剩余最近文件、工程树事件路由和窗口级接线仍待迁移，并需执行最终矩阵验证。 |
 
 ## 当前约束
 

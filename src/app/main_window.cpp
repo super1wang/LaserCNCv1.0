@@ -5,6 +5,7 @@
 #include "app/app_context.h"
 #include "app/command_registry.h"
 #include "app/controllers/project_explorer_controller.h"
+#include "app/controllers/cad_task_panel_controller.h"
 #include "app/controllers/view_state_controller.h"
 #include "app/controllers/workspace_presenter.h"
 #include "app/project_explorer_tree_utils.h"
@@ -135,29 +136,19 @@ QString featureToolId(int featureIndex)
 
 QVariantMap primitiveParams(double sizeX, double sizeY, double sizeZ, double radius1, double radius2)
 {
-    QVariantMap params;
-    params.insert(QStringLiteral("sizeX"), sizeX);
-    params.insert(QStringLiteral("sizeY"), sizeY);
-    params.insert(QStringLiteral("sizeZ"), sizeZ);
-    params.insert(QStringLiteral("radius1"), radius1);
-    params.insert(QStringLiteral("radius2"), radius2);
-    return params;
+    return {{QStringLiteral("sizeX"), sizeX}, {QStringLiteral("sizeY"), sizeY},
+            {QStringLiteral("sizeZ"), sizeZ}, {QStringLiteral("radius1"), radius1},
+            {QStringLiteral("radius2"), radius2}};
 }
 
 QVariantMap featureParams(double length, double angleDeg)
 {
-    QVariantMap params;
-    params.insert(QStringLiteral("length"), length);
-    params.insert(QStringLiteral("angle"), angleDeg);
-    return params;
+    return {{QStringLiteral("length"), length}, {QStringLiteral("angle"), angleDeg}};
 }
 
-CadModule::TransformParameters transformParams(double translateX,
-                                               double translateY,
-                                               double translateZ,
-                                               double rotateX,
-                                               double rotateY,
-                                               double rotateZ,
+CadModule::TransformParameters transformParams(double translateX, double translateY,
+                                               double translateZ, double rotateX,
+                                               double rotateY, double rotateZ,
                                                int referenceMode)
 {
     CadModule::TransformParameters params;
@@ -169,12 +160,6 @@ CadModule::TransformParameters transformParams(double translateX,
     params.rotateZ = rotateZ;
     params.referenceMode = referenceMode;
     return params;
-}
-
-bool isActiveSketchOverlayKey(const QString& key)
-{
-    return key.startsWith(QStringLiteral("__sketch_active_element_"))
-        || key.startsWith(QStringLiteral("__sketch_active_handle_"));
 }
 
 constexpr int kRibbonFileIndex = 0;
@@ -871,6 +856,11 @@ void MainWindow::createRightPanel()
     m_rightStack->setMinimumWidth(320);
     m_rightStack->setMaximumWidth(420);
     m_rightStack->setCurrentIndex(2);
+    m_cadTaskPanelController = std::make_unique<lcnc::app::CadTaskPanelController>(
+        m_cadTaskPanel,
+        cad,
+        [this] { return m_occView; },
+        [this] { return m_rightStack && m_rightStack->currentWidget() == m_cadTaskPanel; });
 
     connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::commandRequested,
             this, [this](const QString& commandId) {
@@ -894,7 +884,7 @@ void MainWindow::createRightPanel()
         showWorkpieceView();
         m_occView->clearTransformGizmo();
         m_cadTaskPanel->showPrimitivePage(primitiveIndex);
-        updateCadPrimitivePreview();
+        m_cadTaskPanelController->updatePrimitivePreview();
         updateCommandStates();
         });
 
@@ -957,25 +947,25 @@ void MainWindow::createRightPanel()
 
     connect(cad, &CadModule::sketchElementsChanged,
             this, [this]() {
-        refreshSketchElementsView();
+        m_cadTaskPanelController->refreshSketchElements();
         rebuildProjectExplorer();
-        updateCadSketchOverlay();
-        updateCadTaskPanelState();
+        m_cadTaskPanelController->updateSketchOverlay();
+        m_cadTaskPanelController->refreshPanelState();
         });
 
     connect(cad, &CadModule::finishedSketchesChanged,
             this, [this](DocumentId) {
-        refreshFinishedSketchesView();
+        m_cadTaskPanelController->refreshFinishedSketches();
         rebuildProjectExplorer();
-        updateCadSketchOverlay();
-        updateCadTaskPanelState();
+        m_cadTaskPanelController->updateSketchOverlay();
+        m_cadTaskPanelController->refreshPanelState();
         });
 
     connect(cad, &CadModule::sketchSelectionChanged,
             this, [this](int) {
-        refreshFinishedSketchesView();
-        updateCadSketchOverlay();
-        updateCadTaskPanelState();
+        m_cadTaskPanelController->refreshFinishedSketches();
+        m_cadTaskPanelController->updateSketchOverlay();
+        m_cadTaskPanelController->refreshPanelState();
         });
 
     connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::sketchSelectionChanged,
@@ -994,29 +984,29 @@ void MainWindow::createRightPanel()
     connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::primitiveParametersChanged,
             this, [this](int, double, double, double, double, double) {
         if (m_cadTaskPanel->isPrimitivePageActive())
-            updateCadPrimitivePreview();
+            m_cadTaskPanelController->updatePrimitivePreview();
         });
 
     connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::featureParametersChanged,
             this, [this](int, double, double) {
         if (m_cadTaskPanel->isFeaturePageActive())
-            updateCadFeaturePreview();
+            m_cadTaskPanelController->updateFeaturePreview();
         });
 
     connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::transformParametersChanged,
             this, [this](double, double, double, double, double, double, int) {
         if (m_cadTaskPanel->isTransformPageActive())
-            updateCadTransformPreview();
+            m_cadTaskPanelController->updateTransformPreview();
         });
 
     connect(m_cadTaskPanel, &lcnc::cad::ui::WidgetCadTaskPanel::previewToggled,
             this, [this](bool enabled) {
         if (enabled && m_cadTaskPanel->isPrimitivePageActive())
-            updateCadPrimitivePreview();
+            m_cadTaskPanelController->updatePrimitivePreview();
         else if (enabled && m_cadTaskPanel->isFeaturePageActive())
-            updateCadFeaturePreview();
+            m_cadTaskPanelController->updateFeaturePreview();
         else if (enabled && m_cadTaskPanel->isTransformPageActive())
-            updateCadTransformPreview();
+            m_cadTaskPanelController->updateTransformPreview();
         else
             m_occView->clearCadPreview();
         });
@@ -1096,7 +1086,7 @@ void MainWindow::createRightPanel()
         updateCommandStates();
         });
 
-    updateCadTaskPanelState();
+    m_cadTaskPanelController->refreshPanelState();
 
     // Wire machine panel signals.
     connect(m_machinePanel, &WidgetMachinePanel::autoInstallWorkpieceChanged, this,
@@ -1334,213 +1324,56 @@ void MainWindow::createRightPanel()
 
 void MainWindow::updateCadPrimitivePreview()
 {
-    if (!m_cadTaskPanel || !m_occView || !m_cadTaskPanel->isPrimitivePageActive()
-        || !m_cadTaskPanel->isPreviewEnabled())
-        return;
-
-    const int primitiveIndex = m_cadTaskPanel->primitiveIndex();
-    const QVariantMap params = primitiveParams(m_cadTaskPanel->primitiveSizeX(),
-                                              m_cadTaskPanel->primitiveSizeY(),
-                                              m_cadTaskPanel->primitiveSizeZ(),
-                                              m_cadTaskPanel->primitiveRadius1(),
-                                              m_cadTaskPanel->primitiveRadius2());
-
-    TopoDS_Shape previewShape;
-    QString errMsg;
-        if (!m_appContext->cadModule()->previewTool(
-            primitiveToolId(primitiveIndex), params, &previewShape, &errMsg)) {
-        m_occView->clearCadPreview();
-        LCNC_DEBUG(lcnc::LogCode::Generic,
-                   "MainWindow::updateCadPrimitivePreview skipped: {}",
-                   errMsg.toStdString());
-        return;
-    }
-
-    m_occView->setCadPreviewShape(previewShape);
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->updatePrimitivePreview();
 }
 
 void MainWindow::updateCadFeaturePreview()
 {
-    if (!m_cadTaskPanel || !m_occView || !m_cadTaskPanel->isFeaturePageActive()
-        || !m_cadTaskPanel->isPreviewEnabled())
-        return;
-
-    TopoDS_Shape previewShape;
-    QString errMsg;
-        const int featureIndex = m_cadTaskPanel->featureIndex();
-        if (!m_appContext->cadModule()->previewTool(
-            featureToolId(featureIndex),
-            featureParams(m_cadTaskPanel->featureLength(), m_cadTaskPanel->featureAngle()),
-            &previewShape,
-            &errMsg)) {
-        m_occView->clearCadPreview();
-        LCNC_DEBUG(lcnc::LogCode::Generic,
-                   "MainWindow::updateCadFeaturePreview skipped: {}",
-                   errMsg.toStdString());
-        return;
-    }
-
-    m_occView->setCadPreviewShape(previewShape);
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->updateFeaturePreview();
 }
 
 void MainWindow::updateCadTransformPreview()
 {
-    if (!m_cadTaskPanel || !m_occView || !m_cadTaskPanel->isTransformPageActive())
-        return;
-
-    const CadModule::TransformParameters params = transformParams(
-        m_cadTaskPanel->transformTranslateX(),
-        m_cadTaskPanel->transformTranslateY(),
-        m_cadTaskPanel->transformTranslateZ(),
-        m_cadTaskPanel->transformRotateX(),
-        m_cadTaskPanel->transformRotateY(),
-        m_cadTaskPanel->transformRotateZ(),
-        m_cadTaskPanel->transformReferenceMode());
-
-    TopoDS_Shape previewShape;
-    QString errMsg;
-    double refX = 0.0;
-    double refY = 0.0;
-    double refZ = 0.0;
-    if (!m_appContext->cadModule()->buildTransformPreview(
-            params, &previewShape, &refX, &refY, &refZ, &errMsg)) {
-        m_occView->clearCadPreview();
-        m_occView->clearTransformGizmo();
-        LCNC_DEBUG(lcnc::LogCode::Generic,
-                   "MainWindow::updateCadTransformPreview skipped: {}",
-                   errMsg.toStdString());
-        return;
-    }
-
-    m_occView->setTransformGizmo(refX, refY, refZ);
-    if (m_cadTaskPanel->isPreviewEnabled())
-        m_occView->setCadPreviewShape(previewShape);
-    else
-        m_occView->clearCadPreview();
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->updateTransformPreview();
 }
 
 void MainWindow::updateCadTaskPanelState()
 {
-    if (!m_cadTaskPanel || !m_appContext || !m_appContext->cadModule())
-        return;
-
-    CadModule* cad = m_appContext->cadModule();
-    const DocumentId docId = cad->workpieceDocumentId();
-    m_cadTaskPanel->setSelectionContext(cad->selectionContext(docId));
-    if (m_cadTaskPanel->isTransformPageActive())
-        updateCadTransformPreview();
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->refreshPanelState();
 }
 
 void MainWindow::refreshSketchElementsView()
 {
-    if (!m_cadTaskPanel || !m_appContext || !m_appContext->cadModule())
-        return;
-    CadModule* cad = m_appContext->cadModule();
-    QVector<lcnc::cad::ui::WidgetCadTaskPanel::SketchElementEntry> entries;
-    if (cad->isSketchEditing()) {
-        for (const auto& snap : cad->sketchElementSnapshots()) {
-            lcnc::cad::ui::WidgetCadTaskPanel::SketchElementEntry entry;
-            entry.id = snap.id;
-            entry.kind = snap.kind;
-            entry.label = snap.label;
-            entries.append(entry);
-        }
-    }
-    m_cadTaskPanel->setSketchElements(entries);
-    m_cadTaskPanel->setActiveSketchTool(cad->sketchTool());
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->refreshSketchElements();
 }
 
 void MainWindow::refreshFinishedSketchesView()
 {
-    if (!m_cadTaskPanel || !m_appContext || !m_appContext->cadModule())
-        return;
-    CadModule* cad = m_appContext->cadModule();
-    QVector<lcnc::cad::ui::WidgetCadTaskPanel::FinishedSketchEntry> entries;
-    for (const auto& snap : cad->finishedSketchSnapshots()) {
-        lcnc::cad::ui::WidgetCadTaskPanel::FinishedSketchEntry entry;
-        entry.sketchId = snap.sketchId;
-        entry.label = snap.name;
-        entry.visible = snap.visible;
-        entry.usedByFeature = snap.usedByFeature;
-        entries.append(entry);
-    }
-    m_cadTaskPanel->setFinishedSketches(entries, cad->selectedSketchId());
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->refreshFinishedSketches();
 }
 
 void MainWindow::updateCadSketchOverlay()
 {
-    if (!m_occView || !m_appContext || !m_appContext->cadModule())
-        return;
-
-    const bool cadContextActive = m_rightStack && m_rightStack->currentWidget() == m_cadTaskPanel;
-    if (!cadContextActive) {
-        m_occView->clearSketchOverlay();
-        return;
-    }
-
-    CadModule* cad = m_appContext->cadModule();
-    QVector<lcnc::view::SketchOverlayItem> items;
-    for (const auto& snap : cad->sketchOverlaySnapshots()) {
-        lcnc::view::SketchOverlayItem item;
-        item.key = snap.key;
-        item.kind = snap.kind;
-        item.plane = snap.plane;
-        item.params = snap.params;
-        item.visible = snap.visible;
-        item.draggable = snap.draggable;
-        if (snap.selected)
-            item.color = QColor(255, 196, 40);
-        else if (snap.activeSession)
-            item.color = QColor(60, 220, 255);
-        else if (snap.usedByFeature)
-            item.color = QColor(120, 135, 145);
-        else
-            item.color = QColor(85, 210, 150);
-        items.append(std::move(item));
-    }
-    m_occView->setSketchOverlayItems(items);
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->updateSketchOverlay();
 }
 
 void MainWindow::handleCadSketchOverlayPicked(const QString& key)
 {
-    const bool cadContextActive = m_rightStack && m_rightStack->currentWidget() == m_cadTaskPanel;
-    if (key.isEmpty() || !cadContextActive || !m_appContext || !m_appContext->cadModule())
-        return;
-
-    CadModule* cad = m_appContext->cadModule();
-    auto context = lcnc::cad::selection::CadSelectionResolver::fromOverlayKey(
-        cad->workpieceDocumentId(), key, true, cad->isSketchEditing());
-    cad->setSelectionContext(context);
-    updateCadSketchOverlay();
-    updateCadTaskPanelState();
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->handleSketchOverlayPicked(key);
 }
 
 void MainWindow::handleCadSketchOverlayDrag(const QString& key, double deltaX, double deltaY)
 {
-    if (!isActiveSketchOverlayKey(key)
-        || !m_appContext
-        || !m_appContext->cadModule()
-        || !m_rightStack
-        || m_rightStack->currentWidget() != m_cadTaskPanel) {
-        return;
-    }
-
-    const auto context = lcnc::cad::selection::CadSelectionResolver::fromOverlayKey(
-        m_appContext->cadModule()->workpieceDocumentId(), key, true, true);
-    if (context.items.isEmpty())
-        return;
-
-    QString errMsg;
-    const auto item = context.items.first();
-    const bool ok = item.sketchHandleIndex >= 0
-        ? m_appContext->cadModule()->moveSketchElementHandle(
-              item.sketchElementId, item.sketchHandleIndex, deltaX, deltaY, &errMsg)
-        : m_appContext->cadModule()->moveSketchElement(item.sketchElementId, deltaX, deltaY, &errMsg);
-    if (!ok) {
-        LCNC_WARN(lcnc::LogCode::Generic,
-                  "MainWindow: moveSketchElement failed: {}",
-                  errMsg.toStdString());
-    }
+    if (m_cadTaskPanelController)
+        m_cadTaskPanelController->handleSketchOverlayDrag(key, deltaX, deltaY);
 }
 
 // ── Ribbon ─────────────────────────────────────────────────────────────────────

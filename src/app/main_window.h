@@ -20,6 +20,7 @@ namespace lcnc::cad::ui { class WidgetCadTaskPanel; }
 namespace lcnc::cam::ui { class DialogAxisCalibrationWizard; }
 namespace lcnc::app {
 class ProjectExplorerController;
+class CadTaskPanelController;
 class StartGuideWidget;
 class ViewStateController;
 class WorkspacePresenter;
@@ -95,25 +96,16 @@ private:
     void restorePersistedCamState();
     void syncMachineWorkspaceUi();
     void syncMachineWorkspaceUiInternal(bool rebuildTree);
-    /// Regenerate the transient CAD primitive preview from the right task panel.
     void updateCadPrimitivePreview();
-    /// Regenerate the transient CAD feature preview from the right task panel.
     void updateCadFeaturePreview();
-    /// Regenerate the transient CAD transform preview and transform gizmo.
     void updateCadTransformPreview();
-    /// Refresh CAD TaskPanel command availability from active document context.
     void updateCadTaskPanelState();
-    /// Sync the TaskPanel sketch element list from the CAD module session state.
     void refreshSketchElementsView();
-    /// Sync the TaskPanel home-page finished sketches list.
     void refreshFinishedSketchesView();
-    /// Sync CAD sketch overlays from module snapshots to the OCC view.
     void updateCadSketchOverlay();
     /// Highlight the contour AIS corresponding to the selected toolpath node.
     void highlightContourInView(int contourIndex);
-    /// Select a CAD sketch overlay item emitted by the OCC view.
     void handleCadSketchOverlayPicked(const QString& key);
-    /// Move an active sketch overlay item by a local sketch-plane delta.
     void handleCadSketchOverlayDrag(const QString& key, double deltaX, double deltaY);
     /// Route 3D view to the machine workspace.
     void showMachineView();
@@ -186,6 +178,7 @@ private:
     lcnc::cam::ui::DialogAxisCalibrationWizard* m_axisCalibWizard{nullptr};
     lcnc::app::ProjectExplorerSnapshot m_projectExplorerSnapshot;
     std::unique_ptr<lcnc::app::ProjectExplorerController> m_projectExplorerController;
+    std::unique_ptr<lcnc::app::CadTaskPanelController> m_cadTaskPanelController;
     std::unique_ptr<lcnc::app::ViewStateController> m_viewStateController;
     bool m_machineWorkspaceActive{false};
     bool m_blockProjectExplorerSignals{false};
