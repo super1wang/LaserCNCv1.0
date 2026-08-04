@@ -1618,6 +1618,15 @@ void MainWindow::onProjectDomainChanged(lcnc::ProjectDomain domain)
         if (auto* gd = m_appContext->camModule()->activeGuiDocument()) {
             auto* project = lcnc::Kernel::current().projectManager();
             activateWorkspaceOccView(project ? project->activeWorkspaceId() : kInvalidProjectWorkspaceId, gd);
+            // autoInstallCurrentWorkpiece mounts the workpiece and refreshes
+            // transforms, but that refresh runs before the OCC view is attached
+            // to this document, so the workpiece AIS can be left at the home
+            // pose until the next axis-motion tick. Re-apply the current
+            // kinematic posture now that the view is live, mirroring the
+            // motion-tick path (updateMachineWorkspaceTransforms) so the
+            // workpiece - and any machining-face highlights - coincide with
+            // the model immediately after opening a file.
+            m_appContext->camModule()->refreshMachineTransforms();
         }
 
         const QString sourcePath = lcnc::Kernel::current()
