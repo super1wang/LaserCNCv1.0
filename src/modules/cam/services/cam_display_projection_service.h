@@ -45,7 +45,8 @@ public:
 
     void refreshMachiningFaces(GuiDocument* document,
                                const std::vector<MachiningFaceDisplaySnapshot>& faces,
-                               bool visible);
+                               bool visible,
+                               const MachineKinematics* kinematics);
     void clearMachiningFaces(GuiDocument* document);
 
     // Re-apply the current WPC transform to each machining-face AIS so the

@@ -80,7 +80,8 @@ void CamDisplayProjectionService::clearMachiningFaces(GuiDocument* document)
 void CamDisplayProjectionService::refreshMachiningFaces(
     GuiDocument* document,
     const std::vector<MachiningFaceDisplaySnapshot>& faces,
-    bool visible)
+    bool visible,
+    const MachineKinematics* kinematics)
 {
     if (!m_state)
         m_state = std::make_unique<State>();
@@ -119,6 +120,13 @@ void CamDisplayProjectionService::refreshMachiningFaces(
             ais->Attributes()->SetFaceBoundaryAspect(new Prs3d_LineAspect(
                 color, Aspect_TOL_SOLID, entry.manual ? 3.0 : 2.0));
         }
+        // Position the highlight at the workpiece's current kinematic posture
+        // immediately, so a face picked while a rotary axis is non-zero
+        // coincides with the model instead of lagging at the home pose.
+        gp_Trsf wpcTransform;
+        if (kinematics && !entry.workpieceEntry.isEmpty())
+            wpcTransform = kinematics->computeWpcTransform(entry.workpieceEntry);
+        ais->SetLocalTransformation(wpcTransform);
         context->Display(ais, AIS_Shaded, 0, Standard_False);
         context->SetZLayer(ais, Graphic3d_ZLayerId_Top);
         context->Deactivate(ais);

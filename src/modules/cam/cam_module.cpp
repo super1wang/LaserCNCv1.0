@@ -5568,7 +5568,7 @@ void CamModule::refreshMachiningFaceDisplay()
                             entry.manual, entry.role});
     }
     m_displayProjectionService->refreshMachiningFaces(
-        activeGuiDocument(), snapshot, m_machiningFacesVisible);
+        activeGuiDocument(), snapshot, m_machiningFacesVisible, kinematics());
 }
 
 void CamModule::setMachiningFacesVisible(bool visible)
