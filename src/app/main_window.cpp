@@ -321,6 +321,11 @@ void MainWindow::createContext()
                 QMessageBox::critical(this, title, message);
             });
 
+    connect(m_appContext->camModule(), &CamModule::operationWarning,
+            this, [this](const QString& title, const QString& message) {
+                QMessageBox::warning(this, title, message);
+            });
+
     connect(m_appContext->processModule(), &ProcessModule::statusMessageChanged,
             this, [this](const QString& status) {
                 if (m_sbStatus)

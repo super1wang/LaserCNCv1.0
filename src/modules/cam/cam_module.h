@@ -443,6 +443,10 @@ signals:
     void machineViewRequested();
     void machineWorkspaceChanged();
     void operationFailed(const QString& title, const QString& message);
+    /// Emitted when generation completed but some contours could not resolve a
+    /// lead-in. The contour is kept without a lead-in instead of aborting the
+    /// whole toolpath; the user is informed so they can fix it manually.
+    void operationWarning(const QString& title, const QString& message);
     void machineLoaded();
     void machineUnloaded();
     void workpieceMounted(const QString& entry);

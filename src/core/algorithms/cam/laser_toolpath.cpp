@@ -1712,11 +1712,12 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
         if (forwardOnSurface)
             direction.Reverse();
         sideResolved = true;
-    } else if (forwardOnSurface) {
-        // 中文翻译：下刀线两侧投影均落在加工外表面，无法确定悬空侧
-        result.error = QStringLiteral("The projections on both sides of the lower knife line fall on the outer surface of the process, and the suspended side cannot be determined.");
-        return result;
     }
+    // When BOTH sides project onto the machining face (typical for a small
+    // hole: the lead-in probe crosses the hole and lands on the face on the
+    // far side), do NOT bail out - fall through to the cross-section normal
+    // and solid-classifier fallbacks below, which can still identify the
+    // suspended (void) side from the adjacent hole-wall normal.
 
     // The outward normal of the exact cross-section face adjacent to this
     // contour edge points into the cut void. It ranks two directions that are

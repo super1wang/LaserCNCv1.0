@@ -2771,6 +2771,7 @@ bool CamModule::buildCurrentGeometricToolpath()
         emit operationFailed(tr("Construct toolpath"), tr("The discrete point data has expired, please re-discretize first."));
         return false;
     }
+    QStringList leadInWarnings;
     for (LaserContour& contour : toolpathRef().contours()) {
         contour.leadIn.length = contour.pendingParams.leadInLength;
         QString error;
@@ -2778,11 +2779,13 @@ bool CamModule::buildCurrentGeometricToolpath()
             || !contour.leadInSolution.valid) {
             if (error.isEmpty())
                 error = contour.leadInSolution.error;
-            // 中文翻译：构造刀路
-            emit operationFailed(tr("Construct toolpath"),
-                                 // 中文翻译：轮廓 "%1" 下刀线生成失败：%2
-                                 tr("Contour \"%1\" lower cut line generation failed: %2").arg(contour.name, error));
-            return false;
+            // Tolerate a per-contour lead-in failure: keep the contour without
+            // a lead-in and continue with the remaining contours.
+            contour.leadInSolution.valid = false;
+            contour.leadInSolution.error = error;
+            // 中文翻译：轮廓 "%1"：%2
+            leadInWarnings.append(tr("Contour \"%1\": %2").arg(contour.name, error));
+            continue;
         }
         contour.needsRecalculation = true;
     }
@@ -2793,6 +2796,14 @@ bool CamModule::buildCurrentGeometricToolpath()
     refreshToolpathDisplay();
     emit toolpathGenerated();
     emit pipelineStageChanged(lcnc::cam::CamPipelineStage::GeometricToolpath);
+    if (!leadInWarnings.isEmpty()) {
+        // 中文翻译：构造刀路
+        emit operationWarning(tr("Construct toolpath"),
+            // 中文翻译：以下轮廓未能生成下刀点，已保留轮廓但不添加下刀点，其余刀路已正常生成：
+            tr("The following contours could not resolve a lead-in and were kept "
+               "without one; the rest of the toolpath was generated:\n%1")
+                .arg(leadInWarnings.join(QStringLiteral("\n"))));
+    }
     return true;
 }
 
@@ -3041,7 +3052,7 @@ TaskId CamModule::buildCurrentGeometricToolpathAsync()
         return kInvalidTaskId;
     }
     const std::vector<LaserContour> input = toolpathRef().contours();
-    struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
+    struct Result { std::vector<LaserContour> contours; QString error; QStringList leadInWarnings; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     TaskSpec spec;
     // 中文翻译：构造几何刀路
@@ -3062,8 +3073,17 @@ TaskId CamModule::buildCurrentGeometricToolpathAsync()
                 QString error;
                 if (!LaserToolpathBuilder::setAutomaticContourStart(contour, &error)
                     || !contour.leadInSolution.valid) {
-                    result->error = error.isEmpty() ? contour.leadInSolution.error : error;
-                    return;
+                    if (error.isEmpty())
+                        error = contour.leadInSolution.error;
+                    // Tolerate a per-contour lead-in failure: keep the contour
+                    // without a lead-in and continue with the remaining ones.
+                    contour.leadInSolution.valid = false;
+                    contour.leadInSolution.error = error;
+                    // 中文翻译：轮廓 "%1"：%2
+                    result->leadInWarnings.append(
+                        QObject::tr("Contour \"%1\": %2").arg(contour.name, error));
+                    progress->setValue(static_cast<int>(index + 1));
+                    continue;
                 }
                 contour.needsRecalculation = true;
                 progress->setValue(static_cast<int>(index + 1));
@@ -3095,6 +3115,14 @@ TaskId CamModule::buildCurrentGeometricToolpathAsync()
         refreshToolpathDisplay();
         emit toolpathGenerated();
         emit pipelineStageChanged(lcnc::cam::CamPipelineStage::GeometricToolpath);
+        if (!result->leadInWarnings.isEmpty()) {
+            // 中文翻译：构造刀路
+            emit operationWarning(tr("Construct toolpath"),
+                // 中文翻译：以下轮廓未能生成下刀点，已保留轮廓但不添加下刀点，其余刀路已正常生成：
+                tr("The following contours could not resolve a lead-in and were kept "
+                   "without one; the rest of the toolpath was generated:\n%1")
+                    .arg(result->leadInWarnings.join(QStringLiteral("\n"))));
+        }
     });
     return taskId;
 }
@@ -3389,12 +3417,11 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
                     || !contour.leadInSolution.valid) {
                     if (leadInError.isEmpty())
                         leadInError = contour.leadInSolution.error;
-                    // 中文翻译：全局生成刀路
-                    emit operationFailed(tr("Generate toolpath globally"),
-                                         // 中文翻译：轮廓 "%1" 下刀点生成失败：%2
-                                         tr("Contour \"%1\" cutting point generation failed: %2")
-                                             .arg(contour.name, leadInError));
-                    return false;
+                    // Tolerate a per-contour lead-in failure: keep the contour
+                    // without a lead-in so the rest of the toolpath can still
+                    // generate. The user is warned after generation completes.
+                    contour.leadInSolution.valid = false;
+                    contour.leadInSolution.error = leadInError;
                 }
             }
 
@@ -3474,6 +3501,27 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     emit toolpathGenerated();
     emit toolpathLayersChanged();
     refreshTravelPath();
+    {
+        QStringList leadInWarnings;
+        for (const LaserContour& contour : toolpathRef().contours()) {
+            if (!contour.leadInSolution.valid) {
+                const QString reason = contour.leadInSolution.error.trimmed().isEmpty()
+                    // 中文翻译：下刀点不可用
+                    ? tr("lead-in unavailable")
+                    : contour.leadInSolution.error;
+                // 中文翻译：轮廓 "%1"：%2
+                leadInWarnings.append(tr("Contour \"%1\": %2").arg(contour.name, reason));
+            }
+        }
+        if (!leadInWarnings.isEmpty()) {
+            // 中文翻译：全局生成刀路
+            emit operationWarning(tr("Generate toolpath globally"),
+                // 中文翻译：以下轮廓未能生成下刀点，已保留轮廓但不添加下刀点，其余刀路已正常生成：
+                tr("The following contours could not resolve a lead-in and were kept "
+                   "without one; the rest of the toolpath was generated:\n%1")
+                    .arg(leadInWarnings.join(QStringLiteral("\n"))));
+        }
+    }
     return true;
 }
 
@@ -3508,6 +3556,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     struct GenerationResult {
         std::vector<LaserContour> contours;
         QString error;
+        QStringList leadInWarnings;
         bool ok{false};
     };
     const auto result = std::make_shared<GenerationResult>();
@@ -3707,8 +3756,15 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                                   contour, &leadInError);
                         if (!startSet
                             || !contour.leadInSolution.valid) {
-                            result->error = leadInError.isEmpty() ? contour.leadInSolution.error : leadInError;
-                            return;
+                            if (leadInError.isEmpty())
+                                leadInError = contour.leadInSolution.error;
+                            // Tolerate a per-contour lead-in failure: keep the
+                            // contour without a lead-in so the rest of the
+                            // toolpath can still generate. It is exported with
+                            // hasLeadIn=false and Process will reject it with a
+                            // clear reason; the user is warned after generation.
+                            contour.leadInSolution.valid = false;
+                            contour.leadInSolution.error = leadInError;
                         }
                     }
                     allContours.push_back(std::move(contour));
@@ -3755,15 +3811,32 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 solveContours, &workerKinematics, gp_Trsf(), nullptr);
             const bool coordinatesValid = std::all_of(allContours.begin(), allContours.end(),
                 [](const LaserContour& contour) {
-                    return contour.leadInSolution.valid
-                        && contour.leadInSolution.point.machineCoord.valid
-                        && std::all_of(contour.points.begin(), contour.points.end(),
-                            [](const ToolpathPoint& point) { return point.machineCoord.valid; });
+                    const bool pointsValid = std::all_of(contour.points.begin(), contour.points.end(),
+                        [](const ToolpathPoint& point) { return point.machineCoord.valid; });
+                    if (!pointsValid)
+                        return false;
+                    // A contour whose lead-in could not be resolved (geometry or
+                    // IK) is retained without a lead-in; only contours that
+                    // claim a lead-in must also have solved its machine pose.
+                    if (!contour.leadInSolution.valid)
+                        return true;
+                    return contour.leadInSolution.point.machineCoord.valid;
                 });
             if (!coordinatesValid) {
                 // 中文翻译：全局五轴刀路求解失败
                 result->error = QObject::tr("Global five-axis tool path solution failed");
                 return;
+            }
+            for (const LaserContour& contour : allContours) {
+                if (!contour.leadInSolution.valid) {
+                    const QString reason = contour.leadInSolution.error.trimmed().isEmpty()
+                        // 中文翻译：下刀点不可用
+                        ? QObject::tr("lead-in unavailable")
+                        : contour.leadInSolution.error;
+                    // 中文翻译：轮廓 "%1"：%2
+                    result->leadInWarnings.append(
+                        QObject::tr("Contour \"%1\": %2").arg(contour.name, reason));
+                }
             }
             result->contours = std::move(allContours);
             result->ok = true;
@@ -3926,6 +3999,14 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             emit toolpathLayersChanged();
             emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
             refreshTravelPath();
+            if (!result->leadInWarnings.isEmpty()) {
+                // 中文翻译：全局生成刀路
+                emit operationWarning(tr("Generate toolpath globally"),
+                    // 中文翻译：以下轮廓未能生成下刀点，已保留轮廓但不添加下刀点，其余刀路已正常生成：
+                    tr("The following contours could not resolve a lead-in and were kept "
+                       "without one; the rest of the toolpath was generated:\n%1")
+                        .arg(result->leadInWarnings.join(QStringLiteral("\n"))));
+            }
         });
     return taskId;
 }
