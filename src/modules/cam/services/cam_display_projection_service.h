@@ -5,11 +5,14 @@
 
 #include <TopoDS_Face.hxx>
 
+#include <QString>
+
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 class GuiDocument;
+class MachineKinematics;
 
 namespace lcnc::cam {
 
@@ -22,6 +25,7 @@ namespace lcnc::cam {
 struct MachiningFaceDisplaySnapshot {
     std::uint64_t faceId{0};
     TopoDS_Face face;
+    QString workpieceEntry;
     bool manual{false};
     MachiningFaceRole role{MachiningFaceRole::MachiningSurface};
 };
@@ -43,6 +47,10 @@ public:
                                const std::vector<MachiningFaceDisplaySnapshot>& faces,
                                bool visible);
     void clearMachiningFaces(GuiDocument* document);
+
+    // Re-apply the current WPC transform to each machining-face AIS so the
+    // highlights track the workpiece as axes move.  No-op when nothing is shown.
+    void updateMachiningFaceTransforms(GuiDocument* document, const MachineKinematics* kinematics);
 
 private:
     class State;

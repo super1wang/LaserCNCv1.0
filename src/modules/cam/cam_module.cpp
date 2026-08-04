@@ -5564,7 +5564,8 @@ void CamModule::refreshMachiningFaceDisplay()
     std::vector<lcnc::cam::MachiningFaceDisplaySnapshot> snapshot;
     snapshot.reserve(m_machiningFaces.size());
     for (const auto& entry : m_machiningFaces) {
-        snapshot.push_back({entry.faceId, entry.face, entry.manual, entry.role});
+        snapshot.push_back({entry.faceId, entry.face, entry.workpieceEntry,
+                            entry.manual, entry.role});
     }
     m_displayProjectionService->refreshMachiningFaces(
         activeGuiDocument(), snapshot, m_machiningFacesVisible);
@@ -5968,6 +5969,7 @@ void CamModule::refreshMachineTransforms()
             m_toolpathRenderer->updateTransforms(gd, toolpathRef(), kinematics());
         }
         updateAxisGuideTransforms();
+        m_displayProjectionService->updateMachiningFaceTransforms(gd, kinematics());
         if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
             m_travelPathRenderer->updateTransforms(gd, kinematics());
         if (gd->hasView())
@@ -5995,6 +5997,7 @@ void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
             m_toolpathRenderer->updateTransforms(gd, toolpathRef(), kinematics());
         }
         updateAxisGuideTransforms();
+        m_displayProjectionService->updateMachiningFaceTransforms(gd, kinematics());
         if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
             m_travelPathRenderer->updateTransforms(gd, kinematics());
         if (gd->hasView())

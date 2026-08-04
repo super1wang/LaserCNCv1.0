@@ -1,6 +1,7 @@
 #include "modules/cam/services/cam_display_projection_service.h"
 
 #include "core/document/lcnc_document.h"
+#include "core/kinematics/machine_kinematics.h"
 #include "view/gui_document.h"
 
 #include <AIS_DisplayMode.hxx>
@@ -11,6 +12,7 @@
 #include <Graphic3d_ZLayerId.hxx>
 #include <Prs3d_LineAspect.hxx>
 #include <Quantity_Color.hxx>
+#include <gp_Trsf.hxx>
 
 #include <QMap>
 
@@ -19,9 +21,13 @@ namespace lcnc::cam {
 class CamDisplayProjectionService::State
 {
 public:
+    struct FaceEntry {
+        Handle(AIS_Shape) ais;
+        QString workpieceEntry;
+    };
     struct DocumentProjection {
         Handle(AIS_InteractiveContext) context;
-        QMap<std::uint64_t, Handle(AIS_Shape)> machiningFaceAis;
+        QMap<std::uint64_t, FaceEntry> machiningFaceAis;
     };
 
     static void clear(DocumentProjection& projection)
@@ -29,8 +35,8 @@ public:
         if (!projection.context.IsNull()) {
             for (auto it = projection.machiningFaceAis.cbegin();
                  it != projection.machiningFaceAis.cend(); ++it) {
-                if (!it.value().IsNull())
-                    projection.context->Remove(it.value(), Standard_False);
+                if (!it.value().ais.IsNull())
+                    projection.context->Remove(it.value().ais, Standard_False);
             }
             projection.context->UpdateCurrentViewer();
         }
@@ -116,9 +122,34 @@ void CamDisplayProjectionService::refreshMachiningFaces(
         context->Display(ais, AIS_Shaded, 0, Standard_False);
         context->SetZLayer(ais, Graphic3d_ZLayerId_Top);
         context->Deactivate(ais);
-        projection.machiningFaceAis.insert(entry.faceId, ais);
+        projection.machiningFaceAis.insert(entry.faceId, {ais, entry.workpieceEntry});
     }
     context->UpdateCurrentViewer();
+}
+
+void CamDisplayProjectionService::updateMachiningFaceTransforms(
+    GuiDocument* document, const MachineKinematics* kinematics)
+{
+    if (!m_state || !kinematics)
+        return;
+    const DocumentId id = documentIdFor(document);
+    auto it = m_state->documents.find(id);
+    if (it == m_state->documents.end())
+        return;
+    auto& projection = *it;
+    if (projection.context.IsNull())
+        return;
+    for (auto faceIt = projection.machiningFaceAis.begin();
+         faceIt != projection.machiningFaceAis.end(); ++faceIt) {
+        const Handle(AIS_Shape)& ais = faceIt.value().ais;
+        if (ais.IsNull())
+            continue;
+        gp_Trsf transform;
+        if (!faceIt.value().workpieceEntry.isEmpty())
+            transform = kinematics->computeWpcTransform(faceIt.value().workpieceEntry);
+        ais->SetLocalTransformation(transform);
+        projection.context->RecomputePrsOnly(ais, Standard_False);
+    }
 }
 
 } // namespace lcnc::cam
