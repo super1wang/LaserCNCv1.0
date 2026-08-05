@@ -83,6 +83,36 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("CAM layer add/update/remove regression"));
     }
 
+    CamDataManager layerManager;
+    LaserContour layerContourA;
+    layerContourA.signature = 101;
+    LaserContour layerContourB;
+    layerContourB.signature = 102;
+    layerManager.toolpath().contours().push_back(layerContourA);
+    layerManager.toolpath().contours().push_back(layerContourB);
+    layerManager.ensureContourIds();
+    layerManager.ensureToolpathLayers();
+    const ContourId layerContourAId = layerManager.toolpath().contour(0).contourId;
+    const ContourId layerContourBId = layerManager.toolpath().contour(1).contourId;
+    const std::uint64_t sourceLayer = layerManager.toolpath().contour(0).layerId;
+    const std::uint64_t destinationLayer = layerManager.addLayer(QStringLiteral("Delete me"));
+    if (sourceLayer == 0 || destinationLayer == 0
+        || !layerManager.assignContoursToLayer({layerContourAId, layerContourBId}, destinationLayer)
+        || layerManager.toolpath().contour(0).layerId != destinationLayer
+        || layerManager.toolpath().contour(1).layerId != destinationLayer
+        || layerManager.toolpathLayer(destinationLayer)->contourIds.size() != 2
+        || !layerManager.removeLayerWithContours(destinationLayer)
+        || layerManager.toolpath().contourCount() != 0
+        || layerManager.toolpathLayer(destinationLayer) != nullptr
+        || layerManager.toolpathLayer(sourceLayer) == nullptr) {
+        return fail(QStringLiteral("CAM layer bulk move/delete regression"));
+    }
+    if (!layerManager.removeLayerWithContours(sourceLayer)
+        || layerManager.toolpath().layers().size() != 1
+        || layerManager.toolpath().layers().front().layerId != sourceLayer) {
+        return fail(QStringLiteral("CAM layer deletion did not retain one empty layer"));
+    }
+
     manager.clearToolpath();
     if (manager.hasToolpath() || !manager.isDirty())
         return fail(QStringLiteral("CAM clear did not remove toolpath and mark project dirty"));

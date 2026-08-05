@@ -312,6 +312,8 @@ public:
     void setAllContoursEnabled(bool enabled);
     lcnc::cam::ContourId contourIdAt(int contourIdx) const;
     int contourIndexById(lcnc::cam::ContourId contourId) const;
+    /// 当前在 3D 视图中选中的轮廓 id 列表（用于"移动到图层"等跨树操作）。
+    QList<lcnc::cam::ContourId> selectedContourIds() const;
     void reorderContoursById(const QList<lcnc::cam::ContourId>& order);
     void reorderContours(const QList<int>& order);
     const std::vector<ToolpathLayer>& toolpathLayers() const;
@@ -320,6 +322,11 @@ public:
     std::uint64_t addToolpathLayer(const QString& name, const QColor& color = QColor());
     /// 删除图层；其下轮廓重挂到 reassignTo（0=自动选其余图层）。
     bool removeToolpathLayer(std::uint64_t layerId, std::uint64_t reassignTo = 0);
+    /// 删除图层及其下所有轮廓（连同 XCAF/AIS/选择状态一并清理）。
+    bool removeToolpathLayerWithContours(std::uint64_t layerId);
+    /// 把一组轮廓移动到指定图层下。
+    bool assignContoursToLayer(const QList<lcnc::cam::ContourId>& contourIds,
+                               std::uint64_t layerId);
     /// 仅更新图层的外观/名称，保留现有工具映射。
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,

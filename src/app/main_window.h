@@ -92,7 +92,6 @@ private:
     void buildCamTab(class SARibbonCategory* cat);
     void buildLaserTab(class SARibbonCategory* cat);
     void rebuildProjectExplorer();
-    void handleProjectExplorerRowsMoved();
     void restorePersistedCamState();
     void syncMachineWorkspaceUi();
     void syncMachineWorkspaceUiInternal(bool rebuildTree);
@@ -139,6 +138,8 @@ private:
     void selectProjectExplorerContourById(lcnc::cam::ContourId contourId, int fallbackIndex = -1);
     void selectProjectExplorerContours(const QList<int>& contourIndexes);
     void selectProjectExplorerEntries(DocumentId docId, const QStringList& entries);
+    /// 收集当前选中的轮廓 id（视图拾取 + 工程树多选的并集），供"移动到图层"等操作使用。
+    QList<lcnc::cam::ContourId> gatherSelectedContourIds() const;
 
     // ── Members ───────────────────────────────────────────────────────────────
     AppContext*        m_appContext{nullptr};

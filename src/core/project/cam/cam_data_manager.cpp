@@ -274,6 +274,40 @@ bool CamDataManager::removeLayer(std::uint64_t layerId, std::uint64_t reassignTo
     return true;
 }
 
+bool CamDataManager::removeLayerWithContours(std::uint64_t layerId)
+{
+    if (!toolpathLayer(layerId))
+        return false;
+
+    // 1. 删除归属本图层的全部轮廓（不重挂到其它图层）。
+    auto& contours = m_toolpath.contours();
+    contours.erase(
+        std::remove_if(contours.begin(), contours.end(),
+                       [layerId](const LaserContour& c) { return c.layerId == layerId; }),
+        contours.end());
+
+    // 2. 删除图层本身。若为最后一个图层则保留空图层（"至少一个图层"不变量）。
+    auto& layers = m_toolpath.layers();
+    bool layerRemoved = false;
+    if (layers.size() > 1) {
+        auto it = std::find_if(layers.begin(), layers.end(),
+                               [layerId](const ToolpathLayer& l) { return l.layerId == layerId; });
+        if (it != layers.end()) {
+            layers.erase(it);
+            layerRemoved = true;
+        }
+    }
+
+    syncLayerContourIds();
+    m_dirty = true;
+    if (m_layerManager) {
+        if (layerRemoved)
+            m_layerManager->emitLayerRemoved(layerId);
+        m_layerManager->emitContourMembershipChanged();
+    }
+    return true;
+}
+
 ToolpathLayer* CamDataManager::toolpathLayer(std::uint64_t layerId)
 {
     for (ToolpathLayer& layer : m_toolpath.layers()) {
@@ -366,6 +400,33 @@ bool CamDataManager::assignContourToLayer(ContourId contourId, std::uint64_t lay
     if (m_toolpath.contour(index).layerId == layerId)
         return false;
     m_toolpath.contour(index).layerId = layerId;
+    syncLayerContourIds();
+    m_dirty = true;
+    if (m_layerManager) {
+        m_layerManager->emitContourMembershipChanged();
+        m_layerManager->emitLayerPropertyChanged(layerId, LayerProperty::ContourMembership);
+    }
+    return true;
+}
+
+bool CamDataManager::assignContoursToLayer(const QList<ContourId>& contourIds, std::uint64_t layerId)
+{
+    if (!toolpathLayer(layerId))
+        return false;
+    bool any = false;
+    for (ContourId cid : contourIds) {
+        if (cid == 0)
+            continue;
+        const int index = contourIndexById(cid);
+        if (index < 0)
+            continue;
+        if (m_toolpath.contour(index).layerId == layerId)
+            continue;
+        m_toolpath.contour(index).layerId = layerId;
+        any = true;
+    }
+    if (!any)
+        return false;
     syncLayerContourIds();
     m_dirty = true;
     if (m_layerManager) {

@@ -2156,6 +2156,26 @@ continue?</source>
         <translation>清除所有加工面</translation>
     </message>
     <message>
+        <source>New layer</source>
+        <translation>新建图层</translation>
+    </message>
+    <message>
+        <source>Delete layer</source>
+        <translation>删除图层</translation>
+    </message>
+    <message>
+        <source>Move to layer</source>
+        <translation>移动到图层</translation>
+    </message>
+    <message>
+        <source>This will delete the layer and all contours under it, and cannot be undone. Continue?</source>
+        <translation>将删除该图层及其下所有轮廓，且不可撤销，是否继续？</translation>
+    </message>
+    <message>
+        <source>Please select the contours to move in the view or project tree first.</source>
+        <translation>请先在视图或工程树中选择要移动的轮廓</translation>
+    </message>
+    <message>
         <source>Unnamed</source>
         <translation>未命名</translation>
     </message>

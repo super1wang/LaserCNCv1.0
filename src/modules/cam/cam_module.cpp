@@ -4967,6 +4967,65 @@ bool CamModule::removeToolpathLayer(std::uint64_t layerId, std::uint64_t reassig
     return true;
 }
 
+bool CamModule::removeToolpathLayerWithContours(std::uint64_t layerId)
+{
+    if (!m_camData)
+        return false;
+
+    // 记录被删轮廓的 contourId，用于清理选择/预览状态。
+    std::vector<std::uint64_t> removedContourIds;
+    if (const ToolpathLayer* layer = m_camData->toolpathLayer(layerId))
+        removedContourIds = layer->contourIds;
+
+    if (!m_camData->removeLayerWithContours(layerId))
+        return false;
+
+    // 重建 XCAF Cam 实体（丢弃被删轮廓的 wire）并同步 AIS 显示。
+    writeContourGeometryToDocument();
+    syncCamDocumentContours(false); // 擦除已删轮廓的线体 AIS，重显存活轮廓（含颜色/可见性）
+    if (m_toolpathRenderer->isVisible())
+        refreshToolpathDisplay();   // 刷新刀路折线/法向（clearAis+rebuild 会丢弃已删轮廓）
+
+    // 清理被删轮廓的残留选择状态。
+    auto selSvc = lcnc::Kernel::current()
+                      .services()
+                      .getService<lcnc::core::SelectionService>();
+    if (selSvc) {
+        for (std::uint64_t cid : removedContourIds)
+            selSvc->removeContour(cid);
+    }
+    for (std::uint64_t cid : removedContourIds)
+        m_lastCamSelectionContourIds.remove(cid);
+    if (m_activeContourId != 0) {
+        for (std::uint64_t cid : removedContourIds) {
+            if (cid == m_activeContourId) {
+                setActiveContourId(0);
+                break;
+            }
+        }
+    }
+    // 轮廓索引随删除发生平移，重置引线预览避免指向错误轮廓。
+    m_previewLeadInContour = -1;
+    m_previewLeadInValid = false;
+
+    emit toolpathLayersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
+bool CamModule::assignContoursToLayer(const QList<lcnc::cam::ContourId>& contourIds,
+                                      std::uint64_t layerId)
+{
+    if (!m_camData || !m_camData->assignContoursToLayer(contourIds, layerId))
+        return false;
+    applyToolpathLayerColors();
+    if (m_toolpathRenderer->isVisible())
+        refreshToolpathDisplay();
+    emit toolpathLayersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
 QList<int> CamModule::contourIndexesInLayer(std::uint64_t layerId) const
 {
     return m_camData ? m_camData->contourIndexesInLayer(layerId) : QList<int>{};
@@ -6189,6 +6248,17 @@ QList<int> CamModule::selectedCamContourIndexes() const
             result.append(idx);
     }
     return result;
+}
+
+QList<lcnc::cam::ContourId> CamModule::selectedContourIds() const
+{
+    QList<lcnc::cam::ContourId> ids;
+    for (int idx : selectedCamContourIndexes()) {
+        const auto id = contourIdAt(idx);
+        if (id != 0)
+            ids.append(id);
+    }
+    return ids;
 }
 
 void CamModule::refreshMachineDisplay()

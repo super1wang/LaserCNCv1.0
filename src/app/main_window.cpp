@@ -725,9 +725,8 @@ void MainWindow::createLeftPanel()
     m_projectExplorerTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_projectExplorerTree->setAnimated(true);
     m_projectExplorerTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_projectExplorerTree->setDragDropMode(QAbstractItemView::InternalMove);
-    m_projectExplorerTree->setDefaultDropAction(Qt::MoveAction);
-    m_projectExplorerTree->setDropIndicatorShown(true);
+    // 禁用工程树节点的拖拽（轮廓重排改由显式命令承担，避免误操作）。
+    m_projectExplorerTree->setDragDropMode(QAbstractItemView::NoDragDrop);
     m_projectExplorerTree->setContextMenuPolicy(Qt::CustomContextMenu);
     m_projectExplorerTree->setStyleSheet(
         "QTreeWidget::item:selected { background-color: #2A6FDB; color: white; }"
@@ -741,8 +740,6 @@ void MainWindow::createLeftPanel()
             this, &MainWindow::onProjectExplorerItemDoubleClicked);
     connect(m_projectExplorerTree, &QTreeWidget::customContextMenuRequested,
             this, &MainWindow::onProjectExplorerContextMenuRequested);
-    connect(m_projectExplorerTree->model(), &QAbstractItemModel::rowsMoved,
-            this, [this]() { handleProjectExplorerRowsMoved(); });
     connect(m_projectExplorerTree, &QTreeWidget::itemSelectionChanged, this,
             [this]() {
                 if (m_blockProjectExplorerSignals || !m_projectExplorerTree)
@@ -1865,6 +1862,57 @@ void MainWindow::onProjectExplorerContextMenuRequested(const QPoint& pos)
         return;
     }
 
+    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathRoot) {
+        CamModule* cam = m_appContext->camModule();
+        if (!cam)
+            return;
+        QMenu menu(this);
+        // 中文翻译：新建图层
+        QAction* newLayerAction = menu.addAction(tr("New layer"));
+        QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
+        if (chosen == newLayerAction) {
+            cam->addToolpathLayer(QString(), QColor());
+            rebuildProjectExplorer();
+        }
+        return;
+    }
+
+    if (kind == lcnc::app::ProjectExplorerNodeKind::ToolpathLayer) {
+        CamModule* cam = m_appContext->camModule();
+        if (!cam)
+            return;
+        const std::uint64_t layerId = item->data(0, kRoleLayerId).toULongLong();
+        QMenu menu(this);
+        // 中文翻译：移动到图层
+        QAction* moveAction = menu.addAction(tr("Move to layer"));
+        // 中文翻译：删除图层
+        QAction* deleteAction = menu.addAction(tr("Delete layer"));
+        QAction* chosen = menu.exec(m_projectExplorerTree->viewport()->mapToGlobal(pos));
+        if (chosen == deleteAction) {
+            // 中文翻译：删除图层；将删除该图层及其下所有轮廓，且不可撤销，是否继续？
+            const QMessageBox::StandardButton btn = QMessageBox::question(
+                this, tr("Delete layer"),
+                tr("This will delete the layer and all contours under it, and cannot be undone. Continue?"),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (btn == QMessageBox::Yes) {
+                cam->removeToolpathLayerWithContours(layerId);
+                rebuildProjectExplorer();
+            }
+        } else if (chosen == moveAction) {
+            const QList<lcnc::cam::ContourId> contourIds = gatherSelectedContourIds();
+            if (contourIds.isEmpty()) {
+                // 中文翻译：移动到图层；请先在视图或工程树中选择要移动的轮廓
+                QMessageBox::information(
+                    this, tr("Move to layer"),
+                    tr("Please select the contours to move in the view or project tree first."));
+                return;
+            }
+            if (cam->assignContoursToLayer(contourIds, layerId))
+                rebuildProjectExplorer();
+        }
+        return;
+    }
+
 }
 
 void MainWindow::rebuildProjectExplorer()
@@ -1883,31 +1931,6 @@ void MainWindow::rebuildProjectExplorer()
 
     if (!isMachineViewActive())
         m_appContext->cadModule()->syncSelectionFromView();
-}
-
-void MainWindow::handleProjectExplorerRowsMoved()
-{
-    if (m_blockProjectExplorerSignals || !m_projectExplorerTree)
-        return;
-    const auto order = m_projectExplorerController
-        ? m_projectExplorerController->contourOrder()
-        : std::nullopt;
-    if (!order || order->indexes.size() != m_appContext->camModule()->toolpath().contourCount()) {
-        rebuildProjectExplorer();
-        return;
-    }
-
-    if (order->hasStableIds) {
-        QList<lcnc::cam::ContourId> ids;
-        for (const auto id : order->ids)
-            ids.append(static_cast<lcnc::cam::ContourId>(id));
-        m_appContext->camModule()->reorderContoursById(ids);
-    }
-    else
-        m_appContext->camModule()->reorderContours(order->indexes);
-    rebuildProjectExplorer();
-    selectProjectExplorerContourById(static_cast<lcnc::cam::ContourId>(order->selectedId),
-                                     order->selectedRow >= 0 ? order->selectedRow : 0);
 }
 
 void MainWindow::selectProjectExplorerContour(int contourIndex)
@@ -1983,6 +2006,37 @@ void MainWindow::selectProjectExplorerEntries(DocumentId docId, const QStringLis
     m_blockProjectExplorerSignals = true;
     m_projectExplorerController->selectEntries(docId, entries);
     m_blockProjectExplorerSignals = false;
+}
+
+QList<lcnc::cam::ContourId> MainWindow::gatherSelectedContourIds() const
+{
+    QList<lcnc::cam::ContourId> ids;
+    QSet<lcnc::cam::ContourId> seen;
+    CamModule* cam = m_appContext ? m_appContext->camModule() : nullptr;
+
+    // 视图拾取的轮廓（右键工程树图层不会影响 3D 视图选择，是最稳定的来源）。
+    if (cam) {
+        for (lcnc::cam::ContourId id : cam->selectedContourIds()) {
+            if (id != 0 && !seen.contains(id)) {
+                seen.insert(id);
+                ids.append(id);
+            }
+        }
+    }
+    // 工程树中仍被选中的轮廓节点（例如未因右键被清除的扩展选区）。
+    if (m_projectExplorerTree) {
+        for (QTreeWidgetItem* item : m_projectExplorerTree->selectedItems()) {
+            if (projectNodeKind(item) != lcnc::app::ProjectExplorerNodeKind::ToolpathContour)
+                continue;
+            const auto id = static_cast<lcnc::cam::ContourId>(
+                item->data(0, kRoleContourId).toULongLong());
+            if (id != 0 && !seen.contains(id)) {
+                seen.insert(id);
+                ids.append(id);
+            }
+        }
+    }
+    return ids;
 }
 
 void MainWindow::highlightContourInView(int contourIndex)

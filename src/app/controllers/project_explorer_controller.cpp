@@ -3,6 +3,7 @@
 #include "app/project_explorer_tree_utils.h"
 #include "modules/cad/selection/cad_selection_resolver.h"
 
+#include <QItemSelectionModel>
 #include <QScrollBar>
 #include <QSet>
 #include <QSignalBlocker>
@@ -50,6 +51,57 @@ QTreeWidgetItem* findByKey(QTreeWidget* tree, const QString& key)
     return nullptr;
 }
 
+// 把节点滚动到可见区，但不展开任何折叠的祖先节点（拾取同步时不自动展开工程树）。
+void scrollWithoutExpand(QTreeWidget* tree, QTreeWidgetItem* item)
+{
+    if (!tree || !item)
+        return;
+    for (QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent()) {
+        if (!parent->isExpanded())
+            return;
+    }
+    tree->scrollToItem(item);
+}
+
+// 程序化设置当前项时，QAbstractItemView::currentChanged 会在 autoScroll 开启时调用
+// scrollTo -> QTreeView::scrollTo 展开折叠的祖先节点。本守卫在构造时关闭 autoScroll，
+// 析构时恢复，避免拾取同步把工程树自动展开（QSignalBlocker 不阻断 selectionModel 的
+// currentChanged 信号，故必须从 autoScroll 入口拦截）。
+class AutoScrollGuard
+{
+public:
+    explicit AutoScrollGuard(QTreeWidget* tree)
+        : m_tree(tree)
+        , m_wasAutoScroll(tree ? tree->hasAutoScroll() : false)
+    {
+        if (m_tree)
+            m_tree->setAutoScroll(false);
+    }
+    ~AutoScrollGuard()
+    {
+        if (m_tree)
+            m_tree->setAutoScroll(m_wasAutoScroll);
+    }
+    Q_DISABLE_COPY_MOVE(AutoScrollGuard)
+private:
+    QTreeWidget* m_tree{nullptr};
+    bool m_wasAutoScroll{false};
+};
+
+QSet<QString> selectedNodeKeys(QTreeWidget* tree)
+{
+    QSet<QString> keys;
+    if (!tree)
+        return keys;
+    const QList<QTreeWidgetItem*> items = tree->selectedItems();
+    for (QTreeWidgetItem* item : items) {
+        const QString key = nodeKey(item);
+        if (!key.isEmpty())
+            keys.insert(key);
+    }
+    return keys;
+}
+
 } // namespace
 
 ProjectExplorerController::ProjectExplorerController(QTreeWidget* tree)
@@ -63,23 +115,28 @@ void ProjectExplorerController::rebuild(const ProjectExplorerSnapshot& snapshot)
         return;
 
     const QSet<QString> keys = expandedKeys(m_tree);
+    const QSet<QString> selectedKeys = selectedNodeKeys(m_tree);
     const QString currentKey = nodeKey(m_tree->currentItem());
     const int scroll = m_tree->verticalScrollBar()
         ? m_tree->verticalScrollBar()->value()
         : 0;
 
     const QSignalBlocker blocker(m_tree);
+    const AutoScrollGuard autoScrollGuard(m_tree);
     populateProjectExplorerTree(m_tree, snapshot);
 
     QTreeWidgetItemIterator iterator(m_tree);
     while (*iterator) {
         const QString key = nodeKey(*iterator);
-        if (!key.isEmpty())
+        if (!key.isEmpty()) {
             (*iterator)->setExpanded(keys.contains(key));
+            if (selectedKeys.contains(key))
+                (*iterator)->setSelected(true);
+        }
         ++iterator;
     }
     if (QTreeWidgetItem* current = findByKey(m_tree, currentKey))
-        m_tree->setCurrentItem(current);
+        m_tree->setCurrentItem(current, 0, QItemSelectionModel::NoUpdate);
     if (m_tree->verticalScrollBar())
         m_tree->verticalScrollBar()->setValue(scroll);
 }
@@ -107,10 +164,11 @@ ProjectExplorerController::selectContour(std::uint64_t contourId, int fallbackIn
         return std::nullopt;
 
     const QSignalBlocker blocker(m_tree);
+    const AutoScrollGuard autoScrollGuard(m_tree);
     m_tree->clearSelection();
-    m_tree->setCurrentItem(target);
+    m_tree->setCurrentItem(target, 0, QItemSelectionModel::NoUpdate);
     target->setSelected(true);
-    m_tree->scrollToItem(target);
+    scrollWithoutExpand(m_tree, target);
     return ContourSelection{target->data(0, ProjectExplorerRoles::ContourId).toULongLong(),
                             target->data(0, ProjectExplorerRoles::ContourIndex).toInt()};
 }
@@ -125,6 +183,7 @@ ProjectExplorerController::selectContours(const QList<std::uint64_t>& contourIds
     QTreeWidgetItem* first = nullptr;
     QTreeWidgetItem* last = nullptr;
     const QSignalBlocker blocker(m_tree);
+    const AutoScrollGuard autoScrollGuard(m_tree);
     m_tree->clearSelection();
     QTreeWidgetItemIterator iterator(m_tree);
     while (*iterator) {
@@ -142,8 +201,8 @@ ProjectExplorerController::selectContours(const QList<std::uint64_t>& contourIds
     }
     if (!last)
         return std::nullopt;
-    m_tree->setCurrentItem(last);
-    m_tree->scrollToItem(first ? first : last);
+    m_tree->setCurrentItem(last, 0, QItemSelectionModel::NoUpdate);
+    scrollWithoutExpand(m_tree, first ? first : last);
     return ContourSelection{last->data(0, ProjectExplorerRoles::ContourId).toULongLong(),
                             last->data(0, ProjectExplorerRoles::ContourIndex).toInt()};
 }

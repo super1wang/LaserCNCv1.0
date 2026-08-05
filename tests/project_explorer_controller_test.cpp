@@ -67,17 +67,28 @@ int main(int argc, char** argv)
     toolpathRoot.children = {contourA, contourB};
     snapshot.roots = {toolpathRoot};
     controller.rebuild(snapshot);
+    QTreeWidgetItem* toolpathItem = tree.topLevelItem(0);
 
     const auto selectedContour = controller.selectContour(12, -1);
     assert(selectedContour && selectedContour->contourIndex == 1);
     const auto selectedContours = controller.selectContours({11, 12}, {});
     assert(selectedContours && selectedContours->contourId == 12);
+    controller.rebuild(snapshot);
+    assert(tree.selectedItems().size() == 2);
+    assert(tree.currentItem());
+    assert(tree.currentItem()->data(
+               0, lcnc::app::ProjectExplorerRoles::NodeKey).toString()
+           == QStringLiteral("contour:12"));
+    toolpathItem = tree.topLevelItem(0);
+    toolpathItem->setExpanded(false);
+    assert(controller.selectContour(11, -1));
+    assert(!toolpathItem->isExpanded());
     const auto order = controller.contourOrder();
     assert(order && order->indexes == QList<int>({0, 1}) && order->hasStableIds);
     controller.selectEntries(kInvalidDocumentId, {});
     assert(tree.selectedItems().isEmpty());
 
-    QTreeWidgetItem* toolpathItem = tree.topLevelItem(0);
+    toolpathItem = tree.topLevelItem(0);
     toolpathItem->setCheckState(0, Qt::Unchecked);
     const auto allContours = controller.visibilityChange(toolpathItem);
     assert(allContours);

@@ -147,12 +147,16 @@ public:
     /// 删除图层；其下轮廓改挂到 reassignTo（为 0 或非法时挂到第一个其余图层）。
     /// 至少保留一个图层时才删除；成功返回 true。
     bool removeLayer(std::uint64_t layerId, std::uint64_t reassignTo = 0);
+    /// 删除图层及其下所有轮廓（不重挂）。若为最后一个图层则保留空图层。
+    bool removeLayerWithContours(std::uint64_t layerId);
     bool updateToolpathLayer(std::uint64_t layerId,
                              const QString& name,
                              const QColor& color,
                              const QString& toolName);
     bool setToolpathLayerEnabled(std::uint64_t layerId, bool enabled);
     bool assignContourToLayer(ContourId contourId, std::uint64_t layerId);
+    /// 批量把多条轮廓移动到指定图层（仅一次 syncLayerContourIds + 一次通知）。
+    bool assignContoursToLayer(const QList<ContourId>& contourIds, std::uint64_t layerId);
     bool reorderContours(const QList<int>& order);
     bool reorderContoursById(const QList<ContourId>& order);
 
