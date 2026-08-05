@@ -58,9 +58,13 @@ void buildRibbonTab(SARibbonCategory* cat,
     SARibbonPanel* panelConn = cat->addPanel(QObject::tr("connect"));
     panelConn->addLargeAction(container->findAction(CmdConnectDevices::Name));
     panelConn->addLargeAction(container->findAction(CmdHome::Name));
-    panelConn->addLargeAction(container->findAction(CmdMoveToLoadingPosition::Name));
-    panelConn->addLargeAction(container->findAction(CmdMoveToBlankingPosition::Name));
     panelConn->addLargeAction(container->findAction(CmdDisconnectDevices::Name));
+
+    // ── 位置 ───────────────────────────────────────────────────────────────
+    // 中文翻译：位置
+    SARibbonPanel* panelPos = cat->addPanel(QObject::tr("position"));
+    panelPos->addLargeAction(container->findAction(CmdMoveToLoadingPosition::Name));
+    panelPos->addLargeAction(container->findAction(CmdMoveToBlankingPosition::Name));
 
     // ── 流程 ───────────────────────────────────────────────────────────────
     // 中文翻译：流程

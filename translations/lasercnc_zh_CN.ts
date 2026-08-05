@@ -4573,6 +4573,10 @@ continue?</source>
         <translation>连接</translation>
     </message>
     <message>
+        <source>position</source>
+        <translation>位置</translation>
+    </message>
+    <message>
         <source>Controller index</source>
         <translation>控制器索引</translation>
     </message>

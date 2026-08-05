@@ -1434,26 +1434,6 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     SARibbonPanel* panelView = cat->addPanel(tr("view"));
     panelView->addLargeAction(m_cmdContainer->findAction(CmdFitAll::Name));
 
-    // 抓取是视图拾取过滤器，而不是 CAD 建模命令：放在视图页，且作用于当前工作区。
-    auto* snapGroup = new QActionGroup(this);
-    snapGroup->setExclusive(true);
-    QAction* snapNone = m_cmdContainer->findAction(CmdSnapNone::Name);
-    QAction* snapVertex = m_cmdContainer->findAction(CmdSnapVertex::Name);
-    QAction* snapEdge = m_cmdContainer->findAction(CmdSnapEdge::Name);
-    QAction* snapFace = m_cmdContainer->findAction(CmdSnapFace::Name);
-    snapGroup->addAction(snapNone);
-    snapGroup->addAction(snapVertex);
-    snapGroup->addAction(snapEdge);
-    snapGroup->addAction(snapFace);
-    // 中文翻译：抓取
-    auto* menuSnap = new QMenu(tr("crawl"), cat);
-    menuSnap->setIcon(QIcon("themeicons:snap.svg"));
-    menuSnap->addAction(snapNone);
-    menuSnap->addAction(snapVertex);
-    menuSnap->addAction(snapEdge);
-    menuSnap->addAction(snapFace);
-    panelView->addLargeMenu(menuSnap);
-
     // View orientation quick actions
     struct OrientInfo { QString label; QString key; QString iconPath; V3d_TypeOfOrientation orient; };
     const QList<OrientInfo> orients = {
@@ -1475,6 +1455,27 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
                 });
         panelView->addLargeAction(act);
     }
+
+    // 抓取是视图拾取过滤器，而不是 CAD 建模命令：放在视图页，且作用于当前工作区。
+    // 中文翻译：抓取
+    SARibbonPanel* panelSnap = cat->addPanel(tr("crawl"));
+    auto* snapGroup = new QActionGroup(this);
+    snapGroup->setExclusive(true);
+    QAction* snapNone = m_cmdContainer->findAction(CmdSnapNone::Name);
+    QAction* snapVertex = m_cmdContainer->findAction(CmdSnapVertex::Name);
+    QAction* snapEdge = m_cmdContainer->findAction(CmdSnapEdge::Name);
+    QAction* snapFace = m_cmdContainer->findAction(CmdSnapFace::Name);
+    snapGroup->addAction(snapNone);
+    snapGroup->addAction(snapVertex);
+    snapGroup->addAction(snapEdge);
+    snapGroup->addAction(snapFace);
+    auto* menuSnap = new QMenu(tr("crawl"), cat);
+    menuSnap->setIcon(QIcon("themeicons:snap.svg"));
+    menuSnap->addAction(snapNone);
+    menuSnap->addAction(snapVertex);
+    menuSnap->addAction(snapEdge);
+    menuSnap->addAction(snapFace);
+    panelSnap->addLargeMenu(menuSnap);
 
     // 中文翻译：显示
     SARibbonPanel* panelDisplay = cat->addPanel(tr("show"));
