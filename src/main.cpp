@@ -75,6 +75,9 @@ QString darkIndustrialStyleSheet()
         QPushButton[jogDirection="positive"] { background: #1E5260; border-color: #4DBFCB; }
         QLineEdit, QDoubleSpinBox, QComboBox, QTextEdit { background: #16212A; border: 1px solid #4A606D; border-radius: 3px; padding: 3px 6px; selection-background-color: #197A98; }
         QDoubleSpinBox:focus, QComboBox:focus { border-color: #55C9E5; }
+        QComboBox QAbstractItemView { background: #24303B; border: 1px solid #405260; color: #D8E1E8; selection-background-color: #176B86; selection-color: #FFFFFF; outline: 0; }
+        QComboBox QAbstractItemView::item { background: #24303B; color: #D8E1E8; }
+        QComboBox QAbstractItemView::item:selected { background: #176B86; color: #FFFFFF; }
         QProgressBar { border: 1px solid #4A606D; border-radius: 3px; text-align: center; color: #E7F3F7; background: #142029; min-height: 12px; }
         QProgressBar::chunk { background: #1397A8; border-radius: 2px; }
         QTreeWidget, QTreeView, QTableView { background: #202B35; alternate-background-color: #25333F; border: 1px solid #405260; }
@@ -129,6 +132,9 @@ QString lightIndustrialStyleSheet()
         QPushButton[jogDirection="positive"] { background: #D7EEF2; border-color: #4A9DA9; }
         QLineEdit, QDoubleSpinBox, QComboBox, QTextEdit { background: #FFFFFF; border: 1px solid #AEBCC5; border-radius: 3px; padding: 3px 6px; selection-background-color: #5AA6BE; }
         QDoubleSpinBox:focus, QComboBox:focus { border-color: #1782A3; }
+        QComboBox QAbstractItemView { background: #FFFFFF; border: 1px solid #BFCBD3; color: #243642; selection-background-color: #D7EDF5; selection-color: #123C4B; outline: 0; }
+        QComboBox QAbstractItemView::item { background: #FFFFFF; color: #243642; }
+        QComboBox QAbstractItemView::item:selected { background: #D7EDF5; color: #123C4B; }
         QProgressBar { border: 1px solid #AEBCC5; border-radius: 3px; text-align: center; color: #243642; background: #EDF2F5; min-height: 12px; }
         QProgressBar::chunk { background: #2698AA; border-radius: 2px; }
         QTreeWidget, QTreeView, QTableView { background: #FFFFFF; alternate-background-color: #F4F7F9; border: 1px solid #C5D0D8; }
