@@ -273,6 +273,7 @@ set(SRCS_VIEW
     src/view/widget_occ_view.cpp
     src/view/toolpath_renderer.cpp
     src/view/travel_path_renderer.cpp
+    src/view/contour_order_label_renderer.cpp
     src/view/machine_guide_renderer.cpp
     src/view/world_axes_renderer.cpp
     src/view/sketch_overlay_renderer.cpp

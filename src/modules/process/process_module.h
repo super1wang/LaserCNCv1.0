@@ -155,6 +155,10 @@ public:
     bool isTravelPathVisible() const { return m_travelPathVisible; }
     void setTravelPathVisible(bool on);
 
+    /// 切割链表序号显示开关；ProcessModule 仅维护状态，绘制在 CAM 端。
+    bool isContourOrderLabelVisible() const { return m_contourOrderLabelVisible; }
+    void setContourOrderLabelVisible(bool on);
+
 signals:
     void connectionChanged(bool connected);
     void simulationModeChanged(bool enabled);
@@ -270,6 +274,7 @@ private:
     // ── Ribbon「加工顺序」状态镜像 ────────────────────────────────────────
     lcnc::process::AutoSortAxis m_autoSortAxis{lcnc::process::AutoSortAxis::XPos};
     bool                        m_travelPathVisible{false};
+    bool                        m_contourOrderLabelVisible{false};
 };
 
 Q_DECLARE_METATYPE(DigitalOutputDescriptor)

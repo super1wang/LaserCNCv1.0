@@ -2119,3 +2119,8 @@ void ProcessModule::setTravelPathVisible(bool on)
 {
     m_travelPathVisible = on;
 }
+
+void ProcessModule::setContourOrderLabelVisible(bool on)
+{
+    m_contourOrderLabelVisible = on;
+}

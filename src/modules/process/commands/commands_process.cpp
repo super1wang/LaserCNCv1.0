@@ -466,4 +466,30 @@ void CmdToggleTravelPath::execute()
         lcnc::process::events::TravelPathVisibilityToggled{next});
 }
 
+// ── CmdToggleContourOrderLabel ─────────────────────────────────────────────
+CmdToggleContourOrderLabel::CmdToggleContourOrderLabel(IAppContext* ctx) : CommandBase(ctx)
+{
+    // 中文翻译：切割链表序号显示
+    auto* a = new QAction(QIcon("themeicons:contour_order.svg"), tr("Cutting sequence number"), this);
+    // 中文翻译：在 3D 视图中按加工顺序在每条轮廓起点附近显示加工序号
+    a->setStatusTip(tr("Display the machining sequence number near each contour start in the 3D view"));
+    a->setCheckable(true);
+    setAction(a);
+}
+bool CmdToggleContourOrderLabel::isEnabled() const
+{
+    return lcnc::Kernel::current().service<ProcessModule>() != nullptr;
+}
+void CmdToggleContourOrderLabel::execute()
+{
+    auto* mod = processModule();
+    if (!mod) return;
+    const bool next = !mod->isContourOrderLabelVisible();
+    mod->setContourOrderLabelVisible(next);
+    if (action()) action()->setChecked(next);
+    // 通过 EventBus 通知 CAM 侧的 ContourOrderLabelRenderer。
+    lcnc::Kernel::current().events().publish(
+        lcnc::process::events::ContourOrderLabelVisibilityToggled{next});
+}
+
 } // namespace lcnc::process

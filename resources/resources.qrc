@@ -49,6 +49,7 @@
     <file alias="icons/emergency_stop.svg">icons/emergency_stop.svg</file>
     <file alias="icons/reset.svg">icons/reset.svg</file>
     <file alias="icons/cutting_plan.svg">icons/cutting_plan.svg</file>
+    <file alias="icons/contour_order.svg">icons/contour_order.svg</file>
     <file alias="icons/toolpath.svg">icons/toolpath.svg</file>
     <file alias="icons/toolpath_32.svg">icons/toolpath_32.svg</file>
     <file alias="icons/toolpath_5x.svg">icons/toolpath_5x.svg</file>
@@ -86,6 +87,7 @@
     <file alias="connect.svg">icons/light/connect.svg</file>
     <file alias="coordinate.svg">icons/light/coordinate.svg</file>
     <file alias="cutting_plan.svg">icons/light/cutting_plan.svg</file>
+    <file alias="contour_order.svg">icons/light/contour_order.svg</file>
     <file alias="cylinder.svg">icons/light/cylinder.svg</file>
     <file alias="delete.svg">icons/light/delete.svg</file>
     <file alias="disconnect.svg">icons/light/disconnect.svg</file>

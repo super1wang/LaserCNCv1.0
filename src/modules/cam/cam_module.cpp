@@ -2,6 +2,7 @@
 #include "modules/cam/cam_module.h"
 #include "view/toolpath_renderer.h"
 #include "view/travel_path_renderer.h"
+#include "view/contour_order_label_renderer.h"
 #include "view/machine_guide_renderer.h"
 #include "core/project/cam/cam_data_manager.h"
 #include "core/project/cam/layer_container.h"
@@ -531,10 +532,15 @@ bool CamModule::init(lcnc::IKernel& kernel)
         [this](const lcnc::process::events::TravelPathVisibilityToggled& e) {
             setTravelPathVisible(e.visible);
         });
+    // 中文翻译：切割链表序号显示
+    // 订阅 Process 模块的"Cutting sequence number display"开关，驱动 ContourOrderLabelRenderer。
+    kernel.events().subscribe<lcnc::process::events::ContourOrderLabelVisibilityToggled>(
+        [this](const lcnc::process::events::ContourOrderLabelVisibilityToggled& e) {
+            setContourOrderLabelVisible(e.visible);
+        });
     kernel.events().subscribe<lcnc::process::events::CuttingPlanChanged>(
         [this](const lcnc::process::events::CuttingPlanChanged&) {
-            if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
-                refreshTravelPath();
+            refreshCuttingOrderOverlays();
         });
 
     return true;
@@ -571,6 +577,7 @@ CamModule::CamModule(QObject* parent)
     , m_toolpathRenderer(std::make_unique<lcnc::view::ToolpathRenderer>())
     , m_guideRenderer(std::make_unique<lcnc::view::MachineGuideRenderer>())
     , m_travelPathRenderer(std::make_unique<lcnc::view::TravelPathRenderer>())
+    , m_contourOrderLabelRenderer(std::make_unique<lcnc::view::ContourOrderLabelRenderer>())
     , m_displayProjectionService(std::make_unique<lcnc::cam::CamDisplayProjectionService>())
     , m_machiningFacePipeline(std::make_unique<lcnc::cam::MachiningFacePipelineService>())
     , m_machiningFaces(m_machiningFacePipeline->entries())
@@ -2831,7 +2838,7 @@ bool CamModule::solveCurrentGeometricToolpath()
     m_camData->markDirty(true);
     m_camData->commitToolpathStates();
     refreshToolpathDisplay();
-    refreshTravelPath();
+    refreshCuttingOrderOverlays();
     emit toolpathGenerated();
     emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
     return true;
@@ -3227,7 +3234,7 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
         m_camData->markDirty(true);
         m_camData->commitToolpathStates();
         refreshToolpathDisplay();
-        refreshTravelPath();
+        refreshCuttingOrderOverlays();
         emit toolpathGenerated();
         emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
     });
@@ -3500,7 +3507,7 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
             ? static_cast<lcnc::cam::ContourId>(toolpathRef().contour(0).contourId) : 0);
     emit toolpathGenerated();
     emit toolpathLayersChanged();
-    refreshTravelPath();
+    refreshCuttingOrderOverlays();
     {
         QStringList leadInWarnings;
         for (const LaserContour& contour : toolpathRef().contours()) {
@@ -3998,7 +4005,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             emit toolpathGenerated();
             emit toolpathLayersChanged();
             emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
-            refreshTravelPath();
+            refreshCuttingOrderOverlays();
             if (!result->leadInWarnings.isEmpty()) {
                 // 中文翻译：全局生成刀路
                 emit operationWarning(tr("Generate toolpath globally"),
@@ -4401,7 +4408,7 @@ bool CamModule::solveToolpathForOrder(
         LCNC_INFO(lcnc::LogCode::Generic,
                   "cam.toolpath: cleared five-axis coordinates because cutting order is empty");
         refreshToolpathDisplay();
-        refreshTravelPath();
+        refreshCuttingOrderOverlays();
         return true;
     }
 
@@ -4412,7 +4419,7 @@ bool CamModule::solveToolpathForOrder(
               "cam.toolpath: solved five-axis coordinates from cutting order, contours={}",
               orderedContours.size());
     refreshToolpathDisplay();
-    refreshTravelPath();
+    refreshCuttingOrderOverlays();
     return true;
 }
 
@@ -4808,7 +4815,7 @@ bool CamModule::commitLeadInPreview(WidgetOccView* occView, const QPoint& screen
     setActiveContourId(0);
     // 仅更新当前轮廓的下刀几何；五轴解算留给用户显式点击“重新计算”。
     m_toolpathRenderer->refreshLeadIns(activeGuiDocument(), toolpathRef(), kinematics());
-    refreshTravelPath();
+    refreshCuttingOrderOverlays();
     if (m_camData)
         m_camData->markDirty(true);
     emit activeContourParametersChanged();
@@ -5219,7 +5226,7 @@ bool CamModule::recalcToolpath()
     m_toolpathRenderer->refreshContour(
         lcnc::Kernel::current().guiApp()->activeGuiDocument(),
         toolpathRef(), kinematics(), contourIndex, preview);
-    refreshTravelPath();
+    refreshCuttingOrderOverlays();
     emit activeContourParametersChanged();
     lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
     return true;
@@ -5429,7 +5436,7 @@ TaskId CamModule::recalcToolpathAsync()
         m_toolpathRenderer->refreshContour(
             lcnc::Kernel::current().guiApp()->activeGuiDocument(),
             toolpathRef(), kinematics(), latestIndex, preview);
-        refreshTravelPath();
+        refreshCuttingOrderOverlays();
         emit activeContourParametersChanged();
         lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
     });
@@ -5877,7 +5884,7 @@ void CamModule::clearToolpathViewState(bool emitSignals)
     if (emitSignals) {
         emit toolpathCleared();
         emit toolpathLayersChanged();
-        refreshTravelPath();
+        refreshCuttingOrderOverlays();
     }
 }
 
@@ -6112,6 +6119,8 @@ void CamModule::refreshMachineTransforms()
         m_displayProjectionService->updateMachiningFaceTransforms(gd, kinematics());
         if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
             m_travelPathRenderer->updateTransforms(gd, kinematics());
+        if (m_contourOrderLabelRenderer && m_contourOrderLabelRenderer->isVisible())
+            m_contourOrderLabelRenderer->updateTransforms(gd, kinematics());
         if (gd->hasView())
             gd->view()->Redraw();
     }
@@ -6140,6 +6149,8 @@ void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
         m_displayProjectionService->updateMachiningFaceTransforms(gd, kinematics());
         if (m_travelPathRenderer && m_travelPathRenderer->isVisible())
             m_travelPathRenderer->updateTransforms(gd, kinematics());
+        if (m_contourOrderLabelRenderer && m_contourOrderLabelRenderer->isVisible())
+            m_contourOrderLabelRenderer->updateTransforms(gd, kinematics());
         if (gd->hasView())
             gd->view()->Redraw();
     }
@@ -6512,7 +6523,7 @@ void CamModule::onCamDataLoaded()
         setActiveContourId(static_cast<lcnc::cam::ContourId>(toolpathRef().contour(0).contourId));
     emit toolpathGenerated();
     emit toolpathLayersChanged();
-    refreshTravelPath();
+    refreshCuttingOrderOverlays();
 
     LCNC_INFO(lcnc::LogCode::Generic,
               "cam.toolpath: refreshed view for {} layers, {} contours",
@@ -6595,4 +6606,89 @@ void CamModule::refreshTravelPath()
     m_travelPathRenderer->refresh(gd, segments);
     m_travelPathRenderer->updateTransforms(gd, kinematics());
     if (gd->hasView()) gd->view()->Redraw();
+}
+
+// ── 切割链表序号标注显示 ─────────────────────────────────────────────────────
+
+void CamModule::setContourOrderLabelVisible(bool on)
+{
+    if (!m_contourOrderLabelRenderer) return;
+    if (m_contourOrderLabelRenderer->isVisible() == on) return;
+    m_contourOrderLabelRenderer->setVisible(on);
+    if (on) {
+        refreshContourOrderLabels();
+    } else {
+        m_contourOrderLabelRenderer->erase(activeGuiDocument());
+        if (auto* gd = activeGuiDocument()) {
+            if (gd->hasView()) gd->view()->Redraw();
+        }
+    }
+}
+
+bool CamModule::isContourOrderLabelVisible() const
+{
+    return m_contourOrderLabelRenderer && m_contourOrderLabelRenderer->isVisible();
+}
+
+void CamModule::refreshContourOrderLabels()
+{
+    if (!m_contourOrderLabelRenderer || !m_contourOrderLabelRenderer->isVisible()) return;
+    GuiDocument* gd = activeGuiDocument();
+    if (!gd) return;
+
+    // 从 Process 端只读视图取顺序，再到 toolpath 取起点（与 refreshTravelPath 同源）。
+    auto provider = lcnc::Kernel::current()
+                        .services()
+                        .getService<lcnc::process::IProcessCuttingPlanProvider>();
+    if (!provider) {
+        m_contourOrderLabelRenderer->refresh(gd, nullptr, {});
+        return;
+    }
+    const auto orderedIds = provider->orderedContourIds();
+    if (orderedIds.isEmpty()) {
+        m_contourOrderLabelRenderer->refresh(gd, nullptr, {});
+        if (gd->hasView()) gd->view()->Redraw();
+        return;
+    }
+
+    QHash<std::uint64_t, const LaserContour*> byId;
+    byId.reserve(toolpathRef().contourCount());
+    for (const LaserContour& contour : toolpathRef().contours()) {
+        if (contour.contourId != 0)
+            byId.insert(contour.contourId, &contour);
+    }
+
+    QVector<lcnc::view::ContourOrderLabelRenderer::Label> labels;
+    labels.reserve(orderedIds.size());
+    int order = 0;
+    for (auto id : orderedIds) {
+        auto it = byId.find(id);
+        if (it == byId.end()) continue;
+        const LaserContour* c = it.value();
+        if (!c || c->points.empty())
+            continue;
+
+        ++order; // 1 起的加工序号
+        const gp_Pnt cutStartLocal = c->points.front().position;
+        gp_Pnt startLocal = cutStartLocal;
+        if (c->leadInSolution.valid)
+            startLocal = c->leadInSolution.point.position;
+
+        lcnc::view::ContourOrderLabelRenderer::Label lbl;
+        lbl.contourId = id;
+        lbl.workpieceEntry = c->workpieceEntry;
+        lbl.sx = startLocal.X(); lbl.sy = startLocal.Y(); lbl.sz = startLocal.Z();
+        lbl.order = order;
+        labels.append(lbl);
+    }
+    m_contourOrderLabelRenderer->refresh(gd, kinematics(), labels);
+    if (gd->hasView()) gd->view()->Redraw();
+}
+
+void CamModule::refreshCuttingOrderOverlays()
+{
+    // 空程虚线与序号标注都派生自同一份"按加工顺序排好的轮廓起点"，
+    // 几何/顺序变化时一并刷新；各自按自身可见性早退，互不影响。
+    refreshTravelPath();
+    refreshContourOrderLabels();
 }

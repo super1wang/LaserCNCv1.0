@@ -22,4 +22,10 @@ struct TravelPathVisibilityToggled
     bool visible{false};
 };
 
+/// 「切割链表序号显示」开关被切换。
+struct ContourOrderLabelVisibilityToggled
+{
+    bool visible{false};
+};
+
 } // namespace lcnc::process::events

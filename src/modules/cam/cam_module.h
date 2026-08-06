@@ -46,6 +46,7 @@ namespace lcnc::view {
 class ToolpathRenderer;
 class MachineGuideRenderer;
 class TravelPathRenderer;
+class ContourOrderLabelRenderer;
 } // namespace lcnc::view
 
 namespace lcnc::cam {
@@ -446,6 +447,16 @@ public:
     /// 按当前 IProcessCuttingPlanProvider 提供的顺序刷新虚线（仅 visible=true 时）。
     void refreshTravelPath();
 
+    // ── 切割链表序号标注显示 ────────────────────────────────────────────
+    // 中文翻译：切割链表序号显示
+    /// 切换"Cutting sequence number display"。OFF 时立即擦除；ON 时立刻按当前 plan 重绘。
+    void setContourOrderLabelVisible(bool on);
+    bool isContourOrderLabelVisible() const;
+    /// 按当前 IProcessCuttingPlanProvider 提供的顺序刷新序号标注（仅 visible=true 时）。
+    void refreshContourOrderLabels();
+    /// 同时刷新空程虚线与序号标注（两者数据同源，几何/顺序变化时一并刷新）。
+    void refreshCuttingOrderOverlays();
+
 signals:
     void machineViewRequested();
     void machineWorkspaceChanged();
@@ -559,6 +570,7 @@ private:
     std::unique_ptr<lcnc::view::ToolpathRenderer>      m_toolpathRenderer;
     std::unique_ptr<lcnc::view::MachineGuideRenderer>  m_guideRenderer;
     std::unique_ptr<lcnc::view::TravelPathRenderer>    m_travelPathRenderer;
+    std::unique_ptr<lcnc::view::ContourOrderLabelRenderer> m_contourOrderLabelRenderer;
     std::unique_ptr<lcnc::cam::CamDisplayProjectionService> m_displayProjectionService;
 
     // ── CAM data managers ─────────────────────────────────────────────

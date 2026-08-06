@@ -43,6 +43,7 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdManualAppendSelectedToCuttingOrder>(CmdManualAppendSelectedToCuttingOrder::Name);
     container->addCommand<CmdAutoSortCuttingOrder>(CmdAutoSortCuttingOrder::Name);
     container->addCommand<CmdToggleTravelPath>(CmdToggleTravelPath::Name);
+    container->addCommand<CmdToggleContourOrderLabel>(CmdToggleContourOrderLabel::Name);
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::registerCommands end");
 }
@@ -121,6 +122,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     autoSortLayout->addWidget(axisCombo);
     panelOrder->addLargeWidget(autoSortControl);
     panelOrder->addLargeAction(container->findAction(CmdToggleTravelPath::Name));
+    panelOrder->addLargeAction(container->findAction(CmdToggleContourOrderLabel::Name));
 
     // ── 运行 ───────────────────────────────────────────────────────────────
     // 中文翻译：运行

@@ -173,4 +173,15 @@ public:
     bool isEnabled() const override;
 };
 
+// 中文翻译：切割链表序号显示
+/// 切换"Cutting sequence number display"--在 OCC 视图中按加工顺序在每条轮廓起点附近绘制序号。
+class CmdToggleContourOrderLabel : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.toggleContourOrderLabel";
+    explicit CmdToggleContourOrderLabel(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
 } // namespace lcnc::process

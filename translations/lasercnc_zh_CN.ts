@@ -1683,6 +1683,17 @@ continue?</source>
     </message>
 </context>
 <context>
+    <name>lcnc::process::CmdToggleContourOrderLabel</name>
+    <message>
+        <source>Cutting sequence number</source>
+        <translation>切割链表序号显示</translation>
+    </message>
+    <message>
+        <source>Display the machining sequence number near each contour start in the 3D view</source>
+        <translation>在 3D 视图中按加工顺序在每条轮廓起点附近显示加工序号</translation>
+    </message>
+</context>
+<context>
     <name>CmdToggleWireframe</name>
     <message>
         <source>Wireframe mode</source>

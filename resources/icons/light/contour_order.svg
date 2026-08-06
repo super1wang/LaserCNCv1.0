@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#244B5A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <text x="2" y="9" fill="#244B5A" stroke="none" font-size="9" font-family="sans-serif" font-weight="bold">1</text>
+  <text x="2" y="15" fill="#244B5A" stroke="none" font-size="9" font-family="sans-serif" font-weight="bold">2</text>
+  <text x="2" y="21" fill="#244B5A" stroke="none" font-size="9" font-family="sans-serif" font-weight="bold">3</text>
+  <line x1="10" y1="6" x2="20" y2="6"/>
+  <line x1="10" y1="12" x2="20" y2="12"/>
+  <line x1="10" y1="18" x2="20" y2="18"/>
+</svg>
