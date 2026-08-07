@@ -5,6 +5,8 @@
 #include "modules/process/runtime/process_execution_context.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
+#include <QMap>
+#include <QString>
 #include <QVariant>
 #include <functional>
 
@@ -41,6 +43,11 @@ public:
                            int timeoutMs,
                            int pollIntervalMs,
                            QString* errorMessage) = 0;
+    /// 读取一次输入信号当前值（digital -> bool，analog -> double），不阻塞等待。
+    virtual bool readInput(const QString& signalType,
+                           const QString& ioName,
+                           QVariant* value,
+                           QString* errorMessage) = 0;
 };
 
 class IProcessCuttingService
@@ -65,6 +72,10 @@ struct ProcessStepContext
     // `cancellationToken` 是历史命名，与 interrupt 指向同一对象，保留以兼容旧代码。
     ProcessInterruptContext* interrupt{nullptr};
     ProcessCancellationToken* cancellationToken{nullptr};
+    // 流程级变量环境（由执行器在 start 时从 Start 节点声明播种），If 条件可读取。
+    QMap<QString, QVariant>* variables{nullptr};
+    // If 节点执行后写入的条件结果（nodeId -> true/false），执行器据此跳过 false 分支的子节点。
+    QMap<QString, bool>* ifResults{nullptr};
     std::function<void(const QString&)> logMessage;
     std::function<void(const QString&, double)> requestAxisPosition;
     std::function<void(const QString&, bool)> requestDigitalOutput;

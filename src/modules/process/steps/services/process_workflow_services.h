@@ -51,6 +51,10 @@ public:
                    int timeoutMs,
                    int pollIntervalMs,
                    QString* errorMessage) override;
+    bool readInput(const QString& signalType,
+                   const QString& ioName,
+                   QVariant* value,
+                   QString* errorMessage) override;
 
 private:
     ProcessDeviceRuntime* m_service{nullptr};

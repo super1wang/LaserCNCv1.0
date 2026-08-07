@@ -6,12 +6,22 @@
 #include "modules/process/workflow/process_flow_document.h"
 #include "modules/process/workflow/process_node_registry.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QThread>
 #include <QtConcurrent>
 
 namespace lcnc::process {
+
+namespace {
+// 单个循环节点最大展开次数与计划总步数硬上限，防止误填导致内存膨胀。
+constexpr int kMaxLoopCount = 99999;
+constexpr int kMaxPlanSize = 200000;
+} // namespace
 
 ProcessWorkflowExecutor::ProcessWorkflowExecutor(QObject* parent)
     : QObject(parent)
@@ -52,9 +62,12 @@ bool ProcessWorkflowExecutor::start(ProcessFlowDocument& document, QString* erro
 
     m_plan.clear();
     m_document = &document;
+    m_ifResults.clear();
+    m_variables.clear();
+    seedVariablesFromStart(document.rootNodes());
     resetNodeStates(m_document->rootNodes());
     for (const auto& node : document.rootNodes())
-        collectNode(node, 0);
+        collectNode(node, 0, QStringList{});
 
     if (m_plan.isEmpty()) {
         // 中文翻译：流程为空，进入空运行仿真
@@ -86,6 +99,8 @@ void ProcessWorkflowExecutor::setStepContext(ProcessStepContext* context)
     if (m_stepContext) {
         m_stepContext->interrupt = &m_token;
         m_stepContext->cancellationToken = &m_token;
+        m_stepContext->variables = &m_variables;
+        m_stepContext->ifResults = &m_ifResults;
     }
 }
 
@@ -159,25 +174,59 @@ bool ProcessWorkflowExecutor::waitForIdle(int timeoutMs)
     return true;
 }
 
-void ProcessWorkflowExecutor::collectNode(const ProcessNode& node, int depth)
+void ProcessWorkflowExecutor::collectNode(const ProcessNode& node, int depth, const QStringList& ifOwners)
 {
     if (!node.enabled)
         return;
 
-    ProcessExecutionStep step;
-    step.nodeId = node.id;
-    step.type = node.type;
-    step.name = node.name;
-    step.parameters = node.parameters;
-    if (const auto* descriptor = ProcessNodeRegistry::instance().descriptor(node.type))
-        step.executorKey = descriptor->executorKey;
-    else
-        step.executorKey = processNodeTypeToString(node.type);
-    step.depth = depth;
-    m_plan.append(step);
+    auto appendStep = [this, &node, depth, &ifOwners] {
+        ProcessExecutionStep step;
+        step.nodeId = node.id;
+        step.type = node.type;
+        step.name = node.name;
+        step.parameters = node.parameters;
+        if (const auto* descriptor = ProcessNodeRegistry::instance().descriptor(node.type))
+            step.executorKey = descriptor->executorKey;
+        else
+            step.executorKey = processNodeTypeToString(node.type);
+        step.depth = depth;
+        step.ifOwnerIds = ifOwners;
+        m_plan.append(step);
+    };
 
+    if (node.type == ProcessNodeType::Loop) {
+        // 循环头只入计划一次（记录/日志），子节点按 loopCount 展开重复入计划，
+        // 这样执行器仍走线性步进，pause/stop/resume 语义不变。
+        appendStep();
+        const int rawCount = node.parameters.value(QStringLiteral("loopCount"), 1).toInt();
+        const int count = qBound(1, rawCount, kMaxLoopCount);
+        for (int i = 0; i < count; ++i) {
+            if (m_plan.size() >= kMaxPlanSize) {
+                LCNC_WARN(lcnc::LogCode::Generic,
+                          "process.executor: loop expansion capped at {} steps",
+                          kMaxPlanSize);
+                break;
+            }
+            for (const auto& child : node.children)
+                collectNode(child, depth + 1, ifOwners);
+        }
+        return;
+    }
+
+    if (node.type == ProcessNodeType::If) {
+        // If 头入计划一次（执行时求值条件并写入 m_ifResults），其子节点继承外层 If
+        // 链 + 本 If 的 id，执行时据此跳过 false 分支。
+        appendStep();
+        QStringList childIfOwners = ifOwners;
+        childIfOwners.append(node.id);
+        for (const auto& child : node.children)
+            collectNode(child, depth + 1, childIfOwners);
+        return;
+    }
+
+    appendStep();
     for (const auto& child : node.children)
-        collectNode(child, depth + 1);
+        collectNode(child, depth + 1, ifOwners);
 }
 
 void ProcessWorkflowExecutor::resetNodeStates(QVector<ProcessNode>& nodes)
@@ -195,13 +244,19 @@ void ProcessWorkflowExecutor::runNextStep()
         if (m_state != State::Running)
             return;
 
-        ++m_currentIndex;
-        if (m_currentIndex >= m_plan.size()) {
-            setState(State::Idle);
-            // 中文翻译：流程运行完成
-            emit messageLogged(tr("The process is completed"));
-            emit workflowFinished();
-            return;
+        // 推进到下一个需要分发的步骤；跳过任何外层 If 条件为 false 的节点
+        // （If 头执行时已把结果写入 m_ifResults，false 分支的子节点直接略过不分发）。
+        while (true) {
+            ++m_currentIndex;
+            if (m_currentIndex >= m_plan.size()) {
+                setState(State::Idle);
+                // 中文翻译：流程运行完成
+                emit messageLogged(tr("The process is completed"));
+                emit workflowFinished();
+                return;
+            }
+            if (!shouldSkipDueToIf(m_plan.at(m_currentIndex)))
+                break;
         }
 
         const ProcessExecutionStep& step = m_plan.at(m_currentIndex);
@@ -353,6 +408,46 @@ void ProcessWorkflowExecutor::setState(State state)
     if (m_state == state)
         return;
     m_state = state;
+}
+
+void ProcessWorkflowExecutor::seedVariablesFromStart(const QVector<ProcessNode>& roots)
+{
+    const ProcessNode* startNode = nullptr;
+    for (const auto& node : roots) {
+        if (node.type == ProcessNodeType::Start) {
+            startNode = &node;
+            break;
+        }
+    }
+    if (!startNode)
+        return;
+
+    const QString json = startNode->parameters
+                             .value(QStringLiteral("variables"), QStringLiteral("[]"))
+                             .toString();
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (!doc.isArray()) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "process.executor: Start variables JSON is not an array, ignored");
+        return;
+    }
+    for (const QJsonValue& value : doc.array()) {
+        const QJsonObject obj = value.toObject();
+        const QString name = obj.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            continue;
+        m_variables.insert(name, obj.value(QStringLiteral("default")).toVariant());
+    }
+}
+
+bool ProcessWorkflowExecutor::shouldSkipDueToIf(const ProcessExecutionStep& step) const
+{
+    for (const QString& ifId : step.ifOwnerIds) {
+        auto it = m_ifResults.constFind(ifId);
+        if (it != m_ifResults.cend() && !it.value())
+            return true;
+    }
+    return false;
 }
 
 } // namespace lcnc::process

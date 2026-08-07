@@ -240,6 +240,44 @@ bool ProcessIoWorkflowService::waitInput(const QString& signalType,
     return false;
 }
 
+bool ProcessIoWorkflowService::readInput(const QString& signalType,
+                                         const QString& ioName,
+                                         QVariant* value,
+                                         QString* errorMessage)
+{
+    const bool analog = signalType.compare(QStringLiteral("analog"), Qt::CaseInsensitive) == 0;
+    auto digitalEnum = analog ? std::optional<DigitalIN>{} : ioEnumFromKey<DigitalIN>(ioName);
+    auto analogEnum = analog ? ioEnumFromKey<AnalogIN>(ioName) : std::optional<AnalogIN>{};
+    if ((!analog && !digitalEnum.has_value()) || (analog && !analogEnum.has_value())) {
+        if (errorMessage)
+            // 中文翻译：输入信号 %1 未注册
+            *errorMessage = QObject::tr("Input signal %1 is not registered").arg(ioName);
+        return false;
+    }
+    ProcessDeviceRuntime* const service = m_service;
+    return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, 5000,
+        [service, analog, ioName, value] {
+            QString error;
+            if (!service)
+                // 中文翻译：运动控制器未连接
+                return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
+            if (analog) {
+                double channelValue = 0.0;
+                if (!service->readAnalogChannel(ioName, &channelValue, &error))
+                    return DeviceCommandResult{false, error};
+                if (value)
+                    *value = channelValue;
+            } else {
+                bool channelValue = false;
+                if (!service->readDigitalChannel(ioName, &channelValue, &error))
+                    return DeviceCommandResult{false, error};
+                if (value)
+                    *value = channelValue;
+            }
+            return DeviceCommandResult{};
+        }, errorMessage);
+}
+
 void CallbackProcessCuttingService::setSnapshotProvider(std::function<ProcessToolpathSnapshot()> provider)
 {
     m_snapshotProvider = std::move(provider);

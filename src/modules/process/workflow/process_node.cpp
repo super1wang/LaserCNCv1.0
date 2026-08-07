@@ -121,8 +121,15 @@ ProcessNodeState processNodeStateFromString(const QString& text)
 
 bool processNodeTypeCanHaveChildren(ProcessNodeType type)
 {
-    Q_UNUSED(type);
-    return false;
+    switch (type) {
+    case ProcessNodeType::Loop:
+    case ProcessNodeType::If:
+    case ProcessNodeType::Group:
+    case ProcessNodeType::RunGroup:
+        return true;
+    default:
+        return false;
+    }
 }
 
 } // namespace lcnc::process
