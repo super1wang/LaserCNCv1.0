@@ -269,7 +269,10 @@ bool colorModelEqual(const ColorSettings& a, const ColorSettings& b)
     return a.workpieceColor == b.workpieceColor
         && qFuzzyCompare(a.workpieceTransparency, b.workpieceTransparency)
         && qFuzzyCompare(a.machineTransparency, b.machineTransparency)
-        && a.machineAxisColors == b.machineAxisColors;
+        && a.machineAxisColors == b.machineAxisColors
+        && a.cutterHeadColor == b.cutterHeadColor
+        && qFuzzyCompare(a.cutterHeadTransparency, b.cutterHeadTransparency)
+        && qFuzzyCompare(a.cutterHeadScale, b.cutterHeadScale);
 }
 
 bool highlightEqual(const ColorSettings& a, const ColorSettings& b)
@@ -677,6 +680,27 @@ void DialogOptions::buildColorPage()
     // 中文翻译：高亮线宽:
     highlightForm->addRow(tr("Highlight line width:"), m_spHighlightLineWidth);
     root->addWidget(highlightGroup);
+
+    // 中文翻译：刀头
+    auto* cutterHeadGroup = new QGroupBox(tr("Cutter head"), page);
+    auto* cutterHeadForm = new QFormLayout(cutterHeadGroup);
+    m_btnCutterHeadColor = makeColorButton(&m_colorDraft.cutterHeadColor);
+    m_spCutterHeadTransparency = noWheel(new QDoubleSpinBox(cutterHeadGroup));
+    m_spCutterHeadTransparency->setRange(0.0, 100.0);
+    m_spCutterHeadTransparency->setDecimals(0);
+    m_spCutterHeadTransparency->setSingleStep(5.0);
+    m_spCutterHeadTransparency->setSuffix(tr(" %"));
+    m_spCutterHeadScale = noWheel(new QDoubleSpinBox(cutterHeadGroup));
+    m_spCutterHeadScale->setRange(0.2, 3.0);
+    m_spCutterHeadScale->setDecimals(2);
+    m_spCutterHeadScale->setSingleStep(0.1);
+    // 中文翻译：刀头颜色:
+    cutterHeadForm->addRow(tr("Cutter head color:"), m_btnCutterHeadColor);
+    // 中文翻译：刀头透明度:
+    cutterHeadForm->addRow(tr("Cutter head transparency:"), m_spCutterHeadTransparency);
+    // 中文翻译：刀头大小(缩放):
+    cutterHeadForm->addRow(tr("Cutter head size (scale):"), m_spCutterHeadScale);
+    root->addWidget(cutterHeadGroup);
 
     root->addStretch(1);
     m_stack->addWidget(page);
@@ -1123,6 +1147,9 @@ void DialogOptions::loadFromSettings()
     }
     setComboByData(m_cbHighlightMode, m_colorDraft.highlightDisplayMode);
     m_spHighlightLineWidth->setValue(m_colorDraft.highlightLineWidth);
+    styleColorButton(m_btnCutterHeadColor, m_colorDraft.cutterHeadColor);
+    m_spCutterHeadTransparency->setValue(m_colorDraft.cutterHeadTransparency * 100.0);
+    m_spCutterHeadScale->setValue(m_colorDraft.cutterHeadScale);
 
     setComboByData(m_cbLanguage, settings->language);
     setComboByData(m_cbTheme, settings->theme);
@@ -1310,6 +1337,8 @@ bool DialogOptions::applyChanges()
     m_colorDraft.machineTransparency = m_spMachineTransparency->value() / 100.0;
     m_colorDraft.highlightDisplayMode = m_cbHighlightMode->currentData().toInt();
     m_colorDraft.highlightLineWidth = m_spHighlightLineWidth->value();
+    m_colorDraft.cutterHeadTransparency = m_spCutterHeadTransparency->value() / 100.0;
+    m_colorDraft.cutterHeadScale = m_spCutterHeadScale->value();
 
     const QString newLanguage = m_cbLanguage->currentData().toString();
     const QString newTheme = m_cbTheme->currentData().toString();
@@ -1406,6 +1435,13 @@ bool DialogOptions::applyChanges()
                 settings->cadViewRendering, settings->camViewRendering, settings->colors,
                 camFlags, false, true);
         }
+    }
+
+    // 刀头锥不在 RenderingManager 域形状内，Colors 路径触及不到，需显式让
+    // CamModule 按新外观（颜色/透明度/缩放）重建刀头指示器。
+    if (modelColorDirty) {
+        if (auto* cam = lcnc::Kernel::current().service<CamModule>())
+            cam->refreshCutterHeadAppearance();
     }
 
     if (treeDirty)

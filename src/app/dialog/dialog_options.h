@@ -105,6 +105,9 @@ private:
     QPushButton* m_btnTreeSelectionColor{nullptr};
     QComboBox* m_cbHighlightMode{nullptr};
     QDoubleSpinBox* m_spHighlightLineWidth{nullptr};
+    QPushButton* m_btnCutterHeadColor{nullptr};
+    QDoubleSpinBox* m_spCutterHeadTransparency{nullptr};
+    QDoubleSpinBox* m_spCutterHeadScale{nullptr};
     QHash<QString, QPushButton*> m_axisColorButtons;
 
     QComboBox* m_cbLanguage{nullptr};

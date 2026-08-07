@@ -92,6 +92,10 @@ struct ColorSettings {
     int highlightDisplayMode = -1;
     double highlightLineWidth = 2.0;
     QHash<QString, QColor> machineAxisColors;
+    ///< 刀头锥指示器外观（颜色 / 透明度 / 缩放）。
+    QColor cutterHeadColor = QColor(255, 0, 0);
+    double cutterHeadTransparency = 0.0; ///< 0.0 = opaque, 1.0 = fully transparent
+    double cutterHeadScale = 1.0;         ///< 圆锥整体缩放比例（1.0 = 默认尺寸）
 };
 
 struct ViewStateSettings {

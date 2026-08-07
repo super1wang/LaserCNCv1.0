@@ -817,6 +817,10 @@ if(BUILD_TESTING)
         tests/contour_extraction_test.cpp
     )
     target_link_libraries(lcnc_contour_extraction_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_cone_construction_diag
+        tests/cone_construction_diag.cpp
+    )
+    target_link_libraries(lcnc_cone_construction_diag PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_process_runtime_configuration_test
         tests/process_runtime_configuration_test.cpp
     )
@@ -902,6 +906,7 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_cam_lead_in_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_lead_in_diag lcnc_runtime_deploy_build)
         add_dependencies(lcnc_contour_extraction_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_cone_construction_diag lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_runtime_configuration_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_device_command_queue_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_preflight_service_test lcnc_runtime_deploy_build)
@@ -928,6 +933,7 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_diag)
     lcnc_deploy_tbb_runtime(lcnc_contour_extraction_test)
+    lcnc_deploy_tbb_runtime(lcnc_cone_construction_diag)
     lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
     lcnc_deploy_tbb_runtime(lcnc_device_command_queue_test)
     lcnc_deploy_tbb_runtime(lcnc_process_preflight_service_test)
@@ -989,6 +995,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_cam_lead_in_test)
     add_test(NAME lcnc_contour_extraction_test
         COMMAND lcnc_contour_extraction_test)
+    add_test(NAME lcnc_cone_construction_test
+        COMMAND lcnc_cone_construction_diag)
     add_test(NAME lcnc_process_runtime_configuration_test
         COMMAND lcnc_process_runtime_configuration_test)
     add_test(NAME lcnc_device_command_queue_test

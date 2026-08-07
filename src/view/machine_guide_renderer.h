@@ -5,11 +5,22 @@
 #include <QString>
 #include <AIS_Shape.hxx>
 #include <gp_Pnt.hxx>
+#include <QColor>
 
 class GuiDocument;
 class MachineKinematics;
 
 namespace lcnc::view {
+
+/**
+ * @brief 刀头锥外观参数（颜色 / 透明度 / 缩放）。
+ * 由 CamModule 从 AppSettings::ColorSettings 注入，渲染器自身不读设置。
+ */
+struct CutterHeadAppearance {
+    QColor color{255, 0, 0};
+    double transparency = 0.0; ///< 0.0 = opaque, 1.0 = fully transparent
+    double scale = 1.0;         ///< 圆锥整体缩放（1.0 = 默认尺寸）
+};
 
 /**
  * @brief 机台坐标轴/刀头辅助 AIS 渲染器（v2.2 从 CamModule 抽出）。
@@ -21,6 +32,9 @@ class MachineGuideRenderer
 public:
     MachineGuideRenderer();
     ~MachineGuideRenderer();
+
+    /// 设置刀头锥外观（颜色/透明度/缩放），在下一次 refresh() 生效。
+    void setCutterHeadAppearance(const CutterHeadAppearance& appearance);
 
     /// 重新创建所有引导 AIS（先 erase 再 display）。
     void refresh(GuiDocument* gd,
@@ -48,6 +62,7 @@ private:
 
 private:
     QHash<GuiDocument*, QMap<QString, Handle(AIS_Shape)>> m_axisGuideAisByDocument;
+    CutterHeadAppearance m_cutterHeadAppearance;
     bool m_rotaryAxisVisible{true};
     bool m_cutterHeadVisible{true};
 };

@@ -29,6 +29,11 @@ namespace lcnc::view {
 MachineGuideRenderer::MachineGuideRenderer() = default;
 MachineGuideRenderer::~MachineGuideRenderer() = default;
 
+void MachineGuideRenderer::setCutterHeadAppearance(const CutterHeadAppearance& appearance)
+{
+    m_cutterHeadAppearance = appearance;
+}
+
 QMap<QString, Handle(AIS_Shape)>& MachineGuideRenderer::guideMap(GuiDocument* gd)
 {
     return m_axisGuideAisByDocument[gd];
@@ -112,6 +117,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
         constexpr double kCenterSphereRadius = 3.5;
         const gp_Pnt center = rotationCenter(kin);
         BRepPrimAPI_MakeSphere sphereMaker(center, kCenterSphereRadius);
+        sphereMaker.Build();  // 同 cone：OCCT 7.9 需显式 Build()，否则 IsDone() 恒 false
         if (sphereMaker.IsDone()) {
             Handle(AIS_Shape) sphereAis = scene->displayShape(sphereMaker.Shape(), false, false, false);
             scene->setShapeColor(sphereAis, Quantity_Color(0.95, 0.95, 0.15, Quantity_TOC_RGB), false);
@@ -124,27 +130,39 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
     constexpr double kHeadConeHeight  = 30.0;
     constexpr double kHeadConeRadius  = 8.0;
     constexpr double kHeadConeTipRadius = 0.35;
+    // 外观（颜色/透明度/缩放）由 CamModule 从 AppSettings 注入。scale 仅放大
+    // 几何，锥尖仍在原点，由 updateTransforms 平移到刀尖世界点。
+    const double scale = m_cutterHeadAppearance.scale;
+    const double coneHeight    = kHeadConeHeight    * scale;
+    const double coneRadius    = kHeadConeRadius    * scale;
+    const double coneTipRadius = kHeadConeTipRadius * scale;
+    const QColor& headColor = m_cutterHeadAppearance.color;
+    const Quantity_Color headQty(headColor.redF(), headColor.greenF(),
+                                 headColor.blueF(), Quantity_TOC_RGB);
     const gp_Pnt coneTip(0.0, 0.0, 0.0);
-    const gp_Pnt coneBaseCenter(0.0, 0.0, kHeadConeHeight);
-    gp_Ax2 coneAxis(coneBaseCenter, gp_Dir(0.0, 0.0, -1.0));
-    BRepPrimAPI_MakeCone coneMaker(coneAxis, kHeadConeRadius, kHeadConeTipRadius, kHeadConeHeight);
+    const gp_Pnt coneBaseCenter(0.0, 0.0, coneHeight);
+    // 用默认 +Z 轴构造：R1=尖半径(z=0)、R2=底半径(z=H)。
+    BRepPrimAPI_MakeCone coneMaker(coneTipRadius, coneRadius, coneHeight);
+    // OCCT 7.9: BRepPrimAPI_MakeOneAxis 的构造函数不调用 Done()，IsDone() 在
+    // Build() 之前恒为 false（Shape() 虽能惰性返回有效实体，但不会置位 IsDone）。
+    // 若直接判断 IsDone() 会永远走线框回退分支--这正是刀头锥一直显示为红色线框
+    // （8 条母线 + 底圆，比完整线框更少线条）的根因。必须显式 Build()。
+    coneMaker.Build();
     if (coneMaker.IsDone()) {
         TopoDS_Shape coneShape = coneMaker.Shape();
         BRepMesh_IncrementalMesh(coneShape, 0.5);
-        // 与工件/机台模型使用相同的 GraphicsScene + InteractiveContext
-        // 显示链。先注册 AIS，再通过 context 设置 own display mode 和
-        // 着色属性，最后重建 presentation，避免只留下 mode 0 的线框缓存。
-        Handle(AIS_Shape) coneAis =
-            scene->displayShape(coneShape, false, false, false);
+        // 直接以 AIS_Shaded 显式 Display，不经过 displayShape(-1)：后者沿用 context
+        // 默认显示模式，用户切到“线框”时锥体会以线框创建且难以纠正。
+        Handle(AIS_Shape) coneAis = new AIS_Shape(coneShape);
         coneAis->SetDisplayMode(AIS_Shaded);
-        ctx->SetDisplayMode(coneAis, AIS_Shaded, Standard_False);
-        ctx->SetColor(coneAis,
-                      Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB),
-                      Standard_False);
+        ctx->Display(coneAis, AIS_Shaded, 0, Standard_False);
+        ctx->SetColor(coneAis, headQty, Standard_False);
         ctx->SetMaterial(
             coneAis,
             Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_ShinyPlastified),
             Standard_False);
+        ctx->SetTransparency(coneAis,
+            qBound(0.0, m_cutterHeadAppearance.transparency, 1.0), Standard_False);
         coneAis->Attributes()->SetFaceBoundaryDraw(Standard_False);
         ctx->SetZLayer(coneAis, Graphic3d_ZLayerId_Topmost);
         ctx->Deactivate(coneAis);
@@ -160,24 +178,21 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
         BRep_Builder builder;
         builder.MakeCompound(coneWire);
         BRepBuilderAPI_MakeEdge baseMaker(
-            gp_Circ(gp_Ax2(coneBaseCenter, gp_Dir(0.0, 0.0, 1.0)), kHeadConeRadius));
+            gp_Circ(gp_Ax2(coneBaseCenter, gp_Dir(0.0, 0.0, 1.0)), coneRadius));
         if (baseMaker.IsDone())
             builder.Add(coneWire, baseMaker.Edge());
         for (int i = 0; i < 8; ++i) {
             const double angle = (2.0 * M_PI * i) / 8.0;
-            const gp_Pnt basePoint(kHeadConeRadius * std::cos(angle),
-                                   kHeadConeRadius * std::sin(angle),
-                                   kHeadConeHeight);
+            const gp_Pnt basePoint(coneRadius * std::cos(angle),
+                                   coneRadius * std::sin(angle),
+                                   coneHeight);
             BRepBuilderAPI_MakeEdge sideMaker(coneTip, basePoint);
             if (sideMaker.IsDone())
                 builder.Add(coneWire, sideMaker.Edge());
         }
         Handle(AIS_Shape) wireAis =
             scene->displayShape(coneWire, false, false, false);
-        scene->setShapeColor(
-            wireAis,
-            Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB),
-            false);
+        scene->setShapeColor(wireAis, headQty, false);
         wireAis->SetWidth(3.0);
         ctx->SetZLayer(wireAis, Graphic3d_ZLayerId_Topmost);
         ctx->Deactivate(wireAis);

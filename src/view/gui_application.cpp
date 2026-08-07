@@ -8,9 +8,6 @@
 #include "view/rendering_manager.h"
 
 #include <AIS_InteractiveContext.hxx>
-#include <AIS_ListIteratorOfListOfInteractive.hxx>
-#include <AIS_ListOfInteractive.hxx>
-#include <AIS_Shape.hxx>
 #include <Prs3d_Drawer.hxx>
 
 #include <utility>
@@ -177,21 +174,12 @@ void GuiApplication::setCurrentDisplayMode(int displayMode, bool faceBoundary)
 
         ctx->DefaultDrawer()->SetFaceBoundaryDraw(faceBoundary);
         ctx->SetDisplayMode(displayMode, Standard_False);
-
-        AIS_ListOfInteractive list;
-        ctx->DisplayedObjects(list);
-        for (AIS_ListIteratorOfListOfInteractive it(list); it.More(); it.Next()) {
-            const Handle(AIS_InteractiveObject)& obj = it.Value();
-            if (Handle(AIS_Shape) shape = Handle(AIS_Shape)::DownCast(obj); !shape.IsNull()) {
-                if (shape->DisplayMode() != displayMode)
-                    ctx->SetDisplayMode(shape, displayMode, Standard_False);
-                if (!shape->Attributes().IsNull()
-                    && shape->Attributes()->FaceBoundaryDraw() != faceBoundary) {
-                    shape->Attributes()->SetFaceBoundaryDraw(faceBoundary);
-                    shape->Redisplay(Standard_True);
-                }
-            }
-        }
+        // context 默认显示模式 + DefaultDrawer 面边线，供后续新建对象（含未显式
+        // 指定模式的 XCAF 工件/机台对象）继承。工件/机台 AIS_Shape 的逐对象模式
+        // 切换已由 applyDisplayModeToDocument -> RenderingManager::
+        // setRuntimeDisplayMode 按域（Workpiece/Machine）处理，这里不再遍历全部
+        // 已显示对象强制覆盖--否则刀路/引导锥/球/gizmo/草绘/CAM 轮廓等会被一并
+        // 切到线框，破坏它们各自创建时确定的模式（如红色刀头锥应始终为实体）。
         ctx->UpdateCurrentViewer();
     }
 }

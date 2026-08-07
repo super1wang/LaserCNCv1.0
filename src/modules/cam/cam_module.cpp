@@ -16,6 +16,7 @@
 #include "modules/cam/i_cam_layer_provider.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kernel/kernel.h"
+#include "core/settings/app_settings.h"
 #include "modules/cad/services/shape_service.h"
 
 #include "modules/cam/settings/cam_config.h"
@@ -5831,7 +5832,24 @@ void CamModule::eraseAxisGuideDisplay()
 
 void CamModule::displayAxisGuides()
 {
+    if (!m_guideRenderer)
+        return;
+    // 刀头外观（颜色/透明度/缩放）从 AppSettings 注入渲染器，保证启动与项目切换
+    // 时刀头锥使用已保存的外观。RenderingManager 的 Colors 路径触及不到刀头锥
+    // （它不在 GuiDocument 域形状 map 内），故由这里显式下发。
+    if (auto* settings = lcnc::Kernel::current().appSettings()) {
+        m_guideRenderer->setCutterHeadAppearance(
+            lcnc::view::CutterHeadAppearance{
+                settings->colors.cutterHeadColor,
+                settings->colors.cutterHeadTransparency,
+                settings->colors.cutterHeadScale});
+    }
     m_guideRenderer->refresh(activeGuiDocument(), kinematics(), cutterHeadWorldPosition());
+}
+
+void CamModule::refreshCutterHeadAppearance()
+{
+    displayAxisGuides();
 }
 
 void CamModule::updateAxisGuideTransforms()

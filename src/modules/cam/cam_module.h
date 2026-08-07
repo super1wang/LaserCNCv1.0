@@ -435,6 +435,8 @@ public:
     bool rotaryAxisGuidesVisible() const;
     void setCutterHeadGuideVisible(bool visible);
     bool cutterHeadGuideVisible() const;
+    /// 按 AppSettings 中的刀头外观（颜色/透明度/缩放）重建刀头锥指示器。
+    void refreshCutterHeadAppearance();
     void setSelectedEntries(const QStringList& entries);
     QStringList selectedEntries() const;
     void syncSelectionFromView();

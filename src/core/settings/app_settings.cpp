@@ -346,6 +346,11 @@ void AppSettings::readFrom(const toml::value& root)
         colors.treeSelectionColor = colorFromHex(get_qstring(c, "tree_selection", colorToHex(colors.treeSelectionColor)), colors.treeSelectionColor);
         colors.highlightDisplayMode = get_int(c, "highlight_display_mode", colors.highlightDisplayMode);
         colors.highlightLineWidth = get_double(c, "highlight_line_width", colors.highlightLineWidth);
+        colors.cutterHeadColor = colorFromHex(get_qstring(c, "cutter_head", colorToHex(colors.cutterHeadColor)), colors.cutterHeadColor);
+        colors.cutterHeadTransparency = qBound(0.0,
+            get_double(c, "cutter_head_transparency", colors.cutterHeadTransparency), 1.0);
+        colors.cutterHeadScale = qBound(0.1,
+            get_double(c, "cutter_head_scale", colors.cutterHeadScale), 5.0);
         if (c.contains("axis_colors") && c.at("axis_colors").is_table()) {
             const auto& ac = c.at("axis_colors");
             for (const auto& kv : ac.as_table()) {
@@ -431,6 +436,9 @@ void AppSettings::writeTo(toml::value& root) const
     colorTable["tree_selection"] = qs(colorToHex(colors.treeSelectionColor));
     colorTable["highlight_display_mode"] = colors.highlightDisplayMode;
     colorTable["highlight_line_width"] = colors.highlightLineWidth;
+    colorTable["cutter_head"] = qs(colorToHex(colors.cutterHeadColor));
+    colorTable["cutter_head_transparency"] = qBound(0.0, colors.cutterHeadTransparency, 1.0);
+    colorTable["cutter_head_scale"] = colors.cutterHeadScale;
     toml::value axisColors(toml::table{});
     for (auto it = colors.machineAxisColors.cbegin(); it != colors.machineAxisColors.cend(); ++it)
         axisColors[qs(it.key())] = qs(colorToHex(it.value()));
