@@ -5056,6 +5056,38 @@ continue?</source>
         <translation>多轴运动轴表为空</translation>
     </message>
     <message>
+        <source>Axis position setting</source>
+        <translation>轴系置位</translation>
+    </message>
+    <message>
+        <source>Set position (empty)</source>
+        <translation>置位（空）</translation>
+    </message>
+    <message>
+        <source>Set position: %1</source>
+        <translation>置位 %1</translation>
+    </message>
+    <message>
+        <source>Position coordinates</source>
+        <translation>置位坐标</translation>
+    </message>
+    <message>
+        <source>Axis position table is empty</source>
+        <translation>置位轴表为空</translation>
+    </message>
+    <message>
+        <source>Axis position setting failed</source>
+        <translation>轴置位失败</translation>
+    </message>
+    <message>
+        <source>Axis position must be a finite value</source>
+        <translation>轴置位坐标必须是有限数值</translation>
+    </message>
+    <message>
+        <source>Axis position table contains duplicate axes</source>
+        <translation>置位轴表包含重复轴</translation>
+    </message>
+    <message>
         <source>Ordinary cutting</source>
         <translation>普通切割</translation>
     </message>
@@ -5667,8 +5699,8 @@ continue?</source>
 <context>
     <name>WidgetLaserControl</name>
     <message>
-        <source>control</source>
-        <translation>控制</translation>
+        <source>Device control</source>
+        <translation>设备控制</translation>
     </message>
     <message>
         <source>System log</source>

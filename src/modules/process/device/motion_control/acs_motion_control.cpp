@@ -572,6 +572,17 @@ bool ACSMotionControl::GetFeedbackPos(Axis eAxis, double& dFPos)
 	return true;
 }
 
+bool ACSMotionControl::SetFPosition(Axis eAxis, double dPos)
+{
+	// setfpos：将轴反馈位置寄存器直接重写为 dPos（用户单位），不产生运动。
+	if (!acsc_SetFPosition(m_hHandle, m_mapMotorValue[eAxis].AxisIndex, dPos, NULL))
+	{
+		LogError();
+		return false;
+	}
+	return true;
+}
+
 bool ACSMotionControl::SetAxisIndex(Axis eAxis, int iIndex)
 {
 	string sTemp = std::to_string(iIndex);

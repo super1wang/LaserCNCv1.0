@@ -26,6 +26,10 @@ public:
                           const QString& mode,
                           int timeoutMs,
                           QString* errorMessage) = 0;
+    /// 将所选轴当前位置寄存器直接置位为指定坐标（ACS setfpos / GTN 对应接口），不产生运动。
+    virtual bool setAxisPosition(const QVariantList& axes,
+                                 int timeoutMs,
+                                 QString* errorMessage) = 0;
     virtual bool stopMotion(QString* errorMessage = nullptr) = 0;
 };
 

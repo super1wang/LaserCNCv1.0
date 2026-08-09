@@ -87,8 +87,10 @@ private:
     QMap<QString, class QPushButton*> m_ioButtons;
     class QTabWidget* m_tabs{nullptr};
     class QWidget* m_controlPage{nullptr};
+    class QWidget* m_devicePage{nullptr};
     class QWidget* m_logPage{nullptr};
     class QVBoxLayout* m_controlLayout{nullptr};
+    class QVBoxLayout* m_deviceLayout{nullptr};
     class QTextEdit* m_logView{nullptr};
     class QGroupBox* m_axisGroup{nullptr};
     class QGroupBox* m_jogGroup{nullptr};

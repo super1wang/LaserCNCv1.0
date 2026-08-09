@@ -138,6 +138,10 @@ public:
 	virtual bool StopMotion() = 0;
 	virtual bool HaltMotor(Axis eMotor) = 0;
 
+	// 置位：将轴当前位置寄存器直接重写为指定坐标（不产生运动）。
+	// ACS 调用 acsc_SetFPosition(setfpos)；GTN 同步设置规划位置与编码器位置。
+	virtual bool SetFPosition(Axis eAxis, double dPos) = 0;
+
 	// 状态查询
 	virtual bool IsAxisMoving(Axis eAxis) = 0;
 	virtual bool IsAxisMoving() = 0;

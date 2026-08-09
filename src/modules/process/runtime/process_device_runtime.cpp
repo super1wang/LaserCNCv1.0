@@ -16,6 +16,8 @@
 #endif
 
 #include <array>
+#include <cmath>
+#include <set>
 
 ProcessDeviceRuntime::ProcessDeviceRuntime(lcnc::process::ProcessSettingsService& settings,
                  lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
@@ -226,6 +228,39 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveAxes(
         : m_motionControl->MoveMAbsolute(nativeAxes, nativePositions, velocity);
     // 中文翻译：同步多轴运动失败
     return {ok, ok ? QString() : QObject::tr("Synchronized multi-axis motion failed")};
+}
+
+lcnc::process::DeviceCommandResult ProcessDeviceRuntime::setAxisPositions(
+    const QVector<QPair<Axis, double>>& targets)
+{
+    const auto lock = lockDeviceAccess();
+    if (!m_motionControl || !m_motionControl->IsConnected())
+        // 中文翻译：运动控制器未连接
+        return {false, QObject::tr("Motion controller not connected")};
+    if (targets.isEmpty())
+        // 中文翻译：置位轴表为空
+        return {false, QObject::tr("Axis position table is empty")};
+
+    std::set<Axis> validatedAxes;
+    for (const auto& target : targets) {
+        if (!m_motionControl->IsMotorCreated(target.first))
+            // 中文翻译：轴未注册
+            return {false, QObject::tr("Axis not registered")};
+        if (!std::isfinite(target.second))
+            // 中文翻译：轴置位坐标必须是有限数值
+            return {false, QObject::tr("Axis position must be a finite value")};
+        if (!validatedAxes.insert(target.first).second)
+            // 中文翻译：置位轴表包含重复轴
+            return {false, QObject::tr("Axis position table contains duplicate axes")};
+    }
+
+    // 在写入任何控制器寄存器前先完成整表校验，避免后续行非法时留下半完成状态。
+    for (const auto& target : targets) {
+        if (!m_motionControl->SetFPosition(target.first, target.second))
+            // 中文翻译：轴置位失败
+            return {false, QObject::tr("Axis position setting failed")};
+    }
+    return {true, QString()};
 }
 
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::setAxisEnabled(Axis axis, bool enabled)

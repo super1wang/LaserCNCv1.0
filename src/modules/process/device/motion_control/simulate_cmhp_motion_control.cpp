@@ -178,6 +178,7 @@ bool SimulateCMHPMotionControl::MoveMAbsolute(vector<Axis> axes,vector<double> p
 bool SimulateCMHPMotionControl::StopMotion(Axis) { return ready(); } bool SimulateCMHPMotionControl::StopMotion() { return ready(); } bool SimulateCMHPMotionControl::HaltMotor(Axis value) { return StopMotion(value); }
 bool SimulateCMHPMotionControl::IsAxisMoving(Axis) { return false; } bool SimulateCMHPMotionControl::IsAxisMoving() { return false; }
 bool SimulateCMHPMotionControl::GetActualPos(Axis value,double& position) { const auto* s=findAxis(value); if(!ready()||!s) return false; position=s->position; return true; } bool SimulateCMHPMotionControl::GetFeedbackPos(Axis value,double& position) { return GetActualPos(value,position); }
+bool SimulateCMHPMotionControl::SetFPosition(Axis value,double position) { if(!ready()) return false; axis(value).position=position; return true; }
 bool SimulateCMHPMotionControl::IsReachPos(Axis value,bool relative,double position) { double actual{}; return GetActualPos(value,actual) && (relative ? std::abs(position) <= kPositionTolerance : std::abs(actual-position) <= kPositionTolerance); }
 bool SimulateCMHPMotionControl::IsAxisStatusNormal(int& fault) { fault=0; return ready(); } bool SimulateCMHPMotionControl::ErrorOccurred() const { return false; } bool SimulateCMHPMotionControl::IsQueueActive() { return m_bufferRunning; }
 #define SIM_SET(name, member, type) bool SimulateCMHPMotionControl::name(Axis value,type input){ axis(value).member=input; return ready(); }

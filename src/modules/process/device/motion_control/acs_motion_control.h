@@ -141,6 +141,7 @@ public:
 	virtual bool IsAxisMoving(Axis eAxis);
 	virtual bool GetActualPos(Axis eAxis, double& dFPos);
 	virtual bool GetFeedbackPos(Axis eAxis, double& dFPos);
+	virtual bool SetFPosition(Axis eAxis, double dPos);
 
 	// 轴系基础参数设置
 	virtual bool SetAxisIndex(Axis eAxis, int iIndex);

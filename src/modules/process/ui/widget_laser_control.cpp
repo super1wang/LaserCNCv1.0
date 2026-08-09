@@ -94,6 +94,15 @@ void WidgetLaserControl::buildUi()
     m_controlLayout->setContentsMargins(6, 6, 6, 6);
     m_controlLayout->setSpacing(8);
 
+    auto* deviceScroll = new QScrollArea(m_tabs);
+    deviceScroll->setWidgetResizable(true);
+    deviceScroll->setFrameShape(QFrame::NoFrame);
+    deviceScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_devicePage = new QWidget(deviceScroll);
+    m_deviceLayout = new QVBoxLayout(m_devicePage);
+    m_deviceLayout->setContentsMargins(6, 6, 6, 6);
+    m_deviceLayout->setSpacing(8);
+
     m_logPage = new QWidget(m_tabs);
     auto* logLayout = new QVBoxLayout(m_logPage);
     logLayout->setContentsMargins(4, 4, 4, 4);
@@ -106,8 +115,11 @@ void WidgetLaserControl::buildUi()
     logLayout->addWidget(m_logView);
 
     controlScroll->setWidget(m_controlPage);
-    // 中文翻译：控制
-    m_tabs->addTab(controlScroll, tr("control"));
+    deviceScroll->setWidget(m_devicePage);
+    // 中文翻译：加工控制
+    m_tabs->addTab(controlScroll, tr("Process control"));
+    // 中文翻译：设备控制
+    m_tabs->addTab(deviceScroll, tr("Device control"));
     // 中文翻译：系统日志
     m_tabs->addTab(m_logPage, tr("System log"));
     mainLayout->addWidget(m_tabs);
@@ -119,13 +131,14 @@ void WidgetLaserControl::buildUi()
     buildJogGroup();
 
     m_controlLayout->addStretch();
+    m_deviceLayout->addStretch();
 }
 
 void WidgetLaserControl::buildAxisGroup()
 {
     // 中文翻译：轴位置
     m_axisGroup = new QGroupBox(tr("axis position"), this);
-    m_controlLayout->addWidget(m_axisGroup);
+    m_deviceLayout->addWidget(m_axisGroup);
     rebuildAxisGroup();
 }
 
@@ -133,7 +146,7 @@ void WidgetLaserControl::buildJogGroup()
 {
     // 中文翻译：手动点动
     m_jogGroup = new QGroupBox(tr("Manual jog"), this);
-    m_controlLayout->addWidget(m_jogGroup);
+    m_deviceLayout->addWidget(m_jogGroup);
     rebuildJogGroup();
 }
 
@@ -162,14 +175,23 @@ void WidgetLaserControl::buildProcessGroup()
         button->setIconSize(QSize(18, 18));
     }
 
+    // 运行/暂停/继续与停止按钮统一为相同固定尺寸，居中排列。
+    const int kActionButtonWidth = 120;
+    const int kActionButtonHeight = 38;
+
     auto* actionSlot = new QWidget(group);
+    actionSlot->setFixedSize(kActionButtonWidth, kActionButtonHeight);
     m_runActionStack = new QStackedLayout(actionSlot);
     m_runActionStack->setContentsMargins(0, 0, 0, 0);
     m_runActionStack->addWidget(m_btnRun);
     m_runActionStack->addWidget(m_btnPause);
     m_runActionStack->addWidget(m_btnResume);
-    row->addWidget(actionSlot, 1);
+    m_btnStop->setFixedSize(kActionButtonWidth, kActionButtonHeight);
+
+    row->addStretch();
+    row->addWidget(actionSlot);
     row->addWidget(m_btnStop);
+    row->addStretch();
     vlay->addLayout(row);
 
     connect(m_btnRun, &QPushButton::clicked, this, &WidgetLaserControl::startRequested);
@@ -189,7 +211,7 @@ void WidgetLaserControl::buildIoGroup()
     grid->setContentsMargins(4, 4, 4, 4);
     // 初始为空 — 由 ProcessModule::digitalOutputDescriptorsChanged 通过
     // setDigitalOutputDescriptors 注入按钮（依据 settings 中 showInMain 字段）。
-    m_controlLayout->addWidget(m_ioGroup);
+    m_deviceLayout->addWidget(m_ioGroup);
 }
 
 void WidgetLaserControl::setDigitalOutputDescriptors(const QList<DigitalOutputDescriptor>& descriptors)

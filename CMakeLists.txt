@@ -400,6 +400,7 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/steps/stop/stop_step.cpp
     src/modules/process/steps/single_axis_move/single_axis_move_step.cpp
     src/modules/process/steps/multi_axis_move/multi_axis_move_step.cpp
+    src/modules/process/steps/set_axis_position/set_axis_position_step.cpp
     src/modules/process/steps/output_signal/output_signal_step.cpp
     src/modules/process/steps/input_signal_wait/input_signal_wait_step.cpp
     src/modules/process/steps/normal_cutting/normal_cutting_step.cpp

@@ -4,6 +4,7 @@
 #include "modules/process/runtime/process_device_runtime.h"
 
 #include <QElapsedTimer>
+#include <QPair>
 #include <QThread>
 
 #include <algorithm>
@@ -137,6 +138,30 @@ bool ProcessMotionWorkflowService::moveAxes(const QVariantList& rows,
                 relative = isRelativeMode(row.value(QStringLiteral("mode"), QStringLiteral("absolute")).toString());
             }
             return service->moveAxes(axes, positions, velocity, relative);
+        }, errorMessage);
+}
+
+bool ProcessMotionWorkflowService::setAxisPosition(const QVariantList& axes,
+                                                   int timeoutMs,
+                                                   QString* errorMessage)
+{
+    ProcessDeviceRuntime* const service = m_service;
+    return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
+        [service, axes] {
+            if (!service)
+                // 中文翻译：运动控制器未连接
+                return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
+            QVector<QPair<Axis, double>> targets;
+            for (const QVariant& item : axes) {
+                const QVariantMap row = item.toMap();
+                const QString axisName = row.value(QStringLiteral("axis")).toString().trimmed().toUpper();
+                const auto eAxis = enum_cast<Axis>(axisName.toStdString());
+                if (!eAxis.has_value())
+                    // 中文翻译：轴 %1 未注册
+                    return DeviceCommandResult{false, QObject::tr("Axis %1 is not registered").arg(axisName)};
+                targets.append({eAxis.value(), row.value(QStringLiteral("position"), 0.0).toDouble()});
+            }
+            return service->setAxisPositions(targets);
         }, errorMessage);
 }
 

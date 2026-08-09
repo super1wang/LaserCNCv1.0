@@ -47,6 +47,7 @@ QString processNodeTypeToString(ProcessNodeType type)
     case ProcessNodeType::RunGroupCheck: return QStringLiteral("RunGroupCheck");
     case ProcessNodeType::SingleAxisMove: return QStringLiteral("SingleAxisMove");
     case ProcessNodeType::MultiAxisMove: return QStringLiteral("MultiAxisMove");
+    case ProcessNodeType::SetAxisPosition: return QStringLiteral("SetAxisPosition");
     case ProcessNodeType::Measurement: return QStringLiteral("Measurement");
     case ProcessNodeType::MarkAcquire: return QStringLiteral("MarkAcquire");
     case ProcessNodeType::Alignment: return QStringLiteral("Alignment");
@@ -79,6 +80,7 @@ ProcessNodeType processNodeTypeFromString(const QString& text)
     if (normalized == QStringLiteral("RunGroupCheck")) return ProcessNodeType::RunGroupCheck;
     if (normalized == QStringLiteral("SingleAxisMove")) return ProcessNodeType::SingleAxisMove;
     if (normalized == QStringLiteral("MultiAxisMove")) return ProcessNodeType::MultiAxisMove;
+    if (normalized == QStringLiteral("SetAxisPosition")) return ProcessNodeType::SetAxisPosition;
     if (normalized == QStringLiteral("Measurement")) return ProcessNodeType::Measurement;
     if (normalized == QStringLiteral("MarkAcquire")) return ProcessNodeType::MarkAcquire;
     if (normalized == QStringLiteral("Alignment")) return ProcessNodeType::Alignment;

@@ -26,6 +26,9 @@ public:
                   const QString& mode,
                   int timeoutMs,
                   QString* errorMessage) override;
+    bool setAxisPosition(const QVariantList& axes,
+                         int timeoutMs,
+                         QString* errorMessage) override;
     bool stopMotion(QString* errorMessage = nullptr) override;
 
 private:

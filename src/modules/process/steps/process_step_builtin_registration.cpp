@@ -7,6 +7,7 @@
 #include "modules/process/steps/multi_axis_move/multi_axis_move_step.h"
 #include "modules/process/steps/normal_cutting/normal_cutting_step.h"
 #include "modules/process/steps/output_signal/output_signal_step.h"
+#include "modules/process/steps/set_axis_position/set_axis_position_step.h"
 #include "modules/process/steps/single_axis_move/single_axis_move_step.h"
 #include "modules/process/steps/start/start_step.h"
 #include "modules/process/steps/stop/stop_step.h"
@@ -23,6 +24,7 @@ void registerBuiltinProcessSteps(ProcessStepRegistry& registry)
     registry.registerStep(std::make_shared<IfStep>());
     registry.registerStep(std::make_shared<SingleAxisMoveStep>());
     registry.registerStep(std::make_shared<MultiAxisMoveStep>());
+    registry.registerStep(std::make_shared<SetAxisPositionStep>());
     registry.registerStep(std::make_shared<OutputSignalStep>());
     registry.registerStep(std::make_shared<InputSignalWaitStep>());
     registry.registerStep(std::make_shared<NormalCuttingStep>());

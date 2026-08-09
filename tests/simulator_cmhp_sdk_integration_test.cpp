@@ -1,3 +1,5 @@
+#include "core/kernel/kernel.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "modules/process/runtime/device_command_queue.h"
 #include "modules/process/runtime/process_device_runtime.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
@@ -27,6 +29,11 @@ int main(int argc, char* argv[])
     if (!settingsDirectory.isValid())
         return fail(QStringLiteral("Could not create temporary Process settings directory"));
 
+    lcnc::Kernel kernel;
+    auto machineConfiguration = std::make_shared<lcnc::MachineConfigurationService>();
+    if (!kernel.services().registerService<lcnc::MachineConfigurationService>(machineConfiguration))
+        return fail(QStringLiteral("Could not register the test machine configuration"));
+
     lcnc::process::ProcessSettingsService settings(settingsDirectory.path());
     if (!settings.initialize())
         return fail(QStringLiteral("Could not initialize temporary Process settings"));
@@ -47,7 +54,7 @@ int main(int argc, char* argv[])
         if (!queue.submit([runtimeHolder] {
                 lcnc::process::DeviceCommandResult disconnected;
                 if (*runtimeHolder)
-                    disconnected = (*runtimeHolder)->disconnectMotionControllerSession();
+                    disconnected = (*runtimeHolder)->disconnectDevices();
                 runtimeHolder->reset();
                 return disconnected;
             }, TaskPriority::Stop,
@@ -60,16 +67,20 @@ int main(int argc, char* argv[])
         return completed.tryAcquire(1, 30000) && result.success;
     };
     // Opening a real ACS Simulator validates acsc_OpenCommSimulator and the
-    // deployed Simulator.prg.  The 100 subsequent executor commands validate
-    // the active SDK session without repeatedly relaunching the vendor RPC
-    // server, which has a multi-second process-release interval.
+    // deployed Simulator.prg.  The position-setting command exercises the ACS
+    // setfpos path, while the remaining polls validate the active SDK session
+    // without repeatedly relaunching the vendor RPC server, which has a
+    // multi-second process-release interval.
     for (int iteration = 0; iteration < 100; ++iteration) {
         QSemaphore completed;
         lcnc::process::DeviceCommandResult result;
         if (!queue.submit([runtimeHolder, iteration] {
             const auto& runtime = *runtimeHolder;
             if (iteration == 0) {
-                return runtime->connectMotionControllerSession(false);
+                return runtime->connectDevices(false, [](int, const QString&) {});
+            }
+            if (iteration == 1) {
+                return runtime->setAxisPositions({{Axis::X, 12.5}});
             }
             const bool connected = runtime->pollStatus({}, {}).connected;
             return lcnc::process::DeviceCommandResult{connected,

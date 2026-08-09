@@ -27,6 +27,7 @@ enum class ProcessNodeType
     RunGroupCheck,
     SingleAxisMove,
     MultiAxisMove,
+    SetAxisPosition,
     Measurement,
     MarkAcquire,
     Alignment,

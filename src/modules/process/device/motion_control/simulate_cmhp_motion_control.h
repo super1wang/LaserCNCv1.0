@@ -45,6 +45,7 @@ public:
     bool StopMotion(Axis axis) override; bool StopMotion() override; bool HaltMotor(Axis axis) override;
     bool IsAxisMoving(Axis axis) override; bool IsAxisMoving() override;
     bool GetActualPos(Axis axis, double& position) override; bool GetFeedbackPos(Axis axis, double& position) override;
+    bool SetFPosition(Axis axis, double position) override;
     bool IsReachPos(Axis axis, bool relative, double position) override;
     bool IsAxisStatusNormal(int& fault) override; bool ErrorOccurred() const override; bool IsQueueActive() override;
     bool SetAxisIndex(Axis axis, int value) override; bool SetAxisHomeBufferIndex(Axis axis, int value) override; bool SetAxisIsRotary(Axis axis, bool value) override; bool SetAxisResolution(Axis axis, int value) override; bool SetAxisTubeDiamater(Axis axis, double value) override; bool SetAxisVel(Axis axis, double value) override; bool SetAxisAcc(Axis axis, double value) override; bool SetAxisDec(Axis axis, double value) override; bool SetAxisJerk(Axis axis, double value) override; bool SetAxisNegLimit(Axis axis, double value) override; bool SetAxisPosLimit(Axis axis, double value) override; bool SetAxisVelAccDecJerk(Axis axis, double vel, double acc, double dec, double jerk) override; bool SetAxisSoftLimit(Axis axis, double neg, double pos) override;

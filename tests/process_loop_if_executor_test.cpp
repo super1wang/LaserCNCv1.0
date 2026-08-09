@@ -11,6 +11,35 @@
 
 namespace {
 int g_outcome = 0; // 0=timeout, 1=finished, 2=failed
+
+class RecordingMotionService final : public lcnc::process::IProcessMotionService
+{
+public:
+    bool moveAxis(const QString&, const QString&, double, double, int, QString*) override
+    {
+        return false;
+    }
+
+    bool moveAxes(const QVariantList&, const QString&, int, QString*) override
+    {
+        return false;
+    }
+
+    bool setAxisPosition(const QVariantList& axes, int timeoutMs, QString*) override
+    {
+        receivedAxes = axes;
+        receivedTimeoutMs = timeoutMs;
+        return true;
+    }
+
+    bool stopMotion(QString*) override
+    {
+        return false;
+    }
+
+    QVariantList receivedAxes;
+    int receivedTimeoutMs{-1};
+};
 }
 
 // Drive the executor headlessly through Loop/If workflows. Steps used
@@ -19,6 +48,7 @@ static bool runCase(lcnc::process::ProcessWorkflowExecutor& executor,
                     lcnc::process::ProcessStepContext& context,
                     lcnc::process::ProcessFlowDocument& doc)
 {
+    Q_UNUSED(context);
     g_outcome = 0;
     QTimer::singleShot(15000, qApp, [&] { if (!g_outcome) { g_outcome = 3; qApp->quit(); } });
     QString err;
@@ -49,6 +79,54 @@ int main(int argc, char* argv[])
                      [&](const QString&, const QString&) { g_outcome = 2; app.quit(); });
 
     using namespace lcnc::process;
+
+    // The new step must be registered, persist by its stable string id and
+    // forward its complete axis table through the motion-service boundary.
+    {
+        if (processNodeTypeFromString(QStringLiteral("SetAxisPosition"))
+                != ProcessNodeType::SetAxisPosition
+            || processNodeTypeToString(ProcessNodeType::SetAxisPosition)
+                != QStringLiteral("SetAxisPosition")) {
+            QTextStream(stderr) << "SetAxisPosition type conversion failed\n";
+            return 1;
+        }
+
+        const auto step = stepRegistry.step(ProcessNodeType::SetAxisPosition);
+        if (!step || step->descriptor().executorKey != QStringLiteral("setAxisPosition")) {
+            QTextStream(stderr) << "SetAxisPosition step was not registered\n";
+            return 1;
+        }
+
+        ProcessNode node = ProcessNodeRegistry::instance().createDefaultNode(
+            ProcessNodeType::SetAxisPosition);
+        if (!step->summary(node).contains(QStringLiteral("empty"))) {
+            QTextStream(stderr) << "SetAxisPosition empty summary is invalid\n";
+            return 1;
+        }
+
+        QVariantMap x;
+        x.insert(QStringLiteral("axis"), QStringLiteral("X"));
+        x.insert(QStringLiteral("position"), 0.0);
+        QVariantMap y;
+        y.insert(QStringLiteral("axis"), QStringLiteral("Y"));
+        y.insert(QStringLiteral("position"), 5.0);
+        const QVariantList axes{x, y};
+        node.parameters.insert(QStringLiteral("axes"), axes);
+        node.parameters.insert(QStringLiteral("timeoutMs"), 4321);
+
+        RecordingMotionService motion;
+        ProcessStepContext stepContext;
+        stepContext.motion = &motion;
+        ProcessNodeExecutionRequest request;
+        request.parameters = node.parameters;
+        QString error;
+        if (!step->execute(request, stepContext, &error)
+            || motion.receivedAxes != axes
+            || motion.receivedTimeoutMs != 4321) {
+            QTextStream(stderr) << "SetAxisPosition execution forwarding failed: " << error << '\n';
+            return 1;
+        }
+    }
 
     // Case 1: Loop(3) containing If(variable, regex=.*) -> If always true.
     {

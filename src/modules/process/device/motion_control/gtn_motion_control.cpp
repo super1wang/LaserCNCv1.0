@@ -701,6 +701,31 @@ bool GTNMotionControl::GetFeedbackPos(Axis eAxis, double& dFPos)
 	return true;
 }
 
+bool GTNMotionControl::SetFPosition(Axis eAxis, double dPos)
+{
+	if (!IsConnected())
+		return false;
+	int iAxis = m_mapMotorValue[eAxis].AxisIndex;
+	long mask = AxisMaskByIndex(iAxis);
+	if (!mask)
+		return LogError("SetFPosition", "AxisMaskByIndex", enum_name(eAxis).data(), -1), false;
+	double dPulse = 0.0;
+	if (!MillimeterToPulse(eAxis, dPos, dPulse))
+		return false;
+	// 对应 ACS setfpos：同步重写编码器反馈位置与规划位置，
+	// 二者不一致会触发跟随误差报警，故必须同时设置并同步轴位置。
+	short sRtn = GTN_SetEncPos(m_iCore, iAxis, (long)dPulse);
+	if (0 != sRtn)
+		return LogError("SetFPosition", "GTN_SetEncPos", enum_name(eAxis).data(), sRtn), false;
+	sRtn = GTN_SetPrfPos(m_iCore, iAxis, (long)dPulse);
+	if (0 != sRtn)
+		return LogError("SetFPosition", "GTN_SetPrfPos", enum_name(eAxis).data(), sRtn), false;
+	sRtn = GTN_SynchAxisPos(m_iCore, mask);
+	if (0 != sRtn)
+		return LogError("SetFPosition", "GTN_SynchAxisPos", enum_name(eAxis).data(), sRtn), false;
+	return true;
+}
+
 void GTNMotionControl::SetAxisHomePrm(Axis eAxis, const toml::table& tableHome)
 {
 	if (!m_mapMotorValue[eAxis].pTHomePrm)

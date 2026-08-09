@@ -78,6 +78,8 @@ public:
     lcnc::process::DeviceCommandResult stopAllMotion();
     lcnc::process::DeviceCommandResult moveAxes(
         const QVector<Axis>& axes, const QVector<double>& positions, double velocity, bool relative);
+    /// 将所选轴当前位置寄存器直接置位为指定坐标（ACS setfpos / GTN 对应接口）。
+    lcnc::process::DeviceCommandResult setAxisPositions(const QVector<QPair<Axis, double>>& targets);
     lcnc::process::DeviceCommandResult setAxisEnabled(Axis axis, bool enabled);
     lcnc::process::DeviceCommandResult setDigitalOutput(DigitalOUT output, bool value);
     lcnc::process::DeviceCommandResult setDigitalOutput(const QString& outputName, bool value);
