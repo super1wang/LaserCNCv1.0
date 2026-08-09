@@ -115,7 +115,8 @@ int main(int argc, char* argv[])
 
     manager.clearToolpath();
     if (manager.hasToolpath() || !manager.isDirty())
-        return fail(QStringLiteral("CAM clear did not remove toolpath and mark project dirty"));
+        return fail(QStringLiteral("CAM clear did not remove toolpath and mark project dirty (hasToolpath=%1, dirty=%2)")
+                    .arg(manager.hasToolpath()).arg(manager.isDirty()));
 
     return 0;
 }

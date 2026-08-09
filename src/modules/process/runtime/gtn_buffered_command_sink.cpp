@@ -1,5 +1,7 @@
 #include "modules/process/runtime/gtn_buffered_command_sink.h"
 
+#include <QCoreApplication>
+
 #include "core/logging/logger.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/device/motion_control/gtn_motion_control.h"
@@ -18,18 +20,15 @@ GtnBufferedCommandSink::GtnBufferedCommandSink(GTNMotionControl* gtn, AxisMap ax
 	if (!m_gtn)
 		return;
 
-	auto configuredAxis = [this](AxisMap::SemanticAxis axis, Axis fallback) {
-		if (!m_axisMap.isPresent(axis))
-			return fallback;
-		const auto value = enum_cast<Axis>(m_axisMap.axisName(axis).toStdString());
-		return value ? *value : fallback;
-	};
-	m_gtn->ConfigureCuttingAxes(
-		configuredAxis(AxisMap::X, Axis::X),
-		configuredAxis(AxisMap::Y, Axis::Y),
-		configuredAxis(AxisMap::Z, Axis::Z),
-		configuredAxis(AxisMap::R1, Axis::A),
-		configuredAxis(AxisMap::R2, Axis::C));
+	std::array<Axis, 5> configuredAxes{Axis::X, Axis::Y, Axis::Z, Axis::A, Axis::C};
+	static constexpr AxisMap::SemanticAxis semanticAxes[5] = {
+		AxisMap::X, AxisMap::Y, AxisMap::Z, AxisMap::R1, AxisMap::R2};
+	for (int index = 0; index < m_axisMap.activeCount(); ++index) {
+		const auto value = enum_cast<Axis>(m_axisMap.axisName(semanticAxes[index]).toStdString());
+		if (!value) return;
+		configuredAxes[index] = *value;
+	}
+	m_gtn->ConfigureCuttingAxes(configuredAxes, m_axisMap.activeCount());
 }
 
 void GtnBufferedCommandSink::resetProgram()
@@ -140,26 +139,46 @@ void GtnBufferedCommandSink::applyToolMotionParams(const Tool& tool, bool jump)
     else      m_gtn->SetCuttingAccJerk(tool);
 }
 
-void GtnBufferedCommandSink::beginSegment(const MachinePose5& /*startPose*/, const Tool& tool)
+bool GtnBufferedCommandSink::beginSegment(const MachinePose5& /*startPose*/, const Tool& tool,
+                                          QString* errorMessage)
 {
     // GTN 在 InitCrd 阶段已经建立好坐标系（GTN_SetCrdPrm + GTN_InitLookAheadEx）。
     // 这里只需把当前工具的切割 ACC/JERK 推下去（写到 GTN_BufXxx FIFO，不触发执行）。
-    if (m_gtn) {
-        m_gtn->InitCrd(tool);
-        m_gtn->SetCuttingAccJerk(tool);
+    if (!m_gtn) {
+        // 中文翻译：GTN 控制器不可用
+        if (errorMessage) *errorMessage = QCoreApplication::translate("GtnBufferedCommandSink", "GTN controller is unavailable");
+        return false;
     }
+    if (!m_gtn->InitCrd(tool)) {
+        // 中文翻译：GTN 坐标系初始化失败
+        if (errorMessage) *errorMessage = QCoreApplication::translate("GtnBufferedCommandSink", "GTN coordinate initialization failed");
+        return false;
+    }
+    m_gtn->SetCuttingAccJerk(tool);
+    return true;
 }
 
-void GtnBufferedCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
+bool GtnBufferedCommandSink::lineTo(const MachinePose5& target, const Tool& tool,
+                                    QString* errorMessage)
 {
 	// 仅写入 GTN_LnXYZACEx 到 FIFO；CAM 已完成软件 IK，因此 RTCP 保持关闭。
 	// Z 以实际刀路点为基准叠加切割高度，
 	// 绝不在中途 SendCommand。
-	if (m_gtn)
-		m_gtn->OffsetLineTo(target.x, target.y,
-		                    target.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate,
-		                    target.r1, target.r2,
-		                    tool);
+	if (!m_gtn) {
+        // 中文翻译：GTN 控制器不可用
+        if (errorMessage) *errorMessage = QCoreApplication::translate("GtnBufferedCommandSink", "GTN controller is unavailable");
+        return false;
+    }
+	const std::array<double, 5> position{
+		target.x, target.y,
+		target.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate,
+		target.r1, target.r2};
+	if (!m_gtn->OffsetLineTo(position, m_axisMap.activeCount(), tool)) {
+        // 中文翻译：GTN 缓冲直线指令失败
+        if (errorMessage) *errorMessage = QCoreApplication::translate("GtnBufferedCommandSink", "GTN buffered line command failed");
+        return false;
+    }
+    return true;
 }
 
 void GtnBufferedCommandSink::endSegment(const Tool& /*tool*/)

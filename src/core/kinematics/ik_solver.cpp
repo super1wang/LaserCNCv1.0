@@ -188,89 +188,17 @@ bool solveRotationAboutAxis(const MachineAxisDef& axis,
 // IKSolver — public entry point
 // =============================================================================
 
-MachineCoord IKSolver::solve(const MachineKinematics* kin,
-                             const gp_Pnt& toolPos,
-                             const gp_Dir& toolDir)
-{
-    return solveContinuous(kin, toolPos, toolDir, nullptr);
-}
-
-MachineCoord IKSolver::solveContinuous(const MachineKinematics* kin,
-                                        const gp_Pnt& toolPos,
-                                        const gp_Dir& toolDir,
-                                        const MachineCoord* previous)
+MachineCoord IKSolver::solveTableContinuous(const MachineKinematics* kin,
+                                             const gp_Pnt& toolPos,
+                                             const gp_Dir& toolDir,
+                                             const QString& childSpinAxisName,
+                                             const QString& parentTiltAxisName,
+                                             const MachineCoord* previous)
 {
     MachineCoord result;
-    if (!kin) return result;
-
-    const QString cfg = kin->configType();
-
-    // Identify the two rotary axes, distinguishing parent/child by parentAxis chain.
-    // 关键：IK 的数学需要 r1 = 先施加的旋转，r2 = 后施加的旋转。
-    // MachineKinematics::chainTrsf 走 BASE→parent→child 累乘，OCC 的 Multiplied 语义使
-    // 子轴的局部变换被先应用到点上、父轴的变换后应用 —— 因此 **r1 必须是 child**，
-    // **r2 必须是 parent**，否则旋转组合反向，机床实际姿态与 IK 求解的不一致，
-    // 表现为切割头偏离轮廓点 / 法线对不齐。
-    QString rotaryAxes[2];
-    int rotaryCount = 0;
-    for (const auto& axis : kin->axes()) {
-        if (axis.motionType == MachineAxisDef::Rotary && rotaryCount < 2) {
-            rotaryAxes[rotaryCount++] = axis.name;
-        }
-    }
-    QString r1Name, r2Name;
-    if (rotaryCount == 2) {
-        // 父子判定：若 rotaryAxes[1] 的 parentAxis 链路上能到达 rotaryAxes[0]，
-        // 则 rotaryAxes[0] 是父；否则反过来。
-        const MachineAxisDef* a0 = kin->findAxis(rotaryAxes[0]);
-        const MachineAxisDef* a1 = kin->findAxis(rotaryAxes[1]);
-        const MachineAxisDef* child  = nullptr;
-        const MachineAxisDef* parent = nullptr;
-        if (a0 && a1) {
-            // 检查 a1 的祖先里是否有 a0
-            QString cur = a1->parentAxis;
-            while (!cur.isEmpty()) {
-                if (cur == a0->name) { child = a1; parent = a0; break; }
-                const MachineAxisDef* d = kin->findAxis(cur);
-                if (!d) break;
-                cur = d->parentAxis;
-            }
-            if (!child) {
-                cur = a0->parentAxis;
-                while (!cur.isEmpty()) {
-                    if (cur == a1->name) { child = a0; parent = a1; break; }
-                    const MachineAxisDef* d = kin->findAxis(cur);
-                    if (!d) break;
-                    cur = d->parentAxis;
-                }
-            }
-        }
-        if (child && parent) {
-            r1Name = child->name;   // 先施加（chain 中子轴先作用于点）
-            r2Name = parent->name;  // 后施加
-        } else {
-            // 兼容兜底：保持原有的 m_axes 遍历顺序
-            r1Name = rotaryAxes[0];
-            r2Name = rotaryAxes[1];
-        }
-    }
-
-    if (r1Name.isEmpty() || r2Name.isEmpty()) {
-        // No two rotary axes found — return 3-axis solution
-        setLinearMachineCoordinates(result, kin, toolPos);
-        result.r1 = 0;   result.r2 = 0;
-        result.r1Name = "A"; result.r2Name = "C";
-        result.valid = true;
-        return result;
-    }
-
-    if (cfg == "VERTICAL_AC_TABLE" || cfg == "VERTICAL_BC_TABLE")
-        return solveTableType(kin, toolPos, toolDir, r1Name, r2Name, previous);
-    else if (cfg == "AB_HEAD" || cfg == "AC_HEAD")
-        return solveHeadType(kin, toolPos, toolDir, r1Name, r2Name);
-
-    // Fallback: head-type heuristic
-    return solveHeadType(kin, toolPos, toolDir, r1Name, r2Name);
+    if (!kin || childSpinAxisName.isEmpty() || parentTiltAxisName.isEmpty()) return result;
+    return solveTableType(kin, toolPos, toolDir,
+                          childSpinAxisName, parentTiltAxisName, previous);
 }
 
 // =============================================================================
@@ -569,6 +497,14 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
 
     result.r1 = normalizeAxisOutput(r1Name, result.r1);
     result.r2 = normalizeAxisOutput(r2Name, result.r2);
+
+    const double finalAlignmentError = tableAlignmentError(
+        *ax1, result.r1, *ax2, result.r2, n, target);
+    if (!withinAxisLimits(*ax1, result.r1)
+        || !withinAxisLimits(*ax2, result.r2)
+        || finalAlignmentError > 1e-5) {
+        return result;
+    }
 
     // Step 3: Compute the actual rotation applied to the workpiece
     gp_Trsf rot1Final = axisRotation(*ax1, result.r1);

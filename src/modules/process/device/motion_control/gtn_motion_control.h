@@ -113,6 +113,7 @@ protected:
 	// 五维坐标系的维度顺序。由 GtnBufferedCommandSink 按 AxisMap 注入，
 	// 因而可覆盖 AC / BC 转台及摆头，而非硬编码物理轴号。
 	std::array<Axis, 5>     m_cuttingAxes{Axis::X, Axis::Y, Axis::Z, Axis::A, Axis::C};
+	int                     m_cuttingAxisCount{5};
 
 	double					m_dFrameLLX;
 	double					m_dFrameLLY;
@@ -217,11 +218,11 @@ public:
 	virtual bool InitCrd(const Tool& curTool);
 	bool FlushToFifo();
 	virtual bool PrfTrapAxis();
-	virtual void OffsetLineTo(double dEndX, double dEndY, double dEndZ,
-	                          double dEndR1, double dEndR2, const Tool& tool);
+	virtual bool OffsetLineTo(const std::array<double, 5>& position,
+	                          int dimension, const Tool& tool);
 	/// Configure the XYZ/R1/R2-to-controller-axis mapping used by the five-axis
 	/// interpolation coordinate system. Must be called before InitCrd().
-	void ConfigureCuttingAxes(Axis x, Axis y, Axis z, Axis r1, Axis r2);
+	bool ConfigureCuttingAxes(const std::array<Axis, 5>& axes, int dimension);
 	/// 点位移动并等待到位，供 GTN 命令汇执行切割前的空程定位。
 	bool MoveToPosition(Axis axis, double velocity, double position);
 	virtual void EndProgramCommand(const Tool&) {};

@@ -314,6 +314,28 @@ void WidgetLaserControl::setAxisDefinitions(const QList<MachineAxisDef>& axes)
     rebuildJogGroup();
 }
 
+void WidgetLaserControl::setTaskAxisStates(
+    const lcnc::MachineAxisLayout& participatingAxes,
+    const QMap<QString, double>& lockedAxisTargets)
+{
+    m_axisTaskStates.clear();
+    const QStringList participating = participatingAxes.axisNames();
+    for (const MachineAxisDef& axis : m_axisDefinitions) {
+        const QString name = axis.name.trimmed().toUpper();
+        if (name.isEmpty() || name == QStringLiteral("BASE")) continue;
+        if (participating.contains(name, Qt::CaseInsensitive))
+            // 中文翻译：参与
+            m_axisTaskStates.insert(name, tr("Participating"));
+        else if (lockedAxisTargets.contains(name))
+            // 中文翻译：锁定
+            m_axisTaskStates.insert(name, tr("Locked"));
+        else
+            // 中文翻译：非本任务
+            m_axisTaskStates.insert(name, tr("Not in this task"));
+    }
+    rebuildAxisGroup();
+}
+
 void WidgetLaserControl::rebuildAxisGroup()
 {
     if (!m_axisGroup)
@@ -347,6 +369,11 @@ void WidgetLaserControl::rebuildAxisGroup()
             : "font-family:Consolas, monospace; color:#49E6B5; font-weight:600;");
         auto* unit = new QLabel(axis.motionType == MachineAxisDef::Linear ? "mm" : "°", m_axisGroup);
         const QString axisName = axis.name.trimmed().toUpper();
+        const QString taskState = m_axisTaskStates.value(axisName);
+        if (!taskState.isEmpty()) {
+            btnAxis->setText(QStringLiteral("%1\n%2").arg(axis.name, taskState));
+            btnAxis->setToolTip(taskState);
+        }
         m_axisButtons.insert(axisName, btnAxis);
         updateAxisButtonStyle(axisName, true);
         connect(btnAxis, &QPushButton::toggled, this, [this, axisName](bool checked) {

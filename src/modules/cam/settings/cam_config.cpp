@@ -183,7 +183,6 @@ void CamConfig::writeTo(toml::value& root) const
         mp["path"] = qs(it.key());
         if (it.value().hasCutterHeadModel)       mp["cutterHeadModelPosition"]    = pointToToml(it.value().cutterHeadModelPosition);
         if (it.value().hasCutterHeadPhysical)    mp["cutterHeadPhysicalPosition"] = pointToToml(it.value().cutterHeadPhysicalPosition);
-        if (it.value().hasWorkpieceInstallPosition) mp["workpieceInstallPosition"] = pointToToml(it.value().workpieceInstallPosition);
         if (it.value().hasAcAngleOffset) {
             mp["acAngleOffsetA"] = it.value().acAngleOffsetA;
             mp["acAngleOffsetC"] = it.value().acAngleOffsetC;
@@ -380,14 +379,15 @@ bool CamConfig::workpieceInstallPositionForMachine(const QString& machinePath,
     return true;
 }
 
-void CamConfig::setWorkpieceInstallPositionForMachine(const QString& machinePath,
-                                                      const gp_Pnt& position)
+void CamConfig::clearLegacyWorkpieceInstallPositionForMachine(const QString& machinePath)
 {
-    if (machinePath.isEmpty()) return;
+    if (machinePath.isEmpty())
+        return;
     auto* profile = mutableProfileForMachine(machinePath);
-    if (profile->hasWorkpieceInstallPosition && samePoint(profile->workpieceInstallPosition, position)) return;
-    profile->hasWorkpieceInstallPosition = true;
-    profile->workpieceInstallPosition    = position;
+    if (!profile || !profile->hasWorkpieceInstallPosition)
+        return;
+    profile->hasWorkpieceInstallPosition = false;
+    profile->workpieceInstallPosition = gp_Pnt();
     saveDefault();
 }
 

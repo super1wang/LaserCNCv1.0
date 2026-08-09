@@ -95,7 +95,6 @@ private:
                                          double offsetX,
                                          double offsetY,
                                          QString* errorMessage);
-    void unwrapCuttingListCAxis(QVector<CuttingRow>& rows) const;
     bool cacheKeyMatches(const CuttingListCacheKey& key) const;
     QVector<CuttingRow> cachedCuttingListCopy();
     void storeCuttingListCache(const CuttingListCacheKey& key, const QVector<CuttingRow>& rows);

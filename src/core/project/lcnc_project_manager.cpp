@@ -319,7 +319,10 @@ bool LcncProjectManager::saveProject(const QString& filePath, QString* errorMsg)
     manifest.saveOptions = options;
     if (auto* machineConfig = Kernel::current().service<MachineConfigurationService>()) {
         manifest.machineConfigurationFingerprint = machineConfig->configurationFingerprint();
-        manifest.toolpathAlgorithmVersion = machineConfig->toolpathAlgorithmText() + QStringLiteral(":1");
+        const auto* camData = current->camData();
+        manifest.toolpathAlgorithmVersion = camData
+            ? QStringLiteral("%1:%2").arg(camData->solverId()).arg(camData->solverVersion())
+            : QStringLiteral("unsolved:0");
     }
 
     LcncProjectManifest savedManifest;

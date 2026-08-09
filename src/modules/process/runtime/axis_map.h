@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/kinematics/machine_topology.h"
+
 #include <QString>
 #include <QVector>
 #include <array>
@@ -32,9 +34,9 @@ public:
         double jerk{0.0};
     };
 
-    /// 从 MachineConfigurationService 构造；缺失轴的 controllerIndex 留 -1。
-    /// machineConfig==nullptr 时返回一个保守默认（X=0,Y=1,Z=2,R1=3,R2=4）。
-    static AxisMap from(lcnc::MachineConfigurationService* machineConfig);
+    /// 从快照布局和当前机床配置精确构造；参数无效时返回空映射，禁止默认回退。
+    static AxisMap from(lcnc::MachineConfigurationService* machineConfig,
+                        const lcnc::MachineAxisLayout& layout);
 
     /// 是否 5 轴有效（X/Y/Z/R1/R2 全部存在）。
     bool isFiveAxis() const;

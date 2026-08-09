@@ -13,7 +13,7 @@ namespace lcnc {
 class LcncProjectManifest : public TomlConfig
 {
 public:
-    static constexpr int kCurrentFormatVersion = 4;
+    static constexpr int kCurrentFormatVersion = 5;
 
     QString schema{QStringLiteral("lcnc.project")};
     int formatVersion{kCurrentFormatVersion};

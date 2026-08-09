@@ -71,10 +71,12 @@ public:
     // —— 切割主循环 ——
     /// 在 X/Y/Z/R1/R2 上插入一段直线（5 个机床坐标）。
     /// 哪些轴参与由 pose.mask 决定；轴索引由 sink 构造期注入的 AxisMap 解析。
-    virtual void lineTo(const MachinePose5& target, const Tool& tool) = 0;
+    virtual bool lineTo(const MachinePose5& target, const Tool& tool,
+                        QString* errorMessage = nullptr) = 0;
 
     /// 进入一段协调插补（XSEG/VFJA 或 GTN crd 开段）。
-    virtual void beginSegment(const MachinePose5& startPose, const Tool& tool) = 0;
+    virtual bool beginSegment(const MachinePose5& startPose, const Tool& tool,
+                              QString* errorMessage = nullptr) = 0;
     /// 结束一段（ENDS / SPLIT / kill Z 等）。
     virtual void endSegment(const Tool& tool) = 0;
 
@@ -104,7 +106,8 @@ public:
         ::MotionControl* mc,
         bool simulationMode,
         PureSimulationToolpathTicker* simTicker,
-        ::ProcessModule* processModule);
+        ::ProcessModule* processModule,
+        const lcnc::MachineAxisLayout& layout);
 };
 
 } // namespace lcnc::process

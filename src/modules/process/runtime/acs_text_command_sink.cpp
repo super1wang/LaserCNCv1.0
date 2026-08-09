@@ -1,5 +1,7 @@
 #include "modules/process/runtime/acs_text_command_sink.h"
 
+#include <QCoreApplication>
+
 #include "core/logging/logger.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/device/motion_control/acs_motion_control.h"
@@ -395,9 +397,14 @@ void AcsTextCommandSink::endSegment(const Tool& /*tool*/)
     appendText(text);
 }
 
-void AcsTextCommandSink::beginSegment(const MachinePose5& /*startPose*/, const Tool& tool)
+bool AcsTextCommandSink::beginSegment(const MachinePose5& /*startPose*/, const Tool& tool,
+                                      QString* errorMessage)
 {
-    if (!m_acs) return;
+    if (!m_acs) {
+        // 中文翻译：ACS 控制器不可用
+        if (errorMessage) *errorMessage = QCoreApplication::translate("AcsTextCommandSink", "ACS controller is unavailable");
+        return false;
+    }
     const auto motion = resolveCuttingMotion(tool, m_axisMap);
     const std::uint8_t segMask = segmentMaskFor(m_axisMap);
 
@@ -423,15 +430,26 @@ void AcsTextCommandSink::beginSegment(const MachinePose5& /*startPose*/, const T
     text += D(motion.junctionAngle * kPi / 180.0);
     text += "\n";
     appendText(text);
+    return true;
 }
 
-void AcsTextCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
+bool AcsTextCommandSink::lineTo(const MachinePose5& target, const Tool& tool,
+                                QString* errorMessage)
 {
-    if (!m_acs) return;
+    if (!m_acs) {
+        // 中文翻译：ACS 控制器不可用
+        if (errorMessage) *errorMessage = QCoreApplication::translate("AcsTextCommandSink", "ACS controller is unavailable");
+        return false;
+    }
     const auto motion = resolveCuttingMotion(tool, m_axisMap);
     // 段 mask = 当前调用的 pose mask ∩ 构型实际拥有的轴。
     const std::uint8_t segMask = static_cast<std::uint8_t>(
         target.mask & segmentMaskFor(m_axisMap));
+    if (segMask != segmentMaskFor(m_axisMap)) {
+        // 中文翻译：机床位姿轴掩码与当前轴布局不匹配
+        if (errorMessage) *errorMessage = QCoreApplication::translate("AcsTextCommandSink", "Machine pose axis mask does not match the active layout");
+        return false;
+    }
 
     MachinePose5 out = target;
     // 切割高度是相对轮廓 Z 的有符号增量；加工段中的每个目标点都必须
@@ -457,6 +475,7 @@ void AcsTextCommandSink::lineTo(const MachinePose5& target, const Tool& tool)
     text += D(motion.feed);
     text += "\n";
     appendText(text);
+    return true;
 }
 
 } // namespace lcnc::process

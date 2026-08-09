@@ -6789,4 +6789,104 @@ No available reference surfaces are currently detected.</source>
         <translation>流程文件路径为空</translation>
     </message>
 </context>
+<context>
+    <name>DialogOptions</name>
+    <message><source>Linear X</source><translation>X 直线轴</translation></message>
+    <message><source>Linear Y</source><translation>Y 直线轴</translation></message>
+    <message><source>Linear Z</source><translation>Z 直线轴</translation></message>
+    <message><source>Workpiece rotary</source><translation>工件回转轴</translation></message>
+    <message><source>Table tilt</source><translation>转台倾斜轴</translation></message>
+    <message><source>Table spin</source><translation>转台回转轴</translation></message>
+    <message><source>Primary head tilt</source><translation>第一摆头轴</translation></message>
+    <message><source>Secondary head tilt</source><translation>第二摆头轴</translation></message>
+    <message><source>Unspecified</source><translation>未指定</translation></message>
+</context>
+<context>
+    <name>lcnc::DialogOptions</name>
+    <message><source>Head software TCP</source><translation>摆头软件 TCP</translation></message>
+    <message><source>Zero beam X</source><translation>零位刀束 X</translation></message>
+    <message><source>Zero beam Y</source><translation>零位刀束 Y</translation></message>
+    <message><source>Zero beam Z</source><translation>零位刀束 Z</translation></message>
+    <message><source>Focus length</source><translation>焦点长度</translation></message>
+    <message><source>Installation offset X</source><translation>安装偏置 X</translation></message>
+    <message><source>Installation offset Y</source><translation>安装偏置 Y</translation></message>
+    <message><source>Installation offset Z</source><translation>安装偏置 Z</translation></message>
+    <message><source>Axis role</source><translation>轴角色</translation></message>
+    <message><source>Machine configuration can only be changed while devices are disconnected and the workflow is idle.</source><translation>机床配置只能在设备断开且流程空闲时修改。</translation></message>
+    <message><source>The machine configuration is invalid: %1</source><translation>机床配置无效：%1</translation></message>
+</context>
+<context>
+    <name>CamModule</name>
+    <message><source>Workpiece setup</source><translation>工件安装姿态</translation></message>
+</context>
+<context>
+    <name>WidgetMachinePanel</name>
+    <message><source>Workpiece setup</source><translation>工件安装姿态</translation></message>
+    <message><source>Automatically mount workpieces</source><translation>自动挂载工件</translation></message>
+    <message><source>Setup X:</source><translation>安装 X：</translation></message>
+    <message><source>Setup Y:</source><translation>安装 Y：</translation></message>
+    <message><source>Setup Z:</source><translation>安装 Z：</translation></message>
+    <message><source>Rotation X:</source><translation>旋转 X：</translation></message>
+    <message><source>Rotation Y:</source><translation>旋转 Y：</translation></message>
+    <message><source>Rotation Z:</source><translation>旋转 Z：</translation></message>
+    <message><source>Set setup origin to rotation center</source><translation>将安装原点设为旋转中心</translation></message>
+    <message><source>This is the only rigid transform from CAD workpiece coordinates to the fixture zero. It drives both model display and machine coordinates; recalculate the toolpath after a change.</source><translation>这是 CAD 工件坐标到夹具零位的唯一刚体变换。它同时驱动模型显示和机床坐标，修改后需要重新计算刀路。</translation></message>
+    <message><source>Set the setup origin to the AC center of rotation.</source><translation>将安装原点设为 AC 旋转中心。</translation></message>
+    <message><source>Set the setup origin to the BC center of rotation.</source><translation>将安装原点设为 BC 旋转中心。</translation></message>
+    <message><source>Set the setup origin to the A turntable center.</source><translation>将安装原点设为 A 转台旋转中心。</translation></message>
+</context>
+<context>
+    <name>WidgetToolpathPanel</name>
+    <message><source>Project machining mode</source><translation>工程加工模式</translation></message>
+    <message><source>Machining mode:</source><translation>加工模式：</translation></message>
+    <message><source>Planar 3-axis</source><translation>三轴平面加工</translation></message>
+    <message><source>Rotary tube 4-axis</source><translation>四轴管材加工</translation></message>
+    <message><source>Simultaneous table 5-axis</source><translation>转台五轴联动</translation></message>
+    <message><source>Simultaneous head 5-axis</source><translation>摆头五轴联动</translation></message>
+</context>
+<context>
+    <name>NormalCuttingManager</name>
+    <message><source>The toolpath snapshot axis layout is invalid: %1</source><translation>刀路快照轴布局无效：%1</translation></message>
+    <message><source>Controller command generation failed</source><translation>控制器指令生成失败</translation></message>
+</context>
+<context>
+    <name>ProcessModule</name>
+    <message><source>Machine configuration or CAM toolpath service is not initialized</source><translation>机床构型或 CAM 刀路服务未初始化</translation></message>
+    <message><source>The machine configuration is invalid: %1</source><translation>机床配置无效：%1</translation></message>
+    <message><source>The toolpath axis layout is invalid: %1</source><translation>刀路轴布局无效：%1</translation></message>
+    <message><source>The current machine does not support project machining mode %1</source><translation>当前机床不支持工程加工模式 %1</translation></message>
+    <message><source>The toolpath solving contract does not match the current machine mode; please solve the machine coordinates again</source><translation>刀路求解契约与当前机床模式不匹配，请重新求解机床坐标</translation></message>
+    <message><source>The toolpath machine configuration fingerprint does not match; please solve the machine coordinates again</source><translation>刀路机床构型指纹不匹配，请重新求解机床坐标</translation></message>
+    <message><source>Locked-axis position drift occurred during processing: %1; safe shutdown was requested</source><translation>加工期间锁定轴发生位置漂移：%1；已请求安全停机</translation></message>
+</context>
+<context>
+    <name>AcsTextCommandSink</name>
+    <message><source>ACS controller is unavailable</source><translation>ACS 控制器不可用</translation></message>
+    <message><source>Machine pose axis mask does not match the active layout</source><translation>机床位姿轴掩码与当前轴布局不匹配</translation></message>
+</context>
+<context>
+    <name>GtnBufferedCommandSink</name>
+    <message><source>GTN controller is unavailable</source><translation>GTN 控制器不可用</translation></message>
+    <message><source>GTN coordinate initialization failed</source><translation>GTN 坐标系初始化失败</translation></message>
+    <message><source>GTN buffered line command failed</source><translation>GTN 缓冲直线指令失败</translation></message>
+</context>
+<context>
+    <name>QObject</name>
+    <message><source>Locked axis %1 was not created in the controller</source><translation>锁定轴 %1 未在控制器中创建</translation></message>
+    <message><source>Locked axis %1 is not enabled</source><translation>锁定轴 %1 未使能</translation></message>
+    <message><source>Locked axis %1 failed to move to the safe posture</source><translation>锁定轴 %1 移动到安全姿态失败</translation></message>
+    <message><source>Timed out waiting for locked axes to reach the safe posture</source><translation>等待锁定轴到达安全姿态超时</translation></message>
+    <message><source>Controller status is abnormal after positioning locked axes</source><translation>锁定轴置位后控制器状态异常</translation></message>
+    <message><source>Locked axis %1 did not reach its target position</source><translation>锁定轴 %1 未到达目标位置</translation></message>
+</context>
+<context>
+    <name>PureSimulationSink</name>
+    <message><source>Machine pose axis mask does not match the active layout</source><translation>机床位姿轴掩码与当前轴布局不匹配</translation></message>
+</context>
+<context>
+    <name>WidgetLaserControl</name>
+    <message><source>Participating</source><translation>参与</translation></message>
+    <message><source>Locked</source><translation>锁定</translation></message>
+    <message><source>Not in this task</source><translation>非本任务</translation></message>
+</context>
 </TS>

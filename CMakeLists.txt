@@ -241,6 +241,8 @@ set(SRCS_CORE
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_kinematics.cpp
+    src/core/kinematics/machine_topology.cpp
+    src/core/kinematics/toolpath_kinematics_solver.cpp
     src/core/kinematics/machine_configuration_service.cpp
     src/core/kinematics/machine_pose.cpp
     src/core/kinematics/ik_solver.cpp
@@ -796,12 +798,24 @@ if(LCNC_WITH_GTN)
     )
 endif()
 
+add_executable(lcnc_project_upgrade
+    src/tools/lcnc_project_upgrade.cpp
+)
+target_link_libraries(lcnc_project_upgrade PRIVATE lcnc_core Qt6::Core QuaZip::QuaZip)
+set_target_properties(lcnc_project_upgrade PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_ROOT}/$<CONFIG>"
+)
+
 if(BUILD_TESTING)
     find_program(LCNC_POWERSHELL_EXECUTABLE NAMES powershell pwsh REQUIRED)
     add_executable(lcnc_project_package_test
         tests/lcnc_project_package_test.cpp
     )
     target_link_libraries(lcnc_project_package_test PRIVATE lcnc_core Qt6::Core QuaZip::QuaZip)
+    add_dependencies(lcnc_project_package_test lcnc_project_upgrade)
+    target_compile_definitions(lcnc_project_package_test PRIVATE
+        LCNC_PROJECT_UPGRADE_PATH="$<TARGET_FILE:lcnc_project_upgrade>"
+    )
     add_executable(lcnc_task_manager_test
         tests/task_manager_test.cpp
     )
@@ -874,6 +888,10 @@ if(BUILD_TESTING)
         tests/cam_data_manager_test.cpp
     )
     target_link_libraries(lcnc_cam_data_manager_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_machine_topology_solver_test
+        tests/machine_topology_solver_test.cpp
+    )
+    target_link_libraries(lcnc_machine_topology_solver_test PRIVATE lcnc_module_process Qt6::Core)
     add_executable(lcnc_toolpath_snapshot_concurrency_test
         tests/toolpath_snapshot_concurrency_test.cpp
     )
@@ -920,6 +938,7 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_process_current_schema_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_contour_order_planner_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_data_manager_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_machine_topology_solver_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_toolpath_snapshot_concurrency_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_run_coordinator_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cad_algorithm_contract_test lcnc_runtime_deploy_build)
@@ -947,6 +966,7 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_process_current_schema_test)
     lcnc_deploy_tbb_runtime(lcnc_contour_order_planner_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_data_manager_test)
+    lcnc_deploy_tbb_runtime(lcnc_machine_topology_solver_test)
     lcnc_deploy_tbb_runtime(lcnc_toolpath_snapshot_concurrency_test)
     lcnc_deploy_tbb_runtime(lcnc_process_run_coordinator_test)
     lcnc_deploy_tbb_runtime(lcnc_cad_algorithm_contract_test)
@@ -975,6 +995,7 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_process_current_schema_test)
         lcnc_deploy_asan_runtime(lcnc_contour_order_planner_test)
         lcnc_deploy_asan_runtime(lcnc_cam_data_manager_test)
+        lcnc_deploy_asan_runtime(lcnc_machine_topology_solver_test)
         lcnc_deploy_asan_runtime(lcnc_toolpath_snapshot_concurrency_test)
         lcnc_deploy_asan_runtime(lcnc_process_run_coordinator_test)
         lcnc_deploy_asan_runtime(lcnc_cad_algorithm_contract_test)
@@ -1022,6 +1043,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_contour_order_planner_test)
     add_test(NAME lcnc_cam_data_manager_test
         COMMAND lcnc_cam_data_manager_test)
+    add_test(NAME lcnc_machine_topology_solver_test
+        COMMAND lcnc_machine_topology_solver_test)
     add_test(NAME lcnc_toolpath_snapshot_concurrency_test
         COMMAND lcnc_toolpath_snapshot_concurrency_test)
     add_test(NAME lcnc_process_run_coordinator_test

@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 
 #include "core/kinematics/machine_kinematics.h"
+#include "core/kinematics/machine_topology.h"
 #include "modules/process/i_process_facade.h"
 #include "modules/process/process_module.h"
 
@@ -26,6 +27,8 @@ public:
 
     // ── Called from ProcessModule ─────────────────────────────────────────────
     void setAxisDefinitions(const QList<MachineAxisDef>& axes);
+    void setTaskAxisStates(const lcnc::MachineAxisLayout& participatingAxes,
+                           const QMap<QString, double>& lockedAxisTargets);
     void updateAxisPosition(const QString& axis, double pos);
     void updateConnectionStatus(bool connected);
     void updateSimulationMode(bool enabled);
@@ -84,6 +87,7 @@ private:
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, class QLabel*> m_posLabels;    ///< axis → position label
     QMap<QString, class QPushButton*> m_axisButtons;
+    QMap<QString, QString> m_axisTaskStates;
     QMap<QString, class QPushButton*> m_ioButtons;
     class QTabWidget* m_tabs{nullptr};
     class QWidget* m_controlPage{nullptr};

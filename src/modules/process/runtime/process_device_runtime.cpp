@@ -19,6 +19,9 @@
 #include <cmath>
 #include <set>
 
+#include <QElapsedTimer>
+#include <QThread>
+
 ProcessDeviceRuntime::ProcessDeviceRuntime(lcnc::process::ProcessSettingsService& settings,
                  lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
     : m_settings(settings)
@@ -665,6 +668,48 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
         // 中文翻译：运动控制器故障码: %1，请清除故障后再加工
         return fail(QObject::tr("Motion controller fault code: %1, please clear the fault before processing").arg(fault));
 
+    for (auto it = request.lockedAxisTargets.cbegin(); it != request.lockedAxisTargets.cend(); ++it) {
+        const auto axis = enum_cast<Axis>(it.key().toStdString());
+        if (!axis.has_value() || !mc->IsMotorCreated(*axis))
+            // 中文翻译：锁定轴 %1 未在控制器中创建
+            return fail(QObject::tr("Locked axis %1 was not created in the controller").arg(it.key()));
+        // 降阶四轴的 A/B 是锁定姿态轴，而非回零目标轴：AC/BC 管材加工会先
+        // 将其低速置于配置的 ±90° 姿态。回零状态不等同于该安全加工姿态，
+        // 因而这里只要求可控使能，随后以实际位置、故障和限位检查确认到位。
+        if (!mc->IsEnabled(*axis))
+            // 中文翻译：锁定轴 %1 未使能
+            return fail(QObject::tr("Locked axis %1 is not enabled").arg(it.key()));
+        if (!mc->MoveAbsolute(*axis, it.value(), request.lockedAxisMoveVelocity)) {
+            (void)mc->StopMotion();
+            // 中文翻译：锁定轴 %1 移动到安全姿态失败
+            return fail(QObject::tr("Locked axis %1 failed to move to the safe posture").arg(it.key()));
+        }
+    }
+    if (!request.lockedAxisTargets.isEmpty()) {
+        QElapsedTimer timer;
+        timer.start();
+        while (mc->IsAxisMoving()) {
+            if (timer.elapsed() > 30000) {
+                (void)mc->StopMotion();
+                // 中文翻译：等待锁定轴到达安全姿态超时
+                return fail(QObject::tr("Timed out waiting for locked axes to reach the safe posture"));
+            }
+            QThread::msleep(20);
+        }
+        int postMoveFault = 0;
+        if (!mc->IsAxisStatusNormal(postMoveFault) || postMoveFault != 0)
+            // 中文翻译：锁定轴置位后控制器状态异常
+            return fail(QObject::tr("Controller status is abnormal after positioning locked axes"));
+        for (auto it = request.lockedAxisTargets.cbegin(); it != request.lockedAxisTargets.cend(); ++it) {
+            const auto axis = enum_cast<Axis>(it.key().toStdString());
+            double actual = 0.0;
+            if (!axis.has_value() || !mc->GetActualPos(*axis, actual)
+                || std::abs(actual - it.value()) > 0.05)
+                // 中文翻译：锁定轴 %1 未到达目标位置
+                return fail(QObject::tr("Locked axis %1 did not reach its target position").arg(it.key()));
+        }
+    }
+
     QStringList disabledAxes;
     QStringList unregisteredAxes;
     for (const QString& axisName : request.axisNames) {
@@ -791,11 +836,13 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::validateContourBoundary
 std::unique_ptr<lcnc::process::IMotionCommandSink> ProcessDeviceRuntime::createMotionSink(
     bool simulationMode,
     lcnc::process::PureSimulationToolpathTicker* simTicker,
-    ProcessModule* processModule)
+    ProcessModule* processModule,
+    const lcnc::MachineAxisLayout& layout)
 {
     const auto lock = lockDeviceAccess();
     return lcnc::process::MotionSinkFactory::create(
-        simulationMode ? nullptr : m_motionControl.get(), simulationMode, simTicker, processModule);
+        simulationMode ? nullptr : m_motionControl.get(), simulationMode, simTicker,
+        processModule, layout);
 }
 
 

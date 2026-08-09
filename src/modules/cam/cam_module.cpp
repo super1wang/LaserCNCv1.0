@@ -142,6 +142,12 @@ public:
                              this, [this] { refreshCache(); });
             QObject::connect(m_module, &CamModule::activeContourParametersChanged,
                              this, [this] { refreshCache(); });
+            QObject::connect(m_module, &CamModule::machiningModeChanged,
+                             this, [this](lcnc::MachiningMode) { refreshCache(); });
+            QObject::connect(m_module, &CamModule::workpieceSetupTransformChanged,
+                             this, [this] { refreshCache(); });
+            QObject::connect(m_module, &CamModule::pipelineStageChanged,
+                             this, [this](lcnc::cam::CamPipelineStage) { refreshCache(); });
             refreshCache();
         }
     }
@@ -174,6 +180,13 @@ public:
 
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const override
     {
+        // Process preflight runs on the CAM/GUI thread.  Read the project-owned
+        // snapshot directly there so it can never observe a cache refresh gap
+        // after a global generation or workspace switch.  Worker callers retain
+        // the immutable cached snapshot.
+        // 中文翻译：CAM 线程上的预检直接读取当前工程快照，后台线程仍读取缓存。
+        if (m_module && QThread::currentThread() == m_module->thread())
+            return m_module->exportToolpathSnapshot();
         QMutexLocker lock(&m_cacheMutex);
         return m_snapshot;
     }
@@ -181,6 +194,8 @@ public:
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds) const override
     {
+        if (m_module && QThread::currentThread() == m_module->thread())
+            return m_module->exportToolpathSnapshotForOrder(orderedContourIds);
         QMutexLocker lock(&m_cacheMutex);
         if (orderedContourIds.isEmpty())
             return m_snapshot;
@@ -188,6 +203,11 @@ public:
         lcnc::cam::ToolpathExportSnapshot ordered;
         ordered.revision = m_snapshot.revision;
         ordered.description = m_snapshot.description;
+        ordered.machiningMode = m_snapshot.machiningMode;
+        ordered.machineAxisLayout = m_snapshot.machineAxisLayout;
+        ordered.machineConfigurationFingerprint = m_snapshot.machineConfigurationFingerprint;
+        ordered.solverId = m_snapshot.solverId;
+        ordered.solverVersion = m_snapshot.solverVersion;
         QHash<std::uint64_t, lcnc::cam::ToolpathExportContour> byId;
         for (const auto& contour : m_snapshot.contours)
             byId.insert(contour.contourId, contour);
@@ -629,6 +649,13 @@ CamModule::CamModule(QObject* parent)
                 m_machiningFacePipeline->reset();
                 refreshMachiningFaceDisplay();
                 m_camData = project->camData();
+                // A new workspace owns a fresh CamDataManager.  Seed its
+                // project-level mode and axis layout from the active machine
+                // before any global generation can capture the default
+                // Planar3Axis enum value.  A persisted v5 layout is valid and
+                // is therefore deliberately left untouched.
+                // 中文翻译：切换到新工程时，按当前机床初始化其加工模式与轴布局。
+                applyConfiguredMachineAxes(false);
                 const auto activeId = project->activeWorkspaceId();
                 m_machineModelVisible = m_machineVisibleWorkspaceIds.contains(activeId);
                 if (auto* gd = activeGuiDocument()) {
@@ -641,6 +668,10 @@ CamModule::CamModule(QObject* parent)
                     rebindMachiningFacesFromRecords();
                 else
                     emit machiningFacesChanged();
+                if (m_camData) {
+                    emit machiningModeChanged(m_camData->machiningMode());
+                    emit workpieceSetupTransformChanged();
+                }
                 emit machineVisibilityChanged();
             });
 
@@ -788,9 +819,7 @@ void CamModule::configureMachine(const QString& presetName)
     m_config.setMachinePreset(presetName);
     if (m_machineConfig)
         m_machineConfig->syncFromKinematics(kin);
-    if (m_machineModelPath.isEmpty())
-        m_workpieceInstallPosition = defaultWorkpieceInstallPosition();
-    else
+    if (!m_machineModelPath.isEmpty())
         applyStoredMachineProfile(m_machineModelPath);
 
     if (!sameConfig)
@@ -1490,13 +1519,11 @@ bool CamModule::translateMachineWorkspace(const gp_Vec& translation, const QStri
     }
 
     m_cutterHeadModelPosition.Translate(translation);
-    m_workpieceInstallPosition.Translate(translation);
     if (!m_machineModelPath.isEmpty()) {
         CamConfig& config = m_config;
         for (const MachineAxisDef& axis : kin->axes())
             config.setAxisOriginForMachine(m_machineModelPath, axis.name, axis.origin);
         config.setCutterHeadModelPositionForMachine(m_machineModelPath, m_cutterHeadModelPosition);
-        config.setWorkpieceInstallPositionForMachine(m_machineModelPath, m_workpieceInstallPosition);
     }
     translateToolpathWorldData(translation);
     refreshMachineDisplay();
@@ -1522,7 +1549,6 @@ bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QS
     const TDF_LabelSequence machineLabels = doc->entityLabels(LcncDocument::EntityKind::Machine);
     const TDF_LabelSequence workpieceLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
     const gp_Pnt cutterHeadSnapshot = m_cutterHeadModelPosition;
-    const gp_Pnt workpieceInstallSnapshot = m_workpieceInstallPosition;
     QList<TDF_Label> movedLabels;
 
     auto moveLabels = [&](const TDF_LabelSequence& labels) {
@@ -1544,7 +1570,6 @@ bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QS
         for (int i = movedLabels.size() - 1; i >= 0; --i)
             ShapeService::moveShape(doc, movedLabels.at(i), reverse);
         m_cutterHeadModelPosition = cutterHeadSnapshot;
-        m_workpieceInstallPosition = workpieceInstallSnapshot;
     };
 
     if (!moveLabels(machineLabels) || !moveLabels(workpieceLabels)) {
@@ -1555,10 +1580,8 @@ bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QS
     }
 
     m_cutterHeadModelPosition.Translate(translation);
-    m_workpieceInstallPosition.Translate(translation);
     if (!m_machineModelPath.isEmpty()) {
         m_config.setCutterHeadModelPositionForMachine(m_machineModelPath, m_cutterHeadModelPosition);
-        m_config.setWorkpieceInstallPositionForMachine(m_machineModelPath, m_workpieceInstallPosition);
     }
 
     translateToolpathWorldData(translation);
@@ -1592,11 +1615,6 @@ QList<CamModule::WorkpieceMountCandidate> CamModule::mountableWorkpieces() const
     result.append({doc->id(), tr("%1 (%2 shape)").arg(displayName).arg(workpieceCount), workpieceCount});
 
     return result;
-}
-
-gp_Pnt CamModule::workpieceInstallPosition() const
-{
-    return m_workpieceInstallPosition;
 }
 
 bool CamModule::autoInstallWorkpiece() const
@@ -1704,88 +1722,6 @@ void CamModule::setSelectedMountedWorkpieceEntries(const QStringList& sourceEntr
         gd->view()->Redraw();
 }
 
-void CamModule::setWorkpieceInstallPosition(const gp_Pnt& position)
-{
-    const bool currentUnchanged = m_workpieceInstallPosition.SquareDistance(position) < 1e-12;
-    const bool bakedUnchanged = m_workpieceInstallPositionBaked.SquareDistance(position) < 1e-12;
-    if (currentUnchanged && bakedUnchanged)
-        return;
-
-    const gp_Vec translation(m_workpieceInstallPositionBaked, position);
-    const bool movedWorkpieces = translation.SquareMagnitude() > 1e-12;
-    if (movedWorkpieces && !translateWorkpieceDocument(translation)) {
-        // 中文翻译：工件安装位置；更新工件安装位置失败，当前安装位置未修改。
-        emit operationFailed(tr("Workpiece installation position"), tr("Failed to update the workpiece installation location. The current installation location has not been modified."));
-        return;
-    }
-
-    if (movedWorkpieces) {
-        translateToolpathWorldData(translation);
-        updateToolpathMachineCoordinates();
-    }
-
-    m_workpieceInstallPosition = position;
-    m_workpieceInstallPositionBaked = position;
-    if (!m_machineModelPath.isEmpty()) {
-        m_config.setWorkpieceInstallPositionForMachine(
-            m_machineModelPath,
-            m_workpieceInstallPosition);
-    }
-
-    if (movedWorkpieces) {
-        resetWorkpieceDisplayLocation();
-        refreshWorkpieceDisplay();
-        if (hasToolpath()) {
-            syncCamDocumentContours(/*forceRebuild=*/true);
-            lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
-        }
-        if (hasToolpath() || m_previewLeadInValid)
-            refreshToolpathDisplay();
-    }
-
-    emit machineWorkspaceChanged();
-}
-
-void CamModule::updateWorkpieceInstallLocation(const gp_Pnt& position)
-{
-    if (m_workpieceInstallPosition.SquareDistance(position) < 1e-12)
-        return;
-
-    m_workpieceInstallPosition = position;
-    if (!m_machineModelPath.isEmpty()) {
-        m_config.setWorkpieceInstallPositionForMachine(
-            m_machineModelPath, m_workpieceInstallPosition);
-    }
-
-    auto* gd = activeGuiDocument();
-    LcncDocument* doc = workpieceDocument();
-    if (!gd || !doc)
-        return;
-
-    // 计算 baked → 当前 的平移增量，对所有已展示的工件 AIS 调 SetLocation。
-    const gp_Vec delta(m_workpieceInstallPositionBaked, m_workpieceInstallPosition);
-    gp_Trsf trsf;
-    trsf.SetTranslation(delta);
-    const TopLoc_Location loc(trsf);
-    const auto& ctx = gd->scene()->context();
-    if (ctx.IsNull())
-        return;
-
-    const TDF_LabelSequence wpcLabels =
-        doc->entityLabels(LcncDocument::EntityKind::Workpiece);
-    int updated = 0;
-    for (int i = 1; i <= wpcLabels.Length(); ++i) {
-        const QString entry = XcafUtils::entry(wpcLabels.Value(i));
-        Handle(AIS_Shape) ais = gd->aisShape(doc->id(), entry);
-        if (ais.IsNull())
-            continue;
-        ctx->SetLocation(ais, loc);
-        ++updated;
-    }
-    if (updated > 0)
-        ctx->UpdateCurrentViewer();
-}
-
 bool CamModule::supportsWorkpieceRotationAlignment() const
 {
     gp_Pnt center;
@@ -1794,19 +1730,23 @@ bool CamModule::supportsWorkpieceRotationAlignment() const
 
 bool CamModule::alignWorkpieceInstallPositionToRotationCenter()
 {
+    return alignWorkpieceSetupToRotationCenter();
+}
+
+bool CamModule::alignWorkpieceSetupToRotationCenter()
+{
     gp_Pnt center;
     if (!currentWorkpieceRotationCenter(center)) {
-        // 中文翻译：工件安装位置；当前构型没有可用于对齐的工件旋转中心。
-        emit operationFailed(tr("Workpiece installation position"), tr("There is no workpiece rotation center available for alignment in the current configuration."));
+        // 中文翻译：工件安装姿态；当前构型没有可用于对齐的工件旋转中心。
+        emit operationFailed(tr("Workpiece setup"), tr("There is no workpiece rotation center available for alignment in the current configuration."));
         return false;
     }
 
-    gp_Pnt alignedPosition = m_workpieceInstallPosition;
-    alignedPosition.SetX(center.X());
-    alignedPosition.SetY(center.Y());
-    setWorkpieceInstallPosition(alignedPosition);
-    autoInstallCurrentWorkpieceInternal(true);
-    return true;
+    lcnc::WorkpieceSetupTransform setup = workpieceSetupTransform();
+    setup.x = center.X();
+    setup.y = center.Y();
+    setup.z = center.Z();
+    return setWorkpieceSetupTransform(setup);
 }
 
 void CamModule::autoDetectAxisOrigins()
@@ -1820,8 +1760,6 @@ void CamModule::applyStoredMachineProfile(const QString& machinePath)
     if (!kin || machinePath.isEmpty())
         return;
 
-    m_workpieceInstallPosition = defaultWorkpieceInstallPosition();
-
     const auto profile = lcnc::cam::machine_axis_detector::applyStoredMachineProfile(
         kin, m_config, machinePath);
 
@@ -1829,8 +1767,23 @@ void CamModule::applyStoredMachineProfile(const QString& machinePath)
         m_cutterHeadModelPosition = profile.cutterHeadModelPosition;
     if (profile.hasCutterHeadPhysical)
         m_cutterHeadPhysicalPosition = profile.cutterHeadPhysicalPosition;
+    if (profile.hasWorkpieceInstall && m_machineConfig
+        && m_machineConfig->workpieceSetupTransform().isIdentity()) {
+        lcnc::WorkpieceSetupTransform migrated;
+        migrated.x = profile.workpieceInstallPosition.X();
+        migrated.y = profile.workpieceInstallPosition.Y();
+        migrated.z = profile.workpieceInstallPosition.Z();
+        m_machineConfig->setWorkpieceSetupTransform(migrated);
+        if (!m_machineConfig->saveDefault()) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "cam.machine: failed to persist migrated legacy workpiece installation setup");
+        }
+        kin->setWorkpieceSetupTransform(migrated.toTransform());
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "cam.machine: migrated legacy workpiece installation XYZ into unified workpiece setup");
+    }
     if (profile.hasWorkpieceInstall)
-        m_workpieceInstallPosition = profile.workpieceInstallPosition;
+        m_config.clearLegacyWorkpieceInstallPositionForMachine(machinePath);
 
     double aOff = 0.0;
     double cOff = 0.0;
@@ -1870,14 +1823,47 @@ bool CamModule::applyConfiguredMachineAxes(bool updateView)
         return false;
 
     kin->setAxes(axes, m_machineConfig->presetName());
+    kin->setWorkpieceSetupTransform(m_machineConfig->workpieceSetupTransform().toTransform());
+    if (m_camData && !m_camData->machineAxisLayout().isValid()) {
+        const lcnc::MachiningMode mode = m_machineConfig->defaultMachiningMode();
+        const lcnc::MachineModeDefinition definition = m_machineConfig->modeDefinition(mode);
+        m_camData->setMachiningMode(mode);
+        m_camData->setMachineAxisLayout(definition.interpolatedAxes);
+        m_camData->setSolverId(definition.solverId);
+        m_camData->setSolverVersion(definition.solverVersion);
+        m_camData->setSolvedMachineConfigurationFingerprint(QString());
+    }
     m_config.setMachinePreset(m_machineConfig->presetName());
-    if (m_pose && m_pose->kinematics() != kin)
+    // setAxes() updates this kinematics object in-place, so refresh the pose
+    // even when the pointer is unchanged; otherwise newly configured C/B axes
+    // are rejected and the workpiece cannot follow the rotary table.
+    if (m_pose)
         m_pose->setKinematics(kin);
-    if (hasToolpath())
-        updateToolpathMachineCoordinates();
-
     if (!updateView)
         return true;
+
+    if (m_camData && hasToolpath()) {
+        // A machine/configuration change invalidates only the solved machine
+        // coordinate stage.  Re-solving remains an explicit CAM operation so
+        // stale coordinates cannot silently become executable.
+        // 中文翻译：机床或安装姿态变化只使机床坐标阶段失效；重新求解必须由 CAM 显式执行，旧坐标不得静默变为可加工状态。
+        m_camData->setSolvedMachineConfigurationFingerprint(QString());
+        m_camData->invalidatePipelineAfter(
+            lcnc::cam::CamPipelineStage::GeometricToolpath,
+            QStringLiteral("Machine configuration changed; machine coordinates must be solved again"));
+        for (LaserContour& contour : toolpathRef().contours()) {
+            for (ToolpathPoint& point : contour.points)
+                point.machineCoord = {};
+            if (contour.leadInSolution.valid)
+                contour.leadInSolution.point.machineCoord = {};
+        }
+        m_camData->markDirty(true);
+        if (m_travelPathRenderer)
+            m_travelPathRenderer->erase(activeGuiDocument());
+        emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
+        lcnc::Kernel::current().projectManager()->notifyDomainChanged(
+            lcnc::ProjectDomain::Cam);
+    }
 
     displayAxisGuides();
     if (hasToolpath())
@@ -1886,15 +1872,6 @@ bool CamModule::applyConfiguredMachineAxes(bool updateView)
     emit axisAssignmentsChanged();
     lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);
     return true;
-}
-
-gp_Pnt CamModule::defaultWorkpieceInstallPosition() const
-{
-    gp_Pnt center;
-    if (currentWorkpieceRotationCenter(center))
-        return gp_Pnt(center.X(), center.Y(), 0.0);
-
-    return gp_Pnt(0.0, 0.0, 0.0);
 }
 
 // ── Workpiece Installation ───────────────────────────────────────────────────
@@ -1915,23 +1892,7 @@ void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName, 
     if (sourceLabels.Length() == 0)
         return;
 
-    BRep_Builder bb;
-    TopoDS_Compound compound;
-    bb.MakeCompound(compound);
-    bool hasShape = false;
-    Handle(XCAFDoc_ShapeTool) sourceShapeTool = srcDoc->shapeTool();
-    for (int i = 1; i <= sourceLabels.Length(); ++i) {
-        TopoDS_Shape sh = sourceShapeTool->GetShape(sourceLabels.Value(i));
-        if (!sh.IsNull()) {
-            bb.Add(compound, sh);
-            hasShape = true;
-        }
-    }
-    if (!hasShape) return;
-
-    const gp_Pnt currentCenter = shapeCenter(compound);
-    const gp_Pnt targetPosition = alignToInstallPosition ? m_workpieceInstallPosition : currentCenter;
-    const gp_Vec placement(currentCenter, targetPosition);
+    Q_UNUSED(alignToInstallPosition);
     bool mountChanged = false;
     QString firstEntry;
     QMap<QString, QString> mountedEntries;
@@ -1956,32 +1917,10 @@ void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName, 
         mountChanged = true;
     }
 
-    const bool movedWorkpiece = placement.SquareMagnitude() > 1e-12;
-    const bool positionUnchanged = m_workpieceInstallPosition.SquareDistance(targetPosition) < 1e-12
-        && m_workpieceInstallPositionBaked.SquareDistance(targetPosition) < 1e-12;
-    if (!movedWorkpiece && !mountChanged && positionUnchanged)
+    if (!mountChanged)
         return;
-
-    if (movedWorkpiece) {
-        clearToolpath();
-        if (!translateWorkpieceDocument(placement)) {
-            // 中文翻译：工件安装；移动工件到安装位置失败。
-            emit operationFailed(tr("Workpiece installation"), tr("Failed to move workpiece to installation location."));
-            return;
-        }
-    }
-
-    m_workpieceInstallPosition = targetPosition;
-    m_workpieceInstallPositionBaked = targetPosition;
     m_mountedWorkpieceEntryBySourceEntry = mountedEntries;
-    if (!m_machineModelPath.isEmpty())
-        m_config.setWorkpieceInstallPositionForMachine(m_machineModelPath, m_workpieceInstallPosition);
-
-    resetWorkpieceDisplayLocation();
-    if (movedWorkpiece)
-        refreshWorkpieceDisplay();
-    else
-        refreshMachineTransforms();
+    refreshMachineTransforms();
     emit machineWorkspaceChanged();
     emit workpieceMounted(firstEntry);
 }
@@ -3158,6 +3097,12 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
     const QVector<lcnc::cam::ContourId> order = defaultCuttingOrderByCAxis();
     const QList<MachineAxisDef> axes = machine->axes();
     const QString configType = machine->configType();
+    const lcnc::MachiningMode machiningMode = m_camData->machiningMode();
+    const lcnc::MachineModeDefinition modeDefinition = m_machineConfig
+        ? m_machineConfig->modeDefinition(machiningMode) : lcnc::MachineModeDefinition{};
+    const lcnc::WorkpieceSetupTransform workpieceSetup = m_machineConfig->workpieceSetupTransform();
+    const lcnc::HeadToolGeometry headToolGeometry = m_machineConfig
+        ? m_machineConfig->headToolGeometry() : lcnc::HeadToolGeometry{};
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     TaskSpec spec;
@@ -3167,7 +3112,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
     spec.priority = TaskPriority::Normal;
     spec.cancellable = true;
     const TaskId taskId = taskManager->run(spec,
-        [input, order, axes, configType, result](TaskProgress* progress) {
+        [input, order, axes, configType, modeDefinition, workpieceSetup,
+         headToolGeometry, result](TaskProgress* progress) {
             progress->setRange(0, 100);
             result->contours = input;
             QSet<std::uint64_t> seen;
@@ -3194,8 +3140,11 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
             }
             MachineKinematics workerKinematics;
             workerKinematics.setAxes(axes, configType);
-            LaserToolpathBuilder::computeMachineCoordinatesForOrder(
-                ordered, &workerKinematics, gp_Trsf(), nullptr);
+            if (!LaserToolpathBuilder::solveToolpathForOrder(
+                    ordered, &workerKinematics, gp_Trsf(), modeDefinition,
+                    workpieceSetup, headToolGeometry, &result->error)) {
+                return;
+            }
             for (const LaserContour& contour : result->contours) {
                 if (!contour.leadInSolution.valid
                     || !contour.leadInSolution.point.machineCoord.valid
@@ -3210,7 +3159,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
             progress->setValue(100);
         });
     m_taskScope.track(taskId);
-    watchTask(this, taskId, [this, taskId, result, pathRevision = pathState.revision](bool success) {
+    watchTask(this, taskId, [this, taskId, result, modeDefinition,
+                            pathRevision = pathState.revision](bool success) {
         m_taskScope.release(taskId);
         if (!success || !result->ok) {
             // 中文翻译：求解机床坐标
@@ -3227,6 +3177,11 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
             return;
         }
         toolpathRef().contours() = std::move(result->contours);
+        m_camData->setMachineAxisLayout(modeDefinition.interpolatedAxes);
+        m_camData->setSolverId(modeDefinition.solverId);
+        m_camData->setSolverVersion(modeDefinition.solverVersion);
+        m_camData->setSolvedMachineConfigurationFingerprint(
+            m_machineConfig ? m_machineConfig->configurationFingerprint() : QString());
         for (LaserContour& contour : toolpathRef().contours())
             contour.needsRecalculation = false;
         m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve,
@@ -3295,16 +3250,9 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     // Phase C：CAM 已不再镜像到 XCAF，AIS 在 syncCamDocumentContours 中按 contourId 重建。
     m_workpieceShape = collectWorkpieceShape();
     bool effectiveUseFaceClassification = useFaceClassification;
-    if (m_machineConfig) {
-        switch (m_machineConfig->toolpathAlgorithm()) {
-        case lcnc::MachineToolpathAlgorithm::ThreeAxis:
-            effectiveUseFaceClassification = false;
-            break;
-        case lcnc::MachineToolpathAlgorithm::FiveAxisTable:
-        case lcnc::MachineToolpathAlgorithm::FiveAxisHead:
-            effectiveUseFaceClassification = true;
-            break;
-        }
+    if (m_machineConfig && m_camData) {
+        effectiveUseFaceClassification =
+            m_camData->machiningMode() != lcnc::MachiningMode::Planar3Axis;
         LCNC_INFO(lcnc::LogCode::Generic,
                   "cam.toolpath: machine algorithm='{}' faceClassification={}",
                   m_machineConfig->toolpathAlgorithmText().toStdString(),
@@ -3543,17 +3491,9 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
         return kInvalidTaskId;
 
     bool effectiveUseFaceClassification = useFaceClassification;
-    if (m_machineConfig) {
-        switch (m_machineConfig->toolpathAlgorithm()) {
-        case lcnc::MachineToolpathAlgorithm::ThreeAxis:
-            effectiveUseFaceClassification = false;
-            break;
-        case lcnc::MachineToolpathAlgorithm::FiveAxisTable:
-        case lcnc::MachineToolpathAlgorithm::FiveAxisHead:
-            effectiveUseFaceClassification = true;
-            break;
-        }
-    }
+    if (m_machineConfig && m_camData)
+        effectiveUseFaceClassification =
+            m_camData->machiningMode() != lcnc::MachiningMode::Planar3Axis;
     const double leadInLength = m_config.leadInLength();
     const QVector<lcnc::cam::ContourId> previousOrder =
         m_camData->layerContainer().manualContourOrder();
@@ -3580,6 +3520,18 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     }
     const QList<MachineAxisDef> axes = machine->axes();
     const QString configType = machine->configType();
+    const lcnc::MachiningMode machiningMode = m_camData->machiningMode();
+    const lcnc::MachineModeDefinition modeDefinition = m_machineConfig
+        ? m_machineConfig->modeDefinition(machiningMode) : lcnc::MachineModeDefinition{};
+    const lcnc::WorkpieceSetupTransform workpieceSetup = m_machineConfig->workpieceSetupTransform();
+    const lcnc::HeadToolGeometry headToolGeometry = m_machineConfig
+        ? m_machineConfig->headToolGeometry() : lcnc::HeadToolGeometry{};
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "cam.toolpath: global generation captures preset='{}' mode='{}' solver='{}' axes={}",
+              configType.toStdString(),
+              lcnc::machiningModeName(machiningMode).toStdString(),
+              modeDefinition.solverId.toStdString(),
+              modeDefinition.interpolatedAxes.count);
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = smoothAngle;
     params.strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
@@ -3626,7 +3578,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     spec.priority = TaskPriority::Normal;
     const TaskId taskId = taskManager->run(spec,
         [workpieceSources, previousBySignature, previousOrder, leadInLength, params, selectedFaceEntries,
-         beamDirs, effectiveUseFaceClassification, axes, configType, result](TaskProgress* progress) {
+         beamDirs, effectiveUseFaceClassification, axes, configType, modeDefinition,
+         workpieceSetup, headToolGeometry, result](TaskProgress* progress) {
             progress->setRange(0, 100);
             // 中文翻译：1/5 正在分离加工面与横截面
             progress->setStepName(QObject::tr("1/5 Separating the machined surface and cross section"));
@@ -3815,8 +3768,11 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     retainedIds.insert(contour.contourId);
                 solveContours.push_back(&contour);
             }
-            LaserToolpathBuilder::computeMachineCoordinatesForOrder(
-                solveContours, &workerKinematics, gp_Trsf(), nullptr);
+            if (!LaserToolpathBuilder::solveToolpathForOrder(
+                    solveContours, &workerKinematics, gp_Trsf(), modeDefinition,
+                    workpieceSetup, headToolGeometry, &result->error)) {
+                return;
+            }
             const bool coordinatesValid = std::all_of(allContours.begin(), allContours.end(),
                 [](const LaserContour& contour) {
                     const bool pointsValid = std::all_of(contour.points.begin(), contour.points.end(),
@@ -3855,7 +3811,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     watchTask(this, taskId,
         [this, taskId, result, leadInLength, previousOrder,
          effectiveUseFaceClassification, smoothAngle, deflection,
-         generationStamp, reuseCurrentFaces](bool success) {
+         generationStamp, reuseCurrentFaces, modeDefinition](bool success) {
             m_taskScope.release(taskId);
             if (!success || !result->ok) {
                 // 中文翻译：全局生成刀路
@@ -3866,17 +3822,9 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             }
             const QList<WorkpieceShapeSource> currentSources = collectWorkpieceShapes();
             bool currentEffectiveFaceClassification = m_useFaceClassification;
-            if (m_machineConfig) {
-                switch (m_machineConfig->toolpathAlgorithm()) {
-                case lcnc::MachineToolpathAlgorithm::ThreeAxis:
-                    currentEffectiveFaceClassification = false;
-                    break;
-                case lcnc::MachineToolpathAlgorithm::FiveAxisTable:
-                case lcnc::MachineToolpathAlgorithm::FiveAxisHead:
-                    currentEffectiveFaceClassification = true;
-                    break;
-                }
-            }
+            if (m_machineConfig && m_camData)
+                currentEffectiveFaceClassification =
+                    m_camData->machiningMode() != lcnc::MachiningMode::Planar3Axis;
             lcnc::cam::ToolpathGenerationStamp currentStamp;
             currentStamp.toolpathRevision = toolpathRevision();
             currentStamp.machiningFaceRevision = machiningFaceSetRevision();
@@ -3966,6 +3914,11 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 lcnc::cam::CamPipelineStage::GeometricToolpath);
             m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve,
                                            pathStage.revision);
+            m_camData->setMachineAxisLayout(modeDefinition.interpolatedAxes);
+            m_camData->setSolverId(modeDefinition.solverId);
+            m_camData->setSolverVersion(modeDefinition.solverVersion);
+            m_camData->setSolvedMachineConfigurationFingerprint(
+                m_machineConfig ? m_machineConfig->configurationFingerprint() : QString());
             m_camData->ensureContourIds();
             m_camData->ensureToolpathLayers();
             QVector<lcnc::cam::ContourId> solveOrder;
@@ -4413,8 +4366,27 @@ bool CamModule::solveToolpathForOrder(
         return true;
     }
 
-    LaserToolpathBuilder::computeMachineCoordinatesForOrder(
-        orderedContours, kin, gp_Trsf(), nullptr);
+    if (!m_machineConfig || !m_camData) return false;
+    const lcnc::MachineModeDefinition definition =
+        m_machineConfig->modeDefinition(m_camData->machiningMode());
+    QString solveError;
+    if (!LaserToolpathBuilder::solveToolpathForOrder(
+            orderedContours, kin, gp_Trsf(), definition,
+            m_machineConfig->workpieceSetupTransform(), m_machineConfig->headToolGeometry(),
+            &solveError)) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.toolpath: ordered machine-coordinate solve failed: {}",
+                 solveError.toStdString());
+        m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve, solveError);
+        refreshToolpathDisplay();
+        refreshCuttingOrderOverlays();
+        return false;
+    }
+    m_camData->setMachineAxisLayout(definition.interpolatedAxes);
+    m_camData->setSolverId(definition.solverId);
+    m_camData->setSolverVersion(definition.solverVersion);
+    m_camData->setSolvedMachineConfigurationFingerprint(
+        m_machineConfig->configurationFingerprint());
 
     LCNC_INFO(lcnc::LogCode::Generic,
               "cam.toolpath: solved five-axis coordinates from cutting order, contours={}",
@@ -4459,6 +4431,67 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
         orderedContours.empty() ? tr("CAM currently has no tool path") : tr("CAM orderly planned tool path snapshot has been exported"));
 }
 
+QList<lcnc::MachiningMode> CamModule::supportedMachiningModes() const
+{
+    return m_machineConfig ? m_machineConfig->supportedMachiningModes()
+                           : QList<lcnc::MachiningMode>{};
+}
+
+lcnc::MachiningMode CamModule::machiningMode() const
+{
+    return m_camData ? m_camData->machiningMode() : lcnc::MachiningMode::Planar3Axis;
+}
+
+bool CamModule::setMachiningMode(lcnc::MachiningMode mode)
+{
+    if (!m_camData || !m_machineConfig || !m_machineConfig->supportsMachiningMode(mode))
+        return false;
+    if (m_camData->machiningMode() == mode) return true;
+    const lcnc::MachineModeDefinition definition = m_machineConfig->modeDefinition(mode);
+    m_camData->setMachiningMode(mode);
+    m_camData->setMachineAxisLayout(definition.interpolatedAxes);
+    m_camData->setSolverId(definition.solverId);
+    m_camData->setSolverVersion(definition.solverVersion);
+    m_camData->setSolvedMachineConfigurationFingerprint(QString());
+    m_camData->invalidatePipelineAfter(lcnc::cam::CamPipelineStage::GeometricToolpath,
+        QStringLiteral("Machining mode changed; machine coordinates must be solved again"));
+    for (LaserContour& contour : toolpathRef().contours()) {
+        for (ToolpathPoint& point : contour.points) point.machineCoord = {};
+        if (contour.leadInSolution.valid) contour.leadInSolution.point.machineCoord = {};
+    }
+    m_camData->markDirty(true);
+    if (m_travelPathRenderer) m_travelPathRenderer->erase(activeGuiDocument());
+    refreshToolpathDisplay();
+    emit machiningModeChanged(mode);
+    emit pipelineStageChanged(lcnc::cam::CamPipelineStage::MachineSolve);
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
+lcnc::WorkpieceSetupTransform CamModule::workpieceSetupTransform() const
+{
+    return m_machineConfig ? m_machineConfig->workpieceSetupTransform()
+                           : lcnc::WorkpieceSetupTransform{};
+}
+
+bool CamModule::setWorkpieceSetupTransform(const lcnc::WorkpieceSetupTransform& setup)
+{
+    if (!m_machineConfig) return false;
+    const auto current = m_machineConfig->workpieceSetupTransform();
+    const auto close = [](double lhs, double rhs) { return std::abs(lhs - rhs) <= 1e-9; };
+    if (close(current.x, setup.x) && close(current.y, setup.y) && close(current.z, setup.z)
+        && close(current.rotationXDeg, setup.rotationXDeg)
+        && close(current.rotationYDeg, setup.rotationYDeg)
+        && close(current.rotationZDeg, setup.rotationZDeg)) return true;
+    // MachineConfigurationService is the single authority. Its synchronous
+    // change signal refreshes kinematics/view state and invalidates any active
+    // project's solved-machine-coordinate stage.
+    // 中文翻译：机床配置服务是唯一权威；其同步变更信号负责刷新运动学/视图并使当前工程机床坐标阶段失效。
+    m_machineConfig->setWorkpieceSetupTransform(setup);
+    emit workpieceSetupTransformChanged();
+    return true;
+}
+
 lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
     const std::vector<LaserContour>& contours,
     std::uint64_t revision,
@@ -4467,6 +4500,15 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
     lcnc::cam::ToolpathExportSnapshot snapshot;
     snapshot.revision = revision;
     snapshot.description = description;
+    if (m_camData) {
+        snapshot.machiningMode = m_camData->machiningMode();
+        snapshot.machineAxisLayout = m_camData->machineAxisLayout();
+        snapshot.solverId = m_camData->solverId();
+        snapshot.solverVersion = m_camData->solverVersion();
+    }
+    if (m_camData)
+        snapshot.machineConfigurationFingerprint =
+            m_camData->solvedMachineConfigurationFingerprint();
 
     auto layerForId = [this](std::uint64_t layerId) -> const ToolpathLayer* {
         for (const ToolpathLayer& layer : toolpathRef().layers()) {
@@ -4514,8 +4556,13 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             gp_Pnt startWorld    = cutStartLocal;
             bool   hasLeadIn = false;
 
+            // computeWpcTransform() is the single CAD-to-machine transform for
+            // a workpiece: axis-chain posture multiplied by the configured
+            // WorkpieceSetupTransform.  Applying setup again here would shift
+            // snapshot/travel endpoints twice for mounted workpieces.
+            // 中文翻译：computeWpcTransform() 已包含轴链和工件安装姿态，快照端点不得再次叠加安装姿态。
             gp_Trsf wpc;
-            if (kin && !contour.workpieceEntry.isEmpty())
+            if (kin)
                 wpc = kin->computeWpcTransform(contour.workpieceEntry);
 
             cutStartWorld.Transform(wpc);
@@ -4565,6 +4612,9 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
                 exportedContour.leadInPoint.rotaryAxis1Name = lead.machineCoord.r1Name;
                 exportedContour.leadInPoint.rotaryAxis2Name = lead.machineCoord.r2Name;
                 exportedContour.leadInPoint.machineCoordValid = lead.machineCoord.valid;
+                exportedContour.leadInPoint.machineAxes = lead.machineCoord.solvedPose.values;
+                exportedContour.leadInPoint.machineAxisMask = lead.machineCoord.solvedPose.activeMask;
+                exportedContour.leadInPoint.machineFailureReason = lead.machineCoord.solvedPose.failureReason;
             }
             exportedContour.endpointsValid = true;
         }
@@ -4593,6 +4643,9 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             exportedPoint.rotaryAxis1Name = point.machineCoord.r1Name;
             exportedPoint.rotaryAxis2Name = point.machineCoord.r2Name;
             exportedPoint.machineCoordValid = point.machineCoord.valid;
+            exportedPoint.machineAxes = point.machineCoord.solvedPose.values;
+            exportedPoint.machineAxisMask = point.machineCoord.solvedPose.activeMask;
+            exportedPoint.machineFailureReason = point.machineCoord.solvedPose.failureReason;
             points.append(exportedPoint);
         }
         snapshot.pointsByContourId.insert(contour.contourId, points);
@@ -5201,8 +5254,17 @@ bool CamModule::recalcToolpath()
         }
     }
 
-    LaserToolpathBuilder::computeMachineCoordinates(
-        updated, kinematics(), gp_Trsf(), continuity.valid ? &continuity : nullptr);
+    const lcnc::MachineModeDefinition definition =
+        m_machineConfig->modeDefinition(m_camData->machiningMode());
+    std::vector<LaserContour*> singleContour{&updated};
+    QString solveError;
+    if (!LaserToolpathBuilder::solveToolpathForOrder(
+            singleContour, kinematics(), gp_Trsf(), definition,
+            m_machineConfig->workpieceSetupTransform(), m_machineConfig->headToolGeometry(),
+            &solveError, continuity.valid ? &continuity.solvedPose : nullptr)) {
+        emit operationFailed(tr("Recalculate the current contour"), solveError);
+        return false;
+    }
     const bool coordinatesValid = updated.leadInSolution.point.machineCoord.valid
         && std::all_of(updated.points.begin(), updated.points.end(), [](const ToolpathPoint& point) {
             return point.machineCoord.valid;
@@ -5292,6 +5354,10 @@ TaskId CamModule::recalcToolpathAsync()
     const auto appliedGlobal = m_camData->appliedGenerationParams();
     const QList<MachineAxisDef> axes = machine->axes();
     const QString configType = machine->configType();
+    const lcnc::MachineModeDefinition modeDefinition =
+        m_machineConfig->modeDefinition(m_camData->machiningMode());
+    const lcnc::WorkpieceSetupTransform workpieceSetup = m_machineConfig->workpieceSetupTransform();
+    const lcnc::HeadToolGeometry headToolGeometry = m_machineConfig->headToolGeometry();
     // Recalculation works from an immutable contour snapshot.  Do not apply its
     // result if any project-level toolpath, face-pipeline, or machine setup
     // input changed while the worker was running.
@@ -5309,7 +5375,8 @@ TaskId CamModule::recalcToolpathAsync()
     spec.priority = TaskPriority::Normal;
     spec.cancellable = true;
     const TaskId taskId = taskManager->run(spec,
-        [current, sourceShape, appliedGlobal, continuity, axes, configType, result](TaskProgress* progress) {
+        [current, sourceShape, appliedGlobal, continuity, axes, configType, modeDefinition,
+         workpieceSetup, headToolGeometry, result](TaskProgress* progress) {
             progress->setRange(0, 100);
             // 中文翻译：正在离散轮廓
             progress->setStepName(QObject::tr("discretizing contours"));
@@ -5379,9 +5446,13 @@ TaskId CamModule::recalcToolpathAsync()
             progress->setStepName(QObject::tr("Solving for machine coordinates"));
             MachineKinematics workerKinematics;
             workerKinematics.setAxes(axes, configType);
-            MachineCoord continuityState = continuity;
-            LaserToolpathBuilder::computeMachineCoordinates(
-                updated, &workerKinematics, gp_Trsf(), continuityState.valid ? &continuityState : nullptr);
+            std::vector<LaserContour*> singleContour{&updated};
+            if (!LaserToolpathBuilder::solveToolpathForOrder(
+                    singleContour, &workerKinematics, gp_Trsf(), modeDefinition,
+                    workpieceSetup, headToolGeometry, &result->error,
+                    continuity.valid ? &continuity.solvedPose : nullptr)) {
+                return;
+            }
             const bool coordinatesValid = updated.leadInSolution.point.machineCoord.valid
                 && std::all_of(updated.points.begin(), updated.points.end(), [](const ToolpathPoint& point) {
                     return point.machineCoord.valid;
@@ -6252,9 +6323,7 @@ void CamModule::applyCamContourTransforms()
         if (ais.IsNull())
             continue;
 
-        gp_Trsf transform;
-        if (!contour.workpieceEntry.isEmpty())
-            transform = kin->computeWpcTransform(contour.workpieceEntry);
+        const gp_Trsf transform = kin->computeWpcTransform(contour.workpieceEntry);
 
         ais->SetLocalTransformation(transform);
         ctx->RecomputePrsOnly(ais, Standard_False);

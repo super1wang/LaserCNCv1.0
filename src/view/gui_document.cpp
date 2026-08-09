@@ -921,13 +921,12 @@ void GuiDocument::updateMachineWorkspaceTransforms(LcncDocument* machineDocument
                 hasTransform = true;
             }
         } else if (workpieceObject) {
-            const QString wpcAxis = kin->mountedAxis(object.entry);
-            if (!wpcAxis.isEmpty()) {
-                t = kin->computeWpcTransform(object.entry);
-                hasTransform = true;
-            } else {
-                hasTransform = true;
-            }
+            // The workpiece setup is a CAD-to-fixture transform, so it applies
+            // to every workpiece whether or not that workpiece is mounted on a
+            // rotary axis.
+            // 中文翻译：工件安装姿态是 CAD 到夹具的变换，未挂载到旋转轴的工件也必须应用。
+            t = kin->computeWpcTransform(object.entry);
+            hasTransform = true;
         }
 
         if (!hasTransform)

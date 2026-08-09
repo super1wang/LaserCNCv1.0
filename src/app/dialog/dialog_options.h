@@ -125,6 +125,7 @@ private:
     QDoubleSpinBox* m_spRotationCenterX{nullptr};
     QDoubleSpinBox* m_spRotationCenterY{nullptr};
     QDoubleSpinBox* m_spRotationCenterZ{nullptr};
+    std::array<QDoubleSpinBox*, 7> m_headTcpEditors{};
     QTableWidget* m_machineAxesTable{nullptr};
     MachineConfigurationService* m_machineConfig{nullptr};
 
@@ -142,6 +143,7 @@ private:
     bool m_originalAutoLoadMachineModel{true};
     QString m_originalMachinePreset;
     QVector<MachineAxisRuntimeConfig> m_originalMachineConfigs;
+    HeadToolGeometry m_originalHeadToolGeometry;
     bool m_loadingUi{false};
 };
 

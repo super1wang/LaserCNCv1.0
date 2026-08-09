@@ -1,6 +1,7 @@
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/kinematics/ik_solver.h"
+#include "core/kinematics/toolpath_kinematics_solver.h"
 #include "core/logging/logger.h"
 
 #include <TopExp_Explorer.hxx>
@@ -1775,178 +1776,128 @@ LeadInSolution LaserToolpathBuilder::computeLeadInSolution(
 // LaserToolpathBuilder — machine coordinate computation (IK)
 // =============================================================================
 
-void LaserToolpathBuilder::computeMachineCoordinates(LaserContour& contour,
-                                                     MachineKinematics* kinematics,
-                                                     const gp_Trsf& wpcTransform,
-                                                     MachineCoord* continuityState)
-{
-    if (!kinematics) return;
-
-    normalizeContourTraversal(contour, kinematics, wpcTransform);
-
-    const bool tracePoints = camToolpathTraceEnabled();
-    if (tracePoints) {
-        LCNC_DEBUG(lcnc::LogCode::Generic,
-                   "cam.toolpath.ik.begin: contour='{}' id={} entry='{}' cfg='{}' points={}",
-                   contour.name.toStdString(),
-                   contour.contourId,
-                   contour.workpieceEntry.toStdString(),
-                   kinematics->configType().toStdString(),
-                   contour.points.size());
-        for (const MachineAxisDef& axis : kinematics->axes()) {
-            LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "cam.toolpath.ik.axis: name='{}' type={} parent='{}' dir=({:.6f},{:.6f},{:.6f}) origin=({:.6f},{:.6f},{:.6f}) limits=[{:.3f},{:.3f}] current={:.3f}",
-                       axis.name.toStdString(),
-                       motionTypeText(axis.motionType),
-                       axis.parentAxis.toStdString(),
-                       axis.direction.X(), axis.direction.Y(), axis.direction.Z(),
-                       axis.origin.X(), axis.origin.Y(), axis.origin.Z(),
-                       axis.minVal, axis.maxVal,
-                       axis.currentPos);
-        }
-    }
-
-    RangeStats localX, localY, localZ;
-    RangeStats worldX, worldY, worldZ;
-    RangeStats normalX, normalY, normalZ;
-    RangeStats machineX, machineY, machineZ, machineR1, machineR2;
-    int validCount = 0;
-    QString r1Name;
-    QString r2Name;
-
-    MachineCoord previous = (continuityState && continuityState->valid)
-        ? *continuityState
-        : currentRotaryReference(kinematics);
-    bool hasPrevious = previous.valid;
-
-    if (contour.leadInSolution.valid) {
-        ToolpathPoint& leadPoint = contour.leadInSolution.point;
-        const gp_Pnt leadWorldPos = leadPoint.position.Transformed(wpcTransform);
-        const gp_Dir leadWorldDir = leadPoint.normal.Transformed(wpcTransform);
-        leadPoint.machineCoord = IKSolver::solveContinuous(
-            kinematics, leadWorldPos, leadWorldDir, hasPrevious ? &previous : nullptr);
-        if (leadPoint.machineCoord.valid) {
-            previous = leadPoint.machineCoord;
-            hasPrevious = true;
-        } else {
-            contour.leadInSolution.valid = false;
-            // 中文翻译：下刀点五轴坐标求解失败
-            contour.leadInSolution.error = QStringLiteral("The solution of the five-axis coordinates of the cutting point failed.");
-        }
-    }
-
-    int pointIndex = 0;
-    for (auto& pt : contour.points) {
-        // Transform from workpiece-local to world frame
-        gp_Pnt worldPos = pt.position.Transformed(wpcTransform);
-        gp_Dir worldDir = pt.normal.Transformed(wpcTransform);
-
-        localX.add(pt.position.X());
-        localY.add(pt.position.Y());
-        localZ.add(pt.position.Z());
-        worldX.add(worldPos.X());
-        worldY.add(worldPos.Y());
-        worldZ.add(worldPos.Z());
-        normalX.add(worldDir.X());
-        normalY.add(worldDir.Y());
-        normalZ.add(worldDir.Z());
-
-        pt.machineCoord = IKSolver::solveContinuous(
-            kinematics, worldPos, worldDir, hasPrevious ? &previous : nullptr);
-        if (pt.machineCoord.valid) {
-            previous = pt.machineCoord;
-            hasPrevious = true;
-            ++validCount;
-            machineX.add(pt.machineCoord.x);
-            machineY.add(pt.machineCoord.y);
-            machineZ.add(pt.machineCoord.z);
-            machineR1.add(pt.machineCoord.r1);
-            machineR2.add(pt.machineCoord.r2);
-            if (r1Name.isEmpty()) r1Name = pt.machineCoord.r1Name;
-            if (r2Name.isEmpty()) r2Name = pt.machineCoord.r2Name;
-        }
-
-        if (tracePoints) {
-            LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "cam.toolpath.ik.point: contour='{}' id={} idx={} param={:.9f} local=({:.6f},{:.6f},{:.6f}) world=({:.6f},{:.6f},{:.6f}) normal=({:.6f},{:.6f},{:.6f}) tangent=({:.6f},{:.6f},{:.6f}) machine.valid={} machine=({:.6f},{:.6f},{:.6f},{:.6f},{:.6f}) rotary='{}','{}'",
-                       contour.name.toStdString(),
-                       contour.contourId,
-                       pointIndex,
-                       pt.param,
-                       pt.position.X(), pt.position.Y(), pt.position.Z(),
-                       worldPos.X(), worldPos.Y(), worldPos.Z(),
-                       worldDir.X(), worldDir.Y(), worldDir.Z(),
-                       pt.tangent.X(), pt.tangent.Y(), pt.tangent.Z(),
-                       pt.machineCoord.valid,
-                       pt.machineCoord.x, pt.machineCoord.y, pt.machineCoord.z,
-                       pt.machineCoord.r1, pt.machineCoord.r2,
-                       pt.machineCoord.r1Name.toStdString(),
-                       pt.machineCoord.r2Name.toStdString());
-        }
-        ++pointIndex;
-    }
-
-    if (contour.leadInSolution.valid
-        && contour.leadInSolution.point.machineCoord.valid
-        && !contour.points.empty()
-        && contour.points.front().machineCoord.valid) {
-        MachineCoord& leadCoord = contour.leadInSolution.point.machineCoord;
-        const MachineCoord& startCoord = contour.points.front().machineCoord;
-        leadCoord.r1 = startCoord.r1;
-        leadCoord.r2 = startCoord.r2;
-        leadCoord.r1Name = startCoord.r1Name;
-        leadCoord.r2Name = startCoord.r2Name;
-    }
-
-    if (continuityState && previous.valid)
-        *continuityState = previous;
-
-    LCNC_INFO(lcnc::LogCode::Generic,
-              "cam.toolpath.ik.summary: contour='{}' id={} entry='{}' cfg='{}' points={} valid={} localX=[{:.6f},{:.6f}] localY=[{:.6f},{:.6f}] localZ=[{:.6f},{:.6f}] worldX=[{:.6f},{:.6f}] worldY=[{:.6f},{:.6f}] worldZ=[{:.6f},{:.6f}] normalX=[{:.6f},{:.6f}] normalY=[{:.6f},{:.6f}] normalZ=[{:.6f},{:.6f}] machineX=[{:.6f},{:.6f}] machineY=[{:.6f},{:.6f}] machineZ=[{:.6f},{:.6f}] {}=[{:.6f},{:.6f}] {}=[{:.6f},{:.6f}] tracePoints={}",
-              contour.name.toStdString(),
-              contour.contourId,
-              contour.workpieceEntry.toStdString(),
-              kinematics->configType().toStdString(),
-              contour.points.size(),
-              validCount,
-              rangeMin(localX), rangeMax(localX),
-              rangeMin(localY), rangeMax(localY),
-              rangeMin(localZ), rangeMax(localZ),
-              rangeMin(worldX), rangeMax(worldX),
-              rangeMin(worldY), rangeMax(worldY),
-              rangeMin(worldZ), rangeMax(worldZ),
-              rangeMin(normalX), rangeMax(normalX),
-              rangeMin(normalY), rangeMax(normalY),
-              rangeMin(normalZ), rangeMax(normalZ),
-              rangeMin(machineX), rangeMax(machineX),
-              rangeMin(machineY), rangeMax(machineY),
-              rangeMin(machineZ), rangeMax(machineZ),
-              r1Name.isEmpty() ? "R1" : r1Name.toStdString(),
-              rangeMin(machineR1), rangeMax(machineR1),
-              r2Name.isEmpty() ? "R2" : r2Name.toStdString(),
-              rangeMin(machineR2), rangeMax(machineR2),
-              tracePoints);
-}
-
-void LaserToolpathBuilder::computeMachineCoordinatesForOrder(
+bool LaserToolpathBuilder::solveToolpathForOrder(
     const std::vector<LaserContour*>& orderedContours,
     MachineKinematics* kinematics,
     const gp_Trsf& wpcTransform,
-    MachineCoord* initialState)
+    const lcnc::MachineModeDefinition& modeDefinition,
+    const lcnc::WorkpieceSetupTransform& workpieceSetup,
+    const lcnc::HeadToolGeometry& headToolGeometry,
+    QString* errorMessage,
+    const lcnc::SolvedMachinePose* initialPose)
 {
-    if (!kinematics)
-        return;
-
-    MachineCoord continuityState;
-    if (initialState && initialState->valid)
-        continuityState = *initialState;
-
-    for (LaserContour* contour : orderedContours) {
-        if (!contour)
-            continue;
-        computeMachineCoordinates(*contour, kinematics, wpcTransform, &continuityState);
+    if (!kinematics) {
+        if (errorMessage) *errorMessage = QStringLiteral("Machine kinematics is unavailable");
+        return false;
+    }
+    QString definitionError;
+    if (!modeDefinition.isValid(&definitionError)) {
+        if (errorMessage) *errorMessage = definitionError;
+        return false;
     }
 
-    if (initialState && continuityState.valid)
-        *initialState = continuityState;
+    lcnc::ToolpathSolverRegistry registry;
+    lcnc::SolvedMachinePose continuity = initialPose ? *initialPose : lcnc::SolvedMachinePose{};
+    const auto applyFixedPlanarBeamNormal = [&modeDefinition](std::vector<ToolpathPoint>& points) {
+        if (modeDefinition.mode != lcnc::MachiningMode::Planar3Axis)
+            return;
+        // Three-axis processing has one physical beam posture.  Preserve the
+        // source normals on LaserContour for geometric/lead-in classification,
+        // but hand the solver a machine-Z normal for every cutting point.
+        // 中文翻译：三轴加工只有一个物理刀束姿态；保留轮廓源法线用于几何和引入线分类，但向求解器传入统一机床 Z 向法线。
+        for (ToolpathPoint& point : points)
+            point.normal = gp_Dir(0, 0, 1);
+    };
+    const auto applyPose = [&modeDefinition](MachineCoord& coordinate,
+                                             const lcnc::SolvedMachinePose& pose) {
+        coordinate = {};
+        coordinate.solvedPose = pose;
+        coordinate.valid = pose.valid;
+        int rotarySlot = 0;
+        for (int index = 0; index < modeDefinition.interpolatedAxes.count; ++index) {
+            const auto& slot = modeDefinition.interpolatedAxes.axes[index];
+            const double value = pose.value(index);
+            switch (slot.role) {
+            case lcnc::MachineAxisRole::LinearX: coordinate.x = value; break;
+            case lcnc::MachineAxisRole::LinearY: coordinate.y = value; break;
+            case lcnc::MachineAxisRole::LinearZ: coordinate.z = value; break;
+            default:
+                if (rotarySlot == 0) { coordinate.r1 = value; coordinate.r1Name = slot.name; }
+                else if (rotarySlot == 1) { coordinate.r2 = value; coordinate.r2Name = slot.name; }
+                ++rotarySlot;
+                break;
+            }
+        }
+    };
+
+    for (LaserContour* contour : orderedContours) {
+        if (!contour) continue;
+        // Traversal normalization must see the same CAD-to-machine placement
+        // as the solver.  The point solve keeps the transforms separate to
+        // avoid applying WorkpieceSetupTransform twice.
+        // 中文翻译：轮廓方向归一化必须使用与求解器一致的 CAD 到机床安装姿态，同时避免工件安装姿态重复应用。
+        const gp_Trsf traversalTransform =
+            wpcTransform.Multiplied(workpieceSetup.toTransform());
+        normalizeContourTraversal(*contour, kinematics, traversalTransform);
+
+        std::vector<ToolpathPoint> worldPoints = contour->points;
+        for (ToolpathPoint& point : worldPoints) {
+            point.position.Transform(wpcTransform);
+            point.normal.Transform(wpcTransform);
+        }
+        applyFixedPlanarBeamNormal(worldPoints);
+        lcnc::ToolpathKinematicsRequest request;
+        request.machine = kinematics;
+        request.mode = modeDefinition.mode;
+        request.definition = modeDefinition;
+        request.workpieceSetup = workpieceSetup;
+        request.headToolGeometry = headToolGeometry;
+        request.points = &worldPoints;
+        request.previousPose = continuity.valid ? &continuity : nullptr;
+        const std::vector<lcnc::SolvedMachinePose> poses = registry.solve(request);
+        if (poses.size() != contour->points.size()) {
+            if (errorMessage) *errorMessage = QStringLiteral("Solver %1 returned an invalid point count")
+                .arg(modeDefinition.solverId);
+            return false;
+        }
+        for (std::size_t index = 0; index < poses.size(); ++index) {
+            applyPose(contour->points[index].machineCoord, poses[index]);
+            if (!poses[index].valid) {
+                if (errorMessage) *errorMessage = poses[index].failureReason;
+                return false;
+            }
+            continuity = poses[index];
+        }
+
+        if (contour->leadInSolution.valid) {
+            std::vector<ToolpathPoint> leadPoints{contour->leadInSolution.point};
+            leadPoints.front().position.Transform(wpcTransform);
+            leadPoints.front().normal.Transform(wpcTransform);
+            applyFixedPlanarBeamNormal(leadPoints);
+            request.points = &leadPoints;
+            request.previousPose = nullptr;
+            const auto leadPoses = registry.solve(request);
+            if (leadPoses.size() != 1 || !leadPoses.front().valid) {
+                contour->leadInSolution.valid = false;
+                contour->leadInSolution.error = leadPoses.empty()
+                    ? QStringLiteral("Lead-in solver returned no pose")
+                    : leadPoses.front().failureReason;
+            } else {
+                lcnc::SolvedMachinePose leadPose = leadPoses.front();
+                // Keep the same rotary posture as the contour start during plunge.
+                if (!poses.empty()) {
+                    for (int index = 0; index < modeDefinition.interpolatedAxes.count; ++index) {
+                        const auto role = modeDefinition.interpolatedAxes.axes[index].role;
+                        if (role != lcnc::MachineAxisRole::LinearX
+                            && role != lcnc::MachineAxisRole::LinearY
+                            && role != lcnc::MachineAxisRole::LinearZ) {
+                            leadPose.setValue(index, poses.front().value(index));
+                        }
+                    }
+                }
+                applyPose(contour->leadInSolution.point.machineCoord, leadPose);
+            }
+        }
+    }
+    return true;
 }

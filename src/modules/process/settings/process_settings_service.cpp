@@ -50,6 +50,31 @@ table& ensureChildTable(table& parent, const std::string& key)
     return ensureTable(parent[key]);
 }
 
+// 工具参数页会为未保存的字段显示 schema 默认值；运行时 Tool::SetFromTable()
+// 则会把缺失字段保留为 0。把这些默认值实化到每个工具表，确保 UI、项目工具
+// 快照和 ACS/GTN 下发使用同一套有效工艺参数，而不是回退到机床轴参数。
+void ensureToolMotionDefaults(table& tool)
+{
+    const auto ensure = [&tool](const char* key, double value) {
+        if (!tool.count(key))
+            tool[key] = value;
+    };
+
+    ensure("fLineVel", 10.0);
+    ensure("fCutAcc", 100.0);
+    ensure("fCutJerk", 1000.0);
+    ensure("fIdelAcc", 100.0);
+    ensure("fIdelJerk", 1000.0);
+    ensure("fXVel", 10.0);
+    ensure("fYVel", 10.0);
+    ensure("fZVel", 10.0);
+    ensure("fAVel", 10.0);
+    ensure("fA1Vel", 10.0);
+    ensure("fCVel", 10.0);
+    ensure("fX1Vel", 10.0);
+    ensure("fY1Vel", 10.0);
+}
+
 QVariant variantFromToml(const toml::value& value, const QVariant& fallback)
 {
     if (value.is_boolean()) return value.as_boolean();
@@ -181,6 +206,7 @@ void ProcessSettingsService::seedDefaults()
     tool["fCuttingHeight"] = 0.0; tool["fIdleHeight"] = 0.0;
     tool["fEnergy"] = 20.0; tool["fFrequency"] = 30; tool["fPluse"] = 20;
     tool["fBeforeOpenLaser"] = 0.0; tool["fAfterCloseLaser"] = 0.0;
+    ensureToolMotionDefaults(tool);
     toolSection["Default"] = tool;
     // Keep every domain structurally valid even when it has no fields yet.
     sectionRef(ProcessConfigArea::Devices, QStringLiteral("Internet"));
@@ -295,7 +321,10 @@ bool ProcessSettingsService::initialize()
                     if (toolIt == settings.end() || !toolIt->second.is_table()) continue;
                     const auto named = toolIt->second.as_table().find(name.toStdString());
                     if (named == toolIt->second.as_table().end()) continue;
-                    sectionRef(ProcessConfigArea::Tools)[name.toStdString()] = named->second;
+                    if (!named->second.is_table()) continue;
+                    table configuredTool = named->second.as_table();
+                    ensureToolMotionDefaults(configuredTool);
+                    sectionRef(ProcessConfigArea::Tools)[name.toStdString()] = configuredTool;
                     m_toolIds.insert(name, id);
                 }
             }

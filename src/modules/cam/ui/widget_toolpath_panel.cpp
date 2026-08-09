@@ -69,6 +69,14 @@ void WidgetToolpathPanel::buildUi()
 
     mainLayout->addWidget(paramGroup);
 
+    // 中文翻译：工程加工模式
+    auto* setupGroup = new QGroupBox(tr("Project machining mode"), this);
+    auto* setupForm = new QFormLayout(setupGroup);
+    m_comboMachiningMode = new QComboBox(setupGroup);
+    // 中文翻译：加工模式:
+    setupForm->addRow(tr("Machining mode:"), m_comboMachiningMode);
+    mainLayout->addWidget(setupGroup);
+
     // ── 面分类 group ───────────────────────────────────────────────────────
     // 中文翻译：全局面分类
     auto* classGroup = new QGroupBox(tr("Overall situation classification"), this);
@@ -182,8 +190,11 @@ void WidgetToolpathPanel::buildUi()
     auto* coordGroup  = new QGroupBox(tr("current profile"), m_machineCoordinatesPage);
     auto* coordLayout = new QVBoxLayout(coordGroup);
 
-    m_coordTable = new QTableWidget(0, 6, coordGroup);
-    m_coordTable->setHorizontalHeaderLabels({tr("#"), tr("X"), tr("Y"), tr("Z"), tr("R1"), tr("R2")});
+    // Axis columns are supplied by MachineAxisLayout after the active machine
+    // mode is known; never expose a synthetic R1/R2 layout while initializing.
+    // 中文翻译：轴列由当前模式的 MachineAxisLayout 动态提供，初始化时不显示虚构的 R1/R2。
+    m_coordTable = new QTableWidget(0, 1, coordGroup);
+    m_coordTable->setHorizontalHeaderLabels({tr("#")});
     m_coordTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_coordTable->verticalHeader()->setVisible(false);
     m_coordTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -215,7 +226,11 @@ void WidgetToolpathPanel::buildUi()
             this, &WidgetToolpathPanel::buildToolpathRequested);
     connect(m_btnSolveMachinePath, &QPushButton::clicked,
             this, &WidgetToolpathPanel::solveMachinePathRequested);
-
+    connect(m_comboMachiningMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+                if (index >= 0) emit machiningModeChanged(
+                    static_cast<lcnc::MachiningMode>(m_comboMachiningMode->itemData(index).toInt()));
+            });
     connect(m_spinLeadInLength, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::leadInLengthChanged);
     connect(m_spinDeflection,   QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -366,6 +381,47 @@ void WidgetToolpathPanel::setNormalSampleStep(double mm)
     m_spinNormalStep->setValue(mm);
 }
 
+void WidgetToolpathPanel::setMachiningModes(const QList<lcnc::MachiningMode>& modes,
+                                            lcnc::MachiningMode currentMode)
+{
+    const QSignalBlocker blocker(m_comboMachiningMode);
+    m_comboMachiningMode->clear();
+    for (lcnc::MachiningMode mode : modes) {
+        QString name;
+        switch (mode) {
+        case lcnc::MachiningMode::Planar3Axis:
+            // 中文翻译：三轴平面加工
+            name = tr("Planar 3-axis"); break;
+        case lcnc::MachiningMode::RotaryTube4Axis:
+            // 中文翻译：四轴管材加工
+            name = tr("Rotary tube 4-axis"); break;
+        case lcnc::MachiningMode::SimultaneousTable5Axis:
+            // 中文翻译：转台五轴联动
+            name = tr("Simultaneous table 5-axis"); break;
+        case lcnc::MachiningMode::SimultaneousHead5Axis:
+            // 中文翻译：摆头五轴联动
+            name = tr("Simultaneous head 5-axis"); break;
+        }
+        m_comboMachiningMode->addItem(name, static_cast<int>(mode));
+    }
+    const int index = m_comboMachiningMode->findData(static_cast<int>(currentMode));
+    if (index >= 0) m_comboMachiningMode->setCurrentIndex(index);
+}
+
+void WidgetToolpathPanel::setMachineAxisLayout(const lcnc::MachineAxisLayout& layout)
+{
+    m_machineAxisLayout = layout;
+    QStringList headers{tr("#")};
+    headers.append(layout.axisNames());
+    m_coordTable->setColumnCount(headers.size());
+    m_coordTable->setHorizontalHeaderLabels(headers);
+}
+
+void WidgetToolpathPanel::setMachineSetupEditingEnabled(bool enabled)
+{
+    if (m_comboMachiningMode) m_comboMachiningMode->setEnabled(enabled);
+}
+
 double WidgetToolpathPanel::leadInLength() const
 {
     return m_spinLeadInLength ? m_spinLeadInLength->value() : 5.0;
@@ -398,26 +454,15 @@ void WidgetToolpathPanel::showContourCoordinates(int contourIndex)
     const int n = static_cast<int>(c.points.size());
     m_coordTable->setRowCount(n);
 
-    // Update R1/R2 header labels from first valid point
-    if (n > 0 && c.points[0].machineCoord.valid) {
-        const auto& mc = c.points[0].machineCoord;
-        QStringList headers = {tr("#"), tr("X"), tr("Y"), tr("Z"),
-                               mc.r1Name.isEmpty() ? tr("R1") : mc.r1Name,
-                               mc.r2Name.isEmpty() ? tr("R2") : mc.r2Name};
-        m_coordTable->setHorizontalHeaderLabels(headers);
-    }
-
     for (int i = 0; i < n; ++i) {
         const auto& mc = c.points[i].machineCoord;
         m_coordTable->setItem(i, 0, new QTableWidgetItem(QString::number(i + 1)));
         if (mc.valid) {
-            m_coordTable->setItem(i, 1, new QTableWidgetItem(QString::number(mc.x, 'f', 3)));
-            m_coordTable->setItem(i, 2, new QTableWidgetItem(QString::number(mc.y, 'f', 3)));
-            m_coordTable->setItem(i, 3, new QTableWidgetItem(QString::number(mc.z, 'f', 3)));
-            m_coordTable->setItem(i, 4, new QTableWidgetItem(QString::number(mc.r1, 'f', 3)));
-            m_coordTable->setItem(i, 5, new QTableWidgetItem(QString::number(mc.r2, 'f', 3)));
+            for (int axisIndex = 0; axisIndex < m_machineAxisLayout.count; ++axisIndex)
+                m_coordTable->setItem(i, axisIndex + 1,
+                    new QTableWidgetItem(QString::number(mc.solvedPose.value(axisIndex), 'f', 3)));
         } else {
-            for (int col = 1; col <= 5; ++col)
+            for (int col = 1; col < m_coordTable->columnCount(); ++col)
                 m_coordTable->setItem(i, col, new QTableWidgetItem(tr("--")));
         }
     }

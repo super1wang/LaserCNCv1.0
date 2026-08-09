@@ -176,38 +176,46 @@ void WidgetMachinePanel::buildWorkpiecePage()
     if (!mainLayout)
         return;
 
-    // 中文翻译：工件安装位置
-    m_installGroup = new QGroupBox(tr("Workpiece installation position"), m_configPage);
+    // 中文翻译：工件安装姿态
+    m_installGroup = new QGroupBox(tr("Workpiece setup"), m_configPage);
     auto* installLayout = new QFormLayout(m_installGroup);
     installLayout->setContentsMargins(6, 6, 6, 6);
     installLayout->setSpacing(6);
-    // 中文翻译：自动安装工件
-    m_chkAutoInstallWorkpiece = new QCheckBox(tr("Automatically install workpieces"), m_installGroup);
-    m_wpcInstallX = createMillimeterSpin(m_installGroup);
-    m_wpcInstallY = createMillimeterSpin(m_installGroup);
-    m_wpcInstallZ = createMillimeterSpin(m_installGroup);
-    // 中文翻译：对齐旋转中心
-    m_btnAlignRotationCenter = new QPushButton(tr("Align center of rotation"), m_installGroup);
+    // 中文翻译：自动挂载工件
+    m_chkAutoInstallWorkpiece = new QCheckBox(tr("Automatically mount workpieces"), m_installGroup);
+    const QStringList setupLabels = {
+        tr("Setup X:"), tr("Setup Y:"), tr("Setup Z:"),
+        tr("Rotation X:"), tr("Rotation Y:"), tr("Rotation Z:")};
+    for (int index = 0; index < 6; ++index) {
+        m_workpieceSetupEditors[index] = createMillimeterSpin(m_installGroup);
+        if (index >= 3) {
+            m_workpieceSetupEditors[index]->setRange(-360.0, 360.0);
+            m_workpieceSetupEditors[index]->setSuffix(tr(" °"));
+        }
+    }
+    // 中文翻译：将安装原点设为旋转中心
+    m_btnAlignRotationCenter = new QPushButton(tr("Set setup origin to rotation center"), m_installGroup);
     installLayout->addRow(m_chkAutoInstallWorkpiece);
-    // 中文翻译：安装 X:
-    installLayout->addRow(tr("Install X:"), m_wpcInstallX);
-    // 中文翻译：安装 Y:
-    installLayout->addRow(tr("Install Y:"), m_wpcInstallY);
-    // 中文翻译：安装 Z:
-    installLayout->addRow(tr("Install Z:"), m_wpcInstallZ);
+    for (int index = 0; index < 6; ++index)
+        installLayout->addRow(setupLabels[index], m_workpieceSetupEditors[index]);
     installLayout->addRow(m_btnAlignRotationCenter);
+    auto* installHint = new QLabel(
+        // 中文翻译：这是 CAD 工件坐标到夹具零位的唯一刚体变换。它同时驱动模型显示和机床坐标，修改后需要重新计算刀路。
+        tr("This is the only rigid transform from CAD workpiece coordinates to the fixture zero. It drives both model display and machine coordinates; recalculate the toolpath after a change."),
+        m_installGroup);
+    installHint->setWordWrap(true);
+    installHint->setStyleSheet("color:#666;");
+    installLayout->addRow(installHint);
     mainLayout->addWidget(m_installGroup);
 
     connect(m_chkAutoInstallWorkpiece, &QCheckBox::toggled,
         this, &WidgetMachinePanel::autoInstallWorkpieceChanged);
     connect(m_btnAlignRotationCenter, &QPushButton::clicked,
-        this, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested);
-    connect(m_wpcInstallX, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-        this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
-    connect(m_wpcInstallY, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-        this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
-    connect(m_wpcInstallZ, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-        this, &WidgetMachinePanel::onWorkpieceInstallPositionChanged);
+        this, &WidgetMachinePanel::alignWorkpieceSetupToRotationCenterRequested);
+    for (QDoubleSpinBox* editor : m_workpieceSetupEditors) {
+        connect(editor, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, &WidgetMachinePanel::onWorkpieceSetupChanged);
+    }
 }
 
 void WidgetMachinePanel::refreshCalibrationSection()
@@ -432,25 +440,16 @@ void WidgetMachinePanel::rebuildWpcSection()
         m_chkAutoInstallWorkpiece->setEnabled(hasPreset);
     }
 
-    if (m_wpcInstallX && m_wpcInstallY && m_wpcInstallZ) {
-        const gp_Pnt installPosition = lcnc::Kernel::current().service<CamModule>()->workpieceInstallPosition();
-        {
-            const QSignalBlocker blockerX(m_wpcInstallX);
-            m_wpcInstallX->setValue(installPosition.X());
+    if (m_workpieceSetupEditors[0]) {
+        const lcnc::WorkpieceSetupTransform setup =
+            lcnc::Kernel::current().service<CamModule>()->workpieceSetupTransform();
+        const std::array<double, 6> values{setup.x, setup.y, setup.z,
+            setup.rotationXDeg, setup.rotationYDeg, setup.rotationZDeg};
+        for (int index = 0; index < 6; ++index) {
+            const QSignalBlocker blocker(m_workpieceSetupEditors[index]);
+            m_workpieceSetupEditors[index]->setValue(values[index]);
+            m_workpieceSetupEditors[index]->setEnabled(hasPreset);
         }
-        {
-            const QSignalBlocker blockerY(m_wpcInstallY);
-            m_wpcInstallY->setValue(installPosition.Y());
-        }
-        {
-            const QSignalBlocker blockerZ(m_wpcInstallZ);
-            m_wpcInstallZ->setValue(installPosition.Z());
-        }
-
-        const bool enabled = hasPreset;
-        m_wpcInstallX->setEnabled(enabled);
-        m_wpcInstallY->setEnabled(enabled);
-        m_wpcInstallZ->setEnabled(enabled);
     }
 
     if (m_installGroup)
@@ -460,14 +459,14 @@ void WidgetMachinePanel::rebuildWpcSection()
         m_btnAlignRotationCenter->setVisible(showRotationButton);
         m_btnAlignRotationCenter->setEnabled(showRotationButton && hasPreset);
         if (configType == QStringLiteral("VERTICAL_AC_TABLE")) {
-            // 中文翻译：将安装位置 X/Y 回填为 AC 旋转中心。
-            m_btnAlignRotationCenter->setToolTip(tr("Backfill the mounting position X/Y to the AC rotation center."));
+            // 中文翻译：将安装原点回填为 AC 旋转中心。
+            m_btnAlignRotationCenter->setToolTip(tr("Set the setup origin to the AC center of rotation."));
         } else if (configType == QStringLiteral("VERTICAL_BC_TABLE")) {
-            // 中文翻译：将安装位置 X/Y 回填为 BC 旋转中心。
-            m_btnAlignRotationCenter->setToolTip(tr("Backfill the mounting position X/Y to the BC center of rotation."));
+            // 中文翻译：将安装原点回填为 BC 旋转中心。
+            m_btnAlignRotationCenter->setToolTip(tr("Set the setup origin to the BC center of rotation."));
         } else if (configType == QStringLiteral("XYZA")) {
-            // 中文翻译：将安装位置 X/Y 回填为 A 转台中心。
-            m_btnAlignRotationCenter->setToolTip(tr("Backfill the installation position X/Y to the A turntable center."));
+            // 中文翻译：将安装原点回填为 A 转台中心。
+            m_btnAlignRotationCenter->setToolTip(tr("Set the setup origin to the A turntable center."));
         } else {
             m_btnAlignRotationCenter->setToolTip(QString());
         }
@@ -541,10 +540,10 @@ void WidgetMachinePanel::onCutterHeadPhysicalEditorChanged()
         m_headPhysicalZ ? m_headPhysicalZ->value() : 0.0);
 }
 
-void WidgetMachinePanel::onWorkpieceInstallPositionChanged()
+void WidgetMachinePanel::onWorkpieceSetupChanged()
 {
-    emit workpieceInstallPositionChanged(
-        m_wpcInstallX ? m_wpcInstallX->value() : 0.0,
-        m_wpcInstallY ? m_wpcInstallY->value() : 0.0,
-        m_wpcInstallZ ? m_wpcInstallZ->value() : 0.0);
+    emit workpieceSetupChanged(
+        m_workpieceSetupEditors[0]->value(), m_workpieceSetupEditors[1]->value(),
+        m_workpieceSetupEditors[2]->value(), m_workpieceSetupEditors[3]->value(),
+        m_workpieceSetupEditors[4]->value(), m_workpieceSetupEditors[5]->value());
 }

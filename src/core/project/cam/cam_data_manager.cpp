@@ -100,6 +100,7 @@ void CamDataManager::clearToolpath(bool resetIds)
     m_layerContainer.clearManualOrder();
     m_layerContainer.setSortStrategy(CuttingPlanSortStrategy::LayerThenContour);
     m_layerContainer.setLastAutoSortAxis(AutoSortAxis::XPos);
+    m_solvedMachineConfigurationFingerprint.clear();
     clearPipelineStages();
     if (resetIds) {
         m_nextContourId = 1;

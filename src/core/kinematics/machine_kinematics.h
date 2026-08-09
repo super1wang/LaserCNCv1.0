@@ -9,6 +9,8 @@
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
+#include "core/kinematics/machine_topology.h"
+
 /**
  * @brief Definition of one kinematic axis of the machine.
  */
@@ -23,6 +25,7 @@ struct MachineAxisDef
     double     minVal{-999.0};       ///< travel limit (mm or °)
     double     maxVal{ 999.0};
     QString    parentAxis;           ///< kinematic parent; empty = world
+    lcnc::MachineAxisRole role{lcnc::MachineAxisRole::Unspecified}; ///< semantic role used by solver selection
     double     currentPos{0.0};      ///< current commanded position
 };
 
@@ -77,6 +80,7 @@ public:
     gp_Trsf computeShapeTransform(const QString& labelEntry) const;
     /// World transform for a mounted workpiece at current axis positions.
     gp_Trsf computeWpcTransform(const QString& wpcEntry)     const;
+    void setWorkpieceSetupTransform(const gp_Trsf& transform);
     /// World transform for an axis node at current axis positions.
     gp_Trsf computeAxisTransform(const QString& axisName) const;
 
@@ -113,4 +117,5 @@ private:
     QList<MachineAxisDef> m_axes;
     QMap<QString,QString> m_shapeToAxis;   ///< labelEntry → axisName (machine parts)
     QMap<QString,QString> m_wpcToAxis;     ///< wpcEntry   → axisName (workpieces)
+    gp_Trsf               m_workpieceSetupTransform;
 };

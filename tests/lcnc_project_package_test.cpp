@@ -2,12 +2,14 @@
 #include "core/project/lcnc_project_package.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/project/lcnc_project_session.h"
+#include "core/project/cam/cam_data_manager.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QSaveFile>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -137,22 +139,52 @@ int main(int argc, char* argv[])
     installSnapshotExtension();
 
     auto source = LcncDocument::createStandalone(1, QStringLiteral("Source"));
+    lcnc::cam::CamDataManager sourceCam;
+    sourceCam.setMachiningMode(lcnc::MachiningMode::RotaryTube4Axis);
+    lcnc::MachineAxisLayout sourceLayout;
+    sourceLayout.append(QStringLiteral("X"), lcnc::MachineAxisRole::LinearX);
+    sourceLayout.append(QStringLiteral("Y"), lcnc::MachineAxisRole::LinearY);
+    sourceLayout.append(QStringLiteral("Z"), lcnc::MachineAxisRole::LinearZ);
+    sourceLayout.append(QStringLiteral("A"), lcnc::MachineAxisRole::WorkpieceRotary);
+    sourceCam.setMachineAxisLayout(sourceLayout);
+    sourceCam.setSolverId(QStringLiteral("RotaryTube4Axis"));
+    sourceCam.setSolverVersion(lcnc::machiningModeSolverVersion(
+        lcnc::MachiningMode::RotaryTube4Axis));
+    sourceCam.setSolvedMachineConfigurationFingerprint(QStringLiteral("test-fingerprint"));
+    LaserContour persistedContour;
+    persistedContour.contourId = 1;
+    persistedContour.name = QStringLiteral("v5-contract");
+    ToolpathPoint persistedPoint;
+    persistedPoint.position = gp_Pnt(1.0, 2.0, 3.0);
+    persistedPoint.normal = gp_Dir(0.0, 0.0, 1.0);
+    persistedPoint.machineCoord.valid = true;
+    persistedPoint.machineCoord.solvedPose.activeMask = 0x0f;
+    persistedPoint.machineCoord.solvedPose.valid = true;
+    persistedPoint.machineCoord.solvedPose.values = {1.0, 2.0, 3.0, 45.0, 0.0};
+    persistedContour.points.push_back(persistedPoint);
+    sourceCam.toolpath().contours().push_back(persistedContour);
+    sourceCam.ensureToolpathLayers();
     const QString packagePath = QDir(temporary.path()).filePath(QStringLiteral("roundtrip.lcnc"));
     QString error;
-    if (!lcnc::LcncProjectPackage::save(*source, nullptr, nullptr, packagePath,
-                                        lcnc::ProjectSaveOptions{}, &error))
-        return fail(QStringLiteral("v4 save failed: %1").arg(error));
+    lcnc::LcncProjectManifest manifest;
+    if (!lcnc::LcncProjectPackage::save(*source, nullptr, nullptr, packagePath, manifest,
+                                        lcnc::ProjectSaveOptions{}, nullptr, &error, &sourceCam))
+        return fail(QStringLiteral("v5 save failed: %1").arg(error));
 
     auto target = LcncDocument::createStandalone(2, QStringLiteral("Target"));
+    lcnc::cam::CamDataManager restoredCam;
     lcnc::ProjectLoadResult loadResult;
     if (!lcnc::LcncProjectPackage::load(*target, nullptr, nullptr, packagePath,
-                                        &loadResult, &error))
-        return fail(QStringLiteral("v4 load failed: %1").arg(error));
+                                        &loadResult, &error, &restoredCam))
+        return fail(QStringLiteral("v5 load failed: %1").arg(error));
     if (loadResult.manifest.formatVersion != lcnc::LcncProjectManifest::kCurrentFormatVersion
-        || restoredSnapshot != expectedSnapshot)
-        return fail(QStringLiteral("v4 package did not preserve the required tool snapshot"));
+        || restoredSnapshot != expectedSnapshot
+        || restoredCam.machiningMode() != lcnc::MachiningMode::RotaryTube4Axis
+        || restoredCam.machineAxisLayout() != sourceLayout
+        || restoredCam.solvedMachineConfigurationFingerprint() != QStringLiteral("test-fingerprint"))
+        return fail(QStringLiteral("v5 package did not preserve the required tool snapshot"));
 
-    // A v4 package must never be produced without its declared project resource.
+    // A v5 package must never be produced without its declared project resource.
     QFile originalFile(packagePath);
     if (!originalFile.open(QIODevice::ReadOnly))
         return fail(QStringLiteral("Cannot read the existing package before negative save"));
@@ -160,15 +192,23 @@ int main(int argc, char* argv[])
     originalFile.close();
 
     lcnc::LcncProjectPackage::setExtension({});
-    if (lcnc::LcncProjectPackage::save(*source, nullptr, nullptr, packagePath,
-                                       lcnc::ProjectSaveOptions{}, &error))
-        return fail(QStringLiteral("v4 save unexpectedly allowed a missing tool snapshot"));
+    if (lcnc::LcncProjectPackage::save(*source, nullptr, nullptr, packagePath, manifest,
+                                       lcnc::ProjectSaveOptions{}, nullptr, &error, &sourceCam))
+        return fail(QStringLiteral("v5 save unexpectedly allowed a missing tool snapshot"));
     if (!originalFile.open(QIODevice::ReadOnly)
         || QCryptographicHash::hash(originalFile.readAll(), QCryptographicHash::Sha256) != originalDigest)
-        return fail(QStringLiteral("failed v4 save modified the existing package"));
+        return fail(QStringLiteral("failed v5 save modified the existing package"));
 
-    // Historical packages are intentionally rejected rather than migrated.
-    for (const int legacyVersion : {1, 2, 3}) {
+    const QString suppliedTools = QDir(temporary.path()).filePath(QStringLiteral("supplied-tools.toml"));
+    {
+        QSaveFile toolsFile(suppliedTools);
+        if (!toolsFile.open(QIODevice::WriteOnly) || toolsFile.write(expectedSnapshot) != expectedSnapshot.size()
+            || !toolsFile.commit())
+            return fail(QStringLiteral("Cannot create supplied migration tool snapshot"));
+    }
+
+    // Desktop rejects historical packages; the isolated utility creates a new v5 package.
+    for (const int legacyVersion : {1, 2, 3, 4}) {
         installSnapshotExtension();
         const QString legacyPath = QDir(temporary.path()).filePath(
             QStringLiteral("legacy-v%1.lcnc").arg(legacyVersion));
@@ -179,6 +219,24 @@ int main(int argc, char* argv[])
         if (lcnc::LcncProjectPackage::load(*rejectedWorkpiece, nullptr, nullptr,
                                             legacyPath, nullptr, &error))
             return fail(QStringLiteral("v%1 package was unexpectedly accepted").arg(legacyVersion));
+
+        const QString upgradedPath = QDir(temporary.path()).filePath(
+            QStringLiteral("legacy-v%1-upgraded.lcnc").arg(legacyVersion));
+        const QString upgrader = QString::fromUtf8(LCNC_PROJECT_UPGRADE_PATH);
+        QProcess process;
+        process.start(upgrader, {legacyPath, upgradedPath, QStringLiteral("--tools"), suppliedTools});
+        if (!process.waitForFinished(30000) || process.exitStatus() != QProcess::NormalExit
+            || process.exitCode() != 0)
+            return fail(QStringLiteral("v%1 upgrade failed: %2").arg(legacyVersion)
+                        .arg(QString::fromLocal8Bit(process.readAllStandardError())));
+        auto upgradedWorkpiece = LcncDocument::createStandalone(50 + legacyVersion, QStringLiteral("Upgraded"));
+        lcnc::ProjectLoadResult upgradedResult;
+        installSnapshotExtension();
+        if (!lcnc::LcncProjectPackage::load(*upgradedWorkpiece, nullptr, nullptr,
+                                            upgradedPath, &upgradedResult, &error)
+            || upgradedResult.manifest.formatVersion != 5)
+            return fail(QStringLiteral("v%1 upgraded package did not load as v5: %2")
+                        .arg(legacyVersion).arg(error));
     }
 
     return 0;

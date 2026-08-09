@@ -26,27 +26,18 @@
 class IKSolver
 {
 public:
-    /// Solve inverse kinematics for a single toolpath point.
-    /// @param kinematics  Machine model (provides config type, axis defs, directions)
-    /// @param toolPos     Desired tool-tip position in world frame (mm)
-    /// @param toolDir     Desired tool direction in world frame (surface normal, pointing outward)
-    /// @return MachineCoord with axis values; valid=false on failure.
-    static MachineCoord solve(const MachineKinematics* kinematics,
-                              const gp_Pnt& toolPos,
-                              const gp_Dir& toolDir);
-
-    /// Solve IK for a point while preserving rotary-axis continuity relative to previous point.
-    /// @param previous Previous valid machine coordinate in the same contour; may be nullptr.
-    static MachineCoord solveContinuous(const MachineKinematics* kinematics,
-                                        const gp_Pnt& toolPos,
-                                        const gp_Dir& toolDir,
-                                        const MachineCoord* previous);
+    /// Explicit table-tilt solve. Axis selection is supplied by semantic role;
+    /// this API never infers a solver from missing axes or configuration text.
+    static MachineCoord solveTableContinuous(const MachineKinematics* kinematics,
+                                             const gp_Pnt& toolPos,
+                                             const gp_Dir& toolDir,
+                                             const QString& childSpinAxisName,
+                                             const QString& parentTiltAxisName,
+                                             const MachineCoord* previous = nullptr);
 
 private:
     IKSolver() = delete;
 
-    /// Solve for table-tilt configurations (AC_TABLE / BC_TABLE).
-    /// The two rotary axes carry the workpiece; tool axis is fixed along −Z.
     static MachineCoord solveTableType(const MachineKinematics* kin,
                                        const gp_Pnt& toolPos,
                                        const gp_Dir& toolDir,

@@ -17,7 +17,7 @@
  *     useFaceClassification / showNormals / normalSampleStep
  *   - machineProfile（按机台 absolute 路径分组，array of tables）：
  *     axisOrigins、cutterHeadModelPosition、cutterHeadPhysicalPosition、
- *     workpieceInstallPosition
+ *     legacy workpieceInstallPosition (read only for one-time migration)
  *
  * 由 CamModule 在初始化时构造并通过 @ref loadDefault 装载。
  * Only the current TOML configuration is accepted.
@@ -89,10 +89,12 @@ public:
     void setCutterHeadPhysicalPositionForMachine(const QString& machinePath,
                                                  const gp_Pnt& position);
 
+    /// Legacy v4 machine-profile value.  It is accepted only to migrate XYZ
+    /// into MachineConfigurationService::WorkpieceSetupTransform and is never
+    /// written back to cam.toml.
     bool workpieceInstallPositionForMachine(const QString& machinePath,
                                             gp_Pnt* outPosition) const;
-    void setWorkpieceInstallPositionForMachine(const QString& machinePath,
-                                               const gp_Pnt& position);
+    void clearLegacyWorkpieceInstallPositionForMachine(const QString& machinePath);
 
     /// 标定位的物理 A/C 角度（度）。已记录返回 true，否则保持 outA/outC 不变。
     bool acAngleOffsetForMachine(const QString& machinePath,
@@ -122,7 +124,7 @@ private:
         gp_Pnt cutterHeadModelPosition;
         bool hasCutterHeadPhysical{false};
         gp_Pnt cutterHeadPhysicalPosition;
-        bool hasWorkpieceInstallPosition{false};
+        bool hasWorkpieceInstallPosition{false}; // legacy input only
         gp_Pnt workpieceInstallPosition;
         bool hasAcAngleOffset{false};
         double acAngleOffsetA{0.0};

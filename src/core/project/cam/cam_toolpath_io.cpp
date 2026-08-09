@@ -28,11 +28,11 @@ namespace {
 
 constexpr char kCamToolpathTomlFile[]   = "cam_toolpath.toml";
 constexpr char kCamToolpathPointsFile[] = "cam_toolpath_points.bin";
-constexpr int  kCamToolpathSchemaVersion = 4;
+constexpr int  kCamToolpathSchemaVersion = 5;
 
 // 二进制点集 magic 头（"LCNCTPT1"）。
 constexpr quint64 kPointsBinMagic = 0x315450434E434C00ull;
-constexpr quint32 kPointsBinVersion = 4;
+constexpr quint32 kPointsBinVersion = 5;
 
 QString camToolpathTomlPath(const QString& packageDir)
 {
@@ -90,8 +90,72 @@ AutoSortAxis autoSortAxisFromString(const QString& s, AutoSortAxis def)
 
 // ---- 二进制点集 IO ----------------------------------------------------------
 
+SolvedMachinePose canonicalPose(const MachineCoord& coord, const MachineAxisLayout& layout)
+{
+    if (coord.solvedPose.valid || !coord.solvedPose.failureReason.isEmpty())
+        return coord.solvedPose;
+    SolvedMachinePose result;
+    result.valid = coord.valid;
+    for (int index = 0; index < layout.count; ++index) {
+        const MachineAxisSlot& axis = layout.axes[index];
+        double value = 0.0;
+        switch (axis.role) {
+        case MachineAxisRole::LinearX: value = coord.x; break;
+        case MachineAxisRole::LinearY: value = coord.y; break;
+        case MachineAxisRole::LinearZ: value = coord.z; break;
+        default:
+            if (axis.name.compare(coord.r1Name, Qt::CaseInsensitive) == 0) value = coord.r1;
+            else if (axis.name.compare(coord.r2Name, Qt::CaseInsensitive) == 0) value = coord.r2;
+            break;
+        }
+        result.setValue(index, value);
+    }
+    return result;
+}
+
+void restoreLegacyPose(MachineCoord& coord, const MachineAxisLayout& layout)
+{
+    coord.valid = coord.solvedPose.valid;
+    int rotarySlot = 0;
+    for (int index = 0; index < layout.count; ++index) {
+        const double value = coord.solvedPose.value(index);
+        switch (layout.axes[index].role) {
+        case MachineAxisRole::LinearX: coord.x = value; break;
+        case MachineAxisRole::LinearY: coord.y = value; break;
+        case MachineAxisRole::LinearZ: coord.z = value; break;
+        default:
+            if (rotarySlot == 0) { coord.r1 = value; coord.r1Name = layout.axes[index].name; }
+            else if (rotarySlot == 1) { coord.r2 = value; coord.r2Name = layout.axes[index].name; }
+            ++rotarySlot;
+            break;
+        }
+    }
+}
+
+void writeMachinePose(QDataStream& stream, const MachineCoord& coord,
+                      const MachineAxisLayout& layout)
+{
+    const SolvedMachinePose pose = canonicalPose(coord, layout);
+    for (double value : pose.values) stream << value;
+    stream << static_cast<quint8>(pose.activeMask)
+           << static_cast<quint8>(pose.valid ? 1 : 0)
+           << pose.failureReason;
+}
+
+void readMachinePose(QDataStream& stream, MachineCoord& coord,
+                     const MachineAxisLayout& layout)
+{
+    for (double& value : coord.solvedPose.values) stream >> value;
+    quint8 mask = 0, valid = 0;
+    stream >> mask >> valid >> coord.solvedPose.failureReason;
+    coord.solvedPose.activeMask = mask;
+    coord.solvedPose.valid = valid != 0;
+    restoreLegacyPose(coord, layout);
+}
+
 bool writePointsBin(const QString& filePath,
                     const std::vector<LaserContour>& contours,
+                    const MachineAxisLayout& layout,
                     QString* errorMsg)
 {
     QFile f(filePath);
@@ -121,10 +185,7 @@ bool writePointsBin(const QString& filePath,
             ds << static_cast<quint8>(p.crossSectionNormalValid ? 1 : 0);
             ds << p.tangent.X()  << p.tangent.Y()  << p.tangent.Z();
             ds << p.param << static_cast<qint32>(p.sourceEdgeIndex);
-            ds << p.machineCoord.x << p.machineCoord.y << p.machineCoord.z;
-            ds << p.machineCoord.r1 << p.machineCoord.r2;
-            ds << p.machineCoord.r1Name << p.machineCoord.r2Name;
-            ds << static_cast<quint8>(p.machineCoord.valid ? 1 : 0);
+            writeMachinePose(ds, p.machineCoord, layout);
         }
         ds << static_cast<quint8>(c.leadInSolution.valid ? 1 : 0);
         if (c.leadInSolution.valid) {
@@ -137,10 +198,7 @@ bool writePointsBin(const QString& filePath,
             ds << static_cast<quint8>(p.crossSectionNormalValid ? 1 : 0);
             ds << p.tangent.X()  << p.tangent.Y()  << p.tangent.Z();
             ds << p.param << static_cast<qint32>(p.sourceEdgeIndex);
-            ds << p.machineCoord.x << p.machineCoord.y << p.machineCoord.z;
-            ds << p.machineCoord.r1 << p.machineCoord.r2;
-            ds << p.machineCoord.r1Name << p.machineCoord.r2Name;
-            ds << static_cast<quint8>(p.machineCoord.valid ? 1 : 0);
+            writeMachinePose(ds, p.machineCoord, layout);
         }
     }
     return ds.status() == QDataStream::Ok;
@@ -149,6 +207,7 @@ bool writePointsBin(const QString& filePath,
 bool readPointsBin(const QString& filePath,
                    QHash<std::uint64_t, std::vector<ToolpathPoint>>& pointsByContourId,
                    QHash<std::uint64_t, LeadInSolution>& leadInsByContourId,
+                   const MachineAxisLayout& layout,
                    QString* errorMsg)
 {
     QFile f(filePath);
@@ -185,16 +244,12 @@ bool readPointsBin(const QString& filePath,
         for (quint32 k = 0; k < pointCount; ++k) {
             double px, py, pz, nx, ny, nz, tx, ty, tz, par;
             double cnx = 0.0, cny = 0.0, cnz = 1.0;
-            double mx, my, mz, r1, r2;
-            QString r1Name, r2Name;
-            quint8 valid = 0;
             quint8 crossValid = 0;
             qint32 sourceEdgeIndex = -1;
             ds >> px >> py >> pz >> nx >> ny >> nz;
             ds >> cnx >> cny >> cnz >> crossValid;
             ds >> tx >> ty >> tz >> par;
             ds >> sourceEdgeIndex;
-            ds >> mx >> my >> mz >> r1 >> r2 >> r1Name >> r2Name >> valid;
             ToolpathPoint tp;
             tp.position = gp_Pnt(px, py, pz);
             tp.normal   = gp_Dir(nx, ny, nz);
@@ -203,14 +258,7 @@ bool readPointsBin(const QString& filePath,
             tp.tangent  = gp_Dir(tx, ty, tz);
             tp.param    = par;
             tp.sourceEdgeIndex = sourceEdgeIndex;
-            tp.machineCoord.x = mx;
-            tp.machineCoord.y = my;
-            tp.machineCoord.z = mz;
-            tp.machineCoord.r1 = r1;
-            tp.machineCoord.r2 = r2;
-            tp.machineCoord.r1Name = r1Name;
-            tp.machineCoord.r2Name = r2Name;
-            tp.machineCoord.valid  = (valid != 0);
+            readMachinePose(ds, tp.machineCoord, layout);
             pts.push_back(std::move(tp));
         }
         pointsByContourId.insert(static_cast<std::uint64_t>(contourId), std::move(pts));
@@ -219,15 +267,13 @@ bool readPointsBin(const QString& filePath,
         ds >> leadValid;
         if (leadValid != 0) {
                 double px, py, pz, nx, ny, nz, tx, ty, tz, par;
-                double cnx, cny, cnz, mx, my, mz, r1, r2;
-                QString r1Name, r2Name;
-                quint8 crossValid = 0, machineValid = 0;
+                double cnx, cny, cnz;
+                quint8 crossValid = 0;
                 qint32 sourceEdgeIndex = -1;
                 ds >> px >> py >> pz >> nx >> ny >> nz;
                 ds >> cnx >> cny >> cnz >> crossValid;
                 ds >> tx >> ty >> tz >> par;
                 ds >> sourceEdgeIndex;
-                ds >> mx >> my >> mz >> r1 >> r2 >> r1Name >> r2Name >> machineValid;
                 LeadInSolution solution;
                 solution.point.position = gp_Pnt(px, py, pz);
                 solution.point.normal = gp_Dir(nx, ny, nz);
@@ -236,14 +282,7 @@ bool readPointsBin(const QString& filePath,
                 solution.point.tangent = gp_Dir(tx, ty, tz);
                 solution.point.param = par;
                 solution.point.sourceEdgeIndex = sourceEdgeIndex;
-                solution.point.machineCoord.x = mx;
-                solution.point.machineCoord.y = my;
-                solution.point.machineCoord.z = mz;
-                solution.point.machineCoord.r1 = r1;
-                solution.point.machineCoord.r2 = r2;
-                solution.point.machineCoord.r1Name = r1Name;
-                solution.point.machineCoord.r2Name = r2Name;
-                solution.point.machineCoord.valid = (machineValid != 0);
+                readMachinePose(ds, solution.point.machineCoord, layout);
                 solution.valid = true;
                 leadInsByContourId.insert(static_cast<std::uint64_t>(contourId),
                                           std::move(solution));
@@ -280,6 +319,21 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
     // 1. 写 toml 元数据
     toml::value root(toml::table{});
     root["schemaVersion"] = kCamToolpathSchemaVersion;
+    root["machiningMode"] = machiningModeName(cam.machiningMode()).toStdString();
+    root["solverId"] = cam.solverId().toStdString();
+    root["solverVersion"] = cam.solverVersion();
+    root["machineConfigurationFingerprint"] =
+        cam.solvedMachineConfigurationFingerprint().toStdString();
+
+    toml::array axisLayout;
+    const MachineAxisLayout& layout = cam.machineAxisLayout();
+    for (int index = 0; index < layout.count; ++index) {
+        toml::value axis(toml::table{});
+        axis["name"] = layout.axes[index].name.toStdString();
+        axis["role"] = machineAxisRoleName(layout.axes[index].role).toStdString();
+        axisLayout.push_back(axis);
+    }
+    root["machineAxisLayout"] = axisLayout;
 
     std::uint64_t maxContour = 0, maxLayer = 0;
     for (const LaserContour& c : tp.contours())
@@ -430,7 +484,7 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
     out.close();
 
     // 2. 写二进制点集
-    if (!writePointsBin(camToolpathPointsPath(packageDir), tp.contours(), errorMsg))
+    if (!writePointsBin(camToolpathPointsPath(packageDir), tp.contours(), layout, errorMsg))
         return false;
 
     LCNC_INFO(lcnc::LogCode::Generic,
@@ -478,10 +532,30 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         return false;
     }
 
+    const MachiningMode machiningMode = root.contains("machiningMode")
+        && root.at("machiningMode").is_string()
+        ? machiningModeFromName(QString::fromStdString(root.at("machiningMode").as_string()))
+        : MachiningMode::Planar3Axis;
+    MachineAxisLayout machineAxisLayout;
+    if (root.contains("machineAxisLayout") && root.at("machineAxisLayout").is_array()) {
+        for (const toml::value& axis : root.at("machineAxisLayout").as_array()) {
+            if (!axis.is_table() || !axis.contains("name") || !axis.contains("role"))
+                continue;
+            machineAxisLayout.append(
+                QString::fromStdString(axis.at("name").as_string()),
+                machineAxisRoleFromName(QString::fromStdString(axis.at("role").as_string())));
+        }
+    }
+    QString layoutError;
+    if (!machineAxisLayout.isValid(&layoutError)) {
+        if (errorMsg) *errorMsg = QStringLiteral("Invalid machine axis layout: %1").arg(layoutError);
+        return false;
+    }
     // 2. 读点集（先于 LaserContour，确保按 contourId 关联）。
     QHash<std::uint64_t, std::vector<ToolpathPoint>> pointsByContourId;
     QHash<std::uint64_t, LeadInSolution> leadInsByContourId;
-    if (!readPointsBin(pointsPath, pointsByContourId, leadInsByContourId, errorMsg))
+    if (!readPointsBin(pointsPath, pointsByContourId, leadInsByContourId,
+                       machineAxisLayout, errorMsg))
         return false;
 
     // 3. 装配 LaserToolpath
@@ -602,6 +676,18 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
     // 5. 灌进 CamDataManager（不做任何视图刷新，那是 CAM 模块职责）。
     cam.restoreSignatureTables(sigContour, sigLayer, nextContour, nextLayer);
     cam.replaceToolpath(std::move(toolpath), nextContour, nextLayer);
+    cam.setMachiningMode(machiningMode);
+    cam.setMachineAxisLayout(machineAxisLayout);
+    cam.setSolverId(root.contains("solverId") && root.at("solverId").is_string()
+        ? QString::fromStdString(root.at("solverId").as_string())
+        : machiningModeName(machiningMode));
+    cam.setSolverVersion(root.contains("solverVersion") && root.at("solverVersion").is_integer()
+        ? static_cast<int>(root.at("solverVersion").as_integer()) : 1);
+    cam.setSolvedMachineConfigurationFingerprint(
+        root.contains("machineConfigurationFingerprint")
+            && root.at("machineConfigurationFingerprint").is_string()
+        ? QString::fromStdString(root.at("machineConfigurationFingerprint").as_string())
+        : QString());
 
     // 恢复容器级 manual order / sortStrategy / lastAutoSortAxis。
     LayerContainer& container = cam.layerContainer();

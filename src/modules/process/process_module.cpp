@@ -1215,6 +1215,44 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
             // 中文翻译：切割计划服务未初始化
             return fail(tr("Cutting plan service not initialized"));
 
+        auto* toolpathProvider = lcnc::Kernel::current().service<lcnc::cam::ICamToolpathProvider>();
+        auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
+        if (!toolpathProvider || !machineConfig)
+            // 中文翻译：机床构型或 CAM 刀路服务未初始化
+            return fail(tr("Machine configuration or CAM toolpath service is not initialized"));
+        QString machineConfigurationError;
+        if (!machineConfig->validateConfiguration(&machineConfigurationError))
+            // 中文翻译：机床配置无效：%1
+            return fail(tr("The machine configuration is invalid: %1")
+                        .arg(machineConfigurationError));
+        const lcnc::cam::ToolpathExportSnapshot snapshot = toolpathProvider->exportToolpathSnapshot();
+        // 中文翻译：Process 预检使用当前 CAM 快照的加工模式、轴布局和求解器契约。
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "process.preflight: CAM snapshot mode='{}' axes={} solver='{}' revision={}",
+                  lcnc::machiningModeName(snapshot.machiningMode).toStdString(),
+                  snapshot.machineAxisLayout.count,
+                  snapshot.solverId.toStdString(),
+                  snapshot.revision);
+        QString layoutError;
+        if (!snapshot.machineAxisLayout.isValid(&layoutError))
+            // 中文翻译：刀路轴布局无效: %1
+            return fail(tr("The toolpath axis layout is invalid: %1").arg(layoutError));
+        if (!machineConfig->supportsMachiningMode(snapshot.machiningMode))
+            // 中文翻译：当前机床不支持工程加工模式 %1
+            return fail(tr("The current machine does not support project machining mode %1")
+                        .arg(lcnc::machiningModeName(snapshot.machiningMode)));
+        const lcnc::MachineModeDefinition definition =
+            machineConfig->modeDefinition(snapshot.machiningMode);
+        if (snapshot.machineAxisLayout != definition.interpolatedAxes
+            || snapshot.solverId != definition.solverId
+            || snapshot.solverVersion != definition.solverVersion)
+            // 中文翻译：刀路求解契约与当前机床模式不匹配，请重新求解机床坐标
+            return fail(tr("The toolpath solving contract does not match the current machine mode; please solve the machine coordinates again"));
+        if (!m_simulationMode
+            && snapshot.machineConfigurationFingerprint != machineConfig->configurationFingerprint())
+            // 中文翻译：刀路机床构型指纹不匹配，请重新求解机床坐标
+            return fail(tr("The toolpath machine configuration fingerprint does not match; please solve the machine coordinates again"));
+
         const auto cuttingList = m_cuttingPlanService->buildCuttingList();
         if (cuttingList.isEmpty())
             // 中文翻译：没有可加工轮廓，请先生成刀路并启用需加工特征
@@ -1293,7 +1331,18 @@ void ProcessModule::runStart()
         return;
     }
 
+    m_activeLockedAxisTargets.clear();
+    if (auto* provider = lcnc::Kernel::current().service<lcnc::cam::ICamToolpathProvider>()) {
+        const auto snapshot = provider->exportToolpathSnapshot();
+        if (auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>())
+            m_activeLockedAxisTargets = machineConfig->modeDefinition(snapshot.machiningMode).lockedAxisTargets;
+    }
+
     if (m_simulationMode) {
+        for (auto it = m_activeLockedAxisTargets.cbegin();
+             it != m_activeLockedAxisTargets.cend(); ++it) {
+            setAxisPosition(it.key(), it.value());
+        }
         startWorkflowAfterPreflight();
         return;
     }
@@ -1307,6 +1356,7 @@ void ProcessModule::runStart()
     lcnc::process::ProcessPreflightRequest request;
     for (const MachineAxisDef& axis : m_axisDefinitions)
         request.axisNames.append(axis.name);
+    request.lockedAxisTargets = m_activeLockedAxisTargets;
 
     const lcnc::ProcessMonitorSettings monitorSettings =
         readMonitorSettings(m_settingsService.get());
@@ -1449,6 +1499,7 @@ void ProcessModule::runStop()
 void ProcessModule::requestStop(StopOutcome outcome, const QString& statusMessage)
 {
     ++m_runRequestGeneration;
+    m_activeLockedAxisTargets.clear();
     // Queue gating exists only while this safe-stop transaction is unfinished.
     // It must not persist merely because the resulting state is Error/Stopped.
     m_stopRecoveryRequired = true;
@@ -1909,6 +1960,7 @@ void ProcessModule::applyHardwareStatus(
     }
 
     QStringList disabledAxesWhileRunning;
+    QStringList driftingLockedAxes;
     for (const lcnc::process::DeviceAxisStatusSample& sample : batch.axes) {
         if (!sample.valid)
             continue;
@@ -1921,6 +1973,13 @@ void ProcessModule::applyHardwareStatus(
         }
         if (!sample.enabled && m_state == State::Running)
             disabledAxesWhileRunning.append(sample.name);
+        const auto locked = m_activeLockedAxisTargets.constFind(sample.name);
+        if (m_state == State::Running && locked != m_activeLockedAxisTargets.cend()
+            && std::abs(sample.pos - locked.value()) > 0.05) {
+            driftingLockedAxes.append(
+                QStringLiteral("%1 (%2/%3)").arg(sample.name).arg(sample.pos, 0, 'f', 3)
+                    .arg(locked.value(), 0, 'f', 3));
+        }
     }
     if (!disabledAxesWhileRunning.isEmpty()) {
         // 中文翻译：加工过程中检测到轴系未使能: %1；已停止流程
@@ -1929,6 +1988,15 @@ void ProcessModule::applyHardwareStatus(
         LCNC_ERR(lcnc::LogCode::Generic,
                  "process: axis disabled while running: {}",
                  disabledAxesWhileRunning.join(QStringLiteral(",")).toStdString());
+        requestStop(StopOutcome::Error, message);
+    }
+    if (!driftingLockedAxes.isEmpty() && !m_stopInFlight) {
+        // 中文翻译：加工期间锁定轴发生位置漂移: %1；已执行安全停机
+        const QString message = tr("Locked-axis position drift occurred during processing: %1; safe shutdown was requested")
+            .arg(driftingLockedAxes.join(QStringLiteral(", ")));
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process: locked axis drift while running: {}",
+                 driftingLockedAxes.join(QStringLiteral(",")).toStdString());
         requestStop(StopOutcome::Error, message);
     }
     for (const lcnc::process::DeviceDigitalOutputSample& sample : batch.digitalOutputs) {

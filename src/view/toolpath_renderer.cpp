@@ -150,7 +150,7 @@ void ToolpathRenderer::updateTransforms(GuiDocument* gd,
     const int count = qMin(m_bundles.size(), toolpath.contourCount());
     for (int i = 0; i < count; ++i) {
         gp_Trsf transform;
-        if (kin && !toolpath.contour(i).workpieceEntry.isEmpty())
+        if (kin)
             transform = kin->computeWpcTransform(toolpath.contour(i).workpieceEntry);
 
         ContourAisBundle& bundle = m_bundles[i];
@@ -162,7 +162,7 @@ void ToolpathRenderer::updateTransforms(GuiDocument* gd,
         && m_previewContourIndex >= 0
         && m_previewContourIndex < toolpath.contourCount()) {
         gp_Trsf transform;
-        if (kin && !toolpath.contour(m_previewContourIndex).workpieceEntry.isEmpty())
+        if (kin)
             transform = kin->computeWpcTransform(toolpath.contour(m_previewContourIndex).workpieceEntry);
         applyLocalTransform(ctx, m_previewLeadInAis, transform);
     }

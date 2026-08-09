@@ -4,6 +4,7 @@
 #include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
 #include "modules/cam/cam_module.h"
+#include "modules/process/process_module.h"
 #include "view/gui_application.h"
 #include "view/rendering_manager.h"
 
@@ -113,18 +114,43 @@ QVector<MachineAxisRuntimeConfig> machineConfigsForPreset(const QString& preset)
     return configs;
 }
 
-QString algorithmTextForAxes(const QString& preset, const QList<MachineAxisDef>& axes)
+QString algorithmTextForAxes(const QString& /*preset*/, const QList<MachineAxisDef>& axes)
 {
-    int rotaryCount = 0;
+    bool workpieceRotary = false;
+    bool tableTilt = false;
+    bool tableSpin = false;
+    bool headPrimary = false;
+    bool headSecondary = false;
     for (const MachineAxisDef& axis : axes) {
-        if (axis.motionType == MachineAxisDef::Rotary)
-            ++rotaryCount;
+        workpieceRotary |= axis.role == lcnc::MachineAxisRole::WorkpieceRotary;
+        tableTilt |= axis.role == lcnc::MachineAxisRole::TableTilt;
+        tableSpin |= axis.role == lcnc::MachineAxisRole::TableSpin;
+        headPrimary |= axis.role == lcnc::MachineAxisRole::HeadTiltPrimary;
+        headSecondary |= axis.role == lcnc::MachineAxisRole::HeadTiltSecondary;
     }
-    if (rotaryCount <= 0)
-        return machineToolpathAlgorithmName(MachineToolpathAlgorithm::ThreeAxis);
-    if (preset.toUpper().contains(QStringLiteral("HEAD")))
-        return machineToolpathAlgorithmName(MachineToolpathAlgorithm::FiveAxisHead);
-    return machineToolpathAlgorithmName(MachineToolpathAlgorithm::FiveAxisTable);
+    QStringList modes{lcnc::machiningModeName(lcnc::MachiningMode::Planar3Axis)};
+    if (workpieceRotary || (tableTilt && tableSpin))
+        modes.append(lcnc::machiningModeName(lcnc::MachiningMode::RotaryTube4Axis));
+    if (tableTilt && tableSpin)
+        modes.append(lcnc::machiningModeName(lcnc::MachiningMode::SimultaneousTable5Axis));
+    if (headPrimary && headSecondary)
+        modes.append(lcnc::machiningModeName(lcnc::MachiningMode::SimultaneousHead5Axis));
+    return modes.join(QStringLiteral(" / "));
+}
+
+QString machineAxisRoleDisplayName(lcnc::MachineAxisRole role)
+{
+    switch (role) {
+    case lcnc::MachineAxisRole::LinearX: return QCoreApplication::translate("DialogOptions", "Linear X"); // 中文翻译：X 直线轴
+    case lcnc::MachineAxisRole::LinearY: return QCoreApplication::translate("DialogOptions", "Linear Y"); // 中文翻译：Y 直线轴
+    case lcnc::MachineAxisRole::LinearZ: return QCoreApplication::translate("DialogOptions", "Linear Z"); // 中文翻译：Z 直线轴
+    case lcnc::MachineAxisRole::WorkpieceRotary: return QCoreApplication::translate("DialogOptions", "Workpiece rotary"); // 中文翻译：工件回转轴
+    case lcnc::MachineAxisRole::TableTilt: return QCoreApplication::translate("DialogOptions", "Table tilt"); // 中文翻译：转台倾斜轴
+    case lcnc::MachineAxisRole::TableSpin: return QCoreApplication::translate("DialogOptions", "Table spin"); // 中文翻译：转台回转轴
+    case lcnc::MachineAxisRole::HeadTiltPrimary: return QCoreApplication::translate("DialogOptions", "Primary head tilt"); // 中文翻译：第一摆头轴
+    case lcnc::MachineAxisRole::HeadTiltSecondary: return QCoreApplication::translate("DialogOptions", "Secondary head tilt"); // 中文翻译：第二摆头轴
+    default: return QCoreApplication::translate("DialogOptions", "Unspecified"); // 中文翻译：未指定
+    }
 }
 
 QTableWidgetItem* machineAxisTableItem(const QString& text, bool editable = true)
@@ -206,6 +232,7 @@ bool sameMachineAxisDefinitions(const QVector<MachineAxisRuntimeConfig>& configs
         const MachineAxisDef& rhs = axes.at(i);
         if (lhs.name != rhs.name
             || lhs.motionType != rhs.motionType
+            || lhs.role != rhs.role
             || lhs.parentAxis != rhs.parentAxis
             || !qFuzzyCompare(lhs.direction.X(), rhs.direction.X())
             || !qFuzzyCompare(lhs.direction.Y(), rhs.direction.Y())
@@ -828,11 +855,24 @@ void DialogOptions::buildMachineConfigurationPage()
     centerForm->addRow(m_lblRotationCenterHint);
     root->addWidget(centerGroup);
 
+    // 中文翻译：摆头软件 TCP
+    auto* headTcpGroup = new QGroupBox(tr("Head software TCP"), page);
+    auto* headTcpForm = new QFormLayout(headTcpGroup);
+    const QStringList tcpLabels = {
+        tr("Zero beam X"), tr("Zero beam Y"), tr("Zero beam Z"), tr("Focus length"),
+        tr("Installation offset X"), tr("Installation offset Y"), tr("Installation offset Z")};
+    for (int index = 0; index < 7; ++index) {
+        m_headTcpEditors[index] = machineCoordinateSpin(headTcpGroup);
+        if (index == 3) m_headTcpEditors[index]->setRange(0.0, 10000.0);
+        headTcpForm->addRow(tcpLabels[index], m_headTcpEditors[index]);
+    }
+    root->addWidget(headTcpGroup);
+
     m_machineAxesTable = new QTableWidget(page);
-    m_machineAxesTable->setColumnCount(9);
+    m_machineAxesTable->setColumnCount(10);
     m_machineAxesTable->setHorizontalHeaderLabels({
         // 中文翻译：轴名；类型；父轴；方向X；方向Y；方向Z
-        tr("Axis name"), tr("Type"), tr("parent axis"), tr("DirectionX"), tr("Direction Y"), tr("Direction Z"),
+        tr("Axis name"), tr("Type"), tr("Axis role"), tr("parent axis"), tr("DirectionX"), tr("Direction Y"), tr("Direction Z"),
         // 中文翻译：原点X；原点Y；原点Z
         tr("OriginX"), tr("Origin Y"), tr("Origin Z")
     });
@@ -932,6 +972,18 @@ void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeCon
                 });
         m_machineAxesTable->setCellWidget(row, 1, typeCombo);
 
+        auto* roleCombo = new QComboBox(m_machineAxesTable);
+        for (lcnc::MachineAxisRole role : {
+                 lcnc::MachineAxisRole::LinearX, lcnc::MachineAxisRole::LinearY,
+                 lcnc::MachineAxisRole::LinearZ, lcnc::MachineAxisRole::WorkpieceRotary,
+                 lcnc::MachineAxisRole::TableTilt, lcnc::MachineAxisRole::TableSpin,
+                 lcnc::MachineAxisRole::HeadTiltPrimary, lcnc::MachineAxisRole::HeadTiltSecondary}) {
+            roleCombo->addItem(machineAxisRoleDisplayName(role), static_cast<int>(role));
+        }
+        const int roleIndex = roleCombo->findData(static_cast<int>(config.axis.role));
+        roleCombo->setCurrentIndex(roleIndex >= 0 ? roleIndex : 0);
+        m_machineAxesTable->setCellWidget(row, 2, roleCombo);
+
         auto* parentCombo = new QComboBox(m_machineAxesTable);
         for (const QString& parent : parentCandidates) {
             if (parent != name)
@@ -942,14 +994,14 @@ void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeCon
             parentAxis = QStringLiteral("BASE");
         const int parentIndex = parentCombo->findData(parentAxis);
         parentCombo->setCurrentIndex(parentIndex >= 0 ? parentIndex : 0);
-        m_machineAxesTable->setCellWidget(row, 2, parentCombo);
+        m_machineAxesTable->setCellWidget(row, 3, parentCombo);
 
-        m_machineAxesTable->setItem(row, 3, machineAxisTableItem(QString::number(config.axis.direction.X(), 'g', 15)));
-        m_machineAxesTable->setItem(row, 4, machineAxisTableItem(QString::number(config.axis.direction.Y(), 'g', 15)));
-        m_machineAxesTable->setItem(row, 5, machineAxisTableItem(QString::number(config.axis.direction.Z(), 'g', 15)));
-        m_machineAxesTable->setItem(row, 6, machineAxisTableItem(QString::number(config.axis.origin.X(), 'g', 15)));
-        m_machineAxesTable->setItem(row, 7, machineAxisTableItem(QString::number(config.axis.origin.Y(), 'g', 15)));
-        m_machineAxesTable->setItem(row, 8, machineAxisTableItem(QString::number(config.axis.origin.Z(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 4, machineAxisTableItem(QString::number(config.axis.direction.X(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 5, machineAxisTableItem(QString::number(config.axis.direction.Y(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 6, machineAxisTableItem(QString::number(config.axis.direction.Z(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 7, machineAxisTableItem(QString::number(config.axis.origin.X(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 8, machineAxisTableItem(QString::number(config.axis.origin.Y(), 'g', 15)));
+        m_machineAxesTable->setItem(row, 9, machineAxisTableItem(QString::number(config.axis.origin.Z(), 'g', 15)));
     }
 
     QList<MachineAxisDef> rawAxes;
@@ -989,19 +1041,21 @@ QList<MachineAxisDef> DialogOptions::collectMachineAxisDefinitions() const
         if (auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 1)))
             axis.motionType = static_cast<MachineAxisDef::MotionType>(combo->currentData().toInt());
         if (auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 2)))
+            axis.role = static_cast<lcnc::MachineAxisRole>(combo->currentData().toInt());
+        if (auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 3)))
             axis.parentAxis = combo->currentData().toString();
         if (axis.parentAxis.trimmed().isEmpty())
             axis.parentAxis = QStringLiteral("BASE");
 
         const gp_Dir fallbackDirection = defaultMachineAxisDirection(name, axis.motionType);
-        const double dx = itemDouble(row, 3, fallbackDirection.X());
-        const double dy = itemDouble(row, 4, fallbackDirection.Y());
-        const double dz = itemDouble(row, 5, fallbackDirection.Z());
+        const double dx = itemDouble(row, 4, fallbackDirection.X());
+        const double dy = itemDouble(row, 5, fallbackDirection.Y());
+        const double dz = itemDouble(row, 6, fallbackDirection.Z());
         const double norm2 = dx * dx + dy * dy + dz * dz;
         axis.direction = norm2 > 1e-12 ? gp_Dir(dx, dy, dz) : fallbackDirection;
-        axis.origin = gp_Pnt(itemDouble(row, 6, 0.0),
-                             itemDouble(row, 7, 0.0),
-                             itemDouble(row, 8, 0.0));
+        axis.origin = gp_Pnt(itemDouble(row, 7, 0.0),
+                             itemDouble(row, 8, 0.0),
+                             itemDouble(row, 9, 0.0));
         if (QTableWidgetItem* nameItem = m_machineAxesTable->item(row, 0)) {
             axis.minVal = nameItem->data(Qt::UserRole).toDouble();
             axis.maxVal = nameItem->data(Qt::UserRole + 1).toDouble();
@@ -1091,9 +1145,9 @@ void DialogOptions::applyRotationCenterToMachineAxisTable()
             != MachineAxisDef::Rotary) {
             continue;
         }
-        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 6)) item->setText(x);
-        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 7)) item->setText(y);
-        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 8)) item->setText(z);
+        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 7)) item->setText(x);
+        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 8)) item->setText(y);
+        if (QTableWidgetItem* item = m_machineAxesTable->item(row, 9)) item->setText(z);
     }
 }
 
@@ -1165,6 +1219,14 @@ void DialogOptions::loadFromSettings()
         m_originalMachineConfigs = m_machineConfig->axisConfigurations();
         setComboByData(m_cbMachinePreset, m_originalMachinePreset);
         populateMachineAxisTable(m_originalMachineConfigs);
+        m_originalHeadToolGeometry = m_machineConfig->headToolGeometry();
+        const std::array<double, 7> values{
+            m_originalHeadToolGeometry.zeroBeamX, m_originalHeadToolGeometry.zeroBeamY,
+            m_originalHeadToolGeometry.zeroBeamZ, m_originalHeadToolGeometry.focusLength,
+            m_originalHeadToolGeometry.installationOffsetX,
+            m_originalHeadToolGeometry.installationOffsetY,
+            m_originalHeadToolGeometry.installationOffsetZ};
+        for (int index = 0; index < 7; ++index) m_headTcpEditors[index]->setValue(values[index]);
     } else {
         m_originalMachinePreset = QStringLiteral("VERTICAL_AC_TABLE");
         m_originalMachineConfigs = machineConfigsForPreset(m_originalMachinePreset);
@@ -1357,6 +1419,22 @@ bool DialogOptions::applyChanges()
         ? m_cbMachinePreset->currentData().toString()
         : m_originalMachinePreset;
     const QList<MachineAxisDef> newMachineAxes = collectMachineAxisDefinitions();
+    HeadToolGeometry newHeadGeometry;
+    newHeadGeometry.zeroBeamX = m_headTcpEditors[0]->value();
+    newHeadGeometry.zeroBeamY = m_headTcpEditors[1]->value();
+    newHeadGeometry.zeroBeamZ = m_headTcpEditors[2]->value();
+    newHeadGeometry.focusLength = m_headTcpEditors[3]->value();
+    newHeadGeometry.installationOffsetX = m_headTcpEditors[4]->value();
+    newHeadGeometry.installationOffsetY = m_headTcpEditors[5]->value();
+    newHeadGeometry.installationOffsetZ = m_headTcpEditors[6]->value();
+    const bool headGeometryDirty =
+        m_originalHeadToolGeometry.zeroBeamX != newHeadGeometry.zeroBeamX
+        || m_originalHeadToolGeometry.zeroBeamY != newHeadGeometry.zeroBeamY
+        || m_originalHeadToolGeometry.zeroBeamZ != newHeadGeometry.zeroBeamZ
+        || m_originalHeadToolGeometry.focusLength != newHeadGeometry.focusLength
+        || m_originalHeadToolGeometry.installationOffsetX != newHeadGeometry.installationOffsetX
+        || m_originalHeadToolGeometry.installationOffsetY != newHeadGeometry.installationOffsetY
+        || m_originalHeadToolGeometry.installationOffsetZ != newHeadGeometry.installationOffsetZ;
 
     const bool cadRuntimeDirty = !profileRuntimeEqual(m_originalCad, m_renderDraft);
     const bool camRuntimeDirty = !profileRuntimeEqual(m_originalCam, m_renderDraft);
@@ -1375,7 +1453,30 @@ bool DialogOptions::applyChanges()
     const bool autoLoadMachineDirty = m_originalAutoLoadMachineModel != newAutoLoadMachineModel;
     const bool machineDirty = m_machineConfig
         && (m_originalMachinePreset != newMachinePreset
-            || !sameMachineAxisDefinitions(m_originalMachineConfigs, newMachineAxes));
+            || !sameMachineAxisDefinitions(m_originalMachineConfigs, newMachineAxes)
+            || headGeometryDirty);
+
+    if (machineDirty) {
+        if (auto* process = lcnc::Kernel::current().service<ProcessModule>();
+            process && (process->isConnected()
+                || (process->state() != ProcessModule::State::Idle
+                    && process->state() != ProcessModule::State::Stopped
+                    && process->state() != ProcessModule::State::Error))) {
+            // 中文翻译：机床配置只能在设备断开且流程空闲时修改。
+            QMessageBox::warning(this, tr("Application Options"),
+                tr("Machine configuration can only be changed while devices are disconnected and the workflow is idle."));
+            return false;
+        }
+        QString configurationError;
+        if (!m_machineConfig->validateCandidateConfiguration(
+                newMachinePreset, newMachineAxes, newHeadGeometry,
+                &configurationError)) {
+            // 中文翻译：机床配置无效：%1
+            QMessageBox::warning(this, tr("Application Options"),
+                tr("The machine configuration is invalid: %1").arg(configurationError));
+            return false;
+        }
+    }
 
     if (!cadRuntimeDirty && !camRuntimeDirty && !cadDefaultDirty && !camDefaultDirty
         && !backgroundDirty && !modelColorDirty
@@ -1455,6 +1556,8 @@ bool DialogOptions::applyChanges()
 
     if (machineDirty) {
         m_machineConfig->setMachineAxisDefinitions(newMachinePreset, newMachineAxes);
+        if (headGeometryDirty)
+            m_machineConfig->setHeadToolGeometry(newHeadGeometry);
         m_originalMachinePreset = m_machineConfig->presetName();
         m_originalMachineConfigs = m_machineConfig->axisConfigurations();
         populateMachineAxisTable(m_originalMachineConfigs);

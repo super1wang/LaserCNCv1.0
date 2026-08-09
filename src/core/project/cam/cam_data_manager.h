@@ -4,6 +4,7 @@
 #include "core/project/cam/cam_data_contracts.h"
 #include "core/project/cam/layer_container.h"
 #include "core/project/cam/layer_manager.h"
+#include "core/kinematics/machine_topology.h"
 
 #include <QHash>
 #include <QList>
@@ -111,6 +112,18 @@ public:
     bool generationParamsDirty() const { return m_generationParamsDirty; }
     void setGenerationParamsDirty(bool dirty) { m_generationParamsDirty = dirty; }
 
+    MachiningMode machiningMode() const { return m_machiningMode; }
+    void setMachiningMode(MachiningMode mode) { m_machiningMode = mode; }
+    const MachineAxisLayout& machineAxisLayout() const { return m_machineAxisLayout; }
+    void setMachineAxisLayout(const MachineAxisLayout& layout) { m_machineAxisLayout = layout; }
+    const QString& solverId() const { return m_solverId; }
+    void setSolverId(const QString& id) { m_solverId = id; }
+    int solverVersion() const { return m_solverVersion; }
+    void setSolverVersion(int version) { m_solverVersion = version; }
+    const QString& solvedMachineConfigurationFingerprint() const { return m_solvedMachineConfigurationFingerprint; }
+    void setSolvedMachineConfigurationFingerprint(const QString& fingerprint)
+    { m_solvedMachineConfigurationFingerprint = fingerprint; }
+
     /// Pipeline stage state is project data, not UI state.  It deliberately
     /// preserves stale downstream snapshots for inspection while preventing
     /// Process from treating them as executable output.
@@ -193,6 +206,11 @@ private:
     GenerationParams m_generationParams;
     GenerationParams m_appliedGenerationParams;
     bool m_generationParamsDirty{false};
+    MachiningMode m_machiningMode{MachiningMode::Planar3Axis};
+    MachineAxisLayout m_machineAxisLayout;
+    QString m_solverId{QStringLiteral("Planar3Axis")};
+    int m_solverVersion{machiningModeSolverVersion(MachiningMode::Planar3Axis)};
+    QString m_solvedMachineConfigurationFingerprint;
     ContourId m_nextContourId{1};
     std::uint64_t m_nextLayerId{1};
     bool m_dirty{false};

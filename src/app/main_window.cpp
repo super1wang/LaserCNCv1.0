@@ -243,6 +243,16 @@ MainWindow::MainWindow(QWidget* parent)
                 if (m_toolpathPanel && m_appContext && m_appContext->camModule()) {
                     auto* cam = m_appContext->camModule();
                     m_toolpathPanel->setToolpath(cam->hasToolpath() ? &cam->toolpathRef() : nullptr);
+                    // Cam data belongs to the active project workspace.  Refresh
+                    // all mode-dependent controls here as well as through CAM
+                    // signals, so a just-opened STEP project cannot retain the
+                    // previous workspace's five-axis-looking UI while its CAM
+                    // data still has the enum default.
+                    // 中文翻译：切换工程时同步加工模式、轴布局和工件安装姿态。
+                    m_toolpathPanel->setMachiningModes(
+                        cam->supportedMachiningModes(), cam->machiningMode());
+                    if (const auto* camData = cam->camData())
+                        m_toolpathPanel->setMachineAxisLayout(camData->machineAxisLayout());
                 }
                 syncMachineTreeVisibilityState();
                 updateCommandStates();
@@ -338,10 +348,16 @@ void MainWindow::createContext()
                 updateCommandStates();
             });
     connect(m_appContext->processModule(), &ProcessModule::stateChanged,
-            this, [this](lcnc::ProcessRunState) {
+            this, [this](lcnc::ProcessRunState state) {
                 // 预检/运行期错误在后台切换状态；必须立即刷新“停止复位”等
                 // Ribbon 命令，不能等待下一次用户交互。
                 updateCommandStates();
+                if (m_toolpathPanel) {
+                    const bool editable = state == lcnc::ProcessRunState::Idle
+                        || state == lcnc::ProcessRunState::Stopped
+                        || state == lcnc::ProcessRunState::Error;
+                    m_toolpathPanel->setMachineSetupEditingEnabled(editable);
+                }
             });
 
     connect(m_appContext->processModule(), &ProcessModule::deviceConnectProgress,
@@ -844,6 +860,9 @@ void MainWindow::createRightPanel()
     m_toolpathPanel->setExtractionStrategy(cam->extractionStrategy());
     m_toolpathPanel->setShowNormals(cam->showNormals());
     m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
+    m_toolpathPanel->setMachiningModes(cam->supportedMachiningModes(), cam->machiningMode());
+    if (const auto* camData = cam->camData())
+        m_toolpathPanel->setMachineAxisLayout(camData->machineAxisLayout());
 
     m_rightStack = new QStackedWidget(this);
 
@@ -1142,14 +1161,21 @@ void MainWindow::createRightPanel()
                 m_axisCalibWizard->raise();
                 m_axisCalibWizard->activateWindow();
             });
-        connect(m_machinePanel, &WidgetMachinePanel::workpieceInstallPositionChanged, this,
-            [this](double x, double y, double z) {
-            // spinbox 频繁回调走轻量路径：仅 SetLocation，不重建机台 view。
-            m_appContext->camModule()->updateWorkpieceInstallLocation(gp_Pnt(x, y, z));
+        connect(m_machinePanel, &WidgetMachinePanel::workpieceSetupChanged, this,
+            [this](double x, double y, double z, double rx, double ry, double rz) {
+                lcnc::WorkpieceSetupTransform setup;
+                setup.x = x;
+                setup.y = y;
+                setup.z = z;
+                setup.rotationXDeg = rx;
+                setup.rotationYDeg = ry;
+                setup.rotationZDeg = rz;
+                m_appContext->camModule()->setWorkpieceSetupTransform(setup);
             });
-        connect(m_machinePanel, &WidgetMachinePanel::alignWorkpieceRotationCenterRequested, this,
+        connect(m_machinePanel, &WidgetMachinePanel::alignWorkpieceSetupToRotationCenterRequested, this,
             [this]() {
-            m_appContext->camModule()->alignWorkpieceInstallPositionToRotationCenter();
+            if (m_appContext->camModule()->alignWorkpieceSetupToRotationCenter())
+                m_machinePanel->setDocument(m_appContext->camModule()->machineDocument());
             });
 
         connect(m_appContext->camModule(), &CamModule::toolpathGenerated, this,
@@ -1199,6 +1225,31 @@ void MainWindow::createRightPanel()
             [this]{ m_appContext->camModule()->buildCurrentGeometricToolpathAsync(); });
     connect(m_toolpathPanel, &WidgetToolpathPanel::solveMachinePathRequested, this,
             [this]{ m_appContext->camModule()->solveCurrentGeometricToolpathAsync(); });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::machiningModeChanged, this,
+            [this](lcnc::MachiningMode mode) {
+                CamModule* cam = m_appContext->camModule();
+                ProcessModule* process = m_appContext->processModule();
+                if (process && process->state() != ProcessModule::State::Idle
+                    && process->state() != ProcessModule::State::Stopped
+                    && process->state() != ProcessModule::State::Error) {
+                    m_toolpathPanel->setMachiningModes(cam->supportedMachiningModes(), cam->machiningMode());
+                    return;
+                }
+                if (cam->setMachiningMode(mode) && cam->camData())
+                    m_toolpathPanel->setMachineAxisLayout(cam->camData()->machineAxisLayout());
+            });
+    connect(cam, &CamModule::machiningModeChanged, this,
+            [this, cam](lcnc::MachiningMode) {
+                m_toolpathPanel->setMachiningModes(cam->supportedMachiningModes(), cam->machiningMode());
+                if (cam->camData()) m_toolpathPanel->setMachineAxisLayout(cam->camData()->machineAxisLayout());
+                if (m_laserControl) {
+                    if (auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>()) {
+                        const auto definition = machineConfig->modeDefinition(cam->machiningMode());
+                        m_laserControl->setTaskAxisStates(
+                            definition.interpolatedAxes, definition.lockedAxisTargets);
+                    }
+                }
+            });
     connect(m_toolpathPanel, &WidgetToolpathPanel::leadInLengthChanged, this,
             [this](double v) {
             if (m_toolpathPanel->parameterScope() == WidgetToolpathPanel::ParameterScope::CurrentContour)
@@ -1301,6 +1352,10 @@ void MainWindow::createRightPanel()
                         const QList<MachineAxisDef> axes = machineConfig->axisDefinitions();
                         process->setAxisDefinitions(axes);
                         m_laserControl->setAxisDefinitions(axes);
+                        const auto definition = machineConfig->modeDefinition(
+                            m_appContext->camModule()->machiningMode());
+                        m_laserControl->setTaskAxisStates(
+                            definition.interpolatedAxes, definition.lockedAxisTargets);
                         if (auto* guiApp = lcnc::Kernel::current().guiApp())
                             guiApp->setMachineCoordinateFrame(axes);
                         lcnc::view::WorldAxesRenderer::instance().setMachineAxisDirections(axes);
@@ -1310,6 +1365,10 @@ void MainWindow::createRightPanel()
                     });
             const QList<MachineAxisDef> axes = machineConfig->axisDefinitions();
             m_laserControl->setAxisDefinitions(axes);
+            const auto definition = machineConfig->modeDefinition(
+                m_appContext->camModule()->machiningMode());
+            m_laserControl->setTaskAxisStates(
+                definition.interpolatedAxes, definition.lockedAxisTargets);
             if (auto* guiApp = lcnc::Kernel::current().guiApp())
                 guiApp->setMachineCoordinateFrame(axes);
             lcnc::view::WorldAxesRenderer::instance().setMachineAxisDirections(axes);

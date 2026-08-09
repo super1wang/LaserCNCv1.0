@@ -1,10 +1,13 @@
 #pragma once
 
+#include "core/kinematics/machine_topology.h"
+
 #include <QHash>
 #include <QString>
 #include <QVector>
 
 #include <cstdint>
+#include <array>
 
 namespace lcnc::cam {
 
@@ -31,6 +34,9 @@ struct ToolpathExportPoint
     QString rotaryAxis1Name;
     QString rotaryAxis2Name;
     bool machineCoordValid{false};
+    std::array<double, MachineAxisLayout::kMaxAxes> machineAxes{};
+    std::uint8_t machineAxisMask{0};
+    QString machineFailureReason;
 };
 
 /**
@@ -78,6 +84,11 @@ struct ToolpathExportSnapshot
     QVector<ToolpathExportContour> contours;
     QHash<std::uint64_t, QVector<ToolpathExportPoint>> pointsByContourId;
     QString description;
+    MachiningMode machiningMode{MachiningMode::Planar3Axis};
+    MachineAxisLayout machineAxisLayout;
+    QString machineConfigurationFingerprint;
+    QString solverId;
+    int solverVersion{0};
 
     bool hasEnabledContours() const;
     int totalPointCount() const;

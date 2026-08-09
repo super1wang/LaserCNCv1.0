@@ -213,7 +213,6 @@ public:
     /// 用于向导启动时回填 + 状态指示。
     bool isMachineCalibrated() const;
     QList<WorkpieceMountCandidate> mountableWorkpieces() const;
-    gp_Pnt workpieceInstallPosition() const;
     bool autoInstallWorkpiece() const;
     void setAutoInstallWorkpiece(bool enabled);
     bool autoInstallCurrentWorkpiece();
@@ -221,16 +220,17 @@ public:
     QStringList sourceWorkpieceEntriesForMountedEntries(const QStringList& mountedEntries) const;
     void setMountedWorkpieceEntriesVisible(const QStringList& sourceEntries, bool visible);
     void setSelectedMountedWorkpieceEntries(const QStringList& sourceEntries);
-    /// 重量级路径：完整重设安装位置，翻译 Workpiece 源 document 的底层 TopoDS。
-    void setWorkpieceInstallPosition(const gp_Pnt& position);
-    /// 轻量级路径：仅对 Workpiece 源 AIS 调 SetLocation，不修改几何；适用于 spinbox
-    /// 频繁拖动，以避免重建其它 domain。后续重量路径会重新 bake 位置并复位 AIS Location。
-    void updateWorkpieceInstallLocation(const gp_Pnt& position);
     bool supportsWorkpieceRotationAlignment() const;
+    /// Sets the unified CAD-to-fixture setup origin to the configured workpiece
+    /// rotation center.  It never moves or rewrites CAD geometry.
+    bool alignWorkpieceSetupToRotationCenter();
+    /// Legacy compatibility entry point.  New UI must use
+    /// alignWorkpieceSetupToRotationCenter().
     bool alignWorkpieceInstallPositionToRotationCenter();
 
     // ── Workpiece Installation ───────────────────────────────────────────
-    /// Install the current Workpiece source document by translating it to the install position.
+    /// Mount the current Workpiece source document to an axis.  Placement is
+    /// exclusively defined by WorkpieceSetupTransform and geometry is never moved.
     void mountWorkpiece(DocumentId sourceDocId, const QString& axisName, bool alignToInstallPosition = true);
 
     /// Clear workpiece-axis bindings without deleting Workpiece section geometry.
@@ -297,6 +297,12 @@ public:
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds) const;
+
+    QList<lcnc::MachiningMode> supportedMachiningModes() const;
+    lcnc::MachiningMode machiningMode() const;
+    bool setMachiningMode(lcnc::MachiningMode mode);
+    lcnc::WorkpieceSetupTransform workpieceSetupTransform() const;
+    bool setWorkpieceSetupTransform(const lcnc::WorkpieceSetupTransform& setup);
 
     void setLeadInLength(double mm);
     double leadInLength() const;
@@ -486,6 +492,8 @@ signals:
     void selectionChanged(const QStringList& entries);
     void axisAssignmentsChanged();
     void machineVisibilityChanged();
+    void machiningModeChanged(lcnc::MachiningMode mode);
+    void workpieceSetupTransformChanged();
 
 private:
     struct WorkpieceShapeSource {
@@ -529,7 +537,6 @@ private:
         const std::vector<LaserContour>& contours,
         std::uint64_t revision,
         const QString& description) const;
-    gp_Pnt defaultWorkpieceInstallPosition() const;
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
     bool clearMountedWorkpieceDisplay(bool refreshView);
@@ -588,9 +595,6 @@ private:
     lcnc::RenderQualityPreset   m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     gp_Pnt                      m_cutterHeadModelPosition{0.0, 0.0, 0.0};
     gp_Pnt                      m_cutterHeadPhysicalPosition{0.0, 0.0, 0.0};
-    gp_Pnt                      m_workpieceInstallPosition{0.0, 0.0, 0.0};
-    /// 上一次"已 bake 进 TopoDS"的安装位置；用于轻量 SetLocation 时计算 delta。
-    gp_Pnt                      m_workpieceInstallPositionBaked{0.0, 0.0, 0.0};
     bool                        m_hasAcAngleOffset{false};
     double                      m_acAngleOffsetA{0.0};
     double                      m_acAngleOffsetC{0.0};

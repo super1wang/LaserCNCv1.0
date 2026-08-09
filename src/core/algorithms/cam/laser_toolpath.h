@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/kinematics/machine_topology.h"
+
 #include <QColor>
 #include <QString>
 #include <QList>
@@ -63,6 +65,7 @@ struct MachineCoord
     double r1{0}, r2{0};         ///< Rotary axis positions (°)
     QString r1Name, r2Name;      ///< Rotary axis names (e.g. "A","C")
     bool   valid{false};         ///< True when IK succeeded
+    lcnc::SolvedMachinePose solvedPose; ///< Authoritative v5 layout-ordered pose.
 };
 
 /**
@@ -333,25 +336,17 @@ public:
         const std::vector<TopoDS_Face>& crossFaces,
         double deflection = 0.1);
 
-    /// Compute machine coordinates (IK) for all points in a contour.
-    /// @param contour       The contour whose points will be updated with machine coords.
-    /// @param kinematics    The machine kinematic model (provides config type and axis defs).
-    /// @param wpcTransform  World transform of the workpiece (from kin->computeWpcTransform).
-    static void computeMachineCoordinates(LaserContour& contour,
-                                          MachineKinematics* kinematics,
-                                          const gp_Trsf& wpcTransform,
-                                          MachineCoord* continuityState = nullptr);
-
-    /// Compute machine coordinates for contours in their actual cutting order.
-    /// The final valid pose of one contour is the initial reference for the
-    /// next contour, so rotary branch selection is continuous across contours.
-    /// This is the only batch-level five-axis planning entry point; contour
-    /// extraction and discretisation must not independently solve IK.
-    static void computeMachineCoordinatesForOrder(
+    /// v5 mode-explicit batch solver. No solver selection is inferred from
+    /// missing axes or configuration-name substrings.
+    static bool solveToolpathForOrder(
         const std::vector<LaserContour*>& orderedContours,
         MachineKinematics* kinematics,
         const gp_Trsf& wpcTransform,
-        MachineCoord* initialState = nullptr);
+        const lcnc::MachineModeDefinition& modeDefinition,
+        const lcnc::WorkpieceSetupTransform& workpieceSetup,
+        const lcnc::HeadToolGeometry& headToolGeometry,
+        QString* errorMessage = nullptr,
+        const lcnc::SolvedMachinePose* initialPose = nullptr);
 
     /// Deterministic hash fingerprint of a face (area + centroid + surface type +
     /// outer-wire vertex count). Stable across session boundaries so that manually

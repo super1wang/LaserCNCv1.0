@@ -46,51 +46,16 @@ MachinePose5 toPose5(const lcnc::cam::ToolpathExportPoint& p,
                       double ox, double oy)
 {
     MachinePose5 pose;
-    pose.x  = p.machineX + ox;
-    pose.y  = p.machineY + oy;
-    pose.z  = p.machineZ;
-    pose.r1 = p.machineR1;
-    pose.r2 = p.machineR2;
+    pose.x  = p.machineAxes[0] + ox;
+    pose.y  = p.machineAxes[1] + oy;
+    pose.z  = p.machineAxes[2];
+    pose.r1 = p.machineAxes[3];
+    pose.r2 = p.machineAxes[4];
     pose.r1Name = p.rotaryAxis1Name;
     pose.r2Name = p.rotaryAxis2Name;
     // 默认 X+Y 参与；下游 sink 还会与构型实际拥有的轴 & 即可。
-    pose.mask = MachinePose5::Bx | MachinePose5::By
-              | MachinePose5::Bz
-              | MachinePose5::Br1
-              | MachinePose5::Br2;
+    pose.mask = p.machineAxisMask;
     return pose;
-}
-
-bool isCAxisName(const QString& name)
-{
-    return name.trimmed().toUpper() == QStringLiteral("C");
-}
-
-double equivalentAngleNear(double value, double reference)
-{
-    while (value - reference > 180.0) value -= 360.0;
-    while (value - reference < -180.0) value += 360.0;
-    return std::abs(value) < 1e-10 ? 0.0 : value;
-}
-
-bool unwrapPointCAxis(lcnc::cam::ToolpathExportPoint& point,
-                      double& lastC,
-                      bool& hasLastC)
-{
-    double* cValue = nullptr;
-    if (isCAxisName(point.rotaryAxis1Name))
-        cValue = &point.machineR1;
-    else if (isCAxisName(point.rotaryAxis2Name))
-        cValue = &point.machineR2;
-
-    if (!cValue)
-        return false;
-
-    if (hasLastC)
-        *cValue = equivalentAngleNear(*cValue, lastC);
-    lastC = *cValue;
-    hasLastC = true;
-    return true;
 }
 
 bool sameCacheDouble(double a, double b)
@@ -169,6 +134,7 @@ bool NormalCuttingManager::run(const QString& nodeId,
     }
 
     QVector<CuttingRow> cuttingList;
+    lcnc::cam::ToolpathExportSnapshot executionSnapshot;
     const CuttingListCacheKey directCacheKey{
         m_toolpathProvider->toolpathRevision(),
         m_planService ? m_planService->planRevision() : 0ull,
@@ -184,8 +150,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
                   directCacheKey.snapshotRevision,
                   directCacheKey.planRevision);
         cuttingList = cachedCuttingListCopy();
+        executionSnapshot = m_toolpathService->currentSnapshot();
     } else {
-        lcnc::cam::ToolpathExportSnapshot snapshot;
         if (m_planService) {
             ProcessCuttingPlanService::CuttingListFilter filter;
             filter.startSequence = startNumber;
@@ -195,16 +161,24 @@ bool NormalCuttingManager::run(const QString& nodeId,
             orderedContourIds.reserve(plan.size());
             for (const auto& entry : plan)
                 orderedContourIds.append(entry.contourId);
-            snapshot = m_toolpathService->refreshSnapshotForOrder(orderedContourIds);
+            executionSnapshot = m_toolpathService->refreshSnapshotForOrder(orderedContourIds);
         } else {
-            snapshot = m_toolpathService->refreshSnapshot();
+            executionSnapshot = m_toolpathService->refreshSnapshot();
         }
-        if (!snapshot.hasEnabledContours()) {
+        if (!executionSnapshot.hasEnabledContours()) {
             // 中文翻译：CAM 中没有可执行的启用轮廓
             if (errorMessage) *errorMessage = tr("There is no executable enable profile in CAM");
             return false;
         }
-        cuttingList = buildCuttingList(snapshot, startNumber, endNumber, compOffsetX, compOffsetY, errorMessage);
+        cuttingList = buildCuttingList(executionSnapshot, startNumber, endNumber,
+                                       compOffsetX, compOffsetY, errorMessage);
+    }
+
+    QString layoutError;
+    if (!executionSnapshot.machineAxisLayout.isValid(&layoutError)) {
+        // 中文翻译：刀路快照轴布局无效：%1
+        if (errorMessage) *errorMessage = tr("The toolpath snapshot axis layout is invalid: %1").arg(layoutError);
+        return false;
     }
 
     if (cuttingList.isEmpty()) {
@@ -220,7 +194,8 @@ bool NormalCuttingManager::run(const QString& nodeId,
     QString backendLabel;
     if (simMode) {
         auto created = m_service
-            ? m_service->createMotionSink(true, m_simTicker.get(), m_processModule)
+            ? m_service->createMotionSink(true, m_simTicker.get(), m_processModule,
+                                          executionSnapshot.machineAxisLayout)
             : nullptr;
         sink = std::shared_ptr<IMotionCommandSink>(std::move(created));
         if (sink) {
@@ -229,9 +204,10 @@ bool NormalCuttingManager::run(const QString& nodeId,
         }
     } else if (m_deviceQueue && m_service) {
         const DeviceCommandResult creation = m_deviceQueue->executeAndWait(
-            DeviceCommandQueue::ResultCommand([this, &sink, &backendLabel, &ic] {
+            DeviceCommandQueue::ResultCommand([this, &sink, &backendLabel, &ic,
+                                               layout = executionSnapshot.machineAxisLayout] {
                 auto created = m_service->createMotionSink(
-                    false, m_simTicker.get(), m_processModule);
+                    false, m_simTicker.get(), m_processModule, layout);
                 if (!created) {
                     return DeviceCommandResult{
                         false,
@@ -463,8 +439,14 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     commandSink.laserOn(tool);
 
     // ——— 协调插补段：beginSegment → lineTo*  → endSegment ———
-    commandSink.beginSegment(leadPose, tool);
-    commandSink.lineTo(contourStartPose, tool);
+    QString commandError;
+    if (!commandSink.beginSegment(leadPose, tool, &commandError)
+        || !commandSink.lineTo(contourStartPose, tool, &commandError)) {
+        if (startError) *startError = commandError.isEmpty()
+            ? tr("Controller command generation failed")
+            : commandError;
+        return false;
+    }
 
     for (int j = 1; j < pts.size(); ++j) {
         if ((j % kTokenPollEvery) == 0) {
@@ -480,7 +462,12 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
                 return false;
             }
         }
-        commandSink.lineTo(toPose5(pts[j], ox, oy), tool);
+        if (!commandSink.lineTo(toPose5(pts[j], ox, oy), tool, &commandError)) {
+            if (startError) *startError = commandError.isEmpty()
+                ? tr("Controller command generation failed")
+                : commandError;
+            return false;
+        }
     }
 
     commandSink.endSegment(tool);
@@ -559,36 +546,6 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
         if (!running)
             return true;
         QThread::msleep(10);
-    }
-}
-
-void NormalCuttingManager::unwrapCuttingListCAxis(QVector<CuttingRow>& rows) const
-{
-    bool hasLastC = false;
-    double lastC = 0.0;
-    int adjustedContours = 0;
-
-    for (CuttingRow& row : rows) {
-        bool rowAdjusted = false;
-        for (lcnc::cam::ToolpathExportPoint& point : row.data.points)
-            rowAdjusted = unwrapPointCAxis(point, lastC, hasLastC) || rowAdjusted;
-        if (!row.data.points.isEmpty()) {
-            const auto& start = row.data.points.front();
-            auto& lead = row.data.contour.leadInPoint;
-            lead.machineR1 = start.machineR1;
-            lead.machineR2 = start.machineR2;
-            lead.rotaryAxis1Name = start.rotaryAxis1Name;
-            lead.rotaryAxis2Name = start.rotaryAxis2Name;
-        }
-        if (rowAdjusted)
-            ++adjustedContours;
-    }
-
-    if (adjustedContours > 0) {
-        LCNC_INFO(lcnc::LogCode::Generic,
-                  "normal-cutting: unwrapped C axis continuously across {} ordered contour(s), finalC={:.6f}",
-                  adjustedContours,
-                  lastC);
     }
 }
 
@@ -748,7 +705,8 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
         }
         if (!out.isEmpty())
         {
-            unwrapCuttingListCAxis(out);
+            // CAM v5 owns canonical and cross-contour continuous rotary angles.
+            // Process executes the ordered snapshot without geometry-specific re-solving.
             storeCuttingListCache(cacheKey, out);
             return out;
         }

@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QStringList>
 
+#include <array>
 class LcncDocument;
 class MachineKinematics;
 class QLabel;
@@ -19,7 +20,7 @@ class QPushButton;
  * @brief Right-panel widget shown when the "准备" tab is active.
  *
  * Sections:
- *  1. 机台模型页 — preset, model loading, machine-part assignment, calibration and workpiece install position.
+ *  1. 机台模型页 — preset, model loading, machine-part assignment, calibration and workpiece setup.
  */
 class WidgetMachinePanel : public QWidget
 {
@@ -46,15 +47,16 @@ signals:
     void cutterHeadPhysicalPositionChanged(double x, double y, double z);
     void alignToPhysicalCutterHeadRequested();
     void axisCalibrationWizardRequested();
-    void workpieceInstallPositionChanged(double x, double y, double z);
-    void alignWorkpieceRotationCenterRequested();
+    void workpieceSetupChanged(double x, double y, double z,
+                               double rotationXDeg, double rotationYDeg, double rotationZDeg);
+    void alignWorkpieceSetupToRotationCenterRequested();
     void autoInstallWorkpieceChanged(bool enabled);
 
 private slots:
     void onAxisOriginEditorChanged();
     void onCutterHeadModelEditorChanged();
     void onCutterHeadPhysicalEditorChanged();
-    void onWorkpieceInstallPositionChanged();
+    void onWorkpieceSetupChanged();
 
 private:
     void buildUi();
@@ -100,9 +102,7 @@ private:
     QGridLayout* m_assignGrid{nullptr};
     QGroupBox* m_installGroup{nullptr};
     QCheckBox* m_chkAutoInstallWorkpiece{nullptr};
-    QDoubleSpinBox* m_wpcInstallX{nullptr};
-    QDoubleSpinBox* m_wpcInstallY{nullptr};
-    QDoubleSpinBox* m_wpcInstallZ{nullptr};
+    std::array<QDoubleSpinBox*, 6> m_workpieceSetupEditors{};
     QPushButton* m_btnAlignRotationCenter{nullptr};
     QStringList m_selectedEntries;
     QString m_pendingCalibrationAxis;

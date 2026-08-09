@@ -19,8 +19,11 @@ void MachinePose::setKinematics(MachineKinematics* kin)
 {
     LCNC_DEBUG(LogCode::Generic,
                "MachinePose::setKinematics kin={}", static_cast<const void*>(kin));
-    if (m_kin == kin)
-        return;
+    // MachineConfigurationService updates the axis list in-place on the same
+    // MachineKinematics instance when a physical preset changes. Pointer
+    // identity alone therefore cannot decide whether the pose is current.
+    // Rebuild on every injection so an XYZ(A) pose never rejects C/B feedback
+    // after switching to an AC/BC table.
     m_kin = kin;
     rebuildFromKinematics();
     LCNC_INFO(LogCode::Generic,

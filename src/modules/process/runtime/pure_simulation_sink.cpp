@@ -1,5 +1,7 @@
 #include "modules/process/runtime/pure_simulation_sink.h"
 
+#include <QCoreApplication>
+
 #include "core/logging/logger.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/cutting/pure_simulation_toolpath_ticker.h"
@@ -116,7 +118,8 @@ void PureSimulationSink::laserOn(const Tool& /*tool*/)             {}
 void PureSimulationSink::laserOff(const Tool& /*tool*/)            {}
 void PureSimulationSink::endProgram(const Tool& /*tool*/)          {}
 
-void PureSimulationSink::beginSegment(const MachinePose5& startPose, const Tool& tool)
+bool PureSimulationSink::beginSegment(const MachinePose5& startPose, const Tool& tool,
+                                      QString* /*errorMessage*/)
 {
     m_feedRate = (tool.m_dLineVelocity > 0) ? tool.m_dLineVelocity : 600.0;
     // 把起点也压进去：PureSimulationToolpathTicker 需要至少 2 个点才能插值。
@@ -131,10 +134,18 @@ void PureSimulationSink::beginSegment(const MachinePose5& startPose, const Tool&
         p.rotaryAxis2Name = startPose.r2Name;
         m_pending.append(p);
     }
+    return true;
 }
 
-void PureSimulationSink::lineTo(const MachinePose5& target, const Tool& tool)
+bool PureSimulationSink::lineTo(const MachinePose5& target, const Tool& tool,
+                                QString* errorMessage)
 {
+    const std::uint8_t expectedMask = static_cast<std::uint8_t>((1u << m_axisMap.activeCount()) - 1u);
+    if ((target.mask & expectedMask) != expectedMask) {
+        // 中文翻译：机床位姿轴掩码与当前轴布局不匹配
+        if (errorMessage) *errorMessage = QCoreApplication::translate("PureSimulationSink", "Machine pose axis mask does not match the active layout");
+        return false;
+    }
     lcnc::cam::ToolpathExportPoint p{};
     p.machineX  = target.x;
     p.machineY  = target.y;
@@ -144,6 +155,7 @@ void PureSimulationSink::lineTo(const MachinePose5& target, const Tool& tool)
     p.rotaryAxis1Name = target.r1Name;
     p.rotaryAxis2Name = target.r2Name;
     m_pending.append(p);
+    return true;
 }
 
 void PureSimulationSink::endSegment(const Tool& /*tool*/) {}

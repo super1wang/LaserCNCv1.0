@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/kinematics/machine_topology.h"
+
 #include <QWidget>
 #include <QCheckBox>
 
@@ -36,6 +38,10 @@ public:
     void setExtractionStrategy(int strategy);
     void setShowNormals(bool on);
     void setNormalSampleStep(double mm);
+    void setMachiningModes(const QList<lcnc::MachiningMode>& modes,
+                           lcnc::MachiningMode currentMode);
+    void setMachineAxisLayout(const lcnc::MachineAxisLayout& layout);
+    void setMachineSetupEditingEnabled(bool enabled);
 
     /// Show machine coordinates for contour at given index in the table.
     void showContourCoordinates(int contourIndex);
@@ -63,6 +69,7 @@ signals:
     void smoothAngleChanged(double deg);
     void extractionStrategyChanged(int strategy);
     void parameterScopeChanged(bool currentContour);
+    void machiningModeChanged(lcnc::MachiningMode mode);
 
 private:
     void buildUi();
@@ -75,6 +82,7 @@ private:
     QComboBox*      m_comboParameterScope{nullptr};
     QLabel*         m_labelCurrentContour{nullptr};
     QGroupBox*      m_classificationGroup{nullptr};
+    QComboBox*      m_comboMachiningMode{nullptr};
 
     // Face classification widgets
     QDoubleSpinBox* m_spinSmoothAngle{nullptr};
@@ -99,6 +107,7 @@ private:
     QWidget*         m_machineCoordinatesPage{nullptr};
     QTableWidget*   m_coordTable{nullptr};
     int             m_activeContourIndex{-1};
+    lcnc::MachineAxisLayout m_machineAxisLayout;
 
 signals:
     void showNormalsToggled(bool on);

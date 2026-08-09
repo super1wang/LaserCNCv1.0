@@ -47,8 +47,10 @@ public:
                            double beforeOff, double afterOff,
                            double blowDelay) override;
 
-    void lineTo(const MachinePose5& target, const Tool& tool) override;
-    void beginSegment(const MachinePose5& startPose, const Tool& tool) override;
+    bool lineTo(const MachinePose5& target, const Tool& tool,
+                QString* errorMessage = nullptr) override;
+    bool beginSegment(const MachinePose5& startPose, const Tool& tool,
+                      QString* errorMessage = nullptr) override;
     void endSegment(const Tool& tool) override;
 
     void laserOn(const Tool& tool) override;

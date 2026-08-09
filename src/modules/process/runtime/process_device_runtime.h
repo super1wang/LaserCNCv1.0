@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/kinematics/machine_topology.h"
+
 #include "modules/process/device/laser/ld_factory.h"
 #include "modules/process/tool/tool_factory.h"
 #include "modules/process/runtime/device_command_queue.h"
@@ -103,7 +105,8 @@ public:
     std::unique_ptr<lcnc::process::IMotionCommandSink> createMotionSink(
         bool simulationMode,
         lcnc::process::PureSimulationToolpathTicker* simTicker,
-        ProcessModule* processModule);
+        ProcessModule* processModule,
+        const lcnc::MachineAxisLayout& layout);
 
     void setToolTable();
     void clearToolData();

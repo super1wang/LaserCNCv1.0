@@ -1534,10 +1534,14 @@ bool GTNMotionControl::IsBufferRunning(int iBufferIndex)
 	return run;
 }
 
-void GTNMotionControl::ConfigureCuttingAxes(Axis x, Axis y, Axis z, Axis r1, Axis r2)
+bool GTNMotionControl::ConfigureCuttingAxes(const std::array<Axis, 5>& axes, int dimension)
 {
-	m_cuttingAxes = {x, y, z, r1, r2};
+	if (dimension < 3 || dimension > 5)
+		return false;
+	m_cuttingAxes = axes;
+	m_cuttingAxisCount = dimension;
 	m_cuttingCoordinateReady = false;
+	return true;
 }
 
 bool GTNMotionControl::MoveToPosition(Axis axis, double velocity, double position)
@@ -1545,47 +1549,48 @@ bool GTNMotionControl::MoveToPosition(Axis axis, double velocity, double positio
 	return MovePostion(axis, velocity, position);
 }
 
-void GTNMotionControl::OffsetLineTo(double dEndX, double dEndY, double dEndZ,
-	                                 double dEndR1, double dEndR2, const Tool& tool)
+bool GTNMotionControl::OffsetLineTo(const std::array<double, 5>& target,
+	                                 int dimension, const Tool& tool)
 {
-	if (!m_cuttingCoordinateReady) {
-		LogError("OffsetLineTo", "five-axis coordinate system is not ready", "", -1);
-		return;
+	if (!m_cuttingCoordinateReady || dimension != m_cuttingAxisCount) {
+		return LogError("OffsetLineTo", "dynamic coordinate system is not ready", "", -1), false;
 	}
 	double dVelocity = tool.m_dLineVelocity;
 	double LineAcc = tool.m_dLineAcc;
 
 	if (m_hasPreviousCuttingPose
-		&& (m_dPreX == dEndX) && (m_dPreY == dEndY) && (m_dPreZ == dEndZ)
-		&& (m_dPreR1 == dEndR1) && (m_dPreR2 == dEndR2))
-		return;
-	double position[5] = {dEndX, dEndY, dEndZ, dEndR1, dEndR2};
+		&& (m_dPreX == target[0]) && (m_dPreY == target[1]) && (m_dPreZ == target[2])
+		&& (dimension < 4 || m_dPreR1 == target[3])
+		&& (dimension < 5 || m_dPreR2 == target[4]))
+		return true;
 	short sRtn;
 	const int MAX_RETRY = 10;
 	for (int retry = 0; retry < MAX_RETRY; retry++)
 	{
-		sRtn = GTN_LnXYZACEx(
-			m_iCore,
-			1, // 该插补段的坐标系是坐标系1
-			position, // XYZ + R1 + R2 的机床轴坐标（RTCP 关闭）
-			0x1f, // 五个坐标系维度均参与插补
-			dVelocity, // 合成速度mm/s
-			LineAcc, // 插补段的加速度：mm/s^2
-			0,
-			0,
-			m_iWriteBuf); // 向坐标系1的FIFO0缓存区传递该直线插补数据
+		if (dimension == 3) {
+			sRtn = GTN_LnXYZEx(m_iCore, 1, target[0], target[1], target[2],
+			                     dVelocity, LineAcc, 0, 0, m_iWriteBuf);
+		} else if (dimension == 4) {
+			sRtn = GTN_LnXYZAEx(m_iCore, 1, target[0], target[1], target[2], target[3],
+			                      dVelocity, LineAcc, 0, 0, m_iWriteBuf);
+		} else {
+			double position[5] = {target[0], target[1], target[2], target[3], target[4]};
+			sRtn = GTN_LnXYZACEx(m_iCore, 1, position, 0x1f,
+			                       dVelocity, LineAcc, 0, 0, m_iWriteBuf);
+		}
 		if (!sRtn) break;
 		// 软件前瞻缓冲区已满：将已有数据刷入硬件FIFO后重试
 		FlushToFifo();
 	}
 	if (sRtn)
-		LogError("OffsetLineTo", "GTN_LnXYZACEx", "", sRtn);
-	m_dPreX = dEndX;
-	m_dPreY = dEndY;
-	m_dPreZ = dEndZ;
-	m_dPreR1 = dEndR1;
-	m_dPreR2 = dEndR2;
+		return LogError("OffsetLineTo", "GTN dynamic line interpolation", "", sRtn), false;
+	m_dPreX = target[0];
+	m_dPreY = target[1];
+	m_dPreZ = target[2];
+	if (dimension >= 4) m_dPreR1 = target[3];
+	if (dimension >= 5) m_dPreR2 = target[4];
 	m_hasPreviousCuttingPose = true;
+	return true;
 }
 
 // [P3 removed] GTNMotionControl::OffsetArcTo
@@ -1705,15 +1710,15 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	short crd = 1, fifo = 0;
 
 	int axisIndex[5] = {};
-	for (int dimension = 0; dimension < 5; ++dimension) {
+	for (int dimension = 0; dimension < m_cuttingAxisCount; ++dimension) {
 		const Axis axis = m_cuttingAxes[dimension];
 		auto it = m_mapMotorValue.find(axis);
 		if (it == m_mapMotorValue.end() || it->second.AxisIndex < 1 || it->second.AxisIndex > 8)
 			return LogError("InitCrd", "five-axis cutting axis not configured", enum_name(axis).data(), -1), false;
 		axisIndex[dimension] = it->second.AxisIndex;
 	}
-	for (int lhs = 0; lhs < 5; ++lhs) {
-		for (int rhs = lhs + 1; rhs < 5; ++rhs) {
+	for (int lhs = 0; lhs < m_cuttingAxisCount; ++lhs) {
+		for (int rhs = lhs + 1; rhs < m_cuttingAxisCount; ++rhs) {
 			if (axisIndex[lhs] == axisIndex[rhs])
 				return LogError("InitCrd", "duplicate five-axis cutting axis", "", -1), false;
 		}
@@ -1727,15 +1732,15 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	TCrdPrm crdPrm;
 	memset(&crdPrm, 0, sizeof(crdPrm));
 	//sRtn = GTN_GetCrdPrm(core,crd,&crdPrm);
-	crdPrm.dimension = 5; // 坐标系为 XYZ + R1 + R2 五维坐标系
+	crdPrm.dimension = m_cuttingAxisCount;
 	crdPrm.synVelMax = 500; // 最大合成速度：pulse/ms
 	crdPrm.synAccMax = 10; // 最大加速度：pulse/ms^2
 	crdPrm.evenTime = 50; // 最小匀速时间：ms
-	for (int dimension = 0; dimension < 5; ++dimension)
+	for (int dimension = 0; dimension < m_cuttingAxisCount; ++dimension)
 		crdPrm.profile[axisIndex[dimension] - 1] = dimension + 1;
 	crdPrm.setOriginFlag = 1; // 通过originPos指定坐标系原点
 
-	for (int dimension = 0; dimension < 5; ++dimension)
+	for (int dimension = 0; dimension < m_cuttingAxisCount; ++dimension)
 		crdPrm.originPos[axisIndex[dimension] - 1] = 0;
 	sRtn = GTN_SetCrdPrm(m_iCore, crd, &crdPrm);
 	if(sRtn)
@@ -1783,7 +1788,7 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 		bool used[8] = {};
 		int slotIdx = 0;
 		// 前五槽位严格对应坐标系 XYZ/R1/R2，保证 GTN_LnXYZACEx 的 pPos 顺序一致。
-		for (int dimension = 0; dimension < 5; ++dimension) {
+		for (int dimension = 0; dimension < m_cuttingAxisCount; ++dimension) {
 			const int index = axisIndex[dimension];
 			lookAheadPara.axisRelation[slotIdx++] = static_cast<short>(index);
 			used[index - 1] = true;
@@ -1824,7 +1829,9 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	}
 
 	// 对齐C#示例：SetupLookAheadCrd → InitLookAheadEx 之间不插入任何其它调用
-	sRtn = GTN_SetupLookAheadCrd(m_iCore, crd, FIVE_AXIS);
+	const EMachineMode machineMode = m_cuttingAxisCount == 3 ? NORMAL_THREE_AXIS
+		: m_cuttingAxisCount == 4 ? MULTI_AXES : FIVE_AXIS;
+	sRtn = GTN_SetupLookAheadCrd(m_iCore, crd, machineMode);
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_SetupLookAheadCrd", "", sRtn), false;
 
 	sRtn = GTN_InitLookAheadEx(m_iCore, crd, &lookAheadPara, fifo, 0);
@@ -1834,7 +1841,7 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 	sRtn = GTN_SetAxisLimitModeLa(m_iCore, crd, axisLimitMode);
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_SetAxisLimitModeLa", "", sRtn), false;
 	long velValidMask = 0;
-	for (int dimension = 0; dimension < 5; ++dimension)
+	for (int dimension = 0; dimension < m_cuttingAxisCount; ++dimension)
 		velValidMask |= (1L << (axisIndex[dimension] - 1));
 	sRtn = GTN_SetAxisVelValidModeLa(m_iCore, crd, velValidMask);
 	if (sRtn) return LogError("SetContiInterpolation", "GTN_SetAxisVelValidModeLa", "", sRtn), false;

@@ -233,6 +233,9 @@ private:
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, double> m_axisPositions;
     QMap<QString, bool>   m_axisEnabled;
+    /// Non-interpolated rotary axes that must remain at their mode posture
+    /// throughout the active workflow.
+    QMap<QString, double> m_activeLockedAxisTargets;
     QMap<QString, bool>   m_digitalOutputs;
     QTimer*               m_simTimer{nullptr};
     QString               m_lastPeripheralDiagnostic;

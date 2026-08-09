@@ -23,6 +23,8 @@ struct ProcessPreflightAnalogGuard {
 
 struct ProcessPreflightRequest {
     QStringList axisNames;
+    QMap<QString, double> lockedAxisTargets;
+    double lockedAxisMoveVelocity{5.0};
     QVector<ProcessPreflightDigitalGuard> digitalGuards;
     QVector<ProcessPreflightAnalogGuard> analogGuards;
 };

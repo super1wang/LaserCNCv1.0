@@ -38,7 +38,8 @@ void MachineKinematics::loadPreset(const QString& configType)
                       MachineAxisDef::MotionType mt,
                       const gp_Dir& dir,
                       double mn, double mx,
-                      const QString& parent)
+                      const QString& parent,
+                      lcnc::MachineAxisRole role = lcnc::MachineAxisRole::Unspecified)
     {
         MachineAxisDef d;
         d.name = name;
@@ -47,6 +48,7 @@ void MachineKinematics::loadPreset(const QString& configType)
         d.minVal     = mn;
         d.maxVal     = mx;
         d.parentAxis = parent;
+        d.role       = role;
         m_axes.append(d);
     };
 
@@ -54,46 +56,46 @@ void MachineKinematics::loadPreset(const QString& configType)
     add("BASE", MachineAxisDef::Linear, gp_Dir(0, 0, 1), 0.0, 0.0, QString());
 
     if (configType == "XYZ") {
-        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE");
-        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y");
-        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X");
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE", lcnc::MachineAxisRole::LinearY);
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y",    lcnc::MachineAxisRole::LinearX);
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X",    lcnc::MachineAxisRole::LinearZ);
 
     } else if (configType == "XYZA") {
-        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE");
-        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y");
-        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X");
-        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0), -9999.0, 9999.0, "BASE");
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE", lcnc::MachineAxisRole::LinearY);
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y",    lcnc::MachineAxisRole::LinearX);
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X",    lcnc::MachineAxisRole::LinearZ);
+        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0), -9999.0, 9999.0, "BASE", lcnc::MachineAxisRole::WorkpieceRotary);
 
     } else if (configType == "VERTICAL_AC_TABLE") {
         // Spindle chain: BASE → Y → X → Z (carries laser head)
         // Table  chain: BASE → A → C (carries workpiece)
-        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE");
-        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y");
-        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X");
-        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0), -120.0,  120.0, "BASE");
-        add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -9999.0, 9999.0, "A");
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "BASE", lcnc::MachineAxisRole::LinearY);
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "Y",    lcnc::MachineAxisRole::LinearX);
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "X",    lcnc::MachineAxisRole::LinearZ);
+        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0), -120.0,  120.0, "BASE", lcnc::MachineAxisRole::TableTilt);
+        add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -9999.0, 9999.0, "A", lcnc::MachineAxisRole::TableSpin);
 
     } else if (configType == "VERTICAL_BC_TABLE") {
-        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "BASE");
-        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "X");
-        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "Y");
-        add("B", MachineAxisDef::Rotary, gp_Dir(0, 1, 0), -120.0,  120.0, "BASE");
-        add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -9999.0, 9999.0, "B");
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0,  500.0, "BASE", lcnc::MachineAxisRole::LinearX);
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0,  400.0, "X",    lcnc::MachineAxisRole::LinearY);
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0,  300.0, "Y",    lcnc::MachineAxisRole::LinearZ);
+        add("B", MachineAxisDef::Rotary, gp_Dir(0, 1, 0), -120.0,  120.0, "BASE", lcnc::MachineAxisRole::TableTilt);
+        add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -9999.0, 9999.0, "B", lcnc::MachineAxisRole::TableSpin);
 
     } else if (configType == "AB_HEAD") {
         // Gantry: X cross-beam, Y longitudinal, Z vertical; A/B tilt the head
-        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0, 500.0, "BASE");
-        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0, 400.0, "BASE");
-        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0, 300.0, "X");
-        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0),  -90.0,  90.0, "Z");
-        add("B", MachineAxisDef::Rotary, gp_Dir(0, 1, 0),  -45.0,  45.0, "A");
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0, 500.0, "BASE", lcnc::MachineAxisRole::LinearX);
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0, 400.0, "BASE", lcnc::MachineAxisRole::LinearY);
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0, 300.0, "X",    lcnc::MachineAxisRole::LinearZ);
+        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0),  -90.0,  90.0, "Z",   lcnc::MachineAxisRole::HeadTiltPrimary);
+        add("B", MachineAxisDef::Rotary, gp_Dir(0, 1, 0),  -45.0,  45.0, "A",   lcnc::MachineAxisRole::HeadTiltSecondary);
 
     } else if (configType == "AC_HEAD") {
-        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0, 500.0, "BASE");
-        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0, 400.0, "BASE");
-        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0, 300.0, "X");
-        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0),  -90.0,  90.0, "Z");
-        add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -360.0, 360.0, "A");
+        add("X", MachineAxisDef::Linear, gp_Dir(1, 0, 0), -500.0, 500.0, "BASE", lcnc::MachineAxisRole::LinearX);
+        add("Y", MachineAxisDef::Linear, gp_Dir(0, 1, 0), -400.0, 400.0, "BASE", lcnc::MachineAxisRole::LinearY);
+        add("Z", MachineAxisDef::Linear, gp_Dir(0, 0, 1), -300.0, 300.0, "X",    lcnc::MachineAxisRole::LinearZ);
+        add("A", MachineAxisDef::Rotary, gp_Dir(1, 0, 0),  -90.0,  90.0, "Z",   lcnc::MachineAxisRole::HeadTiltPrimary);
+        add("C", MachineAxisDef::Rotary, gp_Dir(0, 0, 1), -360.0, 360.0, "A",   lcnc::MachineAxisRole::HeadTiltSecondary);
     }
 
     removeInvalidAssignments();
@@ -281,7 +283,13 @@ gp_Trsf MachineKinematics::computeShapeTransform(const QString& entry) const
 gp_Trsf MachineKinematics::computeWpcTransform(const QString& entry) const
 {
     const QString axisName = m_wpcToAxis.value(entry);
-    return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName);
+    return axisName.isEmpty() ? m_workpieceSetupTransform
+                              : chainTrsf(axisName).Multiplied(m_workpieceSetupTransform);
+}
+
+void MachineKinematics::setWorkpieceSetupTransform(const gp_Trsf& transform)
+{
+    m_workpieceSetupTransform = transform;
 }
 
 gp_Trsf MachineKinematics::computeAxisTransform(const QString& axisName) const
@@ -302,7 +310,8 @@ gp_Dir MachineKinematics::nominalBeamDirectionMachine() const
 gp_Trsf MachineKinematics::computeWpcTransformHome(const QString& entry) const
 {
     const QString axisName = m_wpcToAxis.value(entry);
-    return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName, /*home=*/true);
+    return axisName.isEmpty() ? m_workpieceSetupTransform
+                              : chainTrsf(axisName, /*home=*/true).Multiplied(m_workpieceSetupTransform);
 }
 
 // ── Position control ───────────────────────────────────────────────────────────

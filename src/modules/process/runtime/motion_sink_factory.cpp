@@ -46,12 +46,18 @@ std::unique_ptr<IMotionCommandSink>
 MotionSinkFactory::create(MotionControl* mc,
                           bool simulationMode,
                           PureSimulationToolpathTicker* simTicker,
-                          ProcessModule* processModule)
+                          ProcessModule* processModule,
+                          const lcnc::MachineAxisLayout& layout)
 {
     // 构型驱动的轴映射 —— 一次构造、整个 sink 生命周期复用。
     auto* kernel = lcnc::Kernel::tryCurrent();
     auto* machineConfig = kernel ? kernel->service<lcnc::MachineConfigurationService>() : nullptr;
-    AxisMap axes = AxisMap::from(machineConfig);
+    AxisMap axes = AxisMap::from(machineConfig, layout);
+    if (axes.activeCount() != layout.count) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "MotionSinkFactory: snapshot axis layout does not match configured controller axes");
+        return nullptr;
+    }
 
     // Any selected ACS/GTN backend is authoritative.  A disconnected or
     // failed real backend must never be converted into PureSimulation.
