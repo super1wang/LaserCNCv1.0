@@ -300,6 +300,35 @@ max = 120.0
     ok &= require(tableSidewallPose.size() == 1 && tableSidewallPose.front().valid,
                   "AC-table five-axis solver rejected a reachable tube sidewall normal");
 
+    // Regression: the controller layout is XYZ/A/C, but table IK internally
+    // uses child C then parent A.  A previous pose at +90 degrees must be
+    // restored in that physical order so opposite sidewall normals rotate C
+    // instead of flipping the clamping A axis to -90 degrees.
+    // 中文翻译：回归验证跨轮廓连续姿态按 C→A 物理链路恢复，保持 A=+90 并由 C 处理对侧。
+    const int tableTiltIndex = tableRequest.definition.interpolatedAxes.indexOfRole(
+        lcnc::MachineAxisRole::TableTilt);
+    const int tableSpinIndex = tableRequest.definition.interpolatedAxes.indexOfRole(
+        lcnc::MachineAxisRole::TableSpin);
+    lcnc::SolvedMachinePose stableTablePose;
+    for (int axisIndex = 0; axisIndex < tableRequest.definition.interpolatedAxes.count; ++axisIndex)
+        stableTablePose.setValue(axisIndex, 0.0);
+    stableTablePose.setValue(tableTiltIndex, 90.0);
+    stableTablePose.valid = true;
+    ToolpathPoint oppositeTableSidewallPoint = tableSidewallPoint;
+    oppositeTableSidewallPoint.normal = gp_Dir(0, -1, 0);
+    std::vector<ToolpathPoint> oppositeTableSidewallPoints{
+        tableSidewallPoint, oppositeTableSidewallPoint};
+    tableRequest.points = &oppositeTableSidewallPoints;
+    tableRequest.previousPose = &stableTablePose;
+    const auto stableTablePoses = registry.solve(tableRequest);
+    ok &= require(stableTablePoses.size() == 2
+                  && stableTablePoses[0].valid && stableTablePoses[1].valid
+                  && isNear(stableTablePoses[0].value(tableTiltIndex), 90.0)
+                  && isNear(stableTablePoses[1].value(tableTiltIndex), 90.0)
+                  && std::abs(stableTablePoses[1].value(tableSpinIndex)
+                              - stableTablePoses[0].value(tableSpinIndex)) >= 90.0,
+                  "AC-table continuity did not keep the +90 degree clamping tilt on opposite sidewalls");
+
     MachineKinematics head;
     head.loadPreset(QStringLiteral("AB_HEAD"));
     ToolpathPoint headPoint;

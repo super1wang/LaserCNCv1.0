@@ -71,24 +71,30 @@ SolvedMachinePose poseFromLegacy(const MachineCoord& coordinate,
     return pose;
 }
 
-MachineCoord legacyFromPose(const SolvedMachinePose& pose, const MachineAxisLayout& layout)
+MachineCoord tablePreviousFromPose(const SolvedMachinePose& pose,
+                                   const MachineAxisLayout& layout,
+                                   const QString& childSpinAxisName,
+                                   const QString& parentTiltAxisName)
 {
     MachineCoord coordinate;
-    coordinate.valid = pose.valid;
-    int rotary = 0;
-    for (int index = 0; index < layout.count; ++index) {
-        const double value = pose.value(index);
-        switch (layout.axes[index].role) {
-        case MachineAxisRole::LinearX: coordinate.x = value; break;
-        case MachineAxisRole::LinearY: coordinate.y = value; break;
-        case MachineAxisRole::LinearZ: coordinate.z = value; break;
-        default:
-            if (rotary == 0) { coordinate.r1 = value; coordinate.r1Name = layout.axes[index].name; }
-            else if (rotary == 1) { coordinate.r2 = value; coordinate.r2Name = layout.axes[index].name; }
-            ++rotary;
-            break;
-        }
-    }
+    if (!pose.valid) return coordinate;
+
+    const int spinIndex = layout.indexOfName(childSpinAxisName);
+    const int tiltIndex = layout.indexOfName(parentTiltAxisName);
+    if (spinIndex < 0 || tiltIndex < 0
+        || !pose.isActive(spinIndex) || !pose.isActive(tiltIndex))
+        return coordinate;
+
+    // The persisted/controller layout is X/Y/Z/tilt/spin, while the table IK
+    // decomposes the physical chain child-spin then parent-tilt.  Do not infer
+    // r1/r2 from layout order here: that loses cross-contour continuity and
+    // allows the solver to replace a stable +90 degree table tilt with -90.
+    // 中文翻译：控制器轴布局为倾斜轴、旋转轴，转台逆解连续姿态必须按子旋转轴、父倾斜轴的物理链路恢复。
+    coordinate.r1Name = childSpinAxisName;
+    coordinate.r1 = pose.value(spinIndex);
+    coordinate.r2Name = parentTiltAxisName;
+    coordinate.r2 = pose.value(tiltIndex);
+    coordinate.valid = true;
     return coordinate;
 }
 
@@ -355,7 +361,8 @@ public:
         const MachineAxisDef* spin = axisForRole(request.machine, MachineAxisRole::TableSpin);
         if (!tilt || !spin) return result;
         MachineCoord previous = request.previousPose
-            ? legacyFromPose(*request.previousPose, request.definition.interpolatedAxes)
+            ? tablePreviousFromPose(*request.previousPose, request.definition.interpolatedAxes,
+                                    spin->name, tilt->name)
             : MachineCoord{};
         for (const ToolpathPoint& point : *request.points) {
             gp_Pnt position = point.position.Transformed(setup);
