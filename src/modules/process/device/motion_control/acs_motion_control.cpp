@@ -7,12 +7,22 @@
 //#include "CoreUtils.h"
 #include "bdaqctrl.h"
 #include "core/logging/logger.h"
+#include "modules/process/system/process_numeric_constants.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
+
+#include "magic_enum.hpp"
 
 using namespace Automation::BDaq;
 
+using lcnc::process::AnalogOUT;
+using lcnc::process::Axis;
+using lcnc::process::DigitalOUT;
+using lcnc::process::PermissionLevel;
 using std::ofstream;
 using std::ios;
+using std::string;
+using std::vector;
+using toml::table;
 #define DEBUG_MODE
 
 namespace {
@@ -29,7 +39,7 @@ bool resolveDigital(const std::map<K, DigitalIOData>& m, K key,
 	if (it == m.end() || it->second.strIndex.empty())
 	{
 		LCNC_WARN(lcnc::LogCode::Generic, "{}", std::string("ACS digital IO missing or unconfigured: ") + contextLabel
-					+ " (key=" + std::string(enum_name(key)) + "); generated command skipped.");
+					+ " (key=" + std::string(magic_enum::enum_name(key)) + "); generated command skipped.");
 		out = DigitalIOData{};
 		return false;
 	}
@@ -93,7 +103,7 @@ void ACSMotionControl::LogError()
 void ACSMotionControl::CreateMotor(Axis eAxis, const table& tAxis)
 {
 	SetAxisIndex(eAxis, tAxis.at("iIndex").as_integer());
-	string strName = enum_name(eAxis).data();
+	string strName = magic_enum::enum_name(eAxis).data();
 	m_mapMotorValue[eAxis].HomeName			= strName + "Home";
 	m_mapMotorValue[eAxis].Name				= strName;
 	m_mapMotorValue[eAxis].HomeBufferIndex	= tAxis.at("iHomeIndex")	.as_integer();
@@ -619,7 +629,7 @@ bool ACSMotionControl::SetAxisTubeDiamater(Axis eAxis, double dDiamater)
 	}
 
 	int iResolutionRatio = m_mapMotorValue[eAxis].Resolution;
-	int iEfac = iResolutionRatio * 10000 / (PI * dDiamater);
+	int iEfac = iResolutionRatio * 10000 / (lcnc::process::kPi * dDiamater);
 	if (IsConnected())
 	{
 		if (!WriteEFAC(eAxis, iEfac))
@@ -673,7 +683,7 @@ bool ACSMotionControl::SetAxisTubeDiamater(Axis eAxis, double dDiamater)
 		else if (dDiamater >= 1)
 		{
 			dDiamaterTwo = int(dDiamater) + 0.5;
-			double dXVEL = PI * dDiamaterTwo * 5;		// 5为轴每秒旋转圈数
+			double dXVEL = lcnc::process::kPi * dDiamaterTwo * 5;		// 5为轴每秒旋转圈数
 			bXVSuccess = SetDiamaterXVEL(eAxis, dXVEL);
 		}
 		return bXVSuccess;
@@ -810,7 +820,7 @@ bool ACSMotionControl::GetAxisTubeDiamater(Axis eAxis, double& dTubeDiamater)
 		return false;
 	
 	int iResolutionRatio = m_mapMotorValue[eAxis].Resolution;
-	dTubeDiamater = iResolutionRatio * 10000 / (iEfac * PI);
+	dTubeDiamater = iResolutionRatio * 10000 / (iEfac * lcnc::process::kPi);
 	m_dDiameter = dTubeDiamater;
 	return true;
 }
@@ -1318,8 +1328,8 @@ void ACSMotionControl::EndProgramCommand(const Tool& tool)
 
 void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const Tool& curTool)
 {
-	Axis eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
+	Axis eDirectionX = magic_enum::enum_cast<Axis>(curTool.m_strDirectionX).value();
+	Axis eDirectionY = magic_enum::enum_cast<Axis>(curTool.m_strDirectionY).value();
 
 	//X 定位轴
 	if (curTool.m_bXIsMove && eDirectionX != Axis::X && m_runtimeConfiguration.isAxisEnabled(Axis::X))
@@ -1332,7 +1342,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	//X1 定位轴
 	if (curTool.m_bX1IsMove && m_runtimeConfiguration.isExtensionAxis("X1"))
 	{
-		string strX1Index	 = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("X").value_or(Axis::X)].AxisIndex);
+		string strX1Index	 = boost::lexical_cast<string>(m_mapMotorValue[magic_enum::enum_cast<Axis>("X").value_or(Axis::X)].AxisIndex);
 		string strX1Position = boost::lexical_cast<string>(curTool.m_dX1Position);
 		string strX1Vel		 = boost::lexical_cast<string>(curTool.m_dIdleX1Velocity);
 		m_strCommand += "PTP/EV " + strX1Index + "," + strX1Position + "," + strX1Vel + "\n";
@@ -1341,15 +1351,15 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	if (curTool.m_bAIsMove && eDirectionY != Axis::A && m_runtimeConfiguration.isAxisEnabled(Axis::A))
 	{
 		string strAIndex	= boost::lexical_cast<string>(m_mapMotorValue[Axis::A].AxisIndex);
-		string strAPosition = boost::lexical_cast<string>(curTool.m_dAPosition / 360 * PI * m_dDiameter);
+		string strAPosition = boost::lexical_cast<string>(curTool.m_dAPosition / 360 * lcnc::process::kPi * m_dDiameter);
 		string strAVel		= boost::lexical_cast<string>(curTool.m_dIdleAVelocity);
 		m_strCommand += "PTP/EV " + strAIndex + "," + strAPosition + "," + strAVel + "\n";
 	}
 	//A1 定位轴
 	if (curTool.m_bA1IsMove && m_runtimeConfiguration.isExtensionAxis("A1"))
 	{
-		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
-		string strA1Position = boost::lexical_cast<string>(curTool.m_dA1Position / 360 * PI * m_dDiameter);
+		string strA1Index = boost::lexical_cast<string>(m_mapMotorValue[magic_enum::enum_cast<Axis>("A").value_or(Axis::A)].AxisIndex);
+		string strA1Position = boost::lexical_cast<string>(curTool.m_dA1Position / 360 * lcnc::process::kPi * m_dDiameter);
 		string strA1Vel = boost::lexical_cast<string>(curTool.m_dIdleA1Velocity);
 		m_strCommand += "PTP/EV " + strA1Index + "," + strA1Position + "," + strA1Vel + "\n";
 	}
@@ -1364,7 +1374,7 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	//Y1 定位轴
 	if (curTool.m_bY1IsMove && m_runtimeConfiguration.isExtensionAxis("Y1"))
 	{
-		string strY1Index	 = boost::lexical_cast<string>(m_mapMotorValue[enum_cast<Axis>("Y").value_or(Axis::Y)].AxisIndex);
+		string strY1Index	 = boost::lexical_cast<string>(m_mapMotorValue[magic_enum::enum_cast<Axis>("Y").value_or(Axis::Y)].AxisIndex);
 		string strY1Position = boost::lexical_cast<string>(curTool.m_dY1Position);
 		string strY1Vel		 = boost::lexical_cast<string>(curTool.m_dIdleY1Velocity);
 		m_strCommand += "PTP/EV " + strY1Index + "," + strY1Position + "," + strY1Vel + "\n";
@@ -1570,8 +1580,8 @@ void ACSMotionControl::ProLaserControl(bool bLaser, bool bPso, const Tool& curTo
 	{
 		if (bPso)
 		{
-			Axis eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-			Axis eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
+			Axis eDirectionX = magic_enum::enum_cast<Axis>(curTool.m_strDirectionX).value();
+			Axis eDirectionY = magic_enum::enum_cast<Axis>(curTool.m_strDirectionY).value();
 			string strXIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionX].AxisIndex);
 			string strYIndex = boost::lexical_cast<string>(m_mapMotorValue[eDirectionY].AxisIndex);
 

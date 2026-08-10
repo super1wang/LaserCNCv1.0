@@ -3,9 +3,18 @@
 #include <fstream>
 //#include "bdaqctrl.h"
 #include "core/logging/logger.h"
+#include "modules/process/system/process_numeric_constants.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
 
- 
+#include "magic_enum.hpp"
+
+using lcnc::process::AnalogOUT;
+using lcnc::process::Axis;
+using lcnc::process::DigitalOUT;
+using std::string;
+using std::vector;
+using toml::table;
+
 GTNMotionControl::GTNMotionControl(lcnc::process::ProcessSettingsService& settings,
 	                                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
 	: MotionControl(settings, runtimeConfiguration)
@@ -98,13 +107,13 @@ bool GTNMotionControl::ClearGSNAlarm(Axis eAxis)
 	sRtn = GTN_ClearAlarm(m_iCore, AxisIndex, 1, 1);
 	if (0!= sRtn)
 	{
-		LogError("ClearGSNAlarm", "GTN_ClearAlarm", enum_name(eAxis).data(), sRtn);
+		LogError("ClearGSNAlarm", "GTN_ClearAlarm", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	sRtn = GTN_ClrSts(m_iCore, AxisIndex, 1);
 	if (0 != sRtn)
 	{
-		LogError("ClearGSNAlarm", "GTN_ClrSts", enum_name(eAxis).data(), sRtn);
+		LogError("ClearGSNAlarm", "GTN_ClrSts", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	return true;
@@ -112,7 +121,7 @@ bool GTNMotionControl::ClearGSNAlarm(Axis eAxis)
 
 void GTNMotionControl::CreateMotor(Axis eAxis, const table& tAxis)
 {
-	m_mapMotorValue[eAxis].Name			= enum_name(eAxis).data();
+	m_mapMotorValue[eAxis].Name			= magic_enum::enum_name(eAxis).data();
 	m_mapMotorValue[eAxis].AxisIndex	= tAxis.at("iIndex")		.as_integer();
 	m_mapMotorValue[eAxis].Resolution	= tAxis.at("fResolution")	.as_floating();
 	m_mapMotorValue[eAxis].Rotary		= tAxis.at("bRotation")		.as_boolean();
@@ -274,14 +283,14 @@ bool GTNMotionControl::Home(Axis eAxis)
 
 	sRtn = GTN_LmtsOffEx(m_iCore, AxisIndex, -1, 1);	//控制轴限位失效
 	if (sRtn)
-		return LogError("Home", "GTN_LmtsOffEx", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Home", "GTN_LmtsOffEx", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	// 限位已关闭，以下所有退出路径必须经过 GTN_LmtsOnEx 恢复限位
 	bool bRet = false;
 	try
 	{
 		do {
 			sRtn = GTN_ZeroPos(m_iCore, AxisIndex, 1);
-			if (sRtn) { LogError("Home", "GTN_ZeroPos", enum_name(eAxis).data(), sRtn); break; }
+			if (sRtn) { LogError("Home", "GTN_ZeroPos", magic_enum::enum_name(eAxis).data(), sRtn); break; }
 
 			THomePrm tHomePrm;
 			if (m_mapMotorValue[eAxis].pTHomePrm)
@@ -289,11 +298,11 @@ bool GTNMotionControl::Home(Axis eAxis)
 			else
 			{
 				sRtn = GTN_GetHomePrm(m_iCore, AxisIndex, &tHomePrm);	// 退回读控制器默认参数
-				if (sRtn != 0) { LogError("Home", "GTN_GetHomePrm", enum_name(eAxis).data(), sRtn); break; }
+				if (sRtn != 0) { LogError("Home", "GTN_GetHomePrm", magic_enum::enum_name(eAxis).data(), sRtn); break; }
 			}
 
 			sRtn = GTN_GoHome(m_iCore, AxisIndex, &tHomePrm);	//启动Smart Home回原点
-			if (sRtn != 0) { LogError("Home", "GTN_GoHome", enum_name(eAxis).data(), sRtn); break; }
+			if (sRtn != 0) { LogError("Home", "GTN_GoHome", magic_enum::enum_name(eAxis).data(), sRtn); break; }
 
 			DWORD dwTimeout = GetTickCount64() + 120000;	// 120秒超时
 			THomeStatus tHomeSts{};
@@ -303,19 +312,19 @@ bool GTNMotionControl::Home(Axis eAxis)
 				if (m_bStop)
 				{
 					// 中文翻译：回原点被用户停止
-					LogError("Home", "Return to origin stopped by user", enum_name(eAxis).data(), -1);
+					LogError("Home", "Return to origin stopped by user", magic_enum::enum_name(eAxis).data(), -1);
 					bAborted = true; break;
 				}
 				if (GetTickCount64() > dwTimeout)
 				{
 					// 中文翻译：回原点超时
-					LogError("Home", "Return to origin timeout", enum_name(eAxis).data(), -2);
+					LogError("Home", "Return to origin timeout", magic_enum::enum_name(eAxis).data(), -2);
 					bAborted = true; break;
 				}
 				sRtn = GTN_GetHomeStatus(m_iCore, AxisIndex, &tHomeSts);	//获取回原点状态
 				if (sRtn != 0)
 				{
-					LogError("Home", "GTN_GetHomeStatus", enum_name(eAxis).data(), sRtn);
+					LogError("Home", "GTN_GetHomeStatus", magic_enum::enum_name(eAxis).data(), sRtn);
 					bAborted = true;
 					break;
 				}
@@ -324,10 +333,10 @@ bool GTNMotionControl::Home(Axis eAxis)
 			if (bAborted) break;
 
 			// 中文翻译：回原点报错
-			if (tHomeSts.error) { LogError("Home", "Return to origin and report error", enum_name(eAxis).data(), tHomeSts.error); break; }
+			if (tHomeSts.error) { LogError("Home", "Return to origin and report error", magic_enum::enum_name(eAxis).data(), tHomeSts.error); break; }
 
 			sRtn = GTN_ZeroPos(m_iCore, AxisIndex, 1);
-			if (sRtn != 0) { LogError("Home", "GTN_ZeroPos1", enum_name(eAxis).data(), sRtn); break; }
+			if (sRtn != 0) { LogError("Home", "GTN_ZeroPos1", magic_enum::enum_name(eAxis).data(), sRtn); break; }
 
 			bRet = true;
 		} while (false);
@@ -335,13 +344,13 @@ bool GTNMotionControl::Home(Axis eAxis)
 	catch (...)
 	{
 		// 中文翻译：回原点异常
-		LogError("Home", "Return to origin exception", enum_name(eAxis).data(), -999);
+		LogError("Home", "Return to origin exception", magic_enum::enum_name(eAxis).data(), -999);
 		bRet = false;
 	}
 
 	sRtn = GTN_LmtsOnEx(m_iCore, AxisIndex, -1, 1);	//控制轴限位有效（无论成功/失败均须恢复）
 	if (sRtn != 0)
-		return LogError("Home", "GTN_LmtsOnEx", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Home", "GTN_LmtsOnEx", magic_enum::enum_name(eAxis).data(), sRtn), false;
 
 	if (!IsEnabled(eAxis))
 		return false;
@@ -370,7 +379,7 @@ bool GTNMotionControl::IsHomed(Axis eAxis)
 	sRtn = GTN_GetHomeStatus(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &tHomeSts);//获取回原点状态 
 	if (sRtn !=0 )
 	{
-		LogError("IsHomed", "GTN_GetHomeStatus", enum_name(eAxis).data(), sRtn);
+		LogError("IsHomed", "GTN_GetHomeStatus", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 
@@ -402,20 +411,20 @@ bool GTNMotionControl::Enable(Axis eAxis)
 	int AxisIndex = m_mapMotorValue[eAxis].AxisIndex;
 	long mask = AxisMaskByIndex(AxisIndex);
 	if (!mask)
-		return LogError("Enable", "AxisMaskByIndex", enum_name(eAxis).data(), -1), false;
+		return LogError("Enable", "AxisMaskByIndex", magic_enum::enum_name(eAxis).data(), -1), false;
 	sRtn = GTN_AxisOn(m_iCore, AxisIndex);
 	if (sRtn != 0)
-		return LogError("Enable", "GTN_AxisOn", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Enable", "GTN_AxisOn", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	double APos;
 	sRtn = GTN_GetEncPos(m_iCore, AxisIndex, &APos);//实际位置
 	if (0 != sRtn)
-		return LogError("Enable", "GTN_GetEncPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Enable", "GTN_GetEncPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	sRtn = GTN_SetPrfPos(m_iCore, AxisIndex, APos);//规划位置GTN_SetPrfPosEx
 	if (0 != sRtn)
-		return LogError("Enable", "GTN_SetPrfPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Enable", "GTN_SetPrfPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	sRtn = GTN_SynchAxisPos(m_iCore, mask);
 	if (sRtn != 0)
-		return LogError("Enable", "GTN_SynchAxisPos", enum_name(eAxis).data(), sRtn) ,false;
+		return LogError("Enable", "GTN_SynchAxisPos", magic_enum::enum_name(eAxis).data(), sRtn) ,false;
 	return true;
 }
 
@@ -438,7 +447,7 @@ bool GTNMotionControl::Disable(Axis eAxis)
 	int AxisIndex = m_mapMotorValue[eAxis].AxisIndex;
 	sRtn = GTN_AxisOff(m_iCore, AxisIndex);
 	if (sRtn != 0)
-		return LogError("Disable", "GTN_AxisOff", enum_name(eAxis).data(), sRtn),false;
+		return LogError("Disable", "GTN_AxisOff", magic_enum::enum_name(eAxis).data(), sRtn),false;
 	return true;
 }
 
@@ -462,7 +471,7 @@ bool GTNMotionControl::IsEnabled(Axis eAxis)
 	short sRtn;
 	sRtn = GTN_GetSts(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &lAxisStatus);
 	if (sRtn != 0)
-		return LogError("IsEnabled", "GTN_GetSts", enum_name(eAxis).data(), sRtn), false;
+		return LogError("IsEnabled", "GTN_GetSts", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	if (!(lAxisStatus & 0x200))
 	{
 		return false;
@@ -488,7 +497,7 @@ bool GTNMotionControl::Jog(Axis eAxis, bool bDirection, double dVel)
 	TJogPrm tJogPrm;
 	sRtn = GTN_PrfJog(m_iCore,m_mapMotorValue[eAxis].AxisIndex);
 	if (0 != sRtn)
-		return LogError("Jog", "GTN_PrfJog", enum_name(eAxis).data(), sRtn),false;
+		return LogError("Jog", "GTN_PrfJog", magic_enum::enum_name(eAxis).data(), sRtn),false;
 	double dNewAcc, dNewDec;
 	MillimeterToPulse(eAxis, m_mapMotorValue[eAxis].Acceleration / 1000000.00, dNewAcc);
 	MillimeterToPulse(eAxis, m_mapMotorValue[eAxis].Deceleration / 1000000.00, dNewDec);
@@ -497,19 +506,19 @@ bool GTNMotionControl::Jog(Axis eAxis, bool bDirection, double dVel)
 	tJogPrm.smooth = m_mapMotorValue[eAxis].SmoothTime;
 	sRtn = GTN_SetJogPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &tJogPrm);
 	if (0 != sRtn)
-		return LogError("Jog", "GTN_SetJogPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Jog", "GTN_SetJogPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	double dNewVel;
 	MillimeterToPulse(eAxis, dVel / 1000.0, dNewVel);
 	double directedVel = bDirection ? dNewVel : -dNewVel;
 	sRtn = GTN_SetVel(m_iCore, m_mapMotorValue[eAxis].AxisIndex, directedVel);
 	if (0 != sRtn)
-		return LogError("Jog", "GTN_SetVel", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Jog", "GTN_SetVel", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	long mask = AxisMask(eAxis);
 	if (!mask)
-		return LogError("Jog", "AxisMask", enum_name(eAxis).data(), -1), false;
+		return LogError("Jog", "AxisMask", magic_enum::enum_name(eAxis).data(), -1), false;
 	sRtn = GTN_Update(m_iCore, mask);
 	if (0 != sRtn)
-		return LogError("Jog", "GTN_Update", enum_name(eAxis).data(), sRtn), false;
+		return LogError("Jog", "GTN_Update", magic_enum::enum_name(eAxis).data(), sRtn), false;
 
 	return true;
 }
@@ -523,7 +532,7 @@ bool GTNMotionControl::MoveRelative(Axis eAxis, double dPos, double dVel)
 	int iAxis = m_mapMotorValue[eAxis].AxisIndex;
 	sRtn = GTN_PrfTrap(m_iCore, iAxis);//设定点位运动
 	if (0 != sRtn)
-		return LogError("MoveRelative", "GTN_PrfTrap", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveRelative", "GTN_PrfTrap", magic_enum::enum_name(eAxis).data(), sRtn), false;
 
 	double dNewVel, dNewAcc, dNewDec;
 	
@@ -534,20 +543,20 @@ bool GTNMotionControl::MoveRelative(Axis eAxis, double dPos, double dVel)
 		return false;
 	sRtn = GTN_SetVel(m_iCore, iAxis, dNewVel);
 	if (0 != sRtn)
-		return LogError("MoveRelative", "GTN_SetVel", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveRelative", "GTN_SetVel", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	sRtn = GTN_GetPrfPos(m_iCore, iAxis, &APos);//规划位置
 	if (0 != sRtn)
-		return LogError("MoveRelative", "GTN_GetPrfPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveRelative", "GTN_GetPrfPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	MillimeterToPulse(eAxis, dPos, RelativePos);
 	sRtn = GTN_SetPos(m_iCore, iAxis, APos + RelativePos);
 	if (0 != sRtn)
-		return LogError("MoveRelative", "GTN_SetPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveRelative", "GTN_SetPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	long mask = AxisMaskByIndex(iAxis);
 	if (!mask)
-		return LogError("MoveRelative", "AxisMaskByIndex", enum_name(eAxis).data(), -1), false;
+		return LogError("MoveRelative", "AxisMaskByIndex", magic_enum::enum_name(eAxis).data(), -1), false;
 	sRtn = GTN_Update(m_iCore, mask);
 	if (0 != sRtn)
-		return LogError("MoveRelative", "GTN_Update", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveRelative", "GTN_Update", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	return true;
 	
 }
@@ -558,7 +567,7 @@ bool GTNMotionControl::MoveAbsolute(Axis eAxis, double dPos, double dVel)
 	short sRtn;
 	sRtn = GTN_PrfTrap(m_iCore, iAxis);
 	if (0 != sRtn)
-		return LogError("MoveAbsolute", "GTN_PrfTrap", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveAbsolute", "GTN_PrfTrap", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	double cachedVel = m_mapMotorValue[eAxis].Velocity;
 	double vel = (dVel > 0) ? dVel : cachedVel;
 	if (!SetAxisVelAccDecJerk(eAxis, vel, m_mapMotorValue[eAxis].Acceleration, m_mapMotorValue[eAxis].Deceleration, m_mapMotorValue[eAxis].SmoothTime))
@@ -569,13 +578,13 @@ bool GTNMotionControl::MoveAbsolute(Axis eAxis, double dPos, double dVel)
 	MillimeterToPulse(eAxis, dPos, dNewPos);
 	sRtn = GTN_SetPos(m_iCore, iAxis, (long)dNewPos);
 	if (0 != sRtn)
-		return LogError("MoveAbsolute", "GTN_SetPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveAbsolute", "GTN_SetPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	long mask = AxisMaskByIndex(iAxis);
 	if (!mask)
-		return LogError("MoveAbsolute", "AxisMaskByIndex", enum_name(eAxis).data(), -1), false;
+		return LogError("MoveAbsolute", "AxisMaskByIndex", magic_enum::enum_name(eAxis).data(), -1), false;
 	sRtn = GTN_Update(m_iCore, mask);
 	if (0 != sRtn)
-		return LogError("MoveAbsolute", "GTN_Update", enum_name(eAxis).data(), sRtn), false;
+		return LogError("MoveAbsolute", "GTN_Update", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	return true;
 }
 
@@ -622,17 +631,17 @@ bool GTNMotionControl::StopMotion(Axis eAxis)
 	short sRtn;
 	long mask = AxisMask(eAxis);
 	if (!mask)
-		return LogError("StopMotion", "AxisMask", enum_name(eAxis).data(), -1), false;
+		return LogError("StopMotion", "AxisMask", magic_enum::enum_name(eAxis).data(), -1), false;
 	sRtn = GTN_Stop(m_iCore, mask, mask);//急停
 	if (sRtn != 0)
-		return LogError("StopMotion", "GTN_Stop", enum_name(eAxis).data(), sRtn),false;
+		return LogError("StopMotion", "GTN_Stop", magic_enum::enum_name(eAxis).data(), sRtn),false;
 	do
 	{
 		Sleep(100);
 	} while (IsAxisMoving(eAxis));
 	sRtn = GTN_CrdClear(m_iCore, 1, m_iWriteBuf);
 	if (sRtn != 0)
-		return LogError("StopMotion", "GTN_CrdClear", enum_name(eAxis).data(), sRtn), false;
+		return LogError("StopMotion", "GTN_CrdClear", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	return true;
 }
 
@@ -653,7 +662,7 @@ bool GTNMotionControl::IsAxisMoving(Axis eAxis)
 	sRtn = GTN_GetSts(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &State);
 
 	if (sRtn != 0)
-		return LogError("IsAxisMoving", "GTN_GetSts", enum_name(eAxis).data(), sRtn), false;
+		return LogError("IsAxisMoving", "GTN_GetSts", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	if (State & 0x400)
 		return true;
 	else
@@ -674,7 +683,7 @@ bool GTNMotionControl::GetActualPos(Axis eAxis, double& dAPos)
 	if (sRtn != 0)
 	{
 		dAPos = -1;
-		//LogError("GetActualPos", "GTN_GetPrfPos", enum_name(eAxis).data(), sRtn);
+		//LogError("GetActualPos", "GTN_GetPrfPos", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	PulseToMillimeter(eAxis, APos, dAPos);
@@ -708,7 +717,7 @@ bool GTNMotionControl::SetFPosition(Axis eAxis, double dPos)
 	int iAxis = m_mapMotorValue[eAxis].AxisIndex;
 	long mask = AxisMaskByIndex(iAxis);
 	if (!mask)
-		return LogError("SetFPosition", "AxisMaskByIndex", enum_name(eAxis).data(), -1), false;
+		return LogError("SetFPosition", "AxisMaskByIndex", magic_enum::enum_name(eAxis).data(), -1), false;
 	double dPulse = 0.0;
 	if (!MillimeterToPulse(eAxis, dPos, dPulse))
 		return false;
@@ -716,13 +725,13 @@ bool GTNMotionControl::SetFPosition(Axis eAxis, double dPos)
 	// 二者不一致会触发跟随误差报警，故必须同时设置并同步轴位置。
 	short sRtn = GTN_SetEncPos(m_iCore, iAxis, (long)dPulse);
 	if (0 != sRtn)
-		return LogError("SetFPosition", "GTN_SetEncPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetFPosition", "GTN_SetEncPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	sRtn = GTN_SetPrfPos(m_iCore, iAxis, (long)dPulse);
 	if (0 != sRtn)
-		return LogError("SetFPosition", "GTN_SetPrfPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetFPosition", "GTN_SetPrfPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	sRtn = GTN_SynchAxisPos(m_iCore, mask);
 	if (0 != sRtn)
-		return LogError("SetFPosition", "GTN_SynchAxisPos", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetFPosition", "GTN_SynchAxisPos", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	return true;
 }
 
@@ -777,7 +786,7 @@ bool GTNMotionControl::GetAxisHomePrm(Axis eAxis, toml::table& tableHome)
 		short sRtn = GTN_GetHomePrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &tHomePrm);
 		if (sRtn != 0)
 		{
-			LogError("GetAxisHomePrm", "GTN_GetHomePrm", enum_name(eAxis).data(), sRtn);
+			LogError("GetAxisHomePrm", "GTN_GetHomePrm", magic_enum::enum_name(eAxis).data(), sRtn);
 			return false;
 		}
 		// 同步更新内存中存储的副本
@@ -851,7 +860,7 @@ bool GTNMotionControl::SetAxisVel(Axis eAxis, double dVel)
 	short sRtn = GTN_SetVel(m_iCore, m_mapMotorValue[eAxis].AxisIndex, dNewVel);
 	if (sRtn != 0)
 	{
-		return LogError("SetAxisVel", "GTN_SetVel", enum_name(eAxis).data(), sRtn),false;
+		return LogError("SetAxisVel", "GTN_SetVel", magic_enum::enum_name(eAxis).data(), sRtn),false;
 	}
 	m_mapMotorValue[eAxis].Velocity = dVel;
 	return true;
@@ -868,18 +877,18 @@ bool GTNMotionControl::SetAxisAcc(Axis eAxis, double dAcc)
 	sRtn = GTN_PrfTrap(m_iCore, m_mapMotorValue[eAxis].AxisIndex);
 	if (0 != sRtn)
 	{
-		return LogError("SetAxisAcc", "GTN_PrfTrap", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisAcc", "GTN_PrfTrap", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	TTrapPrm trap;
 	MillimeterToPulse(eAxis, dAcc / 1000000.00, dNewAcc);
 	sRtn = GTN_GetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0 != sRtn)
-		return LogError("SetAxisAcc", "GTN_GetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisAcc", "GTN_GetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	trap.acc = dNewAcc;
 	sRtn = GTN_SetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0!= sRtn)
 	{
-		return LogError("SetAxisAcc", "GTN_SetTrapPrm", enum_name(eAxis).data(), sRtn),false;
+		return LogError("SetAxisAcc", "GTN_SetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn),false;
 	}
 	m_mapMotorValue[eAxis].Acceleration = dAcc;
 	return true;
@@ -895,12 +904,12 @@ bool GTNMotionControl::SetAxisDec(Axis eAxis, double dDec)
 	MillimeterToPulse(eAxis, dDec / 1000000.00, dNewDec);
 	sRtn = GTN_GetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0 != sRtn)
-		return LogError("SetAxisDec", "GTN_GetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisDec", "GTN_GetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	trap.dec = dNewDec;
 	sRtn = GTN_SetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0 != sRtn)
 	{
-		return LogError("SetAxisDec", "GTN_SetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisDec", "GTN_SetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	m_mapMotorValue[eAxis].Deceleration = dDec;
 	return true;
@@ -914,12 +923,12 @@ bool GTNMotionControl::SetAxisJerk(Axis eAxis, double dSmoothTime)
 	TTrapPrm trap;
 	sRtn = GTN_GetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0 != sRtn)
-		return LogError("SetAxisJerk", "GTN_GetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisJerk", "GTN_GetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	trap.smoothTime = dSmoothTime;
 	sRtn = GTN_SetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0 != sRtn)
 	{
-		return LogError("SetAxisJerk", "GTN_SetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisJerk", "GTN_SetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	m_mapMotorValue[eAxis].SmoothTime = dSmoothTime;
 	return true;
@@ -938,14 +947,14 @@ bool GTNMotionControl::SetAxisNegLimit(Axis eAxis, double dNegLimit)
 	sRtn = GTN_GetSoftLimit(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &lPosLimit, &lNegLimit);
 	if (0 != sRtn)
 	{
-		LogError("SetAxisNegLimit", "GTN_GetSoftLimit", enum_name(eAxis).data(), sRtn);
+		LogError("SetAxisNegLimit", "GTN_GetSoftLimit", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	lNegLimit = (long)dNewNegLimit;
 	sRtn = GTN_SetSoftLimit(m_iCore, m_mapMotorValue[eAxis].AxisIndex, lPosLimit, lNegLimit);
 	if (0 != sRtn)
 	{
-		LogError("SetAxisNegLimit", "GTN_SetSoftLimit", enum_name(eAxis).data(), sRtn);
+		LogError("SetAxisNegLimit", "GTN_SetSoftLimit", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	m_mapMotorValue[eAxis].NegLimit = dNegLimit;
@@ -965,14 +974,14 @@ bool GTNMotionControl::SetAxisPosLimit(Axis eAxis, double dPosLimit)
 	sRtn = GTN_GetSoftLimit(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &lPosLimit, &lNegLimit);
 	if (0 != sRtn)
 	{
-		LogError("SetAxisNegLimit", "GTN_GetSoftLimit", enum_name(eAxis).data(), sRtn);
+		LogError("SetAxisNegLimit", "GTN_GetSoftLimit", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	lPosLimit = (long)dNewPosLimit;
 	sRtn = GTN_SetSoftLimit(m_iCore, m_mapMotorValue[eAxis].AxisIndex, lPosLimit, lNegLimit);
 	if (0 != sRtn)
 	{
-		LogError("SetAxisNegLimit", "GTN_SetSoftLimit", enum_name(eAxis).data(), sRtn);
+		LogError("SetAxisNegLimit", "GTN_SetSoftLimit", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	m_mapMotorValue[eAxis].PosLimit = dPosLimit;
@@ -987,20 +996,20 @@ bool GTNMotionControl::SetAxisVelAccDecJerk(Axis eAxis, double dVel, double dAcc
 	short sRtn = GTN_PrfTrap(m_iCore, m_mapMotorValue[eAxis].AxisIndex);
 	if (0 != sRtn)
 	{
-		return LogError("SetAxisAcc", "GTN_PrfTrap", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisAcc", "GTN_PrfTrap", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 
 	TTrapPrm trap;
 	sRtn = GTN_GetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0 != sRtn)
-		return LogError("SetAxisAcc", "GTN_GetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisAcc", "GTN_GetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	MillimeterToPulse(eAxis, dAcc / 1000000.00, trap.acc);
 	MillimeterToPulse(eAxis, dDec / 1000000.00, trap.dec);
 	trap.smoothTime = dJerk;
 	sRtn = GTN_SetTrapPrm(m_iCore, m_mapMotorValue[eAxis].AxisIndex, &trap);
 	if (0 != sRtn)
 	{
-		return LogError("SetAxisAcc", "GTN_SetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisAcc", "GTN_SetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	return true;
 }
@@ -1013,7 +1022,7 @@ bool GTNMotionControl::SetAxisSoftLimit(Axis eAxis, double dNegLimit, double dPo
 
 	short sRtn = GTN_SetSoftLimit(m_iCore, m_mapMotorValue[eAxis].AxisIndex, (long)dPosL, (long)dNegL);
 	if (0 != sRtn)
-		return LogError("SetAxisNegLimit", "GTN_SetSoftLimit", enum_name(eAxis).data(), sRtn), false;
+		return LogError("SetAxisNegLimit", "GTN_SetSoftLimit", magic_enum::enum_name(eAxis).data(), sRtn), false;
 
 	m_mapMotorValue[eAxis].NegLimit = dNegLimit;
 	m_mapMotorValue[eAxis].PosLimit = dPosLimit;
@@ -1045,7 +1054,7 @@ bool GTNMotionControl::GetAxisTubeDiamater(Axis eAxis, double& dTubeDiamater)
 // 		return false;
 // 
 // 	int iResolutionRatio = m_mapMotorValue[eAxis].Resolution;
-// 	dTubeDiamater = iResolutionRatio * 10000 / (iEfac * PI);
+// 	dTubeDiamater = iResolutionRatio * 10000 / (iEfac * lcnc::process::kPi);
 // 	m_dDiameter = dTubeDiamater;
 	return true;
 }
@@ -1059,7 +1068,7 @@ bool GTNMotionControl::GetAxisVel(Axis eAxis, double& dVel)
 	sRtn = GTN_GetVel(m_iCore, iAxis, &Vel);
 	if (0!= sRtn)
 	{
-		return LogError("GetAxisVel", "GTN_GetVel", enum_name(eAxis).data(), sRtn),false;
+		return LogError("GetAxisVel", "GTN_GetVel", magic_enum::enum_name(eAxis).data(), sRtn),false;
 	}
 	PulseToMillimeter(eAxis, Vel, dVel);
 	dVel = dVel * 1000;  // pulse/ms → mm/ms → mm/s
@@ -1074,7 +1083,7 @@ bool GTNMotionControl::GetAxisAcc(Axis eAxis, double& dAcc)
 	sRtn = GTN_GetTrapPrm(m_iCore, iAxis, &trap);
 	if (0 != sRtn)
 	{
-		return LogError("GetAxisAcc", "GTN_GetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("GetAxisAcc", "GTN_GetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	PulseToMillimeter(eAxis, trap.acc, dAcc);
 	dAcc = dAcc * 1000000;
@@ -1089,7 +1098,7 @@ bool GTNMotionControl::GetAxisDec(Axis eAxis, double& dDec)
 	sRtn = GTN_GetTrapPrm(m_iCore, iAxis, &trap);
 	if (0 != sRtn)
 	{
-		return LogError("GetAxisDec", "GTN_GetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("GetAxisDec", "GTN_GetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	PulseToMillimeter(eAxis, trap.dec, dDec);
 	dDec = dDec*1000000;
@@ -1105,7 +1114,7 @@ bool GTNMotionControl::GetAxisJerk(Axis eAxis, double& dSmoothTime)
 	sRtn = GTN_GetTrapPrm(m_iCore, iAxis, &trap);
 	if (0 != sRtn)
 	{
-		return LogError("GetAxisJerk", "GTN_GetTrapPrm", enum_name(eAxis).data(), sRtn), false;
+		return LogError("GetAxisJerk", "GTN_GetTrapPrm", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	dSmoothTime = trap.smoothTime;
 	return true;
@@ -1120,7 +1129,7 @@ bool GTNMotionControl::GetAxisNegLimit(Axis eAxis, double& dNegLimit)
 	sRtn = GTN_GetSoftLimit(m_iCore, iAxis, &Rlimit, &LLimit);
 	if (0 != sRtn)
 	{
-		return LogError("GetAxisNegLimit", "GTN_GetSoftLimit", enum_name(eAxis).data(), sRtn), false;
+		return LogError("GetAxisNegLimit", "GTN_GetSoftLimit", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	PulseToMillimeter(eAxis, LLimit, dNegLimit);
 	
@@ -1136,7 +1145,7 @@ bool GTNMotionControl::GetAxisPosLimit(Axis eAxis, double& dPosLimit)
 	sRtn = GTN_GetSoftLimit(m_iCore, iAxis, &Rlimit, &LLimit);
 	if (0 != sRtn)
 	{
-		return LogError("GetAxisPosLimit", "GTN_GetSoftLimit", enum_name(eAxis).data(), sRtn), false;
+		return LogError("GetAxisPosLimit", "GTN_GetSoftLimit", magic_enum::enum_name(eAxis).data(), sRtn), false;
 	}
 	PulseToMillimeter(eAxis, Rlimit, dPosLimit);
 	
@@ -1601,8 +1610,8 @@ bool GTNMotionControl::OffsetLineTo(const std::array<double, 5>& target,
 void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const Tool& curTool)
 {
 	long sts;
-	Axis eDirectionX = enum_cast<Axis>(curTool.m_strDirectionX).value();
-	Axis eDirectionY = enum_cast<Axis>(curTool.m_strDirectionY).value();
+	Axis eDirectionX = magic_enum::enum_cast<Axis>(curTool.m_strDirectionX).value();
+	Axis eDirectionY = magic_enum::enum_cast<Axis>(curTool.m_strDirectionY).value();
 	short sRtn;
 	
 	//X 定位轴
@@ -1613,7 +1622,7 @@ void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	//A 定位轴
 	if (curTool.m_bAIsMove && eDirectionY != Axis::A && m_runtimeConfiguration.isAxisEnabled(Axis::A))
 	{
-		MovePostion(Axis::A, curTool.m_dIdleAVelocity, curTool.m_dAPosition / 360 * PI * m_dDiameter);
+		MovePostion(Axis::A, curTool.m_dIdleAVelocity, curTool.m_dAPosition / 360 * lcnc::process::kPi * m_dDiameter);
 		
 	}
 	//Y 定位轴
@@ -1714,7 +1723,7 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 		const Axis axis = m_cuttingAxes[dimension];
 		auto it = m_mapMotorValue.find(axis);
 		if (it == m_mapMotorValue.end() || it->second.AxisIndex < 1 || it->second.AxisIndex > 8)
-			return LogError("InitCrd", "five-axis cutting axis not configured", enum_name(axis).data(), -1), false;
+			return LogError("InitCrd", "five-axis cutting axis not configured", magic_enum::enum_name(axis).data(), -1), false;
 		axisIndex[dimension] = it->second.AxisIndex;
 	}
 	for (int lhs = 0; lhs < m_cuttingAxisCount; ++lhs) {
@@ -1861,7 +1870,7 @@ bool GTNMotionControl::PrfTrapAxis()
 	{
 		// 将 AXIS 轴设为点位模式
 		sRtn = GTN_PrfTrap(m_iCore, m_mapMotorValue[axis].AxisIndex);
-		if (sRtn)return LogError("SetJumpAccJerk", "GTN_PrfTrap", enum_name(axis).data(), sRtn), false;
+		if (sRtn)return LogError("SetJumpAccJerk", "GTN_PrfTrap", magic_enum::enum_name(axis).data(), sRtn), false;
 
 	}
 	return true;
@@ -1875,7 +1884,7 @@ bool GTNMotionControl::SetJumpAccJerk(const Tool& curTool)
 	{
 		// 将 AXIS 轴设为点位模式
 		sRtn = GTN_PrfTrap(m_iCore, m_mapMotorValue[axis].AxisIndex);
-		if (sRtn)return LogError("SetJumpAccJerk", "GTN_PrfTrap", enum_name(axis).data(), sRtn), false;
+		if (sRtn)return LogError("SetJumpAccJerk", "GTN_PrfTrap", magic_enum::enum_name(axis).data(), sRtn), false;
 		TTrapPrm trap;
 		double dAccx ;
 		double dDecx ;
@@ -1886,7 +1895,7 @@ bool GTNMotionControl::SetJumpAccJerk(const Tool& curTool)
 		trap.velStart = 0;
 		trap.smoothTime = curTool.m_dIdleXYJerk;
 		sRtn = GTN_SetTrapPrm(m_iCore, m_mapMotorValue[axis].AxisIndex, &trap);
-		if (sRtn)return LogError("SetJumpAccJerk", "GTN_SetTrapPrm", enum_name(axis).data(), sRtn), false;
+		if (sRtn)return LogError("SetJumpAccJerk", "GTN_SetTrapPrm", magic_enum::enum_name(axis).data(), sRtn), false;
 	}
 
 	return true;
@@ -2077,24 +2086,24 @@ bool GTNMotionControl::MovePostion(Axis aAxis, double dVel, double dPos)
 	MillimeterToPulse(aAxis, dVel / 1000.00, dNewVel);
 	MillimeterToPulse(aAxis, dPos, dNewPos);
 	sRtn = GTN_PrfTrap(m_iCore, m_mapMotorValue[aAxis].AxisIndex);
-	if (sRtn) return LogError("MovePostion", "GTN_PrfTrap", enum_name(aAxis).data(), sRtn), false;
+	if (sRtn) return LogError("MovePostion", "GTN_PrfTrap", magic_enum::enum_name(aAxis).data(), sRtn), false;
 	sRtn = GTN_SetVel(m_iCore, m_mapMotorValue[aAxis].AxisIndex, dNewVel);
-	if (sRtn) return LogError("MovePostion", "GTN_SetVel", enum_name(aAxis).data(), sRtn), false;
+	if (sRtn) return LogError("MovePostion", "GTN_SetVel", magic_enum::enum_name(aAxis).data(), sRtn), false;
 
 	sRtn = GTN_SetPos(m_iCore, m_mapMotorValue[aAxis].AxisIndex, (long)dNewPos);
-	if (sRtn) return LogError("MovePostion", "GTN_SetPos", enum_name(aAxis).data(), sRtn), false;
+	if (sRtn) return LogError("MovePostion", "GTN_SetPos", magic_enum::enum_name(aAxis).data(), sRtn), false;
 
 	long mask = AxisMask(aAxis);
 	if (!mask)
-		return LogError("MovePostion", "AxisMask", enum_name(aAxis).data(), -1), false;
+		return LogError("MovePostion", "AxisMask", magic_enum::enum_name(aAxis).data(), -1), false;
 	sRtn = GTN_Update(m_iCore, mask);//启动轴运动
-	if (sRtn) return LogError("MovePostion", "GTN_Update", enum_name(aAxis).data(), sRtn), false;
+	if (sRtn) return LogError("MovePostion", "GTN_Update", magic_enum::enum_name(aAxis).data(), sRtn), false;
 
 	do
 	{
 		sRtn = GTN_GetSts(m_iCore, m_mapMotorValue[aAxis].AxisIndex, &sts);
 		if (sRtn)
-			return LogError("MovePostion", "GTN_GetSts", enum_name(aAxis).data(), sRtn),false;
+			return LogError("MovePostion", "GTN_GetSts", magic_enum::enum_name(aAxis).data(), sRtn),false;
 		if (m_bStop)
 			return false;
 	} while (sts & 0x400);// 等待AXIS轴规划停止
@@ -2104,7 +2113,7 @@ bool GTNMotionControl::MovePostion(Axis aAxis, double dVel, double dPos)
 bool GTNMotionControl::PulseToMillimeter(Axis aAxis, double dValue, double& dNewValue)
 {
 	if (m_mapMotorValue[aAxis].Rotary)
-		dNewValue = dValue / m_mapMotorValue[aAxis].Resolution * (PI * m_dDiameter);
+		dNewValue = dValue / m_mapMotorValue[aAxis].Resolution * (lcnc::process::kPi * m_dDiameter);
 	else
 		dNewValue = dValue / m_mapMotorValue[aAxis].Resolution;
 	return true;
@@ -2113,7 +2122,7 @@ bool GTNMotionControl::PulseToMillimeter(Axis aAxis, double dValue, double& dNew
 bool GTNMotionControl::MillimeterToPulse(Axis aAxis, double dValue, double& dNewValue)
 {
 	if (m_mapMotorValue[aAxis].Rotary)
-		dNewValue = dValue * m_mapMotorValue[aAxis].Resolution / (PI * m_dDiameter);
+		dNewValue = dValue * m_mapMotorValue[aAxis].Resolution / (lcnc::process::kPi * m_dDiameter);
 	else
 		dNewValue = dValue * m_mapMotorValue[aAxis].Resolution;
 	return true;

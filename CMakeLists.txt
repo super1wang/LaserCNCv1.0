@@ -15,6 +15,81 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# CMake Tools can invoke Ninja without the INCLUDE/LIB environment prepared by
+# VsDevCmd.  Keep the compiler and Windows SDK paths in a dedicated interface
+# target created before any third-party source tree is added, so every target
+# can opt in without relying on lcnc_core as an accidental carrier.
+if(WIN32 AND MSVC)
+    if(NOT CMAKE_CXX_COMPILER OR NOT CMAKE_RC_COMPILER)
+        message(FATAL_ERROR
+            "Unable to derive the MSVC/Windows SDK environment: CMAKE_CXX_COMPILER or CMAKE_RC_COMPILER is not configured")
+    endif()
+
+    if(IS_ABSOLUTE "${CMAKE_RC_COMPILER}")
+        get_filename_component(_lcnc_sdk_arch_dir "${CMAKE_RC_COMPILER}" DIRECTORY)
+        get_filename_component(_lcnc_sdk_version_dir "${_lcnc_sdk_arch_dir}" DIRECTORY)
+        get_filename_component(_lcnc_sdk_bin_dir "${_lcnc_sdk_version_dir}" DIRECTORY)
+        get_filename_component(_lcnc_sdk_root "${_lcnc_sdk_bin_dir}" DIRECTORY)
+        get_filename_component(_lcnc_sdk_version "${_lcnc_sdk_version_dir}" NAME)
+    elseif(DEFINED ENV{WindowsSdkDir} AND NOT "$ENV{WindowsSdkDir}" STREQUAL ""
+           AND DEFINED CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION
+           AND NOT "${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}" STREQUAL "")
+        # The Visual Studio generator intentionally stores CMAKE_RC_COMPILER
+        # as the command name "rc", not an absolute executable path.  Resolve
+        # the SDK from the developer-command environment instead of deriving
+        # an empty root such as /Include//ucrt during a reconfigure.
+        # 中文翻译：VS 生成器的 RC 编译器为相对命令名；重配置时从开发环境解析 Windows SDK 根目录。
+        file(REAL_PATH "$ENV{WindowsSdkDir}" _lcnc_sdk_root)
+        set(_lcnc_sdk_version "${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+    else()
+        message(FATAL_ERROR
+            "Unable to derive the Windows SDK root: CMAKE_RC_COMPILER is not absolute and WindowsSdkDir/CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION are unavailable")
+    endif()
+
+    get_filename_component(_lcnc_msvc_arch_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(_lcnc_msvc_host_dir "${_lcnc_msvc_arch_dir}" DIRECTORY)
+    get_filename_component(_lcnc_msvc_bin_dir "${_lcnc_msvc_host_dir}" DIRECTORY)
+    get_filename_component(_lcnc_msvc_root "${_lcnc_msvc_bin_dir}" DIRECTORY)
+
+    set(_lcnc_msvc_include_dir "${_lcnc_msvc_root}/include")
+    set(_lcnc_msvc_x64_lib_dir "${_lcnc_msvc_root}/lib/x64")
+    set(_lcnc_sdk_ucrt_include_dir "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/ucrt")
+    set(_lcnc_sdk_shared_include_dir "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/shared")
+    set(_lcnc_sdk_um_include_dir "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/um")
+    set(_lcnc_sdk_winrt_include_dir "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/winrt")
+    set(_lcnc_sdk_um_x64_lib_dir "${_lcnc_sdk_root}/Lib/${_lcnc_sdk_version}/um/x64")
+    set(_lcnc_sdk_ucrt_x64_lib_dir "${_lcnc_sdk_root}/Lib/${_lcnc_sdk_version}/ucrt/x64")
+
+    foreach(_lcnc_required_path IN ITEMS
+            "${_lcnc_msvc_include_dir}/map"
+            "${_lcnc_msvc_x64_lib_dir}/msvcprtd.lib"
+            "${_lcnc_sdk_ucrt_include_dir}"
+            "${_lcnc_sdk_shared_include_dir}"
+            "${_lcnc_sdk_um_include_dir}"
+            "${_lcnc_sdk_winrt_include_dir}"
+            "${_lcnc_sdk_um_x64_lib_dir}/kernel32.lib"
+            "${_lcnc_sdk_ucrt_x64_lib_dir}/ucrtd.lib")
+        if(NOT EXISTS "${_lcnc_required_path}")
+            message(FATAL_ERROR
+                "Unable to derive a complete MSVC/Windows SDK environment from the configured toolchain; missing: ${_lcnc_required_path}")
+        endif()
+    endforeach()
+
+    add_library(lcnc_msvc_environment INTERFACE)
+    target_include_directories(lcnc_msvc_environment SYSTEM INTERFACE
+        "${_lcnc_msvc_include_dir}"
+        "${_lcnc_sdk_ucrt_include_dir}"
+        "${_lcnc_sdk_shared_include_dir}"
+        "${_lcnc_sdk_um_include_dir}"
+        "${_lcnc_sdk_winrt_include_dir}"
+    )
+    target_link_directories(lcnc_msvc_environment INTERFACE
+        "${_lcnc_msvc_x64_lib_dir}"
+        "${_lcnc_sdk_um_x64_lib_dir}"
+        "${_lcnc_sdk_ucrt_x64_lib_dir}"
+    )
+endif()
+
 # Memory-safety gate.  This stays opt-in because vendor SDK DLLs are not
 # instrumented, but every project-owned translation unit can be built with the
 # MSVC AddressSanitizer runtime through the `asan` configure preset.
@@ -85,6 +160,12 @@ set(QUAZIP_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(QUAZIP_FETCH_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF) # 构建静态 QuaZip（CMP0077 使其 option() 尊重此普通变量）
 add_subdirectory("${LCNC_QUAZIP_ROOT}" "${CMAKE_BINARY_DIR}/quazip-build")
+if(TARGET QuaZip AND TARGET lcnc_msvc_environment)
+    # QuaZip is compiled from source, so it must receive the same IDE-safe
+    # standard-library and SDK search paths as LaserCNC-owned targets.
+    # QuaZip itself uses CMake's legacy plain signature for this target.
+    target_link_libraries(QuaZip lcnc_msvc_environment)
+endif()
 
 # ─── Optional process device SDKs ─────────────────────────────────────────────
 option(LCNC_WITH_ACS "Enable ACS motion controller adapter" ON)
@@ -157,6 +238,9 @@ if(MSVC)
     endif()
 endif()
 target_link_libraries(lcnc_common INTERFACE lcnc_project_warnings)
+if(TARGET lcnc_msvc_environment)
+    target_link_libraries(lcnc_common INTERFACE lcnc_msvc_environment)
+endif()
 target_include_directories(lcnc_common INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/3rd
@@ -480,55 +564,6 @@ target_link_libraries(lcnc_core PUBLIC
     Qt6::Concurrent
 )
 
-# CMake Tools 从 IDE 直接启动 Ninja 时未必继承 VsDevCmd 设置的 LIB。
-# 从 CMake 已选定的 MSVC/Windows SDK 工具路径推导对应的库目录，保证 Qt
-# 的 opengl32.lib 和 MSVC Debug CRT 在此构建方式下同样可被链接器找到。
-if(WIN32 AND CMAKE_RC_COMPILER AND CMAKE_CXX_COMPILER)
-    get_filename_component(_lcnc_sdk_arch_dir "${CMAKE_RC_COMPILER}" DIRECTORY)
-    get_filename_component(_lcnc_sdk_version_dir "${_lcnc_sdk_arch_dir}" DIRECTORY)
-    get_filename_component(_lcnc_sdk_bin_dir "${_lcnc_sdk_version_dir}" DIRECTORY)
-    get_filename_component(_lcnc_sdk_root "${_lcnc_sdk_bin_dir}" DIRECTORY)
-    get_filename_component(_lcnc_sdk_version "${_lcnc_sdk_version_dir}" NAME)
-    set(_lcnc_sdk_um_x64_lib_dir   "${_lcnc_sdk_root}/Lib/${_lcnc_sdk_version}/um/x64")
-    set(_lcnc_sdk_ucrt_x64_lib_dir "${_lcnc_sdk_root}/Lib/${_lcnc_sdk_version}/ucrt/x64")
-
-    get_filename_component(_lcnc_msvc_arch_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    get_filename_component(_lcnc_msvc_host_dir "${_lcnc_msvc_arch_dir}" DIRECTORY)
-    get_filename_component(_lcnc_msvc_bin_dir "${_lcnc_msvc_host_dir}" DIRECTORY)
-    get_filename_component(_lcnc_msvc_root "${_lcnc_msvc_bin_dir}" DIRECTORY)
-    set(_lcnc_msvc_x64_lib_dir "${_lcnc_msvc_root}/lib/x64")
-
-    set(_lcnc_windows_include_dirs)
-    foreach(_lcnc_include_dir IN ITEMS
-            "${_lcnc_msvc_root}/include"
-            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/ucrt"
-            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/shared"
-            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/um"
-            "${_lcnc_sdk_root}/Include/${_lcnc_sdk_version}/winrt")
-        if(EXISTS "${_lcnc_include_dir}")
-            list(APPEND _lcnc_windows_include_dirs "${_lcnc_include_dir}")
-        endif()
-    endforeach()
-    if(_lcnc_windows_include_dirs)
-        target_include_directories(lcnc_core SYSTEM PUBLIC ${_lcnc_windows_include_dirs})
-    endif()
-
-    set(_lcnc_windows_link_dirs)
-    foreach(_lcnc_link_dir IN ITEMS
-            "${_lcnc_msvc_x64_lib_dir}"
-            "${_lcnc_sdk_um_x64_lib_dir}"
-            "${_lcnc_sdk_ucrt_x64_lib_dir}")
-        if(EXISTS "${_lcnc_link_dir}")
-            list(APPEND _lcnc_windows_link_dirs "${_lcnc_link_dir}")
-        endif()
-    endforeach()
-    if(_lcnc_windows_link_dirs)
-        target_link_directories(lcnc_core PUBLIC ${_lcnc_windows_link_dirs})
-    else()
-        message(WARNING "Unable to derive MSVC/Windows SDK library directories from the configured toolchain")
-    endif()
-endif()
-
 # QuaZip 仅在 lcnc_project_package.cpp 实现内部使用（不出现在公开头文件）→ PRIVATE。
 target_link_libraries(lcnc_core PRIVATE QuaZip::QuaZip)
 
@@ -840,6 +875,9 @@ if(BUILD_TESTING)
         tests/process_runtime_configuration_test.cpp
     )
     target_link_libraries(lcnc_process_runtime_configuration_test PRIVATE Qt6::Core)
+    if(TARGET lcnc_msvc_environment)
+        target_link_libraries(lcnc_process_runtime_configuration_test PRIVATE lcnc_msvc_environment)
+    endif()
     target_include_directories(lcnc_process_runtime_configuration_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/3rd/magic_enum"

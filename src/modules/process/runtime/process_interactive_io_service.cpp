@@ -2,6 +2,8 @@
 
 #include "modules/process/runtime/process_device_runtime.h"
 
+#include "magic_enum.hpp"
+
 #include <QMetaObject>
 
 namespace lcnc::process {
@@ -48,7 +50,7 @@ DeviceCommandTicket ProcessInteractiveIoService::setAxisEnabled(const QString& a
         return {};
     }
     const QString axisNameNormalized = axisName.trimmed().toUpper();
-    const auto axis = enum_cast<Axis>(axisNameNormalized.toStdString());
+    const auto axis = magic_enum::enum_cast<Axis>(axisNameNormalized.toStdString());
     if (!axis || !m_axisRunner) {
         complete(std::move(completion), {false, tr("Axis is not registered or the device queue is unavailable")});
         return {};

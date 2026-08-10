@@ -2,7 +2,7 @@
 
 #include "core/kernel/i_service.h"
 #include "modules/process/runtime/device_command_queue.h"
-#include "modules/process/system/data_type.h"
+#include "modules/process/runtime/process_axis_types.h"
 
 #include <QObject>
 

@@ -7,6 +7,8 @@
 
 #include <cassert>
 
+using lcnc::process::Axis;
+
 namespace {
 bool spinUntil(const std::function<bool()>& predicate, int timeoutMs = 2000)
 {

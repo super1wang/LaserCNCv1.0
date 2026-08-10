@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
                 return runtime->connectDevices(false, [](int, const QString&) {});
             }
             if (iteration == 1) {
-                return runtime->setAxisPositions({{Axis::X, 12.5}});
+                return runtime->setAxisPositions({{lcnc::process::Axis::X, 12.5}});
             }
             const bool connected = runtime->pollStatus({}, {}).connected;
             return lcnc::process::DeviceCommandResult{connected,

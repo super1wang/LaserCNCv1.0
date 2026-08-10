@@ -1,8 +1,14 @@
 #pragma once
 
-#include "modules/process/system/data_type.h"
+#include "modules/process/runtime/process_axis_types.h"
+#include "modules/process/runtime/process_permission_types.h"
 
 #include <QStringList>
+
+#include <string>
+#include <utility>
+
+#include "magic_enum.hpp"
 
 namespace lcnc::process {
 
@@ -24,7 +30,7 @@ public:
 
     bool isAxisEnabled(Axis axis) const
     {
-        return m_enabledAxes.contains(QString::fromLatin1(enum_name(axis).data()));
+        return m_enabledAxes.contains(QString::fromLatin1(magic_enum::enum_name(axis).data()));
     }
 
     bool hasEnabledAxes() const { return !m_enabledAxes.isEmpty(); }

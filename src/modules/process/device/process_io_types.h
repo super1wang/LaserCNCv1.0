@@ -1,92 +1,6 @@
 #pragma once
 
-#include <map>
-#include <string>
-#include <vector>
-
-#include <QString>
-
-#include "message_code.h"
-#include "magic_enum.hpp"
-
-#define MaxNestingNumber 1000
-#define PRECISION 1e-10
-#define HIGH_PRECISION 1e-11
-#define LOW_PRECISION 1e-8
-#define LOW_LOW_PRECISION 1e-7
-#define LOW_LOW_LOW_PRECISION 1e-6
-#define ENGI_PRECISION 1e-4
-#define ONE_MICRO 1e-3
-#define PI 3.14159265358979323846
-#define ONE_MICRON 1E-3
-#define FILE_PRECISION 1E-5
-#define MAXIMUM 1E32
-
-using std::map;
-using std::string;
-using std::vector;
-using magic_enum::enum_cast;
-using magic_enum::enum_name;
-using magic_enum::enum_names;
-
-enum class PermissionLevel
-{
-    Developers = 9,
-    Factory = 7,
-    Simulate = 6,
-    Administrator = 4,
-    Technician = 2,
-    Operator = 1,
-    None = 0
-};
-
-enum class Axis
-{
-    X = 0, Y = 1, Z = 2, A = 3, B = 4, C = 5
-};
-
-enum class SystemStatus
-{
-    UnInit, Initializing,
-    Idle,
-    Paused, Pausing,
-    Processing, LaserProcessing,
-    Error
-};
-
-enum class RunMode
-{
-    SignMode = 0,
-    CuttingTest = 1,
-    ProcessTest = 2
-};
-
-enum class ItemType
-{
-    Start, Stop,
-    If, Loop, Group, RunGroup,
-    IO, Camera, Monitor,
-    Calculation, Compare,
-    Base,
-    Wait, Commands, Feeding, RunGroupCheck,
-    Axis, AxesMove, Measurement, MarkAcquire, Alignment,
-    AutoFocus, EnergySwitch, Cutting, OverCutting
-};
-
-enum class ItemState
-{
-    StateSave,
-    Disable, Enable, Editing, Unavailable,
-    Run, Stop, Pause, Unuse, Unrun
-};
-
-struct Item
-{
-    int iParentIndex;
-    int iChildrenIndex;
-    ItemType Type;
-    map<QString, QString> maps;
-};
+namespace lcnc::process {
 
 enum class DigitalIN
 {
@@ -142,3 +56,5 @@ enum class AnalogOUT
     OUT49, OUT50, OUT51, OUT52, OUT53, OUT54, OUT55, OUT56,
     OUT57, OUT58, OUT59, OUT60, OUT61, OUT62, OUT63, OUT64
 };
+
+} // namespace lcnc::process

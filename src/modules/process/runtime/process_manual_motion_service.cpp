@@ -2,6 +2,8 @@
 
 #include "modules/process/runtime/process_device_runtime.h"
 
+#include "magic_enum.hpp"
+
 #include <QMetaObject>
 
 namespace lcnc::process {
@@ -42,7 +44,7 @@ ProcessManualMotionService::ProcessManualMotionService(DeviceCommandQueue& queue
 
 std::optional<Axis> ProcessManualMotionService::axisFor(const QString& axisName)
 {
-    return enum_cast<Axis>(axisName.trimmed().toUpper().toStdString());
+    return magic_enum::enum_cast<Axis>(axisName.trimmed().toUpper().toStdString());
 }
 
 DeviceCommandTicket ProcessManualMotionService::reject(const QString& message, Completion completion)

@@ -28,6 +28,8 @@
 #include "modules/process/runtime/process_connection_service.h"
 #include "modules/process/runtime/process_manual_motion_service.h"
 #include "modules/process/runtime/process_interactive_io_service.h"
+
+#include "magic_enum.hpp"
 #include "modules/process/runtime/process_status_service.h"
 #include "modules/process/tool/tool_factory.h"
 #include "modules/process/workflow/process_workflow_service.h"
@@ -484,7 +486,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
                 QString enumName = channel.trimmed();
                 if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
                     enumName = enumName.mid(1);
-                auto eOut = enum_cast<DigitalOUT>(enumName.toStdString());
+                auto eOut = magic_enum::enum_cast<lcnc::process::DigitalOUT>(enumName.toStdString());
                 if (!eOut.has_value())
                     return;
                 const auto service = m_service;
@@ -1118,7 +1120,7 @@ void ProcessModule::moveToConfiguredPosition(bool loading)
             setStatusMessage(tr("%1 axis is not enabled and cannot move to %2").arg(axisName, positionName));
             return;
         }
-        const auto eAxis = enum_cast<Axis>(axisName.toStdString());
+        const auto eAxis = magic_enum::enum_cast<lcnc::process::Axis>(axisName.toStdString());
         if (!eAxis.has_value()) {
             // 中文翻译：%1 轴未注册，无法移动至%2
             setStatusMessage(tr("%1 axis is not registered and cannot be moved to %2").arg(axisName, positionName));

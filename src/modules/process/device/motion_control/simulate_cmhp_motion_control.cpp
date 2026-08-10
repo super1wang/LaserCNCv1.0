@@ -13,6 +13,10 @@
 
 #include <cmath>
 
+using lcnc::process::Axis;
+using std::vector;
+using toml::table;
+
 #if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
 
 SimulateCMHPMotionControl::SimulateCMHPMotionControl(

@@ -19,8 +19,8 @@ int main(int argc, char* argv[])
     lcnc::process::ProcessRuntimeConfiguration configuration;
 
     configuration.setEnabledAxes({QStringLiteral("x"), QStringLiteral("A"), QStringLiteral("X"), QStringLiteral(" base ")});
-    if (!configuration.isAxisEnabled(Axis::X) || !configuration.isAxisEnabled(Axis::A)
-        || configuration.isAxisEnabled(Axis::Y) || configuration.enabledAxes().size() != 2)
+    if (!configuration.isAxisEnabled(lcnc::process::Axis::X) || !configuration.isAxisEnabled(lcnc::process::Axis::A)
+        || configuration.isAxisEnabled(lcnc::process::Axis::Y) || configuration.enabledAxes().size() != 2)
         return fail(QStringLiteral("Axis normalization or selection is invalid"));
 
     configuration.setExtensionAxes({QStringLiteral("x1"), QStringLiteral("U")});
@@ -33,9 +33,9 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("Simulation default must be enabled"));
     configuration.setSimulationMode(false);
     configuration.setCustomerId("MaiTong");
-    configuration.setPermission(PermissionLevel::Factory);
+    configuration.setPermission(lcnc::process::PermissionLevel::Factory);
     if (configuration.simulationMode() || configuration.customerId() != "MaiTong"
-        || configuration.permission() != PermissionLevel::Factory)
+        || configuration.permission() != lcnc::process::PermissionLevel::Factory)
         return fail(QStringLiteral("Runtime configuration update is invalid"));
 
     return 0;

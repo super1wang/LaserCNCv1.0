@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <functional>
+#include <string>
 #include "modules/process/device/motion_control/motion_control.h"
 #include "modules/process/runtime/process_device_coordinator.h"
 
@@ -50,8 +51,8 @@ public:
             lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration);
     ~ProcessDeviceRuntime();
 
-    string activeMotionControllerName() const;
-    string configuredMotionControllerName() const;
+    std::string activeMotionControllerName() const;
+    std::string configuredMotionControllerName() const;
     bool configuredControllerRequiresDevice() const;
     /// Stop motion buffers and force process outputs to their safe state.
     bool stopMotionAndSafeOutputs();
@@ -73,19 +74,19 @@ public:
     /// Typed motion and IO operations. These methods are called only from the
     /// device queue worker; they keep vendor pointers and the defensive lease
     /// inside the runtime boundary.
-    lcnc::process::DeviceCommandResult moveRelative(Axis axis, double distance, double velocity);
-    lcnc::process::DeviceCommandResult moveAbsolute(Axis axis, double position, double velocity);
-    lcnc::process::DeviceCommandResult jog(Axis axis, bool positive, double velocity);
-    lcnc::process::DeviceCommandResult stopAxis(Axis axis);
+    lcnc::process::DeviceCommandResult moveRelative(lcnc::process::Axis axis, double distance, double velocity);
+    lcnc::process::DeviceCommandResult moveAbsolute(lcnc::process::Axis axis, double position, double velocity);
+    lcnc::process::DeviceCommandResult jog(lcnc::process::Axis axis, bool positive, double velocity);
+    lcnc::process::DeviceCommandResult stopAxis(lcnc::process::Axis axis);
     lcnc::process::DeviceCommandResult stopAllMotion();
     lcnc::process::DeviceCommandResult moveAxes(
-        const QVector<Axis>& axes, const QVector<double>& positions, double velocity, bool relative);
+        const QVector<lcnc::process::Axis>& axes, const QVector<double>& positions, double velocity, bool relative);
     /// 将所选轴当前位置寄存器直接置位为指定坐标（ACS setfpos / GTN 对应接口）。
-    lcnc::process::DeviceCommandResult setAxisPositions(const QVector<QPair<Axis, double>>& targets);
-    lcnc::process::DeviceCommandResult setAxisEnabled(Axis axis, bool enabled);
-    lcnc::process::DeviceCommandResult setDigitalOutput(DigitalOUT output, bool value);
+    lcnc::process::DeviceCommandResult setAxisPositions(const QVector<QPair<lcnc::process::Axis, double>>& targets);
+    lcnc::process::DeviceCommandResult setAxisEnabled(lcnc::process::Axis axis, bool enabled);
+    lcnc::process::DeviceCommandResult setDigitalOutput(lcnc::process::DigitalOUT output, bool value);
     lcnc::process::DeviceCommandResult setDigitalOutput(const QString& outputName, bool value);
-    lcnc::process::DeviceCommandResult setAnalogOutput(AnalogOUT output, double value,
+    lcnc::process::DeviceCommandResult setAnalogOutput(lcnc::process::AnalogOUT output, double value,
                                                        const QString& outputName = {});
     lcnc::process::DeviceCommandResult homeAxes(const QStringList& axes, bool connected);
     lcnc::process::DeviceCommandResult moveToPreset(
@@ -111,17 +112,17 @@ public:
     void setToolTable();
     void clearToolData();
 
-    void setMotionControlTable(const table& table_MotionControl = {});
-    void setDigitalTable(const table& table_Digital = {});
-    void setAnalogTable(const table& table_Analog = {});
-    void setLaserTable(const table& table_Laser = {});
-    void setGasTable(const table& table_Gas = {});
+    void setMotionControlTable(const toml::table& table_MotionControl = {});
+    void setDigitalTable(const toml::table& table_Digital = {});
+    void setAnalogTable(const toml::table& table_Analog = {});
+    void setLaserTable(const toml::table& table_Laser = {});
+    void setGasTable(const toml::table& table_Gas = {});
 
 private:
     using DeviceLock = lcnc::process::ProcessDeviceCoordinator::Lease;
     DeviceLock lockDeviceAccess() { return m_deviceCoordinator.acquire(); }
-    void setMotionControl(string strName = "");
-    void setLaserDevice(string strName = "");
+    void setMotionControl(std::string strName = "");
+    void setLaserDevice(std::string strName = "");
     lcnc::process::ProcessSettingsService& m_settings;
     lcnc::process::ProcessRuntimeConfiguration& m_runtimeConfiguration;
     std::unique_ptr<MotionControl> m_motionControl;
@@ -132,6 +133,6 @@ private:
 
     ToolFactory     m_ToolFactory;
 
-    string  m_strMotionControl;
-    string  m_strLaserDevice;
+    std::string  m_strMotionControl;
+    std::string  m_strLaserDevice;
 };

@@ -4,6 +4,16 @@
 #include "modules/process/settings/process_settings_service.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
 
+#include "magic_enum.hpp"
+
+using lcnc::process::AnalogIN;
+using lcnc::process::AnalogOUT;
+using lcnc::process::Axis;
+using lcnc::process::DigitalIN;
+using lcnc::process::DigitalOUT;
+using std::string;
+using toml::table;
+
 const std::regex MotionControl::regex_DigitalIO("^(-)?(N)?\\d\\.\\d(\\d)?$");	// 匹配格式：(-) （N） 数字 . 数字 (数字)	，如N0.1、N1.23、-N0.1
 const std::regex MotionControl::regex_AnalogIO("^(-)?(N)?\\d(\\d)?$");		// 匹配格式：(-) （N） 数字 (数字)		，如N1、N12、-N1
 
@@ -17,7 +27,7 @@ void MotionControl::rebuildAxes()
 
 		if (!IsMotorCreated(eAxis))
 		{
-			string strAxis = enum_name(eAxis).data();
+			string strAxis = magic_enum::enum_name(eAxis).data();
 			table tableAxis = m_settings.axisRuntimeTable(QString::fromStdString(strAxis));
 			CreateMotor(eAxis, tableAxis);
 		}
@@ -39,7 +49,7 @@ bool MotionControl::IsMotorCreated(Axis eAxis)
 //	table tableAxisHome;
 //	for (Axis eAxis : m_vecMotors)
 //	{
-//		string strAxis = enum_name(eAxis).data();
+//		string strAxis = magic_enum::enum_name(eAxis).data();
 //		if (tableAxisHome.count("Home") && tableAxisHome.at("Home").is_table())
 //			SetAxisHomePrm(eAxis, tableAxisHome.at("Home").as_table());
 //	}
@@ -49,7 +59,7 @@ void MotionControl::setMotionControlTable()
 {
     table tableMotion;
 	for (const Axis axis : m_vecMotors)
-		tableMotion[enum_name(axis).data()] = m_settings.axisRuntimeTable(QString::fromStdString(enum_name(axis).data()));
+		tableMotion[magic_enum::enum_name(axis).data()] = m_settings.axisRuntimeTable(QString::fromStdString(magic_enum::enum_name(axis).data()));
 	setMotionControlTable(tableMotion);
 }
 
@@ -60,7 +70,7 @@ void MotionControl::setMotionControlTable(const table& tableMotion)
 
 	for (Axis eAxis : m_vecMotors)
 	{
-		string strAxis = enum_name(eAxis).data();
+		string strAxis = magic_enum::enum_name(eAxis).data();
 		if (tableMotion.count(strAxis))
 			SetAxisTable(eAxis, tableMotion.at(strAxis).as_table());
 	}
@@ -68,7 +78,7 @@ void MotionControl::setMotionControlTable(const table& tableMotion)
 
 void MotionControl::SetAxisTable(Axis eAxis, const table& tableAxis)
 {
-	string strAxis = enum_name(eAxis).data();
+	string strAxis = magic_enum::enum_name(eAxis).data();
 	table t_Axis = m_settings.axisRuntimeTable(QString::fromStdString(strAxis));
 
 	if (tableAxis.count("iIndex"))
@@ -160,7 +170,7 @@ void MotionControl::SetPipeDiameterTable(const table& tableAxis)
 
 	for (Axis eAxis : m_vecMotors)
 	{
-		string strAxis = enum_name(eAxis).data();
+		string strAxis = magic_enum::enum_name(eAxis).data();
 		if (!tableAxis.count(strAxis))
 			continue;
 		bool bRotary;
@@ -297,7 +307,7 @@ void MotionControl::setDigitalTable(const table& tableDigital)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			auto eIndexOpt = enum_cast<DigitalIN>(key.substr(1, key.size() - 1));
+			auto eIndexOpt = magic_enum::enum_cast<DigitalIN>(key.substr(1, key.size() - 1));
 			if (!eIndexOpt.has_value())
 				continue;	// 未知扩展键，跳过
 			DigitalIN eIndex = eIndexOpt.value();
@@ -371,7 +381,7 @@ void MotionControl::setDigitalTable(const table& tableDigital)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			auto eIndexOpt = enum_cast<DigitalOUT>(key.substr(1, key.size() - 1));
+			auto eIndexOpt = magic_enum::enum_cast<DigitalOUT>(key.substr(1, key.size() - 1));
 			if (!eIndexOpt.has_value())
 				continue;
 			DigitalOUT eIndex = eIndexOpt.value();
@@ -465,7 +475,7 @@ void MotionControl::setAnalogTable(const table& tableAnalog)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			auto eIndexOpt = enum_cast<AnalogIN>(key.substr(1, key.size() - 1));
+			auto eIndexOpt = magic_enum::enum_cast<AnalogIN>(key.substr(1, key.size() - 1));
 			if (!eIndexOpt.has_value())
 				continue;
 			AnalogIN eIndex = eIndexOpt.value();
@@ -527,7 +537,7 @@ void MotionControl::setAnalogTable(const table& tableAnalog)
 		for (const auto& pair : t_maps)
 		{
 			string key = pair.first.data();
-			auto eIndexOpt = enum_cast<AnalogOUT>(key.substr(1, key.size() - 1));
+			auto eIndexOpt = magic_enum::enum_cast<AnalogOUT>(key.substr(1, key.size() - 1));
 			if (!eIndexOpt.has_value())
 				continue;
 			AnalogOUT eIndex = eIndexOpt.value();
@@ -603,7 +613,7 @@ bool MotionControl::DigitalOutputSet(DigitalOUT eIOIndex, int iValue, bool bLogE
 		return DigitalOutputSet(m_mapDigitalOUT[eIOIndex], iValue, bLogError);
 	else
 	{
-		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Digital OUT %1 is invalid").arg(enum_name(eIOIndex).data()));
+		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Digital OUT %1 is invalid").arg(magic_enum::enum_name(eIOIndex).data()));
 		return false;
 	}
 }
@@ -614,7 +624,7 @@ bool MotionControl::DigitalOutputGet(DigitalOUT eIOIndex, int& iValue, bool bLog
 		return DigitalOutputGet(m_mapDigitalOUT[eIOIndex], iValue, bLogError);
 	else
 	{
-		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Digital OUT %1 is invalid").arg(enum_name(eIOIndex).data()));
+		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Digital OUT %1 is invalid").arg(magic_enum::enum_name(eIOIndex).data()));
 		return false;
 	}
 }
@@ -625,7 +635,7 @@ bool MotionControl::DigitalInputGet(DigitalIN eIOIndex, int& iValue, bool bLogEr
 		return DigitalInputGet(m_mapDigitalIN[eIOIndex], iValue, bLogError);
 	else
 	{
-		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Digital IN %1 is invalid").arg(enum_name(eIOIndex).data()));
+		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Digital IN %1 is invalid").arg(magic_enum::enum_name(eIOIndex).data()));
 		return false;
 	}
 }
@@ -636,7 +646,7 @@ bool MotionControl::AnalogOutputSet(AnalogOUT eIOIndex, double dValue, bool bLog
 		return AnalogOutputSet(m_mapAnalogOUT[eIOIndex], dValue, bLogError);
 	else
 	{
-		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Analog OUT %1 is invalid").arg(enum_name(eIOIndex).data()));
+		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Analog OUT %1 is invalid").arg(magic_enum::enum_name(eIOIndex).data()));
 		return false;
 	}
 }
@@ -647,7 +657,7 @@ bool MotionControl::AnalogOutputGet(AnalogOUT eIOIndex, double& dValue, bool bLo
 		return AnalogOutputGet(m_mapAnalogOUT[eIOIndex], dValue, bLogError);
 	else
 	{
-		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Analog OUT %1 is invalid").arg(enum_name(eIOIndex).data()));
+		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Analog OUT %1 is invalid").arg(magic_enum::enum_name(eIOIndex).data()));
 		return false;
 	}
 }
@@ -658,7 +668,7 @@ bool MotionControl::AnalogInputGet(AnalogIN eIOIndex, double& dValue, bool bLogE
 		return AnalogInputGet(m_mapAnalogIN[eIOIndex], dValue, bLogError);
 	else
 	{
-		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Analog IN %1 is invalid").arg(enum_name(eIOIndex).data()));
+		lcnc::process::logDeviceWarning(WarnCode::WARN_MC_NONEINDEX, QObject::tr("Analog IN %1 is invalid").arg(magic_enum::enum_name(eIOIndex).data()));
 		return false;
 	}
 }

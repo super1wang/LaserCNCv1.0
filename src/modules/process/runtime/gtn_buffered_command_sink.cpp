@@ -7,6 +7,8 @@
 #include "modules/process/device/motion_control/gtn_motion_control.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
+#include "magic_enum.hpp"
+
 #include <QThread>
 
 #include <utility>
@@ -24,7 +26,7 @@ GtnBufferedCommandSink::GtnBufferedCommandSink(GTNMotionControl* gtn, AxisMap ax
 	static constexpr AxisMap::SemanticAxis semanticAxes[5] = {
 		AxisMap::X, AxisMap::Y, AxisMap::Z, AxisMap::R1, AxisMap::R2};
 	for (int index = 0; index < m_axisMap.activeCount(); ++index) {
-		const auto value = enum_cast<Axis>(m_axisMap.axisName(semanticAxes[index]).toStdString());
+		const auto value = magic_enum::enum_cast<Axis>(m_axisMap.axisName(semanticAxes[index]).toStdString());
 		if (!value) return;
 		configuredAxes[index] = *value;
 	}
@@ -96,7 +98,7 @@ void GtnBufferedCommandSink::jumpToPose(const MachinePose5& pose, const Tool& to
     if (!m_gtn) return;
     auto move = [this](AxisMap::SemanticAxis axis, double position, double velocity) {
         const auto name = m_axisMap.axisName(axis).toStdString();
-        const auto physicalAxis = enum_cast<Axis>(name);
+        const auto physicalAxis = magic_enum::enum_cast<Axis>(name);
         if (m_axisMap.isPresent(axis) && physicalAxis)
 			m_gtn->MoveToPosition(*physicalAxis, velocity > 0 ? velocity : 10.0, position);
     };

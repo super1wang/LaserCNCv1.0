@@ -1,6 +1,7 @@
 #include "modules/process/runtime/process_device_runtime.h"
 
-#include "modules/process/system/data_type.h"
+#include "modules/process/device/process_io_types.h"
+#include "modules/process/runtime/process_axis_types.h"
 #include "modules/process/system/regex_patterns.h"
 #include "core/logging/logger.h"
 #include "modules/process/settings/process_settings_service.h"
@@ -8,6 +9,8 @@
 #include "modules/process/runtime/i_motion_command_sink.h"
 #include "modules/process/runtime/process_cutting_safety.h"
 #include "modules/process/device/motion_control/simulate_cmhp_motion_control.h"
+
+#include "magic_enum.hpp"
 #if defined(LCNC_PROCESS_HAS_ACS) && LCNC_PROCESS_HAS_ACS
 #include "modules/process/device/motion_control/acs_motion_control.h"
 #endif
@@ -21,6 +24,15 @@
 
 #include <QElapsedTimer>
 #include <QThread>
+
+using lcnc::process::AnalogIN;
+using lcnc::process::AnalogOUT;
+using lcnc::process::Axis;
+using lcnc::process::DigitalIN;
+using lcnc::process::DigitalOUT;
+using std::string;
+using std::vector;
+using toml::table;
 
 ProcessDeviceRuntime::ProcessDeviceRuntime(lcnc::process::ProcessSettingsService& settings,
                  lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
@@ -301,7 +313,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::setDigitalOutput(
     QString enumName = outputName.trimmed();
     if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
         enumName = enumName.mid(1);
-    const auto output = enum_cast<DigitalOUT>(enumName.toStdString());
+    const auto output = magic_enum::enum_cast<DigitalOUT>(enumName.toStdString());
     if (!output.has_value())
         // 中文翻译：IO 输出切换失败
         return {false, QObject::tr("IO output switching failed")};
@@ -332,7 +344,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::homeAxes(
         if (!motionControl)
             continue;
 
-        const auto axis = enum_cast<Axis>(axisName.toStdString());
+        const auto axis = magic_enum::enum_cast<Axis>(axisName.toStdString());
         if (!axis.has_value() || !motionControl->IsMotorCreated(axis.value())) {
             LCNC_WARN(lcnc::LogCode::Generic,
                       "ProcessDeviceRuntime::homeAxes: skip hardware home for axis {} "
@@ -359,7 +371,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveToPreset(
         return {false, QObject::tr("The controller is not connected, please connect the device first")};
 
     for (auto it = targets.cbegin(); it != targets.cend(); ++it) {
-        const auto axis = enum_cast<Axis>(it.key().toStdString());
+        const auto axis = magic_enum::enum_cast<Axis>(it.key().toStdString());
         if (!axis.has_value() || !m_motionControl->IsMotorCreated(axis.value()))
             // 中文翻译：%1 轴未在控制器中创建
             return {false, QObject::tr("%1 axis was not created in the controller").arg(it.key())};
@@ -374,7 +386,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveToPreset(
             return {false, QObject::tr("%1 axis is moving").arg(it.key())};
     }
     for (auto it = targets.cbegin(); it != targets.cend(); ++it) {
-        const auto axis = enum_cast<Axis>(it.key().toStdString());
+        const auto axis = magic_enum::enum_cast<Axis>(it.key().toStdString());
         if (!m_motionControl->MoveAbsolute(axis.value(), it.value(), velocity)) {
             (void)m_motionControl->StopMotion();
             // 中文翻译：%1 轴移动至%2失败
@@ -396,7 +408,7 @@ lcnc::process::DeviceStatusSnapshot ProcessDeviceRuntime::pollStatus(
     for (const QString& name : axisNames) {
         lcnc::process::DeviceAxisStatusSample sample;
         sample.name = name;
-        const auto axis = enum_cast<Axis>(name.toStdString());
+        const auto axis = magic_enum::enum_cast<Axis>(name.toStdString());
         if (axis.has_value() && m_motionControl->IsMotorCreated(axis.value())) {
             double position = 0.0;
             if (m_motionControl->GetActualPos(axis.value(), position)) {
@@ -415,7 +427,7 @@ lcnc::process::DeviceStatusSnapshot ProcessDeviceRuntime::pollStatus(
         QString enumName = entry.first;
         if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
             enumName = enumName.mid(1);
-        const auto output = enum_cast<DigitalOUT>(enumName.toStdString());
+        const auto output = magic_enum::enum_cast<DigitalOUT>(enumName.toStdString());
         int value = 0;
         if (output.has_value() && m_motionControl->m_mapDigitalOUT.count(output.value())
             && m_motionControl->DigitalOutputGet(output.value(), value)) {
@@ -597,13 +609,13 @@ bool ProcessDeviceRuntime::readDigitalChannel(const QString& channel,
     if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
         enumName = enumName.mid(1);
     int raw = 0;
-    if (auto input = enum_cast<DigitalIN>(enumName.toStdString()); input.has_value()
+    if (auto input = magic_enum::enum_cast<DigitalIN>(enumName.toStdString()); input.has_value()
         && m_motionControl->m_mapDigitalIN.count(input.value())
         && m_motionControl->DigitalInputGet(input.value(), raw)) {
         *value = raw != 0;
         return true;
     }
-    if (auto output = enum_cast<DigitalOUT>(enumName.toStdString()); output.has_value()
+    if (auto output = magic_enum::enum_cast<DigitalOUT>(enumName.toStdString()); output.has_value()
         && m_motionControl->m_mapDigitalOUT.count(output.value())
         && m_motionControl->DigitalOutputGet(output.value(), raw)) {
         *value = raw != 0;
@@ -630,7 +642,7 @@ bool ProcessDeviceRuntime::readAnalogChannel(const QString& channel,
     QString enumName = channel.trimmed();
     if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
         enumName = enumName.mid(1);
-    if (auto input = enum_cast<AnalogIN>(enumName.toStdString()); input.has_value()
+    if (auto input = magic_enum::enum_cast<AnalogIN>(enumName.toStdString()); input.has_value()
         && m_motionControl->m_mapAnalogIN.count(input.value())
         && m_motionControl->AnalogInputGet(input.value(), *value)) {
         return true;
@@ -669,7 +681,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
         return fail(QObject::tr("Motion controller fault code: %1, please clear the fault before processing").arg(fault));
 
     for (auto it = request.lockedAxisTargets.cbegin(); it != request.lockedAxisTargets.cend(); ++it) {
-        const auto axis = enum_cast<Axis>(it.key().toStdString());
+        const auto axis = magic_enum::enum_cast<Axis>(it.key().toStdString());
         if (!axis.has_value() || !mc->IsMotorCreated(*axis))
             // 中文翻译：锁定轴 %1 未在控制器中创建
             return fail(QObject::tr("Locked axis %1 was not created in the controller").arg(it.key()));
@@ -701,7 +713,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
             // 中文翻译：锁定轴置位后控制器状态异常
             return fail(QObject::tr("Controller status is abnormal after positioning locked axes"));
         for (auto it = request.lockedAxisTargets.cbegin(); it != request.lockedAxisTargets.cend(); ++it) {
-            const auto axis = enum_cast<Axis>(it.key().toStdString());
+            const auto axis = magic_enum::enum_cast<Axis>(it.key().toStdString());
             double actual = 0.0;
             if (!axis.has_value() || !mc->GetActualPos(*axis, actual)
                 || std::abs(actual - it.value()) > 0.05)
@@ -716,7 +728,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
         const QString name = axisName.trimmed().toUpper();
         if (name.isEmpty() || name == QStringLiteral("BASE"))
             continue;
-        const auto axis = enum_cast<Axis>(name.toStdString());
+        const auto axis = magic_enum::enum_cast<Axis>(name.toStdString());
         if (!axis.has_value())
             continue;
         if (!mc->IsMotorCreated(axis.value())) {
@@ -768,7 +780,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
         QString enumName = guard.channel.trimmed();
         if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
             enumName = enumName.mid(1);
-        const auto input = enum_cast<DigitalIN>(enumName.toStdString());
+        const auto input = magic_enum::enum_cast<DigitalIN>(enumName.toStdString());
         if (!input.has_value() || !mc->m_mapDigitalIN.count(input.value()))
             // 中文翻译：%1状态获取失败: 通道未配置: %2
             return fail(QObject::tr("%1 status acquisition failed: Channel not configured: %2")
@@ -792,7 +804,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
         QString enumName = guard.channel.trimmed();
         if (enumName.startsWith(QLatin1Char('a')) && enumName.size() >= 2)
             enumName = enumName.mid(1);
-        const auto input = enum_cast<AnalogIN>(enumName.toStdString());
+        const auto input = magic_enum::enum_cast<AnalogIN>(enumName.toStdString());
         if (!input.has_value() || !mc->m_mapAnalogIN.count(input.value()))
             // 中文翻译：%1通道未配置: %2
             return fail(QObject::tr("Channel %1 is not configured: %2").arg(guard.title, guard.channel));
@@ -826,9 +838,9 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::validateContourBoundary
         return lcnc::process::evaluateContourBoundaryHealth(health);
     for (Axis axis : mc->m_vecMotors) {
         if (!mc->IsMotorCreated(axis))
-            health.missingAxes.append(QString::fromLatin1(enum_name(axis).data()));
+            health.missingAxes.append(QString::fromLatin1(magic_enum::enum_name(axis).data()));
         else if (!mc->IsEnabled(axis))
-            health.disabledAxes.append(QString::fromLatin1(enum_name(axis).data()));
+            health.disabledAxes.append(QString::fromLatin1(magic_enum::enum_name(axis).data()));
     }
     return lcnc::process::evaluateContourBoundaryHealth(health);
 }

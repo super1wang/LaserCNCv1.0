@@ -3,6 +3,8 @@
 #include "modules/process/runtime/device_command_queue.h"
 #include "modules/process/runtime/process_device_runtime.h"
 
+#include "magic_enum.hpp"
+
 #include <QElapsedTimer>
 #include <QPair>
 #include <QThread>
@@ -36,7 +38,7 @@ QString stripIoKeyPrefix(const QString& tomlKey)
 template <typename Enum>
 std::optional<Enum> ioEnumFromKey(const QString& tomlKey)
 {
-    return enum_cast<Enum>(stripIoKeyPrefix(tomlKey).toStdString());
+    return magic_enum::enum_cast<Enum>(stripIoKeyPrefix(tomlKey).toStdString());
 }
 
 template <typename Fn>
@@ -78,7 +80,7 @@ bool ProcessMotionWorkflowService::moveAxis(const QString& axis,
     ProcessDeviceRuntime* const service = m_service;
     return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
         [service, axis, mode, target, velocity] {
-            const auto eAxis = enum_cast<Axis>(axis.trimmed().toUpper().toStdString());
+            const auto eAxis = magic_enum::enum_cast<Axis>(axis.trimmed().toUpper().toStdString());
             if (!eAxis.has_value())
                 // 中文翻译：轴 %1 未注册
                 return DeviceCommandResult{false, QObject::tr("Axis %1 is not registered").arg(axis)};
@@ -128,7 +130,7 @@ bool ProcessMotionWorkflowService::moveAxes(const QVariantList& rows,
             for (const QVariant& item : rows) {
                 const QVariantMap row = item.toMap();
                 const QString axisName = row.value(QStringLiteral("axis")).toString().trimmed().toUpper();
-                const auto axis = enum_cast<Axis>(axisName.toStdString());
+                const auto axis = magic_enum::enum_cast<Axis>(axisName.toStdString());
                 if (!axis.has_value())
                     // 中文翻译：轴 %1 未注册
                     return DeviceCommandResult{false, QObject::tr("Axis %1 is not registered").arg(axisName)};
@@ -155,7 +157,7 @@ bool ProcessMotionWorkflowService::setAxisPosition(const QVariantList& axes,
             for (const QVariant& item : axes) {
                 const QVariantMap row = item.toMap();
                 const QString axisName = row.value(QStringLiteral("axis")).toString().trimmed().toUpper();
-                const auto eAxis = enum_cast<Axis>(axisName.toStdString());
+                const auto eAxis = magic_enum::enum_cast<Axis>(axisName.toStdString());
                 if (!eAxis.has_value())
                     // 中文翻译：轴 %1 未注册
                     return DeviceCommandResult{false, QObject::tr("Axis %1 is not registered").arg(axisName)};

@@ -13,13 +13,6 @@
 
 #define     deviceDescription L"PCI-1730,BID#0"
 
-using std::ios_base;
-using std::ofstream;
-using std::endl;
-using std::map;
-using std::string;
-using std::ostringstream;
-
 //#define MM 10000
 #define DEBUG_MODE
 
@@ -29,17 +22,17 @@ struct AcsAxisData
 				bool bRotary,
 				int  iResolution,
 				int iHomeIndex, 
-				string strHomeName, 
-				string strRL, 
-				string strLL, 
-				string strEfac,
+				std::string strHomeName,
+				std::string strRL,
+				std::string strLL,
+				std::string strEfac,
 				double dVel,
 				double dAcc,
 				double dDec,
 				double dJerk,
 				double dNeg,
 				double dPos,
-				string strName):
+				std::string strName):
 				AxisIndex(iIndex),
 				Rotary(bRotary),
 				Resolution(iResolution),
@@ -60,17 +53,17 @@ struct AcsAxisData
 	bool	Rotary;
 	int     Resolution;
 	int		HomeBufferIndex;
-	string	HomeName;
-	string	SRLName;
-	string	SLLName;
-	string	Efac;
+	std::string	HomeName;
+	std::string	SRLName;
+	std::string	SLLName;
+	std::string	Efac;
 	double	Velocity;
 	double	Acceleration;
 	double	Deceleration;
 	double	Jerk;
 	double	NegLimit;
 	double	PosLimit;
-	string  Name;
+	std::string  Name;
 };
 
 class  ACSMotionControl :public MotionControl
@@ -90,11 +83,11 @@ protected:
 	int						m_iProgramBufferIndex;
 	bool					m_bConnectFlag;				//是否连接的标志状态
 	bool					m_bErrorOccurred;
-	string					m_strName;
+	std::string					m_strName;
 	HANDLE					m_hHandle;					//与ACS控制器通讯的句柄
-	map<Axis,AcsAxisData>	m_mapMotorValue;
+	std::map<lcnc::process::Axis,AcsAxisData>	m_mapMotorValue;
 
-	string					m_strCommand;
+	std::string					m_strCommand;
 	double					m_dPreX;					//上一个X的位置
 	double					m_dPreY;					//上一个Y的位置
 
@@ -104,74 +97,74 @@ protected:
 	double					m_dFrameURY;
 		
 private:
-	//string FindAxisSign(MotionControl::Axis);
+	//std::string FindAxisSign(MotionControl::Axis);
 public:
 	ACSMotionControl(lcnc::process::ProcessSettingsService& settings,
 	                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration);
 	~ACSMotionControl(void);
 
 	//MotionControl基类函数重写
-	virtual const string& GetName() const;
+	virtual const std::string& GetName() const;
 	virtual void LogError();
-	virtual void CreateMotor(Axis eAxis, const table& tAxis);
+	virtual void CreateMotor(lcnc::process::Axis eAxis, const toml::table& tAxis);
 	virtual bool Connect();
 	virtual bool Disconnect();
 	virtual bool IsConnected();
 	virtual bool Reboot();
 	virtual bool Home();
-	virtual bool Home(Axis eAxis);
+	virtual bool Home(lcnc::process::Axis eAxis);
 	virtual bool IsHomed();
-	virtual bool IsHomed(Axis eAxis);
+	virtual bool IsHomed(lcnc::process::Axis eAxis);
 	virtual bool StopHome();
 	virtual bool Enable();
-	virtual bool Enable(Axis eAxis);
+	virtual bool Enable(lcnc::process::Axis eAxis);
 	virtual bool Disable();
-	virtual bool Disable(Axis eAxis);
+	virtual bool Disable(lcnc::process::Axis eAxis);
 	virtual bool IsEnabled();
-	virtual bool IsEnabled(Axis eAxis);
-	virtual bool SetAxisEnable(Axis eAxis, bool bEnable);
-	virtual bool Jog(Axis eAxis, bool bDirection, double dVel);
-	virtual bool MoveRelative(Axis eAxis, double dPos, double dVel);
-	virtual bool MoveAbsolute(Axis eAxis, double dPos, double dVel);
-	virtual bool MoveMRelative(vector<Axis> vAxis, vector<double> dPos, double dVel);
-	virtual bool MoveMAbsolute(vector<Axis> vAxis, vector<double> dPos, double dVel);
+	virtual bool IsEnabled(lcnc::process::Axis eAxis);
+	virtual bool SetAxisEnable(lcnc::process::Axis eAxis, bool bEnable);
+	virtual bool Jog(lcnc::process::Axis eAxis, bool bDirection, double dVel);
+	virtual bool MoveRelative(lcnc::process::Axis eAxis, double dPos, double dVel);
+	virtual bool MoveAbsolute(lcnc::process::Axis eAxis, double dPos, double dVel);
+	virtual bool MoveMRelative(std::vector<lcnc::process::Axis> vAxis, std::vector<double> dPos, double dVel);
+	virtual bool MoveMAbsolute(std::vector<lcnc::process::Axis> vAxis, std::vector<double> dPos, double dVel);
 	virtual bool StopMotion();
-	virtual bool StopMotion(Axis eAxis);
+	virtual bool StopMotion(lcnc::process::Axis eAxis);
 	virtual bool IsAxisMoving();
-	virtual bool IsAxisMoving(Axis eAxis);
-	virtual bool GetActualPos(Axis eAxis, double& dFPos);
-	virtual bool GetFeedbackPos(Axis eAxis, double& dFPos);
-	virtual bool SetFPosition(Axis eAxis, double dPos);
+	virtual bool IsAxisMoving(lcnc::process::Axis eAxis);
+	virtual bool GetActualPos(lcnc::process::Axis eAxis, double& dFPos);
+	virtual bool GetFeedbackPos(lcnc::process::Axis eAxis, double& dFPos);
+	virtual bool SetFPosition(lcnc::process::Axis eAxis, double dPos);
 
 	// 轴系基础参数设置
-	virtual bool SetAxisIndex(Axis eAxis, int iIndex);
-	virtual bool SetAxisHomeBufferIndex(Axis eAxis, int iHomeIndex);
-	virtual bool SetAxisIsRotary(Axis eAxis, bool bRotary);
-	virtual bool SetAxisResolution(Axis eAxis, int iResolution);
-	virtual bool SetAxisTubeDiamater(Axis eAxis, double dTubeDiamater);
-	virtual bool SetAxisVel(Axis eAxis, double dVel);
-	virtual bool SetAxisAcc(Axis eAxis, double dAcc);
-	virtual bool SetAxisDec(Axis eAxis, double dDec);
-	virtual bool SetAxisJerk(Axis eAxis, double dJerk);
-	virtual bool SetAxisNegLimit(Axis eAxis, double dNegLimit);
-	virtual bool SetAxisPosLimit(Axis eAxis, double dPosLimit);
-	virtual bool SetAxisVelAccDecJerk(Axis eAxis, double dVel, double dAcc, double dDec, double dJerk);
-	virtual bool SetAxisSoftLimit(Axis eAxis, double dNegLimit, double dPosLimit);
+	virtual bool SetAxisIndex(lcnc::process::Axis eAxis, int iIndex);
+	virtual bool SetAxisHomeBufferIndex(lcnc::process::Axis eAxis, int iHomeIndex);
+	virtual bool SetAxisIsRotary(lcnc::process::Axis eAxis, bool bRotary);
+	virtual bool SetAxisResolution(lcnc::process::Axis eAxis, int iResolution);
+	virtual bool SetAxisTubeDiamater(lcnc::process::Axis eAxis, double dTubeDiamater);
+	virtual bool SetAxisVel(lcnc::process::Axis eAxis, double dVel);
+	virtual bool SetAxisAcc(lcnc::process::Axis eAxis, double dAcc);
+	virtual bool SetAxisDec(lcnc::process::Axis eAxis, double dDec);
+	virtual bool SetAxisJerk(lcnc::process::Axis eAxis, double dJerk);
+	virtual bool SetAxisNegLimit(lcnc::process::Axis eAxis, double dNegLimit);
+	virtual bool SetAxisPosLimit(lcnc::process::Axis eAxis, double dPosLimit);
+	virtual bool SetAxisVelAccDecJerk(lcnc::process::Axis eAxis, double dVel, double dAcc, double dDec, double dJerk);
+	virtual bool SetAxisSoftLimit(lcnc::process::Axis eAxis, double dNegLimit, double dPosLimit);
 
-	virtual bool GetAxisIndex(Axis eAxis, int& iIndex);
-	virtual bool GetAxisHomeBufferIndex(Axis eAxis, int& iIndex);
-	virtual bool GetAxisIsRotary(Axis eAxis, bool& bRotary);
-	virtual bool GetAxisResolution(Axis eAxis, int& iResolutionRatioRotation);
-	virtual bool GetAxisTubeDiamater(Axis eAxis, double& dTubeDiamater);
-	virtual bool GetAxisVel(Axis eAxis, double& dVel);
-	virtual bool GetAxisAcc(Axis eAxis, double& dAcc);
-	virtual bool GetAxisDec(Axis eAxis, double& dDec);
-	virtual bool GetAxisJerk(Axis eAxis, double& dJerk);
-	virtual bool GetAxisNegLimit(Axis eAxis, double& dNegLimit);
-	virtual bool GetAxisPosLimit(Axis eAxis, double& dPosLimit);
-	virtual bool GetAxisVelAccDecJerk(Axis eAxis, double& dVel, double& dAcc, double& dDec, double& dJerk);
-	virtual bool GetAxisSoftLimit(Axis eAxis, double& dNegLimit, double& dPosLimit);
-	virtual void ReadAxisSoftLimit(Axis eAxis, double& dNegLimit, double& dPosLimit);
+	virtual bool GetAxisIndex(lcnc::process::Axis eAxis, int& iIndex);
+	virtual bool GetAxisHomeBufferIndex(lcnc::process::Axis eAxis, int& iIndex);
+	virtual bool GetAxisIsRotary(lcnc::process::Axis eAxis, bool& bRotary);
+	virtual bool GetAxisResolution(lcnc::process::Axis eAxis, int& iResolutionRatioRotation);
+	virtual bool GetAxisTubeDiamater(lcnc::process::Axis eAxis, double& dTubeDiamater);
+	virtual bool GetAxisVel(lcnc::process::Axis eAxis, double& dVel);
+	virtual bool GetAxisAcc(lcnc::process::Axis eAxis, double& dAcc);
+	virtual bool GetAxisDec(lcnc::process::Axis eAxis, double& dDec);
+	virtual bool GetAxisJerk(lcnc::process::Axis eAxis, double& dJerk);
+	virtual bool GetAxisNegLimit(lcnc::process::Axis eAxis, double& dNegLimit);
+	virtual bool GetAxisPosLimit(lcnc::process::Axis eAxis, double& dPosLimit);
+	virtual bool GetAxisVelAccDecJerk(lcnc::process::Axis eAxis, double& dVel, double& dAcc, double& dDec, double& dJerk);
+	virtual bool GetAxisSoftLimit(lcnc::process::Axis eAxis, double& dNegLimit, double& dPosLimit);
+	virtual void ReadAxisSoftLimit(lcnc::process::Axis eAxis, double& dNegLimit, double& dPosLimit);
 
 	// IO部分设置
 	virtual bool DigitalOutputSet	(DigitalIOData&	IOData,	int		iValue,	bool bLogError = false);
@@ -188,7 +181,7 @@ public:
 	void AppendRawProgramText(const std::string& fragment) { m_strCommand += fragment; }
 	/// @brief 提供给 sink 用于读取每轴默认 acc/vel/jerk（来自 TOML），以便在工具参数
 	///        无效时回退到合理默认（Fix #2 的归一化入口）。
-	const map<Axis, AcsAxisData>& MotorMap() const { return m_mapMotorValue; }
+	const std::map<lcnc::process::Axis, AcsAxisData>& MotorMap() const { return m_mapMotorValue; }
 
 	// IMotionCommandSink 切割管线入口（仅 AcsTextCommandSink 调用）
 	virtual void ResetProgramCommand();
@@ -207,7 +200,7 @@ public:
 	virtual bool StopMovingCuttingHead();
 	virtual bool StartMovingCuttingHead(const Tool&);
 
-	virtual bool HaltMotor(Axis eMotor);
+	virtual bool HaltMotor(lcnc::process::Axis eMotor);
 	virtual bool IsAxisStatusNormal(int& iFault);
 	virtual bool IsQueueActive();
 	virtual bool ErrorOccurred() const;
@@ -216,22 +209,22 @@ public:
 	virtual void SetIsPressureState(bool);
 
 protected:
-	bool SetDiamaterXVEL(Axis eAxis, double dValue);
+	bool SetDiamaterXVEL(lcnc::process::Axis eAxis, double dValue);
 	bool RunBufferTillEnd(int iBufferIndex, int iTimeout);
 	bool AfterOpenComm();
 	void DeleteOtherConnections();
-	bool WriteEFAC(Axis eAxis, int iEfac);
-	bool ReadEFAC(Axis eAxis, int &iEfac);
-	bool ControllerSaveToFlash(Axis eAxis);
-	bool AcscReadReal(const string, double&);
-	bool AcscWriteReal(const string, double);
-	bool AcscReadInt(const string, int&);
-	bool AcscWriteInt(const string, int);
-	bool IsReachPos(Axis eAxis, bool bRelative, double dPos);
+	bool WriteEFAC(lcnc::process::Axis eAxis, int iEfac);
+	bool ReadEFAC(lcnc::process::Axis eAxis, int &iEfac);
+	bool ControllerSaveToFlash(lcnc::process::Axis eAxis);
+	bool AcscReadReal(const std::string, double&);
+	bool AcscWriteReal(const std::string, double);
+	bool AcscReadInt(const std::string, int&);
+	bool AcscWriteInt(const std::string, int);
+	bool IsReachPos(lcnc::process::Axis eAxis, bool bRelative, double dPos);
 
 private:
 	bool GetFault(int iAxis, int &Fault);
-	double GetAxisIdleVel(Axis eAxis, const Tool& tool);
+	double GetAxisIdleVel(lcnc::process::Axis eAxis, const Tool& tool);
 	bool IsHomeBufferRunning();
 	bool InitCrd(const Tool&) { return true; };
 	bool PrfTrapAxis() { return true; };
