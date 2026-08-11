@@ -1840,7 +1840,18 @@ bool LaserToolpathBuilder::solveToolpathForOrder(
             wpcTransform.Multiplied(workpieceSetup.toTransform());
         normalizeContourTraversal(*contour, kinematics, traversalTransform);
 
-        std::vector<ToolpathPoint> worldPoints = contour->points;
+        // The lead-in is the first motion of this contour, not an independent
+        // positioning move.  Solve it in the same ordered sequence as the
+        // cutting points so a rotary branch selected from the previous contour
+        // remains consistent for every axis of the entry pose.
+        // 中文翻译：下刀点是当前轮廓的首段运动，不得独立定位；必须和切割点在同一有序序列内求解，
+        // 以便继承上一轮廓选择的旋转分支并保持所有轴位姿一致。
+        const bool hasLeadIn = contour->leadInSolution.valid;
+        std::vector<ToolpathPoint> worldPoints;
+        worldPoints.reserve(contour->points.size() + (hasLeadIn ? 1u : 0u));
+        if (hasLeadIn)
+            worldPoints.push_back(contour->leadInSolution.point);
+        worldPoints.insert(worldPoints.end(), contour->points.cbegin(), contour->points.cend());
         for (ToolpathPoint& point : worldPoints) {
             point.position.Transform(wpcTransform);
             point.normal.Transform(wpcTransform);
@@ -1855,48 +1866,21 @@ bool LaserToolpathBuilder::solveToolpathForOrder(
         request.points = &worldPoints;
         request.previousPose = continuity.valid ? &continuity : nullptr;
         const std::vector<lcnc::SolvedMachinePose> poses = registry.solve(request);
-        if (poses.size() != contour->points.size()) {
+        if (poses.size() != worldPoints.size()) {
             if (errorMessage) *errorMessage = QStringLiteral("Solver %1 returned an invalid point count")
                 .arg(modeDefinition.solverId);
             return false;
         }
         for (std::size_t index = 0; index < poses.size(); ++index) {
-            applyPose(contour->points[index].machineCoord, poses[index]);
+            if (hasLeadIn && index == 0)
+                applyPose(contour->leadInSolution.point.machineCoord, poses[index]);
+            else
+                applyPose(contour->points[index - (hasLeadIn ? 1u : 0u)].machineCoord, poses[index]);
             if (!poses[index].valid) {
                 if (errorMessage) *errorMessage = poses[index].failureReason;
                 return false;
             }
             continuity = poses[index];
-        }
-
-        if (contour->leadInSolution.valid) {
-            std::vector<ToolpathPoint> leadPoints{contour->leadInSolution.point};
-            leadPoints.front().position.Transform(wpcTransform);
-            leadPoints.front().normal.Transform(wpcTransform);
-            applyFixedPlanarBeamNormal(leadPoints);
-            request.points = &leadPoints;
-            request.previousPose = nullptr;
-            const auto leadPoses = registry.solve(request);
-            if (leadPoses.size() != 1 || !leadPoses.front().valid) {
-                contour->leadInSolution.valid = false;
-                contour->leadInSolution.error = leadPoses.empty()
-                    ? QStringLiteral("Lead-in solver returned no pose")
-                    : leadPoses.front().failureReason;
-            } else {
-                lcnc::SolvedMachinePose leadPose = leadPoses.front();
-                // Keep the same rotary posture as the contour start during plunge.
-                if (!poses.empty()) {
-                    for (int index = 0; index < modeDefinition.interpolatedAxes.count; ++index) {
-                        const auto role = modeDefinition.interpolatedAxes.axes[index].role;
-                        if (role != lcnc::MachineAxisRole::LinearX
-                            && role != lcnc::MachineAxisRole::LinearY
-                            && role != lcnc::MachineAxisRole::LinearZ) {
-                            leadPose.setValue(index, poses.front().value(index));
-                        }
-                    }
-                }
-                applyPose(contour->leadInSolution.point.machineCoord, leadPose);
-            }
         }
     }
     return true;

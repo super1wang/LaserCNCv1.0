@@ -1,3 +1,4 @@
+#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kinematics/machine_pose.h"
@@ -328,6 +329,49 @@ max = 120.0
                   && std::abs(stableTablePoses[1].value(tableSpinIndex)
                               - stableTablePoses[0].value(tableSpinIndex)) >= 90.0,
                   "AC-table continuity did not keep the +90 degree clamping tilt on opposite sidewalls");
+
+    // Regression: a lead-in belongs to its contour.  It must be solved before
+    // the first cutting point in the same continuity chain; copying only the
+    // first point's rotary axes onto an independently solved lead-in leaves
+    // its XYZ coordinates in a conflicting table posture.
+    // 中文翻译：回归验证下刀点与轮廓首点共同继承连续姿态，不能把独立求解结果的旋转轴覆盖为首点姿态。
+    LaserContour leadInContour;
+    leadInContour.points = {oppositeTableSidewallPoint, tableSidewallPoint};
+    leadInContour.leadInSolution.valid = true;
+    leadInContour.leadInSolution.point = oppositeTableSidewallPoint;
+    leadInContour.leadInSolution.point.position = gp_Pnt(2.0, -12.0, 0.0);
+    const lcnc::SolvedMachinePose contourInitialPose = stableTablePoses.front();
+    std::vector<ToolpathPoint> expectedLeadPoints{leadInContour.leadInSolution.point};
+    tableRequest.points = &expectedLeadPoints;
+    tableRequest.previousPose = nullptr;
+    const auto independentLeadPose = registry.solve(tableRequest);
+    tableRequest.previousPose = &contourInitialPose;
+    const auto expectedLeadPose = registry.solve(tableRequest);
+    QString leadInSolveError;
+    std::vector<LaserContour*> leadInContours{&leadInContour};
+    ok &= require(independentLeadPose.size() == 1 && independentLeadPose.front().valid
+                  && expectedLeadPose.size() == 1 && expectedLeadPose.front().valid
+                  && (std::abs(independentLeadPose.front().value(0)
+                               - expectedLeadPose.front().value(0)) > 1e-6
+                      || std::abs(independentLeadPose.front().value(1)
+                                  - expectedLeadPose.front().value(1)) > 1e-6
+                      || std::abs(independentLeadPose.front().value(2)
+                                  - expectedLeadPose.front().value(2)) > 1e-6)
+                  && LaserToolpathBuilder::solveToolpathForOrder(
+                      leadInContours, &acTable, gp_Trsf(), tableRequest.definition,
+                      {}, {}, &leadInSolveError, &contourInitialPose)
+                  && leadInContour.leadInSolution.point.machineCoord.valid
+                  && isNear(leadInContour.leadInSolution.point.machineCoord.solvedPose.value(0),
+                            expectedLeadPose.front().value(0))
+                  && isNear(leadInContour.leadInSolution.point.machineCoord.solvedPose.value(1),
+                            expectedLeadPose.front().value(1))
+                  && isNear(leadInContour.leadInSolution.point.machineCoord.solvedPose.value(2),
+                            expectedLeadPose.front().value(2))
+                  && isNear(leadInContour.leadInSolution.point.machineCoord.solvedPose.value(tableTiltIndex),
+                            expectedLeadPose.front().value(tableTiltIndex))
+                  && isNear(leadInContour.leadInSolution.point.machineCoord.solvedPose.value(tableSpinIndex),
+                            expectedLeadPose.front().value(tableSpinIndex)),
+                  "Lead-in was not solved in the contour continuity branch");
 
     MachineKinematics head;
     head.loadPreset(QStringLiteral("AB_HEAD"));
