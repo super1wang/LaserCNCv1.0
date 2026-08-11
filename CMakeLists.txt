@@ -428,6 +428,8 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/settings/process_io_table_model.cpp
     src/modules/process/settings/process_settings_dialog.cpp
     src/modules/process/runtime/process_device_runtime.cpp
+    src/modules/process/runtime/process_device_session.cpp
+    src/modules/process/runtime/process_device_configuration.cpp
     src/modules/process/runtime/process_cutting_safety.h
     src/modules/process/runtime/process_cutting_safety.cpp
     src/modules/process/runtime/process_preflight_types.h

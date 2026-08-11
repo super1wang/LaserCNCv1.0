@@ -150,7 +150,7 @@ CAM ToolpathExportSnapshot
 
 `runStart()` 是加工硬门禁：流程、CAM dirty 状态、图层/工具映射、控制器/激光器、轴、IO 与监控条件必须正常才允许进入加工。Stop 是唯一的软件安全停机入口，仅在 Stop lane 已确认全部轴/缓冲停止并关闭激光、吹气后进入 `Stopped`；Stop 与加工错误只在安全停机事务未完成期间启用 stop-only admission，成功后立即恢复队列通道。停止复位会复查加工配置和设备健康状态，只有成功才恢复 `Idle`。
 
-供应商 SDK 类型不得出现在跨模块 facade/DTO。`ProcessDeviceRuntime` 持有当前控制器和激光器，真实硬件 sink 的创建、方法调用和销毁均由设备队列线程执行，禁止函数内 static 控制器。当前 Process 内部的 `MotionSinkFactory` contract 仍接收基类设备指针和 `ProcessModule*`，后续应封装进 executor 私有实现。设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
+供应商 SDK 类型不得出现在跨模块 facade/DTO。`ProcessDeviceRuntime` 持有当前控制器和激光器，真实硬件 sink 的创建、方法调用和销毁均由设备队列线程执行，禁止函数内 static 控制器。runtime/sink、纯仿真 ticker 与普通切割管理器不再持有 `ProcessModule*`，只接收位置投影、进给倍率、仿真状态和活动状态的窄回调；设备队列提供 `Stop > Workflow > Interactive > Normal > Polling`、同级 FIFO、同 key 合并和可追踪 completion；每个被接受的命令必须恰好完成一次。等待超时只完成等待方并阻止继续发送普通命令，不强制中断正在运行的供应商调用。
 
 业务路径不再取得控制器、激光器或设备锁；预检通过 `ProcessPreflightService` 提交 generation 化请求，普通切割在每个轮廓下发前通过 runtime 再次检查连接、故障、电机创建和轴使能。架构门禁拒绝 runtime 外重新调用原始设备访问 API。`ProcessDeviceCoordinator` 暂留在 runtime 内部，不能作为跨模块入口。设备公共接口不得泄漏供应商类型；兼容 `MessageModule`、设备日志宏和旧 `LogModule` 均已删除，统一使用 `lcnc::Logger`。
 
@@ -210,11 +210,11 @@ Process 运行时服务、`MotionControl`、`LaserDevice`、`LDFactory` 和 `Pro
 
 `ToolFactory` 查询无副作用：缺失工具不得创建空项，重载相同索引时必须替换旧参数。
 
-`ProcessRuntimeConfiguration` 由 `ProcessModule` 拥有，并借用给 `Service` 和运动控制器；它是 ACS/GTN 标准轴、扩展轴和仿真选择的运行时事实源。配置会归一化并去重轴名，且拒绝把 `BASE` 伪轴下发给设备层；其行为由独立 CTest 覆盖。旧 `DT` 静态运行时状态已删除，`data_type.h` 仅保留共享枚举、数据结构和数值常量。
+`ProcessRuntimeConfiguration` 由 `ProcessModule` 拥有，并借用给 `ProcessDeviceRuntime` 和运动控制器；它是 ACS/GTN 标准轴、扩展轴和仿真选择的运行时事实源。配置会归一化并去重轴名，且拒绝把 `BASE` 伪轴下发给设备层；其行为由独立 CTest 覆盖。旧 `DT` 静态运行时状态和 `data_type.h` 均已删除，共享轴、权限、IO 与数值常量分别由窄职责头文件提供。
 
 Process 对外仅保留异步全设备连接/断开；旧同步单控制器接口与 `ProcessLayerJob::order` 兼容字段已删除。
 
-设备关闭统一由 `Service::shutdownDevices()` 执行：先停止激光和红光，再断开激光，随后停止运动/缓冲并断开控制器。
+设备关闭统一由 `ProcessDeviceRuntime::shutdownDevices()` 执行：先停止激光和红光，再断开激光，随后停止运动/缓冲并断开控制器。
 
 `runtime/process_axis_utilities` 承载回零顺序、轴定义比较和仿真轴坐标等纯 Process 轴逻辑，不访问 UI 或设备 SDK。
 

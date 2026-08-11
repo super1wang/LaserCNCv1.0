@@ -7,7 +7,7 @@
 #include <QString>
 #include <QVector>
 
-class ProcessModule;
+#include <functional>
 
 namespace lcnc::process {
 
@@ -19,13 +19,13 @@ class PureSimulationToolpathTicker;
  * 与 ACS/GTN sink 的差别：
  *  - 不调用任何控制器；所有运动等价为视图层模型 transform。
  *  - 激光/吹气 IO 写日志，不操作真实 IO（仿真环境本来就没有）。
- *  - feed 速度来自 Tool::m_dLineVelocity；feedOverride 来自 ProcessModule。
+ *  - feed 速度来自 Tool::m_dLineVelocity；feedOverride 由窄回调提供。
  */
 class PureSimulationSink final : public IMotionCommandSink
 {
 public:
     PureSimulationSink(PureSimulationToolpathTicker* ticker,
-                       ProcessModule* processModule,
+                       std::function<double()> feedOverrideProvider,
                        AxisMap axisMap);
     ~PureSimulationSink() override = default;
 
@@ -61,7 +61,7 @@ public:
 
 private:
     PureSimulationToolpathTicker* m_ticker{nullptr};
-    ProcessModule*                m_processModule{nullptr};
+    std::function<double()>       m_feedOverrideProvider;
     AxisMap                       m_axisMap;
     ProcessInterruptContext*      m_token{nullptr};
 

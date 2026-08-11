@@ -23,11 +23,11 @@
 
 namespace lcnc::process {
 class IMotionCommandSink;
+struct MotionSinkCallbacks;
 class ProcessSettingsService;
 class ProcessRuntimeConfiguration;
 class PureSimulationToolpathTicker;
 }
-class ProcessModule;
 
 namespace lcnc::process {
 struct DeviceAxisStatusSample { QString name; double pos{0.0}; bool enabled{false}; bool valid{false}; };
@@ -106,7 +106,7 @@ public:
     std::unique_ptr<lcnc::process::IMotionCommandSink> createMotionSink(
         bool simulationMode,
         lcnc::process::PureSimulationToolpathTicker* simTicker,
-        ProcessModule* processModule,
+        const lcnc::process::MotionSinkCallbacks& callbacks,
         const lcnc::MachineAxisLayout& layout);
 
     void setToolTable();

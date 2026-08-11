@@ -20,15 +20,24 @@
 #include "modules/process/runtime/motion_params.h"
 
 #include <QString>
+#include <functional>
 #include <memory>
 
 class MotionControl;
-class ProcessModule;
 
 namespace lcnc::process {
 
 class ProcessInterruptContext;
 class PureSimulationToolpathTicker;
+
+/// Narrow callbacks used by motion sinks to project state back to the UI.
+/// They deliberately avoid exposing ProcessModule through runtime contracts.
+struct MotionSinkCallbacks
+{
+    std::function<void(const QString&, double)> positionObserver;
+    std::function<double()> feedOverrideProvider;
+};
+
 class IMotionCommandSink
 {
 public:
@@ -102,11 +111,12 @@ class MotionSinkFactory
 public:
     /// 当 mc==nullptr / 仿真模式开启时，返回 PureSimulationSink。
     /// 否则根据 mc->GetName() 选 AcsTextCommandSink 或 GtnBufferedCommandSink。
+    /// callbacks only carry the UI projection callbacks needed by a sink.
     static std::unique_ptr<IMotionCommandSink> create(
         ::MotionControl* mc,
         bool simulationMode,
         PureSimulationToolpathTicker* simTicker,
-        ::ProcessModule* processModule,
+        const MotionSinkCallbacks& callbacks,
         const lcnc::MachineAxisLayout& layout);
 };
 

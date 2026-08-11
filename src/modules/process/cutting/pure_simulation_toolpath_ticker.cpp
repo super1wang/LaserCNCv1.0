@@ -1,12 +1,11 @@
 #include "modules/process/cutting/pure_simulation_toolpath_ticker.h"
 
-#include "modules/process/process_module.h"
-
 #include <QDateTime>
 #include <QTimer>
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace lcnc::process {
 
@@ -43,10 +42,10 @@ lcnc::cam::ToolpathExportPoint interpolate(const lcnc::cam::ToolpathExportPoint&
 
 } // namespace
 
-PureSimulationToolpathTicker::PureSimulationToolpathTicker(ProcessModule* processModule,
+PureSimulationToolpathTicker::PureSimulationToolpathTicker(PositionObserver positionObserver,
                                                             QObject* parent)
     : QObject(parent)
-    , m_processModule(processModule)
+    , m_positionObserver(std::move(positionObserver))
     , m_timer(new QTimer(this))
 {
     m_timer->setInterval(10);
@@ -157,15 +156,15 @@ void PureSimulationToolpathTicker::onTick()
 
 void PureSimulationToolpathTicker::emitPosition(const lcnc::cam::ToolpathExportPoint& p)
 {
-    if (!m_processModule)
+    if (!m_positionObserver)
         return;
-    m_processModule->setAxisPosition(QStringLiteral("X"), p.machineX);
-    m_processModule->setAxisPosition(QStringLiteral("Y"), p.machineY);
-    m_processModule->setAxisPosition(QStringLiteral("Z"), p.machineZ);
+    m_positionObserver(QStringLiteral("X"), p.machineX);
+    m_positionObserver(QStringLiteral("Y"), p.machineY);
+    m_positionObserver(QStringLiteral("Z"), p.machineZ);
     if (!p.rotaryAxis1Name.isEmpty())
-        m_processModule->setAxisPosition(p.rotaryAxis1Name, p.machineR1);
+        m_positionObserver(p.rotaryAxis1Name, p.machineR1);
     if (!p.rotaryAxis2Name.isEmpty())
-        m_processModule->setAxisPosition(p.rotaryAxis2Name, p.machineR2);
+        m_positionObserver(p.rotaryAxis2Name, p.machineR2);
 }
 
 } // namespace lcnc::process

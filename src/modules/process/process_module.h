@@ -139,6 +139,7 @@ public:
 
     /// NormalCuttingManager 在执行普通切割期间调用，旁路 onSimulationTick 的
     /// Lissajous 正弦波 + 硬件状态轮询，避免与刀路驱动写入 setAxisPosition 抢占。
+    /// 仅写入原子标志，可从工作流线程调用。
     void setNormalCuttingActive(bool active);
 
     /// 暴露给 NormalCuttingManager 等需要工艺数据的内部组件。

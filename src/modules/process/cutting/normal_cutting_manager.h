@@ -3,15 +3,16 @@
 #include "modules/cam/contracts/toolpath_export_dto.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/runtime/process_cancellation_token.h"
+#include "modules/process/runtime/i_motion_command_sink.h"
 #include "modules/process/toolpath/process_toolpath_service.h"
 
 #include <QObject>
 #include <QVariantMap>
 #include <QVector>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
-class ProcessModule;
 class ProcessDeviceRuntime;
 
 namespace lcnc::cam { class ICamToolpathProvider; }
@@ -22,6 +23,13 @@ class PureSimulationToolpathTicker;
 class ProcessCuttingPlanService;
 class IMotionCommandSink;
 class DeviceCommandQueue;
+
+struct NormalCuttingCallbacks
+{
+    MotionSinkCallbacks motionSink;
+    std::function<bool()> simulationModeProvider;
+    std::function<void(bool)> normalCuttingActivityObserver;
+};
 
 /**
  * @brief 普通切割主管线 —— 把 CAM 顺序切割链表落地到统一的 IMotionCommandSink。
@@ -48,7 +56,7 @@ class NormalCuttingManager : public QObject
 public:
     NormalCuttingManager(ProcessDeviceRuntime* service,
                          std::shared_ptr<lcnc::cam::ICamToolpathProvider> toolpathProvider,
-                         ProcessModule* processModule,
+                         NormalCuttingCallbacks callbacks,
                          DeviceCommandQueue* deviceQueue,
                          QObject* parent = nullptr);
     ~NormalCuttingManager() override;
@@ -114,7 +122,7 @@ private:
 
     ProcessDeviceRuntime* m_service{nullptr};
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_toolpathProvider;
-    ProcessModule* m_processModule{nullptr};
+    NormalCuttingCallbacks m_callbacks;
     DeviceCommandQueue* m_deviceQueue{nullptr};
     std::unique_ptr<ProcessToolpathService> m_toolpathService;
     std::unique_ptr<PureSimulationToolpathTicker> m_simTicker;

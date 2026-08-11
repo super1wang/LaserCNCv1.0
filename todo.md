@@ -14,7 +14,7 @@
 
 ## P1：结构收口
 
-- [ ] 完成 Process 运行安全事务下沉，不再以行数为目标：让 `ProcessRunCoordinator` 真正拥有 run/preflight/Stop/Emergency/Recovery completion 和合法状态迁移；`ProcessModule` 只转发 facade 与信号。移除 `NormalCuttingManager`、simulation ticker/sink 对 `ProcessModule*` 的反向持有，并把 motion sink 生命周期隐藏到 typed executor 私有 contract。
+- [ ] 完成 Process 运行安全事务下沉，不再以行数为目标：让 `ProcessRunCoordinator` 真正拥有 run/preflight/Stop/Emergency/Recovery completion 和合法状态迁移；`ProcessModule` 只转发 facade 与信号。motion sink 生命周期仍应继续隐藏到 typed executor 私有 contract。
 - [ ] 完成 CAM 高收益下沉：`MachiningFacePipelineService` 不再暴露 mutable `entries()`，下游只消费 immutable snapshot；已为等价自动面重算复用稳定 ID，`CamDisplayProjectionService` 已按 document 记录 owning AIS context。仍需双工作区 offscreen 回归，并继续迁移机台、轴导引、刀路和 travel path 投影；machine calibration 独立成 service。
 - [ ] 完成 CAD 文档事务：异步 reader 只生成 detached 结果，generation 匹配后在文档所属线程一次提交；`CadModule` 关闭及项目管理器关闭 workspace 均先取消并等待模块任务，超时会拒绝关闭并保留 document，保存已拒绝非活动文档；仍需文档级任务归属与显式 workspace/document identity 的保存/导出 API。随后下沉 `CadModelingController`、`CadSelectionController`。
 - [ ] 继续收敛 MainWindow 和跨模块调用：`AppContext`、commands、module UI、`DialogOptions`、`CadTaskPanelController` 改用 facade/service/controller contract，迁移后删除具体 Module 的公共 service 注册。合并 MainWindow/controller 重复的 primitive/feature/transform 参数映射，避免预览与执行 schema 漂移。
@@ -33,7 +33,7 @@
 
 - [ ] 为 `CadDocumentIoService`、`ProcessWorkflowExecutor`、`CamModule` 等仍未记录的 catch 补 `LCNC_ERR`；架构检查增加“catch 必须有错误日志”的可维护规则。
 - [ ] 将 `ProcessManualMotionService`、`ProcessInteractiveIoService` 的新增可见文本加入 `translations/lasercnc_zh_CN.ts`，补齐相邻中文翻译注释，并增加新增 `tr()` catalog 检查。
-- [ ] 在上述结构债务清理后扩展架构扫描：禁止 app/commands/module UI 获取具体 Module，禁止 Process public runtime/sink contract 暴露 `ProcessModule*`，禁止 CAD worker 直接写活动文档。
+- [ ] 在上述结构债务清理后继续扩展架构扫描：禁止 app/commands/module UI 获取具体 Module，并禁止 CAD worker 直接写活动文档。Process public runtime/sink contract 的 `ProcessModule*` 门禁已落地。
 
 ## 每次提交最小检查
 

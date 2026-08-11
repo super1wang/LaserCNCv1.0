@@ -8,7 +8,6 @@
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/cutting/pure_simulation_toolpath_ticker.h"
 #include "modules/process/device/motion_control/motion_control.h"
-#include "modules/process/process_module.h"
 #include "modules/process/runtime/i_motion_command_sink.h"
 #include "modules/process/runtime/device_command_queue.h"
 #include "modules/process/runtime/machine_pose5.h"
@@ -16,6 +15,7 @@
 
 #include <QString>
 #include <QStringList>
+#include <QScopeGuard>
 #include <QVariantMap>
 #include <QThread>
 
@@ -67,16 +67,17 @@ bool sameCacheDouble(double a, double b)
 
 NormalCuttingManager::NormalCuttingManager(ProcessDeviceRuntime* service,
                                            std::shared_ptr<lcnc::cam::ICamToolpathProvider> toolpathProvider,
-                                           ProcessModule* processModule,
+                                           NormalCuttingCallbacks callbacks,
                                            DeviceCommandQueue* deviceQueue,
                                            QObject* parent)
     : QObject(parent)
     , m_service(service)
     , m_toolpathProvider(std::move(toolpathProvider))
-    , m_processModule(processModule)
+    , m_callbacks(std::move(callbacks))
     , m_deviceQueue(deviceQueue)
     , m_toolpathService(std::make_unique<ProcessToolpathService>(m_toolpathProvider))
-    , m_simTicker(std::make_unique<PureSimulationToolpathTicker>(processModule))
+    , m_simTicker(std::make_unique<PureSimulationToolpathTicker>(
+          m_callbacks.motionSink.positionObserver))
 {
     // 兜底 Tool —— 当 ToolFactory 找不到匹配工具时 resolveTool() 返回这个。
     // 由 Fix #1 (Tool 类内默认初始化) 保证非赋值字段不再是 0xCD…。这里仅显式覆盖几个最关键的。
@@ -189,12 +190,14 @@ bool NormalCuttingManager::run(const QString& nodeId,
     }
 
     // 选 sink —— 硬件 sink 必须在设备执行线程创建、使用和销毁。
-    const bool simMode = m_processModule && m_processModule->simulationMode();
+    const bool simMode = m_callbacks.simulationModeProvider
+        && m_callbacks.simulationModeProvider();
+    const MotionSinkCallbacks& sinkCallbacks = m_callbacks.motionSink;
     std::shared_ptr<IMotionCommandSink> sink;
     QString backendLabel;
     if (simMode) {
         auto created = m_service
-            ? m_service->createMotionSink(true, m_simTicker.get(), m_processModule,
+            ? m_service->createMotionSink(true, m_simTicker.get(), sinkCallbacks,
                                           executionSnapshot.machineAxisLayout)
             : nullptr;
         sink = std::shared_ptr<IMotionCommandSink>(std::move(created));
@@ -205,9 +208,10 @@ bool NormalCuttingManager::run(const QString& nodeId,
     } else if (m_deviceQueue && m_service) {
         const DeviceCommandResult creation = m_deviceQueue->executeAndWait(
             DeviceCommandQueue::ResultCommand([this, &sink, &backendLabel, &ic,
+                                               sinkCallbacks,
                                                layout = executionSnapshot.machineAxisLayout] {
                 auto created = m_service->createMotionSink(
-                    false, m_simTicker.get(), m_processModule, layout);
+                    false, m_simTicker.get(), sinkCallbacks, layout);
                 if (!created) {
                     return DeviceCommandResult{
                         false,
@@ -257,12 +261,13 @@ bool NormalCuttingManager::run(const QString& nodeId,
         return false;
     }
 
-    // 旁路 ProcessModule 的 Lissajous 正弦波。
-    if (m_processModule)
-        m_processModule->setNormalCuttingActive(true);
-    auto restoreAxisDriver = [this]() {
-        if (m_processModule) m_processModule->setNormalCuttingActive(false);
-    };
+    // 通知外层暂停普通的仿真轴驱动，避免与刀路回放写入竞争。
+    if (m_callbacks.normalCuttingActivityObserver)
+        m_callbacks.normalCuttingActivityObserver(true);
+    const auto restoreAxisDriver = qScopeGuard([this]() {
+        if (m_callbacks.normalCuttingActivityObserver)
+            m_callbacks.normalCuttingActivityObserver(false);
+    });
 
     // 断点续跑。
     int startContourIndex = 0;
@@ -296,7 +301,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
         env.insert(QString::fromLatin1(kEnvBackend), backendLabel);
         env.insert(QString::fromLatin1(kEnvPhase), QStringLiteral("beforeContour"));
         if (!ic.checkpoint(nodeId, makeLabel(QStringLiteral("beforeContour"), i, total), env)) {
-            restoreAxisDriver();
             // 中文翻译：普通切割已被中断
             if (errorMessage) *errorMessage = tr("Normal cutting has been interrupted");
             return false;
@@ -320,7 +324,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
             if (errorMessage)
                 // 中文翻译：轮廓 %1 执行异常：工具方向字段无效
                 *errorMessage = tr("Contour %1 execution exception: Tool direction field is invalid").arg(row.data.contour.contourId);
-            restoreAxisDriver();
             return false;
         } catch (const std::exception& ex) {
             LCNC_ERR(lcnc::LogCode::Generic,
@@ -331,12 +334,10 @@ bool NormalCuttingManager::run(const QString& nodeId,
                 *errorMessage = tr("Contour %1 execution exception: %2")
                                     .arg(row.data.contour.contourId)
                                     .arg(QString::fromUtf8(ex.what()));
-            restoreAxisDriver();
             return false;
         }
 
         if (!ok) {
-            restoreAxisDriver();
             if (ic.isStopping())
                 return false;
             if (errorMessage && errorMessage->isEmpty())
@@ -347,7 +348,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
 
         env[QString::fromLatin1(kEnvPhase)] = QStringLiteral("afterContour");
         if (!ic.checkpoint(nodeId, makeLabel(QStringLiteral("afterContour"), i, total), env)) {
-            restoreAxisDriver();
             // 中文翻译：普通切割已被中断
             if (errorMessage) *errorMessage = tr("Normal cutting has been interrupted");
             return false;
@@ -357,7 +357,6 @@ bool NormalCuttingManager::run(const QString& nodeId,
     }
 
     ic.clearResumePoint(nodeId);
-    restoreAxisDriver();
     // 中文翻译：普通切割完成
     emit logMessage(tr("Ordinary cutting completed"));
     return true;

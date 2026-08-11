@@ -51,11 +51,28 @@ Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules/process') -Recurse -File
 Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules/process') -Recurse -File -Include *.h,*.hpp,*.cpp |
     Where-Object { $_.FullName -notlike '*\runtime\process_device_runtime.cpp' -and
                    $_.FullName -notlike '*\runtime\process_device_runtime.h' -and
+                   $_.FullName -notlike '*\runtime\process_device_session.cpp' -and
+                   $_.FullName -notlike '*\runtime\process_device_configuration.cpp' -and
                    $_.FullName -notlike '*\device\laser\ld_factory.cpp' -and
                    $_.FullName -notlike '*\device\laser\ld_factory.h' } |
     ForEach-Object {
     foreach ($match in (Select-String -LiteralPath $_.FullName -CaseSensitive -Pattern '\b(?:motionControl|laserDevice|lockDeviceAccess)\s*\(')) {
         $violations.Add("Process raw device access escaped typed runtime: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+    }
+}
+
+# Runtime/sink/cutting contracts publish only narrow callbacks; they must not
+# retain the Process facade implementation to reach UI state.
+$processModuleContractFiles = @(
+    'modules/process/runtime/i_motion_command_sink.h',
+    'modules/process/runtime/pure_simulation_sink.h',
+    'modules/process/cutting/pure_simulation_toolpath_ticker.h',
+    'modules/process/cutting/normal_cutting_manager.h'
+)
+foreach ($relativePath in $processModuleContractFiles) {
+    $contractPath = Join-Path $srcPath $relativePath
+    foreach ($match in (Select-String -LiteralPath $contractPath -Pattern '\bProcessModule\s*\*')) {
+        $violations.Add("Process runtime/sink contract may not expose ProcessModule*: ${contractPath}:$($match.LineNumber): $($match.Line.Trim())")
     }
 }
 

@@ -42,6 +42,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
+#include <QThread>
 #include <QFile>
 #include <QSaveFile>
 #include <QVector>
@@ -187,6 +188,62 @@ bool containsEnabledNodeType(const QVector<lcnc::process::ProcessNode>& nodes,
     return false;
 }
 
+lcnc::process::NormalCuttingCallbacks makeNormalCuttingCallbacks(ProcessModule* processModule)
+{
+    const QPointer<ProcessModule> guardedModule(processModule);
+    lcnc::process::NormalCuttingCallbacks callbacks;
+    callbacks.motionSink.positionObserver = [guardedModule](const QString& axisName, double position) {
+        if (!guardedModule)
+            return;
+        const auto publish = [guardedModule, axisName, position] {
+            if (guardedModule)
+                guardedModule->setAxisPosition(axisName, position);
+        };
+        if (guardedModule->thread() == QThread::currentThread()) {
+            publish();
+            return;
+        }
+        QMetaObject::invokeMethod(guardedModule.data(), publish, Qt::QueuedConnection);
+    };
+    callbacks.motionSink.feedOverrideProvider = [guardedModule] {
+        if (!guardedModule)
+            return 1.0;
+        double feedOverride = 1.0;
+        const auto read = [guardedModule, &feedOverride] {
+            if (guardedModule)
+                feedOverride = guardedModule->feedOverride();
+        };
+        if (guardedModule->thread() == QThread::currentThread())
+            read();
+        else
+            QMetaObject::invokeMethod(guardedModule.data(), read, Qt::BlockingQueuedConnection);
+        return feedOverride;
+    };
+    callbacks.simulationModeProvider = [guardedModule] {
+        if (!guardedModule)
+            return false;
+        bool simulationMode = false;
+        const auto read = [guardedModule, &simulationMode] {
+            if (guardedModule)
+                simulationMode = guardedModule->simulationMode();
+        };
+        if (guardedModule->thread() == QThread::currentThread())
+            read();
+        else
+            QMetaObject::invokeMethod(guardedModule.data(), read, Qt::BlockingQueuedConnection);
+        return simulationMode;
+    };
+    callbacks.normalCuttingActivityObserver = [guardedModule](bool active) {
+        if (!guardedModule)
+            return;
+        // This setter only stores an atomic flag. Keep this callback non-blocking
+        // so module shutdown cannot deadlock while the GUI thread waits for the
+        // workflow worker to finish.
+        guardedModule->setNormalCuttingActive(active);
+    };
+    return callbacks;
+}
+
 } // namespace
 
 // ── IModule ───────────────────────────────────────────────────────────────────────
@@ -295,7 +352,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 
     // 普通切割管线：CAM 顺序链表 → MotionControl 指令序列；PureSim 由 ticker 驱动模型。
     m_normalCuttingManager = std::make_unique<lcnc::process::NormalCuttingManager>(
-        m_service.get(), camProvider, this, m_deviceCommandQueue.get(), this);
+        m_service.get(), camProvider, makeNormalCuttingCallbacks(this), m_deviceCommandQueue.get(), this);
     connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::logMessage,
             this, &ProcessModule::setStatusMessage);
     connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::contourStarted,

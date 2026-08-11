@@ -5,7 +5,6 @@
 #include "core/logging/logger.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/cutting/pure_simulation_toolpath_ticker.h"
-#include "modules/process/process_module.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 
 #include <QMetaObject>
@@ -33,10 +32,10 @@ void invokeOnObjectThread(QObject* object, Fn&& fn)
 } // namespace
 
 PureSimulationSink::PureSimulationSink(PureSimulationToolpathTicker* ticker,
-                                        ProcessModule* processModule,
+                                        std::function<double()> feedOverrideProvider,
                                         AxisMap axisMap)
     : m_ticker(ticker)
-    , m_processModule(processModule)
+    , m_feedOverrideProvider(std::move(feedOverrideProvider))
     , m_axisMap(std::move(axisMap))
 {
 }
@@ -59,17 +58,14 @@ bool PureSimulationSink::flush(QString* errorMessage)
 
 bool PureSimulationSink::startProgram(QString* errorMessage)
 {
-    if (!m_ticker || !m_processModule) {
-        if (errorMessage) *errorMessage = QStringLiteral("PureSimulationSink: ticker/processModule unbound");
+    if (!m_ticker) {
+        if (errorMessage) *errorMessage = QStringLiteral("PureSimulationSink: ticker is unbound");
         return false;
     }
     if (m_pending.size() < 2)
         return true;  // 没有可回放的段
 
-    double feedOverride = 1.0;
-    invokeOnObjectThread(m_processModule, [this, &feedOverride] {
-        feedOverride = m_processModule->feedOverride();
-    });
+    const double feedOverride = m_feedOverrideProvider ? m_feedOverrideProvider() : 1.0;
     const auto points = m_pending;
     const double feedRate = m_feedRate;
     invokeOnObjectThread(m_ticker, [this, points, feedRate, feedOverride] {

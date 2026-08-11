@@ -14,39 +14,15 @@
 #include "modules/process/runtime/gtn_buffered_command_sink.h"
 #endif
 #include "modules/process/device/motion_control/motion_control.h"
-#include "modules/process/process_module.h"
 #include "modules/process/runtime/pure_simulation_sink.h"
 
-#include <QPointer>
-
 namespace lcnc::process {
-
-namespace {
-
-#if LCNC_PROCESS_HAS_ACS
-AcsTextCommandSink::PositionObserver makePositionObserver(ProcessModule* processModule)
-{
-    const QPointer<ProcessModule> guardedModule(processModule);
-    return [guardedModule](const QString& axisName, double position) {
-        if (!guardedModule)
-            return;
-        QMetaObject::invokeMethod(guardedModule.data(),
-                                  [guardedModule, axisName, position] {
-                                      if (guardedModule)
-                                          guardedModule->setAxisPosition(axisName, position);
-                                  },
-                                  Qt::QueuedConnection);
-    };
-}
-#endif
-
-} // namespace
 
 std::unique_ptr<IMotionCommandSink>
 MotionSinkFactory::create(MotionControl* mc,
                           bool simulationMode,
                           PureSimulationToolpathTicker* simTicker,
-                          ProcessModule* processModule,
+                          const MotionSinkCallbacks& callbacks,
                           const lcnc::MachineAxisLayout& layout)
 {
     // 构型驱动的轴映射 —— 一次构造、整个 sink 生命周期复用。
@@ -69,8 +45,7 @@ MotionSinkFactory::create(MotionControl* mc,
                      acs->GetName());
             return nullptr;
         }
-        return std::make_unique<AcsTextCommandSink>(acs, axes,
-                                                    makePositionObserver(processModule));
+        return std::make_unique<AcsTextCommandSink>(acs, axes, callbacks.positionObserver);
     }
 #endif
 #if LCNC_PROCESS_HAS_GTN
@@ -93,7 +68,7 @@ MotionSinkFactory::create(MotionControl* mc,
                      "MotionSinkFactory: pure-simulation requested but no ticker provided");
             return nullptr;
         }
-        return std::make_unique<PureSimulationSink>(simTicker, processModule, axes);
+        return std::make_unique<PureSimulationSink>(simTicker, callbacks.feedOverrideProvider, axes);
     }
 
     const std::string backend = mc ? mc->GetName() : std::string("<none>");

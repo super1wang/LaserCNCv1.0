@@ -5,18 +5,19 @@
 #include <QObject>
 #include <QVector>
 
+#include <functional>
+
 class QTimer;
-class ProcessModule;
 
 namespace lcnc::process {
 
 /**
  * @brief 纯仿真模式下沿真实刀路点驱动机床模型。
  *
- * 在 NormalCutting 运行期间，旁路 ProcessModule::onSimulationTick() 的
+ * 在 NormalCutting 运行期间，旁路常规仿真 tick 的
  * Lissajous 正弦波，由本类按 (feedRate * feedOverride / 60 mm/s) 的速度
  * 在连续两点之间插值，并把 (machineX, machineY, machineZ, machineR1,
- * machineR2) 喂入 ProcessModule::setAxisPosition() —— 进而经
+ * machineR2) 喂入注入的位置观察回调 —— 进而经
  * MachinePose → MachineKinematics → AIS::SetLocalTransformation 路径
  * 让 3D 模型沿轨迹运动。
  *
@@ -27,7 +28,10 @@ class PureSimulationToolpathTicker : public QObject
 {
     Q_OBJECT
 public:
-    explicit PureSimulationToolpathTicker(ProcessModule* processModule, QObject* parent = nullptr);
+    using PositionObserver = std::function<void(const QString&, double)>;
+
+    explicit PureSimulationToolpathTicker(PositionObserver positionObserver,
+                                          QObject* parent = nullptr);
     ~PureSimulationToolpathTicker() override;
 
     /**
@@ -52,7 +56,7 @@ private slots:
 private:
     void emitPosition(const lcnc::cam::ToolpathExportPoint& p);
 
-    ProcessModule* m_processModule{nullptr};
+    PositionObserver m_positionObserver;
     QTimer* m_timer{nullptr};
     QVector<lcnc::cam::ToolpathExportPoint> m_points;
     int m_currentSegment{0};   // 0..m_points.size()-2
