@@ -70,8 +70,10 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QProgressBar>
+#include <QSizePolicy>
 #include <QToolTip>
 
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QComboBox>
 #include <QCloseEvent>
@@ -445,12 +447,29 @@ void MainWindow::createCentralLayout()
     m_splitter->addWidget(m_leftTabs);
     m_splitter->addWidget(m_centerTabs);
     m_splitter->addWidget(m_rightStack);
+    // 两侧 tab/stack 中包含多个页面；QStackedWidget 会把所有页面的最小高度
+    // 汇总给 QSplitter。Ribbon 展开时这会把主窗口最小高度推过屏幕可用高度，
+    // 导致最大化窗口向下溢出，也使普通窗口无法缩短。
+    // 中文翻译：侧栏允许垂直收缩，内容由各自的视图和滚动控件处理。
+    for (QWidget* sidePanel : {static_cast<QWidget*>(m_leftTabs),
+                               static_cast<QWidget*>(m_rightStack)}) {
+        QSizePolicy policy = sidePanel->sizePolicy();
+        policy.setVerticalPolicy(QSizePolicy::Ignored);
+        sidePanel->setSizePolicy(policy);
+        sidePanel->setMinimumHeight(0);
+    }
+    m_splitter->setMinimumHeight(0);
     m_splitter->setStretchFactor(0, 1);
     m_splitter->setStretchFactor(1, 5);
     m_splitter->setStretchFactor(2, 2);
     m_splitter->setSizes({250, 900, 290});
 
     setCentralWidget(m_splitter);
+    // Keep the restored window resizable even after SARibbon switches between
+    // its minimum and normal modes. The centre viewport still retains its own
+    // 300px safety minimum.
+    // 中文翻译：限制主窗口的最小高度，保证非最大化窗口可调且 Ribbon 恢复时不越过屏幕。
+    setMinimumHeight(480);
 
     // Task dialog (non-modal, floats on top)
     m_taskDialog = new DialogTaskManager(this);
@@ -1638,13 +1657,29 @@ void MainWindow::createStatusBar()
     m_sbDocName->setMinimumWidth(200);
     m_sbCoords->setMinimumWidth(280);
     m_sbDeviceProgress->setRange(0, 100);
-    m_sbDeviceProgress->setMinimumWidth(260);
+    // 连接阶段格式为“设备名: 阶段说明 (百分比)”，260px 会截断控制器
+    // 连接等常见阶段文字。槽位必须从启动起保留该宽度，不能在连接时扩张。
+    // 中文翻译：预留足够宽度完整显示连接进度文字。
+    m_sbDeviceProgress->setMinimumWidth(420);
     m_sbDeviceProgress->setTextVisible(true);
     m_sbDeviceProgress->setVisible(false);
 
+    // QStatusBar ignores a hidden direct child when calculating its height.
+    // Showing the connection progress bar would therefore recalculate the
+    // status bar and resize the central viewport. Reserve its geometry in a
+    // permanent slot so connection progress only changes painted content.
+    // 中文翻译：为连接进度条预留固定槽位，避免显示/隐藏时改变状态栏和视窗尺寸。
+    auto* progressSlot = new QWidget(statusBar());
+    auto* progressSlotLayout = new QHBoxLayout(progressSlot);
+    progressSlotLayout->setContentsMargins(0, 0, 0, 0);
+    progressSlotLayout->addWidget(m_sbDeviceProgress);
+    QSize progressSlotSize = m_sbDeviceProgress->sizeHint();
+    progressSlotSize.setWidth(qMax(progressSlotSize.width(), m_sbDeviceProgress->minimumWidth()));
+    progressSlot->setFixedSize(progressSlotSize);
+
     statusBar()->addWidget(m_sbDocName);
     statusBar()->addPermanentWidget(m_sbCoords);
-    statusBar()->addPermanentWidget(m_sbDeviceProgress);
+    statusBar()->addPermanentWidget(progressSlot);
     statusBar()->addPermanentWidget(m_sbStatus);
 }
 
