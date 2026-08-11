@@ -124,6 +124,39 @@ QStringList entityEntries(LcncDocument* doc, LcncDocument::EntityKind kind)
     return result;
 }
 
+bool shapeContainsFace(const TopoDS_Shape& shape, const TopoDS_Face& face)
+{
+    if (shape.IsNull() || face.IsNull())
+        return false;
+    for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
+        if (TopoDS::Face(explorer.Current()).IsSame(face))
+            return true;
+    }
+    return false;
+}
+
+template <typename Source>
+bool faceBelongsToSource(const TopoDS_Face& face,
+                         const Source& source,
+                         const QList<Source>& sources)
+{
+    if (shapeContainsFace(source.shape, face))
+        return true;
+
+    // A virtual open-tube top section is constructed from source boundary
+    // wires and therefore is not an original face of that source.  It is safe
+    // to associate only when the XCAF entry has a single expanded component;
+    // an ambiguous compound must not duplicate the virtual face on every child.
+    if (std::any_of(sources.cbegin(), sources.cend(), [&face](const auto& candidate) {
+            return shapeContainsFace(candidate.shape, face);
+        })) {
+        return false;
+    }
+    return std::count_if(sources.cbegin(), sources.cend(), [&source](const auto& candidate) {
+               return candidate.workpieceEntry == source.workpieceEntry;
+           }) == 1;
+}
+
 class CamToolpathProviderAdapter final
     : public QObject
     , public lcnc::cam::ICamToolpathProvider
@@ -2206,6 +2239,106 @@ QList<CamModule::WorkpieceShapeSource> CamModule::collectWorkpieceShapes() const
     return result;
 }
 
+std::vector<lcnc::cam::MachiningFacePipelineService::Candidate>
+CamModule::selectAutomaticMachiningFaces(const QList<WorkpieceShapeSource>& sources,
+                                         ExtractionStrategy strategy,
+                                         double smoothAngle)
+{
+    std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> result;
+    if (strategy == ExtractionStrategy::ManualFaceSelection)
+        return result;
+
+    if (strategy == ExtractionStrategy::LargestSmoothConnectedSurface) {
+        for (const WorkpieceShapeSource& source : sources) {
+            if (source.shape.IsNull())
+                continue;
+            const FaceClassification classification = FaceClassifier::classifyFaces(
+                source.shape, smoothAngle);
+            if (const auto* outer = classification.outerGroup()) {
+                for (const TopoDS_Face& face : outer->faces) {
+                    result.push_back({face, source.workpieceEntry,
+                                      lcnc::cam::MachiningFaceRole::MachiningSurface});
+                }
+            }
+            for (const FaceGroup* group : classification.crossSectionGroups()) {
+                if (!group)
+                    continue;
+                for (const TopoDS_Face& face : group->faces) {
+                    result.push_back({face, source.workpieceEntry,
+                                      lcnc::cam::MachiningFaceRole::CrossSection});
+                }
+            }
+        }
+        return result;
+    }
+
+    struct SourceBounds {
+        Bnd_Box bounds;
+        double xMin{0.0}; double yMin{0.0}; double zMin{0.0};
+        double xMax{0.0}; double yMax{0.0}; double zMax{0.0};
+        bool valid{false};
+    };
+    std::vector<SourceBounds> bounds(static_cast<std::size_t>(sources.size()));
+    for (int index = 0; index < sources.size(); ++index) {
+        if (sources.at(index).shape.IsNull())
+            continue;
+        BRepBndLib::Add(sources.at(index).shape, bounds[static_cast<std::size_t>(index)].bounds);
+        SourceBounds& value = bounds[static_cast<std::size_t>(index)];
+        if (value.bounds.IsVoid())
+            continue;
+        value.bounds.Get(value.xMin, value.yMin, value.zMin,
+                         value.xMax, value.yMax, value.zMax);
+        value.valid = true;
+    }
+
+    // Components that almost completely overlap in XY are a vertical stack,
+    // not several independent top surfaces.  Cull an entirely covered lower
+    // component before its local face analysis.  This is a cheap projected
+    // visibility pass and prevents every repeated tube layer from contributing
+    // its own cap, hole walls and side fragments.
+    std::vector<int> retainedSources;
+    for (int index = 0; index < sources.size(); ++index) {
+        const SourceBounds& current = bounds[static_cast<std::size_t>(index)];
+        if (!current.valid)
+            continue;
+        const double currentWidth = std::max(0.0, current.xMax - current.xMin);
+        const double currentHeight = std::max(0.0, current.yMax - current.yMin);
+        const double currentArea = currentWidth * currentHeight;
+        const double extent = std::max({currentWidth, currentHeight,
+                                        current.zMax - current.zMin, 1.0});
+        const double zTolerance = std::max(1e-4, extent * 1e-5);
+        bool hiddenByHigherComponent = false;
+        for (int otherIndex = 0; otherIndex < sources.size(); ++otherIndex) {
+            if (otherIndex == index)
+                continue;
+            const SourceBounds& other = bounds[static_cast<std::size_t>(otherIndex)];
+            if (!other.valid || other.zMax <= current.zMax + zTolerance)
+                continue;
+            const double overlapWidth = std::max(
+                0.0, std::min(current.xMax, other.xMax) - std::max(current.xMin, other.xMin));
+            const double overlapHeight = std::max(
+                0.0, std::min(current.yMax, other.yMax) - std::max(current.yMin, other.yMin));
+            const double overlapArea = overlapWidth * overlapHeight;
+            if (currentArea > 1e-8 && overlapArea / currentArea >= 0.98) {
+                hiddenByHigherComponent = true;
+                break;
+            }
+        }
+        if (!hiddenByHigherComponent)
+            retainedSources.push_back(index);
+    }
+
+    for (int index : retainedSources) {
+        const WorkpieceShapeSource& source = sources.at(index);
+        for (const TopoDS_Face& face :
+             LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(source.shape)) {
+            result.push_back({face, source.workpieceEntry,
+                              lcnc::cam::MachiningFaceRole::MachiningSurface});
+        }
+    }
+    return result;
+}
+
 bool CamModule::rejectConflictingPipelineOperation(const QString& operation)
 {
     if (!property("camAutoPipelineRunning").toBool())
@@ -2388,41 +2521,8 @@ bool CamModule::separateMachiningFaces()
         return applyMachiningFaces();
     }
 
-    std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> candidates;
-    auto appendFace = [&candidates](const TopoDS_Face& face,
-                                    const QString& workpieceEntry,
-                                    lcnc::cam::MachiningFaceRole role) {
-        candidates.push_back({face, workpieceEntry, role});
-    };
-
-    for (const WorkpieceShapeSource& source : sources) {
-        if (source.shape.IsNull())
-            continue;
-
-        if (strategy == ExtractionStrategy::TubeClassification
-            || strategy == ExtractionStrategy::Auto) {
-            const FaceClassification classification = FaceClassifier::classifyFaces(
-                source.shape, m_smoothAngle);
-            if (const auto* outer = classification.outerGroup()) {
-                for (const TopoDS_Face& face : outer->faces)
-                    appendFace(face, source.workpieceEntry,
-                               lcnc::cam::MachiningFaceRole::MachiningSurface);
-            }
-            for (const auto* group : classification.crossSectionGroups()) {
-                if (!group)
-                    continue;
-                for (const TopoDS_Face& face : group->faces)
-                    appendFace(face, source.workpieceEntry,
-                               lcnc::cam::MachiningFaceRole::CrossSection);
-            }
-            continue;
-        }
-
-        const TopoDS_Face face = LaserToolpathBuilder::selectMachiningFace(
-            source.shape, beamDirectionWpc(source.workpieceEntry));
-        appendFace(face, source.workpieceEntry,
-                   lcnc::cam::MachiningFaceRole::MachiningSurface);
-    }
+    const std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> candidates =
+        selectAutomaticMachiningFaces(sources, strategy, m_smoothAngle);
 
     if (!m_machiningFacePipeline->replaceAutomaticFaces(candidates)) {
         // 中文翻译：分离加工面；未识别到可加工面，请改用手动选面。
@@ -2464,49 +2564,18 @@ TaskId CamModule::separateMachiningFacesAsync()
     };
     const auto result = std::make_shared<Result>();
     const double smoothAngle = m_smoothAngle;
-    QVector<gp_Dir> beamDirections;
-    beamDirections.reserve(sources.size());
-    for (const WorkpieceShapeSource& source : sources)
-        beamDirections.push_back(beamDirectionWpc(source.workpieceEntry));
-
     // 中文翻译：分离加工面
     TaskSpec spec{tr("Separate processing surface"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
     setProperty("camFaceSeparationRunning", true);
     const TaskId taskId = taskManager->run(spec,
-        [sources, beamDirections, strategy, smoothAngle, result](TaskProgress* progress) {
-            progress->setRange(0, std::max(1, static_cast<int>(sources.size())));
-            for (int index = 0; index < sources.size(); ++index) {
-                if (progress->isAbortRequested())
-                    // 中文翻译：加工面分离已取消
-                    throw std::runtime_error("Machining surface separation canceled");
-                const WorkpieceShapeSource& source = sources.at(index);
-                if (source.shape.IsNull())
-                    continue;
-                if (strategy == ExtractionStrategy::TubeClassification
-                    || strategy == ExtractionStrategy::Auto) {
-                    const FaceClassification classification = FaceClassifier::classifyFaces(
-                        source.shape, smoothAngle);
-                    if (const auto* outer = classification.outerGroup()) {
-                        for (const TopoDS_Face& face : outer->faces)
-                            result->faces.push_back({face, source.workpieceEntry,
-                                lcnc::cam::MachiningFaceRole::MachiningSurface});
-                    }
-                    for (const auto* group : classification.crossSectionGroups()) {
-                        if (!group)
-                            continue;
-                        for (const TopoDS_Face& face : group->faces)
-                            result->faces.push_back({face, source.workpieceEntry,
-                                lcnc::cam::MachiningFaceRole::CrossSection});
-                    }
-                } else {
-                    const TopoDS_Face face = LaserToolpathBuilder::selectMachiningFace(
-                        source.shape, beamDirections.at(index));
-                    if (!face.IsNull())
-                        result->faces.push_back({face, source.workpieceEntry,
-                            lcnc::cam::MachiningFaceRole::MachiningSurface});
-                }
-                progress->setValue(index + 1);
-            }
+        [sources, strategy, smoothAngle, result](TaskProgress* progress) {
+            progress->setRange(0, 1);
+            if (progress->isAbortRequested())
+                // 中文翻译：加工面分离已取消
+                throw std::runtime_error("Machining surface separation canceled");
+            result->faces = CamModule::selectAutomaticMachiningFaces(
+                sources, strategy, smoothAngle);
+            progress->setValue(1);
             if (result->faces.empty()) {
                 // 中文翻译：未识别到可加工面，请改用手动选面。
                 result->error = QObject::tr("No machinable surface is identified, please select manual surface instead.");
@@ -2607,11 +2676,15 @@ bool CamModule::extractContoursFromMachiningFaces()
     params.smoothAngleThresholdDeg = m_smoothAngle;
     params.deflection = m_deflection;
     params.strategy = ExtractionStrategy::ManualFaceSelection;
-    for (const WorkpieceShapeSource& source : collectWorkpieceShapes()) {
+    const bool useLargestSmoothBoundary =
+        m_extractionStrategy == static_cast<int>(ExtractionStrategy::LargestSmoothConnectedSurface);
+    const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
+    for (const WorkpieceShapeSource& source : sources) {
         std::vector<TopoDS_Face> machiningFaces;
         std::vector<TopoDS_Face> crossSectionFaces;
         for (const MachiningFaceEntry& entry : m_machiningFaces) {
-            if (entry.workpieceEntry != source.workpieceEntry || entry.face.IsNull())
+            if (entry.workpieceEntry != source.workpieceEntry
+                || !faceBelongsToSource(entry.face, source, sources))
                 continue;
             switch (entry.role) {
             case lcnc::cam::MachiningFaceRole::MachiningSurface: machiningFaces.push_back(entry.face); break;
@@ -2621,11 +2694,20 @@ bool CamModule::extractContoursFromMachiningFaces()
         if (machiningFaces.empty())
             continue;
         params.machiningBeamDirection = beamDirectionWpc(source.workpieceEntry);
-        std::vector<LaserContour> contours = !crossSectionFaces.empty()
-            ? LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
-                source.shape, machiningFaces, crossSectionFaces, params)
-            : LaserToolpathBuilder::extractContoursFromFaces(
-                source.shape, machiningFaces, params.machiningBeamDirection, params);
+        std::vector<LaserContour> contours = useLargestSmoothBoundary
+            || crossSectionFaces.empty()
+            ? LaserToolpathBuilder::extractContoursFromFaces(
+                source.shape, machiningFaces, params.machiningBeamDirection, params)
+            : LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+                source.shape, machiningFaces, crossSectionFaces, params);
+        if (useLargestSmoothBoundary) {
+            for (LaserContour& contour : contours) {
+                LaserToolpathBuilder::bindLeadInSurfaceContext(
+                    contour, machiningFaces, crossSectionFaces);
+                LaserToolpathBuilder::discretizeContourWithClassification(
+                    contour, machiningFaces, crossSectionFaces, params.deflection);
+            }
+        }
         for (LaserContour& contour : contours) {
             contour.workpieceEntry = source.workpieceEntry;
             contour.sourceShape = source.shape;
@@ -2808,12 +2890,15 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
     const double smoothAngle = m_smoothAngle;
     const double deflection = m_deflection;
     const double leadInLength = m_config.leadInLength();
+    const bool useLargestSmoothBoundary =
+        m_extractionStrategy == static_cast<int>(ExtractionStrategy::LargestSmoothConnectedSurface);
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     // 中文翻译：提取加工轮廓
     TaskSpec spec{tr("Extract machining contours"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
     const TaskId taskId = taskManager->run(spec,
-        [sources, faces, smoothAngle, deflection, leadInLength, result](TaskProgress* progress) {
+        [sources, faces, smoothAngle, deflection, leadInLength,
+         useLargestSmoothBoundary, result](TaskProgress* progress) {
             progress->setRange(0, std::max(1, static_cast<int>(sources.size())));
             ContourExtractionParams params;
             params.smoothAngleThresholdDeg = smoothAngle;
@@ -2827,7 +2912,8 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
                 std::vector<TopoDS_Face> machiningFaces;
                 std::vector<TopoDS_Face> crossSectionFaces;
                 for (const MachiningFaceEntry& entry : faces) {
-                    if (entry.workpieceEntry != source.workpieceEntry || entry.face.IsNull())
+                    if (entry.workpieceEntry != source.workpieceEntry
+                        || !faceBelongsToSource(entry.face, source, sources))
                         continue;
                     switch (entry.role) {
                     case lcnc::cam::MachiningFaceRole::MachiningSurface: machiningFaces.push_back(entry.face); break;
@@ -2835,11 +2921,20 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
                     }
                 }
                 if (!machiningFaces.empty()) {
-                    auto contours = !crossSectionFaces.empty()
-                        ? LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
-                            source.shape, machiningFaces, crossSectionFaces, params)
-                        : LaserToolpathBuilder::extractContoursFromFaces(
-                            source.shape, machiningFaces, gp_Dir(0.0, 0.0, -1.0), params);
+                    auto contours = useLargestSmoothBoundary
+                        || crossSectionFaces.empty()
+                        ? LaserToolpathBuilder::extractContoursFromFaces(
+                            source.shape, machiningFaces, gp_Dir(0.0, 0.0, -1.0), params)
+                        : LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+                            source.shape, machiningFaces, crossSectionFaces, params);
+                    if (useLargestSmoothBoundary) {
+                        for (LaserContour& contour : contours) {
+                            LaserToolpathBuilder::bindLeadInSurfaceContext(
+                                contour, machiningFaces, crossSectionFaces);
+                            LaserToolpathBuilder::discretizeContourWithClassification(
+                                contour, machiningFaces, crossSectionFaces, params.deflection);
+                        }
+                    }
                     for (LaserContour& contour : contours) {
                         contour.workpieceEntry = source.workpieceEntry;
                         contour.sourceShape = source.shape;
@@ -3268,6 +3363,14 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     if (params.strategy == ExtractionStrategy::ManualFaceSelection)
         params.selectedMachiningFaces = manualMachiningFaces();
     params.deflection = deflection;
+    const std::vector<MachiningFaceEntry> selectedFaceEntries = m_machiningFaces;
+    std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> automaticFaceCandidates;
+    if (params.strategy != ExtractionStrategy::ManualFaceSelection) {
+        automaticFaceCandidates = selectAutomaticMachiningFaces(
+            workpieceSources, params.strategy, smoothAngle);
+        if (automaticFaceCandidates.empty())
+            return false;
+    }
     std::vector<LaserContour> allContours;
 
     for (const WorkpieceShapeSource& source : workpieceSources) {
@@ -3276,18 +3379,53 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
 
         params.machiningBeamDirection = beamDirectionWpc(source.workpieceEntry);
         FaceClassification classification;
-        auto contours = LaserToolpathBuilder::extractContours(source.shape, params, &classification);
+        std::vector<TopoDS_Face> outerFaces;
+        std::vector<TopoDS_Face> crossFaces;
+        std::vector<LaserContour> contours;
+        if (params.strategy == ExtractionStrategy::ManualFaceSelection) {
+            for (const MachiningFaceEntry& entry : selectedFaceEntries) {
+                if (entry.workpieceEntry != source.workpieceEntry
+                    || !faceBelongsToSource(entry.face, source, workpieceSources)) {
+                    continue;
+                }
+                if (entry.role == lcnc::cam::MachiningFaceRole::MachiningSurface)
+                    outerFaces.push_back(entry.face);
+                else if (entry.role == lcnc::cam::MachiningFaceRole::CrossSection)
+                    crossFaces.push_back(entry.face);
+            }
+            if (outerFaces.empty())
+                continue;
+            contours = crossFaces.empty()
+                ? LaserToolpathBuilder::extractContoursFromFaces(
+                    source.shape, outerFaces, params.machiningBeamDirection, params)
+                : LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+                    source.shape, outerFaces, crossFaces, params);
+        } else if (params.strategy == ExtractionStrategy::PlanarFaceWires) {
+            for (const auto& candidate : automaticFaceCandidates) {
+                if (candidate.workpieceEntry == source.workpieceEntry
+                    && faceBelongsToSource(candidate.face, source, workpieceSources)) {
+                    outerFaces.push_back(candidate.face);
+                }
+            }
+            if (outerFaces.empty())
+                continue;
+            contours = LaserToolpathBuilder::extractContoursFromFaces(
+                source.shape, outerFaces, params.machiningBeamDirection, params);
+        } else {
+            contours = LaserToolpathBuilder::extractContours(
+                source.shape, params, &classification);
+        }
         if (contours.empty())
             continue;
 
-        std::vector<TopoDS_Face> outerFaces;
-        std::vector<TopoDS_Face> crossFaces;
         if (effectiveUseFaceClassification) {
-            if (classification.outerGroup())
+            if (outerFaces.empty() && classification.outerGroup())
                 outerFaces = classification.outerGroup()->faces;
-            for (const auto* group : classification.crossSectionGroups()) {
-                if (group)
-                    crossFaces.insert(crossFaces.end(), group->faces.begin(), group->faces.end());
+            if (crossFaces.empty()) {
+                for (const auto* group : classification.crossSectionGroups()) {
+                    if (group)
+                        crossFaces.insert(crossFaces.end(), group->faces.begin(), group->faces.end());
+                }
             }
         }
 
@@ -3428,18 +3566,14 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     m_camData->markDirty(true);
     m_camData->commitToolpathStates();    // 把 signature → id 映射固化下来，跨次稳定
 
-    // Auto-capture machining faces for the tree/view (sync path).
-    if (m_extractionStrategy == static_cast<int>(ExtractionStrategy::Auto)
+    // Capture the exact automatic faces used by the selected strategy.
+    if (m_extractionStrategy == static_cast<int>(ExtractionStrategy::LargestSmoothConnectedSurface)
         || m_extractionStrategy == static_cast<int>(ExtractionStrategy::PlanarFaceWires)) {
-        std::vector<TopoDS_Face> autoFaces;
-        for (const WorkpieceShapeSource& src : workpieceSources) {
-            if (src.shape.IsNull()) continue;
-            const TopoDS_Face f = LaserToolpathBuilder::selectMachiningFace(
-                src.shape, beamDirectionWpc(src.workpieceEntry));
-            if (!f.IsNull())
-                autoFaces.push_back(f);
+        if (m_machiningFacePipeline->replaceAutomaticFaces(automaticFaceCandidates)) {
+            pushMachiningFaceRecordsToCamData();
+            refreshMachiningFaceDisplay();
+            emit machiningFacesChanged();
         }
-        setAutoMachiningFaces(autoFaces, QString());
     } else {
         setAutoMachiningFaces({}, QString());
     }
@@ -3503,6 +3637,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
 
     struct GenerationResult {
         std::vector<LaserContour> contours;
+        std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> automaticFaces;
         QString error;
         QStringList leadInWarnings;
         bool ok{false};
@@ -3578,12 +3713,22 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     spec.priority = TaskPriority::Normal;
     const TaskId taskId = taskManager->run(spec,
         [workpieceSources, previousBySignature, previousOrder, leadInLength, params, selectedFaceEntries,
-         beamDirs, effectiveUseFaceClassification, axes, configType, modeDefinition,
+         extractionStrategy, beamDirs, effectiveUseFaceClassification, axes, configType, modeDefinition,
          workpieceSetup, headToolGeometry, result](TaskProgress* progress) {
             progress->setRange(0, 100);
             // 中文翻译：1/5 正在分离加工面与横截面
             progress->setStepName(QObject::tr("1/5 Separating the machined surface and cross section"));
             progress->setValue(5);
+            if (params.strategy != ExtractionStrategy::ManualFaceSelection) {
+                result->automaticFaces = CamModule::selectAutomaticMachiningFaces(
+                    workpieceSources, params.strategy,
+                    params.smoothAngleThresholdDeg);
+                if (result->automaticFaces.empty()) {
+                    // 中文翻译：未识别到可加工面，请改用手动选面。
+                    result->error = QObject::tr("No machinable surface is identified, please select manual surface instead.");
+                    return;
+                }
+            }
             std::vector<LaserContour> allContours;
             for (int sourceIndex = 0; sourceIndex < workpieceSources.size(); ++sourceIndex) {
                 if (progress->isAbortRequested())
@@ -3604,7 +3749,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                 std::vector<LaserContour> contours;
                 if (perSourceParams.strategy == ExtractionStrategy::ManualFaceSelection) {
                     for (const MachiningFaceEntry& entry : selectedFaceEntries) {
-                        if (entry.workpieceEntry != source.workpieceEntry || entry.face.IsNull())
+                        if (entry.workpieceEntry != source.workpieceEntry
+                            || !faceBelongsToSource(entry.face, source, workpieceSources))
                             continue;
                         if (entry.role == lcnc::cam::MachiningFaceRole::MachiningSurface)
                             outerFaces.push_back(entry.face);
@@ -3617,19 +3763,43 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             .arg(source.componentIndex + 1);
                         return;
                     }
-                    contours = crossFaces.empty()
+                    const bool useLargestSmoothBoundary =
+                        extractionStrategy == static_cast<int>(
+                            ExtractionStrategy::LargestSmoothConnectedSurface);
+                    contours = useLargestSmoothBoundary || crossFaces.empty()
                         ? LaserToolpathBuilder::extractContoursFromFaces(
                             source.shape, outerFaces, perSourceParams.machiningBeamDirection, perSourceParams)
                         : LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
                             source.shape, outerFaces, crossFaces, perSourceParams);
+                    if (useLargestSmoothBoundary) {
+                        for (LaserContour& contour : contours) {
+                            LaserToolpathBuilder::bindLeadInSurfaceContext(
+                                contour, outerFaces, crossFaces);
+                            LaserToolpathBuilder::discretizeContourWithClassification(
+                                contour, outerFaces, crossFaces, perSourceParams.deflection);
+                        }
+                    }
+                } else if (perSourceParams.strategy == ExtractionStrategy::PlanarFaceWires) {
+                    for (const auto& candidate : result->automaticFaces) {
+                        if (candidate.workpieceEntry == source.workpieceEntry
+                            && faceBelongsToSource(candidate.face, source, workpieceSources)) {
+                            outerFaces.push_back(candidate.face);
+                        }
+                    }
+                    // A lower component removed by the projected top-layer
+                    // prefilter intentionally contributes no contours.
+                    if (outerFaces.empty())
+                        continue;
+                    contours = LaserToolpathBuilder::extractContoursFromFaces(
+                        source.shape, outerFaces,
+                        perSourceParams.machiningBeamDirection, perSourceParams);
                 } else {
                     const FaceClassification autoClassification = FaceClassifier::classifyFaces(
                         source.shape, perSourceParams.smoothAngleThresholdDeg);
-                    if ((perSourceParams.strategy == ExtractionStrategy::Auto
-                         || perSourceParams.strategy == ExtractionStrategy::TubeClassification)
-                        && (!autoClassification.hasOuter() || !autoClassification.hasCrossSection())) {
-                        // 中文翻译：工件源 #%1 无法可靠识别加工面与横截面，请手动调整面组。
-                        result->error = QObject::tr("Workpiece source #%1 cannot reliably identify the processing surface and cross section. Please adjust the quilt manually.")
+                    if (perSourceParams.strategy == ExtractionStrategy::LargestSmoothConnectedSurface
+                        && !autoClassification.hasOuter()) {
+                        // 中文翻译：工件源 #%1 无法可靠识别最大顺滑连通加工面，请手动调整面组。
+                        result->error = QObject::tr("Workpiece source #%1 cannot reliably identify the largest smooth-connected machining surface. Please adjust the surface group manually.")
                             .arg(source.componentIndex + 1);
                         return;
                     }
@@ -3857,38 +4027,14 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             m_deflection = deflection;
             m_workpieceShape = collectWorkpieceShape();
             if (!reuseCurrentFaces) {
-                // Capture the exact two face groups used by Auto/Tube.  They are
-                // project data, not a renderer-only side effect: later manual
-                // stages continue from these groups without reclassifying.
-                std::vector<lcnc::cam::MachiningFacePipelineService::Candidate> captured;
+                // Capture the exact automatic face group.  It is project data,
+                // not a renderer-only side effect: later manual stages continue
+                // from these faces without reclassifying.
                 const ExtractionStrategy currentStrategy =
                     static_cast<ExtractionStrategy>(m_extractionStrategy);
-                for (const WorkpieceShapeSource& src : currentSources) {
-                    if (src.shape.IsNull())
-                        continue;
-                    auto appendCaptured = [&captured, &src](const TopoDS_Face& face,
-                                                            lcnc::cam::MachiningFaceRole role) {
-                        captured.push_back({face, src.workpieceEntry, role});
-                    };
-                    if (currentStrategy == ExtractionStrategy::Auto
-                        || currentStrategy == ExtractionStrategy::TubeClassification) {
-                        const FaceClassification classification = FaceClassifier::classifyFaces(
-                            src.shape, m_smoothAngle);
-                        if (const auto* group = classification.outerGroup())
-                            for (const TopoDS_Face& face : group->faces)
-                                appendCaptured(face, lcnc::cam::MachiningFaceRole::MachiningSurface);
-                        for (const auto* group : classification.crossSectionGroups()) {
-                            if (!group) continue;
-                            for (const TopoDS_Face& face : group->faces)
-                                appendCaptured(face, lcnc::cam::MachiningFaceRole::CrossSection);
-                        }
-                    } else if (currentStrategy == ExtractionStrategy::PlanarFaceWires) {
-                        appendCaptured(LaserToolpathBuilder::selectMachiningFace(
-                            src.shape, beamDirectionWpc(src.workpieceEntry)),
-                            lcnc::cam::MachiningFaceRole::MachiningSurface);
-                    }
-                }
-                if (m_machiningFacePipeline->replaceAutomaticFaces(captured)) {
+                if ((currentStrategy == ExtractionStrategy::LargestSmoothConnectedSurface
+                     || currentStrategy == ExtractionStrategy::PlanarFaceWires)
+                    && m_machiningFacePipeline->replaceAutomaticFaces(result->automaticFaces)) {
                     pushMachiningFaceRecordsToCamData();
                     refreshMachiningFaceDisplay();
                     emit machiningFacesChanged();
@@ -5588,6 +5734,7 @@ int CamModule::extractionStrategy() const
 
 void CamModule::setExtractionStrategy(int strategy)
 {
+    strategy = static_cast<int>(extractionStrategyFromPersistedValue(strategy));
     if (m_extractionStrategy == strategy)
         return;
     m_extractionStrategy = strategy;

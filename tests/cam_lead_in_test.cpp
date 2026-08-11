@@ -42,11 +42,18 @@ int verifyShape(const TopoDS_Shape& shape, const QString& label)
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
-    params.strategy = ExtractionStrategy::TubeClassification;
+    params.strategy = ExtractionStrategy::LargestSmoothConnectedSurface;
 
     FaceClassification classification;
-    auto contours = LaserToolpathBuilder::extractContours(
-        shape, params, &classification);
+    classification = FaceClassifier::classifyFaces(shape, params.smoothAngleThresholdDeg);
+    std::vector<TopoDS_Face> outerFaces;
+    std::vector<TopoDS_Face> crossSectionFaces;
+    if (const auto* outer = classification.outerGroup())
+        outerFaces = outer->faces;
+    for (const auto* group : classification.crossSectionGroups())
+        crossSectionFaces.insert(crossSectionFaces.end(), group->faces.begin(), group->faces.end());
+    auto contours = LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+        shape, outerFaces, crossSectionFaces, params);
     if (contours.empty())
         return fail(label + QStringLiteral(": no machining contours extracted"));
     if (!classification.hasOuter() || !classification.hasCrossSection())
@@ -100,7 +107,7 @@ int verifyImportedShape(const TopoDS_Shape& shape, const QString& label)
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
-    params.strategy = ExtractionStrategy::TubeClassification;
+    params.strategy = ExtractionStrategy::LargestSmoothConnectedSurface;
 
     FaceClassification classification;
     auto contours = LaserToolpathBuilder::extractContours(
@@ -133,9 +140,18 @@ int verifyOuterFaceProjectionOverridesCrossNormal(const TopoDS_Shape& shape,
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
-    params.strategy = ExtractionStrategy::TubeClassification;
+    params.strategy = ExtractionStrategy::LargestSmoothConnectedSurface;
 
-    auto contours = LaserToolpathBuilder::extractContours(shape, params);
+    const FaceClassification classification = FaceClassifier::classifyFaces(
+        shape, params.smoothAngleThresholdDeg);
+    std::vector<TopoDS_Face> outerFaces;
+    std::vector<TopoDS_Face> crossSectionFaces;
+    if (const auto* outer = classification.outerGroup())
+        outerFaces = outer->faces;
+    for (const auto* group : classification.crossSectionGroups())
+        crossSectionFaces.insert(crossSectionFaces.end(), group->faces.begin(), group->faces.end());
+    auto contours = LaserToolpathBuilder::extractTubeContoursFromFaceGroups(
+        shape, outerFaces, crossSectionFaces, params);
     if (contours.empty())
         return fail(label + QStringLiteral(": no contour for projection test"));
 

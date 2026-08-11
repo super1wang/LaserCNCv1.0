@@ -95,21 +95,19 @@ void WidgetToolpathPanel::buildUi()
     classForm->addRow(tr("Smooth threshold:"), m_spinSmoothAngle);
 
     m_comboClassMode = new QComboBox(classGroup);
-    // 中文翻译：自动识别
-    m_comboClassMode->addItem(tr("automatic recognition"),   static_cast<int>(ExtractionStrategy::Auto));
-    // 中文翻译：平面(取孔)
-    m_comboClassMode->addItem(tr("Plane (hole)"), static_cast<int>(ExtractionStrategy::PlanarFaceWires));
-    // 中文翻译：管材(截面)
-    m_comboClassMode->addItem(tr("Pipe (section)"), static_cast<int>(ExtractionStrategy::TubeClassification));
+    // 中文翻译：最大连通面策略
+    m_comboClassMode->addItem(tr("Largest smooth-connected surface"),
+                              static_cast<int>(ExtractionStrategy::LargestSmoothConnectedSurface));
+    // 中文翻译：平面（Z向光照）
+    m_comboClassMode->addItem(tr("Plane (Z-light)"),
+                              static_cast<int>(ExtractionStrategy::PlanarFaceWires));
     // 中文翻译：手动选面
     m_comboClassMode->addItem(tr("Manual face selection"),   static_cast<int>(ExtractionStrategy::ManualFaceSelection));
     m_comboClassMode->setToolTip(
-        // 中文翻译：自动识别: 按机台构型与装夹姿态自动选取加工面（平板取外环+孔，管材取截面）\n
-        tr("Automatic identification: Automatically select the processing surface according to the machine configuration and clamping posture (the outer ring + hole is selected for the flat plate, and the cross-section is selected for the pipe)"
-           // 中文翻译：平面(取孔): 取加工面的全部 Wire（外轮廓 + 每个孔）\n
-           "Plane (hole taking): Take all wires on the processing surface (outer contour + each hole)"
-           // 中文翻译：管材(截面): 外表面 ∩ 截面交线（管端切割）\n
-           "Pipe (section): Outer surface ∩ Section intersection (pipe end cutting)"
+        // 中文翻译：最大连通面策略：按顺滑连接划分面组，并以面积最大的外表面作为加工面。
+        tr("Largest smooth-connected surface: Group faces by smooth connectivity and use the largest exterior surface as the machining surface."
+           // 中文翻译：平面（Z向光照）：先按外法线过滤竖直侧壁与孔壁，再提取被沿 -Z 平行光首先照射到的最上层外表面（包括曲面）。
+           "Plane (Z-light): Filter vertical side and hole walls by outward normal, then extract topmost exterior faces first hit by parallel light along -Z, including curved surfaces."
            // 中文翻译：手动选面: 在视图点选工件加工面
            "Manual face selection: Select the workpiece processing face in the view"));
     // 中文翻译：提取模式:
@@ -439,7 +437,8 @@ double WidgetToolpathPanel::smoothAngle() const
 
 int WidgetToolpathPanel::extractionStrategy() const
 {
-    if (!m_comboClassMode) return static_cast<int>(ExtractionStrategy::Auto);
+    if (!m_comboClassMode)
+        return static_cast<int>(ExtractionStrategy::LargestSmoothConnectedSurface);
     return m_comboClassMode->currentData().toInt();
 }
 

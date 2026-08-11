@@ -1,5 +1,6 @@
 #include "modules/cam/settings/cam_config.h"
 
+#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/logging/logger.h"
 
 #include <QCoreApplication>
@@ -112,7 +113,8 @@ void CamConfig::readFrom(const toml::value& root)
         m_deflection            = get_double(tp, "deflection",            m_deflection);
         m_smoothAngle           = get_double(tp, "smoothAngle",           m_smoothAngle);
         m_useFaceClassification = get_bool  (tp, "useFaceClassification", m_useFaceClassification);
-        m_extractionStrategy = get_int(tp, "extractionStrategy", m_extractionStrategy);
+        m_extractionStrategy = static_cast<int>(extractionStrategyFromPersistedValue(
+            get_int(tp, "extractionStrategy", m_extractionStrategy)));
         m_showNormals           = get_bool  (tp, "showNormals",           m_showNormals);
         m_normalSampleStep      = get_double(tp, "normalSampleStep",      m_normalSampleStep);
     }
@@ -273,6 +275,7 @@ void CamConfig::setUseFaceClassification(bool enabled)
 
 void CamConfig::setExtractionStrategy(int strategy)
 {
+    strategy = static_cast<int>(extractionStrategyFromPersistedValue(strategy));
     if (m_extractionStrategy == strategy) return;
     m_extractionStrategy = strategy;
     saveDefault();

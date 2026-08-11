@@ -149,7 +149,7 @@ private:
     double m_deflection{0.1};
     double m_smoothAngle{5.0};
     bool m_useFaceClassification{true};
-    int m_extractionStrategy{0}; ///< ExtractionStrategy (Auto)
+    int m_extractionStrategy{0}; ///< ExtractionStrategy (LargestSmoothConnectedSurface)
     bool m_showNormals{false};
     double m_normalSampleStep{2.0};
 

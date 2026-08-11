@@ -3936,8 +3936,8 @@ continue?</source>
         <translation>工件源 #%1 未提供加工面。</translation>
     </message>
     <message>
-        <source>Workpiece source #%1 cannot reliably identify the processing surface and cross section. Please adjust the quilt manually.</source>
-        <translation>工件源 #%1 无法可靠识别加工面与横截面，请手动调整面组。</translation>
+        <source>Workpiece source #%1 cannot reliably identify the largest smooth-connected machining surface. Please adjust the surface group manually.</source>
+        <translation>工件源 #%1 无法可靠识别最大顺滑连通加工面，请手动调整面组。</translation>
     </message>
     <message>
         <source>Workpiece source #%1</source>
@@ -6106,24 +6106,20 @@ continue?</source>
         <translation>光滑阈值:</translation>
     </message>
     <message>
-        <source>automatic recognition</source>
-        <translation>自动识别</translation>
+        <source>Largest smooth-connected surface</source>
+        <translation>最大连通面策略</translation>
     </message>
     <message>
-        <source>Plane (hole)</source>
-        <translation>平面(取孔)</translation>
-    </message>
-    <message>
-        <source>Pipe (section)</source>
-        <translation>管材(截面)</translation>
+        <source>Plane (Z-light)</source>
+        <translation>平面（Z向光照）</translation>
     </message>
     <message>
         <source>Manual face selection</source>
         <translation>手动选面</translation>
     </message>
     <message>
-        <source>Automatic identification: Automatically select the processing surface according to the machine configuration and clamping posture (the outer ring + hole is selected for the flat plate, and the cross-section is selected for the pipe)Plane (hole taking): Take all wires on the processing surface (outer contour + each hole)Pipe (section): Outer surface ∩ Section intersection (pipe end cutting)Manual face selection: Select the workpiece processing face in the view</source>
-        <translation>自动识别：根据机床配置和装夹姿势自动选择加工面（平板选择外环+孔，管材选择截面）平面（取孔）：取加工面上的所有线（外轮廓+每个孔）管材（截面）：外表面∩截面交点（管端切割）手动选面：在视图中选择工件加工面</translation>
+        <source>Largest smooth-connected surface: Group faces by smooth connectivity and use the largest exterior surface as the machining surface.Plane (Z-light): Filter vertical side and hole walls by outward normal, then extract topmost exterior faces first hit by parallel light along -Z, including curved surfaces.Manual face selection: Select the workpiece processing face in the view</source>
+        <translation>最大连通面策略：按顺滑连接划分面组，并以面积最大的外表面作为加工面。平面（Z向光照）：先按外法线过滤竖直侧壁与孔壁，再提取被沿 -Z 平行光首先照射到的最上层外表面（包括曲面）。手动选面：在视图中选择工件加工面。</translation>
     </message>
     <message>
         <source>Extraction mode:</source>

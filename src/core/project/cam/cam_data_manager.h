@@ -102,7 +102,7 @@ public:
         double deflection{0.1};
         double smoothAngle{5.0};
         bool   useFaceClassification{true};
-        int    extractionStrategy{0}; ///< ExtractionStrategy (Auto)
+        int    extractionStrategy{0}; ///< ExtractionStrategy (LargestSmoothConnectedSurface)
         double normalSampleStep{2.0};
     };
     GenerationParams&       generationParams()       { return m_generationParams; }

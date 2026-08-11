@@ -7,6 +7,7 @@
 #include <BRep_tool.hxx>
 #include <BRepTools.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepGProp.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <Geom_Surface.hxx>
@@ -17,8 +18,10 @@
 
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
+#include <GProp_GProps.hxx>
 
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
@@ -142,18 +145,16 @@ bool isSmoothConnection(const TopoDS_Face& face1,
     return n1.Angle(n2) < thresholdRad;
 }
 
-/// Compute the bounding-box diagonal length for a set of faces.
-double bboxDiagonal(const std::vector<TopoDS_Face>& faces)
+/// Compute the total area of a smooth-connected face group.
+double smoothGroupArea(const std::vector<TopoDS_Face>& faces)
 {
-    Bnd_Box box;
-    for (const auto& f : faces)
-        BRepBndLib::Add(f, box);
-    if (box.IsVoid())
-        return 0.0;
-    double xmin, ymin, zmin, xmax, ymax, zmax;
-    box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-    double dx = xmax - xmin, dy = ymax - ymin, dz = zmax - zmin;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
+    double area = 0.0;
+    for (const auto& f : faces) {
+        GProp_GProps properties;
+        BRepGProp::SurfaceProperties(f, properties);
+        area += properties.Mass();
+    }
+    return area;
 }
 
 std::vector<gp_Pnt> sampleOrderedEdges(const std::vector<TopoDS_Edge>& edges)
@@ -318,12 +319,22 @@ FaceClassification FaceClassifier::classifyFaces(const TopoDS_Shape& workpiece,
     if (result.groups.empty())
         return result;
 
-    // ── Step 5: identify the outer group (largest bbox diagonal) ─────────
-    double maxDiag = -1.0;
+    // ── Step 5: identify the outer group (largest smooth area) ───────────
+    // Area reflects the actual exterior machining surface better than a
+    // bounding-box diagonal for long, thin or folded workpieces.
+    double maxArea = -1.0;
+    double highestExtent = -std::numeric_limits<double>::max();
     for (int gi = 0; gi < static_cast<int>(result.groups.size()); ++gi) {
-        double d = bboxDiagonal(result.groups[gi].faces);
-        if (d > maxDiag) {
-            maxDiag = d;
+        const double area = smoothGroupArea(result.groups[gi].faces);
+        Standard_Real xMin, yMin, zMin, xMax, yMax, zMax;
+        result.groups[gi].bbox.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+        // Equal-area top/bottom plate faces are both external candidates. Pick
+        // the upper one deterministically so the Z-light strategy starts with
+        // an exterior group that can actually be illuminated from +Z.
+        if (area > maxArea + 1e-9
+            || (std::abs(area - maxArea) <= 1e-9 && zMax > highestExtent + 1e-9)) {
+            maxArea = area;
+            highestExtent = zMax;
             result.outerIdx = gi;
         }
     }

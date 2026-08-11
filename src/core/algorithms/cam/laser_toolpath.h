@@ -25,20 +25,35 @@ class MachineKinematics;
 /**
  * @brief Strategy for extracting machining contours from a workpiece.
  *
- * Replaces the former ``useFaceClassification`` boolean. The CAM layer selects
- * the strategy from the machine configuration and the user's choice; the
- * algorithm stays decoupled from kinematics by receiving the beam direction
- * (in workpiece coordinates) and any user-picked faces as plain data.
+ * The CAM layer selects the strategy from the user's choice.  The generic
+ * default finds the largest smooth-connected exterior surface; the planar
+ * strategy is intentionally defined in workpiece XY/Z coordinates.
  */
 enum class ExtractionStrategy
 {
-    Auto,               ///< Machine+posture-driven: pick the machining face from
-                        ///< the beam direction, then dispatch to Planar or Tube.
-    PlanarFaceWires,    ///< Machining face -> all wires (outer boundary + holes).
-    TubeClassification, ///< Existing outer-surface ∩ cross-section (tube ends).
-    ManualFaceSelection,///< User-picked faces -> all wires of those faces.
-    LegacyOuterWire     ///< Pre-strategy fallback: OuterWire of every face.
+    LargestSmoothConnectedSurface = 0, ///< Largest smooth-connected exterior surface.
+    PlanarFaceWires = 1,               ///< Topmost outer faces visible to a workpiece -Z parallel beam.
+    ManualFaceSelection = 3,           ///< User-picked faces -> all wires of those faces.
+    LegacyOuterWire = 4                ///< Pre-strategy fallback: OuterWire of every face.
 };
+
+/// Convert a persisted strategy value from the former four-option UI.
+/// Former Auto (0) and Pipe/section (2) both become the new default.  Manual
+/// intentionally retains value 3 so existing manual-selection projects remain
+/// manual after the UI removes the obsolete modes.
+constexpr ExtractionStrategy extractionStrategyFromPersistedValue(int value)
+{
+    switch (value) {
+    case static_cast<int>(ExtractionStrategy::PlanarFaceWires):
+        return ExtractionStrategy::PlanarFaceWires;
+    case static_cast<int>(ExtractionStrategy::ManualFaceSelection):
+        return ExtractionStrategy::ManualFaceSelection;
+    case static_cast<int>(ExtractionStrategy::LegacyOuterWire):
+        return ExtractionStrategy::LegacyOuterWire;
+    default:
+        return ExtractionStrategy::LargestSmoothConnectedSurface;
+    }
+}
 
 /**
  * @brief Boundary role of a contour, persisted on LaserContour::contourType.
@@ -221,11 +236,10 @@ struct ContourExtractionParams
 {
     double smoothAngleThresholdDeg{5.0}; ///< Angle threshold for smooth face adjacency
     double deflection{0.1};              ///< Chordal deflection for discretisation (mm)
-    ExtractionStrategy strategy{ExtractionStrategy::Auto}; ///< Extraction strategy
+    ExtractionStrategy strategy{ExtractionStrategy::LargestSmoothConnectedSurface}; ///< Extraction strategy
 
-    /// Beam travel direction in workpiece coordinates (home posture). Used by
-    /// Auto/PlanarFaceWires to select the machining face. Default -Z matches a
-    /// flat workpiece mounted on a vertical machine with identity wpc transform.
+    /// Retained for manual-face callers that need a machining-ray context.
+    /// PlanarFaceWires always uses the workpiece -Z direction by definition.
     gp_Dir machiningBeamDirection{0.0, 0.0, -1.0};
 
     /// User-picked machining faces (ManualFaceSelection). When non-empty, the
@@ -248,10 +262,15 @@ public:
         const ContourExtractionParams& params,
         FaceClassification* classificationOut = nullptr);
 
-    /// Select the machining face: the planar face whose outward normal most
-    /// opposes the beam direction (most directly faces the laser). Returns a
-    /// null face if no planar face faces the beam (ambiguous / tube side).
-    /// @param beamDirWpc  Beam travel direction in workpiece coordinates.
+    /// Retain only trimmed-face samples whose outward normal has a positive Z
+    /// component, then select faces first hit by workpiece -Z rays. This keeps
+    /// a vertical cylinder's small top cap regardless of smooth-group area,
+    /// while vertical side walls and hole walls never enter ray analysis.
+    static std::vector<TopoDS_Face> selectTopVisibleFacesFromPositiveZ(
+        const TopoDS_Shape& workpiece, QString* info = nullptr);
+
+    /// Legacy single-face helper.  Prefer selectTopVisibleFacesFromPositiveZ() for
+    /// global planar extraction.
     static TopoDS_Face selectMachiningFace(const TopoDS_Shape& workpiece,
                                            const gp_Dir& beamDirWpc,
                                            QString* info = nullptr);

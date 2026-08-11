@@ -1,10 +1,9 @@
 // Verification for the strategy-based contour extraction:
 //   - PlanarFaceWires on a perforated plate yields N+1 contours (1 outer + N
 //     holes), all holes classified InnerHole, ordered holes-first / outer-last.
-//   - Auto (machine+posture-driven via a beam direction) picks the top face and
-//     produces the same N+1 result without kinematics.
-//   - TubeClassification on a cylinder still yields cross-section contours
-//     (regression guard for the existing tube path after the dispatch refactor).
+//   - The largest-smooth-connected-surface default produces the same N+1
+//     result without relying on a machine-specific posture.
+//   - The same default on a cylinder yields its smooth outer-surface boundary.
 
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/face_classifier.h"
@@ -13,15 +12,18 @@
 #include <QTextStream>
 
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRep_Builder.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Solid.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 
+#include <algorithm>
 #include <vector>
 
 namespace {
@@ -61,13 +63,14 @@ int countByKind(const std::vector<LaserContour>& contours, ContourKind kind)
 /// Assert a perforated plate (holeCount holes) extracts to holeCount+1 contours:
 /// 1 outer boundary, holeCount inner holes, holes ordered before the outer ring.
 int verifyPerforatedPlate(const TopoDS_Shape& plate, int holeCount,
-                          ExtractionStrategy strategy, const QString& label)
+                          ExtractionStrategy strategy, const QString& label,
+                          const gp_Dir& reportedBeam = gp_Dir(0.0, 0.0, -1.0))
 {
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
     params.strategy = strategy;
-    params.machiningBeamDirection = gp_Dir(0.0, 0.0, -1.0);
+    params.machiningBeamDirection = reportedBeam;
 
     FaceClassification classification;
     auto contours = LaserToolpathBuilder::extractContours(plate, params, &classification);
@@ -93,22 +96,28 @@ int verifyPerforatedPlate(const TopoDS_Shape& plate, int holeCount,
     return 0;
 }
 
-int verifyTubeRegression(const TopoDS_Shape& cylinder, const QString& label)
+int verifyLargestSmoothSurfaceRegression(const TopoDS_Shape& cylinder, const QString& label)
 {
     ContourExtractionParams params;
     params.smoothAngleThresholdDeg = 5.0;
     params.deflection = 0.1;
-    params.strategy = ExtractionStrategy::TubeClassification;
+    params.strategy = ExtractionStrategy::LargestSmoothConnectedSurface;
 
     FaceClassification classification;
     auto contours = LaserToolpathBuilder::extractContours(cylinder, params, &classification);
     if (contours.empty())
-        return fail(label + QStringLiteral(": tube path produced no contours"));
+        return fail(label + QStringLiteral(": largest smooth surface produced no contours"));
     if (!classification.hasOuter() || !classification.hasCrossSection())
-        return fail(label + QStringLiteral(": tube classification incomplete"));
+        return fail(label + QStringLiteral(": smooth-surface classification incomplete"));
     for (const auto& c : contours)
         if (static_cast<ContourKind>(c.contourType) != ContourKind::TubeCrossSection)
-            return fail(label + QStringLiteral(": tube contour mislabeled"));
+        return fail(label + QStringLiteral(": smooth-surface contour mislabeled"));
+    for (const auto& c : contours) {
+        if (c.points.empty())
+            return fail(label + QStringLiteral(": contour points were not discretized"));
+        if (!c.points.front().crossSectionNormalValid)
+            return fail(label + QStringLiteral(": adjacent section normal was not retained"));
+    }
 
     const auto* outer = classification.outerGroup();
     if (!outer || outer->faces.empty())
@@ -120,6 +129,85 @@ int verifyTubeRegression(const TopoDS_Shape& cylinder, const QString& label)
     for (const auto& c : manualContours)
         if (static_cast<ContourKind>(c.contourType) != ContourKind::TubeCrossSection)
             return fail(label + QStringLiteral(": manual tube boundary mislabeled"));
+    return 0;
+}
+
+int verifyTopVisibleFaceSelection()
+{
+    // The upper box completely shadows the lower one in XY projection.  No
+    // face from the lower box may survive the +Z parallel-light selection.
+    const TopoDS_Solid lower = BRepPrimAPI_MakeBox(
+        gp_Pnt(0.0, 0.0, 0.0), gp_Pnt(100.0, 100.0, 5.0)).Solid();
+    const TopoDS_Solid upper = BRepPrimAPI_MakeBox(
+        gp_Pnt(0.0, 0.0, 10.0), gp_Pnt(100.0, 100.0, 15.0)).Solid();
+    TopoDS_Compound stacked;
+    BRep_Builder builder;
+    builder.MakeCompound(stacked);
+    builder.Add(stacked, lower);
+    builder.Add(stacked, upper);
+
+    const auto visibleFaces = LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(stacked);
+    if (visibleFaces.empty())
+        return fail(QStringLiteral("top-visible selection found no upper face"));
+    for (TopExp_Explorer lowerExp(lower, TopAbs_FACE); lowerExp.More(); lowerExp.Next()) {
+        const TopoDS_Face lowerFace = TopoDS::Face(lowerExp.Current());
+        for (const TopoDS_Face& selected : visibleFaces)
+            if (selected.IsSame(lowerFace))
+                return fail(QStringLiteral("top-visible selection retained an occluded lower face"));
+    }
+    const TopoDS_Shape perforated = makePerforatedPlate(8);
+    const auto perforatedVisibleFaces =
+        LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(perforated);
+    if (perforatedVisibleFaces.empty())
+        return fail(QStringLiteral("perforated plate has no visible top face"));
+    if (std::any_of(perforatedVisibleFaces.cbegin(), perforatedVisibleFaces.cend(),
+                    [](const TopoDS_Face& face) {
+                        return !LaserToolpathBuilder::isPlanarFace(face);
+                    })) {
+        return fail(QStringLiteral("perforated plate retained a vertical hole wall"));
+    }
+
+    // A blind-hole floor is visible through its opening, but it is a cavity
+    // face rather than part of the exterior machining shell.  The Z-light
+    // strategy must retain only the plate's upper face.
+    const TopoDS_Solid solidPlate = BRepPrimAPI_MakeBox(
+        gp_Pnt(0.0, 0.0, 0.0), gp_Pnt(100.0, 100.0, 10.0)).Solid();
+    const TopoDS_Shape blindHole = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(50.0, 50.0, 5.0), gp_Dir(0.0, 0.0, 1.0)), 10.0, 5.0).Shape();
+    BRepAlgoAPI_Cut blindCut(solidPlate, blindHole);
+    blindCut.Build();
+    if (!blindCut.IsDone())
+        return fail(QStringLiteral("blind-hole boolean cut failed"));
+    const auto blindHoleVisibleFaces =
+        LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(blindCut.Shape());
+    if (blindHoleVisibleFaces.size() != 1
+        || !LaserToolpathBuilder::isPlanarFace(blindHoleVisibleFaces.front())) {
+        return fail(QStringLiteral("top-visible selection retained a blind-hole floor"));
+    }
+
+    // The lateral wall is the largest smooth group on a vertical cylinder,
+    // but Z-light extraction must retain the smaller +Z cap instead.
+    const TopoDS_Shape verticalCylinder = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0)), 10.0, 60.0).Shape();
+    const auto verticalVisibleFaces =
+        LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(verticalCylinder);
+    if (verticalVisibleFaces.size() != 1
+        || !LaserToolpathBuilder::isPlanarFace(verticalVisibleFaces.front())) {
+        return fail(QStringLiteral("vertical cylinder did not select only its +Z top cap"));
+    }
+
+    // A horizontal-axis cylinder exposes its curved lateral face to vertical
+    // light; top visibility must not be restricted to horizontal planar faces.
+    const TopoDS_Shape horizontalCylinder = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(1.0, 0.0, 0.0)), 10.0, 60.0).Shape();
+    const auto curvedVisibleFaces =
+        LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(horizontalCylinder);
+    if (std::none_of(curvedVisibleFaces.cbegin(), curvedVisibleFaces.cend(),
+                     [](const TopoDS_Face& face) {
+                         return !LaserToolpathBuilder::isPlanarFace(face);
+                     })) {
+        return fail(QStringLiteral("top-visible selection did not retain the curved upper surface"));
+    }
     return 0;
 }
 
@@ -156,17 +244,23 @@ int main()
 
     if (int rc = verifyPerforatedPlate(plate, holeCount,
                                        ExtractionStrategy::PlanarFaceWires,
-                                       QStringLiteral("PlanarFaceWires")))
+                                       QStringLiteral("PlanarZLight"),
+                                       // The planar strategy is fixed to the workpiece
+                                       // XY/Z coordinate system, not machine posture.
+                                       gp_Dir(1.0, 0.0, 0.0)))
         return rc;
 
     if (int rc = verifyPerforatedPlate(plate, holeCount,
-                                       ExtractionStrategy::Auto,
-                                       QStringLiteral("Auto")))
+                                       ExtractionStrategy::LargestSmoothConnectedSurface,
+                                       QStringLiteral("LargestSmoothConnectedSurface")))
         return rc;
 
     const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(
         gp_Ax2(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0)), 20.0, 80.0).Shape();
-    if (int rc = verifyTubeRegression(cylinder, QStringLiteral("TubeClassification")))
+    if (int rc = verifyLargestSmoothSurfaceRegression(
+            cylinder, QStringLiteral("LargestSmoothConnectedSurface")))
+        return rc;
+    if (int rc = verifyTopVisibleFaceSelection())
         return rc;
     if (int rc = verifyPipelineChain())
         return rc;

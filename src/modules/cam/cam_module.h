@@ -368,13 +368,14 @@ public:
     void   setSmoothAngle(double deg);
     bool   useFaceClassification() const;
     void   setUseFaceClassification(bool on);
-    /// ExtractionStrategy value (Auto/Planar/Tube/Manual). Drives contour
+    /// ExtractionStrategy value (largest-smooth/planar/manual). Drives contour
     /// extraction; machine config still drives discretization independently.
     int    extractionStrategy() const;
     void   setExtractionStrategy(int strategy);
     /// Laser beam travel direction in \a wpcEntry workpiece coordinates at the
     /// home posture, derived from the machine beam axis and the wpc mount.
-    /// Used by Auto/PlanarFaceWires to select the machining face.
+    /// Used only where a machining-ray context is required; planar extraction
+    /// is fixed to the workpiece XY/Z coordinate system.
     gp_Dir beamDirectionWpc(const QString& wpcEntry) const;
     /// @name Manual machining-face selection (ManualFaceSelection strategy)
     /// @{
@@ -391,7 +392,7 @@ public:
     /// faces remain internal reference data and are never rendered here.
     void   setMachiningFacesVisible(bool visible);
     bool   machiningFacesVisible() const;
-    /// Faces captured from the last Auto/Planar extraction (shown in tree/view).
+    /// Faces captured from the last automatic strategy extraction.
     void   setAutoMachiningFaces(const std::vector<TopoDS_Face>& faces,
                                  const QString& workpieceEntry);
     /// Manual picks only (fed into ManualFaceSelection extraction).
@@ -505,6 +506,10 @@ private:
     /// Collect the workpiece compound shape from the project document.
     TopoDS_Shape collectWorkpieceShape() const;
     QList<WorkpieceShapeSource> collectWorkpieceShapes() const;
+    static std::vector<lcnc::cam::MachiningFacePipelineService::Candidate>
+    selectAutomaticMachiningFaces(const QList<WorkpieceShapeSource>& sources,
+                                  ExtractionStrategy strategy,
+                                  double smoothAngle);
     bool rejectConflictingPipelineOperation(const QString& operation);
     std::uint64_t machiningFaceSetRevision() const;
     std::uint64_t machineSetupRevision() const;
@@ -602,7 +607,7 @@ private:
     gp_Pnt                      m_physicalAcCenter{0.0, 0.0, 0.0};
     double                      m_smoothAngle{5.0};
     bool                        m_useFaceClassification{true};
-    int                         m_extractionStrategy{0}; ///< ExtractionStrategy (Auto)
+    int                         m_extractionStrategy{0}; ///< LargestSmoothConnectedSurface
 
     using MachiningFaceEntry = lcnc::cam::MachiningFacePipelineService::Entry;
     std::unique_ptr<lcnc::cam::MachiningFacePipelineService> m_machiningFacePipeline;

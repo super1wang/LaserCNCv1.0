@@ -14,6 +14,8 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <GCPnts_UniformDeflection.hxx>
@@ -27,6 +29,8 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepOffset_Analyse.hxx>
+#include <BRepOffset_ListOfInterval.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -36,9 +40,14 @@
 #include <Geom_Surface.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Bnd_Box.hxx>
+#include <IntCurvesFace_ShapeIntersector.hxx>
+#include <Poly_Triangulation.hxx>
+#include <Poly_Triangle.hxx>
+#include <TopLoc_Location.hxx>
 
 #include <gp_Vec.hxx>
 #include <gp_Trsf.hxx>
+#include <gp_Pnt2d.hxx>
 
 #include <algorithm>
 #include <array>
@@ -731,6 +740,111 @@ int contourCutOrderRank(int contourType)
     return 3;
 }
 
+bool mayTraverseExteriorShell(const BRepOffset_Analyse& concavity,
+                              const TopoDS_Edge& edge)
+{
+    try {
+        const BRepOffset_ListOfInterval& intervals = concavity.Type(edge);
+        bool hasExteriorTransition = false;
+        for (BRepOffset_ListIteratorOfListOfInterval it(intervals); it.More(); it.Next()) {
+            switch (it.Value().Type()) {
+            case ChFiDS_Concave:
+            case ChFiDS_Mixed:
+                // Crossing a concave edge enters a pocket, bore or other
+                // cavity.  It must never promote that cavity to the exterior
+                // machining shell.
+                return false;
+            case ChFiDS_Convex:
+            case ChFiDS_Tangential:
+            case ChFiDS_FreeBound:
+                hasExteriorTransition = true;
+                break;
+            case ChFiDS_Other:
+                break;
+            }
+        }
+        return hasExteriorTransition;
+    } catch (const Standard_Failure&) {
+        // A malformed edge must not open a path into a cavity.
+        return false;
+    }
+}
+
+bool isAttachedToExteriorShell(
+    const TopoDS_Face& face,
+    const TopTools_IndexedDataMapOfShapeListOfShape& edgeToFaces,
+    const BRepOffset_Analyse& concavity)
+{
+    bool hasAdjacentFace = false;
+    for (TopExp_Explorer edgeExp(face, TopAbs_EDGE); edgeExp.More(); edgeExp.Next()) {
+        const TopoDS_Edge edge = TopoDS::Edge(edgeExp.Current());
+        if (!edgeToFaces.Contains(edge))
+            continue;
+        const TopTools_ListOfShape& adjacent = edgeToFaces.FindFromKey(edge);
+        bool hasOtherFace = false;
+        for (TopTools_ListIteratorOfListOfShape it(adjacent); it.More(); it.Next()) {
+            if (!TopoDS::Face(it.Value()).IsSame(face)) {
+                hasOtherFace = true;
+                hasAdjacentFace = true;
+                break;
+            }
+        }
+        if (hasOtherFace && mayTraverseExteriorShell(concavity, edge))
+            return true;
+    }
+    // A closed analytic outer face (for example an unsplit sphere) has no
+    // neighbouring face across which to classify concavity.  Keep it; a hole
+    // floor/wall always has a distinct adjacent cavity face.
+    return !hasAdjacentFace;
+}
+
+TopoDS_Face makeTopOpenSectionFace(const TopoDS_Shape& workpiece)
+{
+    Bnd_Box workpieceBounds;
+    BRepBndLib::Add(workpiece, workpieceBounds);
+    if (workpieceBounds.IsVoid())
+        return {};
+    Standard_Real xMin, yMin, zMin, xMax, yMax, zMax;
+    workpieceBounds.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+    const double extent = std::max({xMax - xMin, yMax - yMin, zMax - zMin, 1.0});
+    const double tolerance = std::max(1e-4, extent * 1e-4);
+
+    struct TopWire { TopoDS_Wire wire; double diagonal; };
+    std::vector<TopWire> topWires;
+    for (TopExp_Explorer exp(workpiece, TopAbs_WIRE); exp.More(); exp.Next()) {
+        const TopoDS_Wire wire = TopoDS::Wire(exp.Current());
+        if (wire.IsNull() || !wire.Closed()
+            || std::any_of(topWires.cbegin(), topWires.cend(),
+                           [&wire](const TopWire& existing) {
+                               return existing.wire.IsSame(wire);
+                           })) {
+            continue;
+        }
+        Bnd_Box bounds;
+        BRepBndLib::Add(wire, bounds);
+        if (bounds.IsVoid())
+            continue;
+        Standard_Real wxMin, wyMin, wzMin, wxMax, wyMax, wzMax;
+        bounds.Get(wxMin, wyMin, wzMin, wxMax, wyMax, wzMax);
+        if (wzMax < zMax - tolerance || wzMax - wzMin > tolerance)
+            continue;
+        const double dx = wxMax - wxMin;
+        const double dy = wyMax - wyMin;
+        topWires.push_back({wire, std::sqrt(dx * dx + dy * dy)});
+    }
+    if (topWires.size() < 2)
+        return {};
+
+    std::sort(topWires.begin(), topWires.end(),
+              [](const TopWire& left, const TopWire& right) {
+                  return left.diagonal > right.diagonal;
+              });
+    BRepBuilderAPI_MakeFace faceBuilder(topWires.front().wire);
+    for (std::size_t index = 1; index < topWires.size(); ++index)
+        faceBuilder.Add(topWires[index].wire);
+    return faceBuilder.IsDone() ? faceBuilder.Face() : TopoDS_Face();
+}
+
 } // namespace
 
 std::uint64_t LaserToolpathBuilder::computeFaceSignature(const TopoDS_Face& face)
@@ -867,33 +981,17 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
                                         params.machiningBeamDirection, params);
     case ExtractionStrategy::PlanarFaceWires: {
         QString info;
-        TopoDS_Face face = selectMachiningFace(
-            workpiece, params.machiningBeamDirection, &info);
+        const std::vector<TopoDS_Face> faces = selectTopVisibleFacesFromPositiveZ(
+            workpiece, &info);
         if (classificationOut)
             *classificationOut = {};
-        if (face.IsNull())
-            return extractContours(workpiece);  // safety net: legacy outer wires
-        return extractContoursFromFaces(workpiece, {face},
+        if (faces.empty())
+            return {};
+        return extractContoursFromFaces(workpiece, faces,
                                         params.machiningBeamDirection, params);
     }
-    case ExtractionStrategy::TubeClassification:
-    case ExtractionStrategy::Auto:
+    case ExtractionStrategy::LargestSmoothConnectedSurface:
         break;  // face-classification path below
-    }
-
-    // Auto: prefer a planar machining face; only fall back to the tube/
-    // classification path when no planar face faces the beam (e.g. a tube side
-    // or an ambiguous shape that the user should pick manually).
-    if (params.strategy == ExtractionStrategy::Auto) {
-        QString info;
-        TopoDS_Face face = selectMachiningFace(
-            workpiece, params.machiningBeamDirection, &info);
-        if (!face.IsNull() && isPlanarFace(face)) {
-            if (classificationOut)
-                *classificationOut = {};
-            return extractContoursFromFaces(workpiece, {face},
-                                            params.machiningBeamDirection, params);
-        }
     }
 
     // ── Step 1: classify faces by smooth connectivity ────────────────────
@@ -902,67 +1000,33 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(
     if (classificationOut)
         *classificationOut = classification;
 
-    // Fallback: if no meaningful classification (no outer or no cross-section),
-    // use the legacy OuterWire-based extraction but filter out inner surfaces.
-    if (!classification.hasOuter() || !classification.hasCrossSection()) {
-        // Collect inner face set for filtering
-        TopTools_IndexedMapOfShape innerFaceMap;
-        for (const auto* ig : classification.innerGroups())
-            for (const auto& f : ig->faces)
-                innerFaceMap.Add(f);
+    if (!classification.hasOuter())
+        return extractContours(workpiece); // malformed/empty topology safety net
 
-        // Use legacy extraction but skip wires from inner faces
-        std::vector<LaserContour> result;
-        struct OwnedWire {
-            TopoDS_Wire wire;
-            TopoDS_Face owner;
-        };
-        std::vector<OwnedWire> outerWires;
-        auto isAlreadyCollected = [&](const TopoDS_Wire& w) {
-            for (const auto& ow : outerWires)
-                if (ow.wire.IsSame(w)) return true;
-            return false;
-        };
-        for (TopExp_Explorer faceExp(workpiece, TopAbs_FACE); faceExp.More(); faceExp.Next()) {
-            const TopoDS_Face& face = TopoDS::Face(faceExp.Current());
-            if (innerFaceMap.Contains(face))
-                continue;  // skip inner surfaces
-            TopoDS_Wire outer = BRepTools::OuterWire(face);
-            if (!outer.IsNull() && !isAlreadyCollected(outer))
-                outerWires.push_back({outer, face});
-        }
-        TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
-        TopExp::MapShapesAndAncestors(
-            workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
-        int wireIdx = 0;
-        for (auto& owned : outerWires) {
-            LaserContour c;
-            c.wire = owned.wire;
-            // 中文翻译：外轮廓 %1
-            c.name = QString::fromUtf8("Outer contour %1").arg(++wireIdx);
-            bindOwnedWireSurfaceContext(c, owned.owner, edgeToFaces);
-            result.push_back(std::move(c));
-        }
-        for (auto& c : result)
-            computeContourSignature(c);
-        return result;
-    }
+    // The generic default deliberately uses the largest smooth-connected
+    // exterior group itself as the machining surface.  Unlike the removed
+    // pipe/section mode, it does not require a separately inferred section.
+    const std::vector<TopoDS_Face>& outerFaces = classification.outerGroup()->faces;
+    std::vector<LaserContour> result = extractContoursFromFaces(
+        workpiece, outerFaces, params.machiningBeamDirection, params);
 
-    // Collect outer and cross-section faces for normal computation
-    std::vector<TopoDS_Face> outerFaces;
-    if (classification.outerGroup())
-        outerFaces = classification.outerGroup()->faces;
-
+    // Keep the classified section faces for the geometric calculations that
+    // follow contour selection.  They do not participate in selecting the
+    // contour, but they anchor each point's machining normal to the selected
+    // outer surface, provide the adjacent-section normal, and let the lead-in
+    // safety rules reject a direction that points into the section side.
     std::vector<TopoDS_Face> crossFaces;
-    for (const auto* cg : classification.crossSectionGroups())
-        for (const auto& f : cg->faces)
-            crossFaces.push_back(f);
-
-    std::vector<LaserContour> result = extractTubeContoursFromFaceGroups(
-        workpiece, outerFaces, crossFaces, params);
+    for (const FaceGroup* group : classification.crossSectionGroups()) {
+        if (group)
+            crossFaces.insert(crossFaces.end(), group->faces.begin(), group->faces.end());
+    }
+    for (LaserContour& contour : result) {
+        bindLeadInSurfaceContext(contour, outerFaces, crossFaces);
+        discretizeContourWithClassification(contour, outerFaces, crossFaces,
+                                            params.deflection);
+    }
     if (result.empty()) {
-        // A classified but unusable boundary should retain the established
-        // legacy fallback for the one-click automatic workflow.
+        // A classified but unusable boundary retains the established fallback.
         ContourExtractionParams fallback;
         fallback.smoothAngleThresholdDeg = params.smoothAngleThresholdDeg;
         fallback.deflection = params.deflection;
@@ -1034,6 +1098,266 @@ bool LaserToolpathBuilder::isPlanarFace(const TopoDS_Face& face)
         return false;
     BRepAdaptor_Surface surf(face, Standard_True);
     return surf.GetType() == GeomAbs_Plane;
+}
+
+std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(
+    const TopoDS_Shape& workpiece, QString* info)
+{
+    if (info)
+        info->clear();
+
+    std::vector<TopoDS_Face> result;
+    if (workpiece.IsNull())
+        return result;
+
+    // An open vertical tube has no planar cap face: its valid Z-top machining
+    // surface is the annular boundary formed by the outer and inner top wires.
+    // Prefer that explicit highest cross-section over cavity faces.
+    const TopoDS_Face topOpenSection = makeTopOpenSectionFace(workpiece);
+    if (!topOpenSection.IsNull())
+        return {topOpenSection};
+
+    // Assemblies and imported open shells do not always provide usable mass
+    // properties.  Their bounding-box centre is still a stable interior-side
+    // reference for rejecting the inside of a bore or perforation.
+    Bnd_Box workpieceBounds;
+    BRepBndLib::Add(workpiece, workpieceBounds);
+    if (workpieceBounds.IsVoid())
+        return result;
+    Standard_Real workpieceXMin, workpieceYMin, workpieceZMin;
+    Standard_Real workpieceXMax, workpieceYMax, workpieceZMax;
+    workpieceBounds.Get(workpieceXMin, workpieceYMin, workpieceZMin,
+                        workpieceXMax, workpieceYMax, workpieceZMax);
+    GProp_GProps volumeProperties;
+    BRepGProp::VolumeProperties(workpiece, volumeProperties);
+    const bool hasVolumeCenter = std::abs(volumeProperties.Mass()) > 1e-9;
+    const gp_Pnt volumeCenter = hasVolumeCenter
+        ? volumeProperties.CentreOfMass()
+        : gp_Pnt((workpieceXMin + workpieceXMax) * 0.5,
+                 (workpieceYMin + workpieceYMax) * 0.5,
+                 (workpieceZMin + workpieceZMax) * 0.5);
+
+    struct FaceSample {
+        gp_Pnt point;
+        double z{0.0};
+    };
+    struct FaceCandidate {
+        TopoDS_Face face;
+        std::vector<FaceSample> samples;
+    };
+
+    // A face can be the first hit of a -Z ray only where its outward normal has
+    // a positive Z component.  Collect those cheap candidates first; their
+    // cavity/exterior relationship is resolved from boundary concavity before
+    // they enter the expensive ray intersector.
+    constexpr std::array<double, 5> kUvFractions{0.1, 0.3, 0.5, 0.7, 0.9};
+    constexpr int kMaxSamplesPerFace = 8;
+    std::vector<FaceCandidate> candidates;
+    for (TopExp_Explorer faceExp(workpiece, TopAbs_FACE); faceExp.More(); faceExp.Next()) {
+        const TopoDS_Face face = TopoDS::Face(faceExp.Current());
+        Standard_Real uMin, uMax, vMin, vMax;
+        BRepTools::UVBounds(face, uMin, uMax, vMin, vMax);
+        if (!std::isfinite(uMin) || !std::isfinite(uMax)
+            || !std::isfinite(vMin) || !std::isfinite(vMax)) {
+            continue;
+        }
+
+        BRepAdaptor_Surface surface(face, Standard_True);
+        const bool isPlanar = surface.GetType() == GeomAbs_Plane;
+        // A bore wall can have a small locally upward-facing strip, even
+        // though the face as a whole points toward the material centre.  Test
+        // the face-wide orientation before accepting that strip as a Z-top
+        // surface.  A true exterior skin points away from the reference
+        // centre on average; a horizontal cylinder remains neutral and is
+        // deliberately kept for its exposed upper half.
+        if (!isPlanar) {
+            double radialOrientationSum = 0.0;
+            int radialOrientationCount = 0;
+            for (double uFraction : kUvFractions) {
+                const double u = uMin + (uMax - uMin) * uFraction;
+                for (double vFraction : kUvFractions) {
+                    const double v = vMin + (vMax - vMin) * vFraction;
+                    BRepClass_FaceClassifier classifier(
+                        face, gp_Pnt2d(u, v), 1e-7, Standard_True);
+                    if (classifier.State() != TopAbs_IN && classifier.State() != TopAbs_ON)
+                        continue;
+                    gp_Pnt point;
+                    gp_Vec dU;
+                    gp_Vec dV;
+                    surface.D1(u, v, point, dU, dV);
+                    gp_Vec normal = dU.Crossed(dV);
+                    if (normal.SquareMagnitude() <= 1e-18)
+                        continue;
+                    if (face.Orientation() == TopAbs_REVERSED)
+                        normal.Reverse();
+                    normal.Normalize();
+                    const gp_Vec fromVolumeCenter(volumeCenter, point);
+                    if (fromVolumeCenter.Magnitude() <= 1e-8)
+                        continue;
+                    radialOrientationSum += normal.Dot(fromVolumeCenter)
+                        / fromVolumeCenter.Magnitude();
+                    ++radialOrientationCount;
+                }
+            }
+            if (radialOrientationCount > 0
+                && radialOrientationSum < -1e-3 * radialOrientationCount) {
+                continue;
+            }
+        }
+        std::vector<FaceSample> samples;
+        samples.reserve(kUvFractions.size() * kUvFractions.size());
+        auto appendSample = [&](double u, double v) {
+            gp_Pnt point;
+            gp_Vec dU;
+            gp_Vec dV;
+            surface.D1(u, v, point, dU, dV);
+            gp_Vec normal = dU.Crossed(dV);
+            if (normal.SquareMagnitude() <= 1e-18)
+                return;
+            if (face.Orientation() == TopAbs_REVERSED)
+                normal.Reverse();
+            normal.Normalize();
+            // STEP imports occasionally reverse a planar cap's face
+            // orientation.  A Z-parallel plane is still a valid top-layer
+            // candidate; the later first-hit ray decides whether it is
+            // actually exposed.  Curved faces still require +Z outward
+            // normal so side/hole walls remain cheap rejects.
+            if ((!isPlanar && normal.Z() <= 1e-6)
+                || (isPlanar && std::abs(normal.Z()) <= 1e-6)) {
+                return;
+            }
+
+            // A radial/side blind-hole face points into the solid's
+            // volume, while a true exterior face points away from its
+            // volume centre.  This rejects those cavity faces before the
+            // expensive trimmed-face and ray tests.  The later edge test
+            // still handles axial blind holes whose floor faces upward.
+            if (!isPlanar) {
+                gp_Vec fromVolumeCenter(volumeCenter, point);
+                if (fromVolumeCenter.Magnitude() > 1e-8
+                    && normal.Dot(fromVolumeCenter) < -1e-7) {
+                    return;
+                }
+            }
+
+            // Test the trimmed face only after the cheap normal test.
+            // Vertical side and hole walls therefore avoid the more
+            // expensive 2-D face classifier altogether.
+            BRepClass_FaceClassifier classifier(
+                face, gp_Pnt2d(u, v), 1e-7, Standard_True);
+            if (classifier.State() != TopAbs_IN && classifier.State() != TopAbs_ON)
+                return;
+            samples.push_back({point, point.Z()});
+        };
+        for (double uFraction : kUvFractions) {
+            const double u = uMin + (uMax - uMin) * uFraction;
+            for (double vFraction : kUvFractions) {
+                const double v = vMin + (vMax - vMin) * vFraction;
+                appendSample(u, v);
+            }
+        }
+        // Dense perforations can cover all coarse UV probes on an otherwise
+        // valid large outer face.  A face-local triangulation respects trims
+        // and holes, so its triangle UV centroids provide real interior
+        // probes.  Refine only that exceptional face instead of making every
+        // hole wall pay a meshing cost.
+        if (samples.empty()) {
+            BRepMesh_IncrementalMesh mesh(face, 0.1, Standard_False, 0.5, Standard_True);
+            TopLoc_Location location;
+            const Handle(Poly_Triangulation) triangulation =
+                BRep_Tool::Triangulation(face, location);
+            if (!triangulation.IsNull() && triangulation->HasUVNodes()) {
+                for (Standard_Integer index = 1;
+                     index <= triangulation->NbTriangles() && samples.size() < 8;
+                     ++index) {
+                    Standard_Integer first, second, third;
+                    triangulation->Triangle(index).Get(first, second, third);
+                    const gp_Pnt2d firstUv = triangulation->UVNode(first);
+                    const gp_Pnt2d secondUv = triangulation->UVNode(second);
+                    const gp_Pnt2d thirdUv = triangulation->UVNode(third);
+                    appendSample((firstUv.X() + secondUv.X() + thirdUv.X()) / 3.0,
+                                 (firstUv.Y() + secondUv.Y() + thirdUv.Y()) / 3.0);
+                }
+            }
+        }
+        if (samples.empty()) {
+            constexpr int kRefinedSampleCount = 11;
+            for (int uIndex = 1; uIndex <= kRefinedSampleCount; ++uIndex) {
+                const double u = uMin + (uMax - uMin) * uIndex
+                    / (kRefinedSampleCount + 1.0);
+                for (int vIndex = 1; vIndex <= kRefinedSampleCount; ++vIndex) {
+                    const double v = vMin + (vMax - vMin) * vIndex
+                        / (kRefinedSampleCount + 1.0);
+                    appendSample(u, v);
+                }
+            }
+        }
+        if (samples.empty())
+            continue;
+        std::sort(samples.begin(), samples.end(),
+                  [](const FaceSample& left, const FaceSample& right) {
+                      return left.z > right.z;
+                  });
+        if (static_cast<int>(samples.size()) > kMaxSamplesPerFace)
+            samples.resize(kMaxSamplesPerFace);
+        candidates.push_back({face, std::move(samples)});
+    }
+
+    if (candidates.empty()) {
+        if (info)
+            *info = QStringLiteral("no upward-facing surface is available for +Z visibility analysis");
+        return result;
+    }
+
+    // A cavity bottom can be visible through a blind-hole opening, so Z depth
+    // alone cannot define the machining exterior.  Filter candidates by their
+    // boundary topology before any ray work: a true exterior face connects to
+    // a neighbour across a convex/tangent edge, whereas a hole floor or wall
+    // is bounded entirely by concave cavity edges.
+    TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+    TopExp::MapShapesAndAncestors(workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
+    BRepOffset_Analyse concavity(workpiece, M_PI / 180.0);
+    if (concavity.IsDone()) {
+        candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+                                        [&edgeToFaces, &concavity](const FaceCandidate& candidate) {
+                                            return !isAttachedToExteriorShell(
+                                                candidate.face, edgeToFaces, concavity);
+                                        }),
+                         candidates.end());
+    }
+    if (candidates.empty()) {
+        if (info)
+            *info = QStringLiteral("no upward-facing exterior shell is available for +Z visibility analysis");
+        return result;
+    }
+
+    const double zSpan = std::max(1.0, workpieceZMax - workpieceZMin);
+    const double rayStartZ = workpieceZMax + zSpan * 0.01 + 1e-3;
+    const double rayLength = rayStartZ - workpieceZMin + zSpan * 0.01 + 1e-3;
+
+    // Intersect the complete workpiece, rather than only the candidates.
+    // A tilted hole wall can locally face +Z and therefore be a candidate, but
+    // its -Z ray must first hit the exterior skin above it.  Loading only
+    // candidates made such a wall incorrectly hit itself.
+    IntCurvesFace_ShapeIntersector intersector;
+    intersector.Load(workpiece, 1e-7);
+    for (const FaceCandidate& candidate : candidates) {
+        for (const FaceSample& faceSample : candidate.samples) {
+            const gp_Pnt& sample = faceSample.point;
+            const gp_Lin ray(gp_Pnt(sample.X(), sample.Y(), rayStartZ),
+                             gp_Dir(0.0, 0.0, -1.0));
+            intersector.PerformNearest(ray, 0.0, rayLength);
+            if (intersector.IsDone() && intersector.NbPnt() > 0
+                && intersector.Face(1).IsSame(candidate.face)) {
+                result.push_back(candidate.face);
+                break;
+            }
+        }
+    }
+
+    if (result.empty() && info)
+        *info = QStringLiteral("no face is visible from the +Z parallel-light direction");
+    return result;
 }
 
 TopoDS_Face LaserToolpathBuilder::selectMachiningFace(

@@ -12,6 +12,9 @@
 #include <QTextStream>
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
+#include <BRep_Builder.hxx>
+#include <Bnd_Box.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <GProp_GProps.hxx>
@@ -28,6 +31,7 @@
 #include <gp_Dir.hxx>
 
 QTextStream out(stdout);
+bool g_planeOnly{false};
 
 QString surfaceTypeName(const TopoDS_Face& face)
 {
@@ -59,6 +63,14 @@ void printShapeStats(const TopoDS_Shape& shape)
     for (TopExp_Explorer w(shape, TopAbs_WIRE); w.More(); w.Next()) ++wireCount;
     out << "  shape stats: faces=" << faceCount << " edges=" << edgeCount
         << " wires=" << wireCount << "\n";
+    Bnd_Box bounds;
+    BRepBndLib::Add(shape, bounds);
+    if (!bounds.IsVoid()) {
+        Standard_Real xMin, yMin, zMin, xMax, yMax, zMax;
+        bounds.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+        out << "  bounds=(" << xMin << "," << yMin << "," << zMin << ")..("
+            << xMax << "," << yMax << "," << zMax << ")\n";
+    }
     for (auto it = faceTypes.constBegin(); it != faceTypes.constEnd(); ++it)
         out << "    " << it.key() << ": " << it.value() << "\n";
 }
@@ -130,12 +142,74 @@ void diagnoseShape(const TopoDS_Shape& shape, const QString& label)
 {
     out << "\n======== " << label << " ========\n";
     printShapeStats(shape);
+    for (TopExp_Explorer exp(shape, TopAbs_FACE); exp.More(); exp.Next()) {
+        const TopoDS_Face face = TopoDS::Face(exp.Current());
+        if (!LaserToolpathBuilder::isPlanarFace(face))
+            continue;
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(face, props);
+        gp_Dir normal = BRepAdaptor_Surface(face, Standard_True).Plane().Axis().Direction();
+        if (face.Orientation() == TopAbs_REVERSED)
+            normal.Reverse();
+        const gp_Pnt center = props.CentreOfMass();
+        out << "  plane center=(" << center.X() << "," << center.Y() << "," << center.Z()
+            << ") normal=(" << normal.X() << "," << normal.Y() << "," << normal.Z()
+            << ") area=" << props.Mass() << "\n";
+    }
 
     const gp_Dir beamDown(0, 0, -1);
     const gp_Dir beamSide(0, -1, 0);
 
-    runStrategy(shape, ExtractionStrategy::Auto, beamDown,
-                QStringLiteral("Auto"), 5.0);
+    {
+        QElapsedTimer timer;
+        timer.start();
+        QString selectionInfo;
+        const std::vector<TopoDS_Face> visibleFaces =
+            LaserToolpathBuilder::selectTopVisibleFacesFromPositiveZ(shape, &selectionInfo);
+        QMap<QString, int> types;
+        double totalArea = 0.0;
+        for (const TopoDS_Face& face : visibleFaces) {
+            GProp_GProps props;
+            BRepGProp::SurfaceProperties(face, props);
+            types[surfaceTypeName(face)]++;
+            totalArea += props.Mass();
+        }
+        out << "\n  -- strategy=PlaneZLight --\n"
+            << "    visible faces: " << visibleFaces.size()
+            << ", area=" << totalArea << ", " << timer.elapsed() << " ms";
+        if (!selectionInfo.isEmpty())
+            out << ", info=" << selectionInfo.toStdString().c_str();
+        out << "\n";
+        for (auto it = types.constBegin(); it != types.constEnd(); ++it)
+            out << "    " << it.key().toStdString().c_str() << ": "
+                << it.value() << "\n";
+        for (const TopoDS_Face& face : visibleFaces) {
+            GProp_GProps props;
+            BRepGProp::SurfaceProperties(face, props);
+            const gp_Pnt center = props.CentreOfMass();
+            BRepAdaptor_Surface surface(face, Standard_True);
+            Standard_Real uMin, uMax, vMin, vMax;
+            BRepTools::UVBounds(face, uMin, uMax, vMin, vMax);
+            gp_Pnt point;
+            gp_Vec dU;
+            gp_Vec dV;
+            surface.D1((uMin + uMax) * 0.5, (vMin + vMax) * 0.5, point, dU, dV);
+            gp_Vec normal = dU.Crossed(dV);
+            if (face.Orientation() == TopAbs_REVERSED)
+                normal.Reverse();
+            if (normal.SquareMagnitude() > 1e-18)
+                normal.Normalize();
+            out << "    selected " << surfaceTypeName(face).toStdString().c_str()
+                << " center=(" << center.X() << "," << center.Y()
+                << "," << center.Z() << ") normal=(" << normal.X() << ","
+                << normal.Y() << "," << normal.Z() << ") area=" << props.Mass() << "\n";
+        }
+    }
+    if (g_planeOnly)
+        return;
+
+    runStrategy(shape, ExtractionStrategy::LargestSmoothConnectedSurface, beamDown,
+                QStringLiteral("LargestSmoothConnectedSurface"), 5.0);
     // Skip the slow 850-contour strategies; focus on the manual-selection
     // scenarios that reproduce the user's failures.
 
@@ -230,11 +304,15 @@ int diagnoseStepFile(const QString& path)
     const Handle(XCAFDoc_ShapeTool) shapeTool = document->shapeTool();
 
     out << "top-level workpiece labels: " << labels.Length() << "\n";
+    TopoDS_Compound globalWorkpiece;
+    BRep_Builder globalBuilder;
+    globalBuilder.MakeCompound(globalWorkpiece);
     int sourceIndex = 0;
     for (int li = 1; li <= labels.Length(); ++li) {
         const TopoDS_Shape shape = shapeTool->GetShape(labels.Value(li));
         if (shape.IsNull())
             continue;
+        globalBuilder.Add(globalWorkpiece, shape);
         out << "label " << li << " top-level type: "
             << shape.ShapeType() << "\n";
         if (shape.ShapeType() == TopAbs_COMPOUND
@@ -251,6 +329,7 @@ int diagnoseStepFile(const QString& path)
                     + QStringLiteral("/source-%1").arg(++sourceIndex));
         }
     }
+    diagnoseShape(globalWorkpiece, QFileInfo(path).fileName() + QStringLiteral("/global"));
     return 0;
 }
 
@@ -263,7 +342,12 @@ int main(int argc, char* argv[])
     }
     int rc = 0;
     for (int i = 1; i < app.arguments().size(); ++i) {
-        if (const int r = diagnoseStepFile(app.arguments().at(i)); r != 0)
+        const QString argument = app.arguments().at(i);
+        if (argument == QStringLiteral("--plane-only")) {
+            g_planeOnly = true;
+            continue;
+        }
+        if (const int r = diagnoseStepFile(argument); r != 0)
             rc = r;
     }
     return rc;
