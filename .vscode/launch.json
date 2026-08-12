@@ -2,14 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // F5 先构建，再启动部署到 x64/Debug 的 ACS+GTN 运行产物。
+      // F5 先构建，再启动隔离的 Ninja ACS+GTN 运行产物。
       "name": "Debug LaserCNC",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/x64/Debug/LaserCNC.exe",
+      "program": "${workspaceFolder}/x64/ninja/Debug/LaserCNC.exe",
       "args": [],
       "stopAtEntry": false,
-      "cwd": "${workspaceFolder}/x64/Debug",
+      "cwd": "${workspaceFolder}/x64/ninja/Debug",
       "environment": [],
       "console": "integratedTerminal",
       "preLaunchTask": "CMake: build"

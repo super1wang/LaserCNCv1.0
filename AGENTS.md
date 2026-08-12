@@ -10,14 +10,17 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - Visual Studio/MSBuild：`build-vs/`，生成并打开
   `build-vs/LaserCNC.sln`，使用 `vs-acs-gtn` preset 或直接 MSBuild。
 - 禁止使用旧 `build/`，禁止让两种生成器共享任何生成树。
-- 两条路线的 `LaserCNC.exe` 和运行依赖都只输出到根目录
-  `x64/Debug` 或 `x64/Release`；中间产物留在各自生成树。
+- 两条路线的 `LaserCNC.exe` 和运行依赖按生成器、功能开关和配置输出：日常 Ninja 为
+  `x64/ninja/Debug` 或 `x64/ninja/Release`，VS/MSBuild 为 `x64/vs/Debug` 或
+  `x64/vs/Release`，ASan 与 all-off 分别为 `x64/ninja-asan/<Config>` 和
+  `x64/ninja-all-off/<Config>`；中间产物留在各自生成树。其它 Ninja 开关也使用各自的
+  `ninja-<variant>/<Config>` 目录。
 - `/m`、`/nologo` 只传给 MSBuild，绝不传给 Ninja。两条路线不得并发构建。
 
 日常 CMake/Ninja：
 
 ```powershell
-cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
+cmd /c "call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
 ```
 
 Visual Studio/MSBuild：

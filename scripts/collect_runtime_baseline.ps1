@@ -14,7 +14,9 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 if ([string]::IsNullOrWhiteSpace($Executable)) {
-    $Executable = Join-Path $repoRoot "x64\Debug\LaserCNC.exe"
+    # VS Code defaults to the Ninja route; pass -Executable for the isolated
+    # Visual Studio build at x64\vs\Debug\LaserCNC.exe.
+    $Executable = Join-Path $repoRoot "x64\ninja\Debug\LaserCNC.exe"
 }
 $Executable = (Resolve-Path $Executable).Path
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {

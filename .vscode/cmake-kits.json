@@ -4,8 +4,7 @@
     "visualStudio": "8580ef5c",
     "visualStudioArchitecture": "x64",
     "preferredGenerator": {
-      "name": "Visual Studio 17 2022",
-      "platform": "x64"
+      "name": "Ninja Multi-Config"
     },
     "isTrusted": true
   }

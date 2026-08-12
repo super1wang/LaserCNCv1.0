@@ -25,25 +25,57 @@ if(WIN32 AND MSVC)
             "Unable to derive the MSVC/Windows SDK environment: CMAKE_CXX_COMPILER or CMAKE_RC_COMPILER is not configured")
     endif()
 
-    if(IS_ABSOLUTE "${CMAKE_RC_COMPILER}")
-        get_filename_component(_lcnc_sdk_arch_dir "${CMAKE_RC_COMPILER}" DIRECTORY)
+    # The Visual Studio generator deliberately caches the resource compiler as
+    # the command name "rc".  Resolve that command first: its SDK bin path is
+    # the most precise source for both the installed SDK root and version.
+    set(_lcnc_rc_compiler_path "${CMAKE_RC_COMPILER}")
+    if(NOT IS_ABSOLUTE "${_lcnc_rc_compiler_path}")
+        unset(_lcnc_rc_compiler_path CACHE)
+        unset(_lcnc_rc_compiler_path)
+        find_program(_lcnc_rc_compiler_path NAMES "${CMAKE_RC_COMPILER}")
+    endif()
+
+    if(IS_ABSOLUTE "${_lcnc_rc_compiler_path}")
+        get_filename_component(_lcnc_sdk_arch_dir "${_lcnc_rc_compiler_path}" DIRECTORY)
         get_filename_component(_lcnc_sdk_version_dir "${_lcnc_sdk_arch_dir}" DIRECTORY)
         get_filename_component(_lcnc_sdk_bin_dir "${_lcnc_sdk_version_dir}" DIRECTORY)
         get_filename_component(_lcnc_sdk_root "${_lcnc_sdk_bin_dir}" DIRECTORY)
         get_filename_component(_lcnc_sdk_version "${_lcnc_sdk_version_dir}" NAME)
     elseif(DEFINED ENV{WindowsSdkDir} AND NOT "$ENV{WindowsSdkDir}" STREQUAL ""
-           AND DEFINED CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION
-           AND NOT "${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}" STREQUAL "")
-        # The Visual Studio generator intentionally stores CMAKE_RC_COMPILER
-        # as the command name "rc", not an absolute executable path.  Resolve
-        # the SDK from the developer-command environment instead of deriving
-        # an empty root such as /Include//ucrt during a reconfigure.
-        # 中文翻译：VS 生成器的 RC 编译器为相对命令名；重配置时从开发环境解析 Windows SDK 根目录。
+           AND DEFINED ENV{WindowsSDKVersion} AND NOT "$ENV{WindowsSDKVersion}" STREQUAL "")
+        # A developer-command environment remains a valid fallback when rc is
+        # not on PATH.  WindowsSDKVersion normally carries a trailing slash.
+        # 中文翻译：当 PATH 无法解析 rc 时，使用开发者命令行提供的 Windows SDK 根目录和版本。
         file(REAL_PATH "$ENV{WindowsSdkDir}" _lcnc_sdk_root)
-        set(_lcnc_sdk_version "${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+        string(REGEX REPLACE "[/\\\\]+$" "" _lcnc_sdk_version "$ENV{WindowsSDKVersion}")
     else()
-        message(FATAL_ERROR
-            "Unable to derive the Windows SDK root: CMAKE_RC_COMPILER is not absolute and WindowsSdkDir/CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION are unavailable")
+        # IDE-triggered CMake regeneration may inherit neither WindowsSdkDir
+        # nor the SDK bin PATH.  Read the Windows Kits registration and select
+        # the newest complete kit so generated .sln builds remain self-contained.
+        # 中文翻译：IDE 自动重配置可能没有 SDK 环境变量或 PATH；从注册表定位完整 Windows SDK。
+        get_filename_component(_lcnc_sdk_root
+            "[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots;KitsRoot10]"
+            ABSOLUTE)
+        if(_lcnc_sdk_root AND EXISTS "${_lcnc_sdk_root}")
+            file(REAL_PATH "${_lcnc_sdk_root}" _lcnc_sdk_root)
+            file(GLOB _lcnc_sdk_version_dirs LIST_DIRECTORIES true
+                "${_lcnc_sdk_root}/Lib/*")
+            list(SORT _lcnc_sdk_version_dirs COMPARE NATURAL ORDER DESCENDING)
+            foreach(_lcnc_sdk_version_dir IN LISTS _lcnc_sdk_version_dirs)
+                get_filename_component(_lcnc_candidate_sdk_version
+                    "${_lcnc_sdk_version_dir}" NAME)
+                if(EXISTS "${_lcnc_sdk_root}/Include/${_lcnc_candidate_sdk_version}/ucrt"
+                   AND EXISTS "${_lcnc_sdk_root}/Lib/${_lcnc_candidate_sdk_version}/um/x64/kernel32.lib"
+                   AND EXISTS "${_lcnc_sdk_root}/Lib/${_lcnc_candidate_sdk_version}/ucrt/x64/ucrtd.lib")
+                    set(_lcnc_sdk_version "${_lcnc_candidate_sdk_version}")
+                    break()
+                endif()
+            endforeach()
+        endif()
+        if(NOT _lcnc_sdk_version)
+            message(FATAL_ERROR
+                "Unable to derive the Windows SDK root: rc is not resolvable and no complete Windows Kits 10 installation was found")
+        endif()
     endif()
 
     get_filename_component(_lcnc_msvc_arch_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
@@ -673,15 +705,33 @@ qt_add_resources(LaserCNC "lcnc_translations"
     PREFIX "/i18n"
     FILES ${LCNC_TRANSLATION_QM_FILES}
 )
-# Both supported generator trees deploy the application to the same canonical
-# runtime root. This is intentionally not a cache variable: build trees contain
-# intermediates, tests and symbols only; x64/<Config> is the sole app output.
+# Generator trees and feature variants remain independent through deployment.
+# A runtime folder contains the executable together with its matching Qt/OCC/
+# SDK DLLs, TOML and Simulator.prg, so mixing variants can run the wrong binary.
+# 中文翻译：运行目录按生成器和功能变体隔离，避免可执行文件、DLL、配置和模拟器程序混用。
 unset(LCNC_RUNTIME_OUTPUT_ROOT CACHE)
 set(LCNC_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/x64")
+set(LCNC_RUNTIME_VARIANT "" CACHE STRING
+    "Runtime deployment variant, for example ninja, ninja-asan, ninja-all-off or vs")
+if(NOT LCNC_RUNTIME_VARIANT MATCHES "^(vs|ninja(-[a-z0-9]+)*)$")
+    message(FATAL_ERROR
+        "LCNC_RUNTIME_VARIANT must be a safe named VS or Ninja variant; got '${LCNC_RUNTIME_VARIANT}'")
+endif()
+if(CMAKE_GENERATOR MATCHES "Visual Studio" AND NOT LCNC_RUNTIME_VARIANT STREQUAL "vs")
+    message(FATAL_ERROR
+        "Visual Studio builds must deploy with LCNC_RUNTIME_VARIANT=vs; got '${LCNC_RUNTIME_VARIANT}'")
+elseif(CMAKE_GENERATOR MATCHES "Ninja" AND NOT LCNC_RUNTIME_VARIANT MATCHES "^ninja")
+    message(FATAL_ERROR
+        "Ninja builds must deploy with an LCNC_RUNTIME_VARIANT beginning with ninja; got '${LCNC_RUNTIME_VARIANT}'")
+elseif(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Ninja")
+    message(FATAL_ERROR "Unsupported generator for LaserCNC runtime deployment: ${CMAKE_GENERATOR}")
+endif()
+set(LCNC_RUNTIME_OUTPUT_DIRECTORY
+    "${LCNC_RUNTIME_OUTPUT_ROOT}/${LCNC_RUNTIME_VARIANT}/$<CONFIG>")
 set_target_properties(LaserCNC PROPERTIES
     AUTOMOC ON
     AUTORCC ON
-    RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_ROOT}/$<CONFIG>"
+    RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_DIRECTORY}"
     PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/symbols/$<CONFIG>"
 )
 target_link_libraries(LaserCNC PRIVATE lcnc_app)
@@ -840,7 +890,7 @@ add_executable(lcnc_project_upgrade
 )
 target_link_libraries(lcnc_project_upgrade PRIVATE lcnc_core Qt6::Core QuaZip::QuaZip)
 set_target_properties(lcnc_project_upgrade PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_ROOT}/$<CONFIG>"
+    RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_DIRECTORY}"
 )
 
 if(BUILD_TESTING)

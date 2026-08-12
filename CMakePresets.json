@@ -21,7 +21,10 @@
       "hidden": true,
       "inherits": "base-config",
       "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build-cmake"
+      "binaryDir": "${sourceDir}/build-cmake",
+      "cacheVariables": {
+        "LCNC_RUNTIME_VARIANT": "ninja"
+      }
     },
     {
       "name": "base-vs",
@@ -29,7 +32,10 @@
       "inherits": "base-config",
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
-      "binaryDir": "${sourceDir}/build-vs"
+      "binaryDir": "${sourceDir}/build-vs",
+      "cacheVariables": {
+        "LCNC_RUNTIME_VARIANT": "vs"
+      }
     },
     {
       "name": "all-off",
@@ -38,7 +44,8 @@
       "binaryDir": "${sourceDir}/build-cmake-all-off",
       "cacheVariables": {
         "LCNC_WITH_ACS": "OFF",
-        "LCNC_WITH_GTN": "OFF"
+        "LCNC_WITH_GTN": "OFF",
+        "LCNC_RUNTIME_VARIANT": "ninja-all-off"
       }
     },
     {
@@ -47,7 +54,8 @@
       "inherits": "base-ninja",
       "binaryDir": "${sourceDir}/build-cmake-asan",
       "cacheVariables": {
-        "LCNC_ENABLE_ASAN": "ON"
+        "LCNC_ENABLE_ASAN": "ON",
+        "LCNC_RUNTIME_VARIANT": "ninja-asan"
       }
     },
     {
@@ -57,7 +65,8 @@
       "binaryDir": "${sourceDir}/build-cmake-acs",
       "cacheVariables": {
         "LCNC_WITH_ACS": "ON",
-        "LCNC_WITH_GTN": "OFF"
+        "LCNC_WITH_GTN": "OFF",
+        "LCNC_RUNTIME_VARIANT": "ninja-acs"
       }
     },
     {
@@ -67,7 +76,8 @@
       "binaryDir": "${sourceDir}/build-cmake-gtn",
       "cacheVariables": {
         "LCNC_WITH_ACS": "OFF",
-        "LCNC_WITH_GTN": "ON"
+        "LCNC_WITH_GTN": "ON",
+        "LCNC_RUNTIME_VARIANT": "ninja-gtn"
       }
     },
     {
@@ -76,7 +86,8 @@
       "inherits": "base-ninja",
       "binaryDir": "${sourceDir}/build-cmake-real-laser",
       "cacheVariables": {
-        "LCNC_WITH_REAL_LASER": "ON"
+        "LCNC_WITH_REAL_LASER": "ON",
+        "LCNC_RUNTIME_VARIANT": "ninja-real-laser"
       }
     },
     {
@@ -85,7 +96,8 @@
       "inherits": "base-ninja",
       "binaryDir": "${sourceDir}/build-cmake-quality",
       "cacheVariables": {
-        "LCNC_WARNINGS_AS_ERRORS": "ON"
+        "LCNC_WARNINGS_AS_ERRORS": "ON",
+        "LCNC_RUNTIME_VARIANT": "ninja-quality"
       }
     },
     {

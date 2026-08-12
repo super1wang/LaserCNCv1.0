@@ -1,4 +1,7 @@
 {
+  // Always honor the repository's Ninja configure/build presets instead of a
+  // user-selected generator or stale CMake Tools kit.
+  "cmake.useCMakePresets": "always",
   "cmake.configurePreset": "acs-gtn",
   "cmake.buildPreset": "acs-gtn-debug",
   "cmake.parallelJobs": 16,

@@ -2,10 +2,33 @@
   "version": "2.0.0",
   "tasks": [
     {
+      // 仅在切换/修复编译器时运行：删除 CMake 缓存而保留源码和 x64 运行产物，
+      // 再由 E 盘稳定 VS2022 工具链重新检测 Ninja 编译器。
+      "label": "CMake: reset Ninja toolchain",
+      "type": "shell",
+      "command": "call \"E:\\vs2022IDE\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --fresh --preset acs-gtn",
+      "options": {
+        "shell": {
+          "executable": "cmd.exe",
+          "args": [
+            "/d",
+            "/s",
+            "/c"
+          ]
+        }
+      },
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
       // 配置并构建独立的 build-cmake/ ACS+GTN Multi-Config 生成树。
       "label": "CMake: build",
       "type": "shell",
-      "command": "call \"C:\\Program Files\\Microsoft Visual Studio\\18\\Insiders\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16",
+      // 必须与 build-vs/ 的稳定 VS2022 v143 工具链一致；不要使用 C 盘 Insiders。
+      "command": "call \"E:\\vs2022IDE\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16",
       "options": {
         "shell": {
           "executable": "cmd.exe",
