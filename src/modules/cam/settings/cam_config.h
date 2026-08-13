@@ -8,6 +8,12 @@
 
 #include <gp_Pnt.hxx>
 
+enum class CutterCollisionProxyMode : int
+{
+    SimulatedCone = 0,
+    ModelFile = 1
+};
+
 /**
  * @brief CAM 模块持久化配置（cam.toml）。
  *
@@ -51,6 +57,23 @@ public:
     bool autoInstallWorkpiece() const { return m_autoInstallWorkpiece; }
     void setAutoInstallWorkpiece(bool enabled);
 
+    CutterCollisionProxyMode cutterCollisionProxyMode() const { return m_cutterCollisionProxyMode; }
+    void setCutterCollisionProxyMode(CutterCollisionProxyMode mode);
+
+    QString cutterNozzleModelPath() const { return m_cutterNozzleModelPath; }
+    void setCutterNozzleModelPath(const QString& path);
+
+    double simulatedConeLengthMm() const { return m_simulatedConeLengthMm; }
+    void setSimulatedConeLengthMm(double value);
+    double simulatedConeTipRadiusMm() const { return m_simulatedConeTipRadiusMm; }
+    void setSimulatedConeTipRadiusMm(double value);
+    double simulatedConeBaseRadiusMm() const { return m_simulatedConeBaseRadiusMm; }
+    void setSimulatedConeBaseRadiusMm(double value);
+    double cutterCollisionClearanceMm() const { return m_cutterCollisionClearanceMm; }
+    void setCutterCollisionClearanceMm(double value);
+    double maximumRapidSafetyOffsetMm() const { return m_maximumRapidSafetyOffsetMm; }
+    void setMaximumRapidSafetyOffsetMm(double value);
+
     double leadInLength() const { return m_leadInLength; }
     void setLeadInLength(double mm);
 
@@ -89,6 +112,12 @@ public:
     void setCutterHeadPhysicalPositionForMachine(const QString& machinePath,
                                                  const gp_Pnt& position);
 
+    QString collisionRoleForMachine(const QString& machinePath,
+                                    const QString& entry) const;
+    void setCollisionRoleForMachine(const QString& machinePath,
+                                    const QString& entry,
+                                    const QString& role);
+
     /// Legacy v4 machine-profile value.  It is accepted only to migrate XYZ
     /// into MachineConfigurationService::WorkpieceSetupTransform and is never
     /// written back to cam.toml.
@@ -124,6 +153,7 @@ private:
         gp_Pnt cutterHeadModelPosition;
         bool hasCutterHeadPhysical{false};
         gp_Pnt cutterHeadPhysicalPosition;
+        QMap<QString, QString> collisionRoles; ///< XCAF entry -> auto/head/obstacle/ignore
         bool hasWorkpieceInstallPosition{false}; // legacy input only
         gp_Pnt workpieceInstallPosition;
         bool hasAcAngleOffset{false};
@@ -145,6 +175,13 @@ private:
     QString m_machinePreset;
     lcnc::RenderQualityPreset m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     bool m_autoInstallWorkpiece{true};
+    CutterCollisionProxyMode m_cutterCollisionProxyMode{CutterCollisionProxyMode::SimulatedCone};
+    QString m_cutterNozzleModelPath;
+    double m_simulatedConeLengthMm{20.0};
+    double m_simulatedConeTipRadiusMm{0.2};
+    double m_simulatedConeBaseRadiusMm{5.0};
+    double m_cutterCollisionClearanceMm{0.5};
+    double m_maximumRapidSafetyOffsetMm{100.0};
     double m_leadInLength{5.0};
     double m_deflection{0.1};
     double m_smoothAngle{5.0};

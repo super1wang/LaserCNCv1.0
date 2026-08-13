@@ -38,9 +38,8 @@ public:
     bool isProgramRunning(QString* errorMessage = nullptr) override;
     bool flush(QString* errorMessage = nullptr) override;
 
-    void jumpToIdleZ(const MachinePose5& pose, const Tool& tool) override;
-    void jumpToPose(const MachinePose5& pose, const Tool& tool) override;
-    void jumpToCuttingZ(const MachinePose5& pose, const Tool& tool) override;
+    bool executeRapidSegment(const lcnc::cam::RapidMoveSegment& segment,
+                             const Tool& tool, QString* errorMessage = nullptr) override;
     void startCuttingHead(const Tool& tool) override;
     void stopCuttingHead() override;
     void setShutterTimings(double beforeOn, double afterOn,

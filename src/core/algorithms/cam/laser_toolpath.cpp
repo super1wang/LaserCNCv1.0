@@ -2209,3 +2209,74 @@ bool LaserToolpathBuilder::solveToolpathForOrder(
     }
     return true;
 }
+
+bool LaserToolpathBuilder::solveTransientMotionPath(
+    std::vector<ToolpathPoint>* points,
+    MachineKinematics* kinematics,
+    const lcnc::MachineModeDefinition& modeDefinition,
+    const lcnc::WorkpieceSetupTransform& workpieceSetup,
+    const lcnc::HeadToolGeometry& headToolGeometry,
+    QString* errorMessage,
+    const lcnc::SolvedMachinePose* initialPose)
+{
+    if (!points || points->size() < 2) {
+        if (errorMessage) *errorMessage = QStringLiteral("Transient motion path requires at least two points");
+        return false;
+    }
+    if (!kinematics) {
+        if (errorMessage) *errorMessage = QStringLiteral("Machine kinematics is unavailable");
+        return false;
+    }
+    QString definitionError;
+    if (!modeDefinition.isValid(&definitionError)) {
+        if (errorMessage) *errorMessage = definitionError;
+        return false;
+    }
+
+    std::vector<ToolpathPoint> solvePoints = *points;
+    if (modeDefinition.mode == lcnc::MachiningMode::Planar3Axis) {
+        for (ToolpathPoint& point : solvePoints)
+            point.normal = gp_Dir(0, 0, 1);
+    }
+    lcnc::ToolpathKinematicsRequest request;
+    request.machine = kinematics;
+    request.mode = modeDefinition.mode;
+    request.definition = modeDefinition;
+    request.workpieceSetup = workpieceSetup;
+    request.headToolGeometry = headToolGeometry;
+    request.points = &solvePoints;
+    request.previousPose = initialPose && initialPose->valid ? initialPose : nullptr;
+    lcnc::ToolpathSolverRegistry registry;
+    const std::vector<lcnc::SolvedMachinePose> poses = registry.solve(request);
+    if (poses.size() != points->size()) {
+        if (errorMessage) *errorMessage = QStringLiteral("Transient motion solver returned an invalid point count");
+        return false;
+    }
+    for (std::size_t index = 0; index < poses.size(); ++index) {
+        const lcnc::SolvedMachinePose& pose = poses[index];
+        if (!pose.valid) {
+            if (errorMessage) *errorMessage = pose.failureReason;
+            return false;
+        }
+        MachineCoord& coordinate = points->at(index).machineCoord;
+        coordinate = {};
+        coordinate.solvedPose = pose;
+        coordinate.valid = true;
+        int rotarySlot = 0;
+        for (int axisIndex = 0; axisIndex < modeDefinition.interpolatedAxes.count; ++axisIndex) {
+            const auto& slot = modeDefinition.interpolatedAxes.axes[axisIndex];
+            const double value = pose.value(axisIndex);
+            switch (slot.role) {
+            case lcnc::MachineAxisRole::LinearX: coordinate.x = value; break;
+            case lcnc::MachineAxisRole::LinearY: coordinate.y = value; break;
+            case lcnc::MachineAxisRole::LinearZ: coordinate.z = value; break;
+            default:
+                if (rotarySlot == 0) { coordinate.r1 = value; coordinate.r1Name = slot.name; }
+                else if (rotarySlot == 1) { coordinate.r2 = value; coordinate.r2Name = slot.name; }
+                ++rotarySlot;
+                break;
+            }
+        }
+    }
+    return true;
+}

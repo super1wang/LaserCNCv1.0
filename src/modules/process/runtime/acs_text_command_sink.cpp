@@ -102,38 +102,6 @@ double normalizeRotaryForAxis(const AxisMap& axes, AxisMap::SemanticAxis axis, d
         : normalizeSigned180(value);
 }
 
-QVector<AxisMap::SemanticAxis> rotaryJumpOrder(const AxisMap& axes)
-{
-    QVector<AxisMap::SemanticAxis> order;
-    auto appendIfPresent = [&](AxisMap::SemanticAxis axis) {
-        if (axes.isPresent(axis) && !order.contains(axis))
-            order.append(axis);
-    };
-
-    if (axes.axisName(AxisMap::R1).trimmed().toUpper() == QStringLiteral("C"))
-        appendIfPresent(AxisMap::R1);
-    if (axes.axisName(AxisMap::R2).trimmed().toUpper() == QStringLiteral("C"))
-        appendIfPresent(AxisMap::R2);
-
-    appendIfPresent(AxisMap::R1);
-    appendIfPresent(AxisMap::R2);
-    return order;
-}
-
-double rotaryPoseValue(const MachinePose5& pose, AxisMap::SemanticAxis axis)
-{
-    return axis == AxisMap::R1 ? pose.r1 : pose.r2;
-}
-
-double rotaryIdleVelocity(const Tool& tool, const AxisMap& axes, AxisMap::SemanticAxis axis)
-{
-    const QString axisName = axes.axisName(axis).trimmed().toUpper();
-    const double configured = axisName == QStringLiteral("C")
-        ? tool.m_dIdleCVelocity
-        : (axis == AxisMap::R1 ? tool.m_dIdleAVelocity : tool.m_dIdleA1Velocity);
-    return configured > 0 ? configured : 10.0;
-}
-
 std::optional<Axis> deviceAxisFor(const AxisMap& axes, AxisMap::SemanticAxis semanticAxis)
 {
     switch (semanticAxis) {
@@ -287,56 +255,69 @@ bool AcsTextCommandSink::isProgramRunning(QString* errorMessage)
     return m_acs->IsBufferRunning(kAcsProgramBuffer);
 }
 
-void AcsTextCommandSink::jumpToIdleZ(const MachinePose5& pose, const Tool& tool)
+bool AcsTextCommandSink::executeRapidSegment(const lcnc::cam::RapidMoveSegment& segment,
+                                              const Tool& tool,
+                                              QString* errorMessage)
 {
-    const int index = m_axisMap.controllerIndex(AxisMap::Z);
-    if (index < 0) return;
-    appendText("PTP/EV " + I(index) + ", " + D(pose.z + tool.m_dIdleZHeight)
-               + ", " + D(tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0) + "\n");
-    appendText("TILL ^MST(" + I(index) + ").#MOVE\n");
-}
-
-void AcsTextCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
-{
-    if (!m_acs) return;
-    auto emitPtp = [this](AxisMap::SemanticAxis axis, double pos, double vel) {
-        const int idx = m_axisMap.controllerIndex(axis);
-        if (idx < 0) return;
-        std::string s;
-        s += "PTP/EV ";
-        s += I(idx);
-        s += ", ";
-        s += D(pos);
-        s += ", ";
-        s += D(vel);
-        s += "\n";
-        appendText(s);
-        appendText("TILL ^MST(" + I(idx) + ").#MOVE\n");
-    };
-
-    emitPtp(AxisMap::X, pose.x, tool.m_dIdleXVelocity > 0 ? tool.m_dIdleXVelocity : 10.0);
-    emitPtp(AxisMap::Y, pose.y, tool.m_dIdleYVelocity > 0 ? tool.m_dIdleYVelocity : 10.0);
-    for (AxisMap::SemanticAxis axis : rotaryJumpOrder(m_axisMap)) {
-        const double value = normalizeRotaryForAxis(m_axisMap, axis, rotaryPoseValue(pose, axis));
-        emitPtp(axis, value, rotaryIdleVelocity(tool, m_axisMap, axis));
-        if (axis == AxisMap::R1) {
-            m_lastR1 = value;
-            m_hasLastR1 = true;
-        } else if (axis == AxisMap::R2) {
-            m_lastR2 = value;
-            m_hasLastR2 = true;
-        }
+    if (!m_acs) {
+        if (errorMessage) *errorMessage = QStringLiteral("AcsTextCommandSink: motion control not bound");
+        return false;
     }
-}
+    if (segment.movingAxisMask == 0)
+        return true;
+    if (segment.synchronization != lcnc::cam::RapidSynchronization::Coordinated) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral(
+                "A planned rapid segment requires an unsupported sequential axis order");
+        }
+        return false;
+    }
 
-void AcsTextCommandSink::jumpToCuttingZ(const MachinePose5& pose, const Tool& tool)
-{
-    const int index = m_axisMap.controllerIndex(AxisMap::Z);
-    if (index < 0) return;
-    appendText("PTP/EV " + I(index) + ", "
-               + D(pose.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate)
-               + ", " + D(tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0) + "\n");
-    appendText("TILL ^MST(" + I(index) + ").#MOVE\n");
+    // A rapid segment is a continuously solved five-axis curve sample.  Do
+    // not lower it back to a series of PTP commands: the controller would be
+    // free to move Z before A/C and no longer follow the CAM curve.
+    const std::uint8_t mask = segmentMaskFor(m_axisMap);
+    MachinePose5 target;
+    target.mask = mask;
+    target.x = segment.target.axes[static_cast<int>(AxisMap::X)];
+    target.y = segment.target.axes[static_cast<int>(AxisMap::Y)];
+    target.z = segment.target.axes[static_cast<int>(AxisMap::Z)];
+    target.r1 = normalizeRotaryForAxis(m_axisMap, AxisMap::R1,
+                                       segment.target.axes[static_cast<int>(AxisMap::R1)]);
+    target.r2 = normalizeRotaryForAxis(m_axisMap, AxisMap::R2,
+                                       segment.target.axes[static_cast<int>(AxisMap::R2)]);
+    const double rapidFeed = tool.m_dIdleXVelocity > 0 ? tool.m_dIdleXVelocity : 10.0;
+
+    applyToolMotionParams(tool, /*jump=*/true);
+    std::string text;
+    text += "XSEG/VFJA ";
+    text += m_axisMap.axisTupleText(mask).toStdString();
+    text += ", ";
+    text += aposListText(m_axisMap, mask);
+    text += ", ";
+    text += D(rapidFeed);
+    text += ", ";
+    text += D(rapidFeed);
+    text += ", 0, 0\n";
+    text += "LINE/V ";
+    text += m_axisMap.axisTupleText(mask).toStdString();
+    text += ", ";
+    text += poseCoordsText(target, mask);
+    text += ", ";
+    text += D(rapidFeed);
+    text += "\nENDS ";
+    text += m_axisMap.axisTupleText(mask).toStdString();
+    text += "\nGO ";
+    text += m_axisMap.axisTupleText(mask).toStdString();
+    text += "\nSPLIT ";
+    text += m_axisMap.axisTupleText(mask).toStdString();
+    text += "\n";
+    appendText(text);
+    m_lastR1 = target.r1;
+    m_lastR2 = target.r2;
+    m_hasLastR1 = m_axisMap.isPresent(AxisMap::R1);
+    m_hasLastR2 = m_axisMap.isPresent(AxisMap::R2);
+    return true;
 }
 
 void AcsTextCommandSink::startCuttingHead(const Tool& tool)

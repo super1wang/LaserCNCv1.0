@@ -85,35 +85,57 @@ bool GtnBufferedCommandSink::isProgramRunning(QString* errorMessage)
     return m_gtn->IsAxisMoving();
 }
 
-void GtnBufferedCommandSink::jumpToIdleZ(const MachinePose5& pose, const Tool& tool)
+bool GtnBufferedCommandSink::executeRapidSegment(const lcnc::cam::RapidMoveSegment& segment,
+                                                  const Tool& tool,
+                                                  QString* errorMessage)
 {
-    if (!m_gtn) return;
-	m_gtn->MoveToPosition(Axis::Z,
-                        tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0,
-                        pose.z + tool.m_dIdleZHeight);
-}
+    if (!m_gtn) {
+        if (errorMessage) *errorMessage = QStringLiteral("GtnBufferedCommandSink: motion control not bound");
+        return false;
+    }
+    if (segment.movingAxisMask == 0)
+        return true;
+    if (segment.synchronization != lcnc::cam::RapidSynchronization::Coordinated) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral(
+                "A planned rapid segment requires an unsupported sequential axis order");
+        }
+        return false;
+    }
 
-void GtnBufferedCommandSink::jumpToPose(const MachinePose5& pose, const Tool& tool)
-{
-    if (!m_gtn) return;
-    auto move = [this](AxisMap::SemanticAxis axis, double position, double velocity) {
-        const auto name = m_axisMap.axisName(axis).toStdString();
-        const auto physicalAxis = magic_enum::enum_cast<Axis>(name);
-        if (m_axisMap.isPresent(axis) && physicalAxis)
-			m_gtn->MoveToPosition(*physicalAxis, velocity > 0 ? velocity : 10.0, position);
-    };
-    move(AxisMap::X, pose.x, tool.m_dIdleXVelocity);
-    move(AxisMap::Y, pose.y, tool.m_dIdleYVelocity);
-    move(AxisMap::R1, pose.r1, tool.m_dIdleAVelocity);
-    move(AxisMap::R2, pose.r2, tool.m_dIdleA1Velocity);
-}
-
-void GtnBufferedCommandSink::jumpToCuttingZ(const MachinePose5& pose, const Tool& tool)
-{
-    if (!m_gtn) return;
-	m_gtn->MoveToPosition(Axis::Z,
-                        tool.m_dIdleZVelocity > 0 ? tool.m_dIdleZVelocity : 10.0,
-                        pose.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate);
+    // GTN point-to-point calls schedule individual axes and therefore cannot
+    // preserve a CAM-certified TCP path.  Execute each planned sample as its
+    // own coordinated line and wait for it before the next sample is built.
+    // This is intentionally conservative; a later FIFO batching optimization
+    // must retain exactly the same coordinate-line semantics.
+    Tool rapidTool = tool;
+    rapidTool.m_dLineVelocity = tool.m_dIdleXVelocity > 0 ? tool.m_dIdleXVelocity : 10.0;
+    rapidTool.m_dLineAcc = tool.m_dIdleXYAccDec > 0 ? tool.m_dIdleXYAccDec : tool.m_dLineAcc;
+    rapidTool.m_dLineJerk = tool.m_dIdleXYJerk > 0 ? tool.m_dIdleXYJerk : tool.m_dLineJerk;
+    if (!m_gtn->InitCrd(rapidTool)) {
+        if (errorMessage) *errorMessage = QStringLiteral("GTN rapid coordinate initialization failed");
+        return false;
+    }
+    m_gtn->SetJumpAccJerk(rapidTool);
+    const std::array<double, 5> target{
+        segment.target.axes[static_cast<int>(AxisMap::X)],
+        segment.target.axes[static_cast<int>(AxisMap::Y)],
+        segment.target.axes[static_cast<int>(AxisMap::Z)],
+        segment.target.axes[static_cast<int>(AxisMap::R1)],
+        segment.target.axes[static_cast<int>(AxisMap::R2)]};
+    if (!m_gtn->OffsetLineTo(target, m_axisMap.activeCount(), rapidTool)
+        || !m_gtn->SendCommand()) {
+        if (errorMessage) *errorMessage = QStringLiteral("GTN coordinated rapid command failed");
+        return false;
+    }
+    while (m_gtn->IsAxisMoving()) {
+        if (m_token && m_token->isStopping()) {
+            if (errorMessage) *errorMessage = QStringLiteral("Cutting has been interrupted");
+            return false;
+        }
+        QThread::msleep(10);
+    }
+    return true;
 }
 
 void GtnBufferedCommandSink::startCuttingHead(const Tool& tool)

@@ -2,6 +2,7 @@
 // pipeline, reporting per-contour success/failure, error reason and timing.
 // Invoked manually with a STEP path - not a unit test.
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/travel_path_planner.h"
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/document/lcnc_document.h"
 
@@ -12,6 +13,7 @@
 #include <QTextStream>
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBndLib.hxx>
 #include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
@@ -29,9 +31,79 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_Shapetool.hxx>
 #include <gp_Dir.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 
 QTextStream out(stdout);
 bool g_planeOnly{false};
+bool g_travelOnly{false};
+
+lcnc::cam_algo::TravelEndpoint travelEndpoint(std::uint64_t id, const gp_Pnt& point)
+{
+    lcnc::cam_algo::TravelEndpoint result;
+    result.contourId = id;
+    result.pose.axes = {point.X(), point.Y(), point.Z(), 0.0, 0.0};
+    result.pose.activeMask = 0x07;
+    result.pose.tcpX = point.X();
+    result.pose.tcpY = point.Y();
+    result.pose.tcpZ = point.Z();
+    return result;
+}
+
+void runTravelPlanning(const TopoDS_Shape& shape, double installationZ)
+{
+    ContourExtractionParams params;
+    params.smoothAngleThresholdDeg = 5.0;
+    params.deflection = 0.1;
+    params.strategy = ExtractionStrategy::LargestSmoothConnectedSurface;
+    params.machiningBeamDirection = gp_Dir(0.0, 0.0, -1.0);
+    auto contours = LaserToolpathBuilder::extractContours(shape, params);
+    for (LaserContour& contour : contours) {
+        contour.sourceShape = shape;
+        contour.leadIn.length = 5.0;
+        if (contour.points.empty())
+            LaserToolpathBuilder::discretizeContour(contour, shape, params.deflection);
+        QString error;
+        LaserToolpathBuilder::setAutomaticContourStart(contour, &error);
+    }
+
+    gp_Trsf installation;
+    installation.SetTranslation(gp_Vec(0.0, 0.0, installationZ));
+    const TopoDS_Shape installedShape = BRepBuilderAPI_Transform(
+        shape, installation, true).Shape();
+    lcnc::cam_algo::TravelPlanningRequest request;
+    request.workpiece = installedShape;
+    request.proxySafetyRadiusMm = 1.0;
+    request.minimumClearanceMm = 0.5;
+    request.motionProfile.supportedCoordinatedMask = 0x07;
+    request.motionProfile.velocity.fill(100.0);
+    request.motionProfile.acceleration.fill(1000.0);
+    request.motionProfile.jerk.fill(10000.0);
+    lcnc::cam_algo::TravelPlanningDiagnostics diagnostics;
+    request.diagnostics = &diagnostics;
+    for (std::size_t i = 1; i < contours.size(); ++i) {
+        const LaserContour& previous = contours[i - 1];
+        const LaserContour& next = contours[i];
+        if (previous.points.empty() || !previous.leadInSolution.valid
+            || !next.leadInSolution.valid) {
+            continue;
+        }
+        const gp_Pnt previousEnd = previous.points.back().position.Transformed(installation);
+        const gp_Pnt nextEntry = next.leadInSolution.point.position.Transformed(installation);
+        auto source = travelEndpoint(previous.contourId, previousEnd);
+        auto target = travelEndpoint(next.contourId, nextEntry);
+        request.transitions.append({source, target});
+    }
+    QElapsedTimer timer;
+    timer.start();
+    const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
+    out << "  travel z=" << installationZ << ": contours=" << contours.size()
+        << " executable=" << plan.transitions.size() << '/' << request.transitions.size()
+        << " elapsed=" << timer.elapsed() << " ms exact=" << diagnostics.exactDistanceCheckCount
+        << " candidates=" << diagnostics.evaluatedCandidateCount << '/' << diagnostics.candidateCount
+        << " failure=" << plan.failureReason << "\n";
+    out.flush();
+}
 
 QString surfaceTypeName(const TopoDS_Face& face)
 {
@@ -142,6 +214,12 @@ void diagnoseShape(const TopoDS_Shape& shape, const QString& label)
 {
     out << "\n======== " << label << " ========\n";
     printShapeStats(shape);
+    if (g_travelOnly) {
+        runTravelPlanning(shape, 0.0);
+        runTravelPlanning(shape, 100.0);
+        out.flush();
+        return;
+    }
     for (TopExp_Explorer exp(shape, TopAbs_FACE); exp.More(); exp.Next()) {
         const TopoDS_Face face = TopoDS::Face(exp.Current());
         if (!LaserToolpathBuilder::isPlanarFace(face))
@@ -345,6 +423,10 @@ int main(int argc, char* argv[])
         const QString argument = app.arguments().at(i);
         if (argument == QStringLiteral("--plane-only")) {
             g_planeOnly = true;
+            continue;
+        }
+        if (argument == QStringLiteral("--travel-only")) {
+            g_travelOnly = true;
             continue;
         }
         if (const int r = diagnoseStepFile(argument); r != 0)

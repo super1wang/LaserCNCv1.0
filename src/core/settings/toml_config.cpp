@@ -16,8 +16,14 @@ bool TomlConfig::load(const QString& path)
 {
     m_filePath = path;
 
-    QFileInfo info(path);
-    if (!info.exists()) {
+    // Do not hand a Windows QString path to toml11's filename overload.
+    // Loading the bytes through QFile keeps the Qt/UTF-16 path boundary in one
+    // place, and parsing an in-memory stream avoids a second CRT file handle.
+    // This is also important at startup: a malformed/unavailable path must be
+    // reported as a recoverable settings failure rather than aborting module
+    // construction inside QFileInfo/std::ifstream.
+    QFile file(path);
+    if (!file.exists()) {
         // Missing file is fine: subclass keeps its built-in defaults.
         LCNC_INFO(LogCode::SettingsLoaded,
                   "{} file missing at '{}', using defaults",
@@ -25,8 +31,25 @@ bool TomlConfig::load(const QString& path)
         return true;
     }
 
+    if (!file.open(QIODevice::ReadOnly)) {
+        LCNC_ERR(LogCode::SettingsParseFailed,
+                 "{} could not open '{}': {}",
+                 configName(), path.toStdString(), file.errorString().toStdString());
+        return false;
+    }
+
+    const QByteArray bytes = file.readAll();
+    if (file.error() != QFileDevice::NoError) {
+        LCNC_ERR(LogCode::SettingsParseFailed,
+                 "{} could not read '{}': {}",
+                 configName(), path.toStdString(), file.errorString().toStdString());
+        return false;
+    }
+
     try {
-        const auto root = toml::parse(path.toStdString());
+        std::istringstream input(std::string(bytes.constData(),
+                                             static_cast<std::size_t>(bytes.size())));
+        const auto root = toml::parse(input, path.toUtf8().toStdString());
         readFrom(root);
         LCNC_INFO(LogCode::SettingsLoaded,
                   "{} loaded from '{}'",

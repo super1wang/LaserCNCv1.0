@@ -6,7 +6,7 @@
       // 再由 E 盘稳定 VS2022 工具链重新检测 Ninja 编译器。
       "label": "CMake: reset Ninja toolchain",
       "type": "shell",
-      "command": "call \"E:\\vs2022IDE\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --fresh --preset acs-gtn",
+      "command": "set \"VSLANG=1033\" && call \"E:\\vs2022IDE\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --fresh --preset acs-gtn",
       "options": {
         "shell": {
           "executable": "cmd.exe",
@@ -28,7 +28,7 @@
       "label": "CMake: build",
       "type": "shell",
       // 必须与 build-vs/ 的稳定 VS2022 v143 工具链一致；不要使用 C 盘 Insiders。
-      "command": "call \"E:\\vs2022IDE\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16",
+      "command": "set \"VSLANG=1033\" && call \"E:\\vs2022IDE\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16",
       "options": {
         "shell": {
           "executable": "cmd.exe",

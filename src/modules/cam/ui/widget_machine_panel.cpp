@@ -422,6 +422,27 @@ void WidgetMachinePanel::rebuildAssignmentSection()
             lcnc::Kernel::current().service<CamModule>()->unassignShape(entry);
     });
     m_assignGrid->addWidget(clearButton, index / 2, index % 2);
+    ++index;
+
+    const struct CollisionAction {
+        const char* role;
+        const char* label;
+    } collisionActions[] = {
+        {"head", "Collision: head"},
+        {"obstacle", "Collision: obstacle"},
+        {"ignore", "Collision: ignore"},
+        {"auto", "Collision: automatic"},
+    };
+    for (const CollisionAction& action : collisionActions) {
+        auto* button = new QPushButton(tr(action.label), m_assignGroup);
+        button->setToolTip(tr("Set collision role for the selected machine components"));
+        connect(button, &QPushButton::clicked, this, [this, action] {
+            lcnc::Kernel::current().service<CamModule>()->setMachineCollisionRole(
+                m_selectedEntries, QString::fromLatin1(action.role));
+        });
+        m_assignGrid->addWidget(button, index / 2, index % 2);
+        ++index;
+    }
 }
 
 void WidgetMachinePanel::rebuildWpcSection()

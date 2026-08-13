@@ -148,6 +148,7 @@ public:
     ContourId contourIdAt(int contourIdx) const;
     int contourIndexById(ContourId contourId) const;
     void ensureContourIds();
+    /// Assign/reuse contour IDs, then normalize layer ownership and membership.
     void ensureToolpathLayers();
     const std::vector<ToolpathLayer>& toolpathLayers() const { return m_toolpath.layers(); }
     ToolpathLayer* toolpathLayer(std::uint64_t layerId);

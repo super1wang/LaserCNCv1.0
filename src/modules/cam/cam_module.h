@@ -168,6 +168,8 @@ public:
     void applyAxisAssignments(const QMap<QString, QString>& entryToAxis);
     void assignShapesToAxis(const QStringList& entries, const QString& axisName);
     void unassignShape(const QString& entry);
+    QString machineCollisionRole(const QString& entry) const;
+    void setMachineCollisionRole(const QStringList& entries, const QString& role);
     void clearAxisAssignments(const QString& axisName);
     QList<AxisOption> axisOptions(bool includeDetachOption = false) const;
     /// Return the preferred workpiece mount axis for the current machine preset.
@@ -294,6 +296,7 @@ public:
     int toolpathContourPointCount(int contourIndex) const override;
     std::uint64_t toolpathRevision() const;
     bool solveToolpathForOrder(const QVector<std::uint64_t>& orderedContourIds);
+    lcnc::cam::ToolpathExportSnapshot exportToolpathBaseSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds) const;
@@ -444,6 +447,8 @@ public:
     bool cutterHeadGuideVisible() const;
     /// 按 AppSettings 中的刀头外观（颜色/透明度/缩放）重建刀头锥指示器。
     void refreshCutterHeadAppearance();
+    /// 应用刀嘴/模拟锥碰撞配置，立即重建 View 中的代理并使执行缓存失效。
+    bool refreshCutterCollisionConfiguration();
     void setSelectedEntries(const QStringList& entries);
     QStringList selectedEntries() const;
     void syncSelectionFromView();
@@ -495,6 +500,7 @@ signals:
     void machineVisibilityChanged();
     void machiningModeChanged(lcnc::MachiningMode mode);
     void workpieceSetupTransformChanged();
+    void cutterCollisionConfigurationChanged();
 
 private:
     struct WorkpieceShapeSource {
@@ -542,6 +548,7 @@ private:
         const std::vector<LaserContour>& contours,
         std::uint64_t revision,
         const QString& description) const;
+    void attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
     bool clearMountedWorkpieceDisplay(bool refreshView);
@@ -594,6 +601,8 @@ private:
     lcnc::cam::MachineWorkspace*                         m_machineWorkspace{nullptr};
 
     TopoDS_Shape                m_workpieceShape;
+    TopoDS_Shape                m_cutterCollisionProxyShape;
+    mutable lcnc::cam::TravelPlanSnapshot m_travelPlanCache;
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
     mutable QList<Handle(AIS_Shape)> m_camContourAisCache;
     QString                     m_machineModelPath;

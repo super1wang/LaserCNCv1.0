@@ -15,6 +15,18 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# CMake 3.29 can misdecode the localized MSVC /showIncludes probe under a
+# Chinese Windows code page and write a mojibake msvc_deps_prefix to Ninja.
+# Ninja then silently misses every header dependency, allowing objects built
+# against different C++ class layouts to be linked together.  The installed
+# compiler emits this stable Simplified-Chinese prefix even when VSLANG=1033
+# is requested, so normalize the internal prefix for this generator/toolchain.
+if(MSVC AND CMAKE_GENERATOR MATCHES "Ninja"
+   AND CMAKE_CL_SHOWINCLUDES_PREFIX MATCHES "娉|鍖|鏂")
+    set(CMAKE_CL_SHOWINCLUDES_PREFIX "注意: 包含文件: " CACHE INTERNAL
+        "Normalized MSVC /showIncludes prefix for Ninja dependency parsing" FORCE)
+endif()
+
 # CMake Tools can invoke Ninja without the INCLUDE/LIB environment prepared by
 # VsDevCmd.  Keep the compiler and Windows SDK paths in a dedicated interface
 # target created before any third-party source tree is added, so every target
@@ -371,6 +383,7 @@ set(SRCS_CORE
     src/core/algorithms/cam/face_classifier.cpp
     src/core/algorithms/cam/laser_toolpath.cpp
     src/core/algorithms/cam/contour_order_planner.cpp
+    src/core/algorithms/cam/travel_path_planner.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp
     src/core/task/module_task_scope.cpp
@@ -974,6 +987,10 @@ if(BUILD_TESTING)
         tests/contour_order_planner_test.cpp
     )
     target_link_libraries(lcnc_contour_order_planner_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_travel_path_planner_test
+        tests/travel_path_planner_test.cpp
+    )
+    target_link_libraries(lcnc_travel_path_planner_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_cam_data_manager_test
         tests/cam_data_manager_test.cpp
     )
@@ -1003,6 +1020,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(lcnc_toolpath_generation_service_test PRIVATE lcnc_module_cam Qt6::Core)
     if(LCNC_WITH_ACS)
+        add_executable(lcnc_acs_rapid_command_test
+            tests/acs_rapid_command_test.cpp
+        )
+        target_link_libraries(lcnc_acs_rapid_command_test PRIVATE
+            lcnc_module_process Qt6::Core)
         add_executable(lcnc_simulator_cmhp_sdk_integration_test
             tests/simulator_cmhp_sdk_integration_test.cpp
         )
@@ -1035,6 +1057,7 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_project_explorer_controller_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_toolpath_generation_service_test lcnc_runtime_deploy_build)
         if(LCNC_WITH_ACS)
+            add_dependencies(lcnc_acs_rapid_command_test lcnc_runtime_deploy_build)
             add_dependencies(lcnc_simulator_cmhp_sdk_integration_test lcnc_runtime_deploy_build)
         endif()
     endif()
@@ -1063,6 +1086,7 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_project_explorer_controller_test)
     lcnc_deploy_tbb_runtime(lcnc_toolpath_generation_service_test)
     if(LCNC_WITH_ACS)
+        lcnc_deploy_tbb_runtime(lcnc_acs_rapid_command_test)
         lcnc_deploy_tbb_runtime(lcnc_simulator_cmhp_sdk_integration_test)
         lcnc_deploy_acs_simulator_program(lcnc_simulator_cmhp_sdk_integration_test)
         lcnc_deploy_gtn_runtime(lcnc_simulator_cmhp_sdk_integration_test)
@@ -1092,6 +1116,7 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_project_explorer_controller_test)
         lcnc_deploy_asan_runtime(lcnc_toolpath_generation_service_test)
         if(LCNC_WITH_ACS)
+            lcnc_deploy_asan_runtime(lcnc_acs_rapid_command_test)
             lcnc_deploy_asan_runtime(lcnc_simulator_cmhp_sdk_integration_test)
         endif()
     endif()
@@ -1131,6 +1156,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_process_current_schema_test)
     add_test(NAME lcnc_contour_order_planner_test
         COMMAND lcnc_contour_order_planner_test)
+    add_test(NAME lcnc_travel_path_planner_test
+        COMMAND lcnc_travel_path_planner_test)
     add_test(NAME lcnc_cam_data_manager_test
         COMMAND lcnc_cam_data_manager_test)
     add_test(NAME lcnc_machine_topology_solver_test
@@ -1149,6 +1176,8 @@ if(BUILD_TESTING)
     add_test(NAME lcnc_toolpath_generation_service_test
         COMMAND lcnc_toolpath_generation_service_test)
     if(LCNC_WITH_ACS)
+        add_test(NAME lcnc_acs_rapid_command_test
+            COMMAND lcnc_acs_rapid_command_test)
         add_test(NAME lcnc_simulator_cmhp_sdk_integration_test
             COMMAND lcnc_simulator_cmhp_sdk_integration_test)
         set_tests_properties(lcnc_simulator_cmhp_sdk_integration_test PROPERTIES

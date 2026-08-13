@@ -22,6 +22,9 @@
       "inherits": "base-config",
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build-cmake",
+      "environment": {
+        "VSLANG": "1033"
+      },
       "cacheVariables": {
         "LCNC_RUNTIME_VARIANT": "ninja"
       }

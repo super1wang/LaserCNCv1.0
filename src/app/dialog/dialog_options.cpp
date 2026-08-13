@@ -830,6 +830,59 @@ void DialogOptions::buildMachineConfigurationPage()
     form->addRow(tr("Tool path algorithm"), m_lblMachineAlgorithm);
     root->addWidget(group);
 
+    // 中文翻译：切割嘴碰撞代理
+    auto* nozzleGroup = new QGroupBox(tr("Cutting nozzle collision proxy"), page);
+    auto* nozzleForm = new QFormLayout(nozzleGroup);
+    m_cbCutterCollisionProxyMode = new QComboBox(nozzleGroup);
+    // 中文翻译：模拟锥头
+    m_cbCutterCollisionProxyMode->addItem(tr("Simulated cone"), 0);
+    // 中文翻译：刀嘴模型文件
+    m_cbCutterCollisionProxyMode->addItem(tr("Nozzle model file"), 1);
+    // 中文翻译：代理类型
+    nozzleForm->addRow(tr("Proxy type"), m_cbCutterCollisionProxyMode);
+
+    auto* nozzlePathRow = new QWidget(nozzleGroup);
+    auto* nozzlePathLayout = new QHBoxLayout(nozzlePathRow);
+    nozzlePathLayout->setContentsMargins(0, 0, 0, 0);
+    nozzlePathLayout->setSpacing(4);
+    m_editCutterNozzleModelPath = new QLineEdit(nozzlePathRow);
+    m_editCutterNozzleModelPath->setClearButtonEnabled(true);
+    // 中文翻译：选择轻量化切割嘴模型文件
+    m_editCutterNozzleModelPath->setPlaceholderText(tr("Select a lightweight cutting nozzle model"));
+    // 中文翻译：浏览...
+    m_btnBrowseCutterNozzleModel = new QPushButton(tr("Browse..."), nozzlePathRow);
+    nozzlePathLayout->addWidget(m_editCutterNozzleModelPath, 1);
+    nozzlePathLayout->addWidget(m_btnBrowseCutterNozzleModel);
+    // 中文翻译：刀嘴模型路径
+    nozzleForm->addRow(tr("Nozzle model path"), nozzlePathRow);
+
+    const auto positiveDistanceSpin = [nozzleGroup](double minimum, double maximum) {
+        auto* spin = noWheel(new QDoubleSpinBox(nozzleGroup));
+        spin->setRange(minimum, maximum);
+        spin->setDecimals(3);
+        spin->setSuffix(QStringLiteral(" mm"));
+        return spin;
+    };
+    m_spSimulatedConeLength = positiveDistanceSpin(0.1, 1000.0);
+    m_spSimulatedConeTipRadius = positiveDistanceSpin(0.0, 100.0);
+    m_spSimulatedConeBaseRadius = positiveDistanceSpin(0.0, 500.0);
+    m_spCutterCollisionClearance = positiveDistanceSpin(0.0, 100.0);
+    m_spMaximumRapidSafetyOffset = positiveDistanceSpin(0.1, 10000.0);
+    // 中文翻译：锥头长度；尖端半径；底部半径；最小安全间隙；最大安全抬高量
+    nozzleForm->addRow(tr("Cone length"), m_spSimulatedConeLength);
+    nozzleForm->addRow(tr("Tip radius"), m_spSimulatedConeTipRadius);
+    nozzleForm->addRow(tr("Base radius"), m_spSimulatedConeBaseRadius);
+    nozzleForm->addRow(tr("Minimum clearance"), m_spCutterCollisionClearance);
+    nozzleForm->addRow(tr("Maximum safety offset"), m_spMaximumRapidSafetyOffset);
+    auto* nozzleHint = new QLabel(
+        // 中文翻译：模型会自动将包围盒最低点作为刀嘴尖端，并以局部 +Z 作为远离加工面的方向。碰撞求高在生成刀路时完成。
+        tr("The model bounding-box minimum is treated as the nozzle tip and local +Z points away from the machining surface. Collision height is solved while generating the tool path."),
+        nozzleGroup);
+    nozzleHint->setWordWrap(true);
+    nozzleHint->setStyleSheet("color:#666;");
+    nozzleForm->addRow(nozzleHint);
+    root->addWidget(nozzleGroup);
+
     // 中文翻译：旋转中心
     auto* centerGroup = new QGroupBox(tr("center of rotation"), page);
     auto* centerForm = new QFormLayout(centerGroup);
@@ -928,6 +981,33 @@ void DialogOptions::buildMachineConfigurationPage()
                 if (!path.isEmpty() && m_editMachineModelPath)
                     m_editMachineModelPath->setText(QFileInfo(path).absoluteFilePath());
             });
+    const auto updateNozzleMode = [this] {
+        const bool modelMode = m_cbCutterCollisionProxyMode
+            && m_cbCutterCollisionProxyMode->currentData().toInt() == 1;
+        if (m_editCutterNozzleModelPath) m_editCutterNozzleModelPath->setEnabled(modelMode);
+        if (m_btnBrowseCutterNozzleModel) m_btnBrowseCutterNozzleModel->setEnabled(modelMode);
+        if (m_spSimulatedConeLength) m_spSimulatedConeLength->setEnabled(!modelMode);
+        if (m_spSimulatedConeTipRadius) m_spSimulatedConeTipRadius->setEnabled(!modelMode);
+        if (m_spSimulatedConeBaseRadius) m_spSimulatedConeBaseRadius->setEnabled(!modelMode);
+    };
+    connect(m_cbCutterCollisionProxyMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, updateNozzleMode);
+    connect(m_btnBrowseCutterNozzleModel, &QPushButton::clicked, this,
+            [this] {
+                const QString currentPath = m_editCutterNozzleModelPath
+                    ? m_editCutterNozzleModelPath->text().trimmed() : QString();
+                const QString dir = currentPath.isEmpty()
+                    ? QString() : QFileInfo(currentPath).absolutePath();
+                const QString path = QFileDialog::getOpenFileName(
+                    this,
+                    // 中文翻译：选择切割嘴碰撞模型
+                    tr("Select cutting nozzle collision model"), dir,
+                    // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;所有文件 (*)
+                    tr("3D model files (*.stp *.step *.stl *.brep);;All files (*)"));
+                if (!path.isEmpty() && m_editCutterNozzleModelPath)
+                    m_editCutterNozzleModelPath->setText(QFileInfo(path).absoluteFilePath());
+            });
+    updateNozzleMode();
 
     m_stack->addWidget(page);
 }
@@ -1174,6 +1254,14 @@ void DialogOptions::loadFromSettings()
     if (auto* cam = lcnc::Kernel::current().service<CamModule>()) {
         m_originalMachineModelPath = cam->machineModelPath();
         m_originalAutoLoadMachineModel = cam->config().autoLoadMachineModel();
+        m_originalCutterCollisionProxyMode =
+            static_cast<int>(cam->config().cutterCollisionProxyMode());
+        m_originalCutterNozzleModelPath = cam->config().cutterNozzleModelPath();
+        m_originalSimulatedConeLength = cam->config().simulatedConeLengthMm();
+        m_originalSimulatedConeTipRadius = cam->config().simulatedConeTipRadiusMm();
+        m_originalSimulatedConeBaseRadius = cam->config().simulatedConeBaseRadiusMm();
+        m_originalCutterCollisionClearance = cam->config().cutterCollisionClearanceMm();
+        m_originalMaximumRapidSafetyOffset = cam->config().maximumRapidSafetyOffsetMm();
     } else {
         m_originalMachineModelPath.clear();
         m_originalAutoLoadMachineModel = true;
@@ -1214,6 +1302,14 @@ void DialogOptions::loadFromSettings()
         m_editMachineModelPath->setText(m_originalMachineModelPath);
     if (m_chkAutoLoadMachineModel)
         m_chkAutoLoadMachineModel->setChecked(m_originalAutoLoadMachineModel);
+    setComboByData(m_cbCutterCollisionProxyMode, m_originalCutterCollisionProxyMode);
+    if (m_editCutterNozzleModelPath)
+        m_editCutterNozzleModelPath->setText(m_originalCutterNozzleModelPath);
+    if (m_spSimulatedConeLength) m_spSimulatedConeLength->setValue(m_originalSimulatedConeLength);
+    if (m_spSimulatedConeTipRadius) m_spSimulatedConeTipRadius->setValue(m_originalSimulatedConeTipRadius);
+    if (m_spSimulatedConeBaseRadius) m_spSimulatedConeBaseRadius->setValue(m_originalSimulatedConeBaseRadius);
+    if (m_spCutterCollisionClearance) m_spCutterCollisionClearance->setValue(m_originalCutterCollisionClearance);
+    if (m_spMaximumRapidSafetyOffset) m_spMaximumRapidSafetyOffset->setValue(m_originalMaximumRapidSafetyOffset);
     if (m_machineConfig) {
         m_originalMachinePreset = m_machineConfig->presetName();
         m_originalMachineConfigs = m_machineConfig->axisConfigurations();
@@ -1415,6 +1511,17 @@ bool DialogOptions::applyChanges()
     const bool newAutoLoadMachineModel = m_chkAutoLoadMachineModel
         ? m_chkAutoLoadMachineModel->isChecked()
         : m_originalAutoLoadMachineModel;
+    const int newCutterCollisionProxyMode = m_cbCutterCollisionProxyMode
+        ? m_cbCutterCollisionProxyMode->currentData().toInt()
+        : m_originalCutterCollisionProxyMode;
+    const QString newCutterNozzleModelPath = m_editCutterNozzleModelPath
+        ? m_editCutterNozzleModelPath->text().trimmed()
+        : m_originalCutterNozzleModelPath;
+    const double newSimulatedConeLength = m_spSimulatedConeLength->value();
+    const double newSimulatedConeTipRadius = m_spSimulatedConeTipRadius->value();
+    const double newSimulatedConeBaseRadius = m_spSimulatedConeBaseRadius->value();
+    const double newCutterCollisionClearance = m_spCutterCollisionClearance->value();
+    const double newMaximumRapidSafetyOffset = m_spMaximumRapidSafetyOffset->value();
     const QString newMachinePreset = m_cbMachinePreset
         ? m_cbMachinePreset->currentData().toString()
         : m_originalMachinePreset;
@@ -1451,10 +1558,33 @@ bool DialogOptions::applyChanges()
         || m_originalRecentLimit != newRecentLimit;
     const bool machineModelPathDirty = m_originalMachineModelPath != newMachineModelPath;
     const bool autoLoadMachineDirty = m_originalAutoLoadMachineModel != newAutoLoadMachineModel;
+    const bool cutterCollisionDirty =
+        m_originalCutterCollisionProxyMode != newCutterCollisionProxyMode
+        || m_originalCutterNozzleModelPath != newCutterNozzleModelPath
+        || m_originalSimulatedConeLength != newSimulatedConeLength
+        || m_originalSimulatedConeTipRadius != newSimulatedConeTipRadius
+        || m_originalSimulatedConeBaseRadius != newSimulatedConeBaseRadius
+        || m_originalCutterCollisionClearance != newCutterCollisionClearance
+        || m_originalMaximumRapidSafetyOffset != newMaximumRapidSafetyOffset;
     const bool machineDirty = m_machineConfig
         && (m_originalMachinePreset != newMachinePreset
             || !sameMachineAxisDefinitions(m_originalMachineConfigs, newMachineAxes)
             || headGeometryDirty);
+
+    if (newSimulatedConeBaseRadius < newSimulatedConeTipRadius) {
+        // 中文翻译：模拟锥头底部半径不能小于尖端半径。
+        QMessageBox::warning(this, tr("Application Options"),
+            tr("The simulated cone base radius cannot be smaller than its tip radius."));
+        return false;
+    }
+    if (newCutterCollisionProxyMode == 1
+        && (!QFileInfo::exists(newCutterNozzleModelPath)
+            || !QFileInfo(newCutterNozzleModelPath).isFile())) {
+        // 中文翻译：请选择有效的切割嘴碰撞模型文件。
+        QMessageBox::warning(this, tr("Application Options"),
+            tr("Select a valid cutting nozzle collision model file."));
+        return false;
+    }
 
     if (machineDirty) {
         if (auto* process = lcnc::Kernel::current().service<ProcessModule>();
@@ -1481,7 +1611,8 @@ bool DialogOptions::applyChanges()
     if (!cadRuntimeDirty && !camRuntimeDirty && !cadDefaultDirty && !camDefaultDirty
         && !backgroundDirty && !modelColorDirty
         && !highlightDirty && !treeDirty && !applicationDirty
-        && !machineModelPathDirty && !autoLoadMachineDirty && !machineDirty) {
+        && !machineModelPathDirty && !autoLoadMachineDirty
+        && !cutterCollisionDirty && !machineDirty) {
         LCNC_DEBUG(lcnc::LogCode::Generic, "DialogOptions::applyChanges no changes");
         return true;
     }
@@ -1567,8 +1698,46 @@ bool DialogOptions::applyChanges()
             cam->setMachineModelPath(newMachineModelPath);
         if (autoLoadMachineDirty)
             cam->config().setAutoLoadMachineModel(newAutoLoadMachineModel);
+        if (cutterCollisionDirty) {
+            cam->config().setCutterCollisionProxyMode(
+                newCutterCollisionProxyMode == 1
+                    ? CutterCollisionProxyMode::ModelFile
+                    : CutterCollisionProxyMode::SimulatedCone);
+            cam->config().setCutterNozzleModelPath(newCutterNozzleModelPath);
+            cam->config().setSimulatedConeLengthMm(newSimulatedConeLength);
+            cam->config().setSimulatedConeTipRadiusMm(newSimulatedConeTipRadius);
+            cam->config().setSimulatedConeBaseRadiusMm(newSimulatedConeBaseRadius);
+            cam->config().setCutterCollisionClearanceMm(newCutterCollisionClearance);
+            cam->config().setMaximumRapidSafetyOffsetMm(newMaximumRapidSafetyOffset);
+            if (!cam->refreshCutterCollisionConfiguration()) {
+                // Restore the last usable collision proxy configuration.  A
+                // file that merely exists may still contain invalid STEP/STL
+                // data; Apply must not persist a proxy that planning cannot load.
+                // 中文翻译：模型文件即使存在也可能无法解析；应用失败时恢复上一份可用碰撞代理配置。
+                cam->config().setCutterCollisionProxyMode(
+                    m_originalCutterCollisionProxyMode == 1
+                        ? CutterCollisionProxyMode::ModelFile
+                        : CutterCollisionProxyMode::SimulatedCone);
+                cam->config().setCutterNozzleModelPath(m_originalCutterNozzleModelPath);
+                cam->config().setSimulatedConeLengthMm(m_originalSimulatedConeLength);
+                cam->config().setSimulatedConeTipRadiusMm(m_originalSimulatedConeTipRadius);
+                cam->config().setSimulatedConeBaseRadiusMm(m_originalSimulatedConeBaseRadius);
+                cam->config().setCutterCollisionClearanceMm(m_originalCutterCollisionClearance);
+                cam->config().setMaximumRapidSafetyOffsetMm(m_originalMaximumRapidSafetyOffset);
+                cam->refreshCutterCollisionConfiguration();
+                return false;
+            }
+        }
         m_originalMachineModelPath = cam->machineModelPath();
         m_originalAutoLoadMachineModel = cam->config().autoLoadMachineModel();
+        m_originalCutterCollisionProxyMode =
+            static_cast<int>(cam->config().cutterCollisionProxyMode());
+        m_originalCutterNozzleModelPath = cam->config().cutterNozzleModelPath();
+        m_originalSimulatedConeLength = cam->config().simulatedConeLengthMm();
+        m_originalSimulatedConeTipRadius = cam->config().simulatedConeTipRadiusMm();
+        m_originalSimulatedConeBaseRadius = cam->config().simulatedConeBaseRadiusMm();
+        m_originalCutterCollisionClearance = cam->config().cutterCollisionClearanceMm();
+        m_originalMaximumRapidSafetyOffset = cam->config().maximumRapidSafetyOffsetMm();
         if (m_editMachineModelPath && machineModelPathDirty)
             m_editMachineModelPath->setText(m_originalMachineModelPath);
     }

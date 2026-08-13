@@ -7,6 +7,8 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include <algorithm>
+
 namespace {
 
 constexpr double kEps    = 1e-9;
@@ -107,6 +109,22 @@ void CamConfig::readFrom(const toml::value& root)
         get_qstring(root, "machineRenderQuality", QStringLiteral("medium")));
     m_machineRenderQualityPreset = renderQualityFromString(presetText);
 
+    if (root.contains("cutterCollision") && root.at("cutterCollision").is_table()) {
+        const auto& collision = root.at("cutterCollision");
+        const int mode = static_cast<int>(get_int(collision, "proxyMode", 0));
+        m_cutterCollisionProxyMode = mode == static_cast<int>(CutterCollisionProxyMode::ModelFile)
+            ? CutterCollisionProxyMode::ModelFile : CutterCollisionProxyMode::SimulatedCone;
+        m_cutterNozzleModelPath = get_qstring(collision, "modelPath", QString());
+        m_simulatedConeLengthMm = std::max(0.1, get_double(collision, "coneLengthMm", 20.0));
+        m_simulatedConeTipRadiusMm = std::max(0.0, get_double(collision, "coneTipRadiusMm", 0.2));
+        m_simulatedConeBaseRadiusMm = std::max(m_simulatedConeTipRadiusMm,
+            get_double(collision, "coneBaseRadiusMm", 5.0));
+        m_cutterCollisionClearanceMm = std::max(0.0,
+            get_double(collision, "clearanceMm", 0.5));
+        m_maximumRapidSafetyOffsetMm = std::max(0.1,
+            get_double(collision, "maximumSafetyOffsetMm", 100.0));
+    }
+
     if (root.contains("toolpath") && root.at("toolpath").is_table()) {
         const auto& tp = root.at("toolpath");
         m_leadInLength          = get_double(tp, "leadInLength",          m_leadInLength);
@@ -144,6 +162,17 @@ void CamConfig::readFrom(const toml::value& root)
                 profile.hasPhysicalAcCenter = true;
                 profile.physicalAcCenter    = p;
             }
+            if (mp.contains("collisionRoles") && mp.at("collisionRoles").is_array()) {
+                for (const auto& cr : mp.at("collisionRoles").as_array()) {
+                    if (!cr.is_table()) continue;
+                    const QString entry = get_qstring(cr, "entry", QString());
+                    const QString role = get_qstring(cr, "role", QString()).trimmed().toLower();
+                    if (!entry.isEmpty() && (role == QStringLiteral("head")
+                        || role == QStringLiteral("obstacle") || role == QStringLiteral("ignore"))) {
+                        profile.collisionRoles.insert(entry, role);
+                    }
+                }
+            }
 
             if (mp.contains("axisOrigins") && mp.at("axisOrigins").is_array()) {
                 for (const auto& ao : mp.at("axisOrigins").as_array()) {
@@ -169,6 +198,16 @@ void CamConfig::writeTo(toml::value& root) const
     root["autoInstallWorkpiece"] = m_autoInstallWorkpiece;
     root["machineRenderQualityPreset"] = qs(renderQualityToString(m_machineRenderQualityPreset));
 
+    toml::value collision(toml::table{});
+    collision["proxyMode"] = static_cast<int>(m_cutterCollisionProxyMode);
+    collision["modelPath"] = qs(m_cutterNozzleModelPath);
+    collision["coneLengthMm"] = m_simulatedConeLengthMm;
+    collision["coneTipRadiusMm"] = m_simulatedConeTipRadiusMm;
+    collision["coneBaseRadiusMm"] = m_simulatedConeBaseRadiusMm;
+    collision["clearanceMm"] = m_cutterCollisionClearanceMm;
+    collision["maximumSafetyOffsetMm"] = m_maximumRapidSafetyOffsetMm;
+    root["cutterCollision"] = collision;
+
     toml::value tp(toml::table{});
     tp["leadInLength"]          = m_leadInLength;
     tp["deflection"]            = m_deflection;
@@ -192,6 +231,14 @@ void CamConfig::writeTo(toml::value& root) const
         if (it.value().hasPhysicalAcCenter) {
             mp["physicalAcCenter"] = pointToToml(it.value().physicalAcCenter);
         }
+        toml::array collisionRoles;
+        for (auto role = it.value().collisionRoles.cbegin(); role != it.value().collisionRoles.cend(); ++role) {
+            toml::value entry(toml::table{});
+            entry["entry"] = qs(role.key());
+            entry["role"] = qs(role.value());
+            collisionRoles.emplace_back(entry);
+        }
+        if (!collisionRoles.empty()) mp["collisionRoles"] = collisionRoles;
 
         toml::array axes;
         for (auto ax = it.value().axisOrigins.cbegin(); ax != it.value().axisOrigins.cend(); ++ax) {
@@ -380,6 +427,91 @@ bool CamConfig::workpieceInstallPositionForMachine(const QString& machinePath,
     if (!profile || !profile->hasWorkpieceInstallPosition || !outPosition) return false;
     *outPosition = profile->workpieceInstallPosition;
     return true;
+}
+
+void CamConfig::setCutterCollisionProxyMode(CutterCollisionProxyMode mode)
+{
+    if (m_cutterCollisionProxyMode == mode) return;
+    m_cutterCollisionProxyMode = mode;
+    saveDefault();
+}
+
+void CamConfig::setCutterNozzleModelPath(const QString& path)
+{
+    const QString normalized = path.trimmed().isEmpty()
+        ? QString() : QFileInfo(path).absoluteFilePath();
+    if (m_cutterNozzleModelPath == normalized) return;
+    m_cutterNozzleModelPath = normalized;
+    saveDefault();
+}
+
+void CamConfig::setSimulatedConeLengthMm(double value)
+{
+    value = std::max(0.1, value);
+    if (nearlyEqual(m_simulatedConeLengthMm, value)) return;
+    m_simulatedConeLengthMm = value;
+    saveDefault();
+}
+
+void CamConfig::setSimulatedConeTipRadiusMm(double value)
+{
+    value = std::max(0.0, value);
+    if (nearlyEqual(m_simulatedConeTipRadiusMm, value)) return;
+    m_simulatedConeTipRadiusMm = value;
+    if (m_simulatedConeBaseRadiusMm < value) m_simulatedConeBaseRadiusMm = value;
+    saveDefault();
+}
+
+void CamConfig::setSimulatedConeBaseRadiusMm(double value)
+{
+    value = std::max(m_simulatedConeTipRadiusMm, value);
+    if (nearlyEqual(m_simulatedConeBaseRadiusMm, value)) return;
+    m_simulatedConeBaseRadiusMm = value;
+    saveDefault();
+}
+
+void CamConfig::setCutterCollisionClearanceMm(double value)
+{
+    value = std::max(0.0, value);
+    if (nearlyEqual(m_cutterCollisionClearanceMm, value)) return;
+    m_cutterCollisionClearanceMm = value;
+    saveDefault();
+}
+
+void CamConfig::setMaximumRapidSafetyOffsetMm(double value)
+{
+    value = std::max(0.1, value);
+    if (nearlyEqual(m_maximumRapidSafetyOffsetMm, value)) return;
+    m_maximumRapidSafetyOffsetMm = value;
+    saveDefault();
+}
+
+QString CamConfig::collisionRoleForMachine(const QString& machinePath,
+                                           const QString& entry) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    return profile ? profile->collisionRoles.value(entry) : QString();
+}
+
+void CamConfig::setCollisionRoleForMachine(const QString& machinePath,
+                                           const QString& entry,
+                                           const QString& role)
+{
+    if (machinePath.isEmpty() || entry.isEmpty()) return;
+    const QString normalized = role.trimmed().toLower();
+    auto* profile = mutableProfileForMachine(machinePath);
+    if (normalized.isEmpty() || normalized == QStringLiteral("auto")) {
+        if (profile->collisionRoles.remove(entry) > 0)
+            saveDefault();
+        return;
+    }
+    if (normalized != QStringLiteral("head") && normalized != QStringLiteral("obstacle")
+        && normalized != QStringLiteral("ignore")) {
+        return;
+    }
+    if (profile->collisionRoles.value(entry) == normalized) return;
+    profile->collisionRoles.insert(entry, normalized);
+    saveDefault();
 }
 
 void CamConfig::clearLegacyWorkpieceInstallPositionForMachine(const QString& machinePath)

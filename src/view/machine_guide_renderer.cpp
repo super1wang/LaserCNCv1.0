@@ -34,6 +34,11 @@ void MachineGuideRenderer::setCutterHeadAppearance(const CutterHeadAppearance& a
     m_cutterHeadAppearance = appearance;
 }
 
+void MachineGuideRenderer::setCutterCollisionProxy(const TopoDS_Shape& shape)
+{
+    m_cutterCollisionProxy = shape;
+}
+
 QMap<QString, Handle(AIS_Shape)>& MachineGuideRenderer::guideMap(GuiDocument* gd)
 {
     return m_axisGuideAisByDocument[gd];
@@ -148,8 +153,10 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
     // 若直接判断 IsDone() 会永远走线框回退分支--这正是刀头锥一直显示为红色线框
     // （8 条母线 + 底圆，比完整线框更少线条）的根因。必须显式 Build()。
     coneMaker.Build();
-    if (coneMaker.IsDone()) {
-        TopoDS_Shape coneShape = coneMaker.Shape();
+    TopoDS_Shape coneShape = m_cutterCollisionProxy;
+    if (coneShape.IsNull() && coneMaker.IsDone())
+        coneShape = coneMaker.Shape();
+    if (!coneShape.IsNull()) {
         BRepMesh_IncrementalMesh(coneShape, 0.5);
         // 直接以 AIS_Shaded 显式 Display，不经过 displayShape(-1)：后者沿用 context
         // 默认显示模式，用户切到“线框”时锥体会以线框创建且难以纠正。

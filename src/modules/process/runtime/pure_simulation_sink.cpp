@@ -103,9 +103,22 @@ bool PureSimulationSink::isProgramRunning(QString* errorMessage)
     return false;
 }
 
-void PureSimulationSink::jumpToIdleZ(const MachinePose5&, const Tool&) {}
-void PureSimulationSink::jumpToPose(const MachinePose5&, const Tool&) {}
-void PureSimulationSink::jumpToCuttingZ(const MachinePose5&, const Tool&) {}
+bool PureSimulationSink::executeRapidSegment(const lcnc::cam::RapidMoveSegment& segment,
+                                              const Tool& tool, QString*)
+{
+    lcnc::cam::ToolpathExportPoint point;
+    point.machineX = segment.target.axes[0];
+    point.machineY = segment.target.axes[1];
+    point.machineZ = segment.target.axes[2];
+    point.machineR1 = segment.target.axes[3];
+    point.machineR2 = segment.target.axes[4];
+    point.machineAxisMask = segment.target.activeMask;
+    point.rotaryAxis1Name = segment.target.rotaryAxis1Name;
+    point.rotaryAxis2Name = segment.target.rotaryAxis2Name;
+    m_feedRate = tool.m_dIdleXVelocity > 0 ? tool.m_dIdleXVelocity : 600.0;
+    m_pending.append(point);
+    return true;
+}
 void PureSimulationSink::startCuttingHead(const Tool& /*tool*/)   {}
 void PureSimulationSink::stopCuttingHead()                         {}
 void PureSimulationSink::setShutterTimings(double, double, double, double, double) {}

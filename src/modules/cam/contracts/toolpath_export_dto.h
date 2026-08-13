@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kinematics/machine_topology.h"
+#include "core/project/cam/travel_plan_contracts.h"
 
 #include <QHash>
 #include <QString>
@@ -89,6 +90,9 @@ struct ToolpathExportSnapshot
     QString machineConfigurationFingerprint;
     QString solverId;
     int solverVersion{0};
+    /// Derived only: never persisted in a .lcnc package.  A stale/failed plan
+    /// is deliberately exported so Process can reject unsafe execution.
+    TravelPlanSnapshot travelPlan;
 
     bool hasEnabledContours() const;
     int totalPointCount() const;

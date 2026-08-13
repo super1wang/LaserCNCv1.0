@@ -23,14 +23,20 @@ namespace lcnc::view {
 class TravelPathRenderer
 {
 public:
-    /// 按加工顺序排列的一段世界坐标端点。
+    /// 按加工顺序排列的一段工件局部坐标端点。
     /// startXYZ 已是"轮廓真实起点"（lead-in 起点优先），endXYZ 是轮廓末点。
     struct Segment
     {
+        struct Waypoint { double x{0.0}, y{0.0}, z{0.0}; };
         std::uint64_t contourId{0};
         QString workpieceEntry;
         double sx{0.0}, sy{0.0}, sz{0.0};
         double ex{0.0}, ey{0.0}, ez{0.0};
+        bool verified{true};
+        /// When provided, render the collision-verified rapid polyline rather
+        /// than the historical straight endpoint connection. Coordinates are
+        /// workpiece-local and follow workpieceEntry during transform refresh.
+        QVector<Waypoint> waypoints;
     };
 
     TravelPathRenderer();
@@ -41,7 +47,7 @@ public:
     bool isVisible() const { return m_visible; }
 
     /// 用传入的 segments 重建虚线 AIS 并 Display 到 gd。
-    /// segments 少于 2 条时只 erase 不重建。
+    /// segments 为空时只 erase；一对轮廓也必须显示其唯一的空程路径。
     /// visible == false 时只 erase。
     void refresh(GuiDocument* gd, const QVector<Segment>& segments);
 

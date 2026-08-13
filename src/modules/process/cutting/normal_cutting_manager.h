@@ -82,6 +82,8 @@ private:
     struct CuttingRow
     {
         ProcessJobContour data;
+        lcnc::cam::RapidTransition entryTransition;
+        bool hasEntryTransition{false};
         Tool* tool{nullptr};
         double compensationOffsetX{0.0};
         double compensationOffsetY{0.0};

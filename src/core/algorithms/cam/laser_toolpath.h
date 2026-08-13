@@ -367,6 +367,19 @@ public:
         QString* errorMessage = nullptr,
         const lcnc::SolvedMachinePose* initialPose = nullptr);
 
+    /// Solve a transient, non-persisted motion path using the same kinematic
+    /// branch-continuity rules as cutting contours.  Surface-offset rapid
+    /// paths use this entry point so their XYZ and rotary values are produced
+    /// together instead of interpolating controller axes independently.
+    static bool solveTransientMotionPath(
+        std::vector<ToolpathPoint>* points,
+        MachineKinematics* kinematics,
+        const lcnc::MachineModeDefinition& modeDefinition,
+        const lcnc::WorkpieceSetupTransform& workpieceSetup,
+        const lcnc::HeadToolGeometry& headToolGeometry,
+        QString* errorMessage = nullptr,
+        const lcnc::SolvedMachinePose* initialPose = nullptr);
+
     /// Deterministic hash fingerprint of a face (area + centroid + surface type +
     /// outer-wire vertex count). Stable across session boundaries so that manually
     /// picked machining faces can be rebound after project reload.

@@ -21,7 +21,7 @@
 ## CMake / Ninja 路线
 
 ```powershell
-cmd /c "call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
+cmd /c "set \"VSLANG=1033\" && call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
 ctest --test-dir build-cmake --build-config Debug --output-on-failure
 ```
 
@@ -86,3 +86,7 @@ Release 将 `Debug` 改为 `Release`，或使用
 - VSCode 的 Ninja 任务必须调用 `E:\vs2022IDE\Common7\Tools\VsDevCmd.bat`，与 VS
   解决方案统一为 MSVC v143 14.44。若曾使用 C 盘 VS Insiders 工具链，先运行
   `CMake: reset Ninja toolchain`，再执行普通 `CMake: build`；不能复用旧的 Ninja 缓存。
+- Ninja/MSVC 必须保持 `VSLANG=1033`。Ninja 通过 `/showIncludes` 文本收集头文件依赖；
+  本项目还会在中文 MSVC 被 CMake 误解码时校正其依赖前缀。若旧生成树已经产生乱码
+  `msvc_deps_prefix`，修改公共头可能不会重编依赖对象，最终形成结构体 ABI 混编；此时
+  执行 `CMake: reset Ninja toolchain`，并对该生成树做一次全量重编。

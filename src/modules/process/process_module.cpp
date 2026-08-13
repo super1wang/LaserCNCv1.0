@@ -406,6 +406,9 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     }
     // CAM 图层变更（新增/删除/重命名）时自动同步映射表。
     if (auto cam = kernel.services().getService<CamModule>()) {
+        connect(cam.get(), &CamModule::cutterCollisionConfigurationChanged,
+                m_cuttingPlanService.get(),
+                &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
         connect(cam.get(), &CamModule::toolpathLayersChanged,
                 this, [this]() {
                     if (m_cuttingPlanService)

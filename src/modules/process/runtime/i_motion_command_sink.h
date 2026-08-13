@@ -15,6 +15,7 @@
  */
 
 #include "axis_map.h"
+#include "core/project/cam/travel_plan_contracts.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/runtime/machine_pose5.h"
 #include "modules/process/runtime/motion_params.h"
@@ -62,13 +63,12 @@ public:
     /// 以便把等待轮询调度为可抢占的短设备任务。
     virtual bool flush(QString* errorMessage = nullptr) = 0;
 
-    // —— 空程跳转（用各轴自己的速度，X/Y 协调）——
-    /// 跳到相对于轮廓 Z 坐标的空程高度。
-    virtual void jumpToIdleZ(const MachinePose5& pose, const Tool& tool) = 0;
-    /// 进入切割前跳到首个 XYAC 位姿（Z 保持在空程高度）。
-    virtual void jumpToPose(const MachinePose5& pose, const Tool& tool) = 0;
-    /// 下到相对于轮廓 Z 坐标的切割高度。
-    virtual void jumpToCuttingZ(const MachinePose5& pose, const Tool& tool) = 0;
+    // —— 空程轨迹 ——
+    /// Executes one CAM-planned rapid segment without changing its axis mask
+    /// or ordering.  The laser must be off while this API is used.
+    virtual bool executeRapidSegment(const lcnc::cam::RapidMoveSegment& segment,
+                                     const Tool& tool,
+                                     QString* errorMessage = nullptr) = 0;
     /// 启动 / 停止跟随头（仅切割头模式）。
     virtual void startCuttingHead(const Tool& tool) = 0;
     virtual void stopCuttingHead() = 0;

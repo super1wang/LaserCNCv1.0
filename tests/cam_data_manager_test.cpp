@@ -90,7 +90,8 @@ int main(int argc, char* argv[])
     layerContourB.signature = 102;
     layerManager.toolpath().contours().push_back(layerContourA);
     layerManager.toolpath().contours().push_back(layerContourB);
-    layerManager.ensureContourIds();
+    // Layer normalization is the single public adoption pass: it must assign
+    // contour IDs itself rather than requiring an immediate duplicate scan.
     layerManager.ensureToolpathLayers();
     const ContourId layerContourAId = layerManager.toolpath().contour(0).contourId;
     const ContourId layerContourBId = layerManager.toolpath().contour(1).contourId;

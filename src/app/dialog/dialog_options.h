@@ -120,6 +120,14 @@ private:
     QLineEdit* m_editMachineModelPath{nullptr};
     QPushButton* m_btnBrowseMachineModel{nullptr};
     QCheckBox* m_chkAutoLoadMachineModel{nullptr};
+    QComboBox* m_cbCutterCollisionProxyMode{nullptr};
+    QLineEdit* m_editCutterNozzleModelPath{nullptr};
+    QPushButton* m_btnBrowseCutterNozzleModel{nullptr};
+    QDoubleSpinBox* m_spSimulatedConeLength{nullptr};
+    QDoubleSpinBox* m_spSimulatedConeTipRadius{nullptr};
+    QDoubleSpinBox* m_spSimulatedConeBaseRadius{nullptr};
+    QDoubleSpinBox* m_spCutterCollisionClearance{nullptr};
+    QDoubleSpinBox* m_spMaximumRapidSafetyOffset{nullptr};
     QLabel* m_lblMachineAlgorithm{nullptr};
     QLabel* m_lblRotationCenterHint{nullptr};
     QDoubleSpinBox* m_spRotationCenterX{nullptr};
@@ -141,6 +149,13 @@ private:
     int m_originalRecentLimit{10};
     QString m_originalMachineModelPath;
     bool m_originalAutoLoadMachineModel{true};
+    int m_originalCutterCollisionProxyMode{0};
+    QString m_originalCutterNozzleModelPath;
+    double m_originalSimulatedConeLength{20.0};
+    double m_originalSimulatedConeTipRadius{0.2};
+    double m_originalSimulatedConeBaseRadius{5.0};
+    double m_originalCutterCollisionClearance{0.5};
+    double m_originalMaximumRapidSafetyOffset{100.0};
     QString m_originalMachinePreset;
     QVector<MachineAxisRuntimeConfig> m_originalMachineConfigs;
     HeadToolGeometry m_originalHeadToolGeometry;

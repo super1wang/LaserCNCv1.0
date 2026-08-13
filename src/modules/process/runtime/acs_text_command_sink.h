@@ -17,8 +17,9 @@ namespace lcnc::process {
  *
  * 工作机理：
  *   1. resetProgram() 清空底层 m_strCommand（acs->ResetProgramCommand()）。
- *   2. jumpTo* / laser / startCuttingHead 等转发到 ACSMotionControl 的对应方法。
- *   3. 分段方法（beginSegment / lineTo / endSegment）由 sink 直接根据 AxisMap 生成
+ *   2. 空程与切割都由 beginSegment / lineTo / endSegment 生成协调插补；激光与切割头
+ *      控制仍转发到 ACSMotionControl。
+ *   3. 分段方法由 sink 直接根据 AxisMap 生成
  *      "XSEG/VFJA (0,1,2,3,4)" / "LINE/V (...)" 文本，规避控制器内部硬编码的 (X,Y)。
  *   4. flush() 调 acs->SendCommand() = acsc_StopBuffer + LoadBuffer + CompileBuffer + RunBuffer + WaitEnd。
  */
@@ -40,9 +41,8 @@ public:
     bool isProgramRunning(QString* errorMessage = nullptr) override;
     bool flush(QString* errorMessage = nullptr) override;
 
-    void jumpToIdleZ(const MachinePose5& pose, const Tool& tool) override;
-    void jumpToPose(const MachinePose5& pose, const Tool& tool) override;
-    void jumpToCuttingZ(const MachinePose5& pose, const Tool& tool) override;
+    bool executeRapidSegment(const lcnc::cam::RapidMoveSegment& segment,
+                             const Tool& tool, QString* errorMessage = nullptr) override;
     void startCuttingHead(const Tool& tool) override;
     void stopCuttingHead() override;
     void setShutterTimings(double beforeOn, double afterOn,

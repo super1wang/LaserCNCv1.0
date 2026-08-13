@@ -204,6 +204,17 @@
 </context>
 <context>
     <name>CamModule</name>
+    <message><source>Cutting nozzle collision proxy</source><translation>切割嘴碰撞代理</translation></message>
+    <message><source>The requested partial machining order has no matching verified rapid travel plan</source><translation>请求的部分加工顺序没有匹配的已验证空程轨迹计划</translation></message>
+    <message><source>Unable to create the cutting nozzle collision proxy</source><translation>无法创建切割嘴碰撞代理</translation></message>
+    <message><source>A contour travel endpoint lacks solved machine coordinates</source><translation>轮廓空程端点缺少已求解的机床坐标</translation></message>
+    <message><source>Surface rapid planning requires a single resolved workpiece for each contour transition</source><translation>每个轮廓空程过渡必须属于同一个已求解工件</translation></message>
+    <message><source>Continuous rapid and contour five-axis solve failed between contours %1 and %2: %3</source><translation>轮廓 %1 与 %2 之间的空程及轮廓连续五轴求解失败：%3</translation></message>
+    <message><source>Loaded machine model has no cutting-head collision component; assign a head collision role before machining</source><translation>已加载的机台模型没有切割头碰撞部件，请在加工前指定切割头碰撞角色</translation></message>
+    <message><source>Rapid transition references an unknown contour</source><translation>空程过渡引用了未知轮廓</translation></message>
+    <message><source>Unable to transform the mounted workpiece for rapid collision verification</source><translation>无法变换已安装工件以进行空程碰撞校验</translation></message>
+    <message><source>Cutting head collides with the workpiece during surface rapid planning</source><translation>沿面空程规划过程中切割头与工件发生碰撞</translation></message>
+    <message><source>Cutting head collides with machine or fixture component %1 during surface rapid planning</source><translation>沿面空程规划过程中切割头与机台或夹具部件 %1 发生碰撞</translation></message>
     <message>
         <source>Loading machine: %1</source>
         <translation>加载机台: %1</translation>
@@ -543,6 +554,10 @@
     <message>
         <source>The tool path has changed during calculation and the background results have been discarded</source>
         <translation>刀路在计算期间已变更，后台结果已丢弃</translation>
+    </message>
+    <message>
+        <source>The active project changed during calculation and the background results were discarded</source>
+        <translation>计算期间活动工程已切换，后台结果已丢弃</translation>
     </message>
     <message>
         <source>The machine axis system configuration cannot be found. Please select the AC turntable configuration first.</source>
@@ -6810,6 +6825,22 @@ No available reference surfaces are currently detected.</source>
     <message><source>Axis role</source><translation>轴角色</translation></message>
     <message><source>Machine configuration can only be changed while devices are disconnected and the workflow is idle.</source><translation>机床配置只能在设备断开且流程空闲时修改。</translation></message>
     <message><source>The machine configuration is invalid: %1</source><translation>机床配置无效：%1</translation></message>
+    <message><source>Cutting nozzle collision proxy</source><translation>切割嘴碰撞代理</translation></message>
+    <message><source>Simulated cone</source><translation>模拟锥头</translation></message>
+    <message><source>Nozzle model file</source><translation>刀嘴模型文件</translation></message>
+    <message><source>Proxy type</source><translation>代理类型</translation></message>
+    <message><source>Select a lightweight cutting nozzle model</source><translation>选择轻量化切割嘴模型</translation></message>
+    <message><source>Nozzle model path</source><translation>刀嘴模型路径</translation></message>
+    <message><source>Cone length</source><translation>锥头长度</translation></message>
+    <message><source>Tip radius</source><translation>尖端半径</translation></message>
+    <message><source>Base radius</source><translation>底部半径</translation></message>
+    <message><source>Minimum clearance</source><translation>最小安全间隙</translation></message>
+    <message><source>Maximum safety offset</source><translation>最大安全抬高量</translation></message>
+    <message><source>The model bounding-box minimum is treated as the nozzle tip and local +Z points away from the machining surface. Collision height is solved while generating the tool path.</source><translation>模型包围盒最低点作为刀嘴尖端，局部 +Z 指向远离加工面的方向。碰撞安全高度在生成刀路时求解。</translation></message>
+    <message><source>Select cutting nozzle collision model</source><translation>选择切割嘴碰撞模型</translation></message>
+    <message><source>3D model files (*.stp *.step *.stl *.brep);;All files (*)</source><translation>三维模型文件 (*.stp *.step *.stl *.brep);;所有文件 (*)</translation></message>
+    <message><source>The simulated cone base radius cannot be smaller than its tip radius.</source><translation>模拟锥头底部半径不能小于尖端半径。</translation></message>
+    <message><source>Select a valid cutting nozzle collision model file.</source><translation>请选择有效的切割嘴碰撞模型文件。</translation></message>
 </context>
 <context>
     <name>CamModule</name>
@@ -6817,6 +6848,11 @@ No available reference surfaces are currently detected.</source>
 </context>
 <context>
     <name>WidgetMachinePanel</name>
+    <message><source>Collision: head</source><translation>碰撞角色：切割头</translation></message>
+    <message><source>Collision: obstacle</source><translation>碰撞角色：障碍物</translation></message>
+    <message><source>Collision: ignore</source><translation>碰撞角色：忽略</translation></message>
+    <message><source>Collision: automatic</source><translation>碰撞角色：自动</translation></message>
+    <message><source>Set collision role for the selected machine components</source><translation>为所选机台部件设置碰撞角色</translation></message>
     <message><source>Workpiece setup</source><translation>工件安装姿态</translation></message>
     <message><source>Automatically mount workpieces</source><translation>自动挂载工件</translation></message>
     <message><source>Setup X:</source><translation>安装 X：</translation></message>
@@ -6842,6 +6878,11 @@ No available reference surfaces are currently detected.</source>
 </context>
 <context>
     <name>NormalCuttingManager</name>
+    <message><source>Planned rapid command generation failed</source><translation>规划空程指令生成失败</translation></message>
+    <message><source>Planned rapid execution failed</source><translation>规划空程执行失败</translation></message>
+    <message><source>Initial coordinated approach execution failed</source><translation>首次协调接近执行失败</translation></message>
+    <message><source>The rapid travel plan is missing or out of date</source><translation>空程轨迹计划缺失或已过期</translation></message>
+    <message><source>Machining cannot start: %1</source><translation>无法开始加工：%1</translation></message>
     <message><source>The toolpath snapshot axis layout is invalid: %1</source><translation>刀路快照轴布局无效：%1</translation></message>
     <message><source>Controller command generation failed</source><translation>控制器指令生成失败</translation></message>
 </context>
@@ -6868,6 +6909,12 @@ No available reference surfaces are currently detected.</source>
 </context>
 <context>
     <name>QObject</name>
+    <message><source>The cutting nozzle collision model file does not exist</source><translation>切割嘴碰撞模型文件不存在</translation></message>
+    <message><source>Unable to read the cutting nozzle STEP model</source><translation>无法读取切割嘴 STEP 模型</translation></message>
+    <message><source>Unable to read the cutting nozzle STL model</source><translation>无法读取切割嘴 STL 模型</translation></message>
+    <message><source>Unable to read the cutting nozzle BREP model</source><translation>无法读取切割嘴 BREP 模型</translation></message>
+    <message><source>Unsupported cutting nozzle collision model format</source><translation>不支持的切割嘴碰撞模型格式</translation></message>
+    <message><source>The cutting nozzle collision model contains no usable geometry</source><translation>切割嘴碰撞模型不包含可用几何体</translation></message>
     <message><source>Locked axis %1 was not created in the controller</source><translation>锁定轴 %1 未在控制器中创建</translation></message>
     <message><source>Locked axis %1 is not enabled</source><translation>锁定轴 %1 未使能</translation></message>
     <message><source>Locked axis %1 failed to move to the safe posture</source><translation>锁定轴 %1 移动到安全姿态失败</translation></message>

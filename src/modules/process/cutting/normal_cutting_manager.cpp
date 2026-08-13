@@ -46,15 +46,18 @@ MachinePose5 toPose5(const lcnc::cam::ToolpathExportPoint& p,
                       double ox, double oy)
 {
     MachinePose5 pose;
-    pose.x  = p.machineAxes[0] + ox;
-    pose.y  = p.machineAxes[1] + oy;
-    pose.z  = p.machineAxes[2];
-    pose.r1 = p.machineAxes[3];
-    pose.r2 = p.machineAxes[4];
+    // machineAxes follows the configurable physical layout (which may be
+    // Y/X/Z/A/C).  Motion sinks consume this fixed semantic representation.
+    pose.x  = p.machineX + ox;
+    pose.y  = p.machineY + oy;
+    pose.z  = p.machineZ;
+    pose.r1 = p.machineR1;
+    pose.r2 = p.machineR2;
     pose.r1Name = p.rotaryAxis1Name;
     pose.r2Name = p.rotaryAxis2Name;
-    // 默认 X+Y 参与；下游 sink 还会与构型实际拥有的轴 & 即可。
-    pose.mask = p.machineAxisMask;
+    pose.mask = MachinePose5::Bx | MachinePose5::By | MachinePose5::Bz;
+    if (!p.rotaryAxis1Name.isEmpty()) pose.mask |= MachinePose5::Br1;
+    if (!p.rotaryAxis2Name.isEmpty()) pose.mask |= MachinePose5::Br2;
     return pose;
 }
 
@@ -412,33 +415,112 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     // ——— 程序起始（与遗留 buildContourACS / executeContourGTN 等价的语义序列）———
     commandSink.resetProgram();
     commandSink.applyToolMotionParams(tool, /*jump=*/true);
+    QString commandError;
 
-    // JumpToSetAFPos 在原实现里写若干 SET 与 PTP，等价为 sink 内"准备阶段"。
-    // 在 sink 抽象下我们只暴露关键 jump 动作；联机硬件保持原 MotionControl 行为。
-    if (tool.m_bCuttingHead) {
-        if (tool.m_bCrossBridge) {
-            commandSink.stopCuttingHead();
-            commandSink.jumpToIdleZ(leadPose, tool);
-            commandSink.jumpToPose(leadPose, tool);
-            commandSink.startCuttingHead(tool);
-        } else {
-            commandSink.jumpToIdleZ(leadPose, tool);
-            commandSink.jumpToPose(leadPose, tool);
-            commandSink.startCuttingHead(tool);
+    Tool rapidTool = tool;
+    rapidTool.m_dLineVelocity = tool.m_dIdleXVelocity > 0
+        ? tool.m_dIdleXVelocity : 10.0;
+    rapidTool.m_dLineAcc = tool.m_dIdleXYAccDec > 0
+        ? tool.m_dIdleXYAccDec : tool.m_dLineAcc;
+    rapidTool.m_dLineJerk = tool.m_dIdleXYJerk > 0
+        ? tool.m_dIdleXYJerk : tool.m_dLineJerk;
+    rapidTool.m_dCuttingHeight = 0.0;
+    rapidTool.m_dCuttingHeightCompensate = 0.0;
+
+    const auto submitCoordinatedRapid = [&](const QVector<MachinePose5>& poses) {
+        if (poses.isEmpty())
+            return true;
+        if (!commandSink.beginSegment(poses.front(), rapidTool, &commandError))
+            return false;
+        for (const MachinePose5& pose : poses) {
+            if (!commandSink.lineTo(pose, rapidTool, &commandError))
+                return false;
         }
-    } else {
-        commandSink.jumpToIdleZ(leadPose, tool);
-        commandSink.jumpToPose(leadPose, tool);
-    }
+        commandSink.endSegment(rapidTool);
+        if (!commandSink.flush(&commandError))
+            return false;
+        commandSink.resetProgram();
+        commandSink.applyToolMotionParams(tool, /*jump=*/false);
+        return true;
+    };
 
-    commandSink.jumpToCuttingZ(leadPose, tool);
+    if (row.hasEntryTransition) {
+        // The continuously solved CAM curve is the sole authority for
+        // inter-contour rapid motion.  Do not rebuild a fixed XY/AC jump here:
+        // it would break pose continuity and can reintroduce a rotary sweep.
+        commandSink.stopCuttingHead();
+        const int rapidCount = row.entryTransition.segments.size();
+        QVector<MachinePose5> rapidPoses;
+        rapidPoses.reserve(rapidCount);
+        for (int rapidIndex = 0; rapidIndex < rapidCount; ++rapidIndex) {
+            // Tool height corrections remain a controller-coordinate concern;
+            // the CAM geometric/IK solution stays nominal.  Apply both
+            // corrections to every coordinated rapid sample, tapering the
+            // idle clearance to zero at the target lead-in so no final
+            // unplanned Z-only descent is needed before laser-on.
+            lcnc::cam::RapidMoveSegment rapid = row.entryTransition.segments.at(rapidIndex);
+            const double t = static_cast<double>(rapidIndex + 1)
+                / static_cast<double>(rapidCount);
+            const double rapidEnvelope = std::sin(3.14159265358979323846 * t);
+            rapid.target.axes[2] += tool.m_dCuttingHeight
+                + tool.m_dCuttingHeightCompensate
+                + tool.m_dIdleZHeight * rapidEnvelope;
+            if (pureSimulation) {
+                if (!commandSink.executeRapidSegment(rapid, tool, &commandError)) {
+                    if (startError) *startError = commandError.isEmpty()
+                        ? tr("Planned rapid command generation failed") : commandError;
+                    return false;
+                }
+            } else {
+                MachinePose5 pose;
+                pose.x = rapid.target.axes[0];
+                pose.y = rapid.target.axes[1];
+                pose.z = rapid.target.axes[2];
+                pose.r1 = rapid.target.axes[3];
+                pose.r2 = rapid.target.axes[4];
+                pose.r1Name = rapid.target.rotaryAxis1Name;
+                pose.r2Name = rapid.target.rotaryAxis2Name;
+                pose.mask = rapid.target.activeMask;
+                rapidPoses.append(std::move(pose));
+            }
+        }
+        // A rapid must finish before the head/laser/cutting program is built.
+        // Keeping them in one ACS buffer made the temporal boundary implicit
+        // and allowed legacy PTP-looking behaviour around START 6.  Submit
+        // the continuously solved XSEG/LINE path now, wait for it, then build
+        // a fresh cutting program from the reached lead-in pose.
+        if (!pureSimulation && !submitCoordinatedRapid(rapidPoses)) {
+            if (startError) *startError = commandError.isEmpty()
+                ? tr("Planned rapid execution failed") : commandError;
+            return false;
+        }
+        if (tool.m_bCuttingHead)
+            commandSink.startCuttingHead(tool);
+    } else {
+        // The first contour starts from controller APOS. It has no predecessor
+        // contour, but its approach still uses one XSEG with LINE samples.
+        if (tool.m_bCuttingHead && tool.m_bCrossBridge)
+            commandSink.stopCuttingHead();
+        if (!pureSimulation) {
+            MachinePose5 idlePose = leadPose;
+            idlePose.z += tool.m_dIdleZHeight;
+            MachinePose5 cuttingPose = leadPose;
+            cuttingPose.z += tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate;
+            if (!submitCoordinatedRapid({idlePose, cuttingPose})) {
+                if (startError) *startError = commandError.isEmpty()
+                    ? tr("Initial coordinated approach execution failed") : commandError;
+                return false;
+            }
+        }
+        if (tool.m_bCuttingHead)
+            commandSink.startCuttingHead(tool);
+    }
 
     commandSink.setShutterTimings(tool.m_dBeforeOn, tool.m_dAfterOn,
                             tool.m_dBeforeOff, tool.m_dAfterOff, tool.m_dBlowDelay);
     commandSink.laserOn(tool);
 
     // ——— 协调插补段：beginSegment → lineTo*  → endSegment ———
-    QString commandError;
     if (!commandSink.beginSegment(leadPose, tool, &commandError)
         || !commandSink.lineTo(contourStartPose, tool, &commandError)) {
         if (startError) *startError = commandError.isEmpty()
@@ -628,6 +710,19 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
 
     QVector<CuttingRow> out;
 
+    if (snapshot.contours.size() > 1 && !snapshot.travelPlan.isExecutable()) {
+        if (errorMessage) {
+            const QString reason = snapshot.travelPlan.failureReason.isEmpty()
+                ? tr("The rapid travel plan is missing or out of date")
+                : snapshot.travelPlan.failureReason;
+            *errorMessage = tr("Machining cannot start: %1").arg(reason);
+        }
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "normal-cutting: rejected stale or invalid travel plan: {}",
+                 snapshot.travelPlan.failureReason.toStdString());
+        return {};
+    }
+
     QHash<std::uint64_t, int> indexById;
     indexById.reserve(snapshot.contours.size());
     for (int i = 0; i < snapshot.contours.size(); ++i)
@@ -675,6 +770,10 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             CuttingRow row;
             row.data.contour = contour;
             row.data.points  = snapshot.pointsByContourId.value(contour.contourId);
+            if (const auto* transition = snapshot.travelPlan.transitionTo(contour.contourId)) {
+                row.entryTransition = *transition;
+                row.hasEntryTransition = transition->isValid();
+            }
             row.compensationOffsetX = offsetX;
             row.compensationOffsetY = offsetY;
             if (row.data.points.size() < 2) {
