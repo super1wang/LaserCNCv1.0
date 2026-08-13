@@ -3,6 +3,7 @@
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kinematics/machine_pose.h"
 #include "core/kinematics/toolpath_kinematics_solver.h"
+#include "modules/process/process_module.h"
 #include "modules/process/runtime/axis_map.h"
 #include "modules/process/runtime/machine_pose5.h"
 
@@ -128,6 +129,58 @@ max = 120.0
                   && livePose.setAxisValue(QStringLiteral("C"), 30.0, false)
                   && isNear(livePose.axisValue(QStringLiteral("C")), 30.0),
                   "In-place AC-table configuration did not refresh the pose C axis");
+
+    // Reconfiguring an axis definition while opening a new workpiece must not
+    // publish a synthetic zero feedback and visually return the mounted
+    // workpiece to home until the next controller polling cycle.
+    ProcessModule process;
+    QList<MachineAxisDef> processAxes = configuration.axisDefinitions();
+    process.setAxisDefinitions(processAxes);
+    process.setAxisPositions({{QStringLiteral("X"), 123.0},
+                              {QStringLiteral("A"), 17.0},
+                              {QStringLiteral("C"), -42.0}});
+    processAxes.front().maxVal += 1.0; // force a non-topological definition refresh
+    process.setAxisDefinitions(processAxes);
+    const QMap<QString, double> refreshedPositions = process.currentAxisPositions();
+    ok &= require(isNear(refreshedPositions.value(QStringLiteral("X")), 123.0)
+                  && isNear(refreshedPositions.value(QStringLiteral("A")), 17.0)
+                  && isNear(refreshedPositions.value(QStringLiteral("C")), -42.0),
+                  "Axis definition refresh reset live controller feedback to zero");
+    QMap<QString, double> replayedPositions;
+    QObject::connect(&process, &ProcessModule::axisPositionChanged,
+                     [&replayedPositions](const QString& axis, double value) {
+                         replayedPositions.insert(axis, value);
+                     });
+    process.synchronizeAxisFeedback();
+    ok &= require(isNear(replayedPositions.value(QStringLiteral("X")), 123.0)
+                  && isNear(replayedPositions.value(QStringLiteral("A")), 17.0)
+                  && isNear(replayedPositions.value(QStringLiteral("C")), -42.0),
+                  "Rebuilt coordinate view did not receive cached controller feedback");
+
+    // Rapid preview points arrive from planning in machine/world coordinates.
+    // The display stores them in workpiece-local coordinates and applies the
+    // current WPC transform once through AIS.  This round trip is what keeps
+    // a rapid curve on a workpiece held at a non-zero table posture.
+    MachineKinematics displayedMachine;
+    displayedMachine.setAxes(configuration.axisDefinitions(), configuration.presetName());
+    displayedMachine.mountWorkpiece(QStringLiteral("fixture"), QStringLiteral("C"));
+    displayedMachine.setAxisPosition(QStringLiteral("A"), 35.0);
+    displayedMachine.setAxisPosition(QStringLiteral("C"), -42.0);
+    gp_Trsf fixtureSetup;
+    fixtureSetup.SetTranslation(gp_Vec(12.0, -8.0, 25.0));
+    displayedMachine.setWorkpieceSetupTransform(fixtureSetup);
+    const gp_Trsf liveFixtureTransform =
+        displayedMachine.computeWpcTransform(QStringLiteral("fixture"));
+    const gp_Pnt plannedWorldPoint = gp_Pnt(4.0, 7.0, 9.0).Transformed(liveFixtureTransform);
+    const gp_Pnt displayLocalPoint = plannedWorldPoint.Transformed(liveFixtureTransform.Inverted());
+    displayedMachine.setAxisPosition(QStringLiteral("C"), 28.0);
+    const gp_Trsf movedFixtureTransform =
+        displayedMachine.computeWpcTransform(QStringLiteral("fixture"));
+    const gp_Pnt redisplayedWorldPoint = displayLocalPoint.Transformed(movedFixtureTransform);
+    const gp_Pnt expectedMovedWorldPoint = gp_Pnt(4.0, 7.0, 9.0).Transformed(movedFixtureTransform);
+    ok &= require(redisplayedWorldPoint.Distance(expectedMovedWorldPoint) < 1e-6
+                  && redisplayedWorldPoint.Distance(plannedWorldPoint) > 1e-3,
+                  "Rapid preview did not follow the non-zero workpiece posture");
 
     configuration.applyPreset(QStringLiteral("VERTICAL_BC_TABLE"));
     const auto bcReduced = configuration.modeDefinition(lcnc::MachiningMode::RotaryTube4Axis);

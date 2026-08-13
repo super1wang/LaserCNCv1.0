@@ -84,6 +84,10 @@ struct RapidTransition
     std::uint64_t toContourId{0};
     QVector<RapidMoveSegment> segments;
     QVector<RapidSurfacePreviewPoint> surfacePreviewPoints;
+    /// Display-only workpiece-local copy frozen when CAM creates the plan.
+    /// Process ignores it; the renderer applies the live WPC transform exactly
+    /// once so the preview remains attached to a moved/rotated workpiece.
+    QVector<RapidSurfacePreviewPoint> workpieceLocalPreviewPoints;
     double estimatedTimeMs{0.0};
     double pathLengthMm{0.0};
     double minimumClearanceMm{0.0};

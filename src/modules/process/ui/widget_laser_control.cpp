@@ -361,14 +361,15 @@ void WidgetLaserControl::rebuildAxisGroup()
         btnAxis->setCheckable(true);
         btnAxis->setChecked(true);
         btnAxis->setMinimumWidth(46);
-        auto* val  = new QLabel("  0.000", m_axisGroup);
+        const QString axisName = axis.name.trimmed().toUpper();
+        const double feedback = m_axisFeedback.value(axisName, 0.0);
+        auto* val  = new QLabel(QString::asprintf("%8.3f", feedback), m_axisGroup);
         val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         val->setMinimumWidth(70);
         val->setStyleSheet(isLightTheme()
             ? "font-family:Consolas, monospace; color:#08724F; font-weight:600;"
             : "font-family:Consolas, monospace; color:#49E6B5; font-weight:600;");
         auto* unit = new QLabel(axis.motionType == MachineAxisDef::Linear ? "mm" : "°", m_axisGroup);
-        const QString axisName = axis.name.trimmed().toUpper();
         const QString taskState = m_axisTaskStates.value(axisName);
         if (!taskState.isEmpty()) {
             btnAxis->setText(QStringLiteral("%1\n%2").arg(axis.name, taskState));
@@ -385,7 +386,7 @@ void WidgetLaserControl::rebuildAxisGroup()
         grid->addWidget(btnAxis, row, column);
         grid->addWidget(val, row, column + 1);
         grid->addWidget(unit, row, column + 2);
-        m_posLabels[axis.name] = val;
+        m_posLabels[axisName] = val;
         ++axisIndex;
     }
 
@@ -541,8 +542,16 @@ void WidgetLaserControl::rebuildJogGroup()
 // ── Public update methods ──────────────────────────────────────────────────────
 void WidgetLaserControl::updateAxisPosition(const QString& axis, double pos)
 {
-    if (m_posLabels.contains(axis))
-        m_posLabels[axis]->setText(QString::asprintf("%8.3f", pos));
+    const QString axisName = axis.trimmed().toUpper();
+    if (axisName.isEmpty())
+        return;
+    // The widget does not infer positions from a document.  It only remembers
+    // the ProcessModule feedback it has already received so rebuilding labels
+    // cannot make a live controller pose temporarily look like zero.
+    // 中文翻译：界面只缓存 ProcessModule 已推送的控制器反馈；重建标签不能把实时位姿暂时显示为零。
+    m_axisFeedback.insert(axisName, pos);
+    if (m_posLabels.contains(axisName))
+        m_posLabels[axisName]->setText(QString::asprintf("%8.3f", pos));
 }
 
 void WidgetLaserControl::updateConnectionStatus(bool connected)

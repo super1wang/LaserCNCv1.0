@@ -291,11 +291,11 @@ public:
             QObject::connect(m_module, &CamModule::activeContourParametersChanged,
                              this, [this] { refreshCache(); });
             QObject::connect(m_module, &CamModule::machiningModeChanged,
-                             this, [this](lcnc::MachiningMode) { refreshCache(); });
+                             this, [this](lcnc::MachiningMode) { refreshCache(true); });
             QObject::connect(m_module, &CamModule::workpieceSetupTransformChanged,
-                             this, [this] { refreshCache(); });
+                             this, [this] { refreshCache(true); });
             QObject::connect(m_module, &CamModule::cutterCollisionConfigurationChanged,
-                             this, [this] { refreshCache(); });
+                             this, [this] { refreshCache(true); });
             QObject::connect(m_module, &CamModule::pipelineStageChanged,
                              this, [this](lcnc::cam::CamPipelineStage) { refreshCache(); });
             refreshCache();
@@ -305,13 +305,13 @@ public:
     bool hasToolpath() const override
     {
         QMutexLocker lock(&m_cacheMutex);
-        return m_snapshot.hasEnabledContours();
+        return m_baseSnapshot.hasEnabledContours();
     }
 
     std::uint64_t toolpathRevision() const override
     {
         QMutexLocker lock(&m_cacheMutex);
-        return m_snapshot.revision;
+        return m_baseSnapshot.revision;
     }
 
     bool solveToolpathForOrder(
@@ -337,7 +337,7 @@ public:
         // commit a fully planned snapshot.
         // 中文翻译：默认快照读取始终走缓存；只有明确设置加工顺序时才生成并提交空程规划。
         QMutexLocker lock(&m_cacheMutex);
-        return m_snapshot;
+        return m_baseSnapshot;
     }
 
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
@@ -347,34 +347,44 @@ public:
             return m_module->exportToolpathSnapshotForOrder(orderedContourIds);
         QMutexLocker lock(&m_cacheMutex);
         if (orderedContourIds.isEmpty())
-            return m_snapshot;
+            return m_baseSnapshot;
 
-        bool exactCachedOrder = orderedContourIds.size() == m_snapshot.contours.size();
+        // A signal-driven base refresh must not overwrite a planned snapshot
+        // from the same immutable toolpath revision.  CAM emits several
+        // completion notifications after a regeneration; Process resolves the
+        // cutting order during one of them, and later notifications previously
+        // replaced that verified plan with TravelPlanningMode::None.
+        // 中文翻译：同一刀路版本的基础快照刷新不能覆盖已验证空程计划；生成完成后的后续信号只更新基础数据。
+        const auto& snapshot = m_plannedSnapshot.revision == m_baseSnapshot.revision
+                ? m_plannedSnapshot
+                : m_baseSnapshot;
+
+        bool exactCachedOrder = orderedContourIds.size() == snapshot.contours.size();
         for (int index = 0; exactCachedOrder && index < orderedContourIds.size(); ++index) {
-            exactCachedOrder = m_snapshot.contours.at(index).contourId
+            exactCachedOrder = snapshot.contours.at(index).contourId
                 == orderedContourIds.at(index);
         }
         if (exactCachedOrder)
-            return m_snapshot;
+            return snapshot;
 
         lcnc::cam::ToolpathExportSnapshot ordered;
-        ordered.revision = m_snapshot.revision;
-        ordered.description = m_snapshot.description;
-        ordered.machiningMode = m_snapshot.machiningMode;
-        ordered.machineAxisLayout = m_snapshot.machineAxisLayout;
-        ordered.machineConfigurationFingerprint = m_snapshot.machineConfigurationFingerprint;
-        ordered.solverId = m_snapshot.solverId;
-        ordered.solverVersion = m_snapshot.solverVersion;
+        ordered.revision = snapshot.revision;
+        ordered.description = snapshot.description;
+        ordered.machiningMode = snapshot.machiningMode;
+        ordered.machineAxisLayout = snapshot.machineAxisLayout;
+        ordered.machineConfigurationFingerprint = snapshot.machineConfigurationFingerprint;
+        ordered.solverId = snapshot.solverId;
+        ordered.solverVersion = snapshot.solverVersion;
         QHash<std::uint64_t, lcnc::cam::ToolpathExportContour> byId;
         QVector<std::uint64_t> actualOrder;
-        for (const auto& contour : m_snapshot.contours)
+        for (const auto& contour : snapshot.contours)
             byId.insert(contour.contourId, contour);
         for (const std::uint64_t id : orderedContourIds) {
             const auto it = byId.constFind(id);
             if (it == byId.constEnd())
                 continue;
             ordered.contours.append(it.value());
-            ordered.pointsByContourId.insert(id, m_snapshot.pointsByContourId.value(id));
+            ordered.pointsByContourId.insert(id, snapshot.pointsByContourId.value(id));
             actualOrder.append(id);
         }
 
@@ -384,7 +394,7 @@ public:
         // subset with TravelPlanningMode::None, because Process would then
         // have no verified inter-contour motion to execute.
         // 中文翻译：部分加工只能复用仍保持相邻关系的已验证空程；缺失空程计划必须阻止执行。
-        ordered.travelPlan = m_snapshot.travelPlan;
+        ordered.travelPlan = snapshot.travelPlan;
         ordered.travelPlan.transitions.clear();
         ordered.travelPlan.totalEstimatedTimeMs = 0.0;
         ordered.travelPlan.totalLengthMm = 0.0;
@@ -400,7 +410,7 @@ public:
         } else {
             double minimumClearance = std::numeric_limits<double>::infinity();
             for (int index = 1; index < actualOrder.size(); ++index) {
-                const auto* transition = m_snapshot.travelPlan.transitionTo(actualOrder.at(index));
+                const auto* transition = snapshot.travelPlan.transitionTo(actualOrder.at(index));
                 if (!transition || transition->fromContourId != actualOrder.at(index - 1)
                     || !transition->isValid()) {
                     ordered.travelPlan.failureReason = QCoreApplication::translate(
@@ -435,11 +445,18 @@ private:
         auto snapshot = orderedContourIds.isEmpty()
             ? m_module->exportToolpathBaseSnapshot()
             : m_module->exportToolpathSnapshotForOrder(orderedContourIds);
+        // Keep the default cache as the complete CAM export.  The planned
+        // snapshot can contain only enabled contours in cutting order, while
+        // Process still needs the complete base snapshot to synchronise layer
+        // membership and to derive subsequent orders.
+        // 中文翻译：基础缓存必须保留完整 CAM 刀路；已规划快照只包含当前加工顺序的启用轮廓。
+        auto baseSnapshot = m_module->exportToolpathBaseSnapshot();
         QMutexLocker lock(&m_cacheMutex);
-        m_snapshot = std::move(snapshot);
+        m_baseSnapshot = std::move(baseSnapshot);
+        m_plannedSnapshot = std::move(snapshot);
     }
 
-    void refreshCache()
+    void refreshCache(bool invalidatePlannedPlan = false)
     {
         if (!m_module || QThread::currentThread() != m_module->thread())
             return;
@@ -450,12 +467,19 @@ private:
         // 中文翻译：信号触发的缓存刷新只复制基础刀路，不在此处同步执行空程规划。
         auto snapshot = m_module->exportToolpathBaseSnapshot();
         QMutexLocker lock(&m_cacheMutex);
-        m_snapshot = std::move(snapshot);
+        // Toolpath content changes produce a new revision and invalidate the
+        // paired plan.  Repeated completion signals for the same revision only
+        // refresh base data, leaving the plan solved by Process intact.
+        // 中文翻译：刀路内容变更会通过 revision 作废空程；同一版本的完成信号仅刷新基础数据，保留已求解计划。
+        if (invalidatePlannedPlan || m_plannedSnapshot.revision != snapshot.revision)
+            m_plannedSnapshot = {};
+        m_baseSnapshot = std::move(snapshot);
     }
 
     CamModule* m_module{nullptr};
     mutable QMutex m_cacheMutex;
-    lcnc::cam::ToolpathExportSnapshot m_snapshot;
+    lcnc::cam::ToolpathExportSnapshot m_baseSnapshot;
+    lcnc::cam::ToolpathExportSnapshot m_plannedSnapshot;
 };
 
 /**
@@ -2061,9 +2085,22 @@ bool CamModule::applyConfiguredMachineAxes(bool updateView)
     if (!kin || !m_machineConfig)
         return false;
 
-    const QList<MachineAxisDef> axes = m_machineConfig->axisDefinitions();
+    QList<MachineAxisDef> axes = m_machineConfig->axisDefinitions();
     if (axes.isEmpty())
         return false;
+
+    // MachineConfigurationService owns the static topology and limits, while
+    // the existing kinematics instance mirrors live controller feedback.  A
+    // workspace/file switch must replace only the former; copying the raw
+    // configured currentPos values would fabricate a home pose until the next
+    // device polling update arrives.
+    // 中文翻译：切换工程只更新轴拓扑和限位；保留已有运动学中的实时反馈，不能把配置默认零位当作控制器反馈。
+    for (MachineAxisDef& axis : axes) {
+        if (axis.name == QStringLiteral("BASE"))
+            continue;
+        if (const MachineAxisDef* liveAxis = kin->findAxis(axis.name))
+            axis.currentPos = liveAxis->currentPos;
+    }
 
     kin->setAxes(axes, m_machineConfig->presetName());
     kin->setWorkpieceSetupTransform(m_machineConfig->workpieceSetupTransform().toTransform());
@@ -4989,6 +5026,31 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         for (auto& contour : snapshot.contours)
             contourById.insert(contour.contourId, &contour);
 
+        // Planning emits surfacePreviewPoints in machine/world coordinates.
+        // Freeze a local display copy now, using the posture at which the
+        // curve was created.  The renderer later applies the current WPC
+        // posture once, so table motion moves the preview with the workpiece
+        // instead of preserving the old world-space curve.
+        // 中文翻译：规划输出的是机床世界坐标；此处固化工件局部显示曲线，渲染时只施加一次当前工件姿态，使空程随工件旋转移动。
+        for (lcnc::cam::RapidTransition& transition : plan.transitions) {
+            const auto* sourceContour = contourById.value(transition.fromContourId, nullptr);
+            if (!sourceContour || transition.surfacePreviewPoints.isEmpty())
+                continue;
+            const gp_Trsf inverseWpc =
+                kin->computeWpcTransform(sourceContour->workpieceEntry).Inverted();
+            transition.workpieceLocalPreviewPoints.reserve(
+                transition.surfacePreviewPoints.size());
+            for (const auto& point : transition.surfacePreviewPoints) {
+                gp_Pnt localPoint(point.x, point.y, point.z);
+                localPoint.Transform(inverseWpc);
+                gp_Dir localNormal(point.normalX, point.normalY, point.normalZ);
+                localNormal.Transform(inverseWpc);
+                transition.workpieceLocalPreviewPoints.append({
+                    localPoint.X(), localPoint.Y(), localPoint.Z(),
+                    localNormal.X(), localNormal.Y(), localNormal.Z()});
+            }
+        }
+
         const auto assignExportCoordinate = [](lcnc::cam::ToolpathExportPoint* point,
                                                const MachineCoord& coordinate) {
             if (!point)
@@ -7545,27 +7607,18 @@ void CamModule::refreshTravelPath()
             segment.verified = plannedPlan.isExecutable();
             segment.workpieceEntry = source->workpieceEntry;
 
-            // The planner and Process contract use machine/world TCP points.
-            // Rendering keeps an equivalent workpiece-local polyline and lets
-            // TravelPathRenderer apply the same live WPC transform as contours.
-            // This makes visibility independent of the current installation
-            // pose and keeps the dashed path attached during table/workpiece
-            // position refreshes without modifying the executable plan.
-            gp_Trsf inverseWpc;
-            if (MachineKinematics* kin = kinematics();
-                kin && !segment.workpieceEntry.isEmpty()) {
-                inverseWpc = kin->computeWpcTransform(segment.workpieceEntry).Inverted();
-            }
-            const auto appendLocalWaypoint = [&segment, &inverseWpc](double x, double y, double z) {
-                const gp_Pnt local = gp_Pnt(x, y, z).Transformed(inverseWpc);
-                segment.waypoints.append({local.X(), local.Y(), local.Z()});
-            };
-            // Display the unsolved geometric curve, not the post-IK samples.
-            for (const auto& preview : transition.surfacePreviewPoints) {
-                appendLocalWaypoint(
+            // The local display curve was frozen when planning used its source
+            // WPC posture.  Do not inverse-transform world points with today's
+            // pose here: doing so followed by the renderer transform cancels
+            // out and leaves the rapid path frozen at its former world pose.
+            const auto& previewPoints = transition.workpieceLocalPreviewPoints.isEmpty()
+                ? transition.surfacePreviewPoints
+                : transition.workpieceLocalPreviewPoints;
+            for (const auto& preview : previewPoints) {
+                segment.waypoints.append({
                     preview.x + preview.normalX * kTravelPreviewOffsetMm,
                     preview.y + preview.normalY * kTravelPreviewOffsetMm,
-                    preview.z + preview.normalZ * kTravelPreviewOffsetMm);
+                    preview.z + preview.normalZ * kTravelPreviewOffsetMm});
             }
             plannedSegments.append(std::move(segment));
         }

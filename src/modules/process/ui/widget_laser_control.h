@@ -86,6 +86,9 @@ private:
 
     QList<MachineAxisDef> m_axisDefinitions;
     QMap<QString, class QLabel*> m_posLabels;    ///< axis → position label
+    /// Last values received from ProcessModule's controller-feedback stream.
+    /// Kept across panel rebuilds; never populated from project/view state.
+    QMap<QString, double> m_axisFeedback;
     QMap<QString, class QPushButton*> m_axisButtons;
     QMap<QString, QString> m_axisTaskStates;
     QMap<QString, class QPushButton*> m_ioButtons;

@@ -124,6 +124,11 @@ public:
     void setAxisPosition(const QString& axisName, double value);
     void setAxisPositions(const QMap<QString, double>& positions);
 
+    /// Re-publish the latest controller feedback after a view rebuild and ask
+    /// the active controller for a fresh sample.  This never derives values
+    /// from project/file state or machine configuration.
+    void synchronizeAxisFeedback();
+
     void setFeedOverride(double factor);
     double feedOverride() const;
 

@@ -1812,6 +1812,20 @@ void ProcessModule::setAxisPositions(const QMap<QString, double>& positions)
         setAxisPosition(it.key(), it.value());
 }
 
+void ProcessModule::synchronizeAxisFeedback()
+{
+    // A newly created coordinate panel has no labels to receive earlier
+    // signals.  Replay only Process-owned feedback, then request the normal
+    // controller polling path for a fresh physical sample.  Opening or
+    // closing a project must never invent a machine coordinate.
+    // 中文翻译：坐标面板重建后重放 Process 保存的控制器反馈，并立即走正常轮询获取物理坐标；文件操作绝不能生成坐标。
+    for (auto it = m_axisPositions.cbegin(); it != m_axisPositions.cend(); ++it)
+        emit axisPositionChanged(it.key(), it.value());
+
+    if (m_connected && m_statusService)
+        m_statusService->requestHardwarePoll();
+}
+
 void ProcessModule::setFeedOverride(double factor)
 {
     const double clamped = std::clamp(factor, 0.0, 2.0);
@@ -1878,7 +1892,14 @@ void ProcessModule::initializeAxisPositions()
     for (const MachineAxisDef& axis : m_axisDefinitions) {
         if (axis.name == QStringLiteral("BASE"))
             continue;
-        nextPositions.insert(axis.name, 0.0);
+
+        // Changing the configured axis envelope (for example while opening a
+        // new project) is not a controller homing operation.  Keep the most
+        // recent feedback for axes that still exist, otherwise this method
+        // publishes false zero positions and temporarily moves the live CAM
+        // view back to the machine home posture.
+        // 中文翻译：轴定义变化不是回零；保留仍存在轴的最近反馈，不能向 CAM 发布伪造的零位姿态。
+        nextPositions.insert(axis.name, m_axisPositions.value(axis.name, 0.0));
     }
 
     m_axisPositions = nextPositions;

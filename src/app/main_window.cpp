@@ -257,6 +257,11 @@ MainWindow::MainWindow(QWidget* parent)
                         m_toolpathPanel->setMachineAxisLayout(camData->machineAxisLayout());
                 }
                 syncMachineTreeVisibilityState();
+                // Workspace changes may recreate the coordinate controls, but
+                // must not redefine or reset Process state.  Re-publish the
+                // controller-owned snapshot for the newly created labels.
+                if (m_appContext && m_appContext->processModule())
+                    m_appContext->processModule()->synchronizeAxisFeedback();
                 updateCommandStates();
             });
 
@@ -1381,6 +1386,7 @@ void MainWindow::createRightPanel()
                         const auto enabledStates = process->axisEnabledStates();
                         for (auto it = enabledStates.cbegin(); it != enabledStates.cend(); ++it)
                             m_laserControl->updateAxisEnabled(it.key(), it.value());
+                        process->synchronizeAxisFeedback();
                     });
             const QList<MachineAxisDef> axes = machineConfig->axisDefinitions();
             m_laserControl->setAxisDefinitions(axes);
@@ -2196,10 +2202,10 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
             rebuildProjectExplorer();
         m_machinePanel->setDocument(nullptr);
         syncMachineTreeVisibilityState();
-        if (process)
-            process->setAxisDefinitions(configuredAxes);
         if (m_laserControl)
             m_laserControl->setAxisDefinitions(configuredAxes);
+        if (process)
+            process->synchronizeAxisFeedback();
         return;
     }
 
@@ -2212,15 +2218,15 @@ void MainWindow::syncMachineWorkspaceUiInternal(bool rebuildTree)
     const QList<MachineAxisDef> axes = configuredAxes.isEmpty()
         ? machineDoc->machineKinematics()->axes()
         : configuredAxes;
-    if (process)
-        process->setAxisDefinitions(axes);
+    // ProcessModule subscribes directly to MachineConfigurationService.  A
+    // file/workspace UI refresh must not feed project-owned axis definitions
+    // back into Process or affect its controller-feedback cache.
+    // 中文翻译：ProcessModule 直接订阅机床配置服务；文件/工作区 UI 刷新不得反向写入轴定义或影响控制器反馈缓存。
     if (m_laserControl)
         m_laserControl->setAxisDefinitions(axes);
 
     if (process && m_laserControl) {
-        const auto axisPositions = process->currentAxisPositions();
-        for (auto it = axisPositions.cbegin(); it != axisPositions.cend(); ++it)
-            m_laserControl->updateAxisPosition(it.key(), it.value());
+        process->synchronizeAxisFeedback();
     }
 }
 
