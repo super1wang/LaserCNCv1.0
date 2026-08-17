@@ -150,21 +150,6 @@ public:
     /// 暴露给 NormalCuttingManager 等需要工艺数据的内部组件。
     lcnc::process::ProcessCuttingPlanService* cuttingPlanService() const { return m_cuttingPlanService.get(); }
 
-    // ── Ribbon「加工顺序」状态 ────────────────────────────────────────────
-    /// 自动排序使用的主轴方向（Ribbon 下拉同步而来）。
-    lcnc::process::AutoSortAxis autoSortAxis() const { return m_autoSortAxis; }
-    void setAutoSortAxis(lcnc::process::AutoSortAxis a);
-    /// 从 Ribbon QComboBox 当前文本（"X+"/"X-"/"Y+"/...）回写。
-    void setAutoSortAxisFromText(const QString& text);
-
-    /// 切割路径虚线显示开关；ProcessModule 仅维护状态，绘制在 CAM 端。
-    bool isTravelPathVisible() const { return m_travelPathVisible; }
-    void setTravelPathVisible(bool on);
-
-    /// 切割链表序号显示开关；ProcessModule 仅维护状态，绘制在 CAM 端。
-    bool isContourOrderLabelVisible() const { return m_contourOrderLabelVisible; }
-    void setContourOrderLabelVisible(bool on);
-
 signals:
     void connectionChanged(bool connected);
     void simulationModeChanged(bool enabled);
@@ -280,10 +265,6 @@ private:
     lcnc::ModuleTaskScope m_taskScope;
     DeviceOperation       m_deviceOperation{DeviceOperation::None};
 
-    // ── Ribbon「加工顺序」状态镜像 ────────────────────────────────────────
-    lcnc::process::AutoSortAxis m_autoSortAxis{lcnc::process::AutoSortAxis::XPos};
-    bool                        m_travelPathVisible{false};
-    bool                        m_contourOrderLabelVisible{false};
 };
 
 Q_DECLARE_METATYPE(DigitalOutputDescriptor)

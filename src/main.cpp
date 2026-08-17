@@ -14,6 +14,7 @@
 #include "modules/cad/cad_module.h"
 #include "modules/cam/cam_module.h"
 #include "modules/process/process_module.h"
+#include "modules/simulation/simulation_module.h"
 
 namespace {
 
@@ -273,6 +274,7 @@ int main(int argc, char* argv[])
 
     tryAdd("cad",     {},          std::make_unique<CadModule>());
     tryAdd("cam",     {"cad"},     std::make_unique<CamModule>());
+    tryAdd("simulation", {"cam"}, std::make_unique<lcnc::simulation::SimulationModule>());
     tryAdd("process", {"cam"},     std::make_unique<ProcessModule>());
 
     if (!kernel.bootstrap()) {

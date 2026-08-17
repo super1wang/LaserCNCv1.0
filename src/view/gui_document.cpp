@@ -384,16 +384,26 @@ Handle(AIS_Shape) GuiDocument::displayShape(lcnc::ProjectDomain domain,
                                              const QString& name,
                                              bool fitAll)
 {
+    return displayShape(domain, document, static_cast<int>(LcncDocument::EntityKind::Workpiece),
+                        shape, name, fitAll);
+}
+
+Handle(AIS_Shape) GuiDocument::displayShape(lcnc::ProjectDomain domain,
+                                             LcncDocument* document,
+                                             int entityKind,
+                                             const TopoDS_Shape& shape,
+                                             const QString& name,
+                                             bool fitAll,
+                                             bool deferPresentationUpdate)
+{
     Handle(AIS_Shape) ais = m_scene->displayShape(shape, fitAll, true, false);
-    registerDisplayObject(domain, document, static_cast<int>(LcncDocument::EntityKind::Workpiece), name, ais);
-    applyMachineDisplayStyle();
-    if (m_renderingManager)
-        m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
-                                                  m_renderingManager->runtimeFaceBoundary());
+    registerDisplayObject(domain, document, entityKind, name, ais);
+    if (!deferPresentationUpdate)
+        finalizeDisplayBatch();
     LCNC_DEBUG(lcnc::LogCode::Generic,
                "GuiDocument::displayShape name={} fit={} count={}",
                name.toStdString(), fitAll, m_displayObjects.size());
-    if (!m_view.IsNull()) {
+    if (!deferPresentationUpdate && !m_view.IsNull()) {
         if (fitAll) {
             if (!fitDisplayObjects(0, false) && !fitDisplayObjects(1, false))
                 fitDisplayObjects(2, false);
@@ -402,6 +412,19 @@ Handle(AIS_Shape) GuiDocument::displayShape(lcnc::ProjectDomain domain,
     }
     emit displayUpdated();
     return ais;
+}
+
+void GuiDocument::finalizeDisplayBatch()
+{
+    applyMachineDisplayStyle();
+    if (m_renderingManager)
+        m_renderingManager->setRuntimeDisplayMode(m_renderingManager->runtimeDisplayMode(),
+                                                  m_renderingManager->runtimeFaceBoundary());
+    const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
+    if (!ctx.IsNull())
+        ctx->UpdateCurrentViewer();
+    if (!m_view.IsNull())
+        m_view->Redraw();
 }
 
 void GuiDocument::eraseEntity(const QString& labelEntry)
@@ -958,7 +981,7 @@ bool GuiDocument::eraseKey(const DisplayKey& key, bool updateViewer)
         return false;
 
     if (!it.value().ais.IsNull())
-        m_scene->eraseShape(it.value().ais, updateViewer);
+        m_scene->removeShape(it.value().ais, updateViewer);
     m_displayObjects.erase(it);
     return true;
 }

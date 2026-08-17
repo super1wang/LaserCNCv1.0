@@ -81,6 +81,19 @@ public:
                                    const TopoDS_Shape& shape,
                                    const QString& name,
                                    bool fitAll = false);
+    /// Registers an explicitly typed shape.  Batch callers can defer the
+    /// O(N) style/display-mode pass and call finalizeDisplayBatch() once.
+    /// 中文翻译：显式实体类型的显示接口；批量调用可延后样式/显示模式处理，最后统一提交。
+    Handle(AIS_Shape) displayShape(lcnc::ProjectDomain domain,
+                                   LcncDocument* document,
+                                   int entityKind,
+                                   const TopoDS_Shape& shape,
+                                   const QString& name,
+                                   bool fitAll = false,
+                                   bool deferPresentationUpdate = false);
+    /// Completes a deferred display batch with one style, display-mode and
+    /// viewer update pass.
+    void finalizeDisplayBatch();
     void eraseEntity(const QString& labelEntry);
     void eraseEntity(DocumentId documentId, const QString& labelEntry);
     void eraseDocument(DocumentId documentId);

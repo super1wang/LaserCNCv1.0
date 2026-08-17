@@ -81,6 +81,10 @@ public:
     /// World transform for a mounted workpiece at current axis positions.
     gp_Trsf computeWpcTransform(const QString& wpcEntry)     const;
     void setWorkpieceSetupTransform(const gp_Trsf& transform);
+    /// Immutable CAD-to-fixture setup captured by read-only consumers such as
+    /// the offline simulation sandbox.
+    /// 中文翻译：供离线仿真等只读消费者捕获的 CAD 到夹具安装变换。
+    const gp_Trsf& workpieceSetupTransform() const { return m_workpieceSetupTransform; }
     /// World transform for an axis node at current axis positions.
     gp_Trsf computeAxisTransform(const QString& axisName) const;
 

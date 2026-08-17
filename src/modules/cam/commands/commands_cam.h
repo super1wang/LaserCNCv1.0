@@ -104,4 +104,48 @@ public:
     void execute()   override;
 };
 
+/// Replaces the CAM manual contour order with the current selection order.
+class CmdManualAppendSelectedToCamOrder : public CommandBase
+{
+    Q_OBJECT
+public:
+    inline static const QString Name = "cam.manualAppendSelectedToOrder";
+    explicit CmdManualAppendSelectedToCamOrder(IAppContext* ctx);
+    bool isEnabled() const override;
+    void execute() override;
+};
+
+/// Applies CAM's automatic contour sorting with the stored primary axis.
+class CmdAutoSortCamOrder : public CommandBase
+{
+    Q_OBJECT
+public:
+    inline static const QString Name = "cam.autoSortOrder";
+    explicit CmdAutoSortCamOrder(IAppContext* ctx);
+    bool isEnabled() const override;
+    void execute() override;
+};
+
+/// Toggles the CAM-owned rapid-travel overlay.
+class CmdToggleCamTravelPath : public CommandBase
+{
+    Q_OBJECT
+public:
+    inline static const QString Name = "cam.toggleTravelPath";
+    explicit CmdToggleCamTravelPath(IAppContext* ctx);
+    bool isEnabled() const override;
+    void execute() override;
+};
+
+/// Toggles CAM-owned sequence-number labels in the view.
+class CmdToggleCamContourOrderLabel : public CommandBase
+{
+    Q_OBJECT
+public:
+    inline static const QString Name = "cam.toggleContourOrderLabel";
+    explicit CmdToggleCamContourOrderLabel(IAppContext* ctx);
+    bool isEnabled() const override;
+    void execute() override;
+};
+
 

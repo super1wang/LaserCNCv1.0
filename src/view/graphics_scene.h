@@ -34,6 +34,10 @@ public:
                                    bool updateViewer = true);
     void redisplayShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
     void eraseShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
+    /// Permanently detach a presentation from the OCC context.  Use this for
+    /// document/domain rebuilds; Erase() alone keeps the object and its
+    /// selection/GPU resources registered for later redisplay.
+    void removeShape(const Handle(AIS_Shape)& aisShape, bool updateViewer = true);
     void eraseAll();
 
     void setShapeColor(const Handle(AIS_Shape)& aisShape,
@@ -46,6 +50,7 @@ public:
     // ── Generic AIS objects ───────────────────────────────────────────────────
     void displayObject(const Handle(AIS_InteractiveObject)& obj, bool update = true);
     void eraseObject(const Handle(AIS_InteractiveObject)& obj,   bool update = true);
+    void removeObject(const Handle(AIS_InteractiveObject)& obj,  bool update = true);
 
     // ── Lighting / background ─────────────────────────────────────────────────
     void setDefaultLighting();

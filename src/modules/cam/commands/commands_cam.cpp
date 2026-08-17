@@ -4,6 +4,8 @@
 
 #include "core/project/project_types.h"
 #include "core/document/lcnc_document.h"
+#include "core/kernel/kernel.h"
+#include "core/services/selection_service.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/kinematics/machine_kinematics.h"
@@ -275,4 +277,131 @@ void CmdClearMachiningFaces::execute()
 {
     context()->camModule()->clearMachiningFaces();
     context()->updateCommandStates();
+}
+
+// =============================================================================
+// CAM contour sequence and view overlays
+// =============================================================================
+
+CmdManualAppendSelectedToCamOrder::CmdManualAppendSelectedToCamOrder(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon("themeicons:cutting_plan.svg"),
+                          tr("Manually set processing sequence"), this);
+    a->setStatusTip(tr("Replace the CAM processing sequence with the currently selected contours"));
+    setAction(a);
+}
+
+bool CmdManualAppendSelectedToCamOrder::isEnabled() const
+{
+    return context()->camModule() && context()->camModule()->hasToolpath();
+}
+
+void CmdManualAppendSelectedToCamOrder::execute()
+{
+    CamModule* cam = context()->camModule();
+    const auto selection = lcnc::Kernel::current().services()
+        .getService<lcnc::core::SelectionService>();
+    const QVector<lcnc::cam::ContourId> ids = selection
+        ? selection->contoursInSelectionOrder() : QVector<lcnc::cam::ContourId>{};
+    if (!cam || ids.isEmpty()) {
+        QMessageBox::information(nullptr, tr("Tips"),
+                                 tr("Please first select at least one profile in the project tree or view."));
+        return;
+    }
+    if (!cam->manualContourOrder().isEmpty()) {
+        const auto choice = QMessageBox::question(
+            nullptr, tr("Cover cutting linked list"),
+            tr("The current cutting list has %1 contours. Do you want to clear them and reset them with the currently selected ones (%2 contours)?")
+                .arg(cam->manualContourOrder().size()).arg(ids.size()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (choice != QMessageBox::Yes)
+            return;
+    }
+    QString error;
+    if (!cam->setManualContourOrder(ids, &error)) {
+        QMessageBox::warning(nullptr, tr("Manual sorting failed"),
+                             error.isEmpty() ? tr("unknown error") : error);
+    }
+    context()->updateCommandStates();
+}
+
+CmdAutoSortCamOrder::CmdAutoSortCamOrder(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon("themeicons:cutting_plan.svg"),
+                          tr("Automatically set processing sequence"), this);
+    a->setStatusTip(tr("Automatically set the CAM processing sequence with the selected direction"));
+    setAction(a);
+}
+
+bool CmdAutoSortCamOrder::isEnabled() const
+{
+    return context()->camModule() && context()->camModule()->hasToolpath();
+}
+
+void CmdAutoSortCamOrder::execute()
+{
+    CamModule* cam = context()->camModule();
+    if (!cam)
+        return;
+    if (!cam->manualContourOrder().isEmpty()) {
+        const auto choice = QMessageBox::question(
+            nullptr, tr("Cover cutting linked list"),
+            tr("The current cutting list already has %1 contours. Do you want to clear them and re-sort them automatically according to the selected direction?")
+                .arg(cam->manualContourOrder().size()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (choice != QMessageBox::Yes)
+            return;
+    }
+    QString error;
+    if (!cam->applyAutoContourSort(cam->lastAutoContourSortAxis(), &error)) {
+        QMessageBox::warning(nullptr, tr("Automatic sorting failed"),
+                             error.isEmpty() ? tr("unknown error") : error);
+    }
+    context()->updateCommandStates();
+}
+
+CmdToggleCamTravelPath::CmdToggleCamTravelPath(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon("themeicons:cutting_plan.svg"), tr("Cutting path display"), this);
+    a->setStatusTip(tr("Shows the planned rapid path between adjacent contours as a dashed line in the 3D view"));
+    a->setCheckable(true);
+    setAction(a);
+}
+
+bool CmdToggleCamTravelPath::isEnabled() const
+{
+    return context()->camModule() && context()->camModule()->hasToolpath();
+}
+
+void CmdToggleCamTravelPath::execute()
+{
+    CamModule* cam = context()->camModule();
+    if (!cam) return;
+    cam->setTravelPathVisible(!cam->isTravelPathVisible());
+    action()->setChecked(cam->isTravelPathVisible());
+}
+
+CmdToggleCamContourOrderLabel::CmdToggleCamContourOrderLabel(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    auto* a = new QAction(QIcon("themeicons:contour_order.svg"), tr("Cutting sequence number"), this);
+    a->setStatusTip(tr("Display the CAM processing sequence number near each contour start in the 3D view"));
+    a->setCheckable(true);
+    setAction(a);
+}
+
+bool CmdToggleCamContourOrderLabel::isEnabled() const
+{
+    return context()->camModule() && context()->camModule()->hasToolpath();
+}
+
+void CmdToggleCamContourOrderLabel::execute()
+{
+    CamModule* cam = context()->camModule();
+    if (!cam) return;
+    cam->setContourOrderLabelVisible(!cam->isContourOrderLabelVisible());
+    action()->setChecked(cam->isContourOrderLabelVisible());
 }

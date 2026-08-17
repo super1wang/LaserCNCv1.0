@@ -10,6 +10,7 @@
 #include "core/task/task_progress.h"
 #include "modules/cam/cam_module.h"
 #include "modules/cam/i_cam_layer_provider.h"
+#include "modules/cam/i_cam_contour_sequence_provider.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
 #include "core/project/cam/layer_manager.h"
 #include "modules/process/cutting/normal_cutting_manager.h"
@@ -389,20 +390,23 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
             connect(mgr, &lcnc::cam::LayerManager::contourMembershipChanged,
                     cuttingPlan, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
             connect(mgr, &lcnc::cam::LayerManager::manualContourOrderChanged,
-                    cuttingPlan, &lcnc::process::ProcessCuttingPlanService::notifyExternalManualOrderChanged);
+                    cuttingPlan, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
             connect(mgr, &lcnc::cam::LayerManager::sortStrategyChanged,
                     cuttingPlan, [cuttingPlan](lcnc::cam::CuttingPlanSortStrategy) {
                         cuttingPlan->notifyExternalPlanChanged();
                     });
         }
     }
+    if (auto sequenceProvider = kernel.services().getService<lcnc::cam::ICamContourSequenceProvider>())
+        m_cuttingPlanService->setContourSequenceProvider(sequenceProvider);
     {
         auto planService = std::shared_ptr<lcnc::process::ProcessCuttingPlanService>(
             m_cuttingPlanService.get(), [](lcnc::process::ProcessCuttingPlanService*) {});
         kernel.services().registerService<lcnc::process::ProcessCuttingPlanService>(planService);
-        // 同一实例额外注册为只读 provider 接口，给 CAM 的 TravelPathRenderer 消费。
-        auto providerView = std::static_pointer_cast<lcnc::process::IProcessCuttingPlanProvider>(planService);
-        kernel.services().registerService<lcnc::process::IProcessCuttingPlanProvider>(providerView);
+        // CAM receives only the optional read-only tool-height bridge; it never
+        // receives a Process-defined contour sequence.
+        auto offsetProvider = std::static_pointer_cast<lcnc::cam::ICamToolOffsetProvider>(planService);
+        kernel.services().registerService<lcnc::cam::ICamToolOffsetProvider>(offsetProvider);
     }
     // CAM 图层变更（新增/删除/重命名）时自动同步映射表。
     if (auto cam = kernel.services().getService<CamModule>()) {
@@ -2249,29 +2253,4 @@ void ProcessModule::setStatusMessage(const QString& message)
     m_statusMessage = message;
     emit statusMessageChanged(m_statusMessage);
     emit processLogMessage(logLevelForMessage(m_statusMessage), m_statusMessage);
-}
-
-// ── Ribbon「加工顺序」状态 ────────────────────────────────────────────────
-
-void ProcessModule::setAutoSortAxis(lcnc::process::AutoSortAxis a)
-{
-    if (m_autoSortAxis == a) return;
-    m_autoSortAxis = a;
-    if (m_cuttingPlanService)
-        m_cuttingPlanService->setLastAutoSortAxis(a);
-}
-
-void ProcessModule::setAutoSortAxisFromText(const QString& text)
-{
-    setAutoSortAxis(lcnc::process::autoSortAxisFromString(text, m_autoSortAxis));
-}
-
-void ProcessModule::setTravelPathVisible(bool on)
-{
-    m_travelPathVisible = on;
-}
-
-void ProcessModule::setContourOrderLabelVisible(bool on)
-{
-    m_contourOrderLabelVisible = on;
 }

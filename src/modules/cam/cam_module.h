@@ -6,6 +6,8 @@
 #include <QList>
 #include <QMap>
 #include <QSet>
+
+#include <atomic>
 #include <QString>
 #include <QVector>
 
@@ -17,6 +19,8 @@
 #include "core/project/cam/cam_data_manager.h"
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/i_cam_facade.h"
+#include "modules/cam/i_cam_contour_sequence_provider.h"
+#include "modules/cam/i_cam_collision_configuration_provider.h"
 #include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 #include "modules/cam/services/machining_face_pipeline_service.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
@@ -41,6 +45,7 @@ class WidgetOccView;
 class gp_Vec;
 class gp_Ax1;
 class gp_Pnt;
+struct CamTravelCollisionGeometryCache;
 
 namespace lcnc::view {
 class ToolpathRenderer;
@@ -157,6 +162,11 @@ public:
     /// Load machine model geometry using the current machine configuration.
     void loadMachine(const QString& filePath);
 
+    /// True between accepting a load request and accepting or rejecting its
+    /// latest detached parse result.  Process uses this to reject stale rapid
+    /// plans while the physical environment is indeterminate.
+    bool isMachineLoadPending() const { return m_machineLoadPending.load(); }
+
     /// Remove all machine entities but keep the current machine configuration.
     void unloadMachine();
 
@@ -168,8 +178,10 @@ public:
     void applyAxisAssignments(const QMap<QString, QString>& entryToAxis);
     void assignShapesToAxis(const QStringList& entries, const QString& axisName);
     void unassignShape(const QString& entry);
-    QString machineCollisionRole(const QString& entry) const;
-    void setMachineCollisionRole(const QStringList& entries, const QString& role);
+    lcnc::cam::CollisionConfigurationSnapshot collisionConfiguration() const;
+    void setCollisionDetectionEnabled(bool enabled);
+    void setCollisionSources(const QSet<QString>& active,
+                             const QSet<QString>& passive);
     void clearAxisAssignments(const QString& axisName);
     QList<AxisOption> axisOptions(bool includeDetachOption = false) const;
     /// Return the preferred workpiece mount axis for the current machine preset.
@@ -295,6 +307,22 @@ public:
     int toolpathContourCount() const override;
     int toolpathContourPointCount(int contourIndex) const override;
     std::uint64_t toolpathRevision() const;
+    /// CAM is the sole authority for the enabled, ordered contour sequence.
+    /// Consumers (Process and offline simulation) must use this snapshot and
+    /// must not rebuild an independent order.
+    lcnc::cam::ContourSequenceSnapshot contourSequenceSnapshot() const;
+    /// Applies CAM's persisted automatic order and resolves the complete
+    /// machine-coordinate sequence at the single CAM solve boundary.
+    bool applyAutoContourSort(lcnc::cam::AutoSortAxis axis, QString* errorMessage = nullptr);
+    /// Sets the persisted CAM manual order, resolves it, then rebuilds the
+    /// matching rapid plan used by both the view and Process.
+    bool setManualContourOrder(const QVector<lcnc::cam::ContourId>& orderedContourIds,
+                               QString* errorMessage = nullptr);
+    int appendToManualContourOrder(const QVector<lcnc::cam::ContourId>& contourIds,
+                                   QString* errorMessage = nullptr);
+    QVector<lcnc::cam::ContourId> manualContourOrder() const;
+    lcnc::cam::AutoSortAxis lastAutoContourSortAxis() const;
+    void setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis axis);
     bool solveToolpathForOrder(const QVector<std::uint64_t>& orderedContourIds);
     lcnc::cam::ToolpathExportSnapshot exportToolpathBaseSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const;
@@ -449,6 +477,10 @@ public:
     void refreshCutterHeadAppearance();
     /// 应用刀嘴/模拟锥碰撞配置，立即重建 View 中的代理并使执行缓存失效。
     bool refreshCutterCollisionConfiguration();
+    /// Returns the immutable local +Z cutter/nozzle collision proxy used by
+    /// CAM rapid planning.  This accessor never changes the machine pose or
+    /// project data; it only initializes the derived proxy cache on demand.
+    TopoDS_Shape cutterCollisionProxyShape(QString* errorMessage = nullptr);
     void setSelectedEntries(const QStringList& entries);
     QStringList selectedEntries() const;
     void syncSelectionFromView();
@@ -458,7 +490,7 @@ public:
     /// 切换"Cutting path display"。OFF 时立即擦除；ON 时立刻按当前 plan 重绘。
     void setTravelPathVisible(bool on);
     bool isTravelPathVisible() const;
-    /// 按当前 IProcessCuttingPlanProvider 提供的顺序刷新虚线（仅 visible=true 时）。
+    /// 按 CAM 权威轮廓顺序刷新虚线（仅 visible=true 时）。
     void refreshTravelPath();
 
     // ── 切割链表序号标注显示 ────────────────────────────────────────────
@@ -466,7 +498,7 @@ public:
     /// 切换"Cutting sequence number display"。OFF 时立即擦除；ON 时立刻按当前 plan 重绘。
     void setContourOrderLabelVisible(bool on);
     bool isContourOrderLabelVisible() const;
-    /// 按当前 IProcessCuttingPlanProvider 提供的顺序刷新序号标注（仅 visible=true 时）。
+    /// 按 CAM 权威轮廓顺序刷新序号标注（仅 visible=true 时）。
     void refreshContourOrderLabels();
     /// 同时刷新空程虚线与序号标注（两者数据同源，几何/顺序变化时一并刷新）。
     void refreshCuttingOrderOverlays();
@@ -501,6 +533,9 @@ signals:
     void machiningModeChanged(lcnc::MachiningMode mode);
     void workpieceSetupTransformChanged();
     void cutterCollisionConfigurationChanged();
+    void collisionConfigurationChanged();
+    /// A CAM-owned contour order now has a matching committed rapid plan.
+    void contourOrderTravelPlanRebuilt(const QVector<std::uint64_t>& orderedContourIds);
 
 private:
     struct WorkpieceShapeSource {
@@ -519,6 +554,14 @@ private:
     bool rejectConflictingPipelineOperation(const QString& operation);
     std::uint64_t machiningFaceSetRevision() const;
     std::uint64_t machineSetupRevision() const;
+    /// Identity of the geometry currently committed to the machine workspace.
+    /// It differs from the configured next-startup path while an operator edits
+    /// options, preventing roles/profiles for one model being applied to another.
+    QString activeMachineProfilePath() const;
+    /// Invalidate collision/travel caches after a machine shape, assignment,
+    /// or role mutation.  Geometry is intentionally versioned separately from
+    /// the kinematic configuration because both participate in safety checks.
+    void invalidateMachineEnvironment();
 
     /// Refresh axis guide AIS via MachineGuideRenderer.
     void displayAxisGuides();
@@ -549,6 +592,8 @@ private:
         std::uint64_t revision,
         const QString& description) const;
     void attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
+    void scheduleFullEnvironmentVerification(const lcnc::cam::ToolpathExportSnapshot& snapshot);
+    bool rebuildTravelPlanForCurrentOrder(QString* errorMessage = nullptr);
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
     bool clearMountedWorkpieceDisplay(bool refreshView);
@@ -602,10 +647,20 @@ private:
 
     TopoDS_Shape                m_workpieceShape;
     TopoDS_Shape                m_cutterCollisionProxyShape;
+    std::uint64_t               m_collisionConfigurationRevision{1};
     mutable lcnc::cam::TravelPlanSnapshot m_travelPlanCache;
+    /// Immutable collision-only meshes/bounds.  It is filled by the background
+    /// rapid verifier and reused while the machine/environment key is stable.
+    /// 中文翻译：仅碰撞使用的不可变网格/包围盒，由后台任务建立并按环境键复用。
+    std::shared_ptr<CamTravelCollisionGeometryCache> m_travelCollisionGeometryCache;
+    TaskId                      m_travelVerificationTask{kInvalidTaskId};
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
     mutable QList<Handle(AIS_Shape)> m_camContourAisCache;
     QString                     m_machineModelPath;
+    QString                     m_loadedMachineModelPath;
+    std::uint64_t               m_machineGeometryRevision{0};
+    std::uint64_t               m_machineLoadGeneration{0};
+    std::atomic_bool            m_machineLoadPending{false};
     lcnc::RenderQualityPreset   m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     gp_Pnt                      m_cutterHeadModelPosition{0.0, 0.0, 0.0};
     gp_Pnt                      m_cutterHeadPhysicalPosition{0.0, 0.0, 0.0};

@@ -203,6 +203,15 @@ void GraphicsScene::eraseShape(const Handle(AIS_Shape)& aisShape, bool updateVie
         m_context->UpdateCurrentViewer();
 }
 
+void GraphicsScene::removeShape(const Handle(AIS_Shape)& aisShape, bool updateViewer)
+{
+    if (aisShape.IsNull())
+        return;
+    m_context->Remove(aisShape, false);
+    if (updateViewer)
+        m_context->UpdateCurrentViewer();
+}
+
 void GraphicsScene::eraseAll()
 {
     m_context->EraseAll(false);
@@ -232,4 +241,11 @@ void GraphicsScene::displayObject(const Handle(AIS_InteractiveObject)& obj, bool
 void GraphicsScene::eraseObject(const Handle(AIS_InteractiveObject)& obj, bool update)
 {
     m_context->Erase(obj, update);
+}
+
+void GraphicsScene::removeObject(const Handle(AIS_InteractiveObject)& obj, bool update)
+{
+    if (obj.IsNull())
+        return;
+    m_context->Remove(obj, update);
 }

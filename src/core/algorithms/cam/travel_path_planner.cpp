@@ -2,6 +2,7 @@
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
@@ -201,9 +202,20 @@ QVector<gp_Pnt> workpieceEnvelopePoints(const TopoDS_Shape& workpiece,
     if (workpiece.IsNull())
         return result;
     try {
-        BRepMesh_IncrementalMesh mesh(workpiece, std::max(0.25, deflection),
+        // BRepMesh writes Poly_Triangulation back into faces.  The request
+        // commonly borrows the XCAF workpiece used by the live AIS display;
+        // meshing it here would replace its display mesh with this deliberately
+        // coarse collision envelope and turn circular features into polygons.
+        // Work on a topology/geometry-private copy and never mutate caller BRep.
+        // 中文翻译：碰撞包络网格只能写入私有副本，不能污染实时工件显示网格。
+        BRepBuilderAPI_Copy copy;
+        copy.Perform(workpiece, Standard_True, Standard_False);
+        if (!copy.IsDone())
+            return result;
+        const TopoDS_Shape collisionCopy = copy.Shape();
+        BRepMesh_IncrementalMesh mesh(collisionCopy, std::max(0.25, deflection),
                                       Standard_False, 0.5, Standard_True);
-        for (TopExp_Explorer explorer(workpiece, TopAbs_FACE); explorer.More(); explorer.Next()) {
+        for (TopExp_Explorer explorer(collisionCopy, TopAbs_FACE); explorer.More(); explorer.Next()) {
             TopLoc_Location location;
             const Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(
                 TopoDS::Face(explorer.Current()), location);
@@ -214,7 +226,7 @@ QVector<gp_Pnt> workpieceEnvelopePoints(const TopoDS_Shape& workpiece,
                 result.append(triangulation->Node(node).Transformed(transform));
         }
         if (result.isEmpty()) {
-            for (TopExp_Explorer explorer(workpiece, TopAbs_VERTEX); explorer.More(); explorer.Next())
+            for (TopExp_Explorer explorer(collisionCopy, TopAbs_VERTEX); explorer.More(); explorer.Next())
                 result.append(BRep_Tool::Pnt(TopoDS::Vertex(explorer.Current())));
         }
     } catch (const Standard_Failure&) {

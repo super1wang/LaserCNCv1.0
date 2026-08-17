@@ -17,6 +17,14 @@ constexpr double kEps2   = 1e-12;
 bool nearlyEqual(double a, double b)        { return qAbs(a - b) <= kEps; }
 bool samePoint(const gp_Pnt& a, const gp_Pnt& b) { return a.SquareDistance(b) <= kEps2; }
 
+QString normalizedCollisionSourceId(QString value)
+{
+    value = value.trimmed();
+    if (value.startsWith(QStringLiteral("axis:"), Qt::CaseInsensitive))
+        return QStringLiteral("axis:") + value.mid(5).trimmed().toUpper();
+    return value.toLower();
+}
+
 QString renderQualityToString(lcnc::RenderQualityPreset q)
 {
     switch (q) {
@@ -77,7 +85,7 @@ QString CamConfig::tomlFilePath()
 
 QString CamConfig::machineKey(const QString& machinePath)
 {
-    if (machinePath.isEmpty()) return QString();
+    if (machinePath.isEmpty()) return QStringLiteral("__virtual_collision_environment__");
     return QFileInfo(machinePath).absoluteFilePath().replace('\\', '/').toLower();
 }
 
@@ -162,17 +170,30 @@ void CamConfig::readFrom(const toml::value& root)
                 profile.hasPhysicalAcCenter = true;
                 profile.physicalAcCenter    = p;
             }
-            if (mp.contains("collisionRoles") && mp.at("collisionRoles").is_array()) {
-                for (const auto& cr : mp.at("collisionRoles").as_array()) {
-                    if (!cr.is_table()) continue;
-                    const QString entry = get_qstring(cr, "entry", QString());
-                    const QString role = get_qstring(cr, "role", QString()).trimmed().toLower();
-                    if (!entry.isEmpty() && (role == QStringLiteral("head")
-                        || role == QStringLiteral("obstacle") || role == QStringLiteral("ignore"))) {
-                        profile.collisionRoles.insert(entry, role);
+            // Legacy collisionRoles deliberately have no migration path:
+            // source selection is now defined by cutter/workpiece/axis units.
+            profile.collisionDetectionEnabled = get_bool(mp, "collisionDetectionEnabled", false);
+            const auto readSources = [&mp](const char* name, const QString& fallback) {
+                QSet<QString> result;
+                const bool hasPersistedArray = mp.contains(name) && mp.at(name).is_array();
+                if (hasPersistedArray) {
+                    for (const auto& item : mp.at(name).as_array()) {
+                        if (!item.is_string()) continue;
+                        const QString value = normalizedCollisionSourceId(
+                            QString::fromStdString(item.as_string()));
+                        if (!value.isEmpty()) result.insert(value);
                     }
                 }
-            }
+                // An explicitly persisted empty array is meaningful: the
+                // configuration remains incomplete until the operator selects
+                // a source.  Apply defaults only to profiles written before
+                // source-level collision configuration existed.
+                // 中文翻译：显式空数组表示尚未选择碰撞源；仅旧配置缺少字段时使用默认值。
+                if (!hasPersistedArray) result.insert(fallback);
+                return result;
+            };
+            profile.activeCollisionSources = readSources("activeCollisionSources", QStringLiteral("cutter"));
+            profile.passiveCollisionSources = readSources("passiveCollisionSources", QStringLiteral("workpiece"));
 
             if (mp.contains("axisOrigins") && mp.at("axisOrigins").is_array()) {
                 for (const auto& ao : mp.at("axisOrigins").as_array()) {
@@ -231,14 +252,15 @@ void CamConfig::writeTo(toml::value& root) const
         if (it.value().hasPhysicalAcCenter) {
             mp["physicalAcCenter"] = pointToToml(it.value().physicalAcCenter);
         }
-        toml::array collisionRoles;
-        for (auto role = it.value().collisionRoles.cbegin(); role != it.value().collisionRoles.cend(); ++role) {
-            toml::value entry(toml::table{});
-            entry["entry"] = qs(role.key());
-            entry["role"] = qs(role.value());
-            collisionRoles.emplace_back(entry);
-        }
-        if (!collisionRoles.empty()) mp["collisionRoles"] = collisionRoles;
+        mp["collisionDetectionEnabled"] = it.value().collisionDetectionEnabled;
+        toml::array activeSources;
+        for (const QString& source : it.value().activeCollisionSources)
+            activeSources.emplace_back(qs(source));
+        mp["activeCollisionSources"] = activeSources;
+        toml::array passiveSources;
+        for (const QString& source : it.value().passiveCollisionSources)
+            passiveSources.emplace_back(qs(source));
+        mp["passiveCollisionSources"] = passiveSources;
 
         toml::array axes;
         for (auto ax = it.value().axisOrigins.cbegin(); ax != it.value().axisOrigins.cend(); ++ax) {
@@ -486,31 +508,45 @@ void CamConfig::setMaximumRapidSafetyOffsetMm(double value)
     saveDefault();
 }
 
-QString CamConfig::collisionRoleForMachine(const QString& machinePath,
-                                           const QString& entry) const
+bool CamConfig::collisionDetectionEnabledForMachine(const QString& machinePath) const
 {
     const auto* profile = profileForMachine(machinePath);
-    return profile ? profile->collisionRoles.value(entry) : QString();
+    return profile && profile->collisionDetectionEnabled;
 }
 
-void CamConfig::setCollisionRoleForMachine(const QString& machinePath,
-                                           const QString& entry,
-                                           const QString& role)
+void CamConfig::setCollisionDetectionEnabledForMachine(const QString& machinePath, bool enabled)
 {
-    if (machinePath.isEmpty() || entry.isEmpty()) return;
-    const QString normalized = role.trimmed().toLower();
     auto* profile = mutableProfileForMachine(machinePath);
-    if (normalized.isEmpty() || normalized == QStringLiteral("auto")) {
-        if (profile->collisionRoles.remove(entry) > 0)
-            saveDefault();
-        return;
-    }
-    if (normalized != QStringLiteral("head") && normalized != QStringLiteral("obstacle")
-        && normalized != QStringLiteral("ignore")) {
-        return;
-    }
-    if (profile->collisionRoles.value(entry) == normalized) return;
-    profile->collisionRoles.insert(entry, normalized);
+    if (profile->collisionDetectionEnabled == enabled) return;
+    profile->collisionDetectionEnabled = enabled;
+    saveDefault();
+}
+
+QSet<QString> CamConfig::activeCollisionSourcesForMachine(const QString& machinePath) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    return profile ? profile->activeCollisionSources : QSet<QString>{QStringLiteral("cutter")};
+}
+
+QSet<QString> CamConfig::passiveCollisionSourcesForMachine(const QString& machinePath) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    return profile ? profile->passiveCollisionSources : QSet<QString>{QStringLiteral("workpiece")};
+}
+
+void CamConfig::setCollisionSourcesForMachine(const QString& machinePath,
+                                              const QSet<QString>& active,
+                                              const QSet<QString>& passive)
+{
+    auto* profile = mutableProfileForMachine(machinePath);
+    QSet<QString> normalizedActive;
+    QSet<QString> normalizedPassive;
+    for (const QString& source : active) normalizedActive.insert(normalizedCollisionSourceId(source));
+    for (const QString& source : passive) normalizedPassive.insert(normalizedCollisionSourceId(source));
+    if (profile->activeCollisionSources == normalizedActive
+        && profile->passiveCollisionSources == normalizedPassive) return;
+    profile->activeCollisionSources = normalizedActive;
+    profile->passiveCollisionSources = normalizedPassive;
     saveDefault();
 }
 

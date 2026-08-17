@@ -33,6 +33,8 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
+#include <algorithm>
+
 namespace lcnc::cad {
 
 CadDocumentIoService::CadDocumentIoService(lcnc::LcncProjectManager& projectManager,
@@ -382,12 +384,22 @@ bool CadDocumentIoService::prepareDisplayMesh(LcncDocument* document,
                 box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
             const double maxSize = box.IsVoid() ? 1.0
                 : std::max({xMax - xMin, yMax - yMin, zMax - zMin});
+            // GuiDocument deliberately disables AIS auto triangulation for
+            // imported workpieces so the presentation uses this prepared mesh.
+            // The former 0.4 %-of-model / 20 degree policy made circular
+            // workpiece features visibly polygonal on large assemblies.  Drop
+            // any serialized or earlier coarse triangulation first, then use
+            // bounded display-quality values.  This runs before the document
+            // is published to a GUI view, therefore the intentional mesh reset
+            // cannot invalidate a live AIS presentation.
+            BRepTools::Clean(shape);
+
             IMeshTools_Parameters params;
             params.InParallel = Standard_True;
-            params.AllowQualityDecrease = Standard_True;
+            params.AllowQualityDecrease = Standard_False;
             params.Relative = Standard_False;
-            params.Deflection = std::max(1e-3, 0.004 * maxSize);
-            params.Angle = 20.0 * 3.14159265358979323846 / 180.0;
+            params.Deflection = std::clamp(0.0005 * maxSize, 0.005, 0.05);
+            params.Angle = 5.0 * 3.14159265358979323846 / 180.0;
             BRepMesh_IncrementalMesh mesher(shape, params);
             if (!mesher.IsDone()) {
                 if (errorMessage)

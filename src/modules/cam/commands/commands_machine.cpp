@@ -81,7 +81,6 @@ void CmdLoadMachine::execute()
         if (pathToLoad.isEmpty())
             return;
 
-        context()->camModule()->setMachineModelPath(pathToLoad);
     }
 
     context()->camModule()->loadMachine(pathToLoad);

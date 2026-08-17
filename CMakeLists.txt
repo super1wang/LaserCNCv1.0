@@ -452,12 +452,17 @@ set(SRCS_MODULE_CAM
     src/modules/cam/commands/commands_machine.cpp
     src/modules/cam/commands/commands_cam.cpp
     src/modules/cam/ui/widget_machine_panel.cpp
+    src/modules/cam/ui/widget_collision_detection_panel.cpp
     src/modules/cam/ui/widget_machine_tree.cpp
     src/modules/cam/ui/widget_machine_tree.h
     src/modules/cam/ui/widget_toolpath_panel.cpp
     src/modules/cam/ui/dialog_mark_axes.cpp
     src/modules/cam/ui/dialog_axis_calibration_wizard.cpp
     src/modules/cam/ui/ribbon_cam_tab.cpp
+)
+
+set(SRCS_MODULE_SIMULATION
+    src/modules/simulation/simulation_module.cpp
 )
 
 set(SRCS_MODULE_PROCESS
@@ -642,6 +647,16 @@ target_link_libraries(lcnc_module_cam PUBLIC
     SARibbonBar::SARibbonBar
 )
 
+# Offline simulation deliberately depends on CAM and rendering only.  Keeping
+# this target separate makes accidental Process/controller dependencies visible.
+add_library(lcnc_module_simulation STATIC ${SRCS_MODULE_SIMULATION})
+set_target_properties(lcnc_module_simulation PROPERTIES AUTOMOC ON)
+target_link_libraries(lcnc_module_simulation PUBLIC
+    lcnc_view
+    lcnc_module_cam
+    Qt6::Widgets
+)
+
 add_library(lcnc_module_process STATIC ${SRCS_MODULE_PROCESS})
 set_target_properties(lcnc_module_process PROPERTIES
     AUTOMOC ON
@@ -695,6 +710,7 @@ set_target_properties(lcnc_app PROPERTIES AUTOMOC ON)
 target_link_libraries(lcnc_app PUBLIC
     lcnc_module_cad
     lcnc_module_cam
+    lcnc_module_simulation
     lcnc_module_process
     SARibbonBar::SARibbonBar
 )
@@ -1019,6 +1035,15 @@ if(BUILD_TESTING)
         tests/toolpath_generation_service_test.cpp
     )
     target_link_libraries(lcnc_toolpath_generation_service_test PRIVATE lcnc_module_cam Qt6::Core)
+    add_executable(lcnc_translation_context_test
+        tests/translation_context_test.cpp
+    )
+    target_link_libraries(lcnc_translation_context_test PRIVATE Qt6::Core)
+    add_dependencies(lcnc_translation_context_test LaserCNC_lrelease)
+    qt_add_resources(lcnc_translation_context_test "lcnc_translation_test_resources"
+        PREFIX "/i18n"
+        FILES ${LCNC_TRANSLATION_QM_FILES}
+    )
     if(LCNC_WITH_ACS)
         add_executable(lcnc_acs_rapid_command_test
             tests/acs_rapid_command_test.cpp
@@ -1056,6 +1081,7 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_cad_algorithm_contract_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_project_explorer_controller_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_toolpath_generation_service_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_translation_context_test lcnc_runtime_deploy_build)
         if(LCNC_WITH_ACS)
             add_dependencies(lcnc_acs_rapid_command_test lcnc_runtime_deploy_build)
             add_dependencies(lcnc_simulator_cmhp_sdk_integration_test lcnc_runtime_deploy_build)
@@ -1085,6 +1111,7 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_cad_algorithm_contract_test)
     lcnc_deploy_tbb_runtime(lcnc_project_explorer_controller_test)
     lcnc_deploy_tbb_runtime(lcnc_toolpath_generation_service_test)
+    lcnc_deploy_tbb_runtime(lcnc_translation_context_test)
     if(LCNC_WITH_ACS)
         lcnc_deploy_tbb_runtime(lcnc_acs_rapid_command_test)
         lcnc_deploy_tbb_runtime(lcnc_simulator_cmhp_sdk_integration_test)
@@ -1115,6 +1142,7 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_cad_algorithm_contract_test)
         lcnc_deploy_asan_runtime(lcnc_project_explorer_controller_test)
         lcnc_deploy_asan_runtime(lcnc_toolpath_generation_service_test)
+        lcnc_deploy_asan_runtime(lcnc_translation_context_test)
         if(LCNC_WITH_ACS)
             lcnc_deploy_asan_runtime(lcnc_acs_rapid_command_test)
             lcnc_deploy_asan_runtime(lcnc_simulator_cmhp_sdk_integration_test)
@@ -1124,6 +1152,11 @@ if(BUILD_TESTING)
         COMMAND "${LCNC_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_architecture.ps1"
                 -Root "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME lcnc_translation_context_contract_test
+        COMMAND "${LCNC_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_translation_contexts.ps1"
+                -Root "${CMAKE_CURRENT_SOURCE_DIR}"
+                -BuildDir "${CMAKE_BINARY_DIR}")
     add_test(NAME lcnc_project_package_test
         COMMAND lcnc_project_package_test)
     add_test(NAME lcnc_task_manager_test
@@ -1175,6 +1208,8 @@ if(BUILD_TESTING)
     )
     add_test(NAME lcnc_toolpath_generation_service_test
         COMMAND lcnc_toolpath_generation_service_test)
+    add_test(NAME lcnc_translation_context_test
+        COMMAND lcnc_translation_context_test)
     if(LCNC_WITH_ACS)
         add_test(NAME lcnc_acs_rapid_command_test
             COMMAND lcnc_acs_rapid_command_test)

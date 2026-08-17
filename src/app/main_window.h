@@ -15,6 +15,7 @@ class WidgetMachinePanel;
 class WidgetMachineTree;
 class WidgetLaserControl;
 class WidgetToolpathPanel;
+namespace lcnc::cam::ui { class WidgetCollisionDetectionPanel; }
 class DialogTaskManager;
 namespace lcnc::cad::ui { class WidgetCadTaskPanel; }
 namespace lcnc::cam::ui { class DialogAxisCalibrationWizard; }
@@ -35,6 +36,7 @@ class QTabWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QWidget;
+class SARibbonCategory;
 
 /**
  * @brief The application's main window.
@@ -91,6 +93,9 @@ private:
     void buildCadTab(class SARibbonCategory* cat);
     void buildCamTab(class SARibbonCategory* cat);
     void buildLaserTab(class SARibbonCategory* cat);
+    void buildSimulationTab(class SARibbonCategory* cat);
+    void enterOfflineSimulation();
+    void exitOfflineSimulation();
     void rebuildProjectExplorer();
     void restorePersistedCamState();
     void syncMachineWorkspaceUi();
@@ -159,16 +164,19 @@ private:
     WidgetOccView*     m_defaultOccView{nullptr};
     std::unique_ptr<lcnc::app::WorkspacePresenter> m_workspacePresenter;
     QStackedWidget*    m_rightStack{nullptr};
-    QTabWidget*        m_camRightTabs{nullptr};   // CAM ribbon 右栏：机床面板 / 刀路参数面板 两个 tab
+    QTabWidget*        m_camRightTabs{nullptr};
     WidgetMachinePanel*   m_machinePanel{nullptr};
     lcnc::cad::ui::WidgetCadTaskPanel* m_cadTaskPanel{nullptr};
     WidgetToolpathPanel*   m_toolpathPanel{nullptr};
+    lcnc::cam::ui::WidgetCollisionDetectionPanel* m_collisionDetectionPanel{nullptr};
     WidgetLaserControl*    m_laserControl{nullptr};
     DialogTaskManager*     m_taskDialog{nullptr};
     GraphicsScene*         m_defaultScene{nullptr};
     QAction*               m_actRotaryAxisGuides{nullptr};
     QAction*               m_actCutterHeadGuide{nullptr};
     QAction*               m_actMachineModelVisible{nullptr};
+    SARibbonCategory*      m_simulationRibbonCategory{nullptr};
+    QWidget*               m_simulationPage{nullptr};
 
     // Status bar labels
     QLabel* m_sbDocName{nullptr};

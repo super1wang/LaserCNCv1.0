@@ -12,8 +12,8 @@
  *   - 把每次"新被选中"的 contourId 按时间顺序追加到内部序列，已选过的不重排；
  *   - 取消选中时从序列中移除。
  *
- * 这样 `CmdManualAppendSelectedToCuttingOrder` 之类的命令就能拿到一份带顺序的
- * contourId 列表，按"先点的先加工"语义写入 ProcessCuttingPlanService。
+ * 这样 CAM 的手动加工顺序命令就能拿到一份带顺序的
+ * contourId 列表，按"先点的先加工"语义写入 CAM 图层顺序容器。
  *
  * 本服务位于 core 层：
  *   - app/main_window、modules/cam、modules/process 三方都允许读写；

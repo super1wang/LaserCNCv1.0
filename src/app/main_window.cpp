@@ -27,6 +27,7 @@
 #include "modules/cam/ui/widget_machine_panel.h"
 #include "modules/cam/ui/widget_machine_tree.h"
 #include "modules/cam/ui/widget_toolpath_panel.h"
+#include "modules/cam/ui/widget_collision_detection_panel.h"
 #include "modules/cam/ui/dialog_axis_calibration_wizard.h"
 #include "modules/process/ui/widget_laser_control.h"
 #include "app/dialog/dialog_task_manager.h"
@@ -52,6 +53,7 @@
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/process_module.h"
 #include "modules/process/workflow/process_workflow_service.h"
+#include "modules/simulation/simulation_module.h"
 
 #include <SARibbonBar.h>
 #include <SARibbonCategory.h>
@@ -169,6 +171,7 @@ constexpr int kRibbonViewIndex = 1;
 constexpr int kRibbonCadIndex = 2;
 constexpr int kRibbonCamIndex = 3;
 constexpr int kRibbonLaserIndex = 4;
+constexpr int kRibbonSimulationIndex = 5;
 
 bool isStepFile(const QString& filePath)
 {
@@ -342,6 +345,15 @@ void MainWindow::createContext()
             this, [this](const QString& title, const QString& message) {
                 QMessageBox::warning(this, title, message);
             });
+
+    if (auto* simulation = lcnc::Kernel::current().service<lcnc::simulation::SimulationModule>()) {
+        connect(simulation, &lcnc::simulation::SimulationModule::operationFailed,
+                this, [this](const QString& title, const QString& message) {
+                    QMessageBox::warning(this, title, message);
+                });
+        connect(simulation, &lcnc::simulation::SimulationModule::sessionInvalidated,
+                this, [this] { exitOfflineSimulation(); });
+    }
 
     connect(m_appContext->processModule(), &ProcessModule::statusMessageChanged,
             this, [this](const QString& status) {
@@ -874,6 +886,7 @@ void MainWindow::createRightPanel()
     m_machinePanel   = new WidgetMachinePanel(this);
     m_cadTaskPanel   = new lcnc::cad::ui::WidgetCadTaskPanel(this);
     m_toolpathPanel  = new WidgetToolpathPanel(this);
+    m_collisionDetectionPanel = new lcnc::cam::ui::WidgetCollisionDetectionPanel(this);
     m_laserControl   = new WidgetLaserControl(this);
 
     CamModule* cam = m_appContext->camModule();
@@ -900,6 +913,14 @@ void MainWindow::createRightPanel()
     m_camRightTabs->addTab(m_toolpathPanel, tr("Tool path parameters"));
     // 中文翻译：机床坐标
     m_camRightTabs->addTab(m_toolpathPanel->machineCoordinatesPage(), tr("Machine coordinates"));
+    // 中文翻译：碰撞检测
+    m_camRightTabs->addTab(m_collisionDetectionPanel, tr("Collision detection"));
+    connect(cam, &CamModule::collisionConfigurationChanged,
+            m_collisionDetectionPanel, &lcnc::cam::ui::WidgetCollisionDetectionPanel::refresh);
+    connect(cam, &CamModule::machineWorkspaceChanged,
+            m_collisionDetectionPanel, &lcnc::cam::ui::WidgetCollisionDetectionPanel::refresh);
+    connect(cam, &CamModule::axisAssignmentsChanged,
+            m_collisionDetectionPanel, &lcnc::cam::ui::WidgetCollisionDetectionPanel::refresh);
 
     m_rightStack->addWidget(m_camRightTabs);   // index 0 — CAM ribbon page
     m_rightStack->addWidget(m_laserControl);   // index 1 — laser/process ribbon page
@@ -1485,9 +1506,23 @@ void MainWindow::createRibbon()
     buildCamTab(ribbon->addCategoryPage(tr("CAM")));
     // 中文翻译：激光加工
     buildLaserTab(ribbon->addCategoryPage(tr("Laser processing")));
+    m_simulationRibbonCategory = ribbon->addCategoryPage(tr("Offline simulation"));
+    buildSimulationTab(m_simulationRibbonCategory);
 
     connect(ribbon, &SARibbonBar::currentRibbonTabChanged,
             this, &MainWindow::syncRightPanelForRibbonIndex);
+    connect(ribbon, &SARibbonBar::currentRibbonTabChanged, this, [this, ribbon](int index) {
+        const int simulationIndex = m_simulationRibbonCategory
+            ? ribbon->categoryIndex(m_simulationRibbonCategory) : -1;
+        if (index == simulationIndex)
+            enterOfflineSimulation();
+        // CAD/CAM/View navigation retains the frozen sandbox and collision
+        // cache.  Entering laser processing is the resource and safety
+        // boundary: it always releases the independent OCC view first.
+        // 中文翻译：仅切入激光加工时退出仿真；其它页面保留只读沙箱与扫描结果。
+        else if (index == kRibbonLaserIndex && m_simulationPage)
+            exitOfflineSimulation();
+    });
     syncRightPanelForRibbonIndex(ribbon->currentIndex());
 }
 
@@ -1567,6 +1602,10 @@ void MainWindow::buildViewTab(SARibbonCategory* cat)
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleWireframe::Name));
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleShadedWithEdges::Name));
     panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleWorldAxes::Name));
+    // CAM 路径和加工序号是三维视图叠加层，不属于 CAM 求解操作。
+    // 中文翻译：将空程路径和加工序号显示统一放在全局视图页。
+    panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleCamTravelPath::Name));
+    panelDisplay->addLargeAction(m_cmdContainer->findAction(CmdToggleCamContourOrderLabel::Name));
 
     QAction* aWire = m_cmdContainer->findAction(CmdToggleWireframe::Name);
     QAction* aShade = m_cmdContainer->findAction(CmdToggleShaded::Name);
@@ -1641,6 +1680,70 @@ void MainWindow::buildCadTab(SARibbonCategory* cat)
 void MainWindow::buildCamTab(SARibbonCategory* cat)
 {
     lcnc::cam::buildRibbonTab(cat, m_cmdContainer, this);
+    if (!cat) return;
+    if (lcnc::Kernel::current().service<lcnc::simulation::SimulationModule>()) {
+        SARibbonPanel* simulation = cat->addPanel(tr("Offline simulation"));
+        auto* enter = new QAction(tr("Enter simulation"), this);
+        connect(enter, &QAction::triggered, this, [this] {
+            if (auto* ribbon = ribbonBar(); ribbon && m_simulationRibbonCategory) {
+                const int simulationIndex = ribbon->categoryIndex(m_simulationRibbonCategory);
+                if (simulationIndex >= 0 && ribbon->currentIndex() != simulationIndex)
+                    ribbon->setCurrentIndex(simulationIndex);
+            }
+            // Selecting an already active ribbon page does not emit a tab
+            // change signal, so the CAM entry must explicitly retry opening.
+            enterOfflineSimulation();
+        });
+        simulation->addLargeAction(enter);
+    }
+}
+
+void MainWindow::buildSimulationTab(SARibbonCategory* cat)
+{
+    if (!cat) return;
+    auto* simulation = lcnc::Kernel::current().service<lcnc::simulation::SimulationModule>();
+    if (!simulation) return;
+    SARibbonPanel* controls = cat->addPanel(tr("Simulation controls"));
+    auto add = [this, controls](const QString& text, auto callback) {
+        auto* action = new QAction(text, this);
+        connect(action, &QAction::triggered, this, callback);
+        controls->addLargeAction(action);
+    };
+    add(tr("Run"), [simulation] { simulation->run(); });
+    add(tr("Pause"), [simulation] { simulation->pause(); });
+    add(tr("Stop"), [simulation] { simulation->stopPlayback(); });
+    add(tr("Previous collision"), [simulation] { simulation->jumpToCollision(-1); });
+    add(tr("Next collision"), [simulation] { simulation->jumpToCollision(1); });
+    SARibbonPanel* speed = cat->addPanel(tr("Speed"));
+    for (const double factor : {0.25, 0.5, 1.0, 2.0, 5.0, 10.0}) {
+        auto* action = new QAction(QStringLiteral("%1x").arg(factor, 0, 'g', 3), this);
+        connect(action, &QAction::triggered, this, [simulation, factor] { simulation->setSpeedMultiplier(factor); });
+        speed->addSmallAction(action);
+    }
+}
+
+void MainWindow::enterOfflineSimulation()
+{
+    auto* simulation = lcnc::Kernel::current().service<lcnc::simulation::SimulationModule>();
+    if (!simulation) return;
+    if (m_simulationPage) {
+        m_centerTabs->setCurrentWidget(m_simulationPage);
+        return;
+    }
+    QWidget* page = simulation->enterSimulation();
+    if (!page) return;
+    m_simulationPage = page;
+    m_centerTabs->addTab(page, tr("Simulation"));
+    m_centerTabs->setCurrentWidget(page);
+}
+
+void MainWindow::exitOfflineSimulation()
+{
+    auto* simulation = lcnc::Kernel::current().service<lcnc::simulation::SimulationModule>();
+    if (m_centerTabs && m_simulationPage)
+        m_centerTabs->removeTab(m_centerTabs->indexOf(m_simulationPage));
+    m_simulationPage = nullptr;
+    if (simulation) simulation->exitSimulation();
 }
 
 void MainWindow::buildLaserTab(SARibbonCategory* cat)
@@ -2547,6 +2650,8 @@ void MainWindow::syncRightPanelForRibbonIndex(int index)
         m_rightStack->setCurrentWidget(m_laserControl);
         showMachineView();
         break;
+    case kRibbonSimulationIndex:
+        break;
     case kRibbonFileIndex:
     default:
         break;
@@ -2570,6 +2675,7 @@ bool MainWindow::isMachineViewActive() const
 
 void MainWindow::closeEvent(QCloseEvent* e)
 {
+    exitOfflineSimulation();
     // Disconnect all signals before shutdown to prevent re-entrant callbacks
     disconnect(this, nullptr, nullptr, nullptr);
 

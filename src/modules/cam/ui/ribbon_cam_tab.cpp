@@ -1,14 +1,19 @@
 #include "modules/cam/ui/ribbon_cam_tab.h"
 
 #include "core/command/commands_api.h"
+#include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
 #include "modules/cam/commands/commands_machine.h"
 #include "modules/cam/commands/commands_cam.h"
+#include "modules/cam/cam_module.h"
 
 #include <SARibbonCategory.h>
 #include <SARibbonPanel.h>
 #include <QAction>
+#include <QComboBox>
 #include <QIcon>
+#include <QToolButton>
+#include <QVBoxLayout>
 #include <QWidget>
 
 namespace lcnc::cam {
@@ -29,6 +34,10 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdRecalcToolpath>(CmdRecalcToolpath::Name);
     container->addCommand<CmdSelectMachiningFace>(CmdSelectMachiningFace::Name);
     container->addCommand<CmdClearMachiningFaces>(CmdClearMachiningFaces::Name);
+    container->addCommand<CmdManualAppendSelectedToCamOrder>(CmdManualAppendSelectedToCamOrder::Name);
+    container->addCommand<CmdAutoSortCamOrder>(CmdAutoSortCamOrder::Name);
+    container->addCommand<CmdToggleCamTravelPath>(CmdToggleCamTravelPath::Name);
+    container->addCommand<CmdToggleCamContourOrderLabel>(CmdToggleCamContourOrderLabel::Name);
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::cam::registerCommands end");
 }
@@ -63,6 +72,56 @@ void buildRibbonTab(SARibbonCategory* cat,
     SARibbonPanel* panelFace = cat->addPanel(QObject::tr("Processing surface"));
     panelFace->addLargeAction(container->findAction(CmdSelectMachiningFace::Name));
     panelFace->addLargeAction(container->findAction(CmdClearMachiningFaces::Name));
+
+    // ── 加工顺序 ──────────────────────────────────────────────────────────
+    // 中文翻译：加工顺序
+    SARibbonPanel* panelOrder = cat->addPanel(QObject::tr("Processing sequence"));
+    panelOrder->addLargeAction(container->findAction(CmdManualAppendSelectedToCamOrder::Name));
+    auto* axisCombo = new QComboBox(panelOrder);
+    axisCombo->setObjectName("camAutoSortAxis");
+    axisCombo->addItems({QStringLiteral("X+"), QStringLiteral("X-"),
+                         QStringLiteral("Y+"), QStringLiteral("Y-"),
+                         QStringLiteral("Z+"), QStringLiteral("Z-")});
+    auto axisText = [](lcnc::cam::AutoSortAxis axis) {
+        switch (axis) {
+        case lcnc::cam::AutoSortAxis::XPos: return QStringLiteral("X+");
+        case lcnc::cam::AutoSortAxis::XNeg: return QStringLiteral("X-");
+        case lcnc::cam::AutoSortAxis::YPos: return QStringLiteral("Y+");
+        case lcnc::cam::AutoSortAxis::YNeg: return QStringLiteral("Y-");
+        case lcnc::cam::AutoSortAxis::ZPos: return QStringLiteral("Z+");
+        case lcnc::cam::AutoSortAxis::ZNeg: return QStringLiteral("Z-");
+        }
+        return QStringLiteral("X+");
+    };
+    if (auto* cam = lcnc::Kernel::current().service<CamModule>())
+        axisCombo->setCurrentText(axisText(cam->lastAutoContourSortAxis()));
+    QObject::connect(axisCombo, &QComboBox::currentTextChanged, parent,
+                     [](const QString& text) {
+                         auto* cam = lcnc::Kernel::current().service<CamModule>();
+                         if (!cam) return;
+                         if (text == QStringLiteral("X-")) cam->setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis::XNeg);
+                         else if (text == QStringLiteral("Y+")) cam->setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis::YPos);
+                         else if (text == QStringLiteral("Y-")) cam->setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis::YNeg);
+                         else if (text == QStringLiteral("Z+")) cam->setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis::ZPos);
+                         else if (text == QStringLiteral("Z-")) cam->setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis::ZNeg);
+                         else cam->setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis::XPos);
+                     });
+    auto* autoSortControl = new QWidget(panelOrder);
+    auto* autoSortLayout = new QVBoxLayout(autoSortControl);
+    autoSortControl->setFixedSize(82, 56);
+    autoSortLayout->setContentsMargins(1, 0, 1, 0);
+    autoSortLayout->setSpacing(1);
+    auto* autoSortButton = new QToolButton(autoSortControl);
+    autoSortButton->setDefaultAction(container->findAction(CmdAutoSortCamOrder::Name));
+    autoSortButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    autoSortButton->setIconSize(QSize(18, 18));
+    autoSortButton->setFixedHeight(30);
+    axisCombo->setParent(autoSortControl);
+    axisCombo->setMinimumWidth(64);
+    axisCombo->setFixedHeight(22);
+    autoSortLayout->addWidget(autoSortButton);
+    autoSortLayout->addWidget(axisCombo);
+    panelOrder->addLargeWidget(autoSortControl);
 
     // ── G代码（占位） ─────────────────────────────────────────────────────
     // 中文翻译：G代码

@@ -15,6 +15,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
@@ -1262,21 +1263,34 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
         // probes.  Refine only that exceptional face instead of making every
         // hole wall pay a meshing cost.
         if (samples.empty()) {
-            BRepMesh_IncrementalMesh mesh(face, 0.1, Standard_False, 0.5, Standard_True);
-            TopLoc_Location location;
-            const Handle(Poly_Triangulation) triangulation =
-                BRep_Tool::Triangulation(face, location);
-            if (!triangulation.IsNull() && triangulation->HasUVNodes()) {
-                for (Standard_Integer index = 1;
-                     index <= triangulation->NbTriangles() && samples.size() < 8;
-                     ++index) {
-                    Standard_Integer first, second, third;
-                    triangulation->Triangle(index).Get(first, second, third);
-                    const gp_Pnt2d firstUv = triangulation->UVNode(first);
-                    const gp_Pnt2d secondUv = triangulation->UVNode(second);
-                    const gp_Pnt2d thirdUv = triangulation->UVNode(third);
-                    appendSample((firstUv.X() + secondUv.X() + thirdUv.X()) / 3.0,
-                                 (firstUv.Y() + secondUv.Y() + thirdUv.Y()) / 3.0);
+            // Meshing attaches Poly_Triangulation data to the supplied BRep.
+            // `face` can be a subshape of the live XCAF workpiece, so doing
+            // that here would silently replace its exact display geometry with
+            // this coarse, classification-only mesh.  Keep the fallback's
+            // temporary triangulation entirely private to the algorithm.
+            BRepBuilderAPI_Copy copy;
+            copy.Perform(face, Standard_True, Standard_False);
+            const TopoDS_Face sampleFace = copy.IsDone()
+                ? TopoDS::Face(copy.Shape())
+                : TopoDS_Face{};
+            if (!sampleFace.IsNull()) {
+                BRepMesh_IncrementalMesh mesh(
+                    sampleFace, 0.1, Standard_False, 0.5, Standard_True);
+                TopLoc_Location location;
+                const Handle(Poly_Triangulation) triangulation =
+                    BRep_Tool::Triangulation(sampleFace, location);
+                if (!triangulation.IsNull() && triangulation->HasUVNodes()) {
+                    for (Standard_Integer index = 1;
+                         index <= triangulation->NbTriangles() && samples.size() < 8;
+                         ++index) {
+                        Standard_Integer first, second, third;
+                        triangulation->Triangle(index).Get(first, second, third);
+                        const gp_Pnt2d firstUv = triangulation->UVNode(first);
+                        const gp_Pnt2d secondUv = triangulation->UVNode(second);
+                        const gp_Pnt2d thirdUv = triangulation->UVNode(third);
+                        appendSample((firstUv.X() + secondUv.X() + thirdUv.X()) / 3.0,
+                                     (firstUv.Y() + secondUv.Y() + thirdUv.Y()) / 3.0);
+                    }
                 }
             }
         }

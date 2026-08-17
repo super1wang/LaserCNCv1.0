@@ -3,7 +3,7 @@
 #include "core/kernel/i_service.h"
 #include "core/project/cam/cam_data_contracts.h"
 #include "core/project/cam/layer_contracts.h" // OCC-free: enums only
-#include "modules/process/cutting/i_process_cutting_plan_provider.h"
+#include "modules/cam/i_cam_tool_offset_provider.h"
 
 #include <QColor>
 #include <QHash>
@@ -20,6 +20,7 @@
 namespace lcnc::cam {
 class ICamToolpathProvider;
 class ICamLayerProvider;
+class ICamContourSequenceProvider;
 }
 
 namespace lcnc::process {
@@ -44,29 +45,19 @@ struct ProcessLayerJob
     QSet<lcnc::cam::ContourId> includedContours;
 };
 
-/// Phase B：CAM 端定义为权威；Process 侧保留同名别名以最小化扩散修改。
-using CuttingPlanSortStrategy = lcnc::cam::CuttingPlanSortStrategy;
-using AutoSortAxis            = lcnc::cam::AutoSortAxis;
-
-QString autoSortAxisToString(AutoSortAxis a);
-AutoSortAxis autoSortAxisFromString(const QString& s, AutoSortAxis def = AutoSortAxis::XPos);
-
-QString sortStrategyToString(CuttingPlanSortStrategy s);
-CuttingPlanSortStrategy sortStrategyFromString(const QString& s,
-                                               CuttingPlanSortStrategy def = CuttingPlanSortStrategy::LayerThenContour);
-
 /**
- * @brief Process 模块的项目级"加工链表管理服务"。
+ * @brief Process 模块的项目级工艺绑定和执行链表服务。
  *
  * Phase B 起：本服务**不再持有任何图层级状态**，所有 toolName/enabled/manual
- * sort strategy/included contours 都从 ICamLayerProvider 拉取或写回，
- * 切割链表的构建逻辑（buildCuttingList）仍留在 Process 侧，但只是 CAM 视图。
+ * included contours 都从 ICamLayerProvider 拉取或写回。CAM 是唯一的排序
+ * 与空程规划边界；Process 只按 CAM 已确认的 contourId 序列附加工艺工具、
+ * 补偿和执行范围。
  *
  * 持久化策略：本服务不写任何项目文件。CAM 工艺/排序状态由 core 的 cam_toolpath_io
  * 随 .lcnc 统一读写；v1 旧档 `process_cutting_plan.toml` 的一次性迁移也已移入 core。
  */
 class ProcessCuttingPlanService : public QObject,
-                                  public lcnc::process::IProcessCuttingPlanProvider
+                                  public lcnc::cam::ICamToolOffsetProvider
 {
     Q_OBJECT
 public:
@@ -77,6 +68,9 @@ public:
     void setToolpathProvider(std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider);
     /// 注入 CAM 图层视图（Phase B 起作为权威存储入口）。
     void setLayerProvider(std::shared_ptr<lcnc::cam::ICamLayerProvider> provider);
+    /// CAM owns the authoritative contour ordering; Process only enriches the
+    /// sequence with execution-specific tool and compensation data.
+    void setContourSequenceProvider(std::shared_ptr<lcnc::cam::ICamContourSequenceProvider> provider);
 
     /// 当前所有图层工艺配置（按 layerId 顺序遍历的稳定快照）。
     QVector<ProcessLayerJob> layerJobs() const;
@@ -90,12 +84,8 @@ public:
     /// 清空所有配置（新建项目时调用）。Phase B：实际重置在 CAM 容器内进行。
     void clearAll();
 
-    // ── 排序策略 ───────────────────────────────────────────────────────────
-    CuttingPlanSortStrategy sortStrategy() const;
-    void setSortStrategy(CuttingPlanSortStrategy s);
-
     // ── 与 CAM 同步 ────────────────────────────────────────────────────────
-    /// Phase B：CAM 是唯一存储，本方法只触发一次 revision 自增 + planChanged。
+    /// CAM 变更后仅刷新 Process 的派生执行链表，不改变顺序或排序策略。
     void syncFromCam();
 
     // ── 工具列表（供 UI 下拉用）────────────────────────────────────────────
@@ -124,22 +114,13 @@ public:
         return buildCuttingList(CuttingListFilter{});
     }
 
-    // ── 手动轮廓顺序（Manual 策略生效）─────────────────────────────────────
-    QVector<lcnc::cam::ContourId> manualContourOrder() const;
-    void setManualContourOrder(const QVector<lcnc::cam::ContourId>& ids);
-    int  appendToManualOrder(const QVector<lcnc::cam::ContourId>& ids);
-    void removeFromManualOrder(const QVector<lcnc::cam::ContourId>& ids);
-    void clearManualOrder();
+    /// Process-only cache revision for tool/compensation bindings and the
+    /// latest CAM sequence notification.  It is not a sorting revision and
+    /// does not grant Process authority to alter CAM order.
+    std::uint64_t planRevision() const noexcept { return m_planRevision.load(); }
 
-    // ── 自动排序 ──────────────────────────────────────────────────────────
-    bool applyAutoSort(AutoSortAxis axis, QString* errorMessage = nullptr);
-
-    AutoSortAxis lastAutoSortAxis() const;
-    void         setLastAutoSortAxis(AutoSortAxis a);
-
-    // ── IProcessCuttingPlanProvider 实现 ──────────────────────────────────
-    QVector<lcnc::cam::ContourId> orderedContourIds() const override;
-    std::uint64_t                 planRevision() const override { return m_planRevision.load(); }
+    // ── CAM 工具显示桥接 ─────────────────────────────────────────────────
+    bool rapidDisplayOffsetMm(const QString& toolName, double* offsetMm) const override;
 
     /// 列出某图层下的全部轮廓（来自 CAM snapshot），供 UI 渲染轮廓复选行。
     struct ContourBrief
@@ -153,25 +134,23 @@ public:
     // Project persistence is owned by the core package services; this service performs no project file I/O.
 
     /// 供 ProcessModule 把 CAM LayerManager 的 Qt 信号桥接到本服务的
-    /// planChanged/manualOrderChanged。仅由 ProcessModule 调用。
+    /// planChanged。仅由 ProcessModule 调用。
     void notifyExternalPlanChanged();
-    void notifyExternalManualOrderChanged();
 
 signals:
-    /// 配置发生变化（工具映射 / 顺序 / 策略 / 同步），UI 与 manager 据此刷新。
+    /// 配置发生变化（工具映射 / CAM 图层同步），UI 与 manager 据此刷新。
     void planChanged();
-    /// 仅手动顺序变化时单独发；UI 想细粒度只刷右表的话可订这个。
-    void manualOrderChanged();
 
 private:
-    void bumpRevisionAndNotify(bool manualOnly = false);
+    void bumpRevisionAndNotify();
     void wireLayerProviderSignals();
 
-    /// 单调递增；任何变化（plan/manual/strategy/sync/load）都自增。
+    /// 单调递增；工艺绑定或 CAM 序列通知变化时自增，用于 Process 执行缓存。
     std::atomic<std::uint64_t> m_planRevision{0};
 
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_provider;
     std::shared_ptr<lcnc::cam::ICamLayerProvider>    m_layerProvider;
+    std::shared_ptr<lcnc::cam::ICamContourSequenceProvider> m_sequenceProvider;
 };
 
 } // namespace lcnc::process

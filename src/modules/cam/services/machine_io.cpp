@@ -15,8 +15,10 @@
 #include <TDF_LabelSequence.hxx>
 #include <TDataStd_Name.hxx>
 #include <TDocStd_Document.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_Location.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
 #include <QFileInfo>
@@ -26,17 +28,23 @@
 
 namespace lcnc::cam::machine_io {
 
-bool loadMachineFromFile(LcncDocument* doc,
-                         const QString& filePath,
-                         TaskProgress* progress,
-                         const std::function<void(const QString& entry, const TopoDS_Shape& shape)>& onShapeLoaded)
+bool readMachineFile(const QString& filePath,
+                     TaskProgress* progress,
+                     MachineImportResult* result)
 {
-    if (!doc || filePath.isEmpty())
+    if (!result)
         return false;
+    *result = {};
+    if (filePath.isEmpty()) {
+        result->error = QStringLiteral("Machine model path is empty");
+        return false;
+    }
 
     QFileInfo fi(filePath);
-    if (!fi.exists())
+    if (!fi.exists()) {
+        result->error = QStringLiteral("Machine model file does not exist");
         return false;
+    }
 
     const QString ext = fi.suffix().toLower();
     if (progress)
@@ -52,6 +60,7 @@ bool loadMachineFromFile(LcncDocument* doc,
         STEPCAFControl_Reader cafReader;
         cafReader.SetNameMode(Standard_True);
         if (cafReader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
+            result->error = QStringLiteral("Unable to read STEP machine model");
             if (progress)
                 progress->setValue(100);
             return false;
@@ -61,25 +70,58 @@ bool loadMachineFromFile(LcncDocument* doc,
             // 中文翻译：转换形体...
             progress->setStepName(QStringLiteral("Transform body..."));
         }
-        cafReader.Transfer(xdeDoc);
+        if (!cafReader.Transfer(xdeDoc)) {
+            result->error = QStringLiteral("Unable to transfer STEP machine model");
+            return false;
+        }
         if (progress)
             progress->setValue(80);
-        QSet<QString> existingEntries;
-        if (onShapeLoaded) {
-            const TDF_LabelSequence existing = doc->entityLabels(LcncDocument::EntityKind::Machine);
-            for (int i = 1; i <= existing.Length(); ++i)
-                existingEntries.insert(XcafUtils::entry(existing.Value(i)));
-        }
+        Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
+        TDF_LabelSequence roots;
+        shapes->GetFreeShapes(roots);
+        for (int i = 1; i <= roots.Length(); ++i) {
+            const TDF_Label root = roots.Value(i);
+            TDF_LabelSequence components;
+            shapes->GetComponents(root, components);
+            if (components.IsEmpty()) {
+                const TopoDS_Shape shape = shapes->GetShape(root);
+                if (shape.IsNull())
+                    continue;
+                QString name = XcafUtils::name(root);
+                if (name.isEmpty())
+                    name = QStringLiteral("Part_%1").arg(i);
+                result->parts.append({name, shape});
+                continue;
+            }
 
-        doc->importFromXcafRoots(xdeDoc, LcncDocument::EntityKind::Machine);
+            // Keep one direct assembly component per selectable machine part.
+            // Recursing into every design subshape would make a real machine
+            // unusable in the tree and collision-role UI; direct components
+            // retain a practical axis-assignment granularity.
+            for (int componentIndex = 1; componentIndex <= components.Length(); ++componentIndex) {
+                const TDF_Label component = components.Value(componentIndex);
+                QString name = XcafUtils::name(component);
+                TopLoc_Location location;
+                Handle(XCAFDoc_Location) locationAttribute;
+                if (component.FindAttribute(XCAFDoc_Location::GetID(), locationAttribute))
+                    location = locationAttribute->Get();
 
-        if (onShapeLoaded) {
-            const TDF_LabelSequence imported = doc->entityLabels(LcncDocument::EntityKind::Machine);
-            for (int i = 1; i <= imported.Length(); ++i) {
-                const TDF_Label label = imported.Value(i);
-                const QString entry = XcafUtils::entry(label);
-                if (!existingEntries.contains(entry))
-                    onShapeLoaded(entry, XcafUtils::shape(label));
+                TDF_Label referred;
+                TopoDS_Shape shape;
+                if (shapes->GetReferredShape(component, referred)) {
+                    if (name.isEmpty())
+                        name = XcafUtils::name(referred);
+                    shape = shapes->GetShape(referred);
+                } else {
+                    shape = shapes->GetShape(component);
+                }
+                if (shape.IsNull())
+                    continue;
+                if (!location.IsIdentity())
+                    shape = shape.Located(location * shape.Location());
+                if (name.isEmpty())
+                    name = QStringLiteral("Part_%1_%2").arg(i).arg(componentIndex);
+                result->parts.append({name, shape});
             }
         }
     } else if (ext == "stl") {
@@ -91,11 +133,11 @@ bool loadMachineFromFile(LcncDocument* doc,
         stlReader.Read(shape, filePath.toUtf8().constData());
         if (progress)
             progress->setValue(80);
-        if (shape.IsNull())
+        if (shape.IsNull()) {
+            result->error = QStringLiteral("Unable to read STL machine model");
             return false;
-        const TDF_Label label = doc->addShapeEntity(shape, fi.baseName(), LcncDocument::EntityKind::Machine);
-        if (onShapeLoaded)
-            onShapeLoaded(XcafUtils::entry(label), shape);
+        }
+        result->parts.append({fi.baseName(), shape});
     } else if (ext == "brep") {
         if (progress)
             // 中文翻译：读取 BREP...
@@ -103,17 +145,43 @@ bool loadMachineFromFile(LcncDocument* doc,
         TopoDS_Shape shape;
         BRep_Builder builder;
         BRepTools::Read(shape, filePath.toUtf8().constData(), builder);
-        if (shape.IsNull())
+        if (shape.IsNull()) {
+            result->error = QStringLiteral("Unable to read BREP machine model");
             return false;
-        const TDF_Label label = doc->addShapeEntity(shape, fi.baseName(), LcncDocument::EntityKind::Machine);
-        if (onShapeLoaded)
-            onShapeLoaded(XcafUtils::entry(label), shape);
+        }
+        result->parts.append({fi.baseName(), shape});
     } else {
+        result->error = QStringLiteral("Unsupported machine model format");
         return false;
     }
 
+    if (result->parts.isEmpty()) {
+        result->error = QStringLiteral("Machine model contains no usable shape");
+        return false;
+    }
     if (progress)
         progress->setValue(100);
+    return true;
+}
+
+bool loadMachineFromFile(LcncDocument* doc,
+                         const QString& filePath,
+                         TaskProgress* progress,
+                         const std::function<void(const QString& entry, const TopoDS_Shape& shape)>& onShapeLoaded)
+{
+    if (!doc)
+        return false;
+
+    MachineImportResult result;
+    if (!readMachineFile(filePath, progress, &result))
+        return false;
+
+    for (const MachineImportResult::Part& part : std::as_const(result.parts)) {
+        const TDF_Label label = doc->addShapeEntity(
+            part.shape, part.name, LcncDocument::EntityKind::Machine);
+        if (onShapeLoaded)
+            onShapeLoaded(XcafUtils::entry(label), part.shape);
+    }
     return true;
 }
 

@@ -138,8 +138,14 @@ struct TravelPlanSnapshot
     int fallbackCount{0};
     QString failureReason;
     bool stale{true};
+    /// Full-machine verification is deliberately asynchronous. Pending plans
+    /// remain visible but are never eligible for Process execution.
+    /// 中文翻译：完整机台验证异步执行；验证中的空程可显示但禁止进入加工执行。
+    bool fullEnvironmentVerificationPending{false};
 
-    bool isExecutable() const { return !stale && failureReason.isEmpty(); }
+    bool isExecutable() const {
+        return !stale && !fullEnvironmentVerificationPending && failureReason.isEmpty();
+    }
     const RapidTransition* transitionTo(std::uint64_t contourId) const
     {
         for (const RapidTransition& transition : transitions) {

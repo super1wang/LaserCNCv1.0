@@ -182,6 +182,30 @@ max = 120.0
                   && redisplayedWorldPoint.Distance(plannedWorldPoint) > 1e-3,
                   "Rapid preview did not follow the non-zero workpiece posture");
 
+    // Automatic contour ordering must use the fixed table-home reference,
+    // never the current A/C pose that happens to be left by jogging, playback
+    // or a prior contour.  Converting live world endpoints back through their
+    // local coordinates into computeWpcTransformHome() must therefore yield
+    // the same sorting coordinates at every table posture.
+    // 中文翻译：自动排序固定在转台零位参考系；无论实时 A/C 姿态如何，
+    // 经工件局部坐标回到 computeWpcTransformHome() 后的排序坐标必须一致。
+    const gp_Pnt sortLocalPoint(18.0, -6.0, 4.0);
+    const auto sortReferencePoint = [&displayedMachine](const gp_Pnt& livePoint) {
+        const gp_Trsf live = displayedMachine.computeWpcTransform(QStringLiteral("fixture"));
+        const gp_Trsf home = displayedMachine.computeWpcTransformHome(QStringLiteral("fixture"));
+        return livePoint.Transformed(live.Inverted()).Transformed(home);
+    };
+    displayedMachine.setAxisPosition(QStringLiteral("A"), -28.0);
+    displayedMachine.setAxisPosition(QStringLiteral("C"), 71.0);
+    const gp_Pnt firstSortReference = sortReferencePoint(
+        sortLocalPoint.Transformed(displayedMachine.computeWpcTransform(QStringLiteral("fixture"))));
+    displayedMachine.setAxisPosition(QStringLiteral("A"), 43.0);
+    displayedMachine.setAxisPosition(QStringLiteral("C"), -116.0);
+    const gp_Pnt secondSortReference = sortReferencePoint(
+        sortLocalPoint.Transformed(displayedMachine.computeWpcTransform(QStringLiteral("fixture"))));
+    ok &= require(firstSortReference.Distance(secondSortReference) < 1e-6,
+                  "Table-home contour sorting coordinates changed with the live A/C pose");
+
     configuration.applyPreset(QStringLiteral("VERTICAL_BC_TABLE"));
     const auto bcReduced = configuration.modeDefinition(lcnc::MachiningMode::RotaryTube4Axis);
     ok &= require(configuration.supportsMachiningMode(lcnc::MachiningMode::SimultaneousTable5Axis)

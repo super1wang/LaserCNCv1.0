@@ -1,6 +1,7 @@
 #include "core/algorithms/cam/travel_path_planner.h"
 
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -8,6 +9,10 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QTextStream>
+
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopLoc_Location.hxx>
 
 #include <cmath>
 
@@ -50,11 +55,35 @@ lcnc::cam_algo::TravelPlanningRequest baseRequest()
     return request;
 }
 
+bool hasFaceTriangulation(const TopoDS_Shape& shape)
+{
+    for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
+        TopLoc_Location location;
+        if (!BRep_Tool::Triangulation(TopoDS::Face(explorer.Current()), location).IsNull())
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
+
+    {
+        // Full-machine verification now runs in a cancellable CAM task after
+        // rapid planning. A pending plan may be previewed, but must never be
+        // considered executable by Process.
+        lcnc::cam::TravelPlanSnapshot pending;
+        pending.stale = false;
+        pending.fullEnvironmentVerificationPending = true;
+        if (pending.isExecutable())
+            return fail(QStringLiteral("Pending full-machine verification was executable"));
+        pending.fullEnvironmentVerificationPending = false;
+        if (!pending.isExecutable())
+            return fail(QStringLiteral("Completed empty rapid plan was not executable"));
+    }
 
     {
         auto request = baseRequest();
@@ -64,6 +93,20 @@ int main(int argc, char* argv[])
         const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
         if (plan.isExecutable() || plan.failureReason.isEmpty())
             return fail(QStringLiteral("Missing workpiece collision geometry was accepted"));
+    }
+
+    {
+        // Collision-envelope sampling may triangulate a private planning copy,
+        // but it must never attach that coarse mesh to the source workpiece
+        // used by the live shaded view.
+        auto request = baseRequest();
+        if (hasFaceTriangulation(request.workpiece))
+            return fail(QStringLiteral("Travel planner source fixture unexpectedly starts meshed"));
+        request.endpoints = {endpoint(1, 0.0, 0.0, 0.0),
+                             endpoint(2, 10.0, 0.0, 0.0)};
+        const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
+        if (!plan.isExecutable() || hasFaceTriangulation(request.workpiece))
+            return fail(QStringLiteral("Rapid planning polluted the source workpiece display mesh"));
     }
 
     {

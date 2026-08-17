@@ -142,46 +142,4 @@ public:
     bool isEnabled() const override;
 };
 
-/// 把当前选中的轮廓按选择顺序追加到切割链表（手动设置加工顺序）。
-class CmdManualAppendSelectedToCuttingOrder : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.manualAppendSelected";
-    explicit CmdManualAppendSelectedToCuttingOrder(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-/// 按 ProcessModule::autoSortAxis 当前选项做"主方向 + 最近邻"自动排序。
-class CmdAutoSortCuttingOrder : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.autoSortCutting";
-    explicit CmdAutoSortCuttingOrder(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-// 中文翻译：切割路径显示
-/// 切换"Cutting path display"——在 OCC 视图中用虚线绘制空程路径。
-class CmdToggleTravelPath : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.toggleTravelPath";
-    explicit CmdToggleTravelPath(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
-// 中文翻译：切割链表序号显示
-/// 切换"Cutting sequence number display"--在 OCC 视图中按加工顺序在每条轮廓起点附近绘制序号。
-class CmdToggleContourOrderLabel : public CommandBase {
-    Q_OBJECT
-public:
-    inline static const QString Name = "process.toggleContourOrderLabel";
-    explicit CmdToggleContourOrderLabel(IAppContext* ctx);
-    void execute() override;
-    bool isEnabled() const override;
-};
-
 } // namespace lcnc::process

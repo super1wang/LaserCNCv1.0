@@ -19,6 +19,7 @@
 #include <QStackedLayout>
 #include <QScrollArea>
 #include <QApplication>
+#include <QCoreApplication>
 
 #include <algorithm>
 
@@ -28,6 +29,29 @@ bool isLightTheme()
 {
     return qApp
         && qApp->property("lcnc.theme").toString() == QStringLiteral("light");
+}
+
+QString localizedBuiltinOutputName(const QString& channel, const QString& configuredName)
+{
+    // Preserve user-defined IO names.  Only translate the canonical English
+    // fallback names shipped with older/default peripheral configurations.
+    // 中文翻译：保留用户自定义 IO 名称；仅翻译旧版/默认外设配置中的标准英文名称。
+    struct BuiltinName { const char* channel; const char* english; };
+    static constexpr BuiltinName kNames[] = {
+        {"aLaser", "Laser"}, {"aBlow", "Blow"}, {"aChuck", "Chuck"},
+        {"aPliers", "Pliers"}, {"aWater", "Water"}, {"aPump", "Pump"},
+        {"aRedLight", "Red light"}, {"aYellowLight", "Yellow light"},
+        {"aGreenLight", "Green light"}, {"aBuzzer", "Buzzer"}
+    };
+    for (const BuiltinName& item : kNames) {
+        if (channel.compare(QLatin1String(item.channel), Qt::CaseInsensitive) != 0)
+            continue;
+        if (configuredName.compare(QLatin1String(item.english), Qt::CaseInsensitive) == 0
+            || configuredName.compare(QLatin1String(item.channel), Qt::CaseInsensitive) == 0)
+            return QCoreApplication::translate("WidgetLaserControl", item.english);
+        break;
+    }
+    return configuredName;
 }
 
 void clearLayout(QLayout* layout)
@@ -246,7 +270,8 @@ void WidgetLaserControl::setDigitalOutputDescriptors(const QList<DigitalOutputDe
 
     for (int index = 0; index < descriptors.size(); ++index) {
         const DigitalOutputDescriptor& desc = descriptors.at(index);
-        const QString display = desc.name.isEmpty() ? desc.channel : desc.name;
+        const QString display = localizedBuiltinOutputName(
+            desc.channel, desc.name.isEmpty() ? desc.channel : desc.name);
         auto* button = new QPushButton(display, m_ioGroup);
         button->setCheckable(true);
         button->setMinimumHeight(30);

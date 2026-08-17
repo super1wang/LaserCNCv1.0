@@ -4,6 +4,7 @@
 #include "core/settings/toml_config.h"
 
 #include <QMap>
+#include <QSet>
 #include <QString>
 
 #include <gp_Pnt.hxx>
@@ -112,11 +113,15 @@ public:
     void setCutterHeadPhysicalPositionForMachine(const QString& machinePath,
                                                  const gp_Pnt& position);
 
-    QString collisionRoleForMachine(const QString& machinePath,
-                                    const QString& entry) const;
-    void setCollisionRoleForMachine(const QString& machinePath,
-                                    const QString& entry,
-                                    const QString& role);
+    /// Collision sources are persisted per machine profile.  An empty path
+    /// addresses the dedicated no-machine (virtual cutter/workpiece) profile.
+    bool collisionDetectionEnabledForMachine(const QString& machinePath) const;
+    void setCollisionDetectionEnabledForMachine(const QString& machinePath, bool enabled);
+    QSet<QString> activeCollisionSourcesForMachine(const QString& machinePath) const;
+    QSet<QString> passiveCollisionSourcesForMachine(const QString& machinePath) const;
+    void setCollisionSourcesForMachine(const QString& machinePath,
+                                       const QSet<QString>& active,
+                                       const QSet<QString>& passive);
 
     /// Legacy v4 machine-profile value.  It is accepted only to migrate XYZ
     /// into MachineConfigurationService::WorkpieceSetupTransform and is never
@@ -153,7 +158,9 @@ private:
         gp_Pnt cutterHeadModelPosition;
         bool hasCutterHeadPhysical{false};
         gp_Pnt cutterHeadPhysicalPosition;
-        QMap<QString, QString> collisionRoles; ///< XCAF entry -> auto/head/obstacle/ignore
+        bool collisionDetectionEnabled{false};
+        QSet<QString> activeCollisionSources{QStringLiteral("cutter")};
+        QSet<QString> passiveCollisionSources{QStringLiteral("workpiece")};
         bool hasWorkpieceInstallPosition{false}; // legacy input only
         gp_Pnt workpieceInstallPosition;
         bool hasAcAngleOffset{false};
