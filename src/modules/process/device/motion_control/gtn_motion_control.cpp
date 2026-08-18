@@ -1640,16 +1640,6 @@ void GTNMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	m_dPreY = dEndY;
 }
 
-void GTNMotionControl::JumpToIdleHeight(const Tool& curTool, double dCompensate)
-{
-	MovePostion(Axis::Z, curTool.m_dIdleZVelocity, curTool.m_dIdleZHeight + dCompensate);
-}
-
-void GTNMotionControl::JumpToCuttingHeight(const Tool& curTool, double dCompensate)
-{
-	MovePostion(Axis::Z, curTool.m_dIdleZVelocity, curTool.m_dCuttingHeight + curTool.m_dCuttingHeightCompensate + dCompensate);
-}
-
 bool GTNMotionControl::SendCommand()
 {
 	short sRtn = 0;

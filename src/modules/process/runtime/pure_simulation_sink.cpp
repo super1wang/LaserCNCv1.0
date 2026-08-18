@@ -136,7 +136,7 @@ bool PureSimulationSink::beginSegment(const MachinePose5& startPose, const Tool&
         lcnc::cam::ToolpathExportPoint p{};
         p.machineX  = startPose.x;
         p.machineY  = startPose.y;
-        p.machineZ  = startPose.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate;
+        p.machineZ  = startPose.z;
         p.machineR1 = startPose.r1;
         p.machineR2 = startPose.r2;
         p.rotaryAxis1Name = startPose.r1Name;
@@ -146,7 +146,7 @@ bool PureSimulationSink::beginSegment(const MachinePose5& startPose, const Tool&
     return true;
 }
 
-bool PureSimulationSink::lineTo(const MachinePose5& target, const Tool& tool,
+bool PureSimulationSink::lineTo(const MachinePose5& target, const Tool& /*tool*/,
                                 QString* errorMessage)
 {
     const std::uint8_t expectedMask = static_cast<std::uint8_t>((1u << m_axisMap.activeCount()) - 1u);
@@ -158,7 +158,7 @@ bool PureSimulationSink::lineTo(const MachinePose5& target, const Tool& tool,
     lcnc::cam::ToolpathExportPoint p{};
     p.machineX  = target.x;
     p.machineY  = target.y;
-    p.machineZ  = target.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate;
+    p.machineZ  = target.z;
     p.machineR1 = target.r1;
     p.machineR2 = target.r2;
     p.rotaryAxis1Name = target.r1Name;

@@ -30,4 +30,30 @@ DeviceCommandResult evaluateContourBoundaryHealth(const ContourBoundaryHealth& h
     return {};
 }
 
+QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapshot)
+{
+    const auto cuttingTr = [](const char* source) {
+        return QCoreApplication::translate("lcnc::process::NormalCuttingManager", source);
+    };
+    const auto& collision = snapshot.motionPlan.collision;
+    if (!collision.complete
+        || collision.state == lcnc::cam::CollisionValidationState::Pending) {
+        // 中文翻译：CAM 全路径碰撞校验尚未完成
+        return cuttingTr("CAM full-path collision validation is incomplete");
+    }
+    if (collision.blocksExecution(collision.blockWarning)) {
+        if (!collision.failureReason.isEmpty())
+            return collision.failureReason;
+        // 中文翻译：CAM 全路径碰撞校验未确认路径安全
+        return cuttingTr("CAM full-path collision validation did not confirm a safe path");
+    }
+    if (snapshot.contours.size() > 1 && !snapshot.travelPlan.isExecutable()) {
+        // 中文翻译：空程规划丢失或已过期
+        return snapshot.travelPlan.failureReason.isEmpty()
+            ? cuttingTr("The rapid travel plan is missing or out of date")
+            : snapshot.travelPlan.failureReason;
+    }
+    return {};
+}
+
 } // namespace lcnc::process

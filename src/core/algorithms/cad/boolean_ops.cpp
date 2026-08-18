@@ -1,4 +1,5 @@
 #include "core/algorithms/cad/boolean_ops.h"
+#include "core/algorithms/occt_exact_operation_lock.h"
 
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -19,6 +20,7 @@ void checkInputs(const TopoDS_Shape& a, const TopoDS_Shape& b)
 TopoDS_Shape fuseShapes(const TopoDS_Shape& a, const TopoDS_Shape& b)
 {
     checkInputs(a, b);
+    lcnc::OcctExactOperationLock exactOperationLock;
     BRepAlgoAPI_Fuse op(a, b);
     if (!op.IsDone())
         throw Standard_Failure("Fuse failed");
@@ -28,6 +30,7 @@ TopoDS_Shape fuseShapes(const TopoDS_Shape& a, const TopoDS_Shape& b)
 TopoDS_Shape cutShapes(const TopoDS_Shape& a, const TopoDS_Shape& b)
 {
     checkInputs(a, b);
+    lcnc::OcctExactOperationLock exactOperationLock;
     BRepAlgoAPI_Cut op(a, b);
     if (!op.IsDone())
         throw Standard_Failure("Cut failed");
@@ -37,6 +40,7 @@ TopoDS_Shape cutShapes(const TopoDS_Shape& a, const TopoDS_Shape& b)
 TopoDS_Shape commonShapes(const TopoDS_Shape& a, const TopoDS_Shape& b)
 {
     checkInputs(a, b);
+    lcnc::OcctExactOperationLock exactOperationLock;
     BRepAlgoAPI_Common op(a, b);
     if (!op.IsDone())
         throw Standard_Failure("Common failed");

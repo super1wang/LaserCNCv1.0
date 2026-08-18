@@ -1,6 +1,6 @@
 # LaserCNC 架构说明
 
-本文描述 2026-08-03 源码基线的实际架构。若本文与阶段性设计记录冲突，以源码、`CMakeLists.txt` 和本文为准。已识别但尚未修复的偏差同时记录在 `AUDIT.md` 与 `todo.md`。
+本文描述截至 2026-08-19 的实际架构。若本文与阶段性设计记录冲突，以源码、`CMakeLists.txt` 和本文为准。已识别但尚未修复的偏差同时记录在 `AUDIT.md` 与 `todo.md`。
 
 ## 1. 系统定位
 
@@ -37,7 +37,7 @@ core/algorithms ----------+
 - `src/modules/process/**` 不得出现 `TopoDS_*`、`AIS_*`、`gp_*`、`Geom_*`、`BRep*`、`XCAF*`。
 - 跨模块同步读取使用接口或服务；状态通知使用 Qt signal 或 `EventBus`。
 
-CMake 将源码拆为 `lcnc_core`、`lcnc_view`、`lcnc_module_cad`、`lcnc_module_cam`、`lcnc_module_process`、`lcnc_app` 六个静态库，最终链接到 `LaserCNC`。
+CMake 将源码拆为 `lcnc_core`、`lcnc_view`、`lcnc_module_cad`、`lcnc_module_cam`、`lcnc_module_simulation`、`lcnc_module_process`、`lcnc_app` 七个静态库，最终链接到 `LaserCNC`。
 
 ## 3. Kernel 与生命周期
 
@@ -65,7 +65,7 @@ CMake 将源码拆为 `lcnc_core`、`lcnc_view`、`lcnc_module_cad`、`lcnc_modu
   -> 最后关闭 Logger 和 QApplication
 ```
 
-模块依赖固定为 `cad -> cam -> process`。配置禁用上游模块时，下游模块不得启动。
+模块依赖为 `cad -> cam -> {simulation, process}`。`simulation` 与 `process` 都依赖 CAM，但彼此没有依赖；配置禁用上游模块时，下游模块不得启动。
 
 ## 4. 工程、文档与数据域
 
@@ -113,6 +113,12 @@ CMake 将源码拆为 `lcnc_core`、`lcnc_view`、`lcnc_module_cad`、`lcnc_modu
 
 `CamModule` 借用项目的统一 XCAF 文档、`CamDataManager`、机台工作区和机台配置服务，负责轮廓提取、离散、刀路求解、图层、排序、引线与渲染协调。
 
+CAM 是轮廓加工顺序和最终运动坐标的唯一事实源。`ICamContourSequenceProvider` 输出不可变 `ContourSequenceSnapshot`；`ICamToolpathProvider` 分离只读目录快照与已提交执行快照。切割偏置和空程偏置属于 CAM 刀路参数，CAM 先沿轮廓点法线构造切割轨迹以及 Retract/Traverse/Approach 三段空程，再连续求解物理轴坐标。Process、ACS、GTN、PureSimulation 和离线仿真只能原样消费这些坐标，不得重排、重新求解或再次叠加工具高度。
+
+机台文件在后台只解析为脱离 XCAF 的 OCC 形体，generation 与最新加载请求匹配后才在 GUI 线程一次提交至 `MachineWorkspace`。加载期间不生成或复用可执行空程计划；已提交模型身份、机台几何修订、轴归属和碰撞源配置共同构成空程/碰撞缓存的环境版本。
+
+碰撞配置以“主动源 → 被动源”表示，可选源包括切割头代理、工件和已归轴机台部件。启用检测时，CAM 在生成刀路事务末尾对引入、切割、空程的最终运动节点执行验证并原子发布 `CollisionValidationSnapshot`；验证未完成、碰撞或无法判定时 Process 不得执行加工。碰撞几何使用私有外表面网格和只读 BVH，在最多四个姿态工作线程中完成 AABB/OBB 与三角表面筛选；只有网格误差带内的候选进入受进程级 `OcctExactOperationLock` 保护的 BRep 精确距离，常规扫描不执行布尔求交。离线仿真直接读取 CAM 已提交的节点状态和区间，不再次扫描路径。
+
 `MachiningFacePipelineService` 已持有加工面集合，`CamDisplayProjectionService` 已承接加工面 AIS 投影；当前 `CamModule` 仍持有 pipeline 的可变 entries 引用，自动面 ID 复用和 projection 的 workspace 隔离尚未完成。其余机台、轴导引、刀路和 travel path 投影仍由入口协调。
 
 业务边界为：
@@ -126,21 +132,27 @@ CMake 将源码拆为 `lcnc_core`、`lcnc_view`、`lcnc_module_cad`、`lcnc_modu
 
 Process 不读取 OCC。CAM 通过 `ICamToolpathProvider` 输出 `ToolpathExportSnapshot`，其中只包含控制器无关的点、姿态、轮廓和工艺引用。
 
-## 8. Process 模块
+## 8. 离线仿真模块
+
+`SimulationModule` 是独立的只读 CAM 消费者，只依赖 `lcnc_module_cam`、`lcnc_view` 和 Qt Widgets，禁止依赖 Process、控制器 SDK、激光器或串口。进入离线仿真时，它冻结已求解的 `ToolpathExportSnapshot`、权威轮廓顺序、机台运动学、显示设置与碰撞配置，并创建独立 `GuiDocument` / OCC 视图；不写入工程、CAM 数据或实时机台姿态。
+
+仿真沙箱在后台准备私有碰撞网格并扫描节点，时间线以灰色表示待验证、绿色表示安全、黄色表示间隙告警、红色表示确认碰撞、橙色表示无法判定。源 CAM、机台、轴归属、刀路、顺序或碰撞配置变化时，冻结会话立即失效并释放独立 AIS/视图资源。离开仿真页面时取消任务；任务仅持有已复制的几何/运动学快照，不得继续借用 GUI 或活动 XCAF 文档状态。
+
+## 9. Process 模块
 
 当前 `ProcessModule` 仍是较大的 facade/coordinator，实际拥有或协调：
 
 - typed settings 与参数/IO 模型。
 - `ProcessDeviceRuntime` 私有持有运动控制器、激光器和工具表；`DeviceCommandQueue` 承接分优先级调度，`ProcessDeviceCoordinator` 租约仅作为 runtime 内部的供应商 SDK 防御串行边界。
-- `ProcessCuttingPlanService`、`NormalCuttingManager` 与 motion sink。
+- `ProcessCuttingPlanService`、`NormalCuttingManager` 与 motion sink；前者只将 CAM 权威顺序补充为工具、补偿和执行范围，不拥有排序策略。
 - 流程文档、步骤插件注册表和 `ProcessWorkflowExecutor`。
 - `ProcessConnectionService` 的连接/断开事务、`ProcessPreflightService` 的不可变硬件预检报告、`ProcessStatusService` 的控制器/外设轮询与安全监控启停，以及 `ProcessRunCoordinator` 的运行状态迁移；workflow/UI facade 组合仍待继续下沉。
 
 执行链路为：
 
 ```text
-CAM ToolpathExportSnapshot
-  -> ProcessToolpathService / ProcessCuttingPlanService
+CAM ContourSequenceSnapshot + ToolpathExportSnapshot
+  -> ProcessToolpathService / ProcessCuttingPlanService（只读补充工艺绑定）
   -> NormalCuttingManager
   -> ProcessDeviceRuntime typed sink/轮廓边界门禁
   -> MotionSinkFactory
@@ -163,12 +175,12 @@ Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `Proces
 
 `scripts/check_architecture.ps1` 是 CTest 的 `architecture_checks`。它拒绝 core/view 反向依赖、纯算法依赖 UI/文档/Kernel、Process 对 OCC 的 include、设备公共头泄漏兼容日志、Process settings singleton、runtime 外原始设备访问、已淘汰文档 API，以及未纳入 `CMakeLists.txt` 的 `.cpp`。标准验证命令为 `ctest --test-dir build-cmake --build-config Debug --output-on-failure`。构建目录和应用输出约定以 `BUILD.md` 为准。
 
-## 9. 异步与内存安全规则
+## 10. 异步与内存安全规则
 
 - C++ 所有权优先使用 `unique_ptr/shared_ptr`；OCC 使用 `Handle`；QObject 使用父子树。
 - 非拥有裸指针必须由更长生命周期对象保证，并在异步边界前转换为快照、受控句柄或在关闭时等待。
 - `TaskManager` 析构会先请求取消，再等待全部 worker 退出，最后释放任务实体。
-- CAD、CAM 与 Process 模块均对其 `TaskManager` 任务持有 task-id；模块停止时先请求取消并有界等待。Process 的 worker 持有 `shared_ptr<Service>`，超时降级时不会释放仍可能在供应商 SDK 调用中的对象；连接、断开和回零在同一设备会话中互斥。
+- CAD、CAM、离线仿真与 Process 模块均对其 `TaskManager` 任务持有 task-id；模块停止时先请求取消并有界等待。离线仿真和 CAM 碰撞任务只能持有已复制的几何/运动学快照；Process 的 worker 持有 `shared_ptr<Service>`，超时降级时不会释放仍可能在供应商 SDK 调用中的对象；连接、断开和回零在同一设备会话中互斥。
 - Process 固定关闭顺序为：停止接收普通命令，取消并等待工作流/后台任务，停止监控，提交 Stop 优先级安全输出，断开设备，最后关闭执行线程。若活动供应商调用超时，则保活 SDK 对象并进入 Error，不得在调用仍活跃时释放。
 - 控制器坐标、轴使能、数字输出与 2 s 外设读取由 `ProcessStatusService` 定时提交到统一设备队列线程；500 ms 安全环境监控仍由 `ProcessMonitorService` 管理。`QSerialPort` 本身归属独立 IO 线程，任何等待串口响应的调用都不得在 GUI 线程执行。
 - Process 停止时禁止产生新轮询并在设备 runtime 销毁前停止队列；status completion 用 generation 隔离旧会话。控制器和外设对象不得先于活动 worker/设备调用销毁。
@@ -179,7 +191,7 @@ Process 模块读取监控、轮询和面板 IO 配置只经其注入的 `Proces
 
 静态审计和一次成功构建不能证明“绝无泄漏”。发布门槛必须包含 ASan/Application Verifier、长时间开关工程/连接设备/仿真循环和退出压力测试。
 
-## 10. `.lcnc` 工程包
+## 11. `.lcnc` 工程包
 
 工程包由 QuaZip 在 staging 目录中事务式生成，当前格式版本为 4：
 
@@ -202,7 +214,7 @@ tools.toml
 - `lcnc_project_package_test` 以独立临时目录验证 v4 写入/读取工具快照、缺快照拒绝、失败保存后原包 SHA-256 不变，并验证 v1/v2/v3 manifest 被明确拒绝。staging `QTemporaryFile` 必须在 QuaZip 创建归档前析构，以避免 `MoveFileExW` 的 Win32=32 共享冲突。
 - 应用和库只接受 v4，且 core 校验 `tools.toml` 必须存在；不存在离线升级器、迁移 API 或旧 `process_cutting_plan.toml` 回退。历史项目必须由外部受控迁移流程处理，不得在产品内猜测或修复。
 
-## 11. 配置与可选硬件
+## 12. 配置与可选硬件
 
 Process 运行时服务、`MotionControl`、`LaserDevice`、`LDFactory` 和 `ProcessParameterRegistry` 通过构造函数接收其所属的 `ProcessSettingsService`；`SimulatorCMHP`、ACS、GTN 与全部激光适配器均经此路径创建。流程步骤注册表在模块初始化注入设置、停止时清空，编辑器只读取该受控引用。`ProcessSettingsService::current()` 已删除。设置必须先完成初始化，才允许创建设备、工具与 IO 服务。
 
@@ -222,7 +234,7 @@ Qt SerialPort 是当前 `LaserDevice -> SerialPort` 继承链的必需依赖。A
 
 个人 SDK 路径只允许作为 CMake cache 默认值，长期应迁移到 `CMakePresets.json` 或本机 preset。每种硬件组合必须有独立配置/编译验证。
 
-## 12. 维护准则
+## 13. 维护准则
 
 - 架构事实只维护在本文；阶段计划只维护在 `todo.md`。
 - 不保留未接入运行时、仅用于演示的平行框架。

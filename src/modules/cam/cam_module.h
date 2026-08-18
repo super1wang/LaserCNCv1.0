@@ -21,6 +21,7 @@
 #include "modules/cam/i_cam_facade.h"
 #include "modules/cam/i_cam_contour_sequence_provider.h"
 #include "modules/cam/i_cam_collision_configuration_provider.h"
+#include "modules/cam/i_cam_initial_approach_planner.h"
 #include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 #include "modules/cam/services/machining_face_pipeline_service.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
@@ -179,6 +180,9 @@ public:
     void assignShapesToAxis(const QStringList& entries, const QString& axisName);
     void unassignShape(const QString& entry);
     lcnc::cam::CollisionConfigurationSnapshot collisionConfiguration() const;
+    lcnc::cam::InitialApproachSnapshot planInitialApproach(
+        const lcnc::cam::InitialApproachRequest& request,
+        std::atomic_bool* cancelRequested = nullptr) const;
     void setCollisionDetectionEnabled(bool enabled);
     void setCollisionSources(const QSet<QString>& active,
                              const QSet<QString>& passive);
@@ -339,11 +343,17 @@ public:
     double leadInLength() const;
     void setDeflection(double mm);
     double deflection() const;
+    bool setCuttingOffset(double mm);
+    double cuttingOffset() const;
+    bool setRapidOffset(double mm);
+    double rapidOffset() const;
     void setActiveContourId(lcnc::cam::ContourId contourId);
     lcnc::cam::ContourId activeContourId() const { return m_activeContourId; }
     int activeContourIndex() const;
     bool setActiveContourLeadInLength(double mm);
     bool setActiveContourDeflection(double mm);
+    bool setActiveContourCuttingOffset(double mm);
+    bool setActiveContourRapidOffset(double mm);
     ContourGenerationParams activeContourPendingParams() const;
     bool activeContourNeedsRecalculation() const;
     void setContourEnabled(int contourIdx, bool enabled);
@@ -591,6 +601,8 @@ private:
         const std::vector<LaserContour>& contours,
         std::uint64_t revision,
         const QString& description) const;
+    void attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
+    void applyToolMotionOffsets(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
     void attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
     void scheduleFullEnvironmentVerification(const lcnc::cam::ToolpathExportSnapshot& snapshot);
     bool rebuildTravelPlanForCurrentOrder(QString* errorMessage = nullptr);

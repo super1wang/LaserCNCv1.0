@@ -893,6 +893,8 @@ void MainWindow::createRightPanel()
     CadModule* cad = m_appContext->cadModule();
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
+    m_toolpathPanel->setCuttingOffset(cam->cuttingOffset());
+    m_toolpathPanel->setRapidOffset(cam->rapidOffset());
     m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
     m_toolpathPanel->setExtractionStrategy(cam->extractionStrategy());
     m_toolpathPanel->setShowNormals(cam->showNormals());
@@ -1309,6 +1311,22 @@ void MainWindow::createRightPanel()
             else
                 m_appContext->camModule()->setDeflection(v);
             });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::cuttingOffsetChanged, this,
+            [this](double v) {
+            if (m_toolpathPanel->parameterScope() == WidgetToolpathPanel::ParameterScope::CurrentContour)
+                m_appContext->camModule()->setActiveContourCuttingOffset(v);
+            else
+                m_appContext->camModule()->setCuttingOffset(v);
+            m_toolpathPanel->refreshParameterEditors();
+            });
+    connect(m_toolpathPanel, &WidgetToolpathPanel::rapidOffsetChanged, this,
+            [this](double v) {
+            if (m_toolpathPanel->parameterScope() == WidgetToolpathPanel::ParameterScope::CurrentContour)
+                m_appContext->camModule()->setActiveContourRapidOffset(v);
+            else
+                m_appContext->camModule()->setRapidOffset(v);
+            m_toolpathPanel->refreshParameterEditors();
+            });
     connect(m_toolpathPanel, &WidgetToolpathPanel::parameterScopeChanged, this,
             [this](bool currentContour) {
             CamModule* cam = m_appContext->camModule();
@@ -1317,6 +1335,8 @@ void MainWindow::createRightPanel()
             } else {
                 m_toolpathPanel->setLeadInLength(cam->leadInLength());
                 m_toolpathPanel->setDiscretizationInterval(cam->deflection());
+                m_toolpathPanel->setCuttingOffset(cam->cuttingOffset());
+                m_toolpathPanel->setRapidOffset(cam->rapidOffset());
             }
             });
     connect(m_toolpathPanel, &WidgetToolpathPanel::smoothAngleChanged, this,
@@ -2277,6 +2297,8 @@ void MainWindow::restorePersistedCamState()
 
     m_toolpathPanel->setLeadInLength(cam->leadInLength());
     m_toolpathPanel->setDiscretizationInterval(cam->deflection());
+    m_toolpathPanel->setCuttingOffset(cam->cuttingOffset());
+    m_toolpathPanel->setRapidOffset(cam->rapidOffset());
     m_toolpathPanel->setSmoothAngle(cam->smoothAngle());
     m_toolpathPanel->setExtractionStrategy(cam->extractionStrategy());
     m_toolpathPanel->setShowNormals(cam->showNormals());

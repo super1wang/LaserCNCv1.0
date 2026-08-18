@@ -1,6 +1,8 @@
 #include "modules/process/cutting/normal_cutting_manager.h"
 
 #include "core/logging/logger.h"
+#include "core/kernel/kernel.h"
+#include "modules/cam/i_cam_initial_approach_planner.h"
 #include "modules/cam/i_cam_toolpath_provider.h"
 #include "modules/process/runtime/process_device_runtime.h"
 #include "modules/process/tool/tool.h"
@@ -12,6 +14,8 @@
 #include "modules/process/runtime/device_command_queue.h"
 #include "modules/process/runtime/machine_pose5.h"
 #include "modules/process/runtime/process_interrupt_context.h"
+#include "modules/process/runtime/rapid_motion_utilities.h"
+#include "modules/process/runtime/process_cutting_safety.h"
 
 #include <QString>
 #include <QStringList>
@@ -86,8 +90,6 @@ NormalCuttingManager::NormalCuttingManager(ProcessDeviceRuntime* service,
     // 由 Fix #1 (Tool 类内默认初始化) 保证非赋值字段不再是 0xCD…。这里仅显式覆盖几个最关键的。
     m_sanitizedDefaultTool.m_strName        = "__fallback__";
     m_sanitizedDefaultTool.m_dLineVelocity  = 600.0;
-    m_sanitizedDefaultTool.m_dIdleZHeight   = 5.0;
-    m_sanitizedDefaultTool.m_dCuttingHeight = 0.0;
 }
 
 NormalCuttingManager::~NormalCuttingManager() = default;
@@ -154,21 +156,15 @@ bool NormalCuttingManager::run(const QString& nodeId,
                   directCacheKey.snapshotRevision,
                   directCacheKey.planRevision);
         cuttingList = cachedCuttingListCopy();
-        executionSnapshot = m_toolpathService->currentSnapshot();
+        // A catalog refresh for preflight/UI may have occurred since the
+        // rows were cached.  Always reacquire the committed CAM execution
+        // snapshot; never execute whichever snapshot happened to be read last.
+        executionSnapshot = m_toolpathService->refreshCommittedExecutionSnapshot();
     } else {
-        if (m_planService) {
-            ProcessCuttingPlanService::CuttingListFilter filter;
-            filter.startSequence = startNumber;
-            filter.endSequence = endNumber;
-            const auto plan = m_planService->buildCuttingList(filter);
-            QVector<std::uint64_t> orderedContourIds;
-            orderedContourIds.reserve(plan.size());
-            for (const auto& entry : plan)
-                orderedContourIds.append(entry.contourId);
-            executionSnapshot = m_toolpathService->refreshSnapshotForOrder(orderedContourIds);
-        } else {
-            executionSnapshot = m_toolpathService->refreshSnapshot();
-        }
+        // CAM alone commits the ordered/solved execution snapshot.  The
+        // Process range filter is applied only to its derived execution rows
+        // below; it must never request a sliced or reordered CAM path.
+        executionSnapshot = m_toolpathService->refreshCommittedExecutionSnapshot();
         if (!executionSnapshot.hasEnabledContours()) {
             // 中文翻译：CAM 中没有可执行的启用轮廓
             if (errorMessage) *errorMessage = tr("There is no executable enable profile in CAM");
@@ -424,8 +420,6 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
         ? tool.m_dIdleXYAccDec : tool.m_dLineAcc;
     rapidTool.m_dLineJerk = tool.m_dIdleXYJerk > 0
         ? tool.m_dIdleXYJerk : tool.m_dLineJerk;
-    rapidTool.m_dCuttingHeight = 0.0;
-    rapidTool.m_dCuttingHeightCompensate = 0.0;
 
     const auto submitCoordinatedRapid = [&](const QVector<MachinePose5>& poses) {
         if (poses.isEmpty())
@@ -453,18 +447,13 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
         QVector<MachinePose5> rapidPoses;
         rapidPoses.reserve(rapidCount);
         for (int rapidIndex = 0; rapidIndex < rapidCount; ++rapidIndex) {
-            // Tool height corrections remain a controller-coordinate concern;
-            // the CAM geometric/IK solution stays nominal.  Apply both
-            // corrections to every coordinated rapid sample, tapering the
-            // idle clearance to zero at the target lead-in so no final
-            // unplanned Z-only descent is needed before laser-on.
-            lcnc::cam::RapidMoveSegment rapid = row.entryTransition.segments.at(rapidIndex);
-            const double t = static_cast<double>(rapidIndex + 1)
-                / static_cast<double>(rapidCount);
-            const double rapidEnvelope = std::sin(3.14159265358979323846 * t);
-            rapid.target.axes[2] += tool.m_dCuttingHeight
-                + tool.m_dCuttingHeightCompensate
-                + tool.m_dIdleZHeight * rapidEnvelope;
+            // CAM has already applied the configured rapid offset to geometry
+            // and solved the complete five-axis sequence. Never alter one
+            // semantic axis here: doing so leaves the certified TCP curve and
+            // can drive the head through the workpiece.
+            // 中文翻译：空程偏置和连续五轴求解已由 CAM 完成，Process 必须原样执行。
+            const lcnc::cam::RapidMoveSegment& rapid =
+                row.entryTransition.segments.at(rapidIndex);
             if (pureSimulation) {
                 if (!commandSink.executeRapidSegment(rapid, tool, &commandError)) {
                     if (startError) *startError = commandError.isEmpty()
@@ -472,16 +461,7 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
                     return false;
                 }
             } else {
-                MachinePose5 pose;
-                pose.x = rapid.target.axes[0];
-                pose.y = rapid.target.axes[1];
-                pose.z = rapid.target.axes[2];
-                pose.r1 = rapid.target.axes[3];
-                pose.r2 = rapid.target.axes[4];
-                pose.r1Name = rapid.target.rotaryAxis1Name;
-                pose.r2Name = rapid.target.rotaryAxis2Name;
-                pose.mask = rapid.target.activeMask;
-                rapidPoses.append(std::move(pose));
+                rapidPoses.append(solvedRapidPose(rapid));
             }
         }
         // A rapid must finish before the head/laser/cutting program is built.
@@ -497,18 +477,95 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
         if (tool.m_bCuttingHead)
             commandSink.startCuttingHead(tool);
     } else {
-        // The first contour starts from controller APOS. It has no predecessor
-        // contour, but its approach still uses one XSEG with LINE samples.
+        // There is no predecessor contour for a sliced/resumed first row.
+        // Submit the measured APOS to CAM and execute only its immutable entry
+        // plan; Process must never rebuild a Z-up/XY/Z-down motion locally.
+        // 中文翻译：首轮廓（含范围加工/续跑）由 CAM 根据控制器 APOS 生成进入段，
+        // Process 不得再本地拼接抬 Z、平移、落 Z。
         if (tool.m_bCuttingHead && tool.m_bCrossBridge)
             commandSink.stopCuttingHead();
-        if (!pureSimulation) {
-            MachinePose5 idlePose = leadPose;
-            idlePose.z += tool.m_dIdleZHeight;
-            MachinePose5 cuttingPose = leadPose;
-            cuttingPose.z += tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate;
-            if (!submitCoordinatedRapid({idlePose, cuttingPose})) {
+        auto planner = lcnc::Kernel::current().services()
+            .getService<lcnc::cam::ICamInitialApproachPlanner>();
+        const auto execution = m_toolpathProvider
+            ? m_toolpathProvider->exportCommittedExecutionSnapshot()
+            : lcnc::cam::ToolpathExportSnapshot{};
+        if (!planner || !m_service || !m_deviceQueue
+            || execution.revision == 0 || execution.machineConfigurationFingerprint.isEmpty()) {
+            if (startError) *startError = tr("CAM initial approach planner or execution snapshot is unavailable");
+            return false;
+        }
+
+        const QStringList axisNames = execution.machineAxisLayout.axisNames();
+        const auto readApos = [this, &axisNames](QMap<QString, double>* positions, QString* error) {
+            const DeviceCommandResult read = m_deviceQueue->executeAndWait(
+                DeviceCommandQueue::ResultCommand([this, axisNames, positions] {
+                    return m_service->readAxisPositions(axisNames, positions);
+                }), TaskPriority::Workflow, 5000);
+            if (!read.success && error)
+                *error = read.error;
+            return read.success;
+        };
+        const auto poseDrifted = [&execution](const QMap<QString, double>& before,
+                                              const QMap<QString, double>& after) {
+            for (int index = 0; index < execution.machineAxisLayout.count; ++index) {
+                const auto& axis = execution.machineAxisLayout.axes[index];
+                const double tolerance = (axis.role == lcnc::MachineAxisRole::LinearX
+                    || axis.role == lcnc::MachineAxisRole::LinearY
+                    || axis.role == lcnc::MachineAxisRole::LinearZ) ? 0.01 : 0.01;
+                if (!before.contains(axis.name) || !after.contains(axis.name)
+                    || std::abs(before.value(axis.name) - after.value(axis.name)) > tolerance)
+                    return true;
+            }
+            return false;
+        };
+
+        lcnc::cam::InitialApproachSnapshot approach;
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            QMap<QString, double> before;
+            QString approachError;
+            if (!readApos(&before, &approachError)) {
+                if (startError) *startError = approachError;
+                return false;
+            }
+            lcnc::cam::InitialApproachRequest request;
+            request.toolpathRevision = execution.revision;
+            request.targetContourId = row.data.contour.contourId;
+            request.machineConfigurationFingerprint = execution.machineConfigurationFingerprint;
+            request.axisPositions = before;
+            approach = planner->planInitialApproach(request, nullptr);
+            if (!approach.isExecutable(approach.collision.blockWarning)) {
+                if (startError) *startError = approach.failureReason.isEmpty()
+                    ? tr("CAM initial approach is not collision-verified") : approach.failureReason;
+                return false;
+            }
+            QMap<QString, double> after;
+            if (!readApos(&after, &approachError)) {
+                if (startError) *startError = approachError;
+                return false;
+            }
+            if (!poseDrifted(before, after))
+                break;
+            if (attempt == 1) {
+                if (startError) *startError = tr("Controller position changed while planning the initial approach");
+                return false;
+            }
+        }
+        if (pureSimulation) {
+            for (const auto& segment : approach.transition.segments) {
+                if (!commandSink.executeRapidSegment(segment, tool, &commandError)) {
+                    if (startError) *startError = commandError.isEmpty()
+                        ? tr("Initial CAM approach execution failed") : commandError;
+                    return false;
+                }
+            }
+        } else {
+            QVector<MachinePose5> rapidPoses;
+            rapidPoses.reserve(approach.transition.segments.size());
+            for (const auto& segment : approach.transition.segments)
+                rapidPoses.append(solvedRapidPose(segment));
+            if (!submitCoordinatedRapid(rapidPoses)) {
                 if (startError) *startError = commandError.isEmpty()
-                    ? tr("Initial coordinated approach execution failed") : commandError;
+                    ? tr("Initial CAM approach execution failed") : commandError;
                 return false;
             }
         }
@@ -710,16 +767,14 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
 
     QVector<CuttingRow> out;
 
-    if (snapshot.contours.size() > 1 && !snapshot.travelPlan.isExecutable()) {
+    const QString camBlockReason = camExecutionBlockReason(snapshot);
+    if (!camBlockReason.isEmpty()) {
         if (errorMessage) {
-            const QString reason = snapshot.travelPlan.failureReason.isEmpty()
-                ? tr("The rapid travel plan is missing or out of date")
-                : snapshot.travelPlan.failureReason;
-            *errorMessage = tr("Machining cannot start: %1").arg(reason);
+            *errorMessage = tr("Machining cannot start: %1").arg(camBlockReason);
         }
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "normal-cutting: rejected stale or invalid travel plan: {}",
-                 snapshot.travelPlan.failureReason.toStdString());
+                 "normal-cutting: rejected unsafe CAM execution snapshot: {}",
+                 camBlockReason.toStdString());
         return {};
     }
 
@@ -733,6 +788,7 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
         filter.startSequence = startNumber;
         filter.endSequence   = endNumber;
         const auto plan = m_planService->buildCuttingList(filter);
+        std::uint64_t previousSelectedContourId = 0;
         for (const auto& e : plan) {
             const int srcIdx = indexById.value(e.contourId, -1);
             if (srcIdx < 0) continue;
@@ -770,7 +826,8 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             CuttingRow row;
             row.data.contour = contour;
             row.data.points  = snapshot.pointsByContourId.value(contour.contourId);
-            if (const auto* transition = snapshot.travelPlan.transitionTo(contour.contourId)) {
+            if (const auto* transition = snapshot.travelPlan.transitionTo(contour.contourId);
+                transition && transition->fromContourId == previousSelectedContourId) {
                 row.entryTransition = *transition;
                 row.hasEntryTransition = transition->isValid();
             }
@@ -800,6 +857,7 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             for (const auto& w : warnings)
                 LCNC_WARN(lcnc::LogCode::Generic, "normal-cutting: {}", w.toStdString());
             out.append(std::move(row));
+            previousSelectedContourId = contour.contourId;
         }
         if (!out.isEmpty())
         {

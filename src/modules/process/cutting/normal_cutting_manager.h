@@ -38,7 +38,7 @@ struct NormalCuttingCallbacks
  * 选出合适的 sink（ACS 文本 / GTN 缓存 / 纯仿真），上层只跟 sink 谈，不再 if-branch 控制器。
  *
  * 数据流：
- *   ICamToolpathProvider::exportToolpathSnapshot()
+ *   ICamToolpathProvider::exportCommittedExecutionSnapshot()
  *     → ProcessToolpathService::refreshSnapshot()
  *     → buildCuttingList() 按 startNumber/endNumber 切片，绑 Tool*、补偿
  *     → 每条 CuttingRow 喂给 sink：resetProgram → jumpTo* → setShutterTimings →

@@ -1,5 +1,37 @@
 # LaserCNC 当前交付状态
 
+## 2026-08-19 补充交付：CAM 统一运动计划与稳定碰撞验证
+
+### 已实现并验证
+
+- 切割高度和空程高度迁入 CAM 刀路参数。CAM 沿局部法线生成切割偏置，并将空程拆为 Retract、Traverse、Approach 三段后连续求解；Process、ACS、GTN、PureSimulation 和离线仿真不再修改最终物理坐标。
+- CAM 原子发布有序轮廓、完整运动节点和 `CollisionValidationSnapshot`。生成刀路启用碰撞检测时覆盖引入、切割及空程；仿真直接显示 CAM 结果，不再把仿真作为加工前必经扫描阶段。
+- 首轮廓进入路径由 Process 读取控制器 APOS 后请求 CAM 临时规划，并在执行前复查轴漂移；Process 删除本地抬高/平移/下降拼接。
+- 修复 OCCT `BRepExtrema_ShapeProximity` 在当前 jemalloc 运行时中的析构崩溃。精确 OCC 运算使用唯一进程级门禁；完整扫描以外表面网格、只读 BVH 和姿态级并行为主，仅在网格误差带内执行串行精确距离。
+- Ninja Debug 全量构建与完整 CTest 35/35 通过；半球刀路规划保持在 5 秒门限内，10,000 个旋转锥头/半球表面 BVH 姿态测试约 2.4–3.0 秒；ASan 目标构建及碰撞、锁、快照并发相关测试通过。
+
+### 仍需外部环境/下一版本验证
+
+- 非机台模式人工测试基本通过；完整机台模式仍存在碰撞校验耗时严重的问题，保留为下一版本的首要性能工作，当前提交不把非机台基准外推为完整机台性能结论。
+- 连续段扫掠/保守细分、碰撞后路径重规划、代表性 AC/BC 转台与摆头的低速无激光验证仍未完成。
+- 仍需执行 100 次 GUI 循环和长期私有字节、句柄、线程及 GPU 资源趋势验证。
+
+## 2026-08-17 补充交付：离线机台仿真与碰撞校验
+
+### 已实现并验证
+
+- 新增仅依赖 CAM 与 view 的 `SimulationModule`，以独立 OCC 沙箱冻结并回放已求解 CAM 刀路、机台运动学、显示设置与碰撞配置；不连接设备，也不写入工程、CAM 或实时机台姿态。
+- CAM 成为轮廓加工顺序的唯一事实源。机床坐标求解、空程/序号叠加显示、Process 切割列表和离线仿真共享 `ContourSequenceSnapshot`；Process 仅补充工具、补偿与执行范围。
+- 机台加载改为“后台 detached 解析 + GUI generation 化提交”；加载中和完整机台碰撞验证中的空程计划均不可进入 Process 加工。
+- 碰撞配置改为切割头代理、工件和已归轴机台部件的主动/被动源选择。该阶段完整校验使用私有几何、AABB/OBB 宽相与精确距离检查；离线仿真提供待验证/安全/间隙告警/确认碰撞/无法判定时间线。
+- Ninja Debug 全量构建、`git diff --check`、架构检查和 `ctest --test-dir build-cmake --build-config Debug --output-on-failure` 均已通过；CTest 为 30/30，包含启动烟测和 SimulatorCMHP SDK 集成测试。
+
+### 仍需外部环境/真机验证
+
+- 代表性 AC/BC 转台、摆头、夹具与切割头模型的 GUI 交互、碰撞源配置和路径结果验证。
+- 连续扫掠体/保守细分、碰撞后重规划、持久化碰撞对覆盖、100 次 GUI 进入退出、ASan GUI 与长期私有字节/句柄/GPU 资源趋势。
+- ACS、GTN 与真实激光器物理硬件的低速无激光碰撞验证、Stop/急停和连接/断开循环。
+
 复核日期：2026-08-03
 
 ## 结论
@@ -44,7 +76,7 @@ completion、轮询跨代、CAM ID/context 和 CAD 部分关闭/保存缺口，�
   抽出带 revision 校验的 `ToolpathGenerationService`；CAD 算法异常统一在
   module/service 边界记录和转换。
 - 新增 `scripts/run_quality_gates.ps1`，统一空白检查、架构/旧格式扫描、配置、构建和 CTest 入口。
-- 两条 ACS+GTN Debug 路线均成功生成 `x64/Debug/LaserCNC.exe`。
+- 2026-08-03 的两条 ACS+GTN Debug 路线均成功生成当时共享输出目录中的 `x64/Debug/LaserCNC.exe`；当前运行输出已按生成器/变体隔离，权威位置见 `BUILD.md`。
 - 2026-08-03 复审时质量树 `build-cmake-quality/` 的 CTest 为 23/23 通过，其中
   `lcnc_simulator_cmhp_sdk_integration_test` 使用真实
   `acsc_OpenCommSimulator()` 与部署的 `Simulator.prg`，并验证 100 次设备

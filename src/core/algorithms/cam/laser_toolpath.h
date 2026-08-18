@@ -102,7 +102,32 @@ struct ContourGenerationParams
 {
     double leadInLength{5.0};
     double deflection{0.1};
+    double cuttingOffsetMm{1.0};
+    double rapidOffsetMm{5.0};
 };
+
+enum class ContourDirtyStage : std::uint32_t
+{
+    None             = 0,
+    Discretization   = 1u << 0,
+    LeadInGeometry   = 1u << 1,
+    MotionOffset     = 1u << 2,
+    MachineSolve     = 1u << 3,
+    AdjacentRapid    = 1u << 4,
+    Collision        = 1u << 5,
+    All              = 0x3fu
+};
+
+constexpr ContourDirtyStage operator|(ContourDirtyStage lhs, ContourDirtyStage rhs)
+{
+    return static_cast<ContourDirtyStage>(
+        static_cast<std::uint32_t>(lhs) | static_cast<std::uint32_t>(rhs));
+}
+
+constexpr bool hasDirtyStage(ContourDirtyStage value, ContourDirtyStage flag)
+{
+    return (static_cast<std::uint32_t>(value) & static_cast<std::uint32_t>(flag)) != 0;
+}
 
 /**
  * @brief Parameters for a lead-in line (引刀线) on one contour.
@@ -157,6 +182,7 @@ struct LaserContour
     LeadInSolution             leadInSolution; ///< Derived geometry and machine pose
     ContourGenerationParams    appliedParams; ///< Parameters matching the stored points
     ContourGenerationParams    pendingParams; ///< Explicitly edited, not yet applied values
+    ContourDirtyStage          dirtyStages{ContourDirtyStage::None};
     bool                       needsRecalculation{false};
     bool                       enabled{true};
     QString                    name;
@@ -212,13 +238,19 @@ public:
 
     // Global parameters applied to all contours
     double globalLeadInLength()  const { return m_globalLeadInLength; }
+    double globalCuttingOffsetMm() const { return m_globalCuttingOffsetMm; }
+    double globalRapidOffsetMm() const { return m_globalRapidOffsetMm; }
 
     void setGlobalLeadInLength(double mm)  { m_globalLeadInLength = mm; }
+    void setGlobalCuttingOffsetMm(double mm) { m_globalCuttingOffsetMm = mm; }
+    void setGlobalRapidOffsetMm(double mm) { m_globalRapidOffsetMm = mm; }
 
 private:
     std::vector<LaserContour> m_contours;
     std::vector<ToolpathLayer> m_layers;
     double m_globalLeadInLength{5.0};
+    double m_globalCuttingOffsetMm{1.0};
+    double m_globalRapidOffsetMm{5.0};
 };
 
 /**
@@ -308,6 +340,9 @@ public:
     /// The lead-in line goes from the approach start to the entry point on the contour.
     /// @return A TopoDS_Edge representing the lead-in line, or a null edge if invalid.
     static TopoDS_Edge computeLeadInEdge(const LaserContour& contour);
+    /// Smooth display geometry derived from immutable base samples and the
+    /// applied normal cutting offset. The source TopoDS_Wire is never changed.
+    static TopoDS_Shape buildOffsetDisplayShape(const LaserContour& contour);
 
     /// Build a lead-in in the machining face's tangent plane. Two nearby points
     /// normal to the contour tangent determine which side leaves the trimmed

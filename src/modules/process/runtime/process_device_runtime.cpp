@@ -328,6 +328,31 @@ lcnc::process::DeviceStatusSnapshot ProcessDeviceRuntime::pollStatus(
     return snapshot;
 }
 
+lcnc::process::DeviceCommandResult ProcessDeviceRuntime::readAxisPositions(
+    const QStringList& axisNames, QMap<QString, double>* positions)
+{
+    if (!positions)
+        return {false, QObject::tr("Axis position output is unavailable")};
+    positions->clear();
+    const auto lock = lockDeviceAccess();
+    MotionControl* const mc = m_motionControl.get();
+    if (!mc || !mc->IsConnected())
+        return {false, QObject::tr("Motion controller not connected or disconnected")};
+    for (const QString& rawName : axisNames) {
+        const QString name = rawName.trimmed().toUpper();
+        if (name.isEmpty() || name == QStringLiteral("BASE"))
+            continue;
+        const auto axis = magic_enum::enum_cast<Axis>(name.toStdString());
+        double position = 0.0;
+        if (!axis.has_value() || !mc->IsMotorCreated(*axis)
+            || !mc->GetActualPos(*axis, position) || !std::isfinite(position)) {
+            return {false, QObject::tr("Failed to read controller position for axis %1").arg(name)};
+        }
+        positions->insert(name, position);
+    }
+    return {};
+}
+
 lcnc::process::DevicePeripheralSnapshot ProcessDeviceRuntime::pollPeripheralStatus()
 {
     lcnc::process::DevicePeripheralSnapshot snapshot;

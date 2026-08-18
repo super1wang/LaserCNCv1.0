@@ -93,6 +93,10 @@ public:
         const QMap<QString, double>& targets, double velocity, const QString& positionName);
     lcnc::process::DeviceStatusSnapshot pollStatus(
         const QStringList& axisNames, const QVector<QPair<QString, QString>>& digitalOutputs);
+    /// Reads a coherent APOS snapshot on the device queue.  The workflow uses
+    /// this immediately before CAM plans a temporary first-contour approach.
+    lcnc::process::DeviceCommandResult readAxisPositions(
+        const QStringList& axisNames, QMap<QString, double>* positions);
     lcnc::process::DevicePeripheralSnapshot pollPeripheralStatus();
 
     /// Typed IO access used by monitoring jobs after they have entered the

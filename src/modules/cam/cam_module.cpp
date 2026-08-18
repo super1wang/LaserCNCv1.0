@@ -14,7 +14,6 @@
 #include "modules/cam/services/reference_pick.h"
 #include "core/machine/machine_workspace.h"
 #include "modules/cam/i_cam_layer_provider.h"
-#include "modules/cam/i_cam_tool_offset_provider.h"
 #include "modules/cam/cam_events.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kernel/kernel.h"
@@ -27,6 +26,9 @@
 #include "core/algorithms/cam/travel_path_planner.h"
 #include "core/document/lcnc_document.h"
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/collision_scan_policy.h"
+#include "core/algorithms/cam/surface_collision_prefilter.h"
+#include "core/algorithms/occt_exact_operation_lock.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kinematics/machine_pose.h"
 #include "core/kernel/i_kernel.h"
@@ -58,6 +60,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -65,14 +68,11 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRep_Builder.hxx>
-#include <BRepGProp.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
-#include <BRepExtrema_ShapeProximity.hxx>
-#include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
 #include <STEPControl_Reader.hxx>
 #include <StlAPI_Reader.hxx>
@@ -103,7 +103,6 @@
 #include <Bnd_Box.hxx>
 #include <Bnd_OBB.hxx>
 #include <GeomAbs_SurfaceType.hxx>
-#include <GProp_GProps.hxx>
 #include <Precision.hxx>
 #include <SelectMgr_EntityOwner.hxx>
 #include <SelectMgr_SelectableObject.hxx>
@@ -132,13 +131,14 @@ struct CamTravelCollisionBody
     bool workpiece{false};
     TopoDS_Shape sourceShape;
     QVector<CamTravelCollisionLeaf> leaves;
+    lcnc::cam_algo::SurfaceCollisionModel surfaceModel;
     Bnd_Box localAabb;
     Bnd_OBB localObb;
 };
 
-/// Collision-only geometry is copied and meshed off the GUI thread.  It is
-/// immutable after construction, therefore worker threads can share it safely.
-/// 中文翻译：碰撞专用几何在 GUI 线程外复制和建网格；构建完成后只读共享。
+/// Collision-only geometry is copied off the GUI thread. It is immutable after
+/// construction, therefore worker threads can share its exact BRep safely.
+/// 中文翻译：碰撞专用几何在 GUI 线程外复制；构建完成后只读共享精确 BRep。
 struct CamTravelCollisionGeometryCache
 {
     lcnc::cam::TravelPlanKey key;
@@ -187,28 +187,33 @@ void buildCollisionGeometry(CamTravelCollisionBody* body, double meshDeflectionM
 {
     if (!body || body->sourceShape.IsNull())
         return;
-    // Never attach triangulation to a shape which is still rendered by the
-    // main view.  OCCT stores the mesh on TShapes, hence this deep copy is a
-    // correctness requirement rather than a display optimisation.
+    // Keep an independent immutable topology for the scan. Bounds are built
+    // from BRep geometry so workers never create or share mesh caches.
     BRepBuilderAPI_Copy copy(body->sourceShape, Standard_True, Standard_True);
     const TopoDS_Shape shape = copy.IsDone() ? copy.Shape() : TopoDS_Shape{};
     if (shape.IsNull())
         return;
-    BRepBndLib::AddOptimal(shape, body->localAabb, Standard_True, Standard_False);
-    BRepBndLib::AddOBB(shape, body->localObb, Standard_True, Standard_False, Standard_False);
+    BRepBndLib::AddOptimal(shape, body->localAabb, Standard_False, Standard_False);
+    BRepBndLib::AddOBB(shape, body->localObb, Standard_False, Standard_False, Standard_False);
     TopTools_MapOfShape seen;
-    const auto append = [&body, &seen, meshDeflectionMm](const TopoDS_Shape& leafShape) {
+    const auto append = [&body, &seen](const TopoDS_Shape& leafShape) {
         if (leafShape.IsNull() || !seen.Add(leafShape))
             return;
-        BRepMesh_IncrementalMesh mesh(leafShape, meshDeflectionMm);
         CamTravelCollisionLeaf leaf;
         leaf.shape = leafShape;
-        BRepBndLib::AddOptimal(leafShape, leaf.localAabb, Standard_True, Standard_False);
-        BRepBndLib::AddOBB(leafShape, leaf.localObb, Standard_True, Standard_False, Standard_False);
+        BRepBndLib::AddOptimal(leafShape, leaf.localAabb, Standard_False, Standard_False);
+        BRepBndLib::AddOBB(leafShape, leaf.localObb, Standard_False, Standard_False, Standard_False);
         if (!leaf.localAabb.IsVoid() && !leaf.localObb.IsVoid())
             body->leaves.append(std::move(leaf));
     };
-    for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next())
+    // Face-level leaves provide the stable narrow-phase hierarchy.  Body and
+    // face AABB/OBB tests stay parallel; only the few surviving face pairs go
+    // through process-wide serial exact distance.  Do not use
+    // BRepExtrema_ShapeProximity here: this OCCT build corrupts its internal
+    // NCollection_Array1 even in a guarded single-call stress test.
+    // 中文翻译：叶节点按面拆分，整体与面级包围盒并行筛选，只有少量候选面进入串行精确距离；
+    // 当前 OCCT 的 ShapeProximity 单次受锁调用仍会损坏内存，因此完全禁用。
+    for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next())
         append(explorer.Current());
     if (body->leaves.isEmpty()) {
         for (TopExp_Explorer explorer(shape, TopAbs_SHELL); explorer.More(); explorer.Next())
@@ -216,6 +221,14 @@ void buildCollisionGeometry(CamTravelCollisionBody* body, double meshDeflectionM
     }
     if (body->leaves.isEmpty())
         append(shape);
+    // The surface-only mesh discards BRep construction history and internal
+    // representation. Its immutable BVH is the parallel narrow prefilter;
+    // exact BRep distance remains a conservative fallback near the tolerance
+    // band, never the per-node default.
+    // 中文翻译：表面网格忽略 BRep 构造历史和内部表达，只保留碰撞所需外表面；
+    // 只读 BVH 用于并行窄相初筛，只有容差带附近才进入 BRep 精确复检。
+    body->surfaceModel = lcnc::cam_algo::SurfaceCollisionModel::build(
+        shape, meshDeflectionMm);
 }
 
 TopoDS_Shape normalizeNozzleCollisionShape(const TopoDS_Shape& source)
@@ -431,28 +444,14 @@ public:
         return m_baseSnapshot.revision;
     }
 
-    bool solveToolpathForOrder(
-        const QVector<std::uint64_t>& orderedContourIds) override
-    {
-        if (!m_module || QThread::currentThread() != m_module->thread()) {
-            LCNC_ERR(lcnc::LogCode::Generic,
-                     "CamToolpathProviderAdapter: solveToolpathForOrder must run on the CAM thread");
-            return false;
-        }
-        const bool solved = m_module->solveToolpathForOrder(orderedContourIds);
-        if (solved)
-            refreshPlannedCacheForOrder(orderedContourIds);
-        return solved;
-    }
-
-    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const override
+    lcnc::cam::ToolpathExportSnapshot exportToolpathCatalogSnapshot() const override
     {
         // Every default provider read is an immutable cache read, including on
-        // the CAM thread.  Process uses this entry for list synchronisation and
-        // preflight; neither operation may unexpectedly execute OCC travel
-        // planning.  Only solveToolpathForOrder() is allowed to create and
-        // commit a fully planned snapshot.
-        // 中文翻译：默认快照读取始终走缓存；只有明确设置加工顺序时才生成并提交空程规划。
+        // the CAM thread.  Process uses this entry only for list and editor
+        // synchronisation; it must never unexpectedly execute OCC travel
+        // planning. CAM commands are the only path allowed to create and
+        // commit a fully planned execution snapshot.
+        // 中文翻译：目录快照读取始终走缓存；只有 CAM 命令可生成并提交空程规划。
         QMutexLocker lock(&m_cacheMutex);
         if (!m_module || !m_module->isMachineLoadPending())
             return m_baseSnapshot;
@@ -467,11 +466,15 @@ public:
             "CamModule",
             "The machine model is loading; a verified rapid travel plan is not available yet");
         blocked.travelPlan.stale = false;
+        blocked.motionPlan = {};
+        blocked.motionPlan.revision = blocked.revision;
+        blocked.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Pending;
+        blocked.motionPlan.collision.complete = false;
+        blocked.motionPlan.collision.failureReason = blocked.travelPlan.failureReason;
         return blocked;
     }
 
-    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
-        const QVector<std::uint64_t>& orderedContourIds) const override
+    lcnc::cam::ToolpathExportSnapshot exportCommittedExecutionSnapshot() const override
     {
         if (m_module && m_module->isMachineLoadPending()) {
             QMutexLocker lock(&m_cacheMutex);
@@ -482,100 +485,20 @@ public:
                 "CamModule",
                 "The machine model is loading; a verified rapid travel plan is not available yet");
             blocked.travelPlan.stale = false;
+            blocked.motionPlan = {};
+            blocked.motionPlan.revision = blocked.revision;
+            blocked.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Pending;
+            blocked.motionPlan.collision.complete = false;
+            blocked.motionPlan.collision.failureReason = blocked.travelPlan.failureReason;
             return blocked;
         }
-        if (m_module && QThread::currentThread() == m_module->thread())
-            return m_module->exportToolpathSnapshotForOrder(orderedContourIds);
         QMutexLocker lock(&m_cacheMutex);
-        if (orderedContourIds.isEmpty())
-            return m_baseSnapshot;
-
-        // A signal-driven base refresh must not overwrite a planned snapshot
-        // from the same immutable toolpath revision.  CAM emits several
-        // completion notifications after a regeneration; Process resolves the
-        // cutting order during one of them, and later notifications previously
-        // replaced that verified plan with TravelPlanningMode::None.
-        // 中文翻译：同一刀路版本的基础快照刷新不能覆盖已验证空程计划；生成完成后的后续信号只更新基础数据。
-        const auto& snapshot = m_plannedSnapshot.revision == m_baseSnapshot.revision
-                ? m_plannedSnapshot
-                : m_baseSnapshot;
-
-        bool exactCachedOrder = orderedContourIds.size() == snapshot.contours.size();
-        for (int index = 0; exactCachedOrder && index < orderedContourIds.size(); ++index) {
-            exactCachedOrder = snapshot.contours.at(index).contourId
-                == orderedContourIds.at(index);
-        }
-        if (exactCachedOrder)
-            return snapshot;
-
-        lcnc::cam::ToolpathExportSnapshot ordered;
-        ordered.revision = snapshot.revision;
-        ordered.description = snapshot.description;
-        ordered.machiningMode = snapshot.machiningMode;
-        ordered.machineAxisLayout = snapshot.machineAxisLayout;
-        ordered.machineConfigurationFingerprint = snapshot.machineConfigurationFingerprint;
-        ordered.solverId = snapshot.solverId;
-        ordered.solverVersion = snapshot.solverVersion;
-        QHash<std::uint64_t, lcnc::cam::ToolpathExportContour> byId;
-        QVector<std::uint64_t> actualOrder;
-        for (const auto& contour : snapshot.contours)
-            byId.insert(contour.contourId, contour);
-        for (const std::uint64_t id : orderedContourIds) {
-            const auto it = byId.constFind(id);
-            if (it == byId.constEnd())
-                continue;
-            ordered.contours.append(it.value());
-            ordered.pointsByContourId.insert(id, snapshot.pointsByContourId.value(id));
-            actualOrder.append(id);
-        }
-
-        // Partial machining normally selects a contiguous slice of the
-        // already solved order.  Reuse only transitions whose source and
-        // target remain adjacent in that slice; never return an OCC-free
-        // subset with TravelPlanningMode::None, because Process would then
-        // have no verified inter-contour motion to execute.
-        // 中文翻译：部分加工只能复用仍保持相邻关系的已验证空程；缺失空程计划必须阻止执行。
-        ordered.travelPlan = snapshot.travelPlan;
-        ordered.travelPlan.transitions.clear();
-        ordered.travelPlan.totalEstimatedTimeMs = 0.0;
-        ordered.travelPlan.totalLengthMm = 0.0;
-        ordered.travelPlan.minimumClearanceMm = 0.0;
-        ordered.travelPlan.fallbackCount = 0;
-        ordered.travelPlan.key.orderHash = 0;
-        for (const std::uint64_t id : std::as_const(actualOrder))
-            ordered.travelPlan.key.orderHash =
-                (ordered.travelPlan.key.orderHash * 1099511628211ull) ^ id;
-        if (actualOrder.size() <= 1) {
-            ordered.travelPlan.failureReason.clear();
-            ordered.travelPlan.stale = false;
-        } else {
-            double minimumClearance = std::numeric_limits<double>::infinity();
-            for (int index = 1; index < actualOrder.size(); ++index) {
-                const auto* transition = snapshot.travelPlan.transitionTo(actualOrder.at(index));
-                if (!transition || transition->fromContourId != actualOrder.at(index - 1)
-                    || !transition->isValid()) {
-                    ordered.travelPlan.failureReason = QCoreApplication::translate(
-                        "CamModule",
-                        "The requested partial machining order has no matching verified rapid travel plan");
-                    ordered.travelPlan.stale = false;
-                    ordered.travelPlan.transitions.clear();
-                    break;
-                }
-                ordered.travelPlan.transitions.append(*transition);
-                ordered.travelPlan.totalEstimatedTimeMs += transition->estimatedTimeMs;
-                ordered.travelPlan.totalLengthMm += transition->pathLengthMm;
-                minimumClearance = std::min(minimumClearance,
-                                            transition->minimumClearanceMm);
-                if (transition->usedAbsoluteSafeFallback)
-                    ++ordered.travelPlan.fallbackCount;
-            }
-            if (ordered.travelPlan.failureReason.isEmpty()) {
-                ordered.travelPlan.minimumClearanceMm =
-                    std::isfinite(minimumClearance) ? minimumClearance : 0.0;
-                ordered.travelPlan.stale = false;
-            }
-        }
-        return ordered;
+        // Never build or filter a requested sequence here.  A consumer must
+        // receive exactly the sequence and rapid plan committed by CAM.
+        // 中文翻译：此处不按消费者请求重新排序或筛选，只导出 CAM 已提交的完整执行序列。
+        return m_plannedSnapshot.revision == m_baseSnapshot.revision
+            ? m_plannedSnapshot
+            : m_baseSnapshot;
     }
 
 private:
@@ -593,8 +516,32 @@ private:
         // 中文翻译：基础缓存必须保留完整 CAM 刀路；已规划快照只包含当前加工顺序的启用轮廓。
         auto baseSnapshot = m_module->exportToolpathBaseSnapshot();
         QMutexLocker lock(&m_cacheMutex);
+        const auto samePlannedOrder = [this, &snapshot] {
+            if (m_plannedSnapshot.revision != snapshot.revision
+                || m_plannedSnapshot.contours.size() != snapshot.contours.size()
+                || !(m_plannedSnapshot.travelPlan.key == snapshot.travelPlan.key)) {
+                return false;
+            }
+            for (int index = 0; index < snapshot.contours.size(); ++index) {
+                if (m_plannedSnapshot.contours.at(index).contourId
+                    != snapshot.contours.at(index).contourId) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (samePlannedOrder()) {
+            // A verification-only refresh reuses the committed travel plan.
+            // Preserve the contour coordinates that were solved continuously
+            // with that rapid path; a cache-hit export contains only the base
+            // contour solve and must not overwrite them.
+            // 中文翻译：仅校验状态更新时保留与空程连续求解的轮廓坐标，不能被基础坐标覆盖。
+            m_plannedSnapshot.travelPlan = snapshot.travelPlan;
+            m_plannedSnapshot.motionPlan.collision = snapshot.motionPlan.collision;
+        } else {
+            m_plannedSnapshot = std::move(snapshot);
+        }
         m_baseSnapshot = std::move(baseSnapshot);
-        m_plannedSnapshot = std::move(snapshot);
     }
 
     void refreshCache(bool invalidatePlannedPlan = false)
@@ -679,49 +626,6 @@ public:
     {
         QMutexLocker lock(&m_cacheMutex);
         return m_revision;
-    }
-
-    // ── 可变（全部走 LayerManager 触发细粒度信号）────────────────────────
-    void setLayerToolName(std::uint64_t layerId, const QString& toolName) override
-    {
-        if (auto* mgr = layerMgr()) mgr->setLayerToolName(layerId, toolName);
-    }
-    void setLayerEnabled(std::uint64_t layerId, bool enabled) override
-    {
-        if (auto* mgr = layerMgr()) mgr->setLayerEnabled(layerId, enabled);
-    }
-    void setLayerCompensationIndex(std::uint64_t layerId, const QString& index) override
-    {
-        if (auto* mgr = layerMgr()) mgr->setLayerCompensationIndex(layerId, index);
-    }
-    void setLayerIncludedContours(std::uint64_t layerId, const QSet<lcnc::cam::ContourId>& included) override
-    {
-        if (auto* mgr = layerMgr()) mgr->setLayerIncludedContours(layerId, included);
-    }
-    void setManualContourOrder(const QVector<lcnc::cam::ContourId>& ids) override
-    {
-        if (auto* mgr = layerMgr()) mgr->setManualContourOrder(ids);
-    }
-    int appendToManualOrder(const QVector<lcnc::cam::ContourId>& ids) override
-    {
-        if (auto* mgr = layerMgr()) return mgr->appendToManualOrder(ids);
-        return 0;
-    }
-    void removeFromManualOrder(const QVector<lcnc::cam::ContourId>& ids) override
-    {
-        if (auto* mgr = layerMgr()) mgr->removeFromManualOrder(ids);
-    }
-    void clearManualOrder() override
-    {
-        if (auto* mgr = layerMgr()) mgr->clearManualOrder();
-    }
-    void setSortStrategy(lcnc::cam::CuttingPlanSortStrategy s) override
-    {
-        if (auto* mgr = layerMgr()) mgr->setSortStrategy(s);
-    }
-    void setLastAutoSortAxis(lcnc::cam::AutoSortAxis a) override
-    {
-        if (auto* mgr = layerMgr()) mgr->setLastAutoSortAxis(a);
     }
 
     QObject* notifier() const override
@@ -860,6 +764,24 @@ private:
     CamModule* m_module{nullptr};
 };
 
+class CamInitialApproachPlannerAdapter final
+    : public lcnc::cam::ICamInitialApproachPlanner
+{
+public:
+    explicit CamInitialApproachPlannerAdapter(CamModule* module) : m_module(module) {}
+
+    lcnc::cam::InitialApproachSnapshot planInitialApproach(
+        const lcnc::cam::InitialApproachRequest& request,
+        std::atomic_bool* cancelRequested) const override
+    {
+        return m_module ? m_module->planInitialApproach(request, cancelRequested)
+                        : lcnc::cam::InitialApproachSnapshot{};
+    }
+
+private:
+    CamModule* m_module{nullptr};
+};
+
 TopoDS_Shape translatedShapeCopy(const TopoDS_Shape& shape, const gp_Vec& translation)
 {
     if (shape.IsNull() || translation.SquareMagnitude() < 1e-12)
@@ -941,6 +863,8 @@ bool CamModule::init(lcnc::IKernel& kernel)
     kernel.services().registerService<lcnc::ICamFacade>(facade);
     auto collisionConfiguration = std::make_shared<CamCollisionConfigurationProviderAdapter>(this);
     kernel.services().registerService<lcnc::cam::ICamCollisionConfigurationProvider>(collisionConfiguration);
+    auto initialApproach = std::make_shared<CamInitialApproachPlannerAdapter>(this);
+    kernel.services().registerService<lcnc::cam::ICamInitialApproachPlanner>(initialApproach);
     auto explorerProjection = std::make_shared<CamProjectExplorerProjectionAdapter>(*this);
     kernel.services().registerService<lcnc::cam::ICamProjectExplorerProjection>(explorerProjection);
     auto toolpathProvider = std::make_shared<CamToolpathProviderAdapter>(this);
@@ -1057,6 +981,8 @@ CamModule::CamModule(QObject* parent)
     m_machineModelPath = config.machineModelPath();
     m_machineRenderQualityPreset = config.machineRenderQualityPreset();
     toolpathRef().setGlobalLeadInLength(config.leadInLength());
+    toolpathRef().setGlobalCuttingOffsetMm(config.cuttingOffsetMm());
+    toolpathRef().setGlobalRapidOffsetMm(config.rapidOffsetMm());
     m_deflection = config.deflection();
     m_smoothAngle = config.smoothAngle();
     m_useFaceClassification = config.useFaceClassification();
@@ -1080,6 +1006,15 @@ CamModule::CamModule(QObject* parent)
                 m_machiningFacePipeline->reset();
                 refreshMachiningFaceDisplay();
                 m_camData = project->camData();
+                if (m_camData && !m_camData->hasToolpath()) {
+                    toolpathRef().setGlobalLeadInLength(m_config.leadInLength());
+                    toolpathRef().setGlobalCuttingOffsetMm(m_config.cuttingOffsetMm());
+                    toolpathRef().setGlobalRapidOffsetMm(m_config.rapidOffsetMm());
+                    m_deflection = m_config.deflection();
+                    pushGenerationParamsToCamData();
+                    m_camData->appliedGenerationParams() = m_camData->generationParams();
+                    m_camData->setGenerationParamsDirty(false);
+                }
                 // A new workspace owns a fresh CamDataManager.  Seed its
                 // project-level mode and axis layout from the active machine
                 // before any global generation can capture the default
@@ -3310,7 +3245,9 @@ bool CamModule::extractContoursFromMachiningFaces()
         for (LaserContour& contour : contours) {
             contour.workpieceEntry = source.workpieceEntry;
             contour.sourceShape = source.shape;
-            contour.appliedParams = {m_config.leadInLength(), m_deflection};
+            contour.appliedParams = {toolpathRef().globalLeadInLength(), m_deflection,
+                                     toolpathRef().globalCuttingOffsetMm(),
+                                     toolpathRef().globalRapidOffsetMm()};
             contour.pendingParams = contour.appliedParams;
             contour.needsRecalculation = true;
             extracted.push_back(std::move(contour));
@@ -3324,7 +3261,6 @@ bool CamModule::extractContoursFromMachiningFaces()
 
     eraseToolpathDisplay();
     toolpathRef().contours() = std::move(extracted);
-    toolpathRef().setGlobalLeadInLength(m_config.leadInLength());
     m_camData->ensureToolpathLayers();
     m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::ContourExtraction,
                                    faceState.revision);
@@ -3370,7 +3306,9 @@ bool CamModule::discretizeCurrentContours()
             emit operationFailed(tr("discrete points"), tr("Contour \"%1\" discrete failure.").arg(contour.name));
             return false;
         }
-        contour.appliedParams = {m_config.leadInLength(), m_deflection};
+        contour.appliedParams = {toolpathRef().globalLeadInLength(), m_deflection,
+                                 toolpathRef().globalCuttingOffsetMm(),
+                                 toolpathRef().globalRapidOffsetMm()};
         contour.pendingParams = contour.appliedParams;
         contour.needsRecalculation = true;
     }
@@ -3487,7 +3425,9 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
     const std::vector<MachiningFaceEntry> faces = m_machiningFaces;
     const double smoothAngle = m_smoothAngle;
     const double deflection = m_deflection;
-    const double leadInLength = m_config.leadInLength();
+    const double leadInLength = toolpathRef().globalLeadInLength();
+    const double cuttingOffsetMm = toolpathRef().globalCuttingOffsetMm();
+    const double rapidOffsetMm = toolpathRef().globalRapidOffsetMm();
     const bool useLargestSmoothBoundary =
         m_extractionStrategy == static_cast<int>(ExtractionStrategy::LargestSmoothConnectedSurface);
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
@@ -3496,6 +3436,7 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
     TaskSpec spec{tr("Extract machining contours"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
     const TaskId taskId = taskManager->run(spec,
         [sources, faces, smoothAngle, deflection, leadInLength,
+         cuttingOffsetMm, rapidOffsetMm,
          useLargestSmoothBoundary, result](TaskProgress* progress) {
             progress->setRange(0, std::max(1, static_cast<int>(sources.size())));
             ContourExtractionParams params;
@@ -3536,7 +3477,8 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
                     for (LaserContour& contour : contours) {
                         contour.workpieceEntry = source.workpieceEntry;
                         contour.sourceShape = source.shape;
-                        contour.appliedParams = {leadInLength, deflection};
+                        contour.appliedParams = {leadInLength, deflection,
+                                                 cuttingOffsetMm, rapidOffsetMm};
                         contour.pendingParams = contour.appliedParams;
                         contour.needsRecalculation = true;
                         result->contours.push_back(std::move(contour));
@@ -3570,7 +3512,6 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
         }
         eraseToolpathDisplay();
         toolpathRef().contours() = std::move(result->contours);
-        toolpathRef().setGlobalLeadInLength(m_config.leadInLength());
         m_camData->ensureToolpathLayers();
         m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::ContourExtraction,
                                        currentFace.revision);
@@ -3608,13 +3549,16 @@ TaskId CamModule::discretizeCurrentContoursAsync()
     }
     const std::vector<LaserContour> input = toolpathRef().contours();
     const double deflection = m_deflection;
-    const double leadInLength = m_config.leadInLength();
+    const double leadInLength = toolpathRef().globalLeadInLength();
+    const double cuttingOffsetMm = toolpathRef().globalCuttingOffsetMm();
+    const double rapidOffsetMm = toolpathRef().globalRapidOffsetMm();
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     // 中文翻译：离散加工轮廓
     TaskSpec spec{tr("Discrete machining contours"), QStringLiteral("cam.pipeline"), TaskPriority::Normal, true};
     const TaskId taskId = taskManager->run(spec,
-        [input, deflection, leadInLength, result](TaskProgress* progress) {
+        [input, deflection, leadInLength, cuttingOffsetMm, rapidOffsetMm,
+         result](TaskProgress* progress) {
             progress->setRange(0, std::max(1, static_cast<int>(input.size())));
             result->contours = input;
             for (std::size_t index = 0; index < result->contours.size(); ++index) {
@@ -3636,7 +3580,8 @@ TaskId CamModule::discretizeCurrentContoursAsync()
                     result->error = QObject::tr("Contour \"%1\" discrete failure.").arg(contour.name);
                     return;
                 }
-                contour.appliedParams = {leadInLength, deflection};
+                contour.appliedParams = {leadInLength, deflection,
+                                         cuttingOffsetMm, rapidOffsetMm};
                 contour.pendingParams = contour.appliedParams;
                 contour.needsRecalculation = true;
                 progress->setValue(static_cast<int>(index + 1));
@@ -3930,7 +3875,9 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
         return false;
 
     // LaserToolpath::clear() 会复位运行时值；全局生成始终以程序配置为准。
-    const double leadInLength = m_config.leadInLength();
+    const double leadInLength = toolpathRef().globalLeadInLength();
+    const double cuttingOffsetMm = toolpathRef().globalCuttingOffsetMm();
+    const double rapidOffsetMm = toolpathRef().globalRapidOffsetMm();
     const LaserToolpath previousToolpath = toolpathRef();
     const QVector<lcnc::cam::ContourId> previousOrder =
         m_camData->layerContainer().manualContourOrder();
@@ -4043,7 +3990,8 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
             // 全局生成以当前程序级全局参数统一重建所有轮廓；轮廓级参数仅由
             // “重新计算当前轮廓”写入和随工程保存，下一次全局生成会被此处覆盖。
             contour.leadIn.length = leadInLength;
-            contour.appliedParams = {leadInLength, deflection};
+            contour.appliedParams = {leadInLength, deflection,
+                                     cuttingOffsetMm, rapidOffsetMm};
             contour.pendingParams = contour.appliedParams;
             contour.needsRecalculation = false;
             contour.workpieceEntry = source.workpieceEntry;
@@ -4127,6 +4075,8 @@ bool CamModule::generateToolpath(double smoothAngle, bool useFaceClassification,
     eraseToolpathDisplay();
     toolpathRef().contours() = std::move(allContours);
     toolpathRef().setGlobalLeadInLength(leadInLength);
+    toolpathRef().setGlobalCuttingOffsetMm(cuttingOffsetMm);
+    toolpathRef().setGlobalRapidOffsetMm(rapidOffsetMm);
     m_camData->ensureToolpathLayers();
     QVector<lcnc::cam::ContourId> solveOrder;
     QSet<lcnc::cam::ContourId> retainedIds;
@@ -4249,7 +4199,9 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     if (m_machineConfig && m_camData)
         effectiveUseFaceClassification =
             m_camData->machiningMode() != lcnc::MachiningMode::Planar3Axis;
-    const double leadInLength = m_config.leadInLength();
+    const double leadInLength = toolpathRef().globalLeadInLength();
+    const double cuttingOffsetMm = toolpathRef().globalCuttingOffsetMm();
+    const double rapidOffsetMm = toolpathRef().globalRapidOffsetMm();
     const QVector<lcnc::cam::ContourId> previousOrder =
         m_camData->layerContainer().manualContourOrder();
     QHash<std::uint64_t, LaserContour> previousBySignature;
@@ -4308,6 +4260,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     generationStamp.leadInLength = leadInLength;
     generationStamp.smoothAngle = smoothAngle;
     generationStamp.deflection = deflection;
+    generationStamp.cuttingOffsetMm = cuttingOffsetMm;
+    generationStamp.rapidOffsetMm = rapidOffsetMm;
     generationStamp.useFaceClassification = effectiveUseFaceClassification;
     generationStamp.extractionStrategy = extractionStrategy;
     generationStamp.contourIds.reserve(toolpathRef().contours().size());
@@ -4333,7 +4287,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     spec.scope = QStringLiteral("cam.toolpath");
     spec.priority = TaskPriority::Normal;
     const TaskId taskId = taskManager->run(spec,
-        [workpieceSources, previousBySignature, previousOrder, leadInLength, params, selectedFaceEntries,
+        [workpieceSources, previousBySignature, previousOrder, leadInLength,
+         cuttingOffsetMm, rapidOffsetMm, params, selectedFaceEntries,
          extractionStrategy, beamDirs, effectiveUseFaceClassification, axes, configType, modeDefinition,
          workpieceSetup, headToolGeometry, result](TaskProgress* progress) {
             progress->setRange(0, 100);
@@ -4454,7 +4409,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             contour.leadIn.entryEdgeIndex = oldContour->points.front().sourceEdgeIndex;
                     }
                     contour.leadIn.length = leadInLength;
-                    contour.appliedParams = {leadInLength, params.deflection};
+                    contour.appliedParams = {leadInLength, params.deflection,
+                                             cuttingOffsetMm, rapidOffsetMm};
                     contour.pendingParams = contour.appliedParams;
                     contour.needsRecalculation = false;
                     contour.workpieceEntry = source.workpieceEntry;
@@ -4633,9 +4589,11 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             currentStamp.toolpathRevision = toolpathRevision();
             currentStamp.machiningFaceRevision = machiningFaceSetRevision();
             currentStamp.machineSetupRevision = machineSetupRevision();
-            currentStamp.leadInLength = m_config.leadInLength();
+            currentStamp.leadInLength = toolpathRef().globalLeadInLength();
             currentStamp.smoothAngle = m_smoothAngle;
             currentStamp.deflection = m_deflection;
+            currentStamp.cuttingOffsetMm = toolpathRef().globalCuttingOffsetMm();
+            currentStamp.rapidOffsetMm = toolpathRef().globalRapidOffsetMm();
             currentStamp.useFaceClassification = currentEffectiveFaceClassification;
             currentStamp.extractionStrategy = m_extractionStrategy;
             const auto& currentContours = toolpathRef().contours();
@@ -4656,6 +4614,8 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             eraseToolpathDisplay();
             toolpathRef().contours() = std::move(result->contours);
             toolpathRef().setGlobalLeadInLength(leadInLength);
+            toolpathRef().setGlobalCuttingOffsetMm(generationStamp.cuttingOffsetMm);
+            toolpathRef().setGlobalRapidOffsetMm(generationStamp.rapidOffsetMm);
             m_smoothAngle = smoothAngle;
             m_useFaceClassification = effectiveUseFaceClassification;
             m_deflection = deflection;
@@ -5324,7 +5284,11 @@ bool CamModule::rebuildTravelPlanForCurrentOrder(QString* errorMessage)
     // A failed rapid plan is still a valid and committed CAM result: it is
     // rendered as unavailable and blocks Process preflight.  Do not roll back
     // the selected order merely because a safety check rejected a transition.
-    if (order.size() > 1 && !snapshot.travelPlan.isExecutable()) {
+    // Pending CAM validation is an expected final generation phase, not a
+    // rapid-planning failure.  Report only a completed/rejected plan here.
+    // 中文翻译：等待 CAM 校验是生成刀路的正常收尾阶段，不应被当作空程规划失败提示；这里只报告已完成的拒绝结果。
+    if (order.size() > 1 && !snapshot.travelPlan.isExecutable()
+        && !snapshot.travelPlan.fullEnvironmentVerificationPending) {
         LCNC_WARN(lcnc::LogCode::Generic,
                   "cam.travel: committed non-executable rapid plan for contour order: {}",
                   snapshot.travelPlan.failureReason.toStdString());
@@ -5346,30 +5310,53 @@ void CamModule::scheduleFullEnvironmentVerification(
     auto* tasks = lcnc::Kernel::current().taskManager();
     LcncDocument* machine = machineDocument();
     MachineKinematics* liveKinematics = kinematics();
-    if (!tasks || !machine || !liveKinematics || !machine->shapeTool())
+    // Full-path validation is CAM-owned even without a loaded machine model:
+    // the cutter/workpiece proxy pair is still a valid collision environment.
+    // A machine document only contributes additional selected axis bodies.
+    // 中文翻译：即使未加载机台模型，切割头/工件代理仍须由 CAM 完整校验；机台文档只额外提供被选轴部件。
+    if (!tasks || !liveKinematics)
         return;
     const auto collision = collisionConfiguration();
+    const auto failBeforeScheduling = [this, &snapshot](const QString& reason) {
+        if (!(m_travelPlanCache.key == snapshot.travelPlan.key))
+            return;
+        m_travelPlanCache.fullEnvironmentVerificationPending = false;
+        m_travelPlanCache.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+        m_travelPlanCache.collision.complete = true;
+        m_travelPlanCache.collision.failureReason = reason;
+        m_travelPlanCache.failureReason = reason;
+        QVector<std::uint64_t> order;
+        order.reserve(snapshot.contours.size());
+        for (const auto& contour : snapshot.contours)
+            order.append(contour.contourId);
+        emit contourOrderTravelPlanRebuilt(order);
+    };
+    if (!collision.enabled || !collision.valid) {
+        failBeforeScheduling(tr("Collision detection is enabled but the source configuration is incomplete"));
+        return;
+    }
     QVector<CamTravelCollisionBody> bodies;
-    const TDF_LabelSequence labels = machine->entityLabels(LcncDocument::EntityKind::Machine);
-    for (int index = 1; index <= labels.Length(); ++index) {
-        const TDF_Label& label = labels.Value(index);
-        const QString entry = XcafUtils::entry(label);
-        const QString source = collisionAxisSourceId(liveKinematics->axisForShape(entry));
-        const bool active = collision.activeSources.contains(source);
-        const bool passive = collision.passiveSources.contains(source);
-        if (!active && !passive)
-            continue;
-        const TopoDS_Shape shape = machine->shapeTool()->GetShape(label);
-        if (!shape.IsNull())
-            bodies.append({entry, source, active, passive, false, false, shape});
+    if (machine && machine->shapeTool()) {
+        const TDF_LabelSequence labels = machine->entityLabels(LcncDocument::EntityKind::Machine);
+        for (int index = 1; index <= labels.Length(); ++index) {
+            const TDF_Label& label = labels.Value(index);
+            const QString entry = XcafUtils::entry(label);
+            const QString source = collisionAxisSourceId(liveKinematics->axisForShape(entry));
+            const bool active = collision.activeSources.contains(source);
+            const bool passive = collision.passiveSources.contains(source);
+            if (!active && !passive)
+                continue;
+            const TopoDS_Shape shape = machine->shapeTool()->GetShape(label);
+            if (!shape.IsNull())
+                bodies.append({entry, source, active, passive, false, false, shape});
+        }
     }
     if (collision.activeSources.contains(QStringLiteral("cutter"))) {
         QString cutterError;
         const TopoDS_Shape cutter = cutterCollisionProxyShape(&cutterError);
         if (cutter.IsNull()) {
-            m_travelPlanCache.fullEnvironmentVerificationPending = false;
-            m_travelPlanCache.failureReason = cutterError.isEmpty()
-                ? tr("Unable to create the cutting nozzle collision proxy") : cutterError;
+            failBeforeScheduling(cutterError.isEmpty()
+                ? tr("Unable to create the cutting nozzle collision proxy") : cutterError);
             return;
         }
         bodies.append({QStringLiteral("__cutter_proxy__"), QStringLiteral("cutter"),
@@ -5380,8 +5367,20 @@ void CamModule::scheduleFullEnvironmentVerification(
         bodies.append({QStringLiteral("__workpiece__"), QStringLiteral("workpiece"),
                        false, true, false, true, m_workpieceShape});
     }
-    if (bodies.isEmpty())
+    if (bodies.isEmpty()) {
+        failBeforeScheduling(tr("No selected collision source has usable geometry"));
         return;
+    }
+    QSet<QString> activeBodySources;
+    for (const CamTravelCollisionBody& body : std::as_const(bodies)) {
+        if (body.active)
+            activeBodySources.insert(body.source);
+    }
+    const QStringList activeSources = lcnc::cam_algo::orderedActiveCollisionSources(activeBodySources);
+    if (activeSources.isEmpty()) {
+        failBeforeScheduling(tr("No active collision source has usable geometry"));
+        return;
+    }
 
     if (m_travelVerificationTask != kInvalidTaskId)
         tasks->requestAbort(m_travelVerificationTask);
@@ -5393,11 +5392,16 @@ void CamModule::scheduleFullEnvironmentVerification(
     const auto mounts = liveKinematics->wpcMounts();
     const auto definition = m_machineConfig->modeDefinition(snapshot.machiningMode);
     const double clearanceMm = m_config.cutterCollisionClearanceMm();
+    const double collisionMeshDeflectionMm = qBound(0.05, clearanceMm * 0.1, 0.25);
     const lcnc::cam::TravelPlanKey planKey = snapshot.travelPlan.key;
+    QVector<std::uint64_t> verifiedOrder;
+    verifiedOrder.reserve(snapshot.contours.size());
+    for (const auto& contour : snapshot.contours)
+        verifiedOrder.append(contour.contourId);
     // Geometry preparation is independent of contour order, toolpath samples
-    // and motion profile.  Keeping those out of this key makes a regenerated
-    // path reuse the expensive collision mesh/BVH preparation.
-    // 中文翻译：几何准备不依赖轮廓顺序、刀路采样和运动曲线；排除这些字段后重生成刀路可复用网格/BVH。
+    // and motion profile. Keeping those out of this key makes a regenerated
+    // path reuse the expensive exact bounds and leaf decomposition.
+    // 中文翻译：几何准备不依赖轮廓顺序、刀路采样和运动曲线；重生成刀路可复用精确包围盒和叶部件分解。
     lcnc::cam::TravelPlanKey geometryKey = planKey;
     geometryKey.toolpathRevision = 0;
     geometryKey.orderHash = 0;
@@ -5409,19 +5413,56 @@ void CamModule::scheduleFullEnvironmentVerification(
                                  && m_travelCollisionGeometryCache->key == geometryKey)
         ? m_travelCollisionGeometryCache : std::shared_ptr<CamTravelCollisionGeometryCache>{};
     const auto completedGeometry = std::make_shared<std::shared_ptr<CamTravelCollisionGeometryCache>>(cachedGeometry);
+    const auto completedNodeStates = std::make_shared<QVector<lcnc::cam::CollisionValidationState>>();
+    const auto completedIntervals = std::make_shared<QVector<lcnc::cam::CollisionInterval>>();
+    const auto completedIndeterminate = std::make_shared<std::atomic_bool>(false);
+    const auto completedCollision = std::make_shared<std::atomic_bool>(false);
+    const auto completedWarning = std::make_shared<std::atomic_bool>(false);
     TaskSpec spec;
-    spec.label = tr("Verify full-machine rapid collision");
-    spec.scope = QStringLiteral("cam.travel.collision");
+    // This is the final phase of global toolpath generation.  Keep the CAM
+    // scope so the task panel presents it as the generation continuation,
+    // not as an offline-simulation activity.
+    // 中文翻译：这是全局生成刀路的最终阶段；保留 CAM 生成范围，任务面板不会将其显示为仿真任务。
+    spec.label = tr("Generate toolpath globally — collision validation");
+    spec.scope = QStringLiteral("cam.toolpath");
     spec.priority = TaskPriority::Normal;
     spec.userVisible = true;
     spec.cancellable = true;
     const TaskId taskId = tasks->run(spec,
-        [snapshot, bodies, cachedGeometry, completedGeometry, axes, configType, workpieceSetup,
+        [snapshot, bodies, activeSources, cachedGeometry, completedGeometry, axes, configType, workpieceSetup,
          assignments, mounts,
-         definition, clearanceMm, geometryKey, result](TaskProgress* progress) {
-            struct WorkItem { lcnc::cam::RapidPose pose; QString workpieceEntry; };
+         definition, clearanceMm, collisionMeshDeflectionMm, geometryKey, result,
+         completedNodeStates, completedIntervals,
+         completedIndeterminate, completedCollision, completedWarning](TaskProgress* progress) {
+            struct WorkItem {
+                lcnc::cam::RapidPose pose;
+                QString workpieceEntry;
+                lcnc::cam::CamMotionPhase phase{lcnc::cam::CamMotionPhase::Rapid};
+                int nodeIndex{-1};
+            };
             QVector<WorkItem> workItems;
-            for (const auto& transition : snapshot.travelPlan.transitions) {
+            // Scan every final CAM node: rapid, lead-in and cutting.  Older
+            // snapshots retain the rapid-only fallback for compatibility.
+            if (!snapshot.motionPlan.nodes.isEmpty()) {
+                for (int nodeIndex = 0; nodeIndex < snapshot.motionPlan.nodes.size(); ++nodeIndex) {
+                    const auto& node = snapshot.motionPlan.nodes.at(nodeIndex);
+                    const auto contour = std::find_if(snapshot.contours.cbegin(), snapshot.contours.cend(),
+                        [&node](const lcnc::cam::ToolpathExportContour& item) {
+                            return item.contourId == node.contourId;
+                        });
+                    if (contour == snapshot.contours.cend()) {
+                        *result = QObject::tr("Motion plan references an unknown contour");
+                        return;
+                    }
+                    lcnc::cam::RapidPose pose;
+                    pose.kinematicAxes = node.axes;
+                    pose.kinematicAxisMask = node.axisMask;
+                    pose.tcpX = node.tcpX; pose.tcpY = node.tcpY; pose.tcpZ = node.tcpZ;
+                    pose.surfaceNormalX = node.normalX; pose.surfaceNormalY = node.normalY;
+                    pose.surfaceNormalZ = node.normalZ;
+                    workItems.append({pose, contour->workpieceEntry, node.phase, nodeIndex});
+                }
+            } else for (const auto& transition : snapshot.travelPlan.transitions) {
                 const auto contour = std::find_if(snapshot.contours.cbegin(), snapshot.contours.cend(),
                     [&transition](const lcnc::cam::ToolpathExportContour& item) {
                         return item.contourId == transition.toContourId;
@@ -5431,23 +5472,31 @@ void CamModule::scheduleFullEnvironmentVerification(
                     return;
                 }
                 for (const auto& segment : transition.segments)
-                    workItems.append({segment.target, contour->workpieceEntry});
+                    workItems.append({segment.target, contour->workpieceEntry,
+                                      lcnc::cam::CamMotionPhase::Rapid,
+                                      static_cast<int>(workItems.size())});
             }
             const int preparationSteps = cachedGeometry ? 0 : bodies.size();
-            progress->setRange(0, qMax(1, preparationSteps + workItems.size()));
+            const int scanSteps = workItems.size() * activeSources.size();
+            progress->setRange(0, qMax(1, preparationSteps + scanSteps));
+            std::unique_lock<std::timed_mutex> scanLock(
+                lcnc::cam_algo::collisionScanExecutionMutex(), std::defer_lock);
+            if (!lcnc::cam_algo::acquireCollisionScanExecution(scanLock, [progress]() {
+                    return progress->isAbortRequested();
+                }))
+                return;
             int prepared = 0;
             std::shared_ptr<CamTravelCollisionGeometryCache> geometry = cachedGeometry;
             if (!geometry) {
                 geometry = std::make_shared<CamTravelCollisionGeometryCache>();
                 geometry->key = geometryKey;
                 geometry->bodies = bodies;
-                const double meshDeflectionMm = qBound(0.05, clearanceMm * 0.5, 0.25);
                 for (CamTravelCollisionBody& body : geometry->bodies) {
                     if (progress->isAbortRequested())
                         return;
-                    buildCollisionGeometry(&body, meshDeflectionMm);
+                    buildCollisionGeometry(&body, collisionMeshDeflectionMm);
                     if (body.leaves.isEmpty()) {
-                        *result = QObject::tr("Rapid collision verification geometry is unavailable for %1")
+                        *result = QObject::tr("Full-machine collision verification geometry is unavailable for %1")
                             .arg(body.source);
                         return;
                     }
@@ -5457,6 +5506,9 @@ void CamModule::scheduleFullEnvironmentVerification(
             *completedGeometry = geometry;
             if (workItems.isEmpty())
                 return;
+            completedNodeStates->fill(lcnc::cam::CollisionValidationState::Pending,
+                                      workItems.size());
+            completedIntervals->clear();
 
             const int threadCount = qMin(4, qMax(1, OSD_Parallel::NbLogicalProcessors() / 2));
             auto workerKinematics = std::make_shared<std::vector<std::unique_ptr<MachineKinematics>>>();
@@ -5471,19 +5523,32 @@ void CamModule::scheduleFullEnvironmentVerification(
                     kinematics->mountWorkpiece(it.key(), it.value());
                 workerKinematics->push_back(std::move(kinematics));
             }
-            const auto cancelledOrFailed = std::make_shared<std::atomic_bool>(false);
+            const auto failed = std::make_shared<std::atomic_bool>(false);
             const auto resultMutex = std::make_shared<QMutex>();
             const auto progressMutex = std::make_shared<QMutex>();
             const auto finished = std::make_shared<std::atomic_int>(0);
+            const auto meshQueries = std::make_shared<std::atomic_uint64_t>(0);
+            const auto meshRejected = std::make_shared<std::atomic_uint64_t>(0);
+            const auto exactQueries = std::make_shared<std::atomic_uint64_t>(0);
+            QElapsedTimer scanTimer;
+            scanTimer.start();
             Handle(OSD_ThreadPool) pool = new OSD_ThreadPool(threadCount);
             OSD_ThreadPool::Launcher launcher(*pool, threadCount);
-            launcher.Perform(0, workItems.size(), [geometry, workItems, workerKinematics, definition,
-                clearanceMm, result, resultMutex, progressMutex, progress, finished, preparationSteps,
-                cancelledOrFailed](int threadIndex, int itemIndex) {
-                if (cancelledOrFailed->load() || progress->isAbortRequested())
+            for (const QString& activeSource : activeSources) {
+                if (failed->load() || progress->isAbortRequested())
+                    break;
+                launcher.Perform(0, workItems.size(), [geometry, workItems, workerKinematics, axes, definition,
+                    activeSource, clearanceMm, result, resultMutex, progressMutex, progress, finished,
+                    preparationSteps, scanSteps, failed, completedNodeStates,
+                    completedIndeterminate, completedCollision, completedWarning,
+                    completedIntervals, meshQueries, meshRejected,
+                    exactQueries](int threadIndex, int itemIndex) {
+                if (failed->load() || progress->isAbortRequested())
                     return;
                 MachineKinematics& kinematics = *workerKinematics->at(static_cast<std::size_t>(threadIndex));
                 const WorkItem& item = workItems.at(itemIndex);
+                for (const MachineAxisDef& axis : axes)
+                    kinematics.setAxisPosition(axis.name, axis.currentPos);
                 for (int axis = 0; axis < definition.interpolatedAxes.count; ++axis)
                     kinematics.setAxisPosition(definition.interpolatedAxes.axes[axis].name,
                                                item.pose.kinematicAxes[axis]);
@@ -5496,8 +5561,8 @@ void CamModule::scheduleFullEnvironmentVerification(
                         gp_Vec normal(item.pose.surfaceNormalX, item.pose.surfaceNormalY, item.pose.surfaceNormalZ);
                         if (normal.SquareMagnitude() <= Precision::SquareConfusion()) normal = gp_Vec(0.0, 0.0, 1.0);
                         normal.Normalize();
-                        transform.SetDisplacement(gp_Ax3(), gp_Ax3(
-                            gp_Pnt(item.pose.tcpX, item.pose.tcpY, item.pose.tcpZ), gp_Dir(normal)));
+                        const gp_Pnt tcp(item.pose.tcpX, item.pose.tcpY, item.pose.tcpZ);
+                        transform.SetDisplacement(gp_Ax3(), gp_Ax3(tcp, gp_Dir(normal)));
                     } else if (body.workpiece) {
                         transform = kinematics.computeWpcTransform(item.workpieceEntry);
                     } else {
@@ -5506,73 +5571,186 @@ void CamModule::scheduleFullEnvironmentVerification(
                     PoseBody poseBody{&body, transform,
                         transformCollisionAabb(body.localAabb, transform, clearanceMm),
                         transformCollisionObb(body.localObb, transform, clearanceMm)};
-                    if (body.active) activeBodies.append(poseBody);
+                    if (body.active && body.source == activeSource) activeBodies.append(poseBody);
                     if (body.passive) passiveBodies.append(poseBody);
                 }
-                const auto fail = [&result, &resultMutex, &cancelledOrFailed](const QString& message) {
+                const auto fail = [&result, &resultMutex, &failed,
+                                   &completedIndeterminate](const QString& message) {
                     bool expected = false;
-                    if (cancelledOrFailed->compare_exchange_strong(expected, true)) {
+                    if (failed->compare_exchange_strong(expected, true)) {
+                        completedIndeterminate->store(true);
                         QMutexLocker lock(resultMutex.get());
                         *result = message;
                     }
                 };
-                for (const PoseBody& active : activeBodies) for (const PoseBody& passive : passiveBodies) {
-                    if (cancelledOrFailed->load() || progress->isAbortRequested()) return;
+                const auto recordFinding = [&result, &resultMutex, completedCollision,
+                                               completedWarning, completedNodeStates,
+                                               completedIntervals, &item](
+                                                   lcnc::cam::CollisionValidationState state,
+                                                   const QString& message,
+                                                   const CamTravelCollisionBody& active,
+                                                   const CamTravelCollisionBody& passive,
+                                                   double distanceMm) {
+                    if (state == lcnc::cam::CollisionValidationState::Collision)
+                        completedCollision->store(true);
+                    else if (state == lcnc::cam::CollisionValidationState::Warning)
+                        completedWarning->store(true);
+                    QMutexLocker lock(resultMutex.get());
+                    if (item.nodeIndex >= 0 && item.nodeIndex < completedNodeStates->size()) {
+                        auto& nodeState = completedNodeStates->operator[](item.nodeIndex);
+                        if (state == lcnc::cam::CollisionValidationState::Collision
+                            || nodeState != lcnc::cam::CollisionValidationState::Collision) {
+                            nodeState = state;
+                        }
+                    }
+                    completedIntervals->append({item.nodeIndex, item.nodeIndex,
+                        state,
+                        active.source, passive.source, active.entry, passive.entry,
+                        distanceMm, message});
+                    if (result->isEmpty())
+                        *result = message;
+                };
+                bool itemCollided = false;
+                for (const PoseBody& active : activeBodies) {
+                    if (itemCollided) break;
+                    for (const PoseBody& passive : passiveBodies) {
+                    if (itemCollided) break;
+                    if (failed->load() || progress->isAbortRequested()) return;
                     // Source-internal pieces are one rigid collision source and are
                     // explicitly excluded even when an axis owns many labels.
                     if (active.body->source == passive.body->source
                         || active.aabb.IsOut(passive.aabb) || active.obb.IsOut(passive.obb))
                         continue;
+                    // Query the immutable surface BVHs before enumerating BRep
+                    // face pairs. Discrete poses remain fully parallel here.
+                    // The guard includes both tessellation errors, so only a
+                    // conservative "definitely separated" answer skips exact
+                    // validation.
+                    // 中文翻译：先并行查询只读表面 BVH；搜索距离包含两侧网格误差，
+                    // 只有保守确认分离时才跳过精确校验。
+                    if (active.body->surfaceModel.isValid()
+                        && passive.body->surfaceModel.isValid()) {
+                        meshQueries->fetch_add(1, std::memory_order_relaxed);
+                        const double meshGuardMm = clearanceMm
+                            + active.body->surfaceModel.linearDeflectionMm()
+                            + passive.body->surfaceModel.linearDeflectionMm();
+                        const auto prefilter = lcnc::cam_algo::prefilterSurfaceCollision(
+                            active.body->surfaceModel, active.transform,
+                            passive.body->surfaceModel, passive.transform,
+                            meshGuardMm);
+                        if (prefilter.valid && prefilter.definitelySeparated) {
+                            meshRejected->fetch_add(1, std::memory_order_relaxed);
+                            continue;
+                        }
+                    }
                     for (const CamTravelCollisionLeaf& activeLeaf : active.body->leaves) {
+                        if (itemCollided) break;
                         const Bnd_Box activeBox = transformCollisionAabb(activeLeaf.localAabb, active.transform, clearanceMm);
                         const Bnd_OBB activeObb = transformCollisionObb(activeLeaf.localObb, active.transform, clearanceMm);
                         for (const CamTravelCollisionLeaf& passiveLeaf : passive.body->leaves) {
+                            if (itemCollided) break;
                             if (activeBox.IsOut(transformCollisionAabb(passiveLeaf.localAabb, passive.transform, clearanceMm))
                                 || activeObb.IsOut(transformCollisionObb(passiveLeaf.localObb, passive.transform, clearanceMm)))
                                 continue;
-                            BRepBuilderAPI_Transform firstTransform(activeLeaf.shape, active.transform, Standard_False);
-                            BRepBuilderAPI_Transform secondTransform(passiveLeaf.shape, passive.transform, Standard_False);
-                            const TopoDS_Shape first = firstTransform.IsDone() ? firstTransform.Shape() : TopoDS_Shape{};
-                            const TopoDS_Shape second = secondTransform.IsDone() ? secondTransform.Shape() : TopoDS_Shape{};
+                            // Rigid machine poses only need a TopLoc location;
+                            // avoid running BRepBuilderAPI_Transform for every
+                            // candidate face pair.
+                            const TopoDS_Shape first = activeLeaf.shape.Moved(
+                                TopLoc_Location(active.transform));
+                            const TopoDS_Shape second = passiveLeaf.shape.Moved(
+                                TopLoc_Location(passive.transform));
                             if (first.IsNull() || second.IsNull()) {
-                                fail(QObject::tr("Rapid collision verification cannot transform %1 and %2")
+                                fail(QObject::tr("Full-machine collision verification cannot transform %1 and %2")
                                     .arg(active.body->source, passive.body->source));
-                                return;
+                                break;
                             }
-                            const double meshDeflectionMm = qBound(0.05, clearanceMm * 0.5, 0.25);
-                            BRepExtrema_ShapeProximity proximity(first, second, clearanceMm + meshDeflectionMm);
-                            proximity.Perform();
-                            if (!proximity.IsDone()) {
-                                fail(QObject::tr("Rapid collision verification proximity check failed between %1 and %2")
-                                    .arg(active.body->source, passive.body->source));
-                                return;
-                            }
-                            if (proximity.OverlapSubShapes1().Extent() == 0
-                                || proximity.OverlapSubShapes2().Extent() == 0)
-                                continue;
+                            // ShapeProximity is deliberately absent.  It
+                            // corrupts its NCollection buffers in this OCCT
+                            // runtime even for one guarded call.  The stable
+                            // path is face AABB/OBB filtering followed by an
+                            // exact distance call under the process-wide gate.
+                            // 中文翻译：禁用会损坏 NCollection 缓冲区的 ShapeProximity；
+                            // 面级包围盒筛选后，仅将精确距离放入进程级安全区。
+                            lcnc::OcctExactOperationLock exactOperationLock;
+                            exactQueries->fetch_add(1, std::memory_order_relaxed);
                             BRepExtrema_DistShapeShape distance(first, second);
                             distance.SetDeflection(0.025);
                             distance.SetMultiThread(Standard_False);
                             distance.Perform();
-                            if (!distance.IsDone() || distance.Value() <= clearanceMm) {
-                                fail(QObject::tr("Rapid collision verification failed between %1 and %2")
+                            if (!distance.IsDone()) {
+                                fail(QObject::tr("Full-machine collision verification failed between %1 and %2")
                                     .arg(active.body->source, passive.body->source));
                                 return;
+                            }
+                            double minimumDistance = distance.Value();
+                            // A cutting TCP is expected to touch the workpiece
+                            // at its tip.  Probe a tiny distance outwards only
+                            // for that cutter/workpiece cutting-node pair: a
+                            // tangent tip contact separates, while a body
+                            // penetration remains a confirmed collision.
+                            if (minimumDistance <= Precision::Confusion()
+                                && active.body->cutterProxy && passive.body->workpiece
+                                && item.phase == lcnc::cam::CamMotionPhase::Cutting) {
+                                gp_Vec outward(item.pose.surfaceNormalX, item.pose.surfaceNormalY,
+                                               item.pose.surfaceNormalZ);
+                                if (outward.SquareMagnitude() <= Precision::SquareConfusion())
+                                    outward = gp_Vec(0.0, 0.0, 1.0);
+                                outward.Normalize();
+                                outward.Multiply(qMax(0.05, Precision::Confusion() * 10.0));
+                                gp_Trsf probeTransform;
+                                probeTransform.SetTranslation(outward);
+                                const TopoDS_Shape probe = first.Moved(
+                                    TopLoc_Location(probeTransform));
+                                BRepExtrema_DistShapeShape probeDistance(probe, second);
+                                probeDistance.SetDeflection(0.025);
+                                probeDistance.SetMultiThread(Standard_False);
+                                probeDistance.Perform();
+                                if (probeDistance.IsDone()
+                                    && probeDistance.Value() > Precision::Confusion())
+                                    minimumDistance = clearanceMm + Precision::Confusion();
+                            }
+                            if (minimumDistance <= clearanceMm) {
+                                const auto state = lcnc::cam_algo::classifyCollisionDistance(
+                                    minimumDistance, clearanceMm, Precision::Confusion());
+                                const QString message = state == lcnc::cam::CollisionValidationState::Collision
+                                    ? QObject::tr("Full-machine collision verification failed between %1 and %2")
+                                        .arg(active.body->source, passive.body->source)
+                                    : QObject::tr("Full-machine collision clearance warning between %1 and %2")
+                                        .arg(active.body->source, passive.body->source);
+                                recordFinding(state, message, *active.body, *passive.body,
+                                              minimumDistance);
+                                itemCollided = true;
+                                break;
                             }
                         }
                     }
                 }
+                }
                 const int done = finished->fetch_add(1) + 1;
-                if ((done & 0x0f) == 0 || done == workItems.size()) {
+                if ((done & 0x0f) == 0 || done == scanSteps) {
                     QMutexLocker lock(progressMutex.get());
                     progress->setValue(preparationSteps + done);
                 }
-            });
+                });
+            }
+            if (!progress->isAbortRequested() && !failed->load()) {
+                for (auto& state : *completedNodeStates) {
+                    if (state == lcnc::cam::CollisionValidationState::Pending)
+                        state = lcnc::cam::CollisionValidationState::Safe;
+                }
+                progress->setValue(preparationSteps + scanSteps);
+            }
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "CAM collision scan: nodes={}, sources={}, mesh_queries={}, mesh_rejected={}, exact_queries={}, elapsed_ms={}",
+                      workItems.size(), activeSources.size(), meshQueries->load(),
+                      meshRejected->load(), exactQueries->load(), scanTimer.elapsed());
         });
     m_travelVerificationTask = taskId;
     m_taskScope.track(taskId);
     QObject::connect(tasks, &TaskManager::taskFinishedDetailed, this,
-        [this, tasks, taskId, planKey, geometryKey, result, completedGeometry](TaskId id, TaskExecutionStatus status, const QString&) {
+        [this, tasks, taskId, planKey, geometryKey, verifiedOrder, result, completedGeometry,
+         completedNodeStates, completedIntervals, completedIndeterminate,
+         completedCollision, completedWarning](TaskId id, TaskExecutionStatus status, const QString&) {
             if (id != taskId)
                 return;
             m_taskScope.release(taskId);
@@ -5584,15 +5762,36 @@ void CamModule::scheduleFullEnvironmentVerification(
             if (status != TaskExecutionStatus::Succeeded) {
                 // Keep the plan pending (and therefore Process-blocked) when
                 // a task is cancelled or a geometry algorithm cannot finish.
-                emit contourOrderTravelPlanRebuilt({});
+                m_travelPlanCache.fullEnvironmentVerificationPending = false;
+                m_travelPlanCache.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+                m_travelPlanCache.collision.complete = true;
+                m_travelPlanCache.collision.failureReason = tr("Full-path collision validation was cancelled or failed");
+                m_travelPlanCache.failureReason = m_travelPlanCache.collision.failureReason;
+                emit contourOrderTravelPlanRebuilt(verifiedOrder);
                 return;
             }
             m_travelPlanCache.fullEnvironmentVerificationPending = false;
             if (*completedGeometry && (*completedGeometry)->key == geometryKey)
                 m_travelCollisionGeometryCache = *completedGeometry;
-            if (!result->isEmpty())
+            const auto finalState = completedIndeterminate->load()
+                ? lcnc::cam::CollisionValidationState::Indeterminate
+                : (completedCollision->load()
+                    ? lcnc::cam::CollisionValidationState::Collision
+                    : (completedWarning->load()
+                        ? lcnc::cam::CollisionValidationState::Warning
+                        : lcnc::cam::CollisionValidationState::Safe));
+            m_travelPlanCache.collision.state = finalState;
+            m_travelPlanCache.collision.complete = true;
+            m_travelPlanCache.collision.failureReason = *result;
+            m_travelPlanCache.collision.nodeStates = *completedNodeStates;
+            m_travelPlanCache.collision.intervals = *completedIntervals;
+            if (finalState == lcnc::cam::CollisionValidationState::Collision
+                || finalState == lcnc::cam::CollisionValidationState::Indeterminate
+                || (finalState == lcnc::cam::CollisionValidationState::Warning
+                    && m_travelPlanCache.collision.blockWarning)) {
                 m_travelPlanCache.failureReason = *result;
-            emit contourOrderTravelPlanRebuilt({});
+            }
+            emit contourOrderTravelPlanRebuilt(verifiedOrder);
             refreshTravelPath();
         });
 }
@@ -5686,8 +5885,155 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathBaseSnapshot() const
 lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshot() const
 {
     auto snapshot = exportToolpathBaseSnapshot();
+    applyToolMotionOffsets(snapshot);
     attachTravelPlan(snapshot);
+    attachMotionPlan(snapshot);
     return snapshot;
+}
+
+
+void CamModule::applyToolMotionOffsets(lcnc::cam::ToolpathExportSnapshot& snapshot) const
+{
+    const MachineKinematics* machine = kinematics();
+    const auto applyPoint = [](lcnc::cam::ToolpathExportPoint* point, double offset) {
+        if (!point || std::abs(offset) <= 1e-12)
+            return;
+        gp_Vec normal(point->normalX, point->normalY, point->normalZ);
+        if (normal.SquareMagnitude() <= Precision::SquareConfusion())
+            normal = gp_Vec(0.0, 0.0, 1.0);
+        normal.Normalize();
+        normal.Multiply(offset);
+        point->x += normal.X();
+        point->y += normal.Y();
+        point->z += normal.Z();
+        // A contour offset changes the TCP geometry.  Its former solved axes
+        // are invalid until CAM recomputes the continuous motion sequence.
+        // 中文翻译：轮廓偏置改变 TCP 几何，必须由 CAM 重新求解连续运动序列，旧轴坐标不再有效。
+        point->machineCoordValid = false;
+        point->machineFailureReason.clear();
+    };
+    const auto offsetWorldEndpoint = [machine](const QString& workpieceEntry,
+                                               const lcnc::cam::ToolpathExportPoint& point,
+                                               double offset) {
+        gp_Vec normal(point.normalX, point.normalY, point.normalZ);
+        if (normal.SquareMagnitude() <= Precision::SquareConfusion())
+            normal = gp_Vec(0.0, 0.0, 1.0);
+        if (machine)
+            normal.Transform(machine->computeWpcTransform(workpieceEntry));
+        normal.Normalize();
+        normal.Multiply(offset);
+        return normal;
+    };
+    for (auto& contour : snapshot.contours) {
+        const double offset = contour.cuttingOffsetMm;
+        auto points = snapshot.pointsByContourId.find(contour.contourId);
+        const lcnc::cam::ToolpathExportPoint* firstPoint =
+            points == snapshot.pointsByContourId.end() || points.value().isEmpty()
+                ? nullptr : &points.value().front();
+        const lcnc::cam::ToolpathExportPoint* lastPoint =
+            points == snapshot.pointsByContourId.end() || points.value().isEmpty()
+                ? nullptr : &points.value().back();
+        const lcnc::cam::ToolpathExportPoint& startPoint = contour.hasLeadIn || !firstPoint
+            ? contour.leadInPoint : *firstPoint;
+        const lcnc::cam::ToolpathExportPoint& cuttingStartPoint = firstPoint
+            ? *firstPoint : startPoint;
+        const lcnc::cam::ToolpathExportPoint& endPoint = lastPoint
+            ? *lastPoint : cuttingStartPoint;
+        const gp_Vec startOffset = offsetWorldEndpoint(contour.workpieceEntry, startPoint, offset);
+        const gp_Vec cuttingStartOffset = offsetWorldEndpoint(
+            contour.workpieceEntry, cuttingStartPoint, offset);
+        const gp_Vec endOffset = offsetWorldEndpoint(contour.workpieceEntry, endPoint, offset);
+
+        applyPoint(&contour.leadInPoint, offset);
+        // Endpoint coordinates are already world-space.  Offset them along
+        // the machining normal, never along a fixed controller Z direction.
+        // 中文翻译：端点已经是世界坐标，必须沿加工法线偏置，绝不能按固定控制器 Z 方向偏置。
+        contour.startX += startOffset.X();
+        contour.startY += startOffset.Y();
+        contour.startZ += startOffset.Z();
+        contour.cutStartX += cuttingStartOffset.X();
+        contour.cutStartY += cuttingStartOffset.Y();
+        contour.cutStartZ += cuttingStartOffset.Z();
+        contour.endX += endOffset.X();
+        contour.endY += endOffset.Y();
+        contour.endZ += endOffset.Z();
+        if (points == snapshot.pointsByContourId.end())
+            continue;
+        for (auto& point : points.value())
+            applyPoint(&point, offset);
+    }
+}
+
+void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const
+{
+    auto& plan = snapshot.motionPlan;
+    plan = {};
+    plan.revision = snapshot.revision;
+    plan.collision = snapshot.travelPlan.collision;
+    // Keep the policy in the exported immutable snapshot even when a cached
+    // validation result predates an application-option change.
+    // 中文翻译：即使缓存的校验结果早于应用选项修改，导出的不可变快照仍使用当前警告阻断策略。
+    plan.collision.blockWarning = m_config.blockMachiningOnCollisionWarning();
+    if (plan.collision.key == 0) {
+        const auto collision = collisionConfiguration();
+        plan.collision.state = collision.enabled
+            ? lcnc::cam::CollisionValidationState::Pending
+            : lcnc::cam::CollisionValidationState::Disabled;
+        plan.collision.complete = !collision.enabled;
+    }
+
+    const auto appendRapid = [&plan](const lcnc::cam::RapidMoveSegment& segment,
+                                     std::uint64_t contourId) {
+        lcnc::cam::CamMotionNode node;
+        node.phase = lcnc::cam::CamMotionPhase::Rapid;
+        node.rapidPhase = segment.phase;
+        node.contourId = contourId;
+        node.axes = segment.target.kinematicAxes;
+        node.axisMask = segment.target.kinematicAxisMask;
+        node.tcpX = segment.target.tcpX;
+        node.tcpY = segment.target.tcpY;
+        node.tcpZ = segment.target.tcpZ;
+        node.normalX = segment.target.surfaceNormalX;
+        node.normalY = segment.target.surfaceNormalY;
+        node.normalZ = segment.target.surfaceNormalZ;
+        node.estimatedTimeMs = segment.estimatedTimeMs;
+        plan.nodes.append(std::move(node));
+    };
+    const auto appendPoint = [&plan](const lcnc::cam::ToolpathExportPoint& point,
+                                     lcnc::cam::CamMotionPhase phase,
+                                     std::uint64_t contourId) {
+        if (!point.machineCoordValid)
+            return;
+        lcnc::cam::CamMotionNode node;
+        node.phase = phase;
+        node.contourId = contourId;
+        node.axes = point.machineAxes;
+        node.axisMask = point.machineAxisMask;
+        node.tcpX = point.x;
+        node.tcpY = point.y;
+        node.tcpZ = point.z;
+        node.normalX = point.normalX;
+        node.normalY = point.normalY;
+        node.normalZ = point.normalZ;
+        node.estimatedTimeMs = phase == lcnc::cam::CamMotionPhase::Cutting ? 20.0 : 1.0;
+        plan.nodes.append(std::move(node));
+    };
+
+    for (const auto& contour : snapshot.contours) {
+        if (!contour.enabled || !contour.layerEnabled)
+            continue;
+        if (const auto* transition = snapshot.travelPlan.transitionTo(contour.contourId)) {
+            for (const auto& segment : transition->segments)
+                appendRapid(segment, contour.contourId);
+        }
+        if (contour.hasLeadIn)
+            appendPoint(contour.leadInPoint, lcnc::cam::CamMotionPhase::LeadIn,
+                        contour.contourId);
+        for (const auto& point : snapshot.pointsByContourId.value(contour.contourId))
+            appendPoint(point, lcnc::cam::CamMotionPhase::Cutting, contour.contourId);
+    }
+    if (plan.collision.nodeStates.size() != plan.nodes.size())
+        plan.collision.nodeStates.fill(plan.collision.state, plan.nodes.size());
 }
 
 void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const
@@ -5707,10 +6053,15 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
     request.minimumClearanceMm = m_config.cutterCollisionClearanceMm();
     request.maximumSafetyOffsetMm = m_config.maximumRapidSafetyOffsetMm();
     request.collisionSampleStepMm = 2.0;
-    // Tool cutting/idle heights are intentionally absent here.  Process adds
-    // them only while building controller commands.
-    // 中文翻译：切割高度和空程高度只在 Process 构建控制器指令时叠加。
+    // The tool's rapid offset is resolved through the narrow CAM contract and
+    // applied to geometric samples before continuous IK. Process must execute
+    // the resulting axes verbatim and must not add another Z envelope.
+    // 中文翻译：工具空程偏置在连续 IK 前合入；Process 必须原样执行已求解轴坐标。
     request.surfacePathStepMm = 0.5;
+    QHash<std::uint64_t, double> rapidOffsetByContour;
+    for (const auto& contour : snapshot.contours) {
+        rapidOffsetByContour.insert(contour.contourId, contour.rapidOffsetMm);
+    }
     const auto semanticMaskFor = [&snapshot](std::uint8_t layoutMask) {
         std::uint8_t result = 0;
         int rotary = 0;
@@ -5797,8 +6148,114 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
     key.environmentRevision ^= static_cast<std::uint64_t>(qHash(cutterProxyFingerprint));
     key.environmentRevision ^= m_collisionConfigurationRevision;
     key.motionProfileHash = static_cast<std::uint64_t>(request.motionProfile.supportedCoordinatedMask);
-    for (const auto& contour : snapshot.contours)
+    for (const auto& contour : snapshot.contours) {
         key.orderHash = (key.orderHash * 1099511628211ull) ^ contour.contourId;
+        key.motionProfileHash = (key.motionProfileHash * 1099511628211ull)
+            ^ static_cast<std::uint64_t>(qHash(QString::number(
+                rapidOffsetByContour.value(contour.contourId), 'g', 17)));
+        key.motionProfileHash = (key.motionProfileHash * 1099511628211ull)
+            ^ static_cast<std::uint64_t>(qHash(QString::number(
+                contour.cuttingOffsetMm, 'g', 17)));
+    }
+
+    // applyToolMotionOffsets() changes the local TCP geometry.  Re-solve only
+    // contours whose old coordinates were invalidated, before a cached or new
+    // rapid plan consumes their endpoints.  This includes a one-contour job.
+    // 中文翻译：轮廓偏置会使旧 TCP 坐标失效；空程计划（包括缓存）读取端点前必须重算，并覆盖单轮廓任务。
+    const auto assignExportCoordinate = [](lcnc::cam::ToolpathExportPoint* point,
+                                           const MachineCoord& coordinate) {
+        if (!point)
+            return;
+        point->machineX = coordinate.x;
+        point->machineY = coordinate.y;
+        point->machineZ = coordinate.z;
+        point->machineR1 = coordinate.r1;
+        point->machineR2 = coordinate.r2;
+        point->rotaryAxis1Name = coordinate.r1Name;
+        point->rotaryAxis2Name = coordinate.r2Name;
+        point->machineCoordValid = coordinate.valid;
+        point->machineAxes = coordinate.solvedPose.values;
+        point->machineAxisMask = coordinate.solvedPose.activeMask;
+        point->machineFailureReason = coordinate.solvedPose.failureReason;
+    };
+    const auto makeOffsetSolveFailure = [&key, &request, &snapshot, this](const QString& reason) {
+        lcnc::cam::TravelPlanSnapshot failed;
+        failed.mode = request.fullEnvironment
+            ? lcnc::cam::TravelPlanningMode::FullEnvironment
+            : lcnc::cam::TravelPlanningMode::WorkpieceProxy;
+        failed.failureReason = reason;
+        failed.stale = false;
+        failed.key = key;
+        snapshot.travelPlan = failed;
+        m_travelPlanCache = failed;
+    };
+    if (!snapshot.contours.isEmpty()) {
+        if (!kin || !m_machineConfig) {
+            makeOffsetSolveFailure(tr("Machine kinematics are unavailable for the contour-offset motion solve"));
+            return;
+        }
+        const lcnc::MachineModeDefinition definition =
+            m_machineConfig->modeDefinition(snapshot.machiningMode);
+        if (!definition.isValid()) {
+            makeOffsetSolveFailure(tr("Machine mode definition is unavailable for the contour-offset motion solve"));
+            return;
+        }
+        for (auto& contour : snapshot.contours) {
+            auto pointsIt = snapshot.pointsByContourId.find(contour.contourId);
+            if (pointsIt == snapshot.pointsByContourId.end())
+                continue;
+            auto& contourPoints = pointsIt.value();
+            const bool needsSolve = (contour.hasLeadIn && !contour.leadInPoint.machineCoordValid)
+                || std::any_of(contourPoints.cbegin(), contourPoints.cend(),
+                    [](const lcnc::cam::ToolpathExportPoint& point) {
+                        return !point.machineCoordValid;
+                    });
+            if (!needsSolve)
+                continue;
+
+            MachineKinematics solveKinematics;
+            solveKinematics.setAxes(kin->axes(), kin->configType());
+            solveKinematics.setWorkpieceSetupTransform(kin->workpieceSetupTransform());
+            for (auto it = kin->shapeAssignments().cbegin(); it != kin->shapeAssignments().cend(); ++it)
+                solveKinematics.assignShape(it.key(), it.value());
+            for (auto it = kin->wpcMounts().cbegin(); it != kin->wpcMounts().cend(); ++it)
+                solveKinematics.mountWorkpiece(it.key(), it.value());
+
+            std::vector<ToolpathPoint> solvePoints;
+            solvePoints.reserve(static_cast<std::size_t>(contourPoints.size())
+                + (contour.hasLeadIn ? 1u : 0u));
+            const auto appendPoint = [&solvePoints](const lcnc::cam::ToolpathExportPoint& point) {
+                ToolpathPoint solved;
+                solved.position = gp_Pnt(point.x, point.y, point.z);
+                solved.normal = gp_Dir(point.normalX, point.normalY, point.normalZ);
+                const gp_Vec tangent(point.tangentX, point.tangentY, point.tangentZ);
+                if (tangent.SquareMagnitude() > Precision::SquareConfusion())
+                    solved.tangent = gp_Dir(tangent);
+                solvePoints.push_back(std::move(solved));
+            };
+            if (contour.hasLeadIn)
+                appendPoint(contour.leadInPoint);
+            for (const auto& point : std::as_const(contourPoints))
+                appendPoint(point);
+            if (solvePoints.empty())
+                continue;
+
+            QString solveError;
+            if (!LaserToolpathBuilder::solveTransientMotionPath(
+                    &solvePoints, &solveKinematics, definition,
+                    m_machineConfig->workpieceSetupTransform(),
+                    m_machineConfig->headToolGeometry(), &solveError, nullptr)) {
+                makeOffsetSolveFailure(tr("Contour-offset five-axis solve failed for contour %1: %2")
+                    .arg(contour.contourId).arg(solveError));
+                return;
+            }
+            std::size_t solvedIndex = 0;
+            if (contour.hasLeadIn)
+                assignExportCoordinate(&contour.leadInPoint, solvePoints[solvedIndex++].machineCoord);
+            for (auto& point : contourPoints)
+                assignExportCoordinate(&point, solvePoints[solvedIndex++].machineCoord);
+        }
+    }
     if (!m_travelPlanCache.stale && m_travelPlanCache.key == key) {
         snapshot.travelPlan = m_travelPlanCache;
         return;
@@ -5811,6 +6268,26 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             : lcnc::cam::TravelPlanningMode::WorkpieceProxy;
         emptyPlan.key = key;
         emptyPlan.stale = false;
+        // A single contour has no inter-contour rapid, but it still contains
+        // lead-in and cutting nodes.  Never bypass CAM collision validation
+        // merely because the rapid-transition list is empty.
+        // 中文翻译：单轮廓虽然没有轮廓间空程，但仍有引入和切割节点；不能因空程列表为空而跳过 CAM 碰撞校验。
+        const auto collisionConfig = collisionConfiguration();
+        emptyPlan.collision.key = key.toolpathRevision ^ key.orderHash ^ key.environmentRevision;
+        emptyPlan.collision.blockWarning = m_config.blockMachiningOnCollisionWarning();
+        if (!collisionConfig.enabled) {
+            emptyPlan.collision.state = lcnc::cam::CollisionValidationState::Disabled;
+            emptyPlan.collision.complete = true;
+        } else if (!collisionConfig.valid) {
+            emptyPlan.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+            emptyPlan.collision.complete = true;
+            emptyPlan.collision.failureReason = tr("Collision detection is enabled but the source configuration is incomplete");
+            emptyPlan.failureReason = emptyPlan.collision.failureReason;
+        } else {
+            emptyPlan.collision.state = lcnc::cam::CollisionValidationState::Pending;
+            emptyPlan.collision.complete = false;
+            emptyPlan.fullEnvironmentVerificationPending = true;
+        }
         snapshot.travelPlan = emptyPlan;
         m_travelPlanCache = emptyPlan;
         return;
@@ -5889,7 +6366,10 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         target.pose.surfaceNormalX = targetNormal.X();
         target.pose.surfaceNormalY = targetNormal.Y();
         target.pose.surfaceNormalZ = targetNormal.Z();
-        request.transitions.append({source, target});
+        request.transitions.append({source, target,
+            rapidOffsetByContour.value(next.contourId, next.rapidOffsetMm),
+            previous.cuttingOffsetMm,
+            next.cuttingOffsetMm});
     }
     lcnc::cam::TravelPlanSnapshot plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
     if (plan.isExecutable() && kin && m_machineConfig) {
@@ -5924,23 +6404,6 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
                     localNormal.X(), localNormal.Y(), localNormal.Z()});
             }
         }
-
-        const auto assignExportCoordinate = [](lcnc::cam::ToolpathExportPoint* point,
-                                               const MachineCoord& coordinate) {
-            if (!point)
-                return;
-            point->machineX = coordinate.x;
-            point->machineY = coordinate.y;
-            point->machineZ = coordinate.z;
-            point->machineR1 = coordinate.r1;
-            point->machineR2 = coordinate.r2;
-            point->rotaryAxis1Name = coordinate.r1Name;
-            point->rotaryAxis2Name = coordinate.r2Name;
-            point->machineCoordValid = coordinate.valid;
-            point->machineAxes = coordinate.solvedPose.values;
-            point->machineAxisMask = coordinate.solvedPose.activeMask;
-            point->machineFailureReason = coordinate.solvedPose.failureReason;
-        };
 
         for (lcnc::cam::RapidTransition& transition : plan.transitions) {
             auto* sourceContour = contourById.value(transition.fromContourId, nullptr);
@@ -5992,6 +6455,9 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             const std::size_t rapidEndIndex = continuousPoints.size() - 1u;
             for (const auto& targetPoint : std::as_const(targetPoints)) {
                 ToolpathPoint point;
+                // targetPoints already include the contour-normal cutting
+                // offset; never add a controller-Z height here.
+                // 中文翻译：目标轮廓点已经包含沿法线的切割偏置；此处绝不能再叠加控制器 Z 高度。
                 point.position = gp_Pnt(targetPoint.x, targetPoint.y, targetPoint.z);
                 point.normal = gp_Dir(targetPoint.normalX, targetPoint.normalY,
                                       targetPoint.normalZ);
@@ -6052,13 +6518,28 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             plan.stale = false;
     }
     const auto collisionConfigSnapshot = this->collisionConfiguration();
-    if (plan.isExecutable() && collisionConfigSnapshot.enabled
-        && collisionConfigSnapshot.valid && hasLoadedMachineGeometry) {
-        // Do not run full-machine BRep distance checks from the GUI-thread
-        // generation completion callback. The asynchronous verifier scheduled
-        // by rebuildTravelPlanForCurrentOrder owns this expensive phase.
-        // 中文翻译：完整机台距离校验不能在生成完成回调的 GUI 线程执行，改由独立异步验证任务处理。
-        plan.fullEnvironmentVerificationPending = true;
+    plan.collision.key = key.toolpathRevision ^ key.orderHash ^ key.environmentRevision;
+    plan.collision.blockWarning = m_config.blockMachiningOnCollisionWarning();
+    if (!collisionConfigSnapshot.enabled) {
+        plan.collision.state = lcnc::cam::CollisionValidationState::Disabled;
+        plan.collision.complete = true;
+    } else {
+        plan.collision.state = lcnc::cam::CollisionValidationState::Pending;
+        plan.collision.complete = false;
+    }
+    if (plan.isExecutable() && collisionConfigSnapshot.enabled) {
+        if (!collisionConfigSnapshot.valid) {
+            plan.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+            plan.collision.complete = true;
+            plan.collision.failureReason = tr("Collision detection is enabled but the source configuration is incomplete");
+            plan.failureReason = plan.collision.failureReason;
+        } else {
+            // Collision validation belongs to the generated CAM motion plan,
+            // not to the optional simulation UI.  This includes the
+            // cutter/workpiece-only fallback when no machine model is loaded.
+            // 中文翻译：碰撞校验归属于生成后的 CAM 运动计划，而非可选仿真界面；未加载机台时也校验切割头/工件组合。
+            plan.fullEnvironmentVerificationPending = true;
+        }
     }
     plan.key = key;
     snapshot.travelPlan = plan;
@@ -6089,8 +6570,370 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
         toolpathRevision(),
         // 中文翻译：CAM 当前无刀路；CAM 有序规划刀路快照已导出
         orderedContours.empty() ? tr("CAM currently has no tool path") : tr("CAM orderly planned tool path snapshot has been exported"));
+    applyToolMotionOffsets(snapshot);
     attachTravelPlan(snapshot);
+    attachMotionPlan(snapshot);
     return snapshot;
+}
+
+lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
+    const lcnc::cam::InitialApproachRequest& request,
+    std::atomic_bool* cancelRequested) const
+{
+    lcnc::cam::InitialApproachSnapshot result;
+    result.toolpathRevision = request.toolpathRevision;
+    result.targetContourId = request.targetContourId;
+    result.machineConfigurationFingerprint = request.machineConfigurationFingerprint;
+    const auto cancelled = [cancelRequested] { return cancelRequested && cancelRequested->load(); };
+    if (cancelled()) {
+        result.failureReason = tr("Initial approach planning was cancelled");
+        return result;
+    }
+
+    // Capture all QObject/XCAF-owned state on the CAM thread.  The subsequent
+    // OCC planning uses only detached values and is therefore safe to call
+    // from the Process workflow thread.
+    struct Captured {
+        lcnc::cam::ToolpathExportSnapshot snapshot;
+        QVector<MachineAxisDef> axes;
+        QString configType;
+        gp_Trsf setup;
+        QMap<QString, QString> assignments;
+        QMap<QString, QString> mounts;
+        TopoDS_Shape workpiece;
+        TopoDS_Shape cutter;
+        gp_Pnt cutterModelPosition;
+        lcnc::MachineModeDefinition definition;
+        lcnc::WorkpieceSetupTransform workpieceSetup;
+        lcnc::HeadToolGeometry headToolGeometry;
+        QVector<CamTravelCollisionBody> collisionBodies;
+    } captured;
+    auto capture = [this, &captured] {
+        const auto order = contourSequenceSnapshot();
+        captured.snapshot = exportToolpathSnapshotForOrder(
+            QVector<std::uint64_t>(order.orderedContourIds.cbegin(), order.orderedContourIds.cend()));
+        if (const auto* kin = kinematics()) {
+            captured.axes = kin->axes();
+            captured.configType = kin->configType();
+            captured.setup = kin->workpieceSetupTransform();
+            captured.assignments = kin->shapeAssignments();
+            captured.mounts = kin->wpcMounts();
+        }
+        captured.workpiece = m_workpieceShape;
+        captured.cutter = const_cast<CamModule*>(this)->cutterCollisionProxyShape(nullptr);
+        captured.cutterModelPosition = m_cutterHeadModelPosition;
+        if (m_machineConfig) {
+            captured.definition = m_machineConfig->modeDefinition(captured.snapshot.machiningMode);
+            captured.workpieceSetup = m_machineConfig->workpieceSetupTransform();
+            captured.headToolGeometry = m_machineConfig->headToolGeometry();
+        }
+        const auto collision = collisionConfiguration();
+        if (collision.enabled && machineDocument() && machineDocument()->shapeTool()
+            && kinematics()) {
+            const TDF_LabelSequence labels = machineDocument()->entityLabels(
+                LcncDocument::EntityKind::Machine);
+            for (int index = 1; index <= labels.Length(); ++index) {
+                const TDF_Label& label = labels.Value(index);
+                const QString entry = XcafUtils::entry(label);
+                const QString source = collisionAxisSourceId(kinematics()->axisForShape(entry));
+                const bool active = collision.activeSources.contains(source);
+                const bool passive = collision.passiveSources.contains(source);
+                const TopoDS_Shape shape = machineDocument()->shapeTool()->GetShape(label);
+                if ((active || passive) && !shape.IsNull())
+                    captured.collisionBodies.append({entry, source, active, passive,
+                                                     false, false, shape});
+            }
+            if (collision.activeSources.contains(QStringLiteral("cutter"))
+                && !captured.cutter.IsNull()) {
+                captured.collisionBodies.append({QStringLiteral("__cutter_proxy__"),
+                    QStringLiteral("cutter"), true, false, true, false, captured.cutter});
+            }
+            if (collision.passiveSources.contains(QStringLiteral("workpiece"))
+                && !captured.workpiece.IsNull()) {
+                captured.collisionBodies.append({QStringLiteral("__workpiece__"),
+                    QStringLiteral("workpiece"), false, true, false, true, captured.workpiece});
+            }
+        }
+    };
+    if (QThread::currentThread() == thread())
+        capture();
+    else
+        QMetaObject::invokeMethod(const_cast<CamModule*>(this), capture, Qt::BlockingQueuedConnection);
+
+    if (cancelled()) {
+        result.failureReason = tr("Initial approach planning was cancelled");
+        return result;
+    }
+    if (captured.snapshot.revision != request.toolpathRevision
+        || captured.snapshot.machineConfigurationFingerprint != request.machineConfigurationFingerprint) {
+        result.failureReason = tr("CAM toolpath or machine configuration changed before initial approach planning");
+        return result;
+    }
+    const auto contourIt = std::find_if(captured.snapshot.contours.cbegin(), captured.snapshot.contours.cend(),
+        [&request](const lcnc::cam::ToolpathExportContour& contour) {
+            return contour.contourId == request.targetContourId;
+        });
+    if (contourIt == captured.snapshot.contours.cend()
+        || !contourIt->leadInPoint.machineCoordValid) {
+        result.failureReason = tr("The first contour has no solved lead-in machine coordinates");
+        return result;
+    }
+    if (captured.cutter.IsNull() || captured.workpiece.IsNull() || !captured.definition.isValid()) {
+        result.failureReason = tr("Initial approach planning geometry or machine definition is unavailable");
+        return result;
+    }
+
+    MachineKinematics currentKinematics;
+    currentKinematics.setAxes(captured.axes, captured.configType);
+    currentKinematics.setWorkpieceSetupTransform(captured.setup);
+    for (auto it = captured.assignments.cbegin(); it != captured.assignments.cend(); ++it)
+        currentKinematics.assignShape(it.key(), it.value());
+    for (auto it = captured.mounts.cbegin(); it != captured.mounts.cend(); ++it)
+        currentKinematics.mountWorkpiece(it.key(), it.value());
+
+    lcnc::SolvedMachinePose currentPose;
+    for (int index = 0; index < captured.definition.interpolatedAxes.count; ++index) {
+        const QString axisName = captured.definition.interpolatedAxes.axes[index].name;
+        const auto value = request.axisPositions.constFind(axisName);
+        if (value == request.axisPositions.cend() || !std::isfinite(value.value())) {
+            result.failureReason = tr("Controller feedback is missing axis %1").arg(axisName);
+            return result;
+        }
+        currentPose.setValue(index, value.value());
+        currentKinematics.setAxisPosition(axisName, value.value());
+    }
+    currentPose.valid = true;
+    gp_Pnt currentTcp = captured.cutterModelPosition;
+    currentTcp.Transform(currentKinematics.computeAxisTransform(QStringLiteral("Z")));
+
+    lcnc::cam_algo::TravelEndpoint source;
+    source.contourId = 0;
+    source.pose.kinematicAxes = currentPose.values;
+    source.pose.kinematicAxisMask = currentPose.activeMask;
+    source.pose.tcpX = currentTcp.X(); source.pose.tcpY = currentTcp.Y(); source.pose.tcpZ = currentTcp.Z();
+    source.pose.surfaceNormalX = contourIt->leadInPoint.normalX;
+    source.pose.surfaceNormalY = contourIt->leadInPoint.normalY;
+    source.pose.surfaceNormalZ = contourIt->leadInPoint.normalZ;
+    int rotarySlot = 0;
+    for (int index = 0; index < captured.definition.interpolatedAxes.count; ++index) {
+        const auto& axis = captured.definition.interpolatedAxes.axes[index];
+        const double value = currentPose.value(index);
+        switch (axis.role) {
+        case lcnc::MachineAxisRole::LinearX: source.pose.axes[0] = value; source.pose.activeMask |= 0x01u; break;
+        case lcnc::MachineAxisRole::LinearY: source.pose.axes[1] = value; source.pose.activeMask |= 0x02u; break;
+        case lcnc::MachineAxisRole::LinearZ: source.pose.axes[2] = value; source.pose.activeMask |= 0x04u; break;
+        default:
+            if (rotarySlot == 0) { source.pose.axes[3] = value; source.pose.rotaryAxis1Name = axis.name; source.pose.activeMask |= 0x08u; }
+            else if (rotarySlot == 1) { source.pose.axes[4] = value; source.pose.rotaryAxis2Name = axis.name; source.pose.activeMask |= 0x10u; }
+            ++rotarySlot;
+            break;
+        }
+    }
+    lcnc::cam_algo::TravelEndpoint target;
+    target.contourId = contourIt->contourId;
+    target.pose.kinematicAxes = contourIt->leadInPoint.machineAxes;
+    target.pose.kinematicAxisMask = contourIt->leadInPoint.machineAxisMask;
+    target.pose.axes = {contourIt->leadInPoint.machineX, contourIt->leadInPoint.machineY,
+                        contourIt->leadInPoint.machineZ, contourIt->leadInPoint.machineR1,
+                        contourIt->leadInPoint.machineR2};
+    target.pose.activeMask = source.pose.activeMask;
+    target.pose.rotaryAxis1Name = contourIt->leadInPoint.rotaryAxis1Name;
+    target.pose.rotaryAxis2Name = contourIt->leadInPoint.rotaryAxis2Name;
+    target.pose.tcpX = contourIt->startX; target.pose.tcpY = contourIt->startY; target.pose.tcpZ = contourIt->startZ;
+    target.pose.surfaceNormalX = contourIt->leadInPoint.normalX;
+    target.pose.surfaceNormalY = contourIt->leadInPoint.normalY;
+    target.pose.surfaceNormalZ = contourIt->leadInPoint.normalZ;
+
+    lcnc::cam_algo::TravelPlanningRequest planRequest;
+    planRequest.transitions.append({source, target, 0.0});
+    planRequest.cutterCollisionProxy = captured.cutter;
+    planRequest.minimumClearanceMm = m_config.cutterCollisionClearanceMm();
+    planRequest.maximumSafetyOffsetMm = m_config.maximumRapidSafetyOffsetMm();
+    planRequest.surfacePathStepMm = 0.5;
+    planRequest.collisionSampleStepMm = 2.0;
+    gp_Trsf wpc = currentKinematics.computeWpcTransform(contourIt->workpieceEntry);
+    BRepBuilderAPI_Transform placedWorkpiece(captured.workpiece, wpc, Standard_True);
+    planRequest.workpiece = placedWorkpiece.IsDone() ? placedWorkpiece.Shape() : captured.workpiece;
+    result.transition = lcnc::cam_algo::TravelPathPlanner::plan(planRequest).transitions.value(0);
+    if (!result.transition.isValid()) {
+        result.failureReason = result.transition.failureReason.isEmpty()
+            ? tr("CAM could not create an initial approach path") : result.transition.failureReason;
+        return result;
+    }
+
+    // Solve the transient geometry from the measured branch.  The committed
+    // lead-in branch is fixed: a different terminal branch is rejected rather
+    // than silently altering the certified contour that follows it.
+    std::vector<ToolpathPoint> solvePoints;
+    solvePoints.reserve(static_cast<std::size_t>(result.transition.segments.size() + 1));
+    const gp_Trsf inverseWpc = wpc.Inverted();
+    for (const auto& segment : result.transition.segments) {
+        ToolpathPoint point;
+        point.position = gp_Pnt(segment.target.tcpX, segment.target.tcpY, segment.target.tcpZ).Transformed(inverseWpc);
+        gp_Dir normal(segment.target.surfaceNormalX, segment.target.surfaceNormalY, segment.target.surfaceNormalZ);
+        normal.Transform(inverseWpc);
+        point.normal = normal;
+        solvePoints.push_back(std::move(point));
+    }
+    if (solvePoints.size() < 2) {
+        result.failureReason = tr("Initial approach path has too few motion samples");
+        return result;
+    }
+    QString solveError;
+    if (!LaserToolpathBuilder::solveTransientMotionPath(&solvePoints, &currentKinematics,
+            captured.definition, captured.workpieceSetup, captured.headToolGeometry,
+            &solveError, &currentPose)) {
+        result.failureReason = tr("Initial approach five-axis solve failed: %1").arg(solveError);
+        return result;
+    }
+    for (int index = 0; index < result.transition.segments.size(); ++index) {
+        const auto& coordinate = solvePoints[static_cast<std::size_t>(index)].machineCoord;
+        auto& targetPose = result.transition.segments[index].target;
+        targetPose.axes = {coordinate.x, coordinate.y, coordinate.z,
+                           coordinate.r1, coordinate.r2};
+        targetPose.activeMask = source.pose.activeMask;
+        targetPose.rotaryAxis1Name = coordinate.r1Name;
+        targetPose.rotaryAxis2Name = coordinate.r2Name;
+        targetPose.kinematicAxes = coordinate.solvedPose.values;
+        targetPose.kinematicAxisMask = coordinate.solvedPose.activeMask;
+    }
+    const auto& terminal = result.transition.segments.constLast().target;
+    for (int index = 0; index < captured.definition.interpolatedAxes.count; ++index) {
+        if (std::abs(terminal.kinematicAxes[index] - contourIt->leadInPoint.machineAxes[index]) > 0.01) {
+            result.failureReason = tr("Initial approach cannot reach the committed lead-in axis branch");
+            return result;
+        }
+    }
+    const auto collision = collisionConfiguration();
+    result.collision.key = result.toolpathRevision ^ result.targetContourId;
+    result.collision.blockWarning = m_config.blockMachiningOnCollisionWarning();
+    if (!collision.enabled) {
+        result.collision.state = lcnc::cam::CollisionValidationState::Disabled;
+        result.collision.complete = true;
+        result.collision.nodeStates.fill(result.collision.state, result.transition.segments.size());
+        return result;
+    }
+    if (!collision.valid || captured.collisionBodies.isEmpty()) {
+        result.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+        result.collision.complete = true;
+        result.collision.failureReason = tr("Initial approach collision source configuration is incomplete");
+        result.failureReason = result.collision.failureReason;
+        return result;
+    }
+    const double collisionMeshDeflectionMm = qBound(
+        0.05, m_config.cutterCollisionClearanceMm() * 0.1, 0.25);
+    for (CamTravelCollisionBody& body : captured.collisionBodies)
+        buildCollisionGeometry(&body, collisionMeshDeflectionMm);
+    for (const CamTravelCollisionBody& body : std::as_const(captured.collisionBodies)) {
+        if (body.leaves.isEmpty()) {
+            result.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+            result.collision.complete = true;
+            result.collision.failureReason = tr("Initial approach collision geometry is unavailable for %1").arg(body.source);
+            result.failureReason = result.collision.failureReason;
+            return result;
+        }
+    }
+    result.collision.nodeStates.fill(lcnc::cam::CollisionValidationState::Safe,
+                                     result.transition.segments.size());
+    for (int nodeIndex = 0; nodeIndex < result.transition.segments.size(); ++nodeIndex) {
+        if (cancelled()) {
+            result.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+            result.collision.complete = true;
+            result.collision.failureReason = tr("Initial approach collision scan was cancelled");
+            result.failureReason = result.collision.failureReason;
+            return result;
+        }
+        const auto& pose = result.transition.segments.at(nodeIndex).target;
+        for (const MachineAxisDef& axis : captured.axes)
+            currentKinematics.setAxisPosition(axis.name, axis.currentPos);
+        for (int axis = 0; axis < captured.definition.interpolatedAxes.count; ++axis)
+            currentKinematics.setAxisPosition(captured.definition.interpolatedAxes.axes[axis].name,
+                                              pose.kinematicAxes[axis]);
+        struct PoseBody { const CamTravelCollisionBody* body; gp_Trsf transform; };
+        QVector<PoseBody> activeBodies;
+        QVector<PoseBody> passiveBodies;
+        for (const CamTravelCollisionBody& body : std::as_const(captured.collisionBodies)) {
+            gp_Trsf transform;
+            if (body.cutterProxy) {
+                gp_Vec normal(pose.surfaceNormalX, pose.surfaceNormalY, pose.surfaceNormalZ);
+                if (normal.SquareMagnitude() <= Precision::SquareConfusion()) normal = gp_Vec(0.0, 0.0, 1.0);
+                normal.Normalize();
+                const gp_Pnt tcp(pose.tcpX, pose.tcpY, pose.tcpZ);
+                transform.SetDisplacement(gp_Ax3(), gp_Ax3(tcp, gp_Dir(normal)));
+            } else if (body.workpiece) {
+                transform = currentKinematics.computeWpcTransform(contourIt->workpieceEntry);
+            } else {
+                transform = currentKinematics.computeShapeTransform(body.entry);
+            }
+            if (body.active) activeBodies.append({&body, transform});
+            if (body.passive) passiveBodies.append({&body, transform});
+        }
+        for (const PoseBody& active : activeBodies) for (const PoseBody& passive : passiveBodies) {
+            if (active.body->source == passive.body->source
+                || transformCollisionAabb(active.body->localAabb, active.transform,
+                                          m_config.cutterCollisionClearanceMm()).IsOut(
+                    transformCollisionAabb(passive.body->localAabb, passive.transform,
+                                           m_config.cutterCollisionClearanceMm())))
+                continue;
+            const double clearance = m_config.cutterCollisionClearanceMm();
+            if (active.body->surfaceModel.isValid()
+                && passive.body->surfaceModel.isValid()) {
+                const double meshGuardMm = clearance
+                    + active.body->surfaceModel.linearDeflectionMm()
+                    + passive.body->surfaceModel.linearDeflectionMm();
+                const auto prefilter = lcnc::cam_algo::prefilterSurfaceCollision(
+                    active.body->surfaceModel, active.transform,
+                    passive.body->surfaceModel, passive.transform,
+                    meshGuardMm);
+                if (prefilter.valid && prefilter.definitelySeparated)
+                    continue;
+            }
+            for (const auto& activeLeaf : active.body->leaves) for (const auto& passiveLeaf : passive.body->leaves) {
+                const Bnd_Box activeBox = transformCollisionAabb(activeLeaf.localAabb, active.transform,
+                    m_config.cutterCollisionClearanceMm());
+                if (activeBox.IsOut(transformCollisionAabb(passiveLeaf.localAabb, passive.transform,
+                                                            m_config.cutterCollisionClearanceMm())))
+                    continue;
+                const TopoDS_Shape first = activeLeaf.shape.Moved(
+                    TopLoc_Location(active.transform));
+                const TopoDS_Shape second = passiveLeaf.shape.Moved(
+                    TopLoc_Location(passive.transform));
+                lcnc::OcctExactOperationLock exactOperationLock;
+                BRepExtrema_DistShapeShape distance(first, second);
+                distance.SetDeflection(0.025);
+                distance.SetMultiThread(Standard_False);
+                distance.Perform();
+                if (!distance.IsDone()) {
+                    result.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
+                    result.collision.complete = true;
+                    result.collision.failureReason = tr("Initial approach collision distance calculation failed");
+                    result.failureReason = result.collision.failureReason;
+                    return result;
+                }
+                const auto state = lcnc::cam_algo::classifyCollisionDistance(
+                    distance.Value(), clearance, Precision::Confusion());
+                if (state != lcnc::cam::CollisionValidationState::Safe) {
+                    result.collision.nodeStates[nodeIndex] = state;
+                    result.collision.intervals.append({nodeIndex, nodeIndex, state,
+                        active.body->source, passive.body->source, active.body->entry,
+                        passive.body->entry, distance.Value(), tr("Initial approach source pair is too close")});
+                    if (state == lcnc::cam::CollisionValidationState::Collision) {
+                        result.collision.state = state;
+                        result.collision.complete = true;
+                        result.collision.failureReason = tr("Initial approach collision detected between %1 and %2")
+                            .arg(active.body->source, passive.body->source);
+                        result.failureReason = result.collision.failureReason;
+                        return result;
+                    }
+                }
+            }
+        }
+    }
+    result.collision.state = result.collision.intervals.isEmpty()
+        ? lcnc::cam::CollisionValidationState::Safe
+        : lcnc::cam::CollisionValidationState::Warning;
+    result.collision.complete = true;
+    return result;
 }
 
 QList<lcnc::MachiningMode> CamModule::supportedMachiningModes() const
@@ -6207,6 +7050,8 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             // 中文翻译：五阶段 CAM 流程未完成或上游版本链不一致
             exportedContour.recalculationReason = tr("The five-stage CAM process is incomplete or the upstream version chain is inconsistent");
         exportedContour.pointCount = static_cast<int>(contour.points.size());
+        exportedContour.cuttingOffsetMm = contour.appliedParams.cuttingOffsetMm;
+        exportedContour.rapidOffsetMm = contour.appliedParams.rapidOffsetMm;
 
         // 计算世界坐标系下的几何端点：cut start = points.front()；end = points.back()；
         // start = leadIn 起点（若 leadIn.valid）否则等于 cut start。
@@ -6321,7 +7166,6 @@ void CamModule::setLeadInLength(double mm)
     if (mm <= 0.0)
         return;
     toolpathRef().setGlobalLeadInLength(mm);
-    m_config.setLeadInLength(mm);
     // 参数只记录为待应用值；已持久化/显示的下刀点仅在“重新计算”时重建。
     LCNC_INFO(lcnc::LogCode::Generic,
               "cam.toolpath: lead-in length changed to {:.3f} mm; apply on explicit recalculation",
@@ -6336,7 +7180,7 @@ void CamModule::setLeadInLength(double mm)
 
 double CamModule::leadInLength() const
 {
-    return m_config.leadInLength();
+    return toolpathRef().globalLeadInLength();
 }
 
 void CamModule::setDeflection(double mm)
@@ -6345,7 +7189,6 @@ void CamModule::setDeflection(double mm)
         return;
 
     m_deflection = mm;
-    m_config.setDeflection(mm);
     pushGenerationParamsToCamData();
     if (m_camData) {
         m_camData->setGenerationParamsDirty(true);
@@ -6357,6 +7200,57 @@ void CamModule::setDeflection(double mm)
 double CamModule::deflection() const
 {
     return m_deflection;
+}
+
+bool CamModule::setCuttingOffset(double mm)
+{
+    if (!std::isfinite(mm) || toolpathRef().globalRapidOffsetMm() <= mm)
+        return false;
+    toolpathRef().setGlobalCuttingOffsetMm(mm);
+    for (LaserContour& contour : toolpathRef().contours()) {
+        contour.pendingParams.cuttingOffsetMm = mm;
+        contour.dirtyStages = contour.dirtyStages | ContourDirtyStage::MotionOffset
+            | ContourDirtyStage::MachineSolve | ContourDirtyStage::AdjacentRapid
+            | ContourDirtyStage::Collision;
+        contour.needsRecalculation = true;
+    }
+    pushGenerationParamsToCamData();
+    if (m_camData) {
+        m_camData->setGenerationParamsDirty(true);
+        m_camData->markDirty(true);
+    }
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
+double CamModule::cuttingOffset() const
+{
+    return toolpathRef().globalCuttingOffsetMm();
+}
+
+bool CamModule::setRapidOffset(double mm)
+{
+    if (!std::isfinite(mm) || mm < 0.0 || mm <= toolpathRef().globalCuttingOffsetMm())
+        return false;
+    toolpathRef().setGlobalRapidOffsetMm(mm);
+    for (LaserContour& contour : toolpathRef().contours()) {
+        contour.pendingParams.rapidOffsetMm = mm;
+        contour.dirtyStages = contour.dirtyStages | ContourDirtyStage::AdjacentRapid
+            | ContourDirtyStage::MachineSolve | ContourDirtyStage::Collision;
+        contour.needsRecalculation = true;
+    }
+    pushGenerationParamsToCamData();
+    if (m_camData) {
+        m_camData->setGenerationParamsDirty(true);
+        m_camData->markDirty(true);
+    }
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
+double CamModule::rapidOffset() const
+{
+    return toolpathRef().globalRapidOffsetMm();
 }
 
 bool CamModule::showNormals() const
@@ -6440,6 +7334,9 @@ bool CamModule::setActiveContourLeadInLength(double mm)
         return false;
     LaserContour& contour = toolpathRef().contour(index);
     contour.pendingParams.leadInLength = mm;
+    contour.dirtyStages = contour.dirtyStages | ContourDirtyStage::LeadInGeometry
+        | ContourDirtyStage::MachineSolve | ContourDirtyStage::AdjacentRapid
+        | ContourDirtyStage::Collision;
     contour.needsRecalculation = true;
     m_camData->markDirty(true);
     emit activeContourParametersChanged();
@@ -6454,6 +7351,44 @@ bool CamModule::setActiveContourDeflection(double mm)
         return false;
     LaserContour& contour = toolpathRef().contour(index);
     contour.pendingParams.deflection = mm;
+    contour.dirtyStages = ContourDirtyStage::All;
+    contour.needsRecalculation = true;
+    m_camData->markDirty(true);
+    emit activeContourParametersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
+bool CamModule::setActiveContourCuttingOffset(double mm)
+{
+    const int index = activeContourIndex();
+    if (!std::isfinite(mm) || index < 0 || index >= toolpathRef().contourCount())
+        return false;
+    LaserContour& contour = toolpathRef().contour(index);
+    if (contour.pendingParams.rapidOffsetMm <= mm)
+        return false;
+    contour.pendingParams.cuttingOffsetMm = mm;
+    contour.dirtyStages = contour.dirtyStages | ContourDirtyStage::MotionOffset
+        | ContourDirtyStage::MachineSolve | ContourDirtyStage::AdjacentRapid
+        | ContourDirtyStage::Collision;
+    contour.needsRecalculation = true;
+    m_camData->markDirty(true);
+    emit activeContourParametersChanged();
+    lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    return true;
+}
+
+bool CamModule::setActiveContourRapidOffset(double mm)
+{
+    const int index = activeContourIndex();
+    if (!std::isfinite(mm) || mm < 0.0 || index < 0 || index >= toolpathRef().contourCount())
+        return false;
+    LaserContour& contour = toolpathRef().contour(index);
+    if (mm <= contour.pendingParams.cuttingOffsetMm)
+        return false;
+    contour.pendingParams.rapidOffsetMm = mm;
+    contour.dirtyStages = contour.dirtyStages | ContourDirtyStage::AdjacentRapid
+        | ContourDirtyStage::MachineSolve | ContourDirtyStage::Collision;
     contour.needsRecalculation = true;
     m_camData->markDirty(true);
     emit activeContourParametersChanged();
@@ -7029,6 +7964,21 @@ TaskId CamModule::recalcToolpathAsync()
             // 中文翻译：正在离散轮廓
             progress->setStepName(QObject::tr("discretizing contours"));
             LaserContour updated = current;
+            const bool rebuildBaseGeometry = hasDirtyStage(
+                updated.dirtyStages, ContourDirtyStage::Discretization)
+                || hasDirtyStage(updated.dirtyStages, ContourDirtyStage::LeadInGeometry);
+            if (!rebuildBaseGeometry) {
+                // Height-only edits reuse immutable base samples and normals.
+                // The committed rapid-plan rebuild below derives offset
+                // geometry and solves the continuous motion sequence.
+                updated.appliedParams = updated.pendingParams;
+                updated.dirtyStages = ContourDirtyStage::None;
+                updated.needsRecalculation = false;
+                result->contour = std::move(updated);
+                result->ok = true;
+                progress->setValue(100);
+                return;
+            }
             if (appliedGlobal.useFaceClassification) {
                 FaceClassification classification =
                     FaceClassifier::classifyFaces(sourceShape, appliedGlobal.smoothAngle);
@@ -7113,6 +8063,7 @@ TaskId CamModule::recalcToolpathAsync()
             updated.appliedParams = updated.pendingParams;
             updated.leadIn.length = updated.appliedParams.leadInLength;
             updated.needsRecalculation = false;
+            updated.dirtyStages = ContourDirtyStage::None;
             result->contour = std::move(updated);
             result->ok = true;
             progress->setValue(100);
@@ -7142,12 +8093,19 @@ TaskId CamModule::recalcToolpathAsync()
             || std::abs(toolpathRef().contour(latestIndex).pendingParams.leadInLength
                         - originalPendingParams.leadInLength) > 1e-12
             || std::abs(toolpathRef().contour(latestIndex).pendingParams.deflection
-                        - originalPendingParams.deflection) > 1e-12) {
+                        - originalPendingParams.deflection) > 1e-12
+            || std::abs(toolpathRef().contour(latestIndex).pendingParams.cuttingOffsetMm
+                        - originalPendingParams.cuttingOffsetMm) > 1e-12
+            || std::abs(toolpathRef().contour(latestIndex).pendingParams.rapidOffsetMm
+                        - originalPendingParams.rapidOffsetMm) > 1e-12) {
             // 中文翻译：重新计算当前轮廓；轮廓在计算期间已变更，后台结果已丢弃
             emit operationFailed(tr("Recalculate the current contour"), tr("The contour changed during calculation and the background results were discarded"));
             return;
         }
         toolpathRef().contour(latestIndex) = std::move(result->contour);
+        QString rapidError;
+        rebuildTravelPlanForCurrentOrder(&rapidError);
+        syncCamDocumentContours(/*forceRebuild=*/true);
         m_camData->markDirty(true);
         lcnc::view::ToolpathRenderer::LeadInPreview preview{
             m_previewLeadInContour, m_previewLeadInPointIndex, m_previewLeadInPoint,
@@ -8141,7 +9099,7 @@ void CamModule::syncCamDocumentContours(bool forceRebuild)
         // UpdateCurrentViewer/Redraw，否则主线程会被每条 AIS 的重绘占满。
         // 选择结构统一由后续的 setCamContoursVisible() 建立一次。
         gd->displayContourBody(contour.contourId,
-                               contour.wire,
+                               LaserToolpathBuilder::buildOffsetDisplayShape(contour),
                                name,
                                /*updateViewer=*/false,
                                /*configureSelection=*/false);
@@ -8248,6 +9206,8 @@ void CamModule::pushGenerationParamsToCamData()
     auto& gp = m_camData->generationParams();
     gp.leadInLength         = toolpathRef().globalLeadInLength();
     gp.deflection           = m_deflection;
+    gp.cuttingOffsetMm      = toolpathRef().globalCuttingOffsetMm();
+    gp.rapidOffsetMm        = toolpathRef().globalRapidOffsetMm();
     gp.smoothAngle          = m_smoothAngle;
     gp.useFaceClassification = m_useFaceClassification;
     gp.extractionStrategy = m_extractionStrategy;
@@ -8257,13 +9217,14 @@ void CamModule::pushGenerationParamsToCamData()
 
 void CamModule::applyGenerationParamsFromCamData()
 {
-    // 全局生成/显示参数归程序配置所有，不能被工程缓存反向覆盖。
-    // 工程只保存每个轮廓自己的 applied/pending 参数与已生成结果。
-    toolpathRef().setGlobalLeadInLength(m_config.leadInLength());
-    m_deflection            = m_config.deflection();
-    m_smoothAngle           = m_config.smoothAngle();
-    m_useFaceClassification = m_config.useFaceClassification();
-    m_extractionStrategy = m_config.extractionStrategy();
+    const auto& gp = m_camData->generationParams();
+    toolpathRef().setGlobalLeadInLength(gp.leadInLength);
+    toolpathRef().setGlobalCuttingOffsetMm(gp.cuttingOffsetMm);
+    toolpathRef().setGlobalRapidOffsetMm(gp.rapidOffsetMm);
+    m_deflection            = gp.deflection;
+    m_smoothAngle           = gp.smoothAngle;
+    m_useFaceClassification = gp.useFaceClassification;
+    m_extractionStrategy = gp.extractionStrategy;
     if (m_toolpathRenderer) {
         m_toolpathRenderer->setShowNormals(m_config.showNormals());
         m_toolpathRenderer->setNormalSampleStep(m_config.normalSampleStep());
@@ -8376,16 +9337,10 @@ void CamModule::refreshTravelPath()
         QHash<std::uint64_t, const LaserContour*> contours;
         for (const LaserContour& contour : toolpathRef().contours())
             contours.insert(contour.contourId, &contour);
-        QHash<std::uint64_t, QString> toolNameByLayer;
-        for (const ToolpathLayer& layer : toolpathRef().layers())
-            toolNameByLayer.insert(layer.layerId, layer.toolName.trimmed());
-        const auto toolOffsetProvider = lcnc::Kernel::current().services()
-            .getService<lcnc::cam::ICamToolOffsetProvider>();
         QVector<lcnc::view::TravelPathRenderer::Segment> plannedSegments;
         plannedSegments.reserve(plannedPlan.transitions.size());
         for (const auto& transition : plannedPlan.transitions) {
             const auto source = contours.value(transition.fromContourId, nullptr);
-            const auto target = contours.value(transition.toContourId, nullptr);
             if (!source || transition.surfacePreviewPoints.size() < 2)
                 continue;
             lcnc::view::TravelPathRenderer::Segment segment;
@@ -8393,28 +9348,15 @@ void CamModule::refreshTravelPath()
             segment.verified = plannedPlan.isExecutable();
             segment.workpieceEntry = source->workpieceEntry;
 
-            // A rapid approaches its target contour, so use that contour's
-            // configured tool idle height.  An absent/unresolvable tool keeps
-            // the exact collision-planned curve (zero synthetic offset).
-            double displayOffsetMm = 0.0;
-            if (target && toolOffsetProvider) {
-                const QString toolName = toolNameByLayer.value(target->layerId);
-                if (!toolName.isEmpty())
-                    toolOffsetProvider->rapidDisplayOffsetMm(toolName, &displayOffsetMm);
-            }
-
-            // The local display curve was frozen when planning used its source
-            // WPC posture.  Do not inverse-transform world points with today's
-            // pose here: doing so followed by the renderer transform cancels
-            // out and leaves the rapid path frozen at its former world pose.
+            // surfacePreviewPoints now describe the executable, offset path.
+            // Never add a display-only tool offset here: it would make the
+            // visible route differ from simulation and controller execution.
+            // 中文翻译：空程显示直接使用可执行偏置轨迹，不再重复叠加显示偏置。
             const auto& previewPoints = transition.workpieceLocalPreviewPoints.isEmpty()
                 ? transition.surfacePreviewPoints
                 : transition.workpieceLocalPreviewPoints;
             for (const auto& preview : previewPoints) {
-                segment.waypoints.append({
-                    preview.x + preview.normalX * displayOffsetMm,
-                    preview.y + preview.normalY * displayOffsetMm,
-                    preview.z + preview.normalZ * displayOffsetMm});
+                segment.waypoints.append({preview.x, preview.y, preview.z});
             }
             plannedSegments.append(std::move(segment));
         }

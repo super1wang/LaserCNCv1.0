@@ -3,7 +3,6 @@
 #include "core/kernel/i_service.h"
 #include "core/project/cam/cam_data_contracts.h"
 #include "core/project/cam/layer_contracts.h" // OCC-free: enums only
-#include "modules/cam/i_cam_tool_offset_provider.h"
 
 #include <QColor>
 #include <QHash>
@@ -57,7 +56,7 @@ struct ProcessLayerJob
  * 随 .lcnc 统一读写；v1 旧档 `process_cutting_plan.toml` 的一次性迁移也已移入 core。
  */
 class ProcessCuttingPlanService : public QObject,
-                                  public lcnc::cam::ICamToolOffsetProvider
+                                  public lcnc::IService
 {
     Q_OBJECT
 public:
@@ -77,10 +76,6 @@ public:
     /// 取单条；不存在时返回带 valid=false 形态？这里直接返回是否找到。
     bool layerJob(std::uint64_t layerId, ProcessLayerJob* out) const;
 
-    /// 设置/覆盖单条工艺配置；写入后立即 emit planChanged()。
-    void setLayerJob(const ProcessLayerJob& job);
-    /// 批量设置（如对话框 Apply 一次性写入）。
-    void setLayerJobs(const QVector<ProcessLayerJob>& jobs);
     /// 清空所有配置（新建项目时调用）。Phase B：实际重置在 CAM 容器内进行。
     void clearAll();
 
@@ -118,9 +113,6 @@ public:
     /// latest CAM sequence notification.  It is not a sorting revision and
     /// does not grant Process authority to alter CAM order.
     std::uint64_t planRevision() const noexcept { return m_planRevision.load(); }
-
-    // ── CAM 工具显示桥接 ─────────────────────────────────────────────────
-    bool rapidDisplayOffsetMm(const QString& toolName, double* offsetMm) const override;
 
     /// 列出某图层下的全部轮廓（来自 CAM snapshot），供 UI 渲染轮廓复选行。
     struct ContourBrief

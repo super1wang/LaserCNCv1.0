@@ -23,6 +23,8 @@ struct ToolpathGenerationStamp
     double leadInLength{0.0};
     double smoothAngle{0.0};
     double deflection{0.0};
+    double cuttingOffsetMm{1.0};
+    double rapidOffsetMm{5.0};
     bool useFaceClassification{false};
     int extractionStrategy{0};
     std::vector<std::uint64_t> contourIds;

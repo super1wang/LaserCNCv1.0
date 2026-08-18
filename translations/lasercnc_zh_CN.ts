@@ -425,6 +425,21 @@
         <translation>轮廓 %1 与 %2 之间的空程及轮廓连续五轴求解失败：%3</translation>
     </message>
     <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="6032"/>
+        <source>Machine kinematics are unavailable for the contour-offset motion solve</source>
+        <translation>轮廓偏置运动求解缺少机台运动学</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="6038"/>
+        <source>Machine mode definition is unavailable for the contour-offset motion solve</source>
+        <translation>轮廓偏置运动求解缺少机台模式定义</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="6086"/>
+        <source>Contour-offset five-axis solve failed for contour %1: %2</source>
+        <translation>轮廓 %1 的偏置五轴运动求解失败：%2</translation>
+    </message>
+    <message>
         <source>Loaded machine model has no cutting-head collision component; assign a head collision role before machining</source>
         <translation type="vanished">已加载的机台模型没有切割头碰撞部件，请在加工前指定切割头碰撞角色</translation>
     </message>
@@ -1228,6 +1243,22 @@ Please complete the configuration on the Machine Configuration page of the appli
         <location filename="../src/modules/cam/cam_module.cpp" line="2324"/>
         <source>Workpiece setup</source>
         <translation>工件安装姿态</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5267"/>
+        <location filename="../src/modules/cam/cam_module.cpp" line="6205"/>
+        <source>Collision detection is enabled but the source configuration is incomplete</source>
+        <translation>碰撞检测已启用，但碰撞源配置不完整。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5303"/>
+        <source>No selected collision source has usable geometry</source>
+        <translation>没有已选择的碰撞源具有可用几何体。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5353"/>
+        <source>Generate toolpath globally — collision validation</source>
+        <translation>全局生成刀路 — 碰撞校验</translation>
     </message>
 </context>
 <context>
@@ -4417,6 +4448,14 @@ continue?</source>
         <translation>无法开始加工：%1</translation>
     </message>
     <message>
+        <source>CAM full-path collision validation is incomplete</source>
+        <translation>CAM 全路径碰撞校验尚未完成</translation>
+    </message>
+    <message>
+        <source>CAM full-path collision validation did not confirm a safe path</source>
+        <translation>CAM 全路径碰撞校验未确认路径安全</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="184"/>
         <source>The toolpath snapshot axis layout is invalid: %1</source>
         <translation>刀路快照轴布局无效：%1</translation>
@@ -4783,6 +4822,10 @@ continue?</source>
 </context>
 <context>
     <name>ProcessModule</name>
+    <message>
+        <source>Machining cannot start: %1</source>
+        <translation>无法开始加工：%1</translation>
+    </message>
     <message>
         <location filename="../src/modules/process/process_module.cpp" line="362"/>
         <source>Cutting %1/%2: %3</source>
@@ -8563,6 +8606,42 @@ continue?</source>
         <source>An unknown error occurred during the CAD operation</source>
         <translation>CAD 操作期间发生未知错误</translation>
     </message>
+    <message>
+        <location filename="../src/modules/simulation/simulation_module.cpp" line="356"/>
+        <source>Showing collision validation completed by CAM.</source>
+        <translation>正在显示已由 CAM 完成的碰撞校验结果。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/simulation/simulation_module.cpp" line="359"/>
+        <source>CAM collision validation is pending; offline simulation will not start another scan.</source>
+        <translation>CAM 碰撞校验尚未完成；离线仿真不会重复启动扫描。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/simulation/simulation_module.cpp" line="360"/>
+        <source>Rapid travel is unavailable; simulating solved cutting path only. CAM collision validation is pending.</source>
+        <translation>空程不可用；仅回放已求解切割路径。CAM 碰撞校验尚未完成。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/simulation/simulation_module.cpp" line="469"/>
+        <source>Running at %1x; CAM collision validation is pending</source>
+        <translation>正在以 %1x 运行；CAM 碰撞校验尚未完成</translation>
+    </message>
+    <message>
+        <source>CAM collision validation is still running; wait for the CAM task to finish before entering offline simulation.</source>
+        <translation>CAM 碰撞校验仍在运行，请等待 CAM 任务完成后再进入离线仿真。</translation>
+    </message>
+    <message>
+        <source>Mesh collision verification failed between %1 and %2</source>
+        <translation>%1 与 %2 之间的网格碰撞校验失败</translation>
+    </message>
+    <message>
+        <source>Full-machine collision verification failed between %1 and %2</source>
+        <translation>%1 与 %2 之间检测到完整机台碰撞</translation>
+    </message>
+    <message>
+        <source>Full-machine collision clearance warning between %1 and %2</source>
+        <translation>%1 与 %2 之间的完整机台碰撞间隙不足</translation>
+    </message>
 </context>
 <context>
     <name>lcnc::simulation::SimulationModule</name>
@@ -9709,6 +9788,14 @@ continue?</source>
         <location filename="../src/modules/cam/ui/widget_toolpath_panel.cpp" line="68"/>
         <source>Discrete interval:</source>
         <translation>离散间隔:</translation>
+    </message>
+    <message>
+        <source>Cutting offset (normal):</source>
+        <translation>切割高度（沿局部法线）:</translation>
+    </message>
+    <message>
+        <source>Rapid offset (normal):</source>
+        <translation>空程高度（沿局部法线）:</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_toolpath_panel.cpp" line="82"/>

@@ -15,6 +15,7 @@
 #include <TopLoc_Location.hxx>
 
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -91,8 +92,36 @@ int main(int argc, char* argv[])
         request.endpoints = {endpoint(1, 0.0, 0.0, 0.0),
                              endpoint(2, 10.0, 0.0, 0.0)};
         const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
-        if (plan.isExecutable() || plan.failureReason.isEmpty())
-            return fail(QStringLiteral("Missing workpiece collision geometry was accepted"));
+        if (!plan.isExecutable())
+            return fail(QStringLiteral("Geometry-only rapid planning incorrectly required collision geometry"));
+    }
+
+    {
+        // Invalid planner inputs must fail before OCC creates a collision mesh.
+        // This keeps a malformed CAM export from surfacing as a later Qt heap
+        // failure while the global-generation completion callback is running.
+        // 中文翻译：无效规划输入必须在 OCC 建网格前失败，不能在全局生成完成回调中延迟表现为 Qt 堆错误。
+        auto request = baseRequest();
+        request.motionProfile.supportedCoordinatedMask = 0;
+        request.endpoints = {endpoint(1, 0.0, 0.0, 0.0),
+                             endpoint(2, 10.0, 0.0, 0.0)};
+        const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
+        if (plan.isExecutable() || plan.failureReason.isEmpty()
+            || hasFaceTriangulation(request.workpiece)) {
+            return fail(QStringLiteral("Invalid rapid-planning mask entered collision meshing"));
+        }
+    }
+
+    {
+        auto request = baseRequest();
+        request.minimumClearanceMm = std::numeric_limits<double>::quiet_NaN();
+        request.endpoints = {endpoint(1, 0.0, 0.0, 0.0),
+                             endpoint(2, 10.0, 0.0, 0.0)};
+        const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
+        if (plan.isExecutable() || plan.failureReason.isEmpty()
+            || hasFaceTriangulation(request.workpiece)) {
+            return fail(QStringLiteral("Non-finite rapid-planning input entered collision meshing"));
+        }
     }
 
     {
@@ -110,9 +139,9 @@ int main(int argc, char* argv[])
     }
 
     {
-        // A non-machining boss crossing the nominal surface route forces the
-        // complete cone proxy to a higher safe trajectory.  This is computed
-        // offline; controller idle height may only add more clearance later.
+        // Rapid geometry uses the configured strict normal offset. Obstacles
+        // are reported by the separate CAM collision validation stage and may
+        // not silently raise or otherwise modify the path.
         auto request = baseRequest();
         const TopoDS_Shape base = BRepPrimAPI_MakeBox(
             gp_Pnt(-5.0, -5.0, -1.0), 30.0, 10.0, 1.0).Shape();
@@ -127,11 +156,11 @@ int main(int argc, char* argv[])
                              endpoint(2, 20.0, 0.0, 0.0)};
         const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
         if (!plan.isExecutable()
-            || plan.transitions.front().maximumSurfaceOffsetMm <= 1.0) {
-            return fail(QStringLiteral("Cutter proxy did not raise the rapid above a non-machining obstacle"));
+            || std::abs(plan.transitions.front().maximumSurfaceOffsetMm - 5.0) > 1e-9) {
+            return fail(QStringLiteral("Rapid planner did not preserve the strict configured offset"));
         }
         if (diagnostics.exactDistanceCheckCount != 0
-            || plan.transitions.front().segments.size() > 16) {
+            || plan.transitions.front().segments.size() > 64) {
             return fail(QStringLiteral("Collision envelope regressed to exact checks or excessive motion segments"));
         }
         auto narrowRequest = request;
@@ -139,9 +168,9 @@ int main(int argc, char* argv[])
         narrowRequest.cutterCollisionProxy = BRepPrimAPI_MakeCone(0.1, 0.2, 15.0).Shape();
         const auto narrowPlan = lcnc::cam_algo::TravelPathPlanner::plan(narrowRequest);
         if (!narrowPlan.isExecutable()
-            || narrowPlan.transitions.front().maximumSurfaceOffsetMm >=
-               plan.transitions.front().maximumSurfaceOffsetMm) {
-            return fail(QStringLiteral("Changing simulated cone dimensions did not change the collision envelope"));
+            || std::abs(narrowPlan.transitions.front().maximumSurfaceOffsetMm
+                        - plan.transitions.front().maximumSurfaceOffsetMm) > 1e-9) {
+            return fail(QStringLiteral("Collision proxy dimensions modified strict rapid geometry"));
         }
         const auto& preview = plan.transitions.front().surfacePreviewPoints;
         if (preview.isEmpty() || std::abs(preview.front().z) > 1e-9
@@ -177,6 +206,70 @@ int main(int argc, char* argv[])
             if (segment.synchronization != lcnc::cam::RapidSynchronization::Coordinated)
                 return fail(QStringLiteral("Surface rapid contains a sequential axis segment"));
         }
+        if (transition.surfacePreviewPoints.size() != transition.segments.size() + 1)
+            return fail(QStringLiteral("Executable rapid preview and solved segment count diverged"));
+        for (int index = 0; index < transition.segments.size(); ++index) {
+            const auto& preview = transition.surfacePreviewPoints.at(index + 1);
+            const auto& target = transition.segments.at(index).target;
+            if (std::abs(preview.x - target.tcpX) > 1e-9
+                || std::abs(preview.y - target.tcpY) > 1e-9
+                || std::abs(preview.z - target.tcpZ) > 1e-9) {
+                return fail(QStringLiteral("Displayed rapid path differs from executable CAM samples"));
+            }
+        }
+    }
+
+    {
+        auto base = baseRequest();
+        const auto source = endpoint(1, 0.0, 0.0, 0.0);
+        const auto target = endpoint(2, 10.0, 0.0, 0.0);
+        base.transitions = {{source, target, 2.0, 1.0, 1.0}};
+        auto offset = base;
+        offset.transitions = {{source, target, 5.0, 1.0, 1.0}};
+        const auto basePlan = lcnc::cam_algo::TravelPathPlanner::plan(base);
+        const auto offsetPlan = lcnc::cam_algo::TravelPathPlanner::plan(offset);
+        if (!basePlan.isExecutable() || !offsetPlan.isExecutable())
+            return fail(QStringLiteral("Tool-offset rapid path could not be planned"));
+        const auto& baseTransition = basePlan.transitions.front();
+        const auto& offsetTransition = offsetPlan.transitions.front();
+        if (baseTransition.segments.size() != offsetTransition.segments.size())
+            return fail(QStringLiteral("Tool offset changed rapid topology unexpectedly"));
+        if (baseTransition.segments.front().phase != lcnc::cam::RapidSegmentPhase::Retract
+            || baseTransition.segments.back().phase != lcnc::cam::RapidSegmentPhase::Approach)
+            return fail(QStringLiteral("Rapid phases were not split into retract/traverse/approach"));
+        if (std::abs(offsetTransition.segments.front().target.tcpZ
+                     - baseTransition.segments.front().target.tcpZ - 3.0) > 1e-9
+            || std::abs(offsetTransition.segments.back().target.tcpZ
+                        - baseTransition.segments.back().target.tcpZ) > 1e-9) {
+            return fail(QStringLiteral("Strict rapid offset or cutting-offset approach is incorrect"));
+        }
+    }
+
+    {
+        // Offsets are geometric normal offsets, never controller-Z additions.
+        auto request = baseRequest();
+        auto source = endpoint(1, 1.0, 0.0, 0.0);
+        auto target = endpoint(2, 10.0, 1.0, 0.0);
+        source.pose.surfaceNormalX = 1.0;
+        source.pose.surfaceNormalZ = 0.0;
+        target.pose.surfaceNormalY = 1.0;
+        target.pose.surfaceNormalZ = 0.0;
+        request.transitions = {{source, target, 5.0, 1.0, 1.0}};
+        const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
+        if (!plan.isExecutable() || plan.transitions.front().segments.size() < 3)
+            return fail(QStringLiteral("Normal-offset rapid path was not planned"));
+        const auto& retract = plan.transitions.front().segments.front();
+        const auto& approach = plan.transitions.front().segments.back();
+        if (retract.phase != lcnc::cam::RapidSegmentPhase::Retract
+            || std::abs(retract.target.tcpX - 5.0) > 1e-9
+            || std::abs(retract.target.tcpY) > 1e-9
+            || std::abs(retract.target.tcpZ) > 1e-9
+            || approach.phase != lcnc::cam::RapidSegmentPhase::Approach
+            || std::abs(approach.target.tcpX - 10.0) > 1e-9
+            || std::abs(approach.target.tcpY - 1.0) > 1e-9
+            || std::abs(approach.target.tcpZ) > 1e-9) {
+            return fail(QStringLiteral("Rapid offsets were applied to physical Z instead of local normals"));
+        }
     }
 
     {
@@ -185,8 +278,8 @@ int main(int argc, char* argv[])
         auto request = baseRequest();
         request.workpiece = BRepPrimAPI_MakeSphere(
             gp_Pnt(0.0, 0.0, 0.0), 20.0).Shape();
-        auto source = endpoint(1, 20.0, 0.0, 0.0);
-        auto target = endpoint(2, 0.0, 20.0, 0.0);
+        auto source = endpoint(1, 21.0, 0.0, 0.0);
+        auto target = endpoint(2, 0.0, 21.0, 0.0);
         source.pose.surfaceNormalX = 1.0;
         source.pose.surfaceNormalZ = 0.0;
         target.pose.surfaceNormalY = 1.0;
@@ -195,12 +288,18 @@ int main(int argc, char* argv[])
         const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
         if (!plan.isExecutable())
             return fail(QStringLiteral("Spherical reference curve was not planned"));
-        for (const auto& point : plan.transitions.front().surfacePreviewPoints) {
+        const auto& preview = plan.transitions.front().surfacePreviewPoints;
+        double minimumRadius = std::numeric_limits<double>::infinity();
+        double maximumAbsZ = 0.0;
+        for (const auto& point : preview) {
             const double radius = std::sqrt(
                 point.x * point.x + point.y * point.y + point.z * point.z);
-            if (std::abs(radius - 20.0) > 1e-3 || std::abs(point.z) > 1e-3)
-                return fail(QStringLiteral("Spherical reference left the short great-circle arc"));
+            minimumRadius = std::min(minimumRadius, radius);
+            maximumAbsZ = std::max(maximumAbsZ, std::abs(point.z));
         }
+        if (minimumRadius < 20.0 - 1e-3 || maximumAbsZ > 1e-3)
+            return fail(QStringLiteral("Spherical reference left the short great-circle arc (r=%1, z=%2)")
+                .arg(minimumRadius, 0, 'g', 12).arg(maximumAbsZ, 0, 'g', 12));
     }
 
     {

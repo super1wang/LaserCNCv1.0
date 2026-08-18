@@ -203,7 +203,6 @@ void ProcessSettingsService::seedDefaults()
     table tool;
     tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0;
     tool["fIdelAcc"] = 100.0; tool["fIdelJerk"] = 1000.0;
-    tool["fCuttingHeight"] = 0.0; tool["fIdleHeight"] = 0.0;
     tool["fEnergy"] = 20.0; tool["fFrequency"] = 30; tool["fPluse"] = 20;
     tool["fBeforeOpenLaser"] = 0.0; tool["fAfterCloseLaser"] = 0.0;
     ensureToolMotionDefaults(tool);
@@ -524,7 +523,7 @@ bool ProcessSettingsService::createTool(const QString& name, QString* error)
 {
     // 中文翻译：工具名称为空或重复。
     const QString clean = name.trimmed(); if (clean.isEmpty() || toolNames().contains(clean)) { if (error) *error = QObject::tr("Tool name is empty or duplicate."); return false; }
-    table tool; tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0; tool["fCuttingHeight"] = 0.0; tool["fIdleHeight"] = 0.0; tool["fEnergy"] = 20.0;
+    table tool; tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0; tool["fEnergy"] = 20.0;
     for (const auto& axis : m_axisDraft) tool[("f" + axis.axis.name + "Vel").toStdString()] = 10.0;
     table& all = sectionRef(ProcessConfigArea::Tools); all[clean.toStdString()] = tool; table& index = ensureChildTable(all, "ToolIndex"); index["sTool_" + std::to_string(toolNames().size())] = clean.toStdString(); if (!index.count("sToolIndex")) index["sToolIndex"] = clean.toStdString(); return true;
 }

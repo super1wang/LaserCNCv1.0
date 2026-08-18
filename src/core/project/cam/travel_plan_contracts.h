@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kinematics/machine_topology.h"
+#include "core/project/cam/collision_validation_contracts.h"
 
 #include <QHash>
 #include <QString>
@@ -63,6 +64,7 @@ struct RapidMoveSegment
     RapidSynchronization synchronization{RapidSynchronization::Sequential};
     double estimatedTimeMs{0.0};
     double minimumClearanceMm{0.0};
+    RapidSegmentPhase phase{RapidSegmentPhase::Traverse};
 };
 
 /// Unsolved geometric surface path used only by the 3D preview.  It contains
@@ -142,6 +144,9 @@ struct TravelPlanSnapshot
     /// remain visible but are never eligible for Process execution.
     /// 中文翻译：完整机台验证异步执行；验证中的空程可显示但禁止进入加工执行。
     bool fullEnvironmentVerificationPending{false};
+    /// CAM-owned full-path validation.  This is transient and intentionally
+    /// travels with the derived plan rather than project-persisted contour data.
+    CollisionValidationSnapshot collision;
 
     bool isExecutable() const {
         return !stale && !fullEnvironmentVerificationPending && failureReason.isEmpty();

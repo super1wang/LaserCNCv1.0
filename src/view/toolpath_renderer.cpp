@@ -12,6 +12,7 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <V3d_View.hxx>
+#include <gp_Vec.hxx>
 
 namespace lcnc::view {
 
@@ -288,7 +289,17 @@ void ToolpathRenderer::rebuildLeadInAis(GuiDocument* gd,
     if (!contour.enabled || !contour.leadIn.valid)
         return;
 
-    TopoDS_Edge leadEdge = LaserToolpathBuilder::computeLeadInEdge(contour);
+    TopoDS_Edge leadEdge;
+    if (contour.leadInSolution.valid && !contour.points.empty()) {
+        const double offset = contour.appliedParams.cuttingOffsetMm;
+        const ToolpathPoint& lead = contour.leadInSolution.point;
+        const ToolpathPoint& start = contour.points.front();
+        const gp_Pnt leadPoint = lead.position.Translated(gp_Vec(lead.normal) * offset);
+        const gp_Pnt startPoint = start.position.Translated(gp_Vec(start.normal) * offset);
+        BRepBuilderAPI_MakeEdge edge(leadPoint, startPoint);
+        if (edge.IsDone())
+            leadEdge = edge.Edge();
+    }
     if (leadEdge.IsNull())
         return;
 
@@ -326,21 +337,23 @@ void ToolpathRenderer::rebuildNormalAis(GuiDocument* gd,
     bool hasPrev = false;
 
     for (const ToolpathPoint& point : contour.points) {
-        if (hasPrev) accum += prev.Distance(point.position);
+        const gp_Pnt offsetPoint = point.position.Translated(
+            gp_Vec(point.normal) * contour.appliedParams.cuttingOffsetMm);
+        if (hasPrev) accum += prev.Distance(offsetPoint);
         const bool emitNow = !hasPrev || accum >= m_normalSampleStep;
         if (emitNow) {
             const gp_Pnt endPt(
-                point.position.X() + point.normal.X() * kNormalLength,
-                point.position.Y() + point.normal.Y() * kNormalLength,
-                point.position.Z() + point.normal.Z() * kNormalLength);
-            BRepBuilderAPI_MakeEdge edgeMaker(point.position, endPt);
+                offsetPoint.X() + point.normal.X() * kNormalLength,
+                offsetPoint.Y() + point.normal.Y() * kNormalLength,
+                offsetPoint.Z() + point.normal.Z() * kNormalLength);
+            BRepBuilderAPI_MakeEdge edgeMaker(offsetPoint, endPt);
             if (edgeMaker.IsDone()) {
                 builder.Add(compound, edgeMaker.Edge());
                 hasSegments = true;
             }
             accum = 0.0;
         }
-        prev = point.position;
+        prev = offsetPoint;
         hasPrev = true;
     }
     if (!hasSegments)

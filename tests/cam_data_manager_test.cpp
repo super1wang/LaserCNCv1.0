@@ -3,6 +3,8 @@
 #include <QCoreApplication>
 #include <QTextStream>
 
+#include <cmath>
+
 namespace {
 
 int fail(const QString& message)
@@ -19,6 +21,19 @@ int main(int argc, char* argv[])
     using namespace lcnc::cam;
 
     CamDataManager manager;
+    if (std::abs(manager.generationParams().cuttingOffsetMm - 1.0) > 1e-12
+        || std::abs(manager.generationParams().rapidOffsetMm - 5.0) > 1e-12
+        || std::abs(manager.toolpath().globalCuttingOffsetMm() - 1.0) > 1e-12
+        || std::abs(manager.toolpath().globalRapidOffsetMm() - 5.0) > 1e-12) {
+        return fail(QStringLiteral("CAM normal-offset defaults are not 1/5 mm"));
+    }
+    const auto heightDirty = ContourDirtyStage::MotionOffset
+        | ContourDirtyStage::MachineSolve | ContourDirtyStage::AdjacentRapid
+        | ContourDirtyStage::Collision;
+    if (!hasDirtyStage(heightDirty, ContourDirtyStage::MotionOffset)
+        || hasDirtyStage(heightDirty, ContourDirtyStage::Discretization)) {
+        return fail(QStringLiteral("Height-only CAM dirty stages rebuild base discretization"));
+    }
     std::uint64_t upstreamRevision = 0;
     for (int value = static_cast<int>(CamPipelineStage::FaceSeparation);
          value < static_cast<int>(CamPipelineStage::Count); ++value) {

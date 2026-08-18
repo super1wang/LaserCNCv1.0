@@ -40,6 +40,9 @@
 #include <ShapeAnalysis_Surface.hxx>
 #include <Geom_Surface.hxx>
 #include <GeomLProp_SLProps.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
 #include <Bnd_Box.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <Poly_Triangulation.hxx>
@@ -70,6 +73,51 @@ void LaserToolpath::clear()
     m_contours.clear();
     m_layers.clear();
     m_globalLeadInLength = 5.0;
+    m_globalCuttingOffsetMm = 1.0;
+    m_globalRapidOffsetMm = 5.0;
+}
+
+TopoDS_Shape LaserToolpathBuilder::buildOffsetDisplayShape(const LaserContour& contour)
+{
+    if (contour.points.size() < 2)
+        return contour.wire;
+    const bool closed = contour.points.size() > 2
+        && contour.points.front().position.SquareDistance(
+               contour.points.back().position) <= 1.0e-10;
+    const int count = static_cast<int>(contour.points.size()) - (closed ? 1 : 0);
+    if (count < 2)
+        return contour.wire;
+    Handle(TColgp_HArray1OfPnt) samples = new TColgp_HArray1OfPnt(1, count);
+    for (int index = 0; index < count; ++index) {
+        const ToolpathPoint& point = contour.points[static_cast<std::size_t>(index)];
+        samples->SetValue(index + 1, point.position.Translated(
+            gp_Vec(point.normal) * contour.appliedParams.cuttingOffsetMm));
+    }
+    try {
+        GeomAPI_Interpolate interpolate(samples, closed, 1.0e-6);
+        interpolate.Perform();
+        if (interpolate.IsDone() && !interpolate.Curve().IsNull()) {
+            BRepBuilderAPI_MakeEdge edge(interpolate.Curve());
+            if (edge.IsDone())
+                return edge.Edge();
+        }
+    } catch (const Standard_Failure& failure) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.toolpath: offset display interpolation failed: {}",
+                 failure.GetMessageString());
+    }
+    BRepBuilderAPI_MakeWire fallback;
+    for (int index = 1; index < count; ++index) {
+        BRepBuilderAPI_MakeEdge edge(samples->Value(index), samples->Value(index + 1));
+        if (edge.IsDone()) fallback.Add(edge.Edge());
+    }
+    if (closed) {
+        BRepBuilderAPI_MakeEdge edge(samples->Value(count), samples->Value(1));
+        if (edge.IsDone()) fallback.Add(edge.Edge());
+    }
+    if (fallback.IsDone())
+        return fallback.Wire();
+    return contour.wire;
 }
 
 namespace {

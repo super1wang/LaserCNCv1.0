@@ -16,6 +16,8 @@ int main()
     captured.leadInLength = 4.0;
     captured.smoothAngle = 5.0;
     captured.deflection = 0.1;
+    captured.cuttingOffsetMm = 1.0;
+    captured.rapidOffsetMm = 5.0;
     captured.useFaceClassification = true;
     captured.extractionStrategy = 2;
     captured.contourIds = {101, 102};
@@ -46,6 +48,14 @@ int main()
 
     current = captured;
     current.deflection += 0.01;
+    assert(!ToolpathGenerationService::acceptsResult(captured, current, true, false));
+
+    current = captured;
+    current.cuttingOffsetMm += 0.5;
+    assert(!ToolpathGenerationService::acceptsResult(captured, current, true, false));
+
+    current = captured;
+    current.rapidOffsetMm += 1.0;
     assert(!ToolpathGenerationService::acceptsResult(captured, current, true, false));
 
     current = captured;

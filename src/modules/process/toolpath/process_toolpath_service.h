@@ -47,9 +47,11 @@ public:
     explicit ProcessToolpathService(std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider = {});
 
     void setProvider(std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider);
+    /// Refresh only the catalog used for Process-side list/preflight display.
     lcnc::cam::ToolpathExportSnapshot refreshSnapshot();
-    lcnc::cam::ToolpathExportSnapshot refreshSnapshotForOrder(
-        const QVector<std::uint64_t>& orderedContourIds);
+    /// Refresh the exact execution snapshot already committed by CAM.  Process
+    /// cannot supply an order or request a re-solve through this boundary.
+    lcnc::cam::ToolpathExportSnapshot refreshCommittedExecutionSnapshot();
     lcnc::cam::ToolpathExportSnapshot currentSnapshot() const;
     ProcessJobPlan buildJobPlan() const;
 

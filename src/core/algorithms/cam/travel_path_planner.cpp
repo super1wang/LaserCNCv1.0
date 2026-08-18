@@ -1,17 +1,10 @@
 #include "core/algorithms/cam/travel_path_planner.h"
 
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepBndLib.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
-#include <BRepMesh_IncrementalMesh.hxx>
-#include <BRep_Tool.hxx>
-#include <Bnd_Box.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
-#include <TopLoc_Location.hxx>
-#include <Poly_Triangulation.hxx>
 #include <Standard_Failure.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Sphere.hxx>
@@ -19,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 namespace lcnc::cam_algo {
@@ -152,10 +146,10 @@ QVector<lcnc::cam::RapidSurfacePreviewPoint> buildBezierReference(
     const gp_Vec n0 = normalOf(source);
     const gp_Vec n3 = normalOf(target);
 
-    // This is a geometric shaping clearance, not a tool-height correction.
-    // Tool cutting/idle offsets remain Process concerns.  The modest lift keeps
-    // the reference curve on the machining side of a gently varying surface
-    // without reproducing every tessellation ripple.
+    // This is only the fallback reference-curve shaping distance.  CAM applies
+    // the configured cutting/rapid normal offsets after constructing the
+    // reference curve; Process never adds a height correction.
+    // 中文翻译：这里只构造回退参考曲线，切割/空程法向偏置随后由 CAM 应用，Process 不再叠加高度。
     const double shapingClearance = std::max(
         0.25, request.minimumClearanceMm + request.proxySafetyRadiusMm);
     const double lift = shapingClearance + std::min(10.0, chord * 0.08);
@@ -195,62 +189,53 @@ QVector<lcnc::cam::RapidSurfacePreviewPoint> buildReferenceCurve(
     return buildBezierReference(source.pose, target.pose, request);
 }
 
-QVector<gp_Pnt> workpieceEnvelopePoints(const TopoDS_Shape& workpiece,
-                                        double deflection)
+bool hasFinitePose(const lcnc::cam::RapidPose& pose)
 {
-    QVector<gp_Pnt> result;
-    if (workpiece.IsNull())
-        return result;
-    try {
-        // BRepMesh writes Poly_Triangulation back into faces.  The request
-        // commonly borrows the XCAF workpiece used by the live AIS display;
-        // meshing it here would replace its display mesh with this deliberately
-        // coarse collision envelope and turn circular features into polygons.
-        // Work on a topology/geometry-private copy and never mutate caller BRep.
-        // 中文翻译：碰撞包络网格只能写入私有副本，不能污染实时工件显示网格。
-        BRepBuilderAPI_Copy copy;
-        copy.Perform(workpiece, Standard_True, Standard_False);
-        if (!copy.IsDone())
-            return result;
-        const TopoDS_Shape collisionCopy = copy.Shape();
-        BRepMesh_IncrementalMesh mesh(collisionCopy, std::max(0.25, deflection),
-                                      Standard_False, 0.5, Standard_True);
-        for (TopExp_Explorer explorer(collisionCopy, TopAbs_FACE); explorer.More(); explorer.Next()) {
-            TopLoc_Location location;
-            const Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(
-                TopoDS::Face(explorer.Current()), location);
-            if (triangulation.IsNull())
-                continue;
-            const gp_Trsf transform = location.Transformation();
-            for (int node = 1; node <= triangulation->NbNodes(); ++node)
-                result.append(triangulation->Node(node).Transformed(transform));
-        }
-        if (result.isEmpty()) {
-            for (TopExp_Explorer explorer(collisionCopy, TopAbs_VERTEX); explorer.More(); explorer.Next())
-                result.append(BRep_Tool::Pnt(TopoDS::Vertex(explorer.Current())));
-        }
-    } catch (const Standard_Failure&) {
-        result.clear();
+    for (int axis = 0; axis < lcnc::MachineAxisLayout::kMaxAxes; ++axis) {
+        if (!std::isfinite(pose.axes[axis]) || !std::isfinite(pose.kinematicAxes[axis]))
+            return false;
     }
-    return result;
+    return std::isfinite(pose.tcpX) && std::isfinite(pose.tcpY)
+        && std::isfinite(pose.tcpZ) && std::isfinite(pose.surfaceNormalX)
+        && std::isfinite(pose.surfaceNormalY) && std::isfinite(pose.surfaceNormalZ);
 }
 
-double proxyEnvelopeRadius(const TopoDS_Shape& proxy)
+bool hasValidPlanningInputs(const TravelPlanningRequest& request,
+                            const QVector<TravelEndpointPair>& pairs)
 {
-    if (proxy.IsNull())
-        return 0.0;
-    try {
-        Bnd_Box bounds;
-        BRepBndLib::Add(proxy, bounds);
-        if (bounds.IsVoid())
-            return 0.0;
-        double xMin, yMin, zMin, xMax, yMax, zMax;
-        bounds.Get(xMin, yMin, zMin, xMax, yMax, zMax);
-        return std::max({std::abs(xMin), std::abs(xMax),
-                         std::abs(yMin), std::abs(yMax)});
-    } catch (const Standard_Failure&) {
-        return 0.0;
+    constexpr std::uint8_t kKnownAxes =
+        static_cast<std::uint8_t>((1u << lcnc::MachineAxisLayout::kMaxAxes) - 1u);
+    if (!std::isfinite(request.proxySafetyRadiusMm)
+        || !std::isfinite(request.minimumClearanceMm)
+        || !std::isfinite(request.maximumSafetyOffsetMm)
+        || !std::isfinite(request.collisionSampleStepMm)
+        || !std::isfinite(request.surfacePathStepMm)
+        || request.minimumClearanceMm < 0.0
+        || request.maximumSafetyOffsetMm < 0.0
+        || request.collisionSampleStepMm <= 0.0
+        || request.surfacePathStepMm <= 0.0
+        || request.motionProfile.supportedCoordinatedMask == 0
+        || (request.motionProfile.supportedCoordinatedMask & ~kKnownAxes) != 0) {
+        return false;
     }
+    for (int axis = 0; axis < lcnc::MachineAxisLayout::kMaxAxes; ++axis) {
+        if (!std::isfinite(request.motionProfile.velocity[axis])
+            || !std::isfinite(request.motionProfile.acceleration[axis])
+            || !std::isfinite(request.motionProfile.jerk[axis])) {
+            return false;
+        }
+    }
+    for (const TravelEndpointPair& pair : pairs) {
+        if (!hasFinitePose(pair.source.pose) || !hasFinitePose(pair.target.pose)
+            || !std::isfinite(pair.rapidOffsetMm)
+            || !std::isfinite(pair.sourceCuttingOffsetMm)
+            || !std::isfinite(pair.targetCuttingOffsetMm)
+            || pair.rapidOffsetMm < 0.0
+            || pair.rapidOffsetMm <= pair.sourceCuttingOffsetMm
+            || pair.rapidOffsetMm <= pair.targetCuttingOffsetMm)
+            return false;
+    }
+    return true;
 }
 
 lcnc::cam::RapidSurfacePreviewPoint offsetSample(
@@ -263,32 +248,6 @@ lcnc::cam::RapidSurfacePreviewPoint offsetSample(
     result.y += normal.Y() * offset;
     result.z += normal.Z() * offset;
     return result;
-}
-
-double collisionEnvelopeHeight(
-    const QVector<gp_Pnt>& workpiecePoints,
-    const QVector<lcnc::cam::RapidSurfacePreviewPoint>& route,
-    double proxyRadius,
-    double clearance)
-{
-    double highest = std::max(0.0, clearance);
-    const double corridorRadius = std::max(0.1, proxyRadius + clearance);
-    const double corridorRadius2 = corridorRadius * corridorRadius;
-    for (const auto& sample : route) {
-        const gp_Pnt routePoint(sample.x, sample.y, sample.z);
-        const gp_Vec normal = normalized(gp_Vec(sample.normalX, sample.normalY,
-                                                sample.normalZ));
-        for (const gp_Pnt& obstaclePoint : workpiecePoints) {
-            const gp_Vec delta(routePoint, obstaclePoint);
-            const double axial = delta.Dot(normal);
-            if (axial <= 0.0)
-                continue;
-            const gp_Vec radial = delta - normal * axial;
-            if (radial.SquareMagnitude() <= corridorRadius2)
-                highest = std::max(highest, axial + clearance);
-        }
-    }
-    return highest;
 }
 
 std::uint8_t changedMask(const lcnc::cam::RapidPose& source,
@@ -370,13 +329,6 @@ lcnc::cam::TravelPlanSnapshot TravelPathPlanner::plan(
         : lcnc::cam::TravelPlanningMode::WorkpieceProxy;
     snapshot.minimumClearanceMm = std::numeric_limits<double>::infinity();
 
-    if (request.workpiece.IsNull() || request.cutterCollisionProxy.IsNull()) {
-        snapshot.failureReason = QStringLiteral(
-            "Surface rapid planning requires workpiece and cutter collision geometry");
-        snapshot.stale = false;
-        return snapshot;
-    }
-
     QVector<TravelEndpointPair> pairs = request.transitions;
     if (pairs.isEmpty() && request.endpoints.size() >= 2) {
         pairs.reserve(request.endpoints.size() - 1);
@@ -390,23 +342,29 @@ lcnc::cam::TravelPlanSnapshot TravelPathPlanner::plan(
         return snapshot;
     }
 
-    const QVector<gp_Pnt> envelopePoints = workpieceEnvelopePoints(
-        request.workpiece, request.collisionSampleStepMm);
-    if (envelopePoints.isEmpty()) {
+    if (!hasValidPlanningInputs(request, pairs)) {
         snapshot.failureReason = QStringLiteral(
-            "Unable to build the workpiece collision envelope");
+            "Surface rapid planning received invalid motion or geometric input");
         snapshot.stale = false;
         return snapshot;
     }
-    const double collisionRadius = proxyEnvelopeRadius(request.cutterCollisionProxy);
 
     for (const TravelEndpointPair& pair : pairs) {
         lcnc::cam::RapidTransition transition;
         transition.fromContourId = pair.source.contourId;
         transition.toContourId = pair.target.contourId;
         transition.pathKind = lcnc::cam::RapidPathKind::SurfaceOffset;
-        transition.surfacePreviewPoints = buildReferenceCurve(
-            pair.source, pair.target, request);
+        TravelEndpoint baseSource = pair.source;
+        TravelEndpoint baseTarget = pair.target;
+        const gp_Vec sourceNormal = normalized(normalOf(pair.source.pose));
+        const gp_Vec targetNormal = normalized(normalOf(pair.target.pose));
+        baseSource.pose.tcpX -= sourceNormal.X() * pair.sourceCuttingOffsetMm;
+        baseSource.pose.tcpY -= sourceNormal.Y() * pair.sourceCuttingOffsetMm;
+        baseSource.pose.tcpZ -= sourceNormal.Z() * pair.sourceCuttingOffsetMm;
+        baseTarget.pose.tcpX -= targetNormal.X() * pair.targetCuttingOffsetMm;
+        baseTarget.pose.tcpY -= targetNormal.Y() * pair.targetCuttingOffsetMm;
+        baseTarget.pose.tcpZ -= targetNormal.Z() * pair.targetCuttingOffsetMm;
+        transition.surfacePreviewPoints = buildReferenceCurve(baseSource, baseTarget, request);
         if (transition.surfacePreviewPoints.size() < 2) {
             transition.failureReason = QStringLiteral(
                 "Unable to build a surface reference curve between contours");
@@ -422,53 +380,41 @@ lcnc::cam::TravelPlanSnapshot TravelPathPlanner::plan(
 
         lcnc::cam::RapidPose previous = pair.source.pose;
         const int last = transition.surfacePreviewPoints.size() - 1;
-        QVector<lcnc::cam::RapidSurfacePreviewPoint> envelopeRoute;
-        const int routeStride = std::max(1, static_cast<int>(std::ceil(
-            std::max(request.collisionSampleStepMm, request.surfacePathStepMm)
-            / std::max(0.25, request.surfacePathStepMm))));
-        for (int index = 0; index <= last; index += routeStride)
-            envelopeRoute.append(transition.surfacePreviewPoints.at(index));
-        if (envelopeRoute.back().x != transition.surfacePreviewPoints.back().x
-            || envelopeRoute.back().y != transition.surfacePreviewPoints.back().y
-            || envelopeRoute.back().z != transition.surfacePreviewPoints.back().z) {
-            envelopeRoute.append(transition.surfacePreviewPoints.back());
-        }
-        const double safetyHeight = collisionEnvelopeHeight(
-            envelopePoints, envelopeRoute, collisionRadius,
-            request.minimumClearanceMm);
-        if (safetyHeight > request.maximumSafetyOffsetMm + kEpsilon) {
-            transition.failureReason = QStringLiteral(
-                "The workpiece collision envelope exceeds the configured maximum rapid safety offset");
-            snapshot.transitions.append(transition);
-            if (snapshot.failureReason.isEmpty())
-                snapshot.failureReason = transition.failureReason;
-            continue;
-        }
 
         struct ExecutionSample {
             lcnc::cam::RapidSurfacePreviewPoint point;
             double progress{0.0};
+            lcnc::cam::RapidSegmentPhase phase{lcnc::cam::RapidSegmentPhase::Traverse};
         };
         QVector<ExecutionSample> executionSamples;
-        if (safetyHeight > kEpsilon) {
-            // One normal ascent, a small number of raised curve samples, then
-            // one normal descent.  No exact solid-distance loop is involved.
-            executionSamples.append({offsetSample(
-                transition.surfacePreviewPoints.front(), safetyHeight), 0.0});
-            for (int index = routeStride; index < last; index += routeStride) {
-                executionSamples.append({offsetSample(
-                    transition.surfacePreviewPoints.at(index), safetyHeight),
-                    static_cast<double>(index) / last});
-            }
-            executionSamples.append({offsetSample(
-                transition.surfacePreviewPoints.back(), safetyHeight), 1.0});
-            executionSamples.append({transition.surfacePreviewPoints.back(), 1.0});
-        } else {
-            for (int index = 1; index <= last; ++index) {
-                executionSamples.append({transition.surfacePreviewPoints.at(index),
-                    static_cast<double>(index) / last});
-            }
+        // Strict three-phase geometry: one normal retract at the source,
+        // surface-normal-offset traverse samples, and one normal approach to
+        // the already offset cutting/lead-in target.
+        executionSamples.append({offsetSample(transition.surfacePreviewPoints.front(),
+                                               pair.rapidOffsetMm), 0.0,
+                                 lcnc::cam::RapidSegmentPhase::Retract});
+        for (int index = 1; index <= last; ++index) {
+            executionSamples.append({offsetSample(transition.surfacePreviewPoints.at(index),
+                                                   pair.rapidOffsetMm),
+                                     static_cast<double>(index) / last,
+                                     lcnc::cam::RapidSegmentPhase::Traverse});
         }
+        executionSamples.append({
+            {pair.target.pose.tcpX, pair.target.pose.tcpY, pair.target.pose.tcpZ,
+             pair.target.pose.surfaceNormalX, pair.target.pose.surfaceNormalY,
+             pair.target.pose.surfaceNormalZ},
+            1.0, lcnc::cam::RapidSegmentPhase::Approach});
+
+        QVector<lcnc::cam::RapidSurfacePreviewPoint> executablePreview;
+        executablePreview.reserve(executionSamples.size() + 1);
+        appendPreview(&executablePreview, pointOf(pair.source.pose), normalOf(pair.source.pose));
+        for (const ExecutionSample& sample : std::as_const(executionSamples)) {
+            appendPreview(&executablePreview,
+                          gp_Pnt(sample.point.x, sample.point.y, sample.point.z),
+                          gp_Vec(sample.point.normalX, sample.point.normalY,
+                                 sample.point.normalZ));
+        }
+        transition.surfacePreviewPoints = std::move(executablePreview);
 
         for (const ExecutionSample& sample : std::as_const(executionSamples)) {
             const double t = sample.progress;
@@ -489,11 +435,12 @@ lcnc::cam::TravelPlanSnapshot TravelPathPlanner::plan(
             const double length = pointOf(previous).Distance(pointOf(target));
             transition.segments.append({target, mask,
                                         lcnc::cam::RapidSynchronization::Coordinated,
-                                        time, request.minimumClearanceMm});
+                                        time, request.minimumClearanceMm, sample.phase});
             transition.estimatedTimeMs += time;
             transition.pathLengthMm += length;
             transition.maximumSurfaceOffsetMm = std::max(
-                transition.maximumSurfaceOffsetMm, safetyHeight);
+                transition.maximumSurfaceOffsetMm,
+                std::abs(pair.rapidOffsetMm));
             previous = std::move(target);
         }
 

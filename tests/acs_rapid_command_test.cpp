@@ -97,8 +97,6 @@ int main(int argc, char* argv[])
     rapidTool.m_dLineVelocity = 100.0;
     rapidTool.m_dLineAcc = 100.0;
     rapidTool.m_dLineJerk = 1000.0;
-    rapidTool.m_dCuttingHeight = 0.0;
-    rapidTool.m_dCuttingHeightCompensate = 0.0;
 
     lcnc::process::MachinePose5 first;
     first.mask = lcnc::process::MachinePose5::Bx

@@ -204,8 +204,6 @@ public:
 
 	// IMotionCommandSink 切割管线入口（仅 GtnBufferedCommandSink 调用）
 	virtual bool SetJumpAccJerk(const Tool&);
-	virtual void JumpToIdleHeight(const Tool& curTool, double dCompensate = 0);
-	virtual void JumpToCuttingHeight(const Tool& curTool, double dCompensate = 0);
 	virtual void JumpToIdleXYPosition(double dEndX, double dEndY, const Tool& curTool);
 	virtual void ProLaserControl(bool, bool, const Tool&, bool);
 	virtual bool InitCrd(const Tool& curTool);

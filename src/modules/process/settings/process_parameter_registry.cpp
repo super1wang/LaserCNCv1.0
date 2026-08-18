@@ -221,9 +221,7 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
             // 中文翻译：切割加加速度；切割
             field("cutJerk", QObject::tr("Cutting jerk"), QObject::tr("cutting"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutJerk", 1000.0, {}, 0.0),
             // 中文翻译：切割高度增量；高度
-            field("cuttingHeight", QObject::tr("Cutting height increment"), QObject::tr("height"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCuttingHeight", 0.0, "mm"),
             // 中文翻译：空程高度增量；高度
-            field("idleHeight", QObject::tr("Idle height increment"), QObject::tr("height"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdleHeight", 0.0, "mm"),
             // 中文翻译：空程加速度
             field("jumpAcceleration", QObject::tr("Idle acceleration"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelAcc", 100.0, {}, 0.0),
             // 中文翻译：空程加加速度

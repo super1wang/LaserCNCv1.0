@@ -1,6 +1,8 @@
 #include "modules/simulation/simulation_module.h"
 
 #include "core/document/lcnc_document.h"
+#include "core/algorithms/cam/collision_scan_policy.h"
+#include "core/algorithms/occt_exact_operation_lock.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
@@ -9,8 +11,7 @@
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
 #include "modules/cam/cam_module.h"
-#include "modules/cam/i_cam_contour_sequence_provider.h"
-#include "modules/cam/i_cam_tool_offset_provider.h"
+#include "modules/cam/i_cam_toolpath_provider.h"
 #include "view/gui_document.h"
 #include "view/machine_guide_renderer.h"
 #include "view/toolpath_renderer.h"
@@ -18,19 +19,15 @@
 #include "view/widget_occ_view.h"
 
 #include <AIS_Shape.hxx>
-#include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
-#include <BRepExtrema_ShapeProximity.hxx>
-#include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <Bnd_Box.hxx>
 #include <Bnd_OBB.hxx>
 #include <Graphic3d_Camera.hxx>
-#include <GProp_GProps.hxx>
 #include <OSD_Parallel.hxx>
 #include <OSD_ThreadPool.hxx>
 #include <TDF_LabelSequence.hxx>
@@ -60,6 +57,7 @@
 #include <atomic>
 #include <cmath>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace {
@@ -86,9 +84,6 @@ struct SimulationNode {
     double normalX{0.0};
     double normalY{0.0};
     double normalZ{1.0};
-    // CAM's configured idle-height/tool offset applies to rapid travel only,
-    // matching the rapid trajectory displayed by CamModule.
-    double rapidToolOffsetMm{0.0};
 };
 
 /// Collision geometry is deliberately decomposed more finely than its view
@@ -102,8 +97,7 @@ struct CollisionLeaf {
     Bnd_OBB localObb;
 };
 
-QVector<CollisionLeaf> buildCollisionLeaves(const TopoDS_Shape& source,
-                                             double meshDeflectionMm);
+QVector<CollisionLeaf> buildCollisionLeaves(const TopoDS_Shape& source);
 
 struct CollisionGeometry {
     QVector<CollisionLeaf> leaves;
@@ -127,44 +121,39 @@ struct SimulationBody {
     Handle(AIS_Shape) ais;
 };
 
-CollisionGeometry buildCollisionGeometry(const TopoDS_Shape& source,
-                                         double meshDeflectionMm)
+CollisionGeometry buildCollisionGeometry(const TopoDS_Shape& source)
 {
     CollisionGeometry result;
     if (source.IsNull())
         return result;
-    // Meshing stores triangulation on a TShape. Deep-copy first so the
-    // background preparation task never mutates geometry rendered by the GUI.
-    // 中文翻译：后台建网格前深拷贝，绝不修改 GUI 正在渲染的原始 TShape。
+    // Keep a private immutable topology and calculate bounds directly from
+    // BRep. Collision workers therefore never create or share mesh caches.
+    // 中文翻译：碰撞几何使用私有只读拓扑，并直接按 BRep 计算包围盒，不共享网格缓存。
     BRepBuilderAPI_Copy copy(source, Standard_True, Standard_True);
     const TopoDS_Shape collisionShape = copy.IsDone() ? copy.Shape() : TopoDS_Shape{};
     if (collisionShape.IsNull())
         return result;
-    BRepBndLib::AddOptimal(collisionShape, result.groupAabb, Standard_True, Standard_False);
-    BRepBndLib::AddOBB(collisionShape, result.groupObb, Standard_True, Standard_False,
+    BRepBndLib::AddOptimal(collisionShape, result.groupAabb, Standard_False, Standard_False);
+    BRepBndLib::AddOBB(collisionShape, result.groupObb, Standard_False, Standard_False,
                         Standard_False);
-    result.leaves = buildCollisionLeaves(collisionShape, meshDeflectionMm);
+    result.leaves = buildCollisionLeaves(collisionShape);
     return result;
 }
 
-QVector<CollisionLeaf> buildCollisionLeaves(const TopoDS_Shape& source,
-                                             double meshDeflectionMm)
+QVector<CollisionLeaf> buildCollisionLeaves(const TopoDS_Shape& source)
 {
     QVector<CollisionLeaf> leaves;
     if (source.IsNull())
         return leaves;
 
     TopTools_MapOfShape seen;
-    const auto append = [&leaves, &seen, meshDeflectionMm](const TopoDS_Shape& shape) {
+    const auto append = [&leaves, &seen](const TopoDS_Shape& shape) {
         if (shape.IsNull() || !seen.Add(shape))
             return;
-        // ShapeProximity uses an existing triangulation as a read-only BVH.
-        // Build it once for the frozen session, never during every pose scan.
-        BRepMesh_IncrementalMesh mesh(shape, meshDeflectionMm);
         CollisionLeaf leaf;
         leaf.shape = shape;
-        BRepBndLib::AddOptimal(shape, leaf.localAabb, Standard_True, Standard_False);
-        BRepBndLib::AddOBB(shape, leaf.localObb, Standard_True, Standard_False,
+        BRepBndLib::AddOptimal(shape, leaf.localAabb, Standard_False, Standard_False);
+        BRepBndLib::AddOBB(shape, leaf.localObb, Standard_False, Standard_False,
                             Standard_False);
         if (!leaf.localAabb.IsVoid() && !leaf.localObb.IsVoid())
             leaves.append(std::move(leaf));
@@ -271,12 +260,9 @@ gp_Trsf cutterProxyTransform(const SimulationNode& node, const gp_Pnt& headTip)
     if (normal.SquareMagnitude() <= 1e-16)
         normal = gp_Vec(0.0, 0.0, 1.0);
     normal.Normalize();
-    // The visual cutter follows the identical head-tip computation used by
-    // the normal machine view.  Rapid tool height is then applied only to the
-    // collision proxy, using the already world-space rapid surface normal.
-    const gp_Pnt tip(headTip.X() + normal.X() * node.rapidToolOffsetMm,
-                     headTip.Y() + normal.Y() * node.rapidToolOffsetMm,
-                     headTip.Z() + normal.Z() * node.rapidToolOffsetMm);
+    // The visual and collision cutter follows the solved machine pose exactly.
+    // CAM has already included any rapid offset before solving these axes.
+    const gp_Pnt tip = headTip;
     // The shared CAM proxy has its tip at local origin and longitudinal axis
     // along +Z.  Map that local frame directly onto the solved TCP frame.
     gp_Trsf trsf;
@@ -307,30 +293,41 @@ public:
         QElapsedTimer openTimer;
         openTimer.start();
         auto* cam = lcnc::Kernel::current().service<CamModule>();
-        auto sequence = lcnc::Kernel::current().service<lcnc::cam::ICamContourSequenceProvider>();
-        if (!cam || !sequence || !cam->hasToolpath() || !cam->kinematics()) {
+        auto toolpathProvider = lcnc::Kernel::current().service<lcnc::cam::ICamToolpathProvider>();
+        if (!cam || !toolpathProvider || !cam->hasToolpath() || !cam->kinematics()) {
             if (error) *error = QObject::tr("A solved CAM toolpath and machine kinematics are required");
             return nullptr;
         }
         m_sourceRevision = cam->toolpathRevision();
-        const auto order = sequence->contourSequence();
-        const auto snapshot = cam->exportToolpathSnapshotForOrder(
-            QVector<std::uint64_t>(order.orderedContourIds.cbegin(), order.orderedContourIds.cend()));
+        const auto snapshot = toolpathProvider->exportCommittedExecutionSnapshot();
+        if (!snapshot.motionPlan.collision.complete
+            || snapshot.motionPlan.collision.state
+                == lcnc::cam::CollisionValidationState::Pending) {
+            if (error) {
+                *error = QObject::tr(
+                    "CAM collision validation is still running; wait for the CAM task to finish before entering offline simulation.");
+            }
+            return nullptr;
+        }
+        QVector<lcnc::cam::ContourId> orderedContourIds;
+        orderedContourIds.reserve(snapshot.contours.size());
+        for (const auto& contour : snapshot.contours)
+            orderedContourIds.append(contour.contourId);
         const qint64 snapshotMs = openTimer.elapsed();
-        if (order.orderedContourIds.isEmpty() || snapshot.machineConfigurationFingerprint.isEmpty()) {
+        if (orderedContourIds.isEmpty() || snapshot.machineConfigurationFingerprint.isEmpty()) {
             if (error) *error = QObject::tr("The CAM contour sequence has not been solved for the current machine");
             return nullptr;
         }
-        // An unavailable rapid plan must never prevent inspection of an already
-        // solved cutting path.  Process still rejects that plan for machining,
-        // while this read-only sandbox presents the available CAM result and
-        // deliberately omits unverified rapid segments.
-        // 中文翻译：空程未验证时仍可只读回放已求解的切割刀路；未验证空程不投影。
+        // A collision result makes a plan non-executable, but does not erase
+        // its already solved rapid nodes.  The sandbox must retain those nodes
+        // so an operator can replay the exact offending movement.  Only omit
+        // rapid geometry when planning itself produced no transition.
+        // 中文翻译：碰撞会使计划不可执行，但不应抹掉已求解空程；沙箱须回放异常运动，仅在规划本身没有过渡节点时省略空程。
         const bool includeRapid = !snapshot.travelPlan.stale
-            && snapshot.travelPlan.failureReason.isEmpty();
-        const auto rapidOffsets = rapidToolOffsets(snapshot);
-        captureSceneSnapshot(cam, snapshot, rapidOffsets);
-        if (!buildNodes(snapshot, order.orderedContourIds, includeRapid, rapidOffsets, error) || m_nodes.isEmpty()) {
+            && (snapshot.travelPlan.failureReason.isEmpty()
+                || !snapshot.travelPlan.transitions.isEmpty());
+        captureSceneSnapshot(cam, snapshot);
+        if (!buildNodes(snapshot, orderedContourIds, includeRapid, error) || m_nodes.isEmpty()) {
             if (error && error->isEmpty())
                 *error = QObject::tr("The current CAM sequence has no resolved cutting nodes");
             return nullptr;
@@ -366,10 +363,12 @@ public:
             m_status->setText(QObject::tr("Collision detection is disabled; simulation playback is not verified."));
         } else if (!m_collisionConfigurationValid) {
             m_status->setText(QObject::tr("Collision detection is enabled but the active/passive source configuration is incomplete."));
+        } else if (snapshot.motionPlan.collision.complete) {
+            m_status->setText(QObject::tr("Showing collision validation completed by CAM."));
         } else {
             m_status->setText(includeRapid
-                ? QObject::tr("Scanning collisions…")
-                : QObject::tr("Rapid travel is unavailable; simulating solved cutting path only. Scanning collisions…"));
+                ? QObject::tr("CAM collision validation is pending; offline simulation will not start another scan.")
+                : QObject::tr("Rapid travel is unavailable; simulating solved cutting path only. CAM collision validation is pending."));
         }
         // GuiDocument deliberately owns the same CAM-view rendering profile
         // and colour settings as the main machine view.  Submit the whole
@@ -424,14 +423,10 @@ public:
             if (!m_sceneSnapshot.camera.IsNull() && !m_gui->view().IsNull())
                 m_gui->view()->SetCamera(m_sceneSnapshot.camera);
             if (m_slider) applyNode(m_slider->value());
-            // Let the newly selected tab paint its first frame before the
-            // scanner starts to consume a worker.  View attachment already
-            // frames registered objects, so a second synchronous FitAll here
-            // only duplicated expensive first-frame work.
-            // 中文翻译：先完成新标签首帧，再启动后台扫描；attach 已适配视图，不再重复 FitAll。
-            QTimer::singleShot(0, m_page, [this] {
-                if (m_page && !m_scanStarted) startCollisionScan();
-            });
+            // Collision validation is deliberately CAM-owned.  The sandbox
+            // only renders the immutable CAM result and never starts a second
+            // expensive scan that could disagree with the machining preflight.
+            // 中文翻译：碰撞校验统一归 CAM 所有；沙箱只显示不可变结果，绝不重复启动可能与加工前检查不一致的扫描。
         });
         m_timer = new QTimer(m_page);
         m_timer->setInterval(16);
@@ -447,6 +442,20 @@ public:
             applyNode(value);
         });
         m_collisionStates.fill(-1, m_nodes.size());
+        if (snapshot.motionPlan.collision.complete
+            && snapshot.motionPlan.collision.nodeStates.size() == m_nodes.size()) {
+            for (int index = 0; index < m_nodes.size(); ++index) {
+                switch (snapshot.motionPlan.collision.nodeStates.at(index)) {
+                case lcnc::cam::CollisionValidationState::Safe: m_collisionStates[index] = 0; break;
+                case lcnc::cam::CollisionValidationState::Warning: m_collisionStates[index] = 2; break;
+                case lcnc::cam::CollisionValidationState::Collision: m_collisionStates[index] = 1; break;
+                case lcnc::cam::CollisionValidationState::Indeterminate: m_collisionStates[index] = 3; break;
+                default: m_collisionStates[index] = -1; break;
+                }
+            }
+            m_scanStarted = true;
+            m_scanFinished = true;
+        }
         m_timeline->setStates(m_collisionStates);
         LCNC_INFO(lcnc::LogCode::Generic,
                   "Offline simulation prepared: nodes={}, rapidSegmentsIncluded={}, machineBodies={}, workpieceBodies={}, mountedWorkpieces={}, snapshotMs={}, projectionMs={}",
@@ -468,7 +477,7 @@ public:
             m_playing = true;
             if (m_status) m_status->setText(m_scanFinished
                     ? QObject::tr("Running at %1x").arg(m_speed, 0, 'g', 3)
-                    : QObject::tr("Running at %1x while collision scanning continues").arg(m_speed, 0, 'g', 3));
+                    : QObject::tr("Running at %1x; CAM collision validation is pending").arg(m_speed, 0, 'g', 3));
             m_timer->start();
         }
     }
@@ -506,13 +515,10 @@ public:
         if (m_travelPathRenderer && m_gui)
             m_travelPathRenderer->erase(m_gui);
         if (m_gui && m_gui->scene()) {
-            if (!m_intersectionAis.IsNull()) m_gui->scene()->removeShape(m_intersectionAis, false);
             for (const auto& body : std::as_const(m_bodies))
                 if (!body.ais.IsNull()) m_gui->scene()->removeShape(body.ais, false);
         }
         m_bodies.clear();
-        m_intersectionCache.clear();
-        m_intersectionLru.clear();
         m_toolpathRenderer.reset();
         m_travelPathRenderer.reset();
         m_guideRenderer.reset();
@@ -522,27 +528,8 @@ public:
     }
 
 private:
-    QHash<std::uint64_t, double> rapidToolOffsets(
-        const lcnc::cam::ToolpathExportSnapshot& snapshot) const
-    {
-        QHash<std::uint64_t, double> result;
-        const auto offsets = lcnc::Kernel::current().services()
-            .getService<lcnc::cam::ICamToolOffsetProvider>();
-        if (!offsets)
-            return result;
-        for (const auto& contour : snapshot.contours) {
-            double offsetMm = 0.0;
-            if (!contour.toolName.trimmed().isEmpty()
-                && offsets->rapidDisplayOffsetMm(contour.toolName, &offsetMm)) {
-                result.insert(contour.contourId, offsetMm);
-            }
-        }
-        return result;
-    }
-
     void captureSceneSnapshot(CamModule* cam,
-                              const lcnc::cam::ToolpathExportSnapshot& snapshot,
-                              const QHash<std::uint64_t, double>& rapidOffsets)
+                              const lcnc::cam::ToolpathExportSnapshot& snapshot)
     {
         m_sceneSnapshot.toolpath = cam->toolpath();
         m_sceneSnapshot.cutterHeadModelPosition = cam->cutterHeadModelPosition();
@@ -579,13 +566,10 @@ private:
             segment.contourId = transition.toContourId;
             segment.workpieceEntry = source->workpieceEntry;
             segment.verified = snapshot.travelPlan.isExecutable();
-            const double offsetMm = rapidOffsets.value(transition.toContourId);
             const auto& points = transition.workpieceLocalPreviewPoints.isEmpty()
                 ? transition.surfacePreviewPoints : transition.workpieceLocalPreviewPoints;
             for (const auto& point : points) {
-                segment.waypoints.append({point.x + point.normalX * offsetMm,
-                                          point.y + point.normalY * offsetMm,
-                                          point.z + point.normalZ * offsetMm});
+                segment.waypoints.append({point.x, point.y, point.z});
             }
             m_sceneSnapshot.rapidSegments.append(std::move(segment));
         }
@@ -594,9 +578,28 @@ private:
     bool buildNodes(const lcnc::cam::ToolpathExportSnapshot& snapshot,
                     const QVector<lcnc::cam::ContourId>& order,
                     bool includeRapid,
-                    const QHash<std::uint64_t, double>& rapidOffsetByContour,
                     QString* error)
     {
+        // CAM publishes the complete final-coordinate motion sequence.  Do
+        // not reconstruct a different path in the sandbox when it is present.
+        if (!snapshot.motionPlan.nodes.isEmpty()) {
+            for (const auto& item : snapshot.motionPlan.nodes) {
+                if (!includeRapid && item.phase == lcnc::cam::CamMotionPhase::Rapid)
+                    continue;
+                SimulationNode node;
+                node.kind = item.phase == lcnc::cam::CamMotionPhase::Rapid ? NodeKind::Rapid
+                    : item.phase == lcnc::cam::CamMotionPhase::LeadIn ? NodeKind::LeadIn
+                    : NodeKind::Cutting;
+                node.contourId = item.contourId;
+                node.axes = item.axes;
+                node.mask = item.axisMask;
+                node.durationMs = qMax(1.0, item.estimatedTimeMs);
+                node.tcpX = item.tcpX; node.tcpY = item.tcpY; node.tcpZ = item.tcpZ;
+                node.normalX = item.normalX; node.normalY = item.normalY; node.normalZ = item.normalZ;
+                m_nodes.append(std::move(node));
+            }
+            return !m_nodes.isEmpty();
+        }
         QHash<std::uint64_t, const lcnc::cam::ToolpathExportContour*> contourById;
         for (const auto& contour : snapshot.contours) contourById.insert(contour.contourId, &contour);
         for (const auto id : order) {
@@ -608,16 +611,11 @@ private:
                 // source pose once so the virtual nozzle follows the complete
                 // offset rapid curve from its first millimetre, rather than
                 // jumping from the preceding cutting TCP to the first target.
-                if (!m_nodes.isEmpty() && !transition->surfacePreviewPoints.isEmpty()) {
+                if (!m_nodes.isEmpty()) {
                     SimulationNode source = m_nodes.constLast();
-                    const auto& preview = transition->surfacePreviewPoints.constFirst();
                     source.kind = NodeKind::Rapid;
                     source.contourId = id;
                     source.durationMs = 1.0;
-                    source.tcpX = preview.x; source.tcpY = preview.y; source.tcpZ = preview.z;
-                    source.normalX = preview.normalX; source.normalY = preview.normalY;
-                    source.normalZ = preview.normalZ;
-                    source.rapidToolOffsetMm = rapidOffsetByContour.value(id);
                     m_nodes.append(source);
                 }
                 for (const auto& segment : transition->segments) {
@@ -629,7 +627,6 @@ private:
                     node.normalX = segment.target.surfaceNormalX;
                     node.normalY = segment.target.surfaceNormalY;
                     node.normalZ = segment.target.surfaceNormalZ;
-                    node.rapidToolOffsetMm = rapidOffsetByContour.value(id);
                     m_nodes.append(node);
                 }
             }
@@ -804,12 +801,13 @@ private:
         // 中文翻译：冻结轮廓按 CAM 域投影，再复用正式 View 的引入线、法线和空程渲染器。
         for (int index = 0; index < m_sceneSnapshot.toolpath.contourCount(); ++index) {
             const LaserContour& contour = m_sceneSnapshot.toolpath.contour(index);
-            if (contour.contourId == 0 || contour.wire.IsNull())
+            if (contour.contourId == 0 || contour.points.size() < 2)
                 continue;
             const QString name = contour.name.isEmpty()
                 ? QObject::tr("Outline %1").arg(index + 1) : contour.name;
             const Handle(AIS_Shape) ais = m_gui->displayContourBody(
-                contour.contourId, contour.wire, name,
+                contour.contourId,
+                LaserToolpathBuilder::buildOffsetDisplayShape(contour), name,
                 /*updateViewer=*/false, /*configureSelection=*/false);
             if (ais.IsNull())
                 continue;
@@ -983,9 +981,6 @@ private:
         sources.reserve(m_bodies.size());
         for (const SimulationBody& body : std::as_const(m_bodies))
             sources.append({body.shape, body.collisionActive || body.collisionPassive});
-        const double meshDeflectionMm = qBound(0.05,
-            lcnc::Kernel::current().service<CamModule>()->config().cutterCollisionClearanceMm() * 0.5,
-            0.25);
         const quint64 generation = m_generation;
         auto geometry = std::make_shared<QVector<CollisionGeometry>>(sources.size());
         TaskSpec spec;
@@ -994,14 +989,19 @@ private:
         spec.userVisible = true;
         spec.cancellable = true;
         m_collisionPreparationTask = tasks->run(spec,
-            [sources, meshDeflectionMm, geometry](TaskProgress* progress) {
+            [sources, geometry](TaskProgress* progress) {
                 progress->setRange(0, qMax(1, sources.size()));
+                std::unique_lock<std::timed_mutex> scanLock(
+                    lcnc::cam_algo::collisionScanExecutionMutex(), std::defer_lock);
+                if (!lcnc::cam_algo::acquireCollisionScanExecution(scanLock, [progress]() {
+                        return progress->isAbortRequested();
+                    }))
+                    return;
                 for (int index = 0; index < sources.size(); ++index) {
                     if (progress->isAbortRequested())
                         return;
                     if (sources.at(index).needed)
-                        geometry->operator[](index) = buildCollisionGeometry(
-                            sources.at(index).shape, meshDeflectionMm);
+                        geometry->operator[](index) = buildCollisionGeometry(sources.at(index).shape);
                     progress->setValue(index + 1);
                 }
             });
@@ -1066,11 +1066,16 @@ private:
         QVector<SimulationBody> passiveBodies;
         QVector<int> activeIndices;
         QVector<int> passiveIndices;
+        QSet<QString> activeSourceSet;
         activeBodies.reserve(m_bodies.size());
         passiveBodies.reserve(m_bodies.size());
         for (int index = 0; index < m_bodies.size(); ++index) {
             const auto& body = m_bodies.at(index);
-            if (body.collisionActive) { activeBodies.append(body); activeIndices.append(index); }
+            if (body.collisionActive) {
+                activeBodies.append(body);
+                activeIndices.append(index);
+                activeSourceSet.insert(body.collisionSource);
+            }
             if (body.collisionPassive) { passiveBodies.append(body); passiveIndices.append(index); }
         }
         const auto axes = m_kinematics.axes();
@@ -1080,6 +1085,8 @@ private:
         const auto mounts = m_kinematics.wpcMounts();
         const auto layout = m_layout;
         const auto cutterHeadModelPosition = m_sceneSnapshot.cutterHeadModelPosition;
+        const QStringList activeSources =
+            lcnc::cam_algo::orderedActiveCollisionSources(activeSourceSet);
         const double clearanceMm = lcnc::Kernel::current().service<CamModule>()->config()
             .cutterCollisionClearanceMm();
         const quint64 generation = m_generation;
@@ -1090,11 +1097,18 @@ private:
         auto progressMutex = std::make_shared<QMutex>();
         auto completed = std::make_shared<std::atomic_int>(0);
         TaskSpec spec; spec.label = QObject::tr("Offline collision scan"); spec.scope = QStringLiteral("simulation.collision"); spec.userVisible = false;
-        m_scanTask = tasks->run(spec, [nodes, activeBodies, passiveBodies, activeIndices,
+        m_scanTask = tasks->run(spec, [nodes, activeBodies, passiveBodies, activeIndices, activeSources,
             passiveIndices, axes, config, workpieceSetup, assignments, mounts, layout,
             cutterHeadModelPosition, clearanceMm, result, pairs, resultMutex, progressMutex,
             completed](TaskProgress* progress) {
-            progress->setRange(0, qMax(1, nodes.size()));
+            const int scanSteps = nodes.size() * activeSources.size();
+            progress->setRange(0, qMax(1, scanSteps));
+            std::unique_lock<std::timed_mutex> scanLock(
+                lcnc::cam_algo::collisionScanExecutionMutex(), std::defer_lock);
+            if (!lcnc::cam_algo::acquireCollisionScanExecution(scanLock, [progress]() {
+                    return progress->isAbortRequested();
+                }))
+                return;
             const int threadCount = qMin(4, qMax(1, OSD_Parallel::NbLogicalProcessors() / 2));
             auto workerKinematics = std::make_shared<std::vector<std::unique_ptr<MachineKinematics>>>();
             workerKinematics->reserve(static_cast<std::size_t>(threadCount));
@@ -1108,10 +1122,15 @@ private:
             }
             Handle(OSD_ThreadPool) pool = new OSD_ThreadPool(threadCount);
             OSD_ThreadPool::Launcher launcher(*pool, threadCount);
-            launcher.Perform(0, nodes.size(), [nodes, activeBodies, passiveBodies,
+            for (int phase = 0; phase < activeSources.size(); ++phase) {
+                if (progress->isAbortRequested())
+                    break;
+                const QString activeSource = activeSources.at(phase);
+                const bool finalPhase = phase + 1 == activeSources.size();
+                launcher.Perform(0, nodes.size(), [nodes, activeBodies, passiveBodies,
                 activeIndices, passiveIndices, axes, layout, cutterHeadModelPosition,
-                clearanceMm, result, pairs, resultMutex, progressMutex, completed,
-                workerKinematics, progress](int threadIndex, int n) {
+                activeSource, finalPhase, scanSteps, clearanceMm, result, pairs, resultMutex,
+                progressMutex, completed, workerKinematics, progress](int threadIndex, int n) {
                 if (progress->isAbortRequested()) return;
                 // Every OCCT worker owns a distinct kinematics state and all
                 // narrow phase instances below have their internal parallelism disabled.
@@ -1159,11 +1178,14 @@ private:
                                           : kin.computeShapeTransform(body.id));
                     return trsf;
                 };
-                const auto appendGroups = [&bodyTransformForNode, clearanceMm](const QVector<SimulationBody>& bodies,
-                                                                                  const QVector<int>& bodyIndices,
-                                                                                  QVector<PoseGroup>* target) {
+                const auto appendGroups = [&bodyTransformForNode, clearanceMm, &activeSource](const QVector<SimulationBody>& bodies,
+                                                                                   const QVector<int>& bodyIndices,
+                                                                                   bool activeSet,
+                                                                                   QVector<PoseGroup>* target) {
                     for (int body = 0; body < bodies.size(); ++body) {
                         const SimulationBody& source = bodies.at(body);
+                        if (activeSet && source.collisionSource != activeSource)
+                            continue;
                         if (source.collisionGroupAabb.IsVoid() || source.collisionGroupObb.IsVoid())
                             continue;
                         const gp_Trsf trsf = bodyTransformForNode(source);
@@ -1172,8 +1194,8 @@ private:
                             transformObb(source.collisionGroupObb, trsf, clearanceMm)});
                     }
                 };
-                appendGroups(activeBodies, activeIndices, &activeGroups);
-                appendGroups(passiveBodies, passiveIndices, &passiveGroups);
+                appendGroups(activeBodies, activeIndices, true, &activeGroups);
+                appendGroups(passiveBodies, passiveIndices, false, &passiveGroups);
                 QSet<int> activeRelevant;
                 QSet<int> passiveRelevant;
                 for (const PoseGroup& active : activeGroups) for (const PoseGroup& passive : passiveGroups) {
@@ -1206,7 +1228,6 @@ private:
                 };
                 appendLeaves(activeBodies, activeIndices, activeRelevant, &activeLeaves);
                 appendLeaves(passiveBodies, passiveIndices, passiveRelevant, &passiveLeaves);
-                const double meshDeflectionMm = qBound(0.05, clearanceMm * 0.5, 0.25);
                 for (int a = 0; a < activeLeaves.size(); ++a) for (int b = 0; b < passiveLeaves.size(); ++b) {
                     if (progress->isAbortRequested()) return;
                     const PoseLeaf& active = activeLeaves.at(a);
@@ -1224,20 +1245,6 @@ private:
                         if (one.IsNull() || two.IsNull()) {
                             pairState = 3;
                         }
-                        // This mesh BVH stage removes the vast majority of
-                        // AABB/OBB candidates caused by a large sparse axis
-                        // Compound. It is deliberately never a final verdict.
-                        if (pairState == 0) {
-                            BRepExtrema_ShapeProximity proximity(one, two,
-                                clearanceMm + meshDeflectionMm);
-                            proximity.Perform();
-                            if (!proximity.IsDone()) {
-                                pairState = 3;
-                            } else if (proximity.OverlapSubShapes1().Extent() == 0
-                                       || proximity.OverlapSubShapes2().Extent() == 0) {
-                                continue;
-                            }
-                        }
                         if (pairState == 3) {
                             const int severity = 3;
                             if (severity > worstSeverity) {
@@ -1247,29 +1254,39 @@ private:
                             }
                             continue;
                         }
+                        lcnc::OcctExactOperationLock exactOperationLock;
                         BRepExtrema_DistShapeShape distance(one, two);
+                        distance.SetDeflection(0.025);
                         distance.SetMultiThread(Standard_False);
                         distance.Perform();
                         if (!distance.IsDone()) {
                             pairState = 3;
                         } else if (distance.Value() <= Precision::Confusion()) {
-                            // Confirm only candidate leaf-pair penetration;
-                            // ordinary cutting-point contact is permitted.
-                            BRepAlgoAPI_Common common(one, two);
-                            common.SetRunParallel(Standard_False);
-                            common.Build();
-                            if (!common.IsDone()) {
-                                pairState = 3;
-                            } else if (!common.Shape().IsNull()) {
-                                GProp_GProps volume;
-                                BRepGProp::VolumeProperties(common.Shape(), volume);
-                                if (std::abs(volume.Mass()) > 1e-8) {
-                                    pairState = 1;
-                                } else if (!(active.cutterProxy
-                                             && passive.workpiece
-                                             && node.kind == NodeKind::Cutting)) {
-                                    pairState = 2;
-                                }
+                            pairState = 1;
+                            // At a cutting node only the nozzle tip's intended
+                            // zero contact may be ignored. Move the nozzle a
+                            // tiny distance along the outward normal: a true
+                            // penetration remains at zero distance, while a
+                            // tangent tip contact separates. This avoids an
+                            // expensive and crash-prone Boolean Common.
+                            if (active.cutterProxy && passive.workpiece
+                                && node.kind == NodeKind::Cutting) {
+                                gp_Vec outward(node.normalX, node.normalY, node.normalZ);
+                                if (outward.SquareMagnitude() <= Precision::SquareConfusion())
+                                    outward = gp_Vec(0.0, 0.0, 1.0);
+                                outward.Normalize();
+                                outward.Multiply(qMax(0.05, Precision::Confusion() * 10.0));
+                                gp_Trsf probeTransform;
+                                probeTransform.SetTranslation(outward);
+                                const TopoDS_Shape probe = transformed(one, probeTransform);
+                                BRepExtrema_DistShapeShape probeDistance(probe, two);
+                                probeDistance.SetDeflection(0.025);
+                                probeDistance.SetMultiThread(Standard_False);
+                                probeDistance.Perform();
+                                if (!probeDistance.IsDone())
+                                    pairState = 3;
+                                else if (probeDistance.Value() > Precision::Confusion())
+                                    pairState = 0;
                             }
                         } else if (distance.Value() <= clearanceMm) {
                             pairState = 2;
@@ -1284,16 +1301,25 @@ private:
                 }
                 {
                     QMutexLocker lock(resultMutex.get());
-                    result->operator[](n) = worstState;
-                    pairs->operator[](n) = collisionPair;
+                    const qint8 current = result->at(n);
+                    if (worstState != 0
+                        && lcnc::cam_algo::collisionStateSeverity(worstState)
+                            > lcnc::cam_algo::collisionStateSeverity(current)) {
+                        result->operator[](n) = worstState;
+                        pairs->operator[](n) = collisionPair;
+                    } else if (finalPhase && current < 0) {
+                        result->operator[](n) = 0;
+                        pairs->operator[](n) = {-1, -1};
+                    }
                 }
                 const int finished = completed->fetch_add(1) + 1;
-                if ((finished & 0x0f) == 0 || finished == nodes.size()) {
+                if ((finished & 0x0f) == 0 || finished == scanSteps) {
                     QMutexLocker progressLock(progressMutex.get());
                     progress->setValue(finished);
                 }
-            });
-            if (!progress->isAbortRequested()) progress->setValue(nodes.size());
+                });
+            }
+            if (!progress->isAbortRequested()) progress->setValue(scanSteps);
         });
         QObject::connect(tasks, &TaskManager::taskProgressChanged, m_page,
                          [this, generation, result, pairs, resultMutex](TaskId id, int percent) {
@@ -1333,21 +1359,16 @@ private:
     void showCollision(int index)
     {
         if (!m_gui || index < 0 || index >= m_collisionStates.size()) return;
-        if (!m_intersectionAis.IsNull()) {
-            m_gui->scene()->removeShape(m_intersectionAis, false);
-            m_intersectionAis.Nullify();
-        }
         clearCollisionHighlight();
         const qint8 state = m_collisionStates.at(index);
         if (state <= 0) return;
         const auto pair = index < m_collisionPairs.size() ? m_collisionPairs.at(index) : QPair<int, int>{-1, -1};
         if (pair.first >= 0 && pair.second >= 0 && pair.first < m_bodies.size() && pair.second < m_bodies.size()) {
             auto& first = m_bodies[pair.first]; auto& second = m_bodies[pair.second];
-            // The costly common shape is generated on demand only for a
-            // confirmed penetration. Near-clearance and indeterminate states
-            // deliberately do not tint the entire source Compound: doing so
-            // made an AABB candidate look like a real collision of the full
-            // axis. Their state remains visible in the timeline/status bar.
+            // Collision detection is the safety result. Highlight the two
+            // confirmed source bodies without running a Boolean Common on the
+            // GUI thread; the latter was costly and could crash inside OCCT.
+            // 中文翻译：碰撞结果直接高亮双方，不在 GUI 线程求精确布尔交集。
             if (state != 1) {
                 if (m_gui->context()) m_gui->context()->UpdateCurrentViewer();
                 return;
@@ -1356,28 +1377,6 @@ private:
             if (!first.ais.IsNull()) first.ais->SetColor(collisionColor);
             if (!second.ais.IsNull()) second.ais->SetColor(collisionColor);
             m_highlightedCollisionPair = pair;
-            const SimulationNode& node = m_nodes.at(index);
-            const TopoDS_Shape one = transformed(first.shape, bodyTransform(first, node));
-            const TopoDS_Shape two = transformed(second.shape, bodyTransform(second, node));
-            TopoDS_Shape intersection = m_intersectionCache.value(index);
-            if (intersection.IsNull()) {
-                BRepAlgoAPI_Common common(one, two); common.SetRunParallel(Standard_False); common.Build();
-                if (common.IsDone()) intersection = common.Shape();
-                if (!intersection.IsNull()) {
-                    m_intersectionCache.insert(index, intersection);
-                    m_intersectionLru.removeAll(index);
-                    m_intersectionLru.append(index);
-                    while (m_intersectionLru.size() > 8)
-                        m_intersectionCache.remove(m_intersectionLru.takeFirst());
-                }
-            } else {
-                m_intersectionLru.removeAll(index);
-                m_intersectionLru.append(index);
-            }
-            if (!intersection.IsNull()) {
-                m_intersectionAis = m_gui->scene()->displayShape(intersection, false, false, false);
-                if (!m_intersectionAis.IsNull()) m_intersectionAis->SetColor(Quantity_Color(Quantity_NOC_RED));
-            }
         }
         if (m_gui->context()) m_gui->context()->UpdateCurrentViewer();
     }
@@ -1413,9 +1412,8 @@ private:
     std::unique_ptr<lcnc::view::TravelPathRenderer> m_travelPathRenderer;
     std::unique_ptr<lcnc::view::MachineGuideRenderer> m_guideRenderer;
     QVector<SimulationNode> m_nodes; QVector<SimulationBody> m_bodies; QVector<qint8> m_collisionStates;
-    QVector<QPair<int, int>> m_collisionPairs; Handle(AIS_Shape) m_intersectionAis;
+    QVector<QPair<int, int>> m_collisionPairs;
     QPair<int, int> m_highlightedCollisionPair{-1, -1};
-    QHash<int, TopoDS_Shape> m_intersectionCache; QVector<int> m_intersectionLru;
     TaskId m_scanTask{kInvalidTaskId}; TaskId m_collisionPreparationTask{kInvalidTaskId};
     quint64 m_generation{1}; std::uint64_t m_sourceRevision{0};
     int m_machineBodyCount{0}; int m_workpieceBodyCount{0}; int m_mountedWorkpieceBodyCount{0};

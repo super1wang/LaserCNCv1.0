@@ -18,6 +18,10 @@ struct TravelEndpointPair
 {
     TravelEndpoint source;
     TravelEndpoint target;
+    /// Absolute offsets measured along the corresponding local surface normal.
+    double rapidOffsetMm{5.0};
+    double sourceCuttingOffsetMm{1.0};
+    double targetCuttingOffsetMm{1.0};
 };
 
 struct TravelPlanningDiagnostics
@@ -42,8 +46,8 @@ struct TravelPlanningRequest
     /// visibility must not affect this value.
     bool fullEnvironment{false};
     lcnc::cam::RapidMotionProfile motionProfile;
-    /// Legacy geometric shaping input.  Tool cutting/idle offsets are not
-    /// consumed here and remain command-construction parameters in Process.
+    /// Legacy geometric shaping input. Per-transition rapid offsets are
+    /// carried by TravelEndpointPair and become part of the solved CAM path.
     double proxySafetyRadiusMm{0.0};
     double minimumClearanceMm{0.0};
     /// Maximum additional normal offset the offline planner may search.

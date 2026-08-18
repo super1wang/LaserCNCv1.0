@@ -36,6 +36,8 @@ bool ToolpathGenerationService::acceptsResult(
         && std::abs(captured.leadInLength - current.leadInLength) <= kTolerance
         && std::abs(captured.smoothAngle - current.smoothAngle) <= kTolerance
         && std::abs(captured.deflection - current.deflection) <= kTolerance
+        && std::abs(captured.cuttingOffsetMm - current.cuttingOffsetMm) <= kTolerance
+        && std::abs(captured.rapidOffsetMm - current.rapidOffsetMm) <= kTolerance
         && captured.useFaceClassification == current.useFaceClassification
         && captured.extractionStrategy == current.extractionStrategy
         && captured.contourIds == current.contourIds

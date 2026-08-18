@@ -1395,30 +1395,6 @@ void ACSMotionControl::JumpToIdleXYPosition(double dEndX, double dEndY, const To
 	m_dPreY = dEndY;
 }
 
-void ACSMotionControl::JumpToIdleHeight(const Tool& curTool, double dCompensate)
-{
-	string strZIndex		= boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-	string strZVel			= boost::lexical_cast<string>(curTool.m_dIdleZVelocity);
-	string strIdleZHeight	= boost::lexical_cast<string>(curTool.m_dIdleZHeight + dCompensate);
-
-	m_strCommand += "PTP/EV " + strZIndex + "," + strIdleZHeight + "," + strZVel + "\n";
-	m_strCommand += "TILL ^MST(" + strZIndex + ").#MOVE" + "\n";
-}
-
-void ACSMotionControl::JumpToCuttingHeight(const Tool& curTool, double dCompensate)
-{
-	string strZIndex	= boost::lexical_cast<string>(m_mapMotorValue[Axis::Z].AxisIndex);
-	string strZVel		= boost::lexical_cast<string>(curTool.m_dIdleZVelocity);
-	string strZPosition = boost::lexical_cast<string>(curTool.m_dCuttingHeight + curTool.m_dCuttingHeightCompensate + dCompensate);
-
-	m_strCommand += "PTP/EV " + strZIndex + "," + strZPosition + "," + strZVel + "\n";
-	m_strCommand += "TILL ^MST(" + strZIndex + ").#MOVE" + "\n";
-	bool bEnergySwitchUse = m_runtimeConfiguration.customerId() == "MaiTong"
-		|| int(m_runtimeConfiguration.permission()) > int(PermissionLevel::Factory);
-	if (bEnergySwitchUse && curTool.m_bEnergySwitch)
-		m_strCommand += "EnergySwitch=1\n";
-}
-
 bool ACSMotionControl::SendCommand()
 {
 	//char* pcCommand = new char[m_strCommand.length() + 1];

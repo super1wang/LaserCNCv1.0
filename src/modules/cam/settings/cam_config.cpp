@@ -8,6 +8,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -131,12 +132,17 @@ void CamConfig::readFrom(const toml::value& root)
             get_double(collision, "clearanceMm", 0.5));
         m_maximumRapidSafetyOffsetMm = std::max(0.1,
             get_double(collision, "maximumSafetyOffsetMm", 100.0));
+        m_blockMachiningOnCollisionWarning = get_bool(collision, "blockMachiningOnWarning", true);
     }
 
     if (root.contains("toolpath") && root.at("toolpath").is_table()) {
         const auto& tp = root.at("toolpath");
         m_leadInLength          = get_double(tp, "leadInLength",          m_leadInLength);
         m_deflection            = get_double(tp, "deflection",            m_deflection);
+        m_cuttingOffsetMm       = get_double(tp, "cuttingOffsetMm",       m_cuttingOffsetMm);
+        m_rapidOffsetMm         = std::max(0.0, get_double(tp, "rapidOffsetMm", m_rapidOffsetMm));
+        if (m_rapidOffsetMm <= m_cuttingOffsetMm)
+            m_rapidOffsetMm = std::max(5.0, m_cuttingOffsetMm + 0.001);
         m_smoothAngle           = get_double(tp, "smoothAngle",           m_smoothAngle);
         m_useFaceClassification = get_bool  (tp, "useFaceClassification", m_useFaceClassification);
         m_extractionStrategy = static_cast<int>(extractionStrategyFromPersistedValue(
@@ -227,11 +233,14 @@ void CamConfig::writeTo(toml::value& root) const
     collision["coneBaseRadiusMm"] = m_simulatedConeBaseRadiusMm;
     collision["clearanceMm"] = m_cutterCollisionClearanceMm;
     collision["maximumSafetyOffsetMm"] = m_maximumRapidSafetyOffsetMm;
+    collision["blockMachiningOnWarning"] = m_blockMachiningOnCollisionWarning;
     root["cutterCollision"] = collision;
 
     toml::value tp(toml::table{});
     tp["leadInLength"]          = m_leadInLength;
     tp["deflection"]            = m_deflection;
+    tp["cuttingOffsetMm"]       = m_cuttingOffsetMm;
+    tp["rapidOffsetMm"]         = m_rapidOffsetMm;
     tp["smoothAngle"]           = m_smoothAngle;
     tp["useFaceClassification"] = m_useFaceClassification;
     tp["extractionStrategy"] = m_extractionStrategy;
@@ -451,6 +460,23 @@ bool CamConfig::workpieceInstallPositionForMachine(const QString& machinePath,
     return true;
 }
 
+void CamConfig::setCuttingOffsetMm(double mm)
+{
+    if (!std::isfinite(mm) || nearlyEqual(m_cuttingOffsetMm, mm)) return;
+    m_cuttingOffsetMm = mm;
+    if (m_rapidOffsetMm <= m_cuttingOffsetMm)
+        m_rapidOffsetMm = m_cuttingOffsetMm + 0.001;
+    saveDefault();
+}
+
+void CamConfig::setRapidOffsetMm(double mm)
+{
+    if (!std::isfinite(mm) || mm < 0.0 || mm <= m_cuttingOffsetMm
+        || nearlyEqual(m_rapidOffsetMm, mm)) return;
+    m_rapidOffsetMm = mm;
+    saveDefault();
+}
+
 void CamConfig::setCutterCollisionProxyMode(CutterCollisionProxyMode mode)
 {
     if (m_cutterCollisionProxyMode == mode) return;
@@ -505,6 +531,13 @@ void CamConfig::setMaximumRapidSafetyOffsetMm(double value)
     value = std::max(0.1, value);
     if (nearlyEqual(m_maximumRapidSafetyOffsetMm, value)) return;
     m_maximumRapidSafetyOffsetMm = value;
+    saveDefault();
+}
+
+void CamConfig::setBlockMachiningOnCollisionWarning(bool enabled)
+{
+    if (m_blockMachiningOnCollisionWarning == enabled) return;
+    m_blockMachiningOnCollisionWarning = enabled;
     saveDefault();
 }
 

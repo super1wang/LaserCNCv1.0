@@ -1,4 +1,5 @@
 #include "modules/process/runtime/process_runtime_configuration.h"
+#include "modules/process/runtime/rapid_motion_utilities.h"
 
 #include <QCoreApplication>
 #include <QTextStream>
@@ -37,6 +38,19 @@ int main(int argc, char* argv[])
     if (configuration.simulationMode() || configuration.customerId() != "MaiTong"
         || configuration.permission() != lcnc::process::PermissionLevel::Factory)
         return fail(QStringLiteral("Runtime configuration update is invalid"));
+
+    lcnc::cam::RapidMoveSegment rapid;
+    rapid.target.axes = {1.25, -2.5, 3.75, 91.0, -182.0};
+    rapid.target.activeMask = 0x1f;
+    rapid.target.rotaryAxis1Name = QStringLiteral("A");
+    rapid.target.rotaryAxis2Name = QStringLiteral("C");
+    const auto rapidPose = lcnc::process::solvedRapidPose(rapid);
+    if (rapidPose.x != 1.25 || rapidPose.y != -2.5 || rapidPose.z != 3.75
+        || rapidPose.r1 != 91.0 || rapidPose.r2 != -182.0
+        || rapidPose.mask != 0x1f || rapidPose.r1Name != QStringLiteral("A")
+        || rapidPose.r2Name != QStringLiteral("C")) {
+        return fail(QStringLiteral("Process modified a CAM-certified rapid pose"));
+    }
 
     return 0;
 }

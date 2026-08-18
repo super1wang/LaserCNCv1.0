@@ -67,6 +67,24 @@ void WidgetToolpathPanel::buildUi()
     // 中文翻译：离散间隔:
     paramForm->addRow(tr("Discrete interval:"), m_spinDeflection);
 
+    m_spinCuttingOffset = new QDoubleSpinBox(paramGroup);
+    m_spinCuttingOffset->setRange(-100.0, 100.0);
+    m_spinCuttingOffset->setValue(1.0);
+    m_spinCuttingOffset->setDecimals(3);
+    m_spinCuttingOffset->setSuffix(tr(" mm"));
+    m_spinCuttingOffset->setSingleStep(0.1);
+    // 中文翻译：切割高度（沿局部法线）:
+    paramForm->addRow(tr("Cutting offset (normal):"), m_spinCuttingOffset);
+
+    m_spinRapidOffset = new QDoubleSpinBox(paramGroup);
+    m_spinRapidOffset->setRange(0.0, 500.0);
+    m_spinRapidOffset->setValue(5.0);
+    m_spinRapidOffset->setDecimals(3);
+    m_spinRapidOffset->setSuffix(tr(" mm"));
+    m_spinRapidOffset->setSingleStep(0.5);
+    // 中文翻译：空程高度（沿局部法线）:
+    paramForm->addRow(tr("Rapid offset (normal):"), m_spinRapidOffset);
+
     mainLayout->addWidget(paramGroup);
 
     // 中文翻译：工程加工模式
@@ -233,6 +251,10 @@ void WidgetToolpathPanel::buildUi()
             this, &WidgetToolpathPanel::leadInLengthChanged);
     connect(m_spinDeflection,   QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &WidgetToolpathPanel::discretizationIntervalChanged);
+    connect(m_spinCuttingOffset, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &WidgetToolpathPanel::cuttingOffsetChanged);
+    connect(m_spinRapidOffset, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &WidgetToolpathPanel::rapidOffsetChanged);
     connect(m_comboParameterScope, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
                 refreshParameterEditors();
@@ -296,11 +318,17 @@ void WidgetToolpathPanel::refreshParameterEditors()
         const auto& params = m_toolpath->contour(m_activeContourIndex).pendingParams;
         setLeadInLength(params.leadInLength);
         setDiscretizationInterval(params.deflection);
+        setCuttingOffset(params.cuttingOffsetMm);
+        setRapidOffset(params.rapidOffsetMm);
     } else if (!currentScope && m_toolpath) {
         setLeadInLength(m_toolpath->globalLeadInLength());
+        setCuttingOffset(m_toolpath->globalCuttingOffsetMm());
+        setRapidOffset(m_toolpath->globalRapidOffsetMm());
     }
     if (m_spinLeadInLength) m_spinLeadInLength->setEnabled(!currentScope || hasContour);
     if (m_spinDeflection) m_spinDeflection->setEnabled(!currentScope || hasContour);
+    if (m_spinCuttingOffset) m_spinCuttingOffset->setEnabled(!currentScope || hasContour);
+    if (m_spinRapidOffset) m_spinRapidOffset->setEnabled(!currentScope || hasContour);
     if (m_classificationGroup) m_classificationGroup->setEnabled(!currentScope);
 }
 
@@ -331,6 +359,22 @@ void WidgetToolpathPanel::setDiscretizationInterval(double mm)
 
     const QSignalBlocker blocker(m_spinDeflection);
     m_spinDeflection->setValue(mm);
+}
+
+void WidgetToolpathPanel::setCuttingOffset(double mm)
+{
+    if (!m_spinCuttingOffset || qFuzzyCompare(m_spinCuttingOffset->value() + 101.0, mm + 101.0))
+        return;
+    const QSignalBlocker blocker(m_spinCuttingOffset);
+    m_spinCuttingOffset->setValue(mm);
+}
+
+void WidgetToolpathPanel::setRapidOffset(double mm)
+{
+    if (!m_spinRapidOffset || qFuzzyCompare(m_spinRapidOffset->value() + 1.0, mm + 1.0))
+        return;
+    const QSignalBlocker blocker(m_spinRapidOffset);
+    m_spinRapidOffset->setValue(mm);
 }
 
 void WidgetToolpathPanel::setSmoothAngle(double deg)
@@ -428,6 +472,16 @@ double WidgetToolpathPanel::leadInLength() const
 double WidgetToolpathPanel::discretizationInterval() const
 {
     return m_spinDeflection ? m_spinDeflection->value() : 0.1;
+}
+
+double WidgetToolpathPanel::cuttingOffset() const
+{
+    return m_spinCuttingOffset ? m_spinCuttingOffset->value() : 1.0;
+}
+
+double WidgetToolpathPanel::rapidOffset() const
+{
+    return m_spinRapidOffset ? m_spinRapidOffset->value() : 5.0;
 }
 
 double WidgetToolpathPanel::smoothAngle() const

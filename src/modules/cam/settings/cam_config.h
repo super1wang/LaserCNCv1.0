@@ -73,6 +73,8 @@ public:
     double cutterCollisionClearanceMm() const { return m_cutterCollisionClearanceMm; }
     void setCutterCollisionClearanceMm(double value);
     double maximumRapidSafetyOffsetMm() const { return m_maximumRapidSafetyOffsetMm; }
+    bool blockMachiningOnCollisionWarning() const { return m_blockMachiningOnCollisionWarning; }
+    void setBlockMachiningOnCollisionWarning(bool enabled);
     void setMaximumRapidSafetyOffsetMm(double value);
 
     double leadInLength() const { return m_leadInLength; }
@@ -80,6 +82,11 @@ public:
 
     double deflection() const { return m_deflection; }
     void setDeflection(double mm);
+
+    double cuttingOffsetMm() const { return m_cuttingOffsetMm; }
+    void setCuttingOffsetMm(double mm);
+    double rapidOffsetMm() const { return m_rapidOffsetMm; }
+    void setRapidOffsetMm(double mm);
 
     double smoothAngle() const { return m_smoothAngle; }
     void setSmoothAngle(double deg);
@@ -189,8 +196,11 @@ private:
     double m_simulatedConeBaseRadiusMm{5.0};
     double m_cutterCollisionClearanceMm{0.5};
     double m_maximumRapidSafetyOffsetMm{100.0};
+    bool m_blockMachiningOnCollisionWarning{true};
     double m_leadInLength{5.0};
     double m_deflection{0.1};
+    double m_cuttingOffsetMm{1.0};
+    double m_rapidOffsetMm{5.0};
     double m_smoothAngle{5.0};
     bool m_useFaceClassification{true};
     int m_extractionStrategy{0}; ///< ExtractionStrategy (LargestSmoothConnectedSurface)

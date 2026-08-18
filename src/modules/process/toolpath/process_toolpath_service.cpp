@@ -33,7 +33,7 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshot()
         // 中文翻译：未连接 CAM 刀路提供者
         snapshot.description = QObject::tr("CAM toolpath provider not connected");
     } else {
-        snapshot = provider->exportToolpathSnapshot();
+        snapshot = provider->exportToolpathCatalogSnapshot();
     }
     LCNC_INFO(lcnc::LogCode::Generic,
               "process.toolpath: snapshot revision={} contours={} points={}",
@@ -47,8 +47,7 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshot()
     return snapshot;
 }
 
-lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshotForOrder(
-    const QVector<std::uint64_t>& orderedContourIds)
+lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshCommittedExecutionSnapshot()
 {
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> provider;
     {
@@ -60,17 +59,17 @@ lcnc::cam::ToolpathExportSnapshot ProcessToolpathService::refreshSnapshotForOrde
         // 中文翻译：未连接 CAM 刀路提供者
         snapshot.description = QObject::tr("CAM toolpath provider not connected");
     } else {
-        // Cutting-plan mutations resolve the authoritative CAM order on the GUI
-        // thread before publishing planChanged. Process consumes the immutable
-        // cached snapshot here and must never mutate CAM from its workflow thread.
-        snapshot = provider->exportToolpathSnapshotForOrder(orderedContourIds);
+        // Process only receives CAM's current committed execution result.  It
+        // cannot pass a different contour order, trigger a re-solve, or edit
+        // the exported path from its workflow thread.
+        // 中文翻译：Process 只能读取 CAM 已提交的执行结果，不能传入顺序、触发重算或改写刀路。
+        snapshot = provider->exportCommittedExecutionSnapshot();
     }
     LCNC_INFO(lcnc::LogCode::Generic,
-              "process.toolpath: ordered snapshot revision={} contours={} points={} orderSize={}",
+              "process.toolpath: committed execution snapshot revision={} contours={} points={}",
               snapshot.revision,
               snapshot.contours.size(),
-              snapshot.totalPointCount(),
-              orderedContourIds.size());
+              snapshot.totalPointCount());
     {
         QWriteLocker locker(&m_snapshotLock);
         m_snapshot = snapshot;

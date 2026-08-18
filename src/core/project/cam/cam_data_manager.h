@@ -100,6 +100,8 @@ public:
     struct GenerationParams {
         double leadInLength{5.0};
         double deflection{0.1};
+        double cuttingOffsetMm{1.0};
+        double rapidOffsetMm{5.0};
         double smoothAngle{5.0};
         bool   useFaceClassification{true};
         int    extractionStrategy{0}; ///< ExtractionStrategy (LargestSmoothConnectedSurface)

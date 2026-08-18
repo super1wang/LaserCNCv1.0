@@ -38,5 +38,23 @@ int main()
     result = evaluateContourBoundaryHealth(health);
     assert(result.success);
     assert(result.completion == DeviceCommandCompletion::Succeeded);
+
+    lcnc::cam::ToolpathExportSnapshot snapshot;
+    snapshot.contours.resize(1);
+    snapshot.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Pending;
+    snapshot.motionPlan.collision.complete = false;
+    assert(camExecutionBlockReason(snapshot).contains(QStringLiteral("incomplete")));
+
+    snapshot.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Collision;
+    snapshot.motionPlan.collision.complete = true;
+    assert(!camExecutionBlockReason(snapshot).isEmpty());
+
+    snapshot.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Warning;
+    snapshot.motionPlan.collision.blockWarning = false;
+    assert(camExecutionBlockReason(snapshot).isEmpty());
+
+    snapshot.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Disabled;
+    snapshot.motionPlan.collision.blockWarning = true;
+    assert(camExecutionBlockReason(snapshot).isEmpty());
     return 0;
 }

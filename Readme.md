@@ -4,12 +4,15 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 
 ## 当前架构
 
-- `Kernel` 统一编排核心服务与 `cad -> cam -> process` 模块生命周期。
+- `Kernel` 统一编排核心服务与 `cad -> cam -> {simulation, process}` 模块生命周期；离线仿真与 Process 都依赖 CAM，但彼此不依赖。
 - `LcncProjectManager` 支持多工作区；每个工作区拥有一个统一的 Workpiece+CAM XCAF 文档、`CamDataManager` 和项目会话。
 - 机台模型由 Kernel 的 `MachineWorkspace` 独立持有，跨工程复用且不写入 `.lcnc`。
 - `GuiApplication` 为每个工作区拥有一个 `GuiDocument`，显示对象按文档、XCAF entry 和实体类型注册。
 - 当前视图统一由 `activeGuiDocument()` 取得；工作区切换使用带 `ProjectWorkspaceId` 的明确通知，避免同义文档 API。
 - Process 只消费 CAM 输出的 OCC-free `ToolpathExportSnapshot`，不依赖 OCC 类型。
+- CAM 是轮廓加工顺序的唯一事实源；机床坐标求解、空程/序号叠加显示、Process 切割列表和离线仿真都消费同一份 `ContourSequenceSnapshot`，Process 不得重排或回写该顺序。
+- `src/modules/simulation/` 提供独立只读离线仿真：冻结 CAM、机台运动学、显示和碰撞快照后在单独 OCC 标签页回放，不连接控制器、激光器或串口，也不改变实时机台姿态。
+- CAM 沿轮廓法线构造切割偏置和 Retract/Traverse/Approach 三段空程，输出最终物理轴坐标；Process 和仿真不得再次添加工具高度或重求路径。启用碰撞检测后，CAM 在生成事务末尾使用私有外表面网格、只读 BVH、姿态级并行和受全局门禁保护的精确距离验证完整运动计划；离线仿真直接显示 CAM 发布的灰/绿/黄/红/橙节点状态。
 - Process 的回零顺序、轴定义比较与仿真轴坐标在独立 `process_axis_utilities` 中实现，不混入设备协调或 UI。
 - Process 的主要 ACS/GTN/激光/IO 调用由 `DeviceCommandQueue` 分优先级调度，并经过 `ProcessDeviceCoordinator` 串行租约；设备队列尚不是唯一 SDK 入口。ACS/GTN、激光设备和参数注册表均使用构造注入的设置服务；Stop 是唯一软件安全停机入口，安全停机失败会保持 Error，必须经设备检查复位后才能恢复 Idle。
 - ProcessModule 持有 `ProcessRuntimeConfiguration`；ACS/GTN 的轴选择、扩展轴和仿真模式通过它传入设备层，`BASE` 伪轴会在配置边界过滤；旧 `DT` 静态运行时状态已删除。
@@ -30,7 +33,7 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 
 架构门禁运行 `ctest --test-dir build-cmake --build-config Debug --output-on-failure`；它检查分层依赖、纯算法边界、Process OCC/设置注入/设备公共头边界、淘汰 API 与孤儿源文件。
 
-日常构建默认启用 ACS 与 GTN。CMake/Ninja 使用 `build-cmake/`，Visual Studio/MSBuild 使用 `build-vs/`；旧 `build/` 禁止继续使用。两条路线均只把应用部署到 `x64/Debug` 或 `x64/Release`。all-off、ACS、GTN 和 ASan 保留为 CMake/Ninja 的显式验证 preset。GTN 和 ACS adapter 均由各自开关控制，并通过构造注入的 Process 设置服务读取配置；all-off 使用不依赖供应商 SDK 的本地 `Simulator` 与 `PureSimulationSink`。控制器状态以 150 ms 在专用单线程池采集，安全 IO 以 500 ms 采集，串口外设以 2 s 低频采集且串口对象不归属 GUI 线程。
+日常构建默认启用 ACS 与 GTN。CMake/Ninja 使用 `build-cmake/`，Visual Studio/MSBuild 使用 `build-vs/`；旧 `build/` 禁止继续使用。运行文件按生成器和变体隔离：日常 Ninja 为 `x64/ninja/<Config>`，VS/MSBuild 为 `x64/vs/<Config>`，其余 Ninja 变体使用 `x64/ninja-<variant>/<Config>`。all-off、ACS、GTN 和 ASan 保留为 CMake/Ninja 的显式验证 preset。GTN 和 ACS adapter 均由各自开关控制，并通过构造注入的 Process 设置服务读取配置；all-off 使用不依赖供应商 SDK 的本地 `Simulator` 与 `PureSimulationSink`。控制器状态以 150 ms 在专用单线程池采集，安全 IO 以 500 ms 采集，串口外设以 2 s 低频采集且串口对象不归属 GUI 线程。
 
 ## 主要目录
 
@@ -40,6 +43,7 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 | `src/view/` | OCC 场景、每工作区 GuiDocument、视图控件与渲染器。 |
 | `src/modules/cad/` | 工件导入/导出、CAD 建模、草图、选择与命令。 |
 | `src/modules/cam/` | 机台、轮廓、离散/求解、图层、引线、排序和 CAM UI。 |
+| `src/modules/simulation/` | 只读离线机台仿真、冻结快照回放与碰撞时间线；只依赖 CAM 和 view。 |
 | `src/modules/process/` | 加工流程、前置检查、刀路执行、控制器/激光/IO 与监控。 |
 | `src/app/` | MainWindow、工作区视图、命令注册、ProjectExplorer 和应用对话框。 |
 | `resources/` | Qt 资源和 SVG 图标。 |
@@ -56,14 +60,14 @@ LaserCNC 是面向五轴激光加工的 CAD + CAM + Process 一体化 Windows �
 
 ```powershell
 # CMake/Ninja
-cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
+cmd /c "call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
 
 # Visual Studio/MSBuild
 cmake --preset vs-acs-gtn
 cmake --build --preset vs-acs-gtn-debug --parallel 16
 ```
 
-Debug 运行文件位于 `x64/Debug`，Release 位于 `x64/Release`。两个目录是唯一应用输出，只部署应用、运行时 DLL/Qt 插件、`Simulator.prg`、基础配置和可写的 `logs/`；符号、测试和中间产物保留在 `build-cmake/` 或 `build-vs/`。两条路线不可并发构建，也不能相互复用生成树。执行 `scripts/clean_legacy_build_artifacts.ps1` 可预览旧 `build/` 等历史目录，确认后使用 `-Execute` 删除。
+日常 Ninja 的运行文件位于 `x64/ninja/Debug` 或 `x64/ninja/Release`，VS/MSBuild 位于 `x64/vs/Debug` 或 `x64/vs/Release`；其它 Ninja 变体使用各自的 `x64/ninja-<variant>/<Config>` 目录。运行目录只部署应用、运行时 DLL/Qt 插件、`Simulator.prg`、基础配置和可写的 `logs/`；符号、测试和中间产物保留在 `build-cmake/` 或 `build-vs/`。两条路线不可并发构建，也不能相互复用生成树。执行 `scripts/clean_legacy_build_artifacts.ps1` 可预览旧 `build/` 等历史目录，确认后使用 `-Execute` 删除。
 
 本地 SDK 路径通过 `LCNC_QT6_ROOT`、`LCNC_OCCT_ROOT`、`LCNC_SARIBBON_ROOT`、`LCNC_QUAZIP_ROOT` 等 CMake cache 变量配置。硬件开关包括 `LCNC_WITH_ACS`、`LCNC_WITH_GTN`、`LCNC_WITH_BDAQ`、`LCNC_WITH_REAL_LASER`。
 

@@ -34,6 +34,8 @@ public:
 
     void setLeadInLength(double mm);
     void setDiscretizationInterval(double mm);
+    void setCuttingOffset(double mm);
+    void setRapidOffset(double mm);
     void setSmoothAngle(double deg);
     void setExtractionStrategy(int strategy);
     void setShowNormals(bool on);
@@ -52,6 +54,8 @@ public:
 
     double leadInLength()  const;
     double discretizationInterval() const;
+    double cuttingOffset() const;
+    double rapidOffset() const;
     double smoothAngle()   const;
     int    extractionStrategy() const;
 
@@ -66,6 +70,8 @@ signals:
     void solveMachinePathRequested();
     void leadInLengthChanged(double mm);
     void discretizationIntervalChanged(double mm);
+    void cuttingOffsetChanged(double mm);
+    void rapidOffsetChanged(double mm);
     void smoothAngleChanged(double deg);
     void extractionStrategyChanged(int strategy);
     void parameterScopeChanged(bool currentContour);
@@ -79,6 +85,8 @@ private:
     // Parameter widgets
     QDoubleSpinBox* m_spinLeadInLength{nullptr};
     QDoubleSpinBox* m_spinDeflection{nullptr};
+    QDoubleSpinBox* m_spinCuttingOffset{nullptr};
+    QDoubleSpinBox* m_spinRapidOffset{nullptr};
     QComboBox*      m_comboParameterScope{nullptr};
     QLabel*         m_labelCurrentContour{nullptr};
     QGroupBox*      m_classificationGroup{nullptr};

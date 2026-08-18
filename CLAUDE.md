@@ -11,15 +11,16 @@ generated tree between them:
 - Visual Studio/MSBuild uses `build-vs/`, `build-vs/LaserCNC.sln`, and the
   `vs-acs-gtn` family of presets.
 - The legacy `build/` tree is forbidden.
-- Both routes deploy `LaserCNC.exe` and runtime files only to root
-  `x64/Debug` or `x64/Release`; intermediates stay in their generator tree.
+- Runtime outputs are isolated by generator and variant: daily Ninja uses
+  `x64/ninja/<Config>`, VS/MSBuild uses `x64/vs/<Config>`, and other Ninja
+  variants use `x64/ninja-<variant>/<Config>`; intermediates stay in their
+  generator tree.
 - MSBuild flags such as `/m` and `/nologo` must never be passed to Ninja.
-  Do not build the two routes concurrently because they share the deployment
-  directory.
+  Do not build the two routes concurrently.
 
 ```powershell
 # CMake/Ninja
-cmd /c "call \"C:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
+cmd /c "call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && cmake --preset acs-gtn && cmake --build --preset acs-gtn-debug --parallel 16"
 
 # Visual Studio/MSBuild
 cmake --preset vs-acs-gtn
@@ -54,7 +55,7 @@ The application is a single-process, multi-workspace desktop app for 5-axis lase
 **CAD / CAM / Process own no project data — they are business logic** over the core data:
 - **CAD** edits workpiece geometry through core document APIs.
 - **CAM** runs algorithms (extract / discretise / IK), writes results into the core-owned `CamDataManager` (borrowed via `projectManager()->camData()`), manages layers (`addToolpathLayer`/`removeToolpathLayer` → `CamDataManager::addLayer`/`removeLayer`), and keeps only renderers + transient UI/preview state.
-- **Process** consumes CAM data read-only via the OCC-free `ToolpathExportSnapshot` DTO.
+- **Process** consumes the OCC-free `ToolpathExportSnapshot` DTO and CAM-owned `ContourSequenceSnapshot` read-only; it may enrich but must never redefine the contour order.
 
 ### CAM Contour Extraction Strategy
 
@@ -105,7 +106,7 @@ Hard rules:
 ### Module Lifecycle
 
 Modules implement `IModule` (`src/core/kernel/i_module.h`): `info()`, `init(kernel)`, `start()`, `stop()`.
-Dependency order is `cad → cam → process`, enforced by topological sort in `ModuleRegistry`.
+Dependency order is `cad → cam → {simulation, process}`, enforced by topological sort in `ModuleRegistry`. `SimulationModule` is a read-only CAM/view consumer and must never depend on Process, controller SDKs, laser, or serial devices.
 Modules that start `TaskManager` jobs must retain their task ids, request cancellation in `stop()`, and wait before destroying borrowed runtime state. A timeout must safe-stop and retain SDK-owned objects rather than freeing them under an active call.
 `init()`, `start()` and `stop()` must not leak either standard or unknown exceptions. `stop()` must be idempotent because ModuleRegistry uses it for init/start rollback as well as normal shutdown.
 In `main.cpp`: construct Kernel → registerCoreServices → load settings → inject GuiApplication → add modules → kernel.bootstrap() → MainWindow → app.exec().
@@ -117,7 +118,7 @@ In `main.cpp`: construct Kernel → registerCoreServices → load settings → i
 3. Initialize `Logger`.
 4. Construct `Kernel`, call `registerCoreServices()`, `appSettings()->loadDefault()`.
 5. Create `GuiApplication`, inject into Kernel via `setGuiApp()`.
-6. Add modules (`CadModule` → `CamModule` → `ProcessModule`); skip any disabled by `[modules].disabled` in `mainwindow.toml`.
+6. Add modules (`CadModule` → `CamModule` → `SimulationModule` → `ProcessModule`); skip any disabled by `[modules].disabled` in `mainwindow.toml`.
 7. `kernel.bootstrap()` (topological sort → init → start).
 8. Create `MainWindow`, call `show()`, enter event loop.
 9. On exit: save settings, `kernel.shutdown()` (reverse stop), shutdown logger.
@@ -151,7 +152,7 @@ Pure OCC/math, no UI or document ownership. Free functions preferred. Namespaces
 
 ## Process Module (`src/modules/process/`)
 
-The Process module handles execution/simulation, not geometry. Critical boundary: **Process must never include OCC types** (`TopoDS_*`, `AIS_*`, `gp_*`, `BRep*`, `XCAF*`). It consumes only the OCC-free `ToolpathExportSnapshot` DTO from CAM via `ICamToolpathProvider`.
+The Process module handles execution, not geometry or offline machine simulation. Critical boundary: **Process must never include OCC types** (`TopoDS_*`, `AIS_*`, `gp_*`, `BRep*`, `XCAF*`). It consumes the OCC-free `ToolpathExportSnapshot` DTO and CAM-owned `ContourSequenceSnapshot`; Process may enrich but must never redefine the contour order.
 
 Current runtime structure:
 - `ProcessModule` — facade and coordinator for state, connection, preflight, monitoring and workflow.

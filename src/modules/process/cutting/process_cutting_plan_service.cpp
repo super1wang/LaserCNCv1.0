@@ -91,29 +91,6 @@ bool ProcessCuttingPlanService::layerJob(std::uint64_t layerId, ProcessLayerJob*
     return false;
 }
 
-void ProcessCuttingPlanService::setLayerJob(const ProcessLayerJob& job)
-{
-    if (!m_layerProvider || job.layerId == 0) return;
-    m_layerProvider->setLayerToolName(job.layerId, job.toolName);
-    m_layerProvider->setLayerEnabled(job.layerId, job.enabled);
-    m_layerProvider->setLayerCompensationIndex(job.layerId, job.compensationIndex);
-    m_layerProvider->setLayerIncludedContours(job.layerId, job.includedContours);
-    bumpRevisionAndNotify();
-}
-
-void ProcessCuttingPlanService::setLayerJobs(const QVector<ProcessLayerJob>& jobs)
-{
-    if (!m_layerProvider) return;
-    for (const auto& j : jobs) {
-        if (j.layerId == 0) continue;
-        m_layerProvider->setLayerToolName(j.layerId, j.toolName);
-        m_layerProvider->setLayerEnabled(j.layerId, j.enabled);
-        m_layerProvider->setLayerCompensationIndex(j.layerId, j.compensationIndex);
-        m_layerProvider->setLayerIncludedContours(j.layerId, j.includedContours);
-    }
-    bumpRevisionAndNotify();
-}
-
 void ProcessCuttingPlanService::clearAll()
 {
     // The CAM data lifecycle owns contour membership and sequencing.  Process
@@ -145,7 +122,7 @@ ProcessCuttingPlanService::buildCuttingList(const CuttingListFilter& filter) con
     if (!m_provider)
         return out;
 
-    const auto snapshot = m_provider->exportToolpathSnapshot();
+    const auto snapshot = m_provider->exportToolpathCatalogSnapshot();
     if (snapshot.contours.isEmpty())
         return out;
 
@@ -203,7 +180,7 @@ ProcessCuttingPlanService::contoursInLayer(std::uint64_t layerId) const
     QVector<ContourBrief> out;
     if (!m_provider)
         return out;
-    const auto snapshot = m_provider->exportToolpathSnapshot();
+    const auto snapshot = m_provider->exportToolpathCatalogSnapshot();
     for (const auto& contour : snapshot.contours) {
         if (contour.layerId != layerId)
             continue;
@@ -227,23 +204,6 @@ void ProcessCuttingPlanService::bumpRevisionAndNotify()
 void ProcessCuttingPlanService::notifyExternalPlanChanged()
 {
     bumpRevisionAndNotify();
-}
-
-bool ProcessCuttingPlanService::rapidDisplayOffsetMm(
-    const QString& toolName,
-    double* offsetMm) const
-{
-    if (offsetMm)
-        *offsetMm = 0.0;
-    const QString trimmed = toolName.trimmed();
-    if (trimmed.isEmpty())
-        return false;
-    Tool* tool = ToolFactory::GetTool(trimmed);
-    if (!tool || QString::fromStdString(tool->m_strName) != trimmed)
-        return false;
-    if (offsetMm)
-        *offsetMm = tool->m_dIdleZHeight;
-    return true;
 }
 
 } // namespace lcnc::process

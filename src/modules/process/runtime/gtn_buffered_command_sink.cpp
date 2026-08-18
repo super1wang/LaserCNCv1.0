@@ -186,8 +186,8 @@ bool GtnBufferedCommandSink::lineTo(const MachinePose5& target, const Tool& tool
                                     QString* errorMessage)
 {
 	// 仅写入 GTN_LnXYZACEx 到 FIFO；CAM 已完成软件 IK，因此 RTCP 保持关闭。
-	// Z 以实际刀路点为基准叠加切割高度，
-	// 绝不在中途 SendCommand。
+	// CAM already provides final physical coordinates. Never add a tool Z
+	// correction here or GTN would execute a path different from CAM's scan.
 	if (!m_gtn) {
         // 中文翻译：GTN 控制器不可用
         if (errorMessage) *errorMessage = QCoreApplication::translate("GtnBufferedCommandSink", "GTN controller is unavailable");
@@ -195,7 +195,7 @@ bool GtnBufferedCommandSink::lineTo(const MachinePose5& target, const Tool& tool
     }
 	const std::array<double, 5> position{
 		target.x, target.y,
-		target.z + tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate,
+		target.z,
 		target.r1, target.r2};
 	if (!m_gtn->OffsetLineTo(position, m_axisMap.activeCount(), tool)) {
         // 中文翻译：GTN 缓冲直线指令失败

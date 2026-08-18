@@ -53,9 +53,6 @@ public:
 		m_dOffsetDiameter			= _Tool.m_dOffsetDiameter;			//补偿光斑直径
 		m_dOffsetDistance			= _Tool.m_dOffsetDistance;			//补偿间距
 		m_dOffsetIgnoreLength		= _Tool.m_dOffsetIgnoreLength;		//直线圆弧补偿时忽略长度
-		m_dIdleZHeight				= _Tool.m_dIdleZHeight;		
-		m_dCuttingHeight			= _Tool.m_dCuttingHeight;
-		m_dCuttingHeightCompensate	= _Tool.m_dCuttingHeightCompensate;
 		m_strDirectionX				= _Tool.m_strDirectionX;
 		m_strDirectionY				= _Tool.m_strDirectionY;
 
@@ -165,9 +162,6 @@ public:
 	double m_dOffsetDiameter{0.0};			// 补偿光斑直径
 	double m_dOffsetDistance{0.0};			// 补偿间距
 	double m_dOffsetIgnoreLength{0.0};		// 直线圆弧补偿时忽略长度
-	double m_dIdleZHeight{0.0};
-	double m_dCuttingHeight{0.0};
-	double m_dCuttingHeightCompensate{0.0};  // 切割高度补偿
 	string m_strDirectionX;
 	string m_strDirectionY;
 

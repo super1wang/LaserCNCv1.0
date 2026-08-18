@@ -18,6 +18,27 @@ Find-ForbiddenInclude (Join-Path $srcPath 'core') '#\s*include\s*[<"](?:view|mod
 Find-ForbiddenInclude (Join-Path $srcPath 'view') '#\s*include\s*[<"](?:modules|app)/' 'view may not depend on modules/app'
 Find-ForbiddenInclude (Join-Path $srcPath 'modules/process') '#\s*include\s*[<"](?:TopoDS|AIS_|gp_|Geom_|BRep|XCAF)' 'Process may not include OCC types'
 Find-ForbiddenInclude (Join-Path $srcPath 'core/algorithms') '#\s*include\s*[<"](?:QWidget|QAction|QDialog|core/document/lcnc_document|view/gui_document|core/kernel/kernel)' 'core algorithms must remain independent of UI, documents, and Kernel'
+
+# CAM is the sole toolpath producer.  Cross-module contracts intentionally
+# expose detached catalog/execution snapshots only: neither Process nor the
+# offline sandbox may ask CAM to solve/reorder/slice a path or write layer data.
+$toolpathProviderContract = Join-Path $srcPath 'modules/cam/i_cam_toolpath_provider.h'
+foreach ($match in (Select-String -LiteralPath $toolpathProviderContract -Pattern '\bsolveToolpathForOrder\s*\(|\bexportToolpathSnapshotForOrder\s*\(')) {
+    $violations.Add("CAM toolpath consumer contract must be read-only: ${toolpathProviderContract}:$($match.LineNumber): $($match.Line.Trim())")
+}
+$layerProviderContract = Join-Path $srcPath 'modules/cam/i_cam_layer_provider.h'
+foreach ($match in (Select-String -LiteralPath $layerProviderContract -Pattern '\bsetLayer|\bsetManual|\bappendToManual|\bremoveFromManual|\bclearManual|\bsetSortStrategy|\bsetLastAuto')) {
+    $violations.Add("CAM layer consumer contract must be read-only: ${layerProviderContract}:$($match.LineNumber): $($match.Line.Trim())")
+}
+foreach ($consumerPath in @(
+        (Join-Path $srcPath 'modules/process'),
+        (Join-Path $srcPath 'modules/simulation'))) {
+    Get-ChildItem -LiteralPath $consumerPath -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
+        foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern '\b(?:solveToolpathForOrder|exportToolpathSnapshotForOrder|toolpathRef)\s*\(')) {
+            $violations.Add("Process/simulation may only consume committed CAM toolpath data: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+        }
+    }
+}
 Get-ChildItem -LiteralPath (Join-Path $srcPath 'core/algorithms/cad') -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
     foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern 'QString\s*\*|catch\s*\(\s*const\s+Standard_Failure')) {
         $violations.Add("CAD algorithms must propagate typed/OCC failures: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")

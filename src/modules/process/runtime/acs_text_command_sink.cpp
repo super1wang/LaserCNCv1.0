@@ -432,10 +432,11 @@ bool AcsTextCommandSink::lineTo(const MachinePose5& target, const Tool& tool,
         return false;
     }
 
+    // CAM owns the final physical coordinates, including every configured
+    // height/offset.  Applying tool data here would make controller motion
+    // diverge from CAM collision validation and offline simulation.
+    // 中文翻译：CAM 已输出最终物理轴坐标，控制器端不得再次叠加工具高度。
     MachinePose5 out = target;
-    // 切割高度是相对轮廓 Z 的有符号增量；加工段中的每个目标点都必须
-    // 使用同一偏移，不能仅在切入前 PTP 一次后又回到原始轮廓高度。
-    out.z += tool.m_dCuttingHeight + tool.m_dCuttingHeightCompensate;
     if (segMask & MachinePose5::Br1) {
         out.r1 = normalizeRotaryForAxis(m_axisMap, AxisMap::R1, target.r1);
         m_lastR1 = out.r1;

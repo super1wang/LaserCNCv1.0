@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kinematics/machine_topology.h"
+#include "core/project/cam/collision_validation_contracts.h"
 #include "core/project/cam/travel_plan_contracts.h"
 
 #include <QHash>
@@ -56,6 +57,8 @@ struct ToolpathExportContour
     bool needsRecalculation{false};
     QString recalculationReason;
     int pointCount{0};
+    double cuttingOffsetMm{1.0};
+    double rapidOffsetMm{5.0};
 
     // 世界坐标系下的几何端点，给空程规划/虚线绘制直接消费。
     // startX/Y/Z = lead-in 解有效 ? 下刀点 : points.front()
@@ -93,6 +96,9 @@ struct ToolpathExportSnapshot
     /// Derived only: never persisted in a .lcnc package.  A stale/failed plan
     /// is deliberately exported so Process can reject unsafe execution.
     TravelPlanSnapshot travelPlan;
+    /// Canonical final-coordinate execution sequence.  It is derived by CAM
+    /// and retained separately from the editable contour data.
+    CamMotionPlanSnapshot motionPlan;
 
     bool hasEnabledContours() const;
     int totalPointCount() const;

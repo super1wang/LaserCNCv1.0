@@ -25,6 +25,7 @@
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/steps/services/process_workflow_services.h"
 #include "modules/process/runtime/process_device_runtime.h"
+#include "modules/process/runtime/process_cutting_safety.h"
 #include "modules/process/runtime/process_preflight_service.h"
 #include "modules/process/runtime/process_connection_service.h"
 #include "modules/process/runtime/process_manual_motion_service.h"
@@ -342,7 +343,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_cuttingStepService->setSnapshotProvider([camProvider]() {
         lcnc::process::ProcessToolpathSnapshot s;
         if (camProvider && camProvider->hasToolpath()) {
-            const auto exp = camProvider->exportToolpathSnapshot();
+            const auto exp = camProvider->exportToolpathCatalogSnapshot();
             s.available = exp.hasEnabledContours();
             s.contourCount = exp.contours.size();
             s.totalPointCount = exp.totalPointCount();
@@ -403,16 +404,17 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
         auto planService = std::shared_ptr<lcnc::process::ProcessCuttingPlanService>(
             m_cuttingPlanService.get(), [](lcnc::process::ProcessCuttingPlanService*) {});
         kernel.services().registerService<lcnc::process::ProcessCuttingPlanService>(planService);
-        // CAM receives only the optional read-only tool-height bridge; it never
-        // receives a Process-defined contour sequence.
-        auto offsetProvider = std::static_pointer_cast<lcnc::cam::ICamToolOffsetProvider>(planService);
-        kernel.services().registerService<lcnc::cam::ICamToolOffsetProvider>(offsetProvider);
     }
     // CAM 图层变更（新增/删除/重命名）时自动同步映射表。
     if (auto cam = kernel.services().getService<CamModule>()) {
         connect(cam.get(), &CamModule::cutterCollisionConfigurationChanged,
                 m_cuttingPlanService.get(),
                 &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
+        connect(cam.get(), &CamModule::contourOrderTravelPlanRebuilt,
+                m_cuttingPlanService.get(),
+                [cuttingPlan = m_cuttingPlanService.get()](const QVector<std::uint64_t>&) {
+                    cuttingPlan->notifyExternalPlanChanged();
+                });
         connect(cam.get(), &CamModule::toolpathLayersChanged,
                 this, [this]() {
                     if (m_cuttingPlanService)
@@ -1291,8 +1293,11 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
             // 中文翻译：机床配置无效：%1
             return fail(tr("The machine configuration is invalid: %1")
                         .arg(machineConfigurationError));
-        const lcnc::cam::ToolpathExportSnapshot snapshot = toolpathProvider->exportToolpathSnapshot();
-        // 中文翻译：Process 预检使用当前 CAM 快照的加工模式、轴布局和求解器契约。
+        const lcnc::cam::ToolpathExportSnapshot snapshot =
+            toolpathProvider->exportCommittedExecutionSnapshot();
+        // Process preflight must inspect the same immutable execution snapshot
+        // that NormalCutting will consume, including CAM collision state.
+        // 中文翻译：Process 预检必须读取加工将执行的同一份 CAM 不可变快照及碰撞状态。
         LCNC_INFO(lcnc::LogCode::Generic,
                   "process.preflight: CAM snapshot mode='{}' axes={} solver='{}' revision={}",
                   lcnc::machiningModeName(snapshot.machiningMode).toStdString(),
@@ -1318,6 +1323,10 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
             && snapshot.machineConfigurationFingerprint != machineConfig->configurationFingerprint())
             // 中文翻译：刀路机床构型指纹不匹配，请重新求解机床坐标
             return fail(tr("The toolpath machine configuration fingerprint does not match; please solve the machine coordinates again"));
+
+        const QString camBlockReason = lcnc::process::camExecutionBlockReason(snapshot);
+        if (!camBlockReason.isEmpty())
+            return fail(tr("Machining cannot start: %1").arg(camBlockReason));
 
         const auto cuttingList = m_cuttingPlanService->buildCuttingList();
         if (cuttingList.isEmpty())
@@ -1399,7 +1408,7 @@ void ProcessModule::runStart()
 
     m_activeLockedAxisTargets.clear();
     if (auto* provider = lcnc::Kernel::current().service<lcnc::cam::ICamToolpathProvider>()) {
-        const auto snapshot = provider->exportToolpathSnapshot();
+        const auto snapshot = provider->exportCommittedExecutionSnapshot();
         if (auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>())
             m_activeLockedAxisTargets = machineConfig->modeDefinition(snapshot.machiningMode).lockedAxisTargets;
     }

@@ -52,8 +52,6 @@ void ProcessDeviceRuntime::setToolTable()
         fallback.m_dJunctionVelocity = 1.0;
         fallback.m_dJunctionAngle    = 1.0;
         fallback.m_dXsegEndVelocity  = 1.0;
-        fallback.m_dIdleZHeight   = 0.0;
-        fallback.m_dCuttingHeight = 0.0;
         fallback.m_strDirectionX  = "X";
         fallback.m_strDirectionY  = "Y";
         m_ToolFactory.SetTool(0, fallback);

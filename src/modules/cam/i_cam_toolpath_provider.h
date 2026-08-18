@@ -15,13 +15,15 @@ public:
 
     virtual bool hasToolpath() const = 0;
     virtual std::uint64_t toolpathRevision() const = 0;
-    /// Resolve five-axis machine coordinates for the supplied cutting order.
-    /// The order is the only source of cross-contour rotary continuity.
-    virtual bool solveToolpathForOrder(
-        const QVector<std::uint64_t>& orderedContourIds) = 0;
-    virtual ToolpathExportSnapshot exportToolpathSnapshot() const = 0;
-    virtual ToolpathExportSnapshot exportToolpathSnapshotForOrder(
-        const QVector<std::uint64_t>& orderedContourIds) const = 0;
+    /// A detached, read-only-by-contract description of all CAM contours.
+    /// It is for list/preflight display only and deliberately carries no
+    /// promise that a rapid plan has been committed.
+    virtual ToolpathExportSnapshot exportToolpathCatalogSnapshot() const = 0;
+
+    /// The exact current CAM execution result: CAM's committed order, solved
+    /// cutting coordinates, and its matching rapid plan.  Consumers receive a
+    /// value copy and have no API for changing/reordering/re-solving it.
+    virtual ToolpathExportSnapshot exportCommittedExecutionSnapshot() const = 0;
 };
 
 } // namespace lcnc::cam

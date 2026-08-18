@@ -151,7 +151,7 @@ bool upgradeCam(const QString& rootPath, QString* error)
         if (error) *error = QString::fromLocal8Bit(exception.what());
         return false;
     }
-    root["schemaVersion"] = 5;
+    root["schemaVersion"] = 6;
     QString mode = QStringLiteral("Planar3Axis");
     toml::array layout;
     layout.push_back(axisEntry("X", "LinearX"));
@@ -175,6 +175,24 @@ bool upgradeCam(const QString& rootPath, QString* error)
     root["solverVersion"] = mode == QStringLiteral("Planar3Axis") ? 3 : 2;
     root["machineConfigurationFingerprint"] = std::string();
     root["machineAxisLayout"] = layout;
+    if (!root.contains("generation") || !root.at("generation").is_table())
+        root["generation"] = toml::value(toml::table{});
+    root["generation"]["cuttingOffsetMm"] = 1.0;
+    root["generation"]["rapidOffsetMm"] = 5.0;
+    root["generation"]["appliedCuttingOffsetMm"] = 1.0;
+    root["generation"]["appliedRapidOffsetMm"] = 5.0;
+    root["generation"]["dirty"] = true;
+    if (root.contains("contours") && root.at("contours").is_array()) {
+        for (toml::value& contour : root["contours"].as_array()) {
+            if (!contour.is_table()) continue;
+            contour["appliedCuttingOffsetMm"] = 1.0;
+            contour["appliedRapidOffsetMm"] = 5.0;
+            contour["pendingCuttingOffsetMm"] = 1.0;
+            contour["pendingRapidOffsetMm"] = 5.0;
+            contour["dirtyStages"] = 60; // offset + IK + adjacent rapid + collision
+            contour["needsRecalculation"] = true;
+        }
+    }
     // Workpiece mounting is machine-model state in v5 and must not be carried
     // into the upgraded project package.
     // 中文翻译：v5 的工件装夹属于机床模型状态，升级后的项目包不得保留该字段。

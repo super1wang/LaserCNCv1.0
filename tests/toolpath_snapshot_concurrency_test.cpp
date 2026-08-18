@@ -15,13 +15,23 @@ class SnapshotProvider final : public lcnc::cam::ICamToolpathProvider
 public:
     bool hasToolpath() const override { return true; }
     std::uint64_t toolpathRevision() const override { return m_revision.load(); }
-    bool solveToolpathForOrder(const QVector<std::uint64_t>&) override { return true; }
+    lcnc::cam::ToolpathExportSnapshot exportToolpathCatalogSnapshot() const override
+    {
+        return makeSnapshot(QStringLiteral("catalog"));
+    }
 
-    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const override
+    lcnc::cam::ToolpathExportSnapshot exportCommittedExecutionSnapshot() const override
+    {
+        return makeSnapshot(QStringLiteral("execution"));
+    }
+
+private:
+    lcnc::cam::ToolpathExportSnapshot makeSnapshot(const QString& kind) const
     {
         const std::uint64_t revision = m_revision.fetch_add(1) + 1;
         lcnc::cam::ToolpathExportSnapshot snapshot;
         snapshot.revision = revision;
+        snapshot.description = kind;
         lcnc::cam::ToolpathExportContour contour;
         contour.contourId = revision;
         contour.enabled = true;
@@ -34,14 +44,6 @@ public:
         snapshot.pointsByContourId.insert(revision, {point});
         return snapshot;
     }
-
-    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
-        const QVector<std::uint64_t>&) const override
-    {
-        return exportToolpathSnapshot();
-    }
-
-private:
     mutable std::atomic_uint64_t m_revision{0};
 };
 
@@ -58,7 +60,12 @@ int main(int argc, char* argv[])
     QCoreApplication app(argc, argv);
     auto provider = std::make_shared<SnapshotProvider>();
     lcnc::process::ProcessToolpathService service(provider);
-    service.refreshSnapshot();
+    const auto execution = service.refreshCommittedExecutionSnapshot();
+    if (execution.description != QStringLiteral("execution"))
+        return fail(QStringLiteral("Process did not read the committed CAM execution snapshot"));
+    const auto catalog = service.refreshSnapshot();
+    if (catalog.description != QStringLiteral("catalog"))
+        return fail(QStringLiteral("Process did not read the CAM catalog snapshot"));
 
     std::atomic_bool running{true};
     std::atomic_bool mixedRevision{false};

@@ -1,4 +1,5 @@
 #include "core/algorithms/cad/measure.h"
+#include "core/algorithms/occt_exact_operation_lock.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -26,6 +27,7 @@ double minDistance(const TopoDS_Shape& a, const TopoDS_Shape& b)
 {
     if (a.IsNull() || b.IsNull())
         throw std::invalid_argument("Distance input shape is null");
+    lcnc::OcctExactOperationLock exactOperationLock;
     BRepExtrema_DistShapeShape distance(a, b);
     distance.Perform();
     if (!distance.IsDone())

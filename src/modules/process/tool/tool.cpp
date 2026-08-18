@@ -184,10 +184,6 @@ int Tool::SetFromTable(const ::toml::table& t)
 	if (tryGetString(t, "sDirectionX", m_strDirectionX)) ++n;
 	if (tryGetString(t, "sDirectionY", m_strDirectionY)) ++n;
 
-	// 高度
-	if (tryGetDouble(t, "fCuttingHeight", m_dCuttingHeight)) ++n;
-	if (tryGetDouble(t, "fIdleHeight",    m_dIdleZHeight))   ++n;
-
 	// 通用开关
 	if (tryGetBool(t, "bPunch",    m_bPunch))    ++n;
 	if (tryGetBool(t, "bStopBlow", m_bStopBlow)) ++n;
@@ -246,7 +242,6 @@ int Tool::SetFromTable(const ::toml::table& t)
 	// 盲刻
 	if (tryGetBool  (t, "bTrough",        m_bTroughFlag))                ++n;
 	if (tryGetInt   (t, "iRunBuffer",     m_iTroughBuffer))              ++n;
-	if (tryGetDouble(t, "fCHCompensate",  m_dCuttingHeightCompensate))   ++n;
 	if (tryGetDouble(t, "fExtendSctart",  m_dExtend))                    ++n;
 	if (tryGetDouble(t, "fExtendEnd",     m_dExtend_End))                ++n;
 	if (tryGetDouble(t, "fDelay",         m_dTroughDelay))               ++n;
@@ -331,8 +326,6 @@ int Tool::SetFromTable(const ::toml::table& t)
 	table["iRepetitionRate"] = m_iRepetitionRate;
 	table["iPulsePickerDivider"] = m_iPulsePickerDivider;
 	table["fAnalogLaserValue"] = m_dAnalogLaserValue;
-	table["fCuttingHeight"] = m_dCuttingHeight;
-	table["fIdleHeight"] = m_dIdleZHeight;
 	table["bAxisZLinkage"] = m_bAxisZLinkage;
 	table["fLinkedDelay"] = m_dLinkedDelay;
 	table["sLinkedDirection"] = m_sLinkedDirection;

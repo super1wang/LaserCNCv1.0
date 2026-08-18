@@ -28,7 +28,8 @@ namespace {
 
 constexpr char kCamToolpathTomlFile[]   = "cam_toolpath.toml";
 constexpr char kCamToolpathPointsFile[] = "cam_toolpath_points.bin";
-constexpr int  kCamToolpathSchemaVersion = 5;
+constexpr int  kCamToolpathSchemaVersion = 6;
+constexpr int  kOldCamToolpathSchemaVersion = 5;
 
 // 二进制点集 magic 头（"LCNCTPT1"）。
 constexpr quint64 kPointsBinMagic = 0x315450434E434C00ull;
@@ -403,8 +404,13 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
         entry["leadInLength"]      = c.appliedParams.leadInLength;
         entry["appliedLeadInLength"] = c.appliedParams.leadInLength;
         entry["appliedDeflection"] = c.appliedParams.deflection;
+        entry["appliedCuttingOffsetMm"] = c.appliedParams.cuttingOffsetMm;
+        entry["appliedRapidOffsetMm"] = c.appliedParams.rapidOffsetMm;
         entry["pendingLeadInLength"] = c.pendingParams.leadInLength;
         entry["pendingDeflection"] = c.pendingParams.deflection;
+        entry["pendingCuttingOffsetMm"] = c.pendingParams.cuttingOffsetMm;
+        entry["pendingRapidOffsetMm"] = c.pendingParams.rapidOffsetMm;
+        entry["dirtyStages"] = static_cast<std::int64_t>(c.dirtyStages);
         entry["needsRecalculation"] = c.needsRecalculation;
         entry["leadInValid"]       = c.leadIn.valid;
         if (c.leadIn.valid) {
@@ -434,6 +440,8 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
     toml::value gen(toml::table{});
     gen["leadInLength"]         = gp.leadInLength;
     gen["deflection"]           = gp.deflection;
+    gen["cuttingOffsetMm"]      = gp.cuttingOffsetMm;
+    gen["rapidOffsetMm"]        = gp.rapidOffsetMm;
     gen["smoothAngle"]          = gp.smoothAngle;
     gen["useFaceClassification"] = gp.useFaceClassification;
     gen["extractionStrategy"]   = gp.extractionStrategy;
@@ -441,6 +449,8 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
     gen["dirty"]                = cam.generationParamsDirty();
     gen["appliedLeadInLength"]  = appliedGp.leadInLength;
     gen["appliedDeflection"]    = appliedGp.deflection;
+    gen["appliedCuttingOffsetMm"] = appliedGp.cuttingOffsetMm;
+    gen["appliedRapidOffsetMm"] = appliedGp.rapidOffsetMm;
     gen["appliedSmoothAngle"]   = appliedGp.smoothAngle;
     gen["appliedUseFaceClassification"] = appliedGp.useFaceClassification;
     gen["appliedExtractionStrategy"]   = appliedGp.extractionStrategy;
@@ -525,7 +535,8 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
     }
     const int schemaVersion = root.contains("schemaVersion") && root.at("schemaVersion").is_integer()
         ? static_cast<int>(root.at("schemaVersion").as_integer()) : 0;
-    if (schemaVersion != kCamToolpathSchemaVersion) {
+    if (schemaVersion != kCamToolpathSchemaVersion
+        && schemaVersion != kOldCamToolpathSchemaVersion) {
         if (errorMsg)
             *errorMsg = QStringLiteral("CAM toolpath schema version %1 is not supported; expected %2")
                             .arg(schemaVersion).arg(kCamToolpathSchemaVersion);
@@ -605,12 +616,29 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
                 ? e.at("appliedLeadInLength").as_floating() : c.leadIn.length;
             c.appliedParams.deflection = e.contains("appliedDeflection")
                 ? e.at("appliedDeflection").as_floating() : 0.0;
+            c.appliedParams.cuttingOffsetMm = e.contains("appliedCuttingOffsetMm")
+                ? e.at("appliedCuttingOffsetMm").as_floating() : 1.0;
+            c.appliedParams.rapidOffsetMm = e.contains("appliedRapidOffsetMm")
+                ? e.at("appliedRapidOffsetMm").as_floating() : 5.0;
             c.pendingParams.leadInLength = e.contains("pendingLeadInLength")
                 ? e.at("pendingLeadInLength").as_floating() : c.appliedParams.leadInLength;
             c.pendingParams.deflection = e.contains("pendingDeflection")
                 ? e.at("pendingDeflection").as_floating() : c.appliedParams.deflection;
+            c.pendingParams.cuttingOffsetMm = e.contains("pendingCuttingOffsetMm")
+                ? e.at("pendingCuttingOffsetMm").as_floating() : c.appliedParams.cuttingOffsetMm;
+            c.pendingParams.rapidOffsetMm = e.contains("pendingRapidOffsetMm")
+                ? e.at("pendingRapidOffsetMm").as_floating() : c.appliedParams.rapidOffsetMm;
+            c.dirtyStages = e.contains("dirtyStages")
+                ? static_cast<ContourDirtyStage>(e.at("dirtyStages").as_integer())
+                : ContourDirtyStage::None;
             c.needsRecalculation = e.contains("needsRecalculation")
                 && e.at("needsRecalculation").as_boolean();
+            if (schemaVersion == kOldCamToolpathSchemaVersion) {
+                c.dirtyStages = ContourDirtyStage::MotionOffset
+                    | ContourDirtyStage::MachineSolve | ContourDirtyStage::AdjacentRapid
+                    | ContourDirtyStage::Collision;
+                c.needsRecalculation = true;
+            }
             c.leadIn.length = c.appliedParams.leadInLength;
             if (e.contains("leadInValid"))    c.leadIn.valid       = e.at("leadInValid").as_boolean();
             if (c.leadIn.valid) {
@@ -716,6 +744,8 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         CamDataManager::GenerationParams gp = cam.generationParams();
         if (gen.contains("leadInLength"))         gp.leadInLength         = gen.at("leadInLength").as_floating();
         if (gen.contains("deflection"))           gp.deflection           = gen.at("deflection").as_floating();
+        if (gen.contains("cuttingOffsetMm"))      gp.cuttingOffsetMm      = gen.at("cuttingOffsetMm").as_floating();
+        if (gen.contains("rapidOffsetMm"))        gp.rapidOffsetMm        = gen.at("rapidOffsetMm").as_floating();
         if (gen.contains("smoothAngle"))          gp.smoothAngle          = gen.at("smoothAngle").as_floating();
         if (gen.contains("useFaceClassification")) gp.useFaceClassification = gen.at("useFaceClassification").as_boolean();
         if (gen.contains("extractionStrategy"))    gp.extractionStrategy = static_cast<int>(gen.at("extractionStrategy").as_integer());
@@ -724,6 +754,8 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         CamDataManager::GenerationParams applied = gp;
         if (gen.contains("appliedLeadInLength")) applied.leadInLength = gen.at("appliedLeadInLength").as_floating();
         if (gen.contains("appliedDeflection")) applied.deflection = gen.at("appliedDeflection").as_floating();
+        if (gen.contains("appliedCuttingOffsetMm")) applied.cuttingOffsetMm = gen.at("appliedCuttingOffsetMm").as_floating();
+        if (gen.contains("appliedRapidOffsetMm")) applied.rapidOffsetMm = gen.at("appliedRapidOffsetMm").as_floating();
         if (gen.contains("appliedSmoothAngle")) applied.smoothAngle = gen.at("appliedSmoothAngle").as_floating();
         if (gen.contains("appliedUseFaceClassification"))
             applied.useFaceClassification = gen.at("appliedUseFaceClassification").as_boolean();
@@ -732,6 +764,17 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         cam.appliedGenerationParams() = applied;
         cam.setGenerationParamsDirty(gen.contains("dirty") && gen.at("dirty").as_boolean());
     }
+    if (schemaVersion == kOldCamToolpathSchemaVersion) {
+        auto& gp = cam.generationParams();
+        gp.cuttingOffsetMm = 1.0;
+        gp.rapidOffsetMm = 5.0;
+        cam.appliedGenerationParams().cuttingOffsetMm = 1.0;
+        cam.appliedGenerationParams().rapidOffsetMm = 5.0;
+        cam.setGenerationParamsDirty(true);
+    }
+    cam.toolpath().setGlobalLeadInLength(cam.generationParams().leadInLength);
+    cam.toolpath().setGlobalCuttingOffsetMm(cam.generationParams().cuttingOffsetMm);
+    cam.toolpath().setGlobalRapidOffsetMm(cam.generationParams().rapidOffsetMm);
 
     // Machining-face records (manual picks bound by signature on next generate).
     if (root.contains("machiningFaces") && root.at("machiningFaces").is_array()) {

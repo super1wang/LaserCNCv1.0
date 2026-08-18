@@ -377,6 +377,7 @@ set(SRCS_CORE
     src/core/algorithms/cad/primitives.cpp
     src/core/algorithms/cad/boolean_ops.cpp
     src/core/algorithms/cad/measure.cpp
+    src/core/algorithms/occt_exact_operation_lock.cpp
     src/core/algorithms/cad/sketch.cpp
     src/core/algorithms/cad/features.cpp
     src/core/algorithms/cad/transform_ops.cpp
@@ -384,6 +385,7 @@ set(SRCS_CORE
     src/core/algorithms/cam/laser_toolpath.cpp
     src/core/algorithms/cam/contour_order_planner.cpp
     src/core/algorithms/cam/travel_path_planner.cpp
+    src/core/algorithms/cam/surface_collision_prefilter.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp
     src/core/task/module_task_scope.cpp
@@ -468,6 +470,8 @@ set(SRCS_MODULE_SIMULATION
 set(SRCS_MODULE_PROCESS
     src/modules/process/process_module.cpp
     src/modules/process/runtime/process_axis_utilities.cpp
+    src/modules/process/runtime/rapid_motion_utilities.cpp
+    src/modules/process/runtime/rapid_motion_utilities.h
     src/modules/process/runtime/device_command_queue.cpp
     src/modules/process/runtime/device_command_queue.h
     src/modules/process/runtime/process_run_coordinator.cpp
@@ -954,6 +958,7 @@ if(BUILD_TESTING)
     target_link_libraries(lcnc_cone_construction_diag PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_process_runtime_configuration_test
         tests/process_runtime_configuration_test.cpp
+        src/modules/process/runtime/rapid_motion_utilities.cpp
     )
     target_link_libraries(lcnc_process_runtime_configuration_test PRIVATE Qt6::Core)
     if(TARGET lcnc_msvc_environment)
@@ -1007,6 +1012,36 @@ if(BUILD_TESTING)
         tests/travel_path_planner_test.cpp
     )
     target_link_libraries(lcnc_travel_path_planner_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_cam_half_sphere_collision_regression_test
+        tests/cam_half_sphere_collision_regression_test.cpp
+    )
+    target_link_libraries(lcnc_cam_half_sphere_collision_regression_test PRIVATE lcnc_core Qt6::Core)
+    target_compile_definitions(lcnc_cam_half_sphere_collision_regression_test PRIVATE
+        LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
+    )
+    add_executable(lcnc_collision_scan_policy_test
+        tests/collision_scan_policy_test.cpp
+    )
+    target_link_libraries(lcnc_collision_scan_policy_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_occt_exact_operation_lock_test
+        tests/occt_exact_operation_lock_test.cpp
+    )
+    target_link_libraries(lcnc_occt_exact_operation_lock_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_surface_collision_prefilter_test
+        tests/surface_collision_prefilter_test.cpp
+    )
+    target_link_libraries(lcnc_surface_collision_prefilter_test PRIVATE lcnc_core Qt6::Core)
+    target_compile_definitions(lcnc_surface_collision_prefilter_test PRIVATE
+        LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
+    )
+    if(LCNC_ENABLE_ASAN)
+        target_compile_definitions(lcnc_surface_collision_prefilter_test PRIVATE
+            LCNC_TEST_WITH_ASAN=1)
+    endif()
+    add_executable(lcnc_cam_motion_plan_contract_test
+        tests/cam_motion_plan_contract_test.cpp
+    )
+    target_link_libraries(lcnc_cam_motion_plan_contract_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_cam_data_manager_test
         tests/cam_data_manager_test.cpp
     )
@@ -1074,6 +1109,9 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_process_loop_if_executor_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_current_schema_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_contour_order_planner_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_cam_half_sphere_collision_regression_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_occt_exact_operation_lock_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_surface_collision_prefilter_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_data_manager_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_machine_topology_solver_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_toolpath_snapshot_concurrency_test lcnc_runtime_deploy_build)
@@ -1104,6 +1142,9 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_process_loop_if_executor_test)
     lcnc_deploy_tbb_runtime(lcnc_process_current_schema_test)
     lcnc_deploy_tbb_runtime(lcnc_contour_order_planner_test)
+    lcnc_deploy_tbb_runtime(lcnc_cam_half_sphere_collision_regression_test)
+    lcnc_deploy_tbb_runtime(lcnc_occt_exact_operation_lock_test)
+    lcnc_deploy_tbb_runtime(lcnc_surface_collision_prefilter_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_data_manager_test)
     lcnc_deploy_tbb_runtime(lcnc_machine_topology_solver_test)
     lcnc_deploy_tbb_runtime(lcnc_toolpath_snapshot_concurrency_test)
@@ -1135,6 +1176,9 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_process_loop_if_executor_test)
         lcnc_deploy_asan_runtime(lcnc_process_current_schema_test)
         lcnc_deploy_asan_runtime(lcnc_contour_order_planner_test)
+        lcnc_deploy_asan_runtime(lcnc_cam_half_sphere_collision_regression_test)
+        lcnc_deploy_asan_runtime(lcnc_occt_exact_operation_lock_test)
+        lcnc_deploy_asan_runtime(lcnc_surface_collision_prefilter_test)
         lcnc_deploy_asan_runtime(lcnc_cam_data_manager_test)
         lcnc_deploy_asan_runtime(lcnc_machine_topology_solver_test)
         lcnc_deploy_asan_runtime(lcnc_toolpath_snapshot_concurrency_test)
@@ -1191,6 +1235,16 @@ if(BUILD_TESTING)
         COMMAND lcnc_contour_order_planner_test)
     add_test(NAME lcnc_travel_path_planner_test
         COMMAND lcnc_travel_path_planner_test)
+    add_test(NAME lcnc_cam_half_sphere_collision_regression_test
+        COMMAND lcnc_cam_half_sphere_collision_regression_test)
+    add_test(NAME lcnc_collision_scan_policy_test
+        COMMAND lcnc_collision_scan_policy_test)
+    add_test(NAME lcnc_occt_exact_operation_lock_test
+        COMMAND lcnc_occt_exact_operation_lock_test)
+    add_test(NAME lcnc_surface_collision_prefilter_test
+        COMMAND lcnc_surface_collision_prefilter_test)
+    add_test(NAME lcnc_cam_motion_plan_contract_test
+        COMMAND lcnc_cam_motion_plan_contract_test)
     add_test(NAME lcnc_cam_data_manager_test
         COMMAND lcnc_cam_data_manager_test)
     add_test(NAME lcnc_machine_topology_solver_test
