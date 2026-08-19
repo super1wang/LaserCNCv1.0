@@ -948,18 +948,10 @@ if(BUILD_TESTING)
         tests/cam_offset_display_test.cpp
     )
     target_link_libraries(lcnc_cam_offset_display_test PRIVATE lcnc_core Qt6::Core)
-    add_executable(lcnc_cam_lead_in_diag
-        tests/cam_lead_in_diag.cpp
-    )
-    target_link_libraries(lcnc_cam_lead_in_diag PRIVATE lcnc_core Qt6::Core)
-    add_executable(lcnc_contour_extraction_test
+    add_executable(lcnc_cam_algorithm_pipeline_test
         tests/contour_extraction_test.cpp
     )
-    target_link_libraries(lcnc_contour_extraction_test PRIVATE lcnc_core Qt6::Core)
-    add_executable(lcnc_cone_construction_diag
-        tests/cone_construction_diag.cpp
-    )
-    target_link_libraries(lcnc_cone_construction_diag PRIVATE lcnc_core Qt6::Core)
+    target_link_libraries(lcnc_cam_algorithm_pipeline_test PRIVATE lcnc_module_cam Qt6::Core)
     add_executable(lcnc_process_runtime_configuration_test
         tests/process_runtime_configuration_test.cpp
         src/modules/process/runtime/rapid_motion_utilities.cpp
@@ -996,14 +988,10 @@ if(BUILD_TESTING)
         tests/process_manual_motion_service_test.cpp
     )
     target_link_libraries(lcnc_process_manual_motion_service_test PRIVATE lcnc_module_process Qt6::Core)
-    add_executable(lcnc_process_workflow_service_test
-        tests/process_workflow_service_test.cpp
-    )
-    target_link_libraries(lcnc_process_workflow_service_test PRIVATE lcnc_module_process Qt6::Core)
-    add_executable(lcnc_process_loop_if_executor_test
+    add_executable(lcnc_process_workflow_test
         tests/process_loop_if_executor_test.cpp
     )
-    target_link_libraries(lcnc_process_loop_if_executor_test PRIVATE lcnc_module_process Qt6::Core)
+    target_link_libraries(lcnc_process_workflow_test PRIVATE lcnc_module_process Qt6::Core)
     add_executable(lcnc_process_current_schema_test
         tests/process_current_schema_test.cpp
     )
@@ -1016,17 +1004,14 @@ if(BUILD_TESTING)
         tests/travel_path_planner_test.cpp
     )
     target_link_libraries(lcnc_travel_path_planner_test PRIVATE lcnc_core Qt6::Core)
-    add_executable(lcnc_cam_half_sphere_collision_regression_test
+    add_executable(lcnc_manufacturing_flow_test
         tests/cam_half_sphere_collision_regression_test.cpp
     )
-    target_link_libraries(lcnc_cam_half_sphere_collision_regression_test PRIVATE lcnc_core Qt6::Core)
-    target_compile_definitions(lcnc_cam_half_sphere_collision_regression_test PRIVATE
+    target_link_libraries(lcnc_manufacturing_flow_test PRIVATE
+        lcnc_module_process lcnc_module_cam Qt6::Core)
+    target_compile_definitions(lcnc_manufacturing_flow_test PRIVATE
         LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
     )
-    add_executable(lcnc_collision_scan_policy_test
-        tests/collision_scan_policy_test.cpp
-    )
-    target_link_libraries(lcnc_collision_scan_policy_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_occt_exact_operation_lock_test
         tests/occt_exact_operation_lock_test.cpp
     )
@@ -1058,10 +1043,6 @@ if(BUILD_TESTING)
         tests/toolpath_snapshot_concurrency_test.cpp
     )
     target_link_libraries(lcnc_toolpath_snapshot_concurrency_test PRIVATE lcnc_module_process Qt6::Core)
-    add_executable(lcnc_process_run_coordinator_test
-        tests/process_run_coordinator_test.cpp
-    )
-    target_link_libraries(lcnc_process_run_coordinator_test PRIVATE lcnc_module_process Qt6::Core)
     add_executable(lcnc_cad_algorithm_contract_test
         tests/cad_algorithm_contract_test.cpp
     )
@@ -1070,10 +1051,6 @@ if(BUILD_TESTING)
         tests/project_explorer_controller_test.cpp
     )
     target_link_libraries(lcnc_project_explorer_controller_test PRIVATE lcnc_app Qt6::Widgets)
-    add_executable(lcnc_toolpath_generation_service_test
-        tests/toolpath_generation_service_test.cpp
-    )
-    target_link_libraries(lcnc_toolpath_generation_service_test PRIVATE lcnc_module_cam Qt6::Core)
     add_executable(lcnc_translation_context_test
         tests/translation_context_test.cpp
     )
@@ -1100,9 +1077,7 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_task_manager_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_lead_in_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_offset_display_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cam_lead_in_diag lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_contour_extraction_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cone_construction_diag lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_cam_algorithm_pipeline_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_runtime_configuration_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_device_command_queue_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_preflight_service_test lcnc_runtime_deploy_build)
@@ -1110,20 +1085,17 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_process_status_service_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_connection_service_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_manual_motion_service_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_workflow_service_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_loop_if_executor_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_process_workflow_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_process_current_schema_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_contour_order_planner_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cam_half_sphere_collision_regression_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_manufacturing_flow_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_occt_exact_operation_lock_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_surface_collision_prefilter_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_data_manager_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_machine_topology_solver_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_toolpath_snapshot_concurrency_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_run_coordinator_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cad_algorithm_contract_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_project_explorer_controller_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_toolpath_generation_service_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_translation_context_test lcnc_runtime_deploy_build)
         if(LCNC_WITH_ACS)
             add_dependencies(lcnc_acs_rapid_command_test lcnc_runtime_deploy_build)
@@ -1134,9 +1106,7 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_offset_display_test)
-    lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_diag)
-    lcnc_deploy_tbb_runtime(lcnc_contour_extraction_test)
-    lcnc_deploy_tbb_runtime(lcnc_cone_construction_diag)
+    lcnc_deploy_tbb_runtime(lcnc_cam_algorithm_pipeline_test)
     lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
     lcnc_deploy_tbb_runtime(lcnc_device_command_queue_test)
     lcnc_deploy_tbb_runtime(lcnc_process_preflight_service_test)
@@ -1144,20 +1114,17 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_process_status_service_test)
     lcnc_deploy_tbb_runtime(lcnc_process_connection_service_test)
     lcnc_deploy_tbb_runtime(lcnc_process_manual_motion_service_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_workflow_service_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_loop_if_executor_test)
+    lcnc_deploy_tbb_runtime(lcnc_process_workflow_test)
     lcnc_deploy_tbb_runtime(lcnc_process_current_schema_test)
     lcnc_deploy_tbb_runtime(lcnc_contour_order_planner_test)
-    lcnc_deploy_tbb_runtime(lcnc_cam_half_sphere_collision_regression_test)
+    lcnc_deploy_tbb_runtime(lcnc_manufacturing_flow_test)
     lcnc_deploy_tbb_runtime(lcnc_occt_exact_operation_lock_test)
     lcnc_deploy_tbb_runtime(lcnc_surface_collision_prefilter_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_data_manager_test)
     lcnc_deploy_tbb_runtime(lcnc_machine_topology_solver_test)
     lcnc_deploy_tbb_runtime(lcnc_toolpath_snapshot_concurrency_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_run_coordinator_test)
     lcnc_deploy_tbb_runtime(lcnc_cad_algorithm_contract_test)
     lcnc_deploy_tbb_runtime(lcnc_project_explorer_controller_test)
-    lcnc_deploy_tbb_runtime(lcnc_toolpath_generation_service_test)
     lcnc_deploy_tbb_runtime(lcnc_translation_context_test)
     if(LCNC_WITH_ACS)
         lcnc_deploy_tbb_runtime(lcnc_acs_rapid_command_test)
@@ -1171,7 +1138,7 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_task_manager_test)
         lcnc_deploy_asan_runtime(lcnc_cam_lead_in_test)
         lcnc_deploy_asan_runtime(lcnc_cam_offset_display_test)
-        lcnc_deploy_asan_runtime(lcnc_contour_extraction_test)
+        lcnc_deploy_asan_runtime(lcnc_cam_algorithm_pipeline_test)
         lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
         lcnc_deploy_asan_runtime(lcnc_device_command_queue_test)
         lcnc_deploy_asan_runtime(lcnc_process_preflight_service_test)
@@ -1179,20 +1146,17 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_process_status_service_test)
         lcnc_deploy_asan_runtime(lcnc_process_connection_service_test)
         lcnc_deploy_asan_runtime(lcnc_process_manual_motion_service_test)
-        lcnc_deploy_asan_runtime(lcnc_process_workflow_service_test)
-        lcnc_deploy_asan_runtime(lcnc_process_loop_if_executor_test)
+        lcnc_deploy_asan_runtime(lcnc_process_workflow_test)
         lcnc_deploy_asan_runtime(lcnc_process_current_schema_test)
         lcnc_deploy_asan_runtime(lcnc_contour_order_planner_test)
-        lcnc_deploy_asan_runtime(lcnc_cam_half_sphere_collision_regression_test)
+        lcnc_deploy_asan_runtime(lcnc_manufacturing_flow_test)
         lcnc_deploy_asan_runtime(lcnc_occt_exact_operation_lock_test)
         lcnc_deploy_asan_runtime(lcnc_surface_collision_prefilter_test)
         lcnc_deploy_asan_runtime(lcnc_cam_data_manager_test)
         lcnc_deploy_asan_runtime(lcnc_machine_topology_solver_test)
         lcnc_deploy_asan_runtime(lcnc_toolpath_snapshot_concurrency_test)
-        lcnc_deploy_asan_runtime(lcnc_process_run_coordinator_test)
         lcnc_deploy_asan_runtime(lcnc_cad_algorithm_contract_test)
         lcnc_deploy_asan_runtime(lcnc_project_explorer_controller_test)
-        lcnc_deploy_asan_runtime(lcnc_toolpath_generation_service_test)
         lcnc_deploy_asan_runtime(lcnc_translation_context_test)
         if(LCNC_WITH_ACS)
             lcnc_deploy_asan_runtime(lcnc_acs_rapid_command_test)
@@ -1216,10 +1180,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_cam_lead_in_test)
     add_test(NAME lcnc_cam_offset_display_test
         COMMAND lcnc_cam_offset_display_test)
-    add_test(NAME lcnc_contour_extraction_test
-        COMMAND lcnc_contour_extraction_test)
-    add_test(NAME lcnc_cone_construction_test
-        COMMAND lcnc_cone_construction_diag)
+    add_test(NAME lcnc_cam_algorithm_pipeline_test
+        COMMAND lcnc_cam_algorithm_pipeline_test)
     add_test(NAME lcnc_process_runtime_configuration_test
         COMMAND lcnc_process_runtime_configuration_test)
     add_test(NAME lcnc_device_command_queue_test
@@ -1234,20 +1196,22 @@ if(BUILD_TESTING)
         COMMAND lcnc_process_connection_service_test)
     add_test(NAME lcnc_process_manual_motion_service_test
         COMMAND lcnc_process_manual_motion_service_test)
-    add_test(NAME lcnc_process_workflow_service_test
-        COMMAND lcnc_process_workflow_service_test)
-    add_test(NAME lcnc_process_loop_if_executor_test
-        COMMAND lcnc_process_loop_if_executor_test)
+    add_test(NAME lcnc_process_workflow_test
+        COMMAND lcnc_process_workflow_test)
     add_test(NAME lcnc_process_current_schema_test
         COMMAND lcnc_process_current_schema_test)
     add_test(NAME lcnc_contour_order_planner_test
         COMMAND lcnc_contour_order_planner_test)
     add_test(NAME lcnc_travel_path_planner_test
         COMMAND lcnc_travel_path_planner_test)
-    add_test(NAME lcnc_cam_half_sphere_collision_regression_test
-        COMMAND lcnc_cam_half_sphere_collision_regression_test)
-    add_test(NAME lcnc_collision_scan_policy_test
-        COMMAND lcnc_collision_scan_policy_test)
+    add_test(NAME lcnc_flow_open_workpiece_test
+        COMMAND lcnc_manufacturing_flow_test --case open-workpiece)
+    add_test(NAME lcnc_flow_cam_pipeline_test
+        COMMAND lcnc_manufacturing_flow_test --case cam-pipeline)
+    add_test(NAME lcnc_flow_collision_workpiece_test
+        COMMAND lcnc_manufacturing_flow_test --case collision-workpiece)
+    add_test(NAME lcnc_flow_collision_machine_contract_test
+        COMMAND lcnc_manufacturing_flow_test --case collision-machine-contract)
     add_test(NAME lcnc_occt_exact_operation_lock_test
         COMMAND lcnc_occt_exact_operation_lock_test)
     add_test(NAME lcnc_surface_collision_prefilter_test
@@ -1260,8 +1224,6 @@ if(BUILD_TESTING)
         COMMAND lcnc_machine_topology_solver_test)
     add_test(NAME lcnc_toolpath_snapshot_concurrency_test
         COMMAND lcnc_toolpath_snapshot_concurrency_test)
-    add_test(NAME lcnc_process_run_coordinator_test
-        COMMAND lcnc_process_run_coordinator_test)
     add_test(NAME lcnc_cad_algorithm_contract_test
         COMMAND lcnc_cad_algorithm_contract_test)
     add_test(NAME lcnc_project_explorer_controller_test
@@ -1269,8 +1231,6 @@ if(BUILD_TESTING)
     set_tests_properties(lcnc_project_explorer_controller_test PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     )
-    add_test(NAME lcnc_toolpath_generation_service_test
-        COMMAND lcnc_toolpath_generation_service_test)
     add_test(NAME lcnc_translation_context_test
         COMMAND lcnc_translation_context_test)
     if(LCNC_WITH_ACS)
@@ -1290,6 +1250,52 @@ if(BUILD_TESTING)
         TIMEOUT 30
         RUN_SERIAL TRUE
     )
+    set_tests_properties(
+        lcnc_cam_lead_in_test
+        lcnc_cam_algorithm_pipeline_test
+        lcnc_contour_order_planner_test
+        lcnc_travel_path_planner_test
+        lcnc_occt_exact_operation_lock_test
+        lcnc_surface_collision_prefilter_test
+        lcnc_cam_motion_plan_contract_test
+        lcnc_machine_topology_solver_test
+        PROPERTIES LABELS "critical;algorithm")
+    set_tests_properties(
+        lcnc_project_package_test
+        lcnc_process_workflow_test
+        lcnc_flow_open_workpiece_test
+        lcnc_flow_cam_pipeline_test
+        lcnc_flow_collision_workpiece_test
+        lcnc_flow_collision_machine_contract_test
+        PROPERTIES LABELS "critical;flow")
+    set_tests_properties(
+        architecture_checks
+        lcnc_task_manager_test
+        lcnc_device_command_queue_test
+        lcnc_process_runtime_configuration_test
+        lcnc_process_preflight_service_test
+        lcnc_process_cutting_safety_test
+        lcnc_process_status_service_test
+        lcnc_process_connection_service_test
+        lcnc_process_manual_motion_service_test
+        lcnc_toolpath_snapshot_concurrency_test
+        PROPERTIES LABELS "critical;safety")
+    set_tests_properties(
+        lcnc_translation_context_contract_test
+        lcnc_cam_offset_display_test
+        lcnc_cam_data_manager_test
+        lcnc_cad_algorithm_contract_test
+        lcnc_process_current_schema_test
+        lcnc_project_explorer_controller_test
+        lcnc_translation_context_test
+        lcnc_startup_smoke_test
+        PROPERTIES LABELS "support")
+    if(LCNC_WITH_ACS)
+        set_tests_properties(
+            lcnc_acs_rapid_command_test
+            lcnc_simulator_cmhp_sdk_integration_test
+            PROPERTIES LABELS "critical;sdk-integration")
+    endif()
 endif()
 
 message(STATUS "Qt6 version: ${Qt6_VERSION}")

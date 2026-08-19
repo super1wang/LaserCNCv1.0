@@ -142,8 +142,30 @@ void TaskManager::requestAbort(TaskId id)
     if (auto* e = m_tasks.value(id, nullptr)) {
         if (!e->spec.cancellable)
             return;
-        e->progress->requestAbort();
-        setStatus(e, TaskExecutionStatus::CancelRequested);
+
+        // Do not overwrite a worker's terminal state.  The previous
+        // requestAbort()->setStatus() sequence could race with the worker:
+        // the worker stored Cancelled after observing the abort flag, then
+        // the caller stored CancelRequested and left a completed task in a
+        // non-terminal state.
+        TaskExecutionStatus current = e->status.load();
+        while (current == TaskExecutionStatus::Queued
+               || current == TaskExecutionStatus::Running) {
+            if (e->status.compare_exchange_weak(
+                    current, TaskExecutionStatus::CancelRequested)) {
+                const TaskId taskId = e->id;
+                QMetaObject::invokeMethod(this, [this, taskId] {
+                    if (m_tasks.contains(taskId)) {
+                        emit taskStatusChanged(
+                            taskId, TaskExecutionStatus::CancelRequested);
+                    }
+                }, Qt::QueuedConnection);
+                e->progress->requestAbort();
+                return;
+            }
+        }
+        if (current == TaskExecutionStatus::CancelRequested)
+            e->progress->requestAbort();
     }
 }
 

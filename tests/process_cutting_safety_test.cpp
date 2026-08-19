@@ -1,4 +1,5 @@
 #include "modules/process/runtime/process_cutting_safety.h"
+#include "modules/process/runtime/process_run_coordinator.h"
 
 #include <cassert>
 
@@ -6,6 +7,18 @@ using namespace lcnc::process;
 
 int main()
 {
+    ProcessRunCoordinator coordinator;
+    assert(coordinator.state() == lcnc::ProcessRunState::Idle);
+    assert(!coordinator.transitionTo(lcnc::ProcessRunState::Paused));
+    assert(coordinator.transitionTo(lcnc::ProcessRunState::Running));
+    assert(coordinator.transitionTo(lcnc::ProcessRunState::Paused));
+    assert(coordinator.transitionTo(lcnc::ProcessRunState::Running));
+    assert(coordinator.transitionTo(lcnc::ProcessRunState::Stopped));
+    assert(coordinator.transitionTo(lcnc::ProcessRunState::Idle));
+    assert(coordinator.transitionTo(lcnc::ProcessRunState::Error));
+    assert(!coordinator.transitionTo(lcnc::ProcessRunState::Running));
+    assert(coordinator.transitionTo(lcnc::ProcessRunState::Stopped));
+
     ContourBoundaryHealth health;
     auto result = evaluateContourBoundaryHealth(health);
     assert(!result.success);

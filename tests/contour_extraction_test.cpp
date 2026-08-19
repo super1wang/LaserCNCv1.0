@@ -6,8 +6,11 @@
 //   - The same default on a cylinder yields its smooth outer-surface boundary.
 
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cad/primitives.h"
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/project/cam/cam_data_manager.h"
+#include "modules/cam/services/machining_face_pipeline_service.h"
+#include "modules/cam/services/toolpath_generation_service.h"
 
 #include <QTextStream>
 
@@ -235,6 +238,86 @@ int verifyPipelineChain()
     return 0;
 }
 
+int verifyAsynchronousResultContracts()
+{
+    lcnc::cam::ToolpathGenerationStamp captured;
+    captured.toolpathRevision = 10;
+    captured.machiningFaceRevision = 20;
+    captured.machineSetupRevision = 30;
+    captured.leadInLength = 4.0;
+    captured.smoothAngle = 5.0;
+    captured.deflection = 0.1;
+    captured.cuttingOffsetMm = 1.0;
+    captured.rapidOffsetMm = 5.0;
+    captured.useFaceClassification = true;
+    captured.extractionStrategy = 2;
+    captured.contourIds = {101, 102};
+    captured.sources.push_back({
+        QStringLiteral("0:1"), 0, lcnc::cad_algo::makeBox(10.0, 10.0, 2.0)});
+
+    using lcnc::cam::ToolpathGenerationService;
+    if (!ToolpathGenerationService::acceptsResult(captured, captured, true, false))
+        return fail(QStringLiteral("Unchanged asynchronous CAM result was rejected"));
+
+    const auto mustReject = [&captured](lcnc::cam::ToolpathGenerationStamp changed,
+                                        const QString& label) {
+        if (ToolpathGenerationService::acceptsResult(captured, changed, true, false))
+            return fail(QStringLiteral("Stale CAM result accepted after %1 changed").arg(label));
+        return 0;
+    };
+    auto changed = captured;
+    ++changed.machiningFaceRevision;
+    if (const int rc = mustReject(changed, QStringLiteral("machining faces")); rc != 0)
+        return rc;
+    changed = captured;
+    ++changed.machineSetupRevision;
+    if (const int rc = mustReject(changed, QStringLiteral("machine setup")); rc != 0)
+        return rc;
+    changed = captured;
+    changed.contourIds.pop_back();
+    if (const int rc = mustReject(changed, QStringLiteral("contour selection")); rc != 0)
+        return rc;
+    changed = captured;
+    changed.sources.front().shape = lcnc::cad_algo::makeBox(11.0, 10.0, 2.0);
+    if (const int rc = mustReject(changed, QStringLiteral("source geometry")); rc != 0)
+        return rc;
+    if (ToolpathGenerationService::acceptsResult(captured, captured, false, false)
+        || ToolpathGenerationService::acceptsResult(captured, captured, true, true)) {
+        return fail(QStringLiteral("Failed or cancelled CAM result was accepted"));
+    }
+
+    lcnc::cam::MachiningFacePipelineService faces;
+    const TopoDS_Shape source = lcnc::cad_algo::makeBox(8.0, 6.0, 2.0);
+    TopExp_Explorer explorer(source, TopAbs_FACE);
+    if (!explorer.More())
+        return fail(QStringLiteral("Face-pipeline fixture has no face"));
+    const TopoDS_Face face = TopoDS::Face(explorer.Current());
+    const lcnc::cam::MachiningFacePipelineService::Candidate candidate{
+        face, QStringLiteral("0:2"), lcnc::cam::MachiningFaceRole::MachiningSurface};
+    if (!faces.replaceAutomaticFaces({candidate}) || faces.entries().size() != 1)
+        return fail(QStringLiteral("Automatic machining face was not accepted"));
+    const auto stableId = faces.entries().front().faceId;
+
+    const TopoDS_Shape rebuilt = lcnc::cad_algo::makeBox(8.0, 6.0, 2.0);
+    TopExp_Explorer rebuiltExplorer(rebuilt, TopAbs_FACE);
+    if (!rebuiltExplorer.More()
+        || !faces.replaceAutomaticFaces({{
+            TopoDS::Face(rebuiltExplorer.Current()), QStringLiteral("0:2"),
+            lcnc::cam::MachiningFaceRole::MachiningSurface}})
+        || faces.entries().front().faceId != stableId) {
+        return fail(QStringLiteral("Equivalent automatic face did not preserve its stable id"));
+    }
+    const auto records = faces.persistenceRecords();
+    lcnc::cam::MachiningFacePipelineService rebound;
+    const auto result = rebound.rebindFromRecords(
+        records, {{QStringLiteral("0:2"), rebuilt}});
+    if (result.reboundCount != 1 || !result.missingFaces.empty()
+        || rebound.entries().front().faceId != stableId) {
+        return fail(QStringLiteral("Persisted machining face could not be rebound"));
+    }
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -264,7 +347,9 @@ int main()
         return rc;
     if (int rc = verifyPipelineChain())
         return rc;
+    if (int rc = verifyAsynchronousResultContracts())
+        return rc;
 
-    QTextStream(stderr) << "contour_extraction_test: ok\n";
+    QTextStream(stderr) << "cam_algorithm_pipeline_test: ok\n";
     return 0;
 }

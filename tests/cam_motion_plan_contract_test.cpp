@@ -9,6 +9,8 @@
 #include <gp_Trsf.hxx>
 
 #include <cmath>
+#include <limits>
+#include <mutex>
 
 namespace {
 
@@ -18,11 +20,59 @@ int fail(const QString& message)
     return 1;
 }
 
+int verifyCollisionScanPolicy()
+{
+    const QSet<QString> sources = {
+        QStringLiteral("axis:B"), QStringLiteral("axis:Z"),
+        QStringLiteral("cutter"), QStringLiteral("axis:A")};
+    const QStringList expected = {
+        QStringLiteral("cutter"), QStringLiteral("axis:Z"),
+        QStringLiteral("axis:A"), QStringLiteral("axis:B")};
+    if (lcnc::cam_algo::orderedActiveCollisionSources(sources) != expected)
+        return fail(QStringLiteral("Active collision sources are not staged deterministically"));
+
+    using State = lcnc::cam::CollisionValidationState;
+    if (lcnc::cam_algo::collisionStateSeverity(1)
+            <= lcnc::cam_algo::collisionStateSeverity(3)
+        || lcnc::cam_algo::collisionStateSeverity(3)
+            <= lcnc::cam_algo::collisionStateSeverity(2)
+        || lcnc::cam_algo::collisionStateSeverity(2)
+            <= lcnc::cam_algo::collisionStateSeverity(0)
+        || lcnc::cam_algo::classifyCollisionDistance(0.0, 0.5, 1e-7)
+            != State::Collision
+        || lcnc::cam_algo::classifyCollisionDistance(0.25, 0.5, 1e-7)
+            != State::Warning
+        || lcnc::cam_algo::classifyCollisionDistance(0.75, 0.5, 1e-7)
+            != State::Safe
+        || lcnc::cam_algo::classifyCollisionDistance(
+               std::numeric_limits<double>::quiet_NaN(), 0.5, 1e-7)
+            != State::Indeterminate) {
+        return fail(QStringLiteral("Collision severity or distance classification is invalid"));
+    }
+
+    std::unique_lock<std::timed_mutex> owner(
+        lcnc::cam_algo::collisionScanExecutionMutex());
+    std::unique_lock<std::timed_mutex> cancelled(
+        lcnc::cam_algo::collisionScanExecutionMutex(), std::defer_lock);
+    if (lcnc::cam_algo::acquireCollisionScanExecution(cancelled, [] { return true; }))
+        return fail(QStringLiteral("Cancelled scan acquired the global execution guard"));
+    owner.unlock();
+
+    std::unique_lock<std::timed_mutex> next(
+        lcnc::cam_algo::collisionScanExecutionMutex(), std::defer_lock);
+    if (!lcnc::cam_algo::acquireCollisionScanExecution(next, [] { return false; }))
+        return fail(QStringLiteral("Released collision execution guard could not be acquired"));
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
+
+    if (const int rc = verifyCollisionScanPolicy(); rc != 0)
+        return rc;
 
     lcnc::cam::CollisionValidationSnapshot validation;
     validation.state = lcnc::cam::CollisionValidationState::Disabled;

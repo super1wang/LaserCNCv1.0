@@ -4,10 +4,15 @@
 #include "modules/process/steps/process_step_registry.h"
 #include "modules/process/workflow/process_flow_document.h"
 #include "modules/process/workflow/process_node_registry.h"
+#include "modules/process/workflow/process_workflow_service.h"
 
 #include <QCoreApplication>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QTextStream>
+
+#include <atomic>
 
 namespace {
 int g_outcome = 0; // 0=timeout, 1=finished, 2=failed
@@ -40,6 +45,71 @@ public:
     QVariantList receivedAxes;
     int receivedTimeoutMs{-1};
 };
+
+class RecordingCuttingService final : public lcnc::process::IProcessCuttingService
+{
+public:
+    lcnc::process::ProcessToolpathSnapshot toolpathSnapshot() const override
+    {
+        lcnc::process::ProcessToolpathSnapshot snapshot;
+        snapshot.available = true;
+        snapshot.contourCount = 2;
+        snapshot.totalPointCount = 20;
+        snapshot.description = QStringLiteral("integration fixture");
+        return snapshot;
+    }
+
+    bool executeNormalCutting(const QString& nodeId,
+                              const QVariantMap&,
+                              lcnc::process::ProcessInterruptContext*,
+                              QString*) override
+    {
+        lastNodeId = nodeId;
+        ++executionCount;
+        return true;
+    }
+
+    std::atomic<int> executionCount{0};
+    QString lastNodeId;
+};
+
+bool verifyWorkflowPersistence()
+{
+    QTemporaryDir directory;
+    if (!directory.isValid())
+        return false;
+
+    lcnc::process::ProcessWorkflowService service;
+    int changes = 0;
+    QObject::connect(&service, &lcnc::process::ProcessWorkflowService::flowChanged,
+                     [&changes] { ++changes; });
+    service.createNew();
+    if (service.document().rootNodes().size() != 3 || changes != 1)
+        return false;
+
+    const QString path = directory.filePath(QStringLiteral("current.toml"));
+    QString error;
+    if (!service.save(path, &error) || service.document().isDirty())
+        return false;
+    service.document().resetToDefault();
+    if (!service.load(path, &error) || changes != 2)
+        return false;
+
+    const QString retainedNodeId = service.document().rootNodes().front().id;
+    const QString oldPath = directory.filePath(QStringLiteral("old.toml"));
+    QFile oldFile(oldPath);
+    if (!oldFile.open(QIODevice::WriteOnly | QIODevice::Text)
+        || oldFile.write("[Process]\nschemaVersion = 0\nnodes = []\n") < 0) {
+        return false;
+    }
+    oldFile.close();
+    if (service.load(oldPath, &error)
+        || service.document().rootNodes().front().id != retainedNodeId
+        || changes != 2) {
+        return false;
+    }
+    return true;
+}
 }
 
 // Drive the executor headlessly through Loop/If workflows. Steps used
@@ -67,6 +137,11 @@ int main(int argc, char* argv[])
     stepRegistry.clear();
     lcnc::process::registerBuiltinProcessSteps(stepRegistry);
 
+    if (!verifyWorkflowPersistence()) {
+        QTextStream(stderr) << "Workflow persistence contract failed\n";
+        return 1;
+    }
+
     lcnc::process::ProcessWorkflowExecutor executor;
     lcnc::process::ProcessStepContext context;
     context.logMessage = [](const QString&) {};
@@ -79,6 +154,23 @@ int main(int argc, char* argv[])
                      [&](const QString&, const QString&) { g_outcome = 2; app.quit(); });
 
     using namespace lcnc::process;
+
+    // Execute the real default Start -> NormalCutting -> Stop workflow through
+    // the public cutting-service boundary. This is the headless machining-flow
+    // gate; controller-specific SDK dispatch remains in its integration test.
+    {
+        RecordingCuttingService cutting;
+        context.cutting = &cutting;
+        ProcessFlowDocument document;
+        document.resetToDefault();
+        if (!runCase(executor, context, document)
+            || cutting.executionCount.load() != 1
+            || cutting.lastNodeId.isEmpty()) {
+            QTextStream(stderr) << "Default machining workflow did not execute exactly once\n";
+            return 1;
+        }
+        context.cutting = nullptr;
+    }
 
     // The new step must be registered, persist by its stable string id and
     // forward its complete axis table through the motion-service boundary.
