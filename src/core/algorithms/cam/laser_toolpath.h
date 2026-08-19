@@ -340,8 +340,9 @@ public:
     /// The lead-in line goes from the approach start to the entry point on the contour.
     /// @return A TopoDS_Edge representing the lead-in line, or a null edge if invalid.
     static TopoDS_Edge computeLeadInEdge(const LaserContour& contour);
-    /// Smooth display geometry derived from immutable base samples and the
-    /// applied normal cutting offset. The source TopoDS_Wire is never changed.
+    /// Sampled display geometry derived from immutable base samples and the
+    /// applied normal cutting offset. It preserves the executable line
+    /// segments and never changes the source TopoDS_Wire.
     static TopoDS_Shape buildOffsetDisplayShape(const LaserContour& contour);
 
     /// Build a lead-in in the machining face's tangent plane. Two nearby points

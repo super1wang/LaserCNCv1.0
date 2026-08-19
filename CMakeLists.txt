@@ -944,6 +944,10 @@ if(BUILD_TESTING)
         tests/cam_lead_in_test.cpp
     )
     target_link_libraries(lcnc_cam_lead_in_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_cam_offset_display_test
+        tests/cam_offset_display_test.cpp
+    )
+    target_link_libraries(lcnc_cam_offset_display_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_cam_lead_in_diag
         tests/cam_lead_in_diag.cpp
     )
@@ -1095,6 +1099,7 @@ if(BUILD_TESTING)
         add_dependencies(lcnc_project_package_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_task_manager_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_lead_in_test lcnc_runtime_deploy_build)
+        add_dependencies(lcnc_cam_offset_display_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cam_lead_in_diag lcnc_runtime_deploy_build)
         add_dependencies(lcnc_contour_extraction_test lcnc_runtime_deploy_build)
         add_dependencies(lcnc_cone_construction_diag lcnc_runtime_deploy_build)
@@ -1128,6 +1133,7 @@ if(BUILD_TESTING)
     lcnc_deploy_tbb_runtime(lcnc_project_package_test)
     lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_test)
+    lcnc_deploy_tbb_runtime(lcnc_cam_offset_display_test)
     lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_diag)
     lcnc_deploy_tbb_runtime(lcnc_contour_extraction_test)
     lcnc_deploy_tbb_runtime(lcnc_cone_construction_diag)
@@ -1164,6 +1170,7 @@ if(BUILD_TESTING)
         lcnc_deploy_asan_runtime(lcnc_project_package_test)
         lcnc_deploy_asan_runtime(lcnc_task_manager_test)
         lcnc_deploy_asan_runtime(lcnc_cam_lead_in_test)
+        lcnc_deploy_asan_runtime(lcnc_cam_offset_display_test)
         lcnc_deploy_asan_runtime(lcnc_contour_extraction_test)
         lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
         lcnc_deploy_asan_runtime(lcnc_device_command_queue_test)
@@ -1207,6 +1214,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_task_manager_test)
     add_test(NAME lcnc_cam_lead_in_test
         COMMAND lcnc_cam_lead_in_test)
+    add_test(NAME lcnc_cam_offset_display_test
+        COMMAND lcnc_cam_offset_display_test)
     add_test(NAME lcnc_contour_extraction_test
         COMMAND lcnc_contour_extraction_test)
     add_test(NAME lcnc_cone_construction_test

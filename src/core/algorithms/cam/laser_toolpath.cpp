@@ -39,10 +39,11 @@
 #include <TopTools_ListOfShape.hxx>
 #include <ShapeAnalysis_Surface.hxx>
 #include <Geom_Surface.hxx>
-#include <GeomLProp_SLProps.hxx>
-#include <GeomAPI_Interpolate.hxx>
 #include <Geom_BSplineCurve.hxx>
-#include <TColgp_HArray1OfPnt.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <TColgp_Array1OfPnt.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
 #include <Bnd_Box.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <Poly_Triangulation.hxx>
@@ -57,6 +58,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <limits>
 #include <utility>
 
@@ -81,42 +83,70 @@ TopoDS_Shape LaserToolpathBuilder::buildOffsetDisplayShape(const LaserContour& c
 {
     if (contour.points.size() < 2)
         return contour.wire;
+    const double offset = contour.appliedParams.cuttingOffsetMm;
+    if (std::abs(offset) <= 1.0e-12 && !contour.wire.IsNull())
+        return contour.wire;
     const bool closed = contour.points.size() > 2
         && contour.points.front().position.SquareDistance(
                contour.points.back().position) <= 1.0e-10;
     const int count = static_cast<int>(contour.points.size()) - (closed ? 1 : 0);
     if (count < 2)
         return contour.wire;
-    Handle(TColgp_HArray1OfPnt) samples = new TColgp_HArray1OfPnt(1, count);
+
+    std::vector<gp_Pnt> samples;
+    samples.reserve(static_cast<std::size_t>(count + (closed ? 1 : 0)));
     for (int index = 0; index < count; ++index) {
         const ToolpathPoint& point = contour.points[static_cast<std::size_t>(index)];
-        samples->SetValue(index + 1, point.position.Translated(
-            gp_Vec(point.normal) * contour.appliedParams.cuttingOffsetMm));
+        const gp_Pnt offsetPoint = point.position.Translated(gp_Vec(point.normal) * offset);
+        if (samples.empty() || samples.back().SquareDistance(offsetPoint) > 1.0e-18)
+            samples.push_back(offsetPoint);
     }
+    if (closed && samples.size() > 2
+        && samples.back().SquareDistance(samples.front()) > 1.0e-18) {
+        samples.push_back(samples.front());
+    }
+    if (samples.size() < 2)
+        return contour.wire;
+
+    // The exported cutting path is a sequence of lineTo commands through these
+    // exact samples. Interpolating the whole closed contour as one periodic
+    // cubic B-spline rounds sharp corners and can overshoot across adjacent
+    // source edges. A degree-one B-spline is the exact polyline: every pole is
+    // an executable sample, every span is straight, and every corner remains C0.
+    // 中文翻译：实际切割按这些偏置采样点逐段直线插补。整轮廓周期 B 样条会跨原始边
+    // 圆化尖角并产生过冲；一次 B 样条严格等同于采样折线，既不拟合也不增加大量拓扑边。
     try {
-        GeomAPI_Interpolate interpolate(samples, closed, 1.0e-6);
-        interpolate.Perform();
-        if (interpolate.IsDone() && !interpolate.Curve().IsNull()) {
-            BRepBuilderAPI_MakeEdge edge(interpolate.Curve());
-            if (edge.IsDone())
-                return edge.Edge();
+        const int poleCount = static_cast<int>(samples.size());
+        TColgp_Array1OfPnt poles(1, poleCount);
+        TColStd_Array1OfReal knots(1, poleCount);
+        TColStd_Array1OfInteger multiplicities(1, poleCount);
+        double accumulatedLength = 0.0;
+        for (int index = 0; index < poleCount; ++index) {
+            if (index > 0)
+                accumulatedLength += samples[static_cast<std::size_t>(index - 1)]
+                    .Distance(samples[static_cast<std::size_t>(index)]);
+            poles.SetValue(index + 1, samples[static_cast<std::size_t>(index)]);
+            knots.SetValue(index + 1, accumulatedLength);
+            multiplicities.SetValue(index + 1,
+                                    index == 0 || index + 1 == poleCount ? 2 : 1);
         }
+        Handle(Geom_BSplineCurve) polyline = new Geom_BSplineCurve(
+            poles, knots, multiplicities, 1, Standard_False);
+        BRepBuilderAPI_MakeEdge edge(polyline);
+        if (edge.IsDone())
+            return edge.Edge();
     } catch (const Standard_Failure& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.toolpath: offset display interpolation failed: {}",
+                 "cam.toolpath: offset display polyline construction failed: {}",
                  failure.GetMessageString());
+    } catch (const std::exception& exception) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.toolpath: offset display polyline construction failed: {}",
+                 exception.what());
+    } catch (...) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.toolpath: offset display polyline construction failed with unknown exception");
     }
-    BRepBuilderAPI_MakeWire fallback;
-    for (int index = 1; index < count; ++index) {
-        BRepBuilderAPI_MakeEdge edge(samples->Value(index), samples->Value(index + 1));
-        if (edge.IsDone()) fallback.Add(edge.Edge());
-    }
-    if (closed) {
-        BRepBuilderAPI_MakeEdge edge(samples->Value(count), samples->Value(1));
-        if (edge.IsDone()) fallback.Add(edge.Edge());
-    }
-    if (fallback.IsDone())
-        return fallback.Wire();
     return contour.wire;
 }
 
