@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/project/cam/collision_validation_contracts.h"
+
 /**
  * @file travel_path_renderer.h
  * @brief 在 OCC 视图里用虚线绘制相邻轮廓间空程（travel）路径的渲染器。
@@ -27,7 +29,14 @@ public:
     /// startXYZ 已是"轮廓真实起点"（lead-in 起点优先），endXYZ 是轮廓末点。
     struct Segment
     {
-        struct Waypoint { double x{0.0}, y{0.0}, z{0.0}; };
+        struct Waypoint
+        {
+            double x{0.0}, y{0.0}, z{0.0};
+            /// Phase of the executable segment entering this waypoint.  The
+            /// first waypoint has no incoming segment and keeps the default.
+            lcnc::cam::RapidSegmentPhase incomingPhase{
+                lcnc::cam::RapidSegmentPhase::Traverse};
+        };
         std::uint64_t contourId{0};
         QString workpieceEntry;
         double sx{0.0}, sy{0.0}, sz{0.0};

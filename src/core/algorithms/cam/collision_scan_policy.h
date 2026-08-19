@@ -1,10 +1,15 @@
 #pragma once
 
+#include "core/kinematics/machine_kinematics.h"
 #include "core/project/cam/collision_validation_contracts.h"
 
 #include <QSet>
 #include <QString>
 #include <QStringList>
+
+#include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 
 #include <algorithm>
 #include <chrono>
@@ -13,6 +18,46 @@
 #include <utility>
 
 namespace lcnc::cam_algo {
+
+// CAM generation and offline simulation must be reproducible from the
+// committed toolpath alone.  Live MachineAxisDef::currentPos values belong to
+// the machine/view state and must not become an implicit initial cutter pose.
+// Axes outside the solved layout use the mode's explicit locked target, or
+// zero when the mode does not prescribe one.
+// 中文翻译：CAM 生成与离线仿真不得把实时轴反馈当成隐式起始刀头位姿；
+// 未参与求解的轴只采用加工模式锁定值，未配置锁定值时采用零位。
+inline QList<MachineAxisDef> offlinePlanningAxisBaseline(
+    const QList<MachineAxisDef>& source,
+    const lcnc::MachineModeDefinition& definition)
+{
+    QList<MachineAxisDef> result = source;
+    for (MachineAxisDef& axis : result) {
+        const auto locked = definition.lockedAxisTargets.constFind(axis.name);
+        axis.currentPos = locked == definition.lockedAxisTargets.cend()
+            ? 0.0 : locked.value();
+    }
+    return result;
+}
+
+inline void applyOfflineMotionPose(
+    MachineKinematics* kinematics,
+    const QList<MachineAxisDef>& baseline,
+    const lcnc::MachineAxisLayout& layout,
+    const std::array<double, lcnc::MachineAxisLayout::kMaxAxes>& values,
+    std::uint8_t activeMask)
+{
+    if (!kinematics)
+        return;
+    for (const MachineAxisDef& axis : baseline)
+        kinematics->setAxisPosition(axis.name, axis.currentPos);
+    for (int index = 0; index < layout.count; ++index) {
+        if ((activeMask & (1u << index)) == 0)
+            continue;
+        const QString& name = layout.axes[index].name;
+        if (!name.isEmpty())
+            kinematics->setAxisPosition(name, values[index]);
+    }
+}
 
 // OCCT geometry algorithms are allowed to parallelise inside one collision
 // scan, but two scan sessions must never operate on the same frozen machine
@@ -82,6 +127,34 @@ inline lcnc::cam::CollisionValidationState classifyCollisionDistance(
     if (distanceMm <= std::max(0.0, clearanceMm))
         return lcnc::cam::CollisionValidationState::Warning;
     return lcnc::cam::CollisionValidationState::Safe;
+}
+
+/// Converts the geometric part of a CAM motion node from workpiece-local
+/// coordinates to the machine-world frame used by machine collision bodies.
+/// Solved machine axes are already in the machine frame and are not changed.
+/// 中文翻译：把运动节点的 TCP 与法线从工件局部坐标转换到机床世界坐标；
+/// 已求解的机床轴坐标保持不变。
+inline void transformMotionNodeGeometry(
+    lcnc::cam::CamMotionNode* node,
+    const gp_Trsf& workpieceTransform)
+{
+    if (!node)
+        return;
+    gp_Pnt tcp(node->tcpX, node->tcpY, node->tcpZ);
+    tcp.Transform(workpieceTransform);
+    gp_Vec normal(node->normalX, node->normalY, node->normalZ);
+    if (normal.SquareMagnitude() <= 1.0e-18)
+        normal = gp_Vec(0.0, 0.0, 1.0);
+    normal.Transform(workpieceTransform);
+    if (normal.SquareMagnitude() <= 1.0e-18)
+        normal = gp_Vec(0.0, 0.0, 1.0);
+    normal.Normalize();
+    node->tcpX = tcp.X();
+    node->tcpY = tcp.Y();
+    node->tcpZ = tcp.Z();
+    node->normalX = normal.X();
+    node->normalY = normal.Y();
+    node->normalZ = normal.Z();
 }
 
 } // namespace lcnc::cam_algo

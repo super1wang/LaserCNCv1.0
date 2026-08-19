@@ -94,6 +94,34 @@ int main(int argc, char* argv[])
     if (!penetrating.valid || penetrating.definitelySeparated)
         return fail(QStringLiteral("Surface BVH missed a penetrating cutter pose"));
 
+    // Workpiece-proxy cutting nodes intentionally touch at the TCP.  Verify
+    // that the lightweight outward probe can distinguish that contact before
+    // the CAM scan enters serialized exact BRep distance.
+    // 中文翻译：非机台模式切割节点在 TCP 正常接触；验证外移 BVH 探针可在精确 BRep 前排除该接触。
+    const auto fineWorkpieceSurface = lcnc::cam_algo::SurfaceCollisionModel::build(
+        workpiece, 0.01, &error);
+    const auto fineCutterSurface = lcnc::cam_algo::SurfaceCollisionModel::build(
+        cone, 0.01, &error);
+    if (!fineWorkpieceSurface.isValid() || !fineCutterSurface.isValid())
+        return fail(QStringLiteral("Cannot build fine workpiece-proxy collision meshes"));
+    const gp_Dir topNormal(0.0, 0.0, 1.0);
+    const gp_Trsf touchingPose = cutterPose(
+        gp_Pnt(centerX, centerY, zMax), topNormal);
+    const double fineGuard = fineWorkpieceSurface.linearDeflectionMm()
+        + fineCutterSurface.linearDeflectionMm() + 1.0e-7;
+    const auto touching = lcnc::cam_algo::prefilterSurfaceCollision(
+        fineCutterSurface, touchingPose,
+        fineWorkpieceSurface, gp_Trsf(), fineGuard);
+    if (!touching.valid || touching.definitelySeparated)
+        return fail(QStringLiteral("Tangent cutter contact was unexpectedly rejected"));
+    gp_Trsf outwardProbe;
+    outwardProbe.SetTranslation(gp_Vec(topNormal) * 0.05);
+    const auto separatedProbe = lcnc::cam_algo::prefilterSurfaceCollision(
+        fineCutterSurface, outwardProbe.Multiplied(touchingPose),
+        fineWorkpieceSurface, gp_Trsf(), fineGuard);
+    if (!separatedProbe.valid || !separatedProbe.definitelySeparated)
+        return fail(QStringLiteral("Outward cutter-tip probe did not reject tangent contact"));
+
     const auto outerBox = lcnc::cam_algo::SurfaceCollisionModel::build(
         BRepPrimAPI_MakeBox(100.0, 100.0, 100.0).Shape(), 0.05, &error);
     const auto innerBox = lcnc::cam_algo::SurfaceCollisionModel::build(

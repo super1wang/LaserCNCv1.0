@@ -6,6 +6,7 @@
 #include "core/document/xcaf_utils.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/settings/app_settings.h"
@@ -327,14 +328,18 @@ public:
             && (snapshot.travelPlan.failureReason.isEmpty()
                 || !snapshot.travelPlan.transitions.isEmpty());
         captureSceneSnapshot(cam, snapshot);
+        m_layout = snapshot.machineAxisLayout;
+        const auto* machineConfig = lcnc::Kernel::current()
+            .service<lcnc::MachineConfigurationService>();
+        const lcnc::MachineModeDefinition definition = machineConfig
+            ? machineConfig->modeDefinition(snapshot.machiningMode)
+            : lcnc::MachineModeDefinition{};
+        copyKinematics(cam->kinematics(), definition);
         if (!buildNodes(snapshot, orderedContourIds, includeRapid, error) || m_nodes.isEmpty()) {
             if (error && error->isEmpty())
                 *error = QObject::tr("The current CAM sequence has no resolved cutting nodes");
             return nullptr;
         }
-        m_layout = snapshot.machineAxisLayout;
-
-        copyKinematics(cam->kinematics());
         m_page = new QWidget;
         auto* root = new QVBoxLayout(m_page);
         root->setContentsMargins(0, 0, 0, 0);
@@ -568,8 +573,12 @@ private:
             segment.verified = snapshot.travelPlan.isExecutable();
             const auto& points = transition.workpieceLocalPreviewPoints.isEmpty()
                 ? transition.surfacePreviewPoints : transition.workpieceLocalPreviewPoints;
-            for (const auto& point : points) {
-                segment.waypoints.append({point.x, point.y, point.z});
+            for (int index = 0; index < points.size(); ++index) {
+                const auto& point = points.at(index);
+                const auto phase = index > 0 && index - 1 < transition.segments.size()
+                    ? transition.segments.at(index - 1).phase
+                    : lcnc::cam::RapidSegmentPhase::Traverse;
+                segment.waypoints.append({point.x, point.y, point.z, phase});
             }
             m_sceneSnapshot.rapidSegments.append(std::move(segment));
         }
@@ -600,43 +609,64 @@ private:
             }
             return !m_nodes.isEmpty();
         }
+        const QList<MachineAxisDef> projectionBaselineAxes = m_planningBaselineAxes;
         QHash<std::uint64_t, const lcnc::cam::ToolpathExportContour*> contourById;
         for (const auto& contour : snapshot.contours) contourById.insert(contour.contourId, &contour);
         for (const auto id : order) {
             const auto* contour = contourById.value(id, nullptr);
             const auto points = snapshot.pointsByContourId.value(id);
             if (!contour || points.isEmpty()) continue;
-            if (includeRapid) if (const auto* transition = snapshot.travelPlan.transitionTo(id)) {
-                // RapidMoveSegment stores targets only.  Insert the matching
-                // source pose once so the virtual nozzle follows the complete
-                // offset rapid curve from its first millimetre, rather than
-                // jumping from the preceding cutting TCP to the first target.
-                if (!m_nodes.isEmpty()) {
+            // Legacy snapshots follow the same boundary as the canonical
+            // plan: node zero is the first lead-in/cutting point.  Never
+            // replay a transition into the first simulated contour.
+            // 中文翻译：旧快照同样从首轮廓下刀/切割首点开始，不回放进入首轮廓的空程。
+            if (includeRapid && !m_nodes.isEmpty()) {
+                const auto* transition = snapshot.travelPlan.transitionTo(id);
+                if (transition) {
+                    // RapidMoveSegment stores targets only.  Insert the matching
+                    // source pose once so the virtual nozzle follows the complete
+                    // offset rapid curve from its first millimetre, rather than
+                    // jumping from the preceding cutting TCP to the first target.
                     SimulationNode source = m_nodes.constLast();
                     source.kind = NodeKind::Rapid;
                     source.contourId = id;
                     source.durationMs = 1.0;
                     m_nodes.append(source);
-                }
-                for (const auto& segment : transition->segments) {
-                    SimulationNode node; node.kind = NodeKind::Rapid; node.contourId = id;
-                    node.axes = segment.target.kinematicAxes; node.mask = segment.target.kinematicAxisMask;
-                    node.durationMs = qMax(1.0, segment.estimatedTimeMs);
-                    node.tcpX = segment.target.tcpX; node.tcpY = segment.target.tcpY;
-                    node.tcpZ = segment.target.tcpZ;
-                    node.normalX = segment.target.surfaceNormalX;
-                    node.normalY = segment.target.surfaceNormalY;
-                    node.normalZ = segment.target.surfaceNormalZ;
-                    m_nodes.append(node);
+                    for (const auto& segment : transition->segments) {
+                        SimulationNode node; node.kind = NodeKind::Rapid; node.contourId = id;
+                        node.axes = segment.target.kinematicAxes; node.mask = segment.target.kinematicAxisMask;
+                        node.durationMs = qMax(1.0, segment.estimatedTimeMs);
+                        node.tcpX = segment.target.tcpX; node.tcpY = segment.target.tcpY;
+                        node.tcpZ = segment.target.tcpZ;
+                        node.normalX = segment.target.surfaceNormalX;
+                        node.normalY = segment.target.surfaceNormalY;
+                        node.normalZ = segment.target.surfaceNormalZ;
+                        m_nodes.append(node);
+                    }
                 }
             }
-            const auto append = [this, id](const lcnc::cam::ToolpathExportPoint& point, NodeKind kind) {
+            const QString workpieceEntry = contour->workpieceEntry;
+            const auto append = [this, id, workpieceEntry, projectionBaselineAxes](
+                                    const lcnc::cam::ToolpathExportPoint& point,
+                                    NodeKind kind) {
                 if (!point.machineCoordValid) return false;
                 SimulationNode node; node.kind = kind; node.contourId = id;
                 node.axes = point.machineAxes; node.mask = point.machineAxisMask;
                 node.durationMs = 20.0;
-                node.tcpX = point.x; node.tcpY = point.y; node.tcpZ = point.z;
-                node.normalX = point.normalX; node.normalY = point.normalY; node.normalZ = point.normalZ;
+                lcnc::cam::CamMotionNode geometry;
+                geometry.tcpX = point.x; geometry.tcpY = point.y; geometry.tcpZ = point.z;
+                geometry.normalX = point.normalX;
+                geometry.normalY = point.normalY;
+                geometry.normalZ = point.normalZ;
+                lcnc::cam_algo::applyOfflineMotionPose(
+                    &m_kinematics, projectionBaselineAxes, m_layout,
+                    point.machineAxes, point.machineAxisMask);
+                lcnc::cam_algo::transformMotionNodeGeometry(
+                    &geometry, m_kinematics.computeWpcTransform(workpieceEntry));
+                node.tcpX = geometry.tcpX; node.tcpY = geometry.tcpY; node.tcpZ = geometry.tcpZ;
+                node.normalX = geometry.normalX;
+                node.normalY = geometry.normalY;
+                node.normalZ = geometry.normalZ;
                 m_nodes.append(node); return true;
             };
             if (contour->hasLeadIn && contour->leadInPoint.machineCoordValid && !append(contour->leadInPoint, NodeKind::LeadIn)) {
@@ -649,9 +679,14 @@ private:
         return true;
     }
 
-    void copyKinematics(const MachineKinematics* source)
+    void copyKinematics(const MachineKinematics* source,
+                        const lcnc::MachineModeDefinition& definition)
     {
-        m_kinematics.setAxes(source->axes(), source->configType());
+        if (!source)
+            return;
+        m_planningBaselineAxes = lcnc::cam_algo::offlinePlanningAxisBaseline(
+            source->axes(), definition);
+        m_kinematics.setAxes(m_planningBaselineAxes, source->configType());
         m_kinematics.setWorkpieceSetupTransform(source->workpieceSetupTransform());
         for (auto it = source->shapeAssignments().cbegin(); it != source->shapeAssignments().cend(); ++it)
             m_kinematics.assignShape(it.key(), it.value());
@@ -766,11 +801,9 @@ private:
 
     void setPose(const SimulationNode& node)
     {
-        for (int axis = 0; axis < lcnc::MachineAxisLayout::kMaxAxes; ++axis) {
-            if ((node.mask & (1u << axis)) == 0) continue;
-            const QString name = m_layout.axes[axis].name;
-            if (!name.isEmpty()) m_kinematics.setAxisPosition(name, node.axes[axis]);
-        }
+        lcnc::cam_algo::applyOfflineMotionPose(
+            &m_kinematics, m_planningBaselineAxes, m_layout,
+            node.axes, node.mask);
     }
 
     gp_Trsf bodyTransform(const SimulationBody& body, const SimulationNode& node) const
@@ -1078,7 +1111,7 @@ private:
             }
             if (body.collisionPassive) { passiveBodies.append(body); passiveIndices.append(index); }
         }
-        const auto axes = m_kinematics.axes();
+        const auto axes = m_planningBaselineAxes;
         const auto config = m_kinematics.configType();
         const gp_Trsf workpieceSetup = m_kinematics.workpieceSetupTransform();
         const auto assignments = m_kinematics.shapeAssignments();
@@ -1407,6 +1440,7 @@ private:
     QWidget* m_page{nullptr}; GuiDocument* m_gui{nullptr}; WidgetOccView* m_view{nullptr};
     QSlider* m_slider{nullptr}; CollisionTimeline* m_timeline{nullptr}; QLabel* m_status{nullptr}; QTimer* m_timer{nullptr};
     MachineKinematics m_kinematics; lcnc::MachineAxisLayout m_layout;
+    QList<MachineAxisDef> m_planningBaselineAxes;
     SimulationSceneSnapshot m_sceneSnapshot;
     std::unique_ptr<lcnc::view::ToolpathRenderer> m_toolpathRenderer;
     std::unique_ptr<lcnc::view::TravelPathRenderer> m_travelPathRenderer;

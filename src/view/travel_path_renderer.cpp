@@ -153,21 +153,49 @@ void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segmen
     for (const Segment& segment : segments) {
         allVerified = allVerified && segment.verified;
         if (segment.waypoints.size() >= 2) {
-            // Prefer one interpolated OCC Edge for the original nominal curve.
-            // Segment lines remain a robust fallback for degenerate samples.
-            // 中文翻译：原始空程曲线优先构造成一条 OCC Edge，并用虚线样式显示。
-            if (!addCurveEdge(segment.waypoints)) {
-                for (int i = 1; i < segment.waypoints.size(); ++i) {
-                    const Segment::Waypoint& a = segment.waypoints.at(i - 1);
-                    const Segment::Waypoint& b = segment.waypoints.at(i);
-                    addEdge(gp_Pnt(a.x, a.y, a.z), gp_Pnt(b.x, b.y, b.z));
+            QVector<Segment::Waypoint> traverseWaypoints;
+            QVector<Segment::Waypoint> arrowWaypoints;
+            const auto flushTraverse = [&]() {
+                if (traverseWaypoints.size() < 2) {
+                    traverseWaypoints.clear();
+                    return;
                 }
+                // Only the traverse phase is interpolated. Retract and
+                // approach are executable normal-only moves and must remain
+                // straight in the preview.
+                // 中文翻译：仅空程段做曲线插值；上升与下降是沿局部法线的执行直线。
+                if (!addCurveEdge(traverseWaypoints)) {
+                    for (int index = 1; index < traverseWaypoints.size(); ++index) {
+                        const auto& a = traverseWaypoints.at(index - 1);
+                        const auto& b = traverseWaypoints.at(index);
+                        addEdge(gp_Pnt(a.x, a.y, a.z), gp_Pnt(b.x, b.y, b.z));
+                    }
+                }
+                if (traverseWaypoints.size() > arrowWaypoints.size())
+                    arrowWaypoints = traverseWaypoints;
+                traverseWaypoints.clear();
+            };
+            for (int index = 1; index < segment.waypoints.size(); ++index) {
+                const auto& previous = segment.waypoints.at(index - 1);
+                const auto& current = segment.waypoints.at(index);
+                if (current.incomingPhase == lcnc::cam::RapidSegmentPhase::Traverse) {
+                    if (traverseWaypoints.isEmpty())
+                        traverseWaypoints.append(previous);
+                    traverseWaypoints.append(current);
+                    continue;
+                }
+                flushTraverse();
+                addEdge(gp_Pnt(previous.x, previous.y, previous.z),
+                        gp_Pnt(current.x, current.y, current.z));
             }
-            const int middle = segment.waypoints.size() / 2;
-            const Segment::Waypoint& before = segment.waypoints.at(middle - 1);
-            const Segment::Waypoint& after = segment.waypoints.at(middle);
-            addArrow(gp_Pnt(before.x, before.y, before.z),
-                     gp_Pnt(after.x, after.y, after.z));
+            flushTraverse();
+            if (arrowWaypoints.size() >= 2) {
+                const int middle = arrowWaypoints.size() / 2;
+                const auto& before = arrowWaypoints.at(middle - 1);
+                const auto& after = arrowWaypoints.at(middle);
+                addArrow(gp_Pnt(before.x, before.y, before.z),
+                         gp_Pnt(after.x, after.y, after.z));
+            }
         }
     }
     if (addedEdges == 0) {
