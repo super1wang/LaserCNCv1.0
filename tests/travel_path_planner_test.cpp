@@ -125,6 +125,31 @@ int main(int argc, char* argv[])
     }
 
     {
+        // Regression: Process starts at a measured TCP (zero source cutting
+        // offset) and approaches a lead-in that already contains the target
+        // cutting offset.  The initial approach must use the contour's real
+        // rapid offset and remain executable under strict input validation.
+        // 中文翻译：初始进入段从实测 TCP 出发，源切割偏置为零；目标已包含切割偏置，
+        // 必须使用轮廓真实空程偏置并通过严格输入校验。
+        auto request = baseRequest();
+        const auto source = endpoint(0, 0.0, 0.0, 10.0);
+        const auto target = endpoint(1, 10.0, 0.0, 1.0);
+        request.transitions.append({source, target, 5.0, 0.0, 1.0});
+        const auto plan = lcnc::cam_algo::TravelPathPlanner::plan(request);
+        if (!plan.isExecutable() || plan.transitions.size() != 1
+            || !plan.transitions.front().isValid()
+            || plan.transitions.front().segments.isEmpty()) {
+            return fail(QStringLiteral("Measured-pose initial approach was rejected"));
+        }
+        const auto& terminal = plan.transitions.front().segments.back().target;
+        if (std::abs(terminal.tcpX - target.pose.tcpX) > 1e-9
+            || std::abs(terminal.tcpY - target.pose.tcpY) > 1e-9
+            || std::abs(terminal.tcpZ - target.pose.tcpZ) > 1e-9) {
+            return fail(QStringLiteral("Initial approach did not terminate at the committed lead-in"));
+        }
+    }
+
+    {
         // Collision-envelope sampling may triangulate a private planning copy,
         // but it must never attach that coarse mesh to the source workpiece
         // used by the live shaded view.

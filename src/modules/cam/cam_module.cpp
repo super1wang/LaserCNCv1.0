@@ -6456,6 +6456,15 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             makeOffsetSolveFailure(tr("Machine mode definition is unavailable for the contour-offset motion solve"));
             return;
         }
+        // Offset geometry must retain the same cross-contour rotary branch as
+        // the committed ordered solve.  Re-solving every contour from an empty
+        // pose lets opposite tube faces independently choose A=+90/-90 even
+        // though the equivalent C rotation is continuous.  Carry the complete
+        // physical-layout pose forward so TableSpin(C) is resolved while the
+        // TableTilt(A/B) branch remains stable.
+        // 中文翻译：刀具偏置后的重算必须延续整条有序刀路的旋转分支；逐轮廓从空姿态求解会让
+        // 管材对侧轮廓各自选择 A=+90/-90。传递上一轮廓末位姿，优先由 C 轴吸收周向变化。
+        lcnc::SolvedMachinePose offsetContinuity;
         for (auto& contour : snapshot.contours) {
             auto pointsIt = snapshot.pointsByContourId.find(contour.contourId);
             if (pointsIt == snapshot.pointsByContourId.end())
@@ -6466,8 +6475,14 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
                     [](const lcnc::cam::ToolpathExportPoint& point) {
                         return !point.machineCoordValid;
                     });
-            if (!needsSolve)
+            if (!needsSolve) {
+                if (!contourPoints.isEmpty() && contourPoints.back().machineCoordValid) {
+                    offsetContinuity.values = contourPoints.back().machineAxes;
+                    offsetContinuity.activeMask = contourPoints.back().machineAxisMask;
+                    offsetContinuity.valid = true;
+                }
                 continue;
+            }
 
             MachineKinematics solveKinematics;
             solveKinematics.setAxes(kin->axes(), kin->configType());
@@ -6500,7 +6515,8 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             if (!LaserToolpathBuilder::solveTransientMotionPath(
                     &solvePoints, &solveKinematics, definition,
                     m_machineConfig->workpieceSetupTransform(),
-                    m_machineConfig->headToolGeometry(), &solveError, nullptr)) {
+                    m_machineConfig->headToolGeometry(), &solveError,
+                    offsetContinuity.valid ? &offsetContinuity : nullptr)) {
                 makeOffsetSolveFailure(tr("Contour-offset five-axis solve failed for contour %1: %2")
                     .arg(contour.contourId).arg(solveError));
                 return;
@@ -6510,6 +6526,7 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
                 assignExportCoordinate(&contour.leadInPoint, solvePoints[solvedIndex++].machineCoord);
             for (auto& point : contourPoints)
                 assignExportCoordinate(&point, solvePoints[solvedIndex++].machineCoord);
+            offsetContinuity = solvePoints.back().machineCoord.solvedPose;
         }
     }
     if (!m_travelPlanCache.stale && m_travelPlanCache.key == key) {
@@ -7001,16 +7018,36 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
     target.pose.surfaceNormalZ = contourIt->leadInPoint.normalZ;
 
     lcnc::cam_algo::TravelPlanningRequest planRequest;
-    planRequest.transitions.append({source, target, 0.0});
+    // The measured source is the actual TCP, not a cutting-offset contour
+    // endpoint.  The target has already received its committed cutting offset,
+    // so provide the real per-contour rapid/cutting values to the strict
+    // three-phase planner instead of the former invalid zero rapid offset.
+    // 中文翻译：起点是控制器实测 TCP，不带切割偏置；目标已带当前轮廓切割偏置。
+    // 初始进入规划必须使用真实空程/切割偏置，不能再传入无效的零空程偏置。
+    planRequest.transitions.append({source, target, contourIt->rapidOffsetMm,
+                                    0.0, contourIt->cuttingOffsetMm});
     planRequest.cutterCollisionProxy = captured.cutter;
     planRequest.minimumClearanceMm = m_config.cutterCollisionClearanceMm();
     planRequest.maximumSafetyOffsetMm = m_config.maximumRapidSafetyOffsetMm();
     planRequest.surfacePathStepMm = 0.5;
     planRequest.collisionSampleStepMm = 2.0;
+    planRequest.motionProfile.supportedCoordinatedMask =
+        source.pose.activeMask | target.pose.activeMask;
+    planRequest.motionProfile.velocity.fill(100.0);
+    planRequest.motionProfile.acceleration.fill(1000.0);
+    planRequest.motionProfile.jerk.fill(10000.0);
     gp_Trsf wpc = currentKinematics.computeWpcTransform(contourIt->workpieceEntry);
     BRepBuilderAPI_Transform placedWorkpiece(captured.workpiece, wpc, Standard_True);
     planRequest.workpiece = placedWorkpiece.IsDone() ? placedWorkpiece.Shape() : captured.workpiece;
-    result.transition = lcnc::cam_algo::TravelPathPlanner::plan(planRequest).transitions.value(0);
+    const lcnc::cam::TravelPlanSnapshot approachPlan =
+        lcnc::cam_algo::TravelPathPlanner::plan(planRequest);
+    if (approachPlan.transitions.isEmpty()) {
+        result.failureReason = approachPlan.failureReason.isEmpty()
+            ? tr("CAM could not create an initial approach path")
+            : approachPlan.failureReason;
+        return result;
+    }
+    result.transition = approachPlan.transitions.front();
     if (!result.transition.isValid()) {
         result.failureReason = result.transition.failureReason.isEmpty()
             ? tr("CAM could not create an initial approach path") : result.transition.failureReason;

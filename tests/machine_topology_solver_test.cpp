@@ -407,6 +407,33 @@ max = 120.0
                               - stableTablePoses[0].value(tableSpinIndex)) >= 90.0,
                   "AC-table continuity did not keep the +90 degree clamping tilt on opposite sidewalls");
 
+    // Regression: CAM may solve offset-adjusted contours in separate transient
+    // batches.  Passing the previous batch's final pose must preserve the A
+    // branch and let C absorb the circumferential change across that boundary.
+    // 中文翻译：偏置后的轮廓可能分批重算；后一批必须继承前一批末位姿，保持 A 分支，
+    // 由 C 轴吸收跨轮廓的周向变化。
+    std::vector<ToolpathPoint> firstOffsetBatch{
+        tableSidewallPoint, tableSidewallPoint};
+    QString offsetBatchError;
+    ok &= require(LaserToolpathBuilder::solveTransientMotionPath(
+                      &firstOffsetBatch, &acTable, tableRequest.definition,
+                      {}, {}, &offsetBatchError)
+                  && firstOffsetBatch.back().machineCoord.valid,
+                  "First offset-adjusted AC-table contour solve failed");
+    const lcnc::SolvedMachinePose firstOffsetFinalPose =
+        firstOffsetBatch.back().machineCoord.solvedPose;
+    std::vector<ToolpathPoint> secondOffsetBatch{
+        oppositeTableSidewallPoint, oppositeTableSidewallPoint};
+    ok &= require(LaserToolpathBuilder::solveTransientMotionPath(
+                      &secondOffsetBatch, &acTable, tableRequest.definition,
+                      {}, {}, &offsetBatchError, &firstOffsetFinalPose)
+                  && secondOffsetBatch.front().machineCoord.valid
+                  && isNear(secondOffsetBatch.front().machineCoord.solvedPose.value(tableTiltIndex),
+                            firstOffsetFinalPose.value(tableTiltIndex))
+                  && std::abs(secondOffsetBatch.front().machineCoord.solvedPose.value(tableSpinIndex)
+                              - firstOffsetFinalPose.value(tableSpinIndex)) >= 90.0,
+                  "Segmented contour solve did not prioritize C continuity over an A-axis flip");
+
     // Regression: a lead-in belongs to its contour.  It must be solved before
     // the first cutting point in the same continuity chain; copying only the
     // first point's rotary axes onto an independently solved lead-in leaves
