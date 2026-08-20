@@ -22,6 +22,7 @@
 #include "modules/cad/ui/widget_cad_task_panel.h"
 #include "modules/cam/ui/ribbon_cam_tab.h"
 #include "modules/process/ui/ribbon_process_tab.h"
+#include "modules/process/commands/commands_process.h"
 #include "modules/process/ui/process_flow_widget.h"
 #include "view/widget_occ_view.h"
 #include "modules/cam/ui/widget_machine_panel.h"
@@ -378,6 +379,8 @@ void MainWindow::createContext()
                     m_toolpathPanel->setMachineSetupEditingEnabled(editable);
                 }
             });
+    connect(m_appContext->processModule(), &ProcessModule::machiningInteractionLockChanged,
+            this, [this](bool) { updateCommandStates(); });
 
     connect(m_appContext->processModule(), &ProcessModule::deviceConnectProgress,
             this, [this](const QString& deviceName, int percent, const QString& step) {
@@ -731,6 +734,8 @@ void MainWindow::activateWorkspaceOccView(ProjectWorkspaceId id, GuiDocument* do
     if (m_workspacePresenter)
         (void)m_workspacePresenter->activate(id);
     view->attachDocument(document);
+    view->setModelSelectionEnabled(
+        !ribbonBar() || ribbonBar()->currentIndex() != kRibbonLaserIndex);
 }
 
 void MainWindow::removeWorkspaceOccView(ProjectWorkspaceId id)
@@ -757,6 +762,8 @@ void MainWindow::showDefaultOccView()
     if (m_workspacePresenter)
         m_workspacePresenter->showDefault();
     m_defaultOccView->attachDefaultScene(m_defaultScene);
+    m_defaultOccView->setModelSelectionEnabled(
+        !ribbonBar() || ribbonBar()->currentIndex() != kRibbonLaserIndex);
 }
 
 void MainWindow::createLeftPanel()
@@ -1232,8 +1239,15 @@ void MainWindow::createRightPanel()
             m_toolpathPanel->setToolpath(&m_appContext->camModule()->toolpathRef());
             rebuildProjectExplorer();
             const auto activeId = m_appContext->camModule()->activeContourId();
-            selectProjectExplorerContourById(activeId != 0
-                ? activeId : m_appContext->camModule()->contourIdAt(0), 0);
+            if (activeId != 0) {
+                selectProjectExplorerContourById(activeId);
+            } else if (m_projectExplorerTree) {
+                const QSignalBlocker blocker(m_projectExplorerTree);
+                m_projectExplorerTree->clearSelection();
+                m_projectExplorerTree->setCurrentItem(nullptr);
+                m_toolpathPanel->setActiveContour(-1);
+                m_toolpathPanel->showContourCoordinates(-1);
+            }
             });
         connect(m_appContext->camModule(), &CamModule::activeToolpathContourChanged, this,
             [this](std::uint64_t contourId, int contourIndex) {
@@ -1386,6 +1400,8 @@ void MainWindow::createRightPanel()
             m_laserControl, &WidgetLaserControl::updateConnectionStatus);
         connect(process, &ProcessModule::stateChanged,
             m_laserControl, &WidgetLaserControl::updateRunState);
+        connect(process, &ProcessModule::machiningInteractionLockChanged,
+            m_laserControl, &WidgetLaserControl::setMachiningInteractionLocked);
         connect(process, &ProcessModule::processingRunStarted,
             m_laserControl, &WidgetLaserControl::beginProcessingRun);
         connect(process, &ProcessModule::processingProgressChanged,
@@ -1442,6 +1458,7 @@ void MainWindow::createRightPanel()
 
         m_laserControl->updateConnectionStatus(process->isConnected());
         m_laserControl->updateRunState(process->state());
+        m_laserControl->setMachiningInteractionLocked(process->isMachiningInteractionLocked());
         m_laserControl->updateSimulationMode(process->simulationMode());
         m_laserControl->updateSystemStatus(process->statusMessage());
         const auto axisPositions = process->currentAxisPositions();
@@ -2679,14 +2696,54 @@ void MainWindow::syncRightPanelForRibbonIndex(int index)
         break;
     }
 
+    if (m_occView)
+        m_occView->setModelSelectionEnabled(index != kRibbonLaserIndex);
+
     updateCadSketchOverlay();
     updateCommandStates();
 }
 
 void MainWindow::updateCommandStates()
 {
-    if (m_cmdContainer)
-        m_cmdContainer->updateAllStates();
+    const auto* process = m_appContext ? m_appContext->processModule() : nullptr;
+    const bool locked = process && process->isMachiningInteractionLocked();
+    if (m_cmdContainer) {
+        const QSet<QString> allowedCommands = {
+            lcnc::process::CmdRunStart::Name,
+            lcnc::process::CmdRunPause::Name,
+            lcnc::process::CmdRunStop::Name,
+            CmdToggleCamTravelPath::Name,
+            CmdToggleCamContourOrderLabel::Name,
+            CmdToggleCadGrid::Name,
+            CmdToggleGridSnap::Name,
+            CmdSnapNone::Name,
+            CmdSnapVertex::Name,
+            CmdSnapEdge::Name,
+            CmdSnapFace::Name,
+        };
+        m_cmdContainer->setInteractionLocked(locked, allowedCommands);
+    }
+
+    // 工程、CAM、机床参数和流程编辑都会改变本次加工输入；运行期间整体冻结。
+    if (m_documentTabs)
+        m_documentTabs->setEnabled(!locked);
+    if (m_projectExplorerTree)
+        m_projectExplorerTree->setEnabled(!locked);
+    if (m_processLeftPanel)
+        m_processLeftPanel->setEnabled(!locked);
+    if (m_machineTree)
+        m_machineTree->setEnabled(!locked);
+    if (m_machinePanel)
+        m_machinePanel->setEnabled(!locked);
+    if (m_cadTaskPanel)
+        m_cadTaskPanel->setEnabled(!locked);
+    if (m_toolpathPanel)
+        m_toolpathPanel->setEnabled(!locked);
+    if (m_collisionDetectionPanel)
+        m_collisionDetectionPanel->setEnabled(!locked);
+    if (m_laserControl)
+        m_laserControl->setMachiningInteractionLocked(locked);
+
     updateCadTaskPanelState();
 }
 

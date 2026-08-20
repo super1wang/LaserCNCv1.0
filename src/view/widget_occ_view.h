@@ -76,6 +76,10 @@ public:
     void setGridStep(double stepMm);
     void setGridSnapEnabled(bool enabled);
     void setCadSnapMode(CadSnapMode mode);
+    /// Disable all model/overlay selection while preserving camera navigation
+    /// and ViewCube interaction.
+    void setModelSelectionEnabled(bool enabled);
+    bool isModelSelectionEnabled() const { return m_modelSelectionEnabled; }
     void setCadPreviewShape(const TopoDS_Shape& shape);
     void clearCadPreview();
     /// Show a selectable CAD transform gizmo at a world-space reference point.
@@ -164,6 +168,7 @@ private:
     bool   m_transformGizmoDragging{false};
     bool   m_leadInPickActive{false};
     bool   m_facePickActive{false};
+    bool   m_modelSelectionEnabled{true};
     bool   m_gridVisible{false};
     bool   m_gridSnapEnabled{false};
     double m_gridStep{10.0};

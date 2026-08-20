@@ -582,6 +582,10 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             if (e.contains("color"))     l.color     = QColor(QString::fromStdString(e.at("color").as_string()));
             if (e.contains("enabled"))   l.enabled   = e.at("enabled").as_boolean();
             if (e.contains("toolName"))  l.toolName  = QString::fromStdString(e.at("toolName").as_string());
+            if (l.toolName.isEmpty()
+                || l.toolName.compare(QStringLiteral("Default"), Qt::CaseInsensitive) == 0) {
+                l.toolName = QStringLiteral("default");
+            }
             if (e.contains("compensationIndex"))
                 l.compensationIndex = QString::fromStdString(e.at("compensationIndex").as_string());
             if (e.contains("contourIds") && e.at("contourIds").is_array()) {

@@ -386,6 +386,94 @@
 <context>
     <name>CamModule</name>
     <message>
+        <source>Collision safety-domain path request is invalid</source>
+        <translation>碰撞安全域路径请求无效</translation>
+    </message>
+    <message>
+        <source>CAM collision safety domain is not ready for this environment</source>
+        <translation>当前环境的 CAM 碰撞安全域尚未准备完成</translation>
+    </message>
+    <message>
+        <source>Collision safety-domain path validation was cancelled</source>
+        <translation>碰撞安全域路径校验已取消</translation>
+    </message>
+    <message>
+        <source>Collision safety domain has no usable source pair</source>
+        <translation>碰撞安全域没有可用的碰撞源组合</translation>
+    </message>
+    <message>
+        <source>Collision safety-domain exact distance calculation failed</source>
+        <translation>碰撞安全域精确距离计算失败</translation>
+    </message>
+    <message>
+        <source>Collision safety-domain path intersects %1 and %2</source>
+        <translation>碰撞安全域路径与 %1 和 %2 相交</translation>
+    </message>
+    <message>
+        <source>Collision safety-domain path clearance is insufficient between %1 and %2</source>
+        <translation>碰撞安全域路径在 %1 和 %2 之间的间隙不足</translation>
+    </message>
+    <message>
+        <source>Collision safety-domain geometry operation failed</source>
+        <translation>碰撞安全域几何运算失败</translation>
+    </message>
+    <message>
+        <source>Collision safety-domain validation failed</source>
+        <translation>碰撞安全域校验失败</translation>
+    </message>
+    <message>
+        <source>Prepare CAM collision safety domain</source>
+        <translation>准备 CAM 碰撞安全域</translation>
+    </message>
+    <message>
+        <source>Automatic initial approach cannot find a safe Z height within machine limits</source>
+        <translation>自动首段规划无法在 Z 轴限位内找到安全高度</translation>
+    </message>
+    <message>
+        <source>Automatic initial approach Z search input is invalid</source>
+        <translation>自动首段 Z 安全域搜索输入无效</translation>
+    </message>
+    <message>
+        <source>Automatic initial approach found no executable path in the machine safety domain</source>
+        <translation>自动首段规划在机台安全域内没有找到可执行路径</translation>
+    </message>
+    <message>
+        <source>The configured initial-segment Z safety coordinate is outside the machine limits</source>
+        <translation>配置的首段 Z 安全坐标超出机床限位</translation>
+    </message>
+    <message>
+        <source>The configured initial-segment Z direction or safety coordinate is invalid</source>
+        <translation>配置的首段 Z 方向或安全坐标无效</translation>
+    </message>
+    <message>
+        <source>Initial segment planning failed: %1</source>
+        <translation>首段规划失败：%1</translation>
+    </message>
+    <message>
+        <source>Initial segment did not reach the committed first cutting pose</source>
+        <translation>首段未到达已提交的首个切割位姿</translation>
+    </message>
+    <message>
+        <source>Initial approach axis input is invalid</source>
+        <translation>首段轴输入无效</translation>
+    </message>
+    <message>
+        <source>Initial approach axis layout is invalid</source>
+        <translation>首段轴布局无效</translation>
+    </message>
+    <message>
+        <source>Initial approach requires an active linear Z axis</source>
+        <translation>首段规划需要启用直线 Z 轴</translation>
+    </message>
+    <message>
+        <source>Initial approach contains a non-finite axis value</source>
+        <translation>首段包含无效的轴数值</translation>
+    </message>
+    <message>
+        <source>Initial approach safety Z is below the first cutting height</source>
+        <translation>首段 Z 安全坐标在物理方向上低于首点切割高度</translation>
+    </message>
+    <message>
         <location filename="../src/modules/cam/cam_module.cpp" line="7593"/>
         <source>Cutting nozzle collision proxy</source>
         <translation>切割嘴碰撞代理</translation>
@@ -1259,6 +1347,46 @@ Please complete the configuration on the Machine Configuration page of the appli
         <location filename="../src/modules/cam/cam_module.cpp" line="5353"/>
         <source>Generate toolpath globally — collision validation</source>
         <translation>全局生成刀路 — 碰撞校验</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5325"/>
+        <source>There is no toolpath available for collision validation</source>
+        <translation>没有可用于碰撞校验的刀路</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5331"/>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5407"/>
+        <source>Collision source configuration is incomplete</source>
+        <translation>碰撞源配置不完整</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5336"/>
+        <source>Collision validation background service is unavailable</source>
+        <translation>碰撞校验后台服务不可用</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5348"/>
+        <source>The current toolpath does not have an executable motion plan</source>
+        <translation>当前刀路没有可执行的运动计划</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/cam_module.cpp" line="5513"/>
+        <source>Validate current toolpath collisions</source>
+        <translation>校验当前刀路碰撞</translation>
+    </message>
+</context>
+<context>
+    <name>CmdValidateCamCollisions</name>
+    <message>
+        <location filename="../src/modules/cam/commands/commands_cam.cpp" line="145"/>
+        <location filename="../src/modules/cam/commands/commands_cam.cpp" line="161"/>
+        <source>Collision validation</source>
+        <translation>碰撞校验</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/commands/commands_cam.cpp" line="147"/>
+        <source>Run full collision validation for the current solved toolpath regardless of the automatic collision-detection switch</source>
+        <translation>无视自动碰撞检测开关，对当前已求解刀路执行完整碰撞校验</translation>
     </message>
 </context>
 <context>
@@ -4574,6 +4702,37 @@ continue?</source>
         <source>Tool &quot;%1&quot;/layer &quot;%2&quot; are not registered, using default tool parameters</source>
         <translation>工具 &quot;%1&quot;/图层 &quot;%2&quot; 均未注册，使用默认工具参数</translation>
     </message>
+    <message>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="499"/>
+        <source>CAM initial approach planner or execution snapshot is unavailable</source>
+        <translation>CAM 首段规划器或执行快照不可用</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="552"/>
+        <source>CAM initial approach is not collision-verified</source>
+        <translation>CAM 首段未通过碰撞校验</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="564"/>
+        <source>Controller position changed while planning the initial approach</source>
+        <translation>首段规划期间控制器位置发生变化</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="573"/>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="630"/>
+        <source>Initial CAM approach execution failed</source>
+        <translation>CAM 首段执行失败</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="600"/>
+        <source>CAM initial Z phase contains a non-Z axis movement</source>
+        <translation>CAM 首段 Z 阶段包含非 Z 轴运动</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="618"/>
+        <source>Initial CAM absolute Z movement failed</source>
+        <translation>CAM 首段 Z 轴绝对运动失败</translation>
+    </message>
 </context>
 <context>
     <name>lcnc::process::ProcessFlowModel</name>
@@ -5966,6 +6125,10 @@ continue?</source>
 <context>
     <name>QObject</name>
     <message>
+        <source>Cutting has been interrupted</source>
+        <translation>切割已被中断</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/runtime/process_device_session.cpp" line="57"/>
         <source>Motion controller disconnection failed</source>
         <translation>运动控制器断开失败</translation>
@@ -7076,6 +7239,34 @@ continue?</source>
         <translation>绝对运动命令失败</translation>
     </message>
     <message>
+        <location filename="../src/modules/process/runtime/process_device_runtime.cpp" line="82"/>
+        <source>Absolute motion parameters are invalid</source>
+        <translation>绝对运动参数无效</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/process_device_runtime.cpp" line="94"/>
+        <source>Timed out waiting for absolute motion to complete</source>
+        <translation>等待绝对运动完成超时</translation>
+    </message>
+    <message>
+        <source>The controller disconnected while waiting for absolute motion</source>
+        <translation>绝对运动等待期间控制器连接已断开</translation>
+    </message>
+    <message>
+        <source>The controller disconnected after absolute motion</source>
+        <translation>绝对运动结束时控制器连接已断开</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/process_device_runtime.cpp" line="101"/>
+        <source>Controller status is abnormal after absolute motion</source>
+        <translation>绝对运动后控制器状态异常</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/process_device_runtime.cpp" line="106"/>
+        <source>Absolute motion did not reach the target coordinate</source>
+        <translation>绝对运动未到达目标坐标</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/runtime/process_device_runtime.cpp" line="79"/>
         <source>Continuous motion command failed</source>
         <translation>连续运动命令失败</translation>
@@ -7405,6 +7596,34 @@ continue?</source>
         <translation>介质与流程</translation>
     </message>
     <message>
+        <source>Initial segment settings</source>
+        <translation>首段设置</translation>
+    </message>
+    <message>
+        <source>Planning mode</source>
+        <translation>规划模式</translation>
+    </message>
+    <message>
+        <source>Initial segment</source>
+        <translation>首段</translation>
+    </message>
+    <message>
+        <source>Manual planning</source>
+        <translation>手动规划</translation>
+    </message>
+    <message>
+        <source>Automatic planning</source>
+        <translation>自动规划</translation>
+    </message>
+    <message>
+        <source>Z safety coordinate (absolute motion)</source>
+        <translation>Z 安全坐标（绝对运动）</translation>
+    </message>
+    <message>
+        <source>Initial segment collision validation</source>
+        <translation>首段碰撞校验</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="133"/>
         <source>Enable blowing</source>
         <translation>启用吹气</translation>
@@ -7727,6 +7946,16 @@ continue?</source>
         <location filename="../src/modules/process/settings/process_settings_service.cpp" line="526"/>
         <source>Tool name is empty or duplicate.</source>
         <translation>工具名称为空或重复。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_settings_service.cpp" line="599"/>
+        <source>The default tool is fixed and cannot be renamed or deleted.</source>
+        <translation>默认工具固定存在，不能重命名或删除。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_settings_service.cpp" line="616"/>
+        <source>The default tool must remain the first tool.</source>
+        <translation>默认工具必须保持为第一个工具。</translation>
     </message>
     <message>
         <location filename="../src/modules/process/settings/process_settings_service.cpp" line="533"/>

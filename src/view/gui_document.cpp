@@ -501,7 +501,16 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
         return;
     }
 
-    m_document = document;
+    // A workspace GuiDocument is owned by the project/workpiece document.
+    // Rebuilding the independently owned Machine domain must not replace that
+    // primary identity: CAM overlays (for example machining-face AIS objects)
+    // use it as their stable per-workspace key. Replacing it here creates a
+    // second overlay set under the machine document id which the normal hide
+    // path cannot remove.
+    // 中文翻译：工作区视图的主文档属于项目/工件；重建独立机台域时不得改写主文档，
+    // 否则加工面等覆盖层会按机台文档 ID 再创建一套，原有覆盖层将无法正常隐藏。
+    if (!m_document || domain != lcnc::ProjectDomain::Machine)
+        m_document = document;
 
     // 统一工程文档可同时持有工件与 CAM 轮廓实体（按 EntityKind 区分）。按本次请求的
     // 域只取对应 EntityKind 的实体，避免把 CAM 轮廓当作工件域显示（或反之）。

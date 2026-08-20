@@ -34,12 +34,11 @@ public:
     using SafetyMonitoringHandler = std::function<void(bool)>;
 
     ProcessStatusService(ProcessDeviceRuntime& runtime,
-                         DeviceCommandQueue& queue,
                          QObject* parent = nullptr);
-    ProcessStatusService(DeviceCommandQueue& queue,
-                         HardwarePoller hardwarePoller,
+    ProcessStatusService(HardwarePoller hardwarePoller,
                          PeripheralPoller peripheralPoller,
                          QObject* parent = nullptr);
+    ~ProcessStatusService() override;
 
     void setRequestProvider(RequestProvider provider);
     void setHardwareHandler(HardwareHandler handler);
@@ -56,7 +55,14 @@ private:
     void onHardwareTimer();
     void onPeripheralTimer();
 
-    DeviceCommandQueue& m_queue;
+    // Controller coordinates and low-frequency peripherals must not wait
+    // behind a workflow command which can remain active for an entire move.
+    // The runtime's ProcessDeviceCoordinator remains the single SDK lease, so
+    // these independent executors interleave only at bounded SDK call edges.
+    // 中文翻译：坐标轮询和低频外设各自使用独立执行器，不排在长时间加工指令之后；
+    // 实际 SDK 调用仍由 ProcessDeviceCoordinator 串行化。
+    DeviceCommandQueue m_hardwareQueue;
+    DeviceCommandQueue m_peripheralQueue;
     HardwarePoller m_hardwarePoller;
     PeripheralPoller m_peripheralPoller;
     QTimer m_hardwareTimer;

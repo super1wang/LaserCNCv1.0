@@ -15,10 +15,12 @@
 #include "modules/process/runtime/machine_pose5.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 #include "modules/process/runtime/rapid_motion_utilities.h"
+#include "modules/process/settings/process_settings_service.h"
 #include "modules/process/runtime/process_cutting_safety.h"
 
 #include <QString>
 #include <QStringList>
+#include <QElapsedTimer>
 #include <QScopeGuard>
 #include <QVariantMap>
 #include <QThread>
@@ -76,12 +78,14 @@ NormalCuttingManager::NormalCuttingManager(ProcessDeviceRuntime* service,
                                            std::shared_ptr<lcnc::cam::ICamToolpathProvider> toolpathProvider,
                                            NormalCuttingCallbacks callbacks,
                                            DeviceCommandQueue* deviceQueue,
+                                           ProcessSettingsService* settings,
                                            QObject* parent)
     : QObject(parent)
     , m_service(service)
     , m_toolpathProvider(std::move(toolpathProvider))
     , m_callbacks(std::move(callbacks))
     , m_deviceQueue(deviceQueue)
+    , m_settings(settings)
     , m_toolpathService(std::make_unique<ProcessToolpathService>(m_toolpathProvider))
     , m_simTicker(std::make_unique<PureSimulationToolpathTicker>(
           m_callbacks.motionSink.positionObserver))
@@ -361,6 +365,132 @@ bool NormalCuttingManager::run(const QString& nodeId,
     return true;
 }
 
+bool NormalCuttingManager::prepareInitialApproach(
+    const CuttingRow& row,
+    ProcessInterruptContext& interrupt,
+    lcnc::cam::InitialApproachSnapshot* approach,
+    QString* errorMessage)
+{
+    if (!approach) {
+        if (errorMessage)
+            *errorMessage = tr("CAM initial approach planner or execution snapshot is unavailable");
+        return false;
+    }
+
+    auto planner = lcnc::Kernel::current().services()
+        .getService<lcnc::cam::ICamInitialApproachPlanner>();
+    const auto execution = m_toolpathProvider
+        ? m_toolpathProvider->exportCommittedExecutionSnapshot()
+        : lcnc::cam::ToolpathExportSnapshot{};
+    if (!planner || !m_service || !m_deviceQueue
+        || execution.revision == 0 || execution.machineConfigurationFingerprint.isEmpty()) {
+        // 中文翻译：CAM 首段规划器或执行快照不可用
+        if (errorMessage)
+            *errorMessage = tr("CAM initial approach planner or execution snapshot is unavailable");
+        return false;
+    }
+
+    const QStringList axisNames = execution.machineAxisLayout.axisNames();
+    const auto readApos = [this, &axisNames](QMap<QString, double>* positions,
+                                             QString* error) {
+        const auto captured = std::make_shared<QMap<QString, double>>();
+        const DeviceCommandResult read = m_deviceQueue->executeAndWait(
+            DeviceCommandQueue::ResultCommand([this, axisNames, captured] {
+                return m_service->readAxisPositions(axisNames, captured.get());
+            }), TaskPriority::Workflow, 5000);
+        if (read.success && positions)
+            *positions = *captured;
+        if (!read.success && error)
+            *error = read.error;
+        return read.success;
+    };
+    const auto poseDrifted = [&execution](const QMap<QString, double>& before,
+                                          const QMap<QString, double>& after) {
+        for (int index = 0; index < execution.machineAxisLayout.count; ++index) {
+            const auto& axis = execution.machineAxisLayout.axes[index];
+            const double tolerance = (axis.role == lcnc::MachineAxisRole::LinearX
+                || axis.role == lcnc::MachineAxisRole::LinearY
+                || axis.role == lcnc::MachineAxisRole::LinearZ) ? 0.01 : 0.01;
+            if (!before.contains(axis.name) || !after.contains(axis.name)
+                || std::abs(before.value(axis.name) - after.value(axis.name)) > tolerance) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const ProcessInitialApproachSettings initialSettings = m_settings
+        ? m_settings->initialApproachSettings()
+        : ProcessInitialApproachSettings{};
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        if (interrupt.isStopping()) {
+            if (errorMessage)
+                *errorMessage = tr("Normal cutting has been interrupted");
+            return false;
+        }
+        QMap<QString, double> before;
+        QString approachError;
+        if (!readApos(&before, &approachError)) {
+            if (errorMessage)
+                *errorMessage = approachError;
+            return false;
+        }
+        QStringList aposFields;
+        for (auto it = before.cbegin(); it != before.cend(); ++it)
+            aposFields.append(QStringLiteral("%1=%2").arg(it.key()).arg(it.value(), 0, 'f', 4));
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.initial_approach.apos event=captured attempt={} positions='{}'",
+                  attempt + 1, aposFields.join(QStringLiteral(",")).toStdString());
+
+        lcnc::cam::InitialApproachRequest request;
+        request.toolpathRevision = execution.revision;
+        request.targetContourId = row.data.contour.contourId;
+        request.machineConfigurationFingerprint = execution.machineConfigurationFingerprint;
+        request.axisPositions = before;
+        request.planningMode = initialSettings.mode == ProcessInitialApproachMode::Manual
+            ? lcnc::cam::InitialApproachPlanningMode::Manual
+            : lcnc::cam::InitialApproachPlanningMode::Automatic;
+        request.safetyAxisZ = initialSettings.safetyZ;
+        request.collisionCheckEnabled = initialSettings.collisionCheckEnabled;
+
+        QElapsedTimer planningElapsed;
+        planningElapsed.start();
+        *approach = planner->planInitialApproach(request, &interrupt.stopRequested);
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.initial_approach.plan event=end result={} mode={} segments={} elapsed_ms={}",
+                  approach->isExecutable(approach->collision.blockWarning)
+                      ? "success" : "failed",
+                  initialSettings.mode == ProcessInitialApproachMode::Manual
+                      ? "manual" : "automatic",
+                  approach->transition.segments.size(), planningElapsed.elapsed());
+        if (!approach->isExecutable(approach->collision.blockWarning)) {
+            // 中文翻译：CAM 首段未通过碰撞校验
+            if (errorMessage) {
+                *errorMessage = approach->failureReason.isEmpty()
+                    ? tr("CAM initial approach is not collision-verified")
+                    : approach->failureReason;
+            }
+            return false;
+        }
+
+        QMap<QString, double> after;
+        if (!readApos(&after, &approachError)) {
+            if (errorMessage)
+                *errorMessage = approachError;
+            return false;
+        }
+        if (!poseDrifted(before, after))
+            return true;
+        if (attempt == 1) {
+            // 中文翻译：首段规划期间控制器位置发生变化
+            if (errorMessage)
+                *errorMessage = tr("Controller position changed while planning the initial approach");
+            return false;
+        }
+    }
+    return false;
+}
+
 bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSink>& sink,
                                            bool pureSimulation,
                                            const CuttingRow& row,
@@ -371,6 +501,28 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
                                            QString* errorMessage)
 {
     bool skippedEmptyContour = false;
+    const bool needsInitialApproach = !row.hasEntryTransition;
+    QElapsedTimer initialApproachElapsed;
+    bool initialApproachSucceeded = false;
+    const auto initialApproachLog = qScopeGuard([&] {
+        if (!needsInitialApproach)
+            return;
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.initial_approach event=end result={} contour={} elapsed_ms={}",
+                  initialApproachSucceeded ? "success" : "failed",
+                  row.data.contour.contourId,
+                  initialApproachElapsed.elapsed());
+    });
+    lcnc::cam::InitialApproachSnapshot initialApproach;
+    if (needsInitialApproach) {
+        initialApproachElapsed.start();
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.initial_approach event=begin contour={} pure_simulation={}",
+                  row.data.contour.contourId, pureSimulation);
+        if (!prepareInitialApproach(row, interrupt, &initialApproach, errorMessage))
+            return false;
+    }
+
     auto constructAndStart = [&](IMotionCommandSink& commandSink, QString* startError) {
         // Construct and start one complete contour on the device executor.
         if (!row.tool) {
@@ -477,100 +629,99 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
         if (tool.m_bCuttingHead)
             commandSink.startCuttingHead(tool);
     } else {
-        // There is no predecessor contour for a sliced/resumed first row.
-        // Submit the measured APOS to CAM and execute only its immutable entry
-        // plan; Process must never rebuild a Z-up/XY/Z-down motion locally.
-        // 中文翻译：首轮廓（含范围加工/续跑）由 CAM 根据控制器 APOS 生成进入段，
-        // Process 不得再本地拼接抬 Z、平移、落 Z。
+        // There is no predecessor contour for the first row of every new run,
+        // including a range run after Stop. Submit measured APOS to CAM and
+        // execute only its immutable entry plan; Process must never reuse the
+        // previous run or rebuild a Z-up/XY/Z-down motion locally.
+        // 中文翻译：每次全新加工（含停止后的范围加工）的首轮廓都没有前序轮廓，
+        // 必须由 CAM 根据控制器 APOS 重新生成首段，不能复用上次运行的过渡段。
         if (tool.m_bCuttingHead && tool.m_bCrossBridge)
             commandSink.stopCuttingHead();
-        auto planner = lcnc::Kernel::current().services()
-            .getService<lcnc::cam::ICamInitialApproachPlanner>();
-        const auto execution = m_toolpathProvider
-            ? m_toolpathProvider->exportCommittedExecutionSnapshot()
-            : lcnc::cam::ToolpathExportSnapshot{};
-        if (!planner || !m_service || !m_deviceQueue
-            || execution.revision == 0 || execution.machineConfigurationFingerprint.isEmpty()) {
-            if (startError) *startError = tr("CAM initial approach planner or execution snapshot is unavailable");
-            return false;
-        }
-
-        const QStringList axisNames = execution.machineAxisLayout.axisNames();
-        const auto readApos = [this, &axisNames](QMap<QString, double>* positions, QString* error) {
-            const DeviceCommandResult read = m_deviceQueue->executeAndWait(
-                DeviceCommandQueue::ResultCommand([this, axisNames, positions] {
-                    return m_service->readAxisPositions(axisNames, positions);
-                }), TaskPriority::Workflow, 5000);
-            if (!read.success && error)
-                *error = read.error;
-            return read.success;
-        };
-        const auto poseDrifted = [&execution](const QMap<QString, double>& before,
-                                              const QMap<QString, double>& after) {
-            for (int index = 0; index < execution.machineAxisLayout.count; ++index) {
-                const auto& axis = execution.machineAxisLayout.axes[index];
-                const double tolerance = (axis.role == lcnc::MachineAxisRole::LinearX
-                    || axis.role == lcnc::MachineAxisRole::LinearY
-                    || axis.role == lcnc::MachineAxisRole::LinearZ) ? 0.01 : 0.01;
-                if (!before.contains(axis.name) || !after.contains(axis.name)
-                    || std::abs(before.value(axis.name) - after.value(axis.name)) > tolerance)
-                    return true;
-            }
-            return false;
-        };
-
-        lcnc::cam::InitialApproachSnapshot approach;
-        for (int attempt = 0; attempt < 2; ++attempt) {
-            QMap<QString, double> before;
-            QString approachError;
-            if (!readApos(&before, &approachError)) {
-                if (startError) *startError = approachError;
-                return false;
-            }
-            lcnc::cam::InitialApproachRequest request;
-            request.toolpathRevision = execution.revision;
-            request.targetContourId = row.data.contour.contourId;
-            request.machineConfigurationFingerprint = execution.machineConfigurationFingerprint;
-            request.axisPositions = before;
-            approach = planner->planInitialApproach(request, nullptr);
-            if (!approach.isExecutable(approach.collision.blockWarning)) {
-                if (startError) *startError = approach.failureReason.isEmpty()
-                    ? tr("CAM initial approach is not collision-verified") : approach.failureReason;
-                return false;
-            }
-            QMap<QString, double> after;
-            if (!readApos(&after, &approachError)) {
-                if (startError) *startError = approachError;
-                return false;
-            }
-            if (!poseDrifted(before, after))
-                break;
-            if (attempt == 1) {
-                if (startError) *startError = tr("Controller position changed while planning the initial approach");
-                return false;
-            }
-        }
+        const lcnc::cam::InitialApproachSnapshot& approach = initialApproach;
         if (pureSimulation) {
             for (const auto& segment : approach.transition.segments) {
                 if (!commandSink.executeRapidSegment(segment, tool, &commandError)) {
+                    // 中文翻译：CAM 首段执行失败
                     if (startError) *startError = commandError.isEmpty()
                         ? tr("Initial CAM approach execution failed") : commandError;
                     return false;
                 }
             }
         } else {
-            QVector<MachinePose5> rapidPoses;
-            rapidPoses.reserve(approach.transition.segments.size());
-            for (const auto& segment : approach.transition.segments)
-                rapidPoses.append(solvedRapidPose(segment));
-            if (!submitCoordinatedRapid(rapidPoses)) {
-                if (startError) *startError = commandError.isEmpty()
-                    ? tr("Initial CAM approach execution failed") : commandError;
-                return false;
+            // Preserve CAM's safe-zone phase boundaries. Retract/approach are
+            // issued as real controller absolute-Z commands and verified at
+            // the requested signed coordinate. SafeXY and SafeAC remain
+            // coordinated axis-space lines, submitted as separate programs so
+            // the controller cannot blend across the safe-zone boundary.
+            // 中文翻译：严格保留 CAM 安全区阶段边界；退回/接近调用控制器 Z 轴
+            // 绝对运动并校验有符号目标，SafeXY 与 SafeAC 分别提交，禁止跨阶段圆滑。
+            int segmentIndex = 0;
+            while (segmentIndex < approach.transition.segments.size()) {
+                const auto phase = approach.transition.segments.at(segmentIndex).phase;
+                int phaseEnd = segmentIndex + 1;
+                while (phaseEnd < approach.transition.segments.size()
+                       && approach.transition.segments.at(phaseEnd).phase == phase) {
+                    ++phaseEnd;
+                }
+                const bool absoluteZPhase = phase == lcnc::cam::RapidSegmentPhase::Retract
+                    || phase == lcnc::cam::RapidSegmentPhase::Approach;
+                QElapsedTimer phaseElapsed;
+                phaseElapsed.start();
+                if (absoluteZPhase) {
+                    for (int index = segmentIndex; index < phaseEnd; ++index) {
+                        if ((approach.transition.segments.at(index).movingAxisMask & ~0x04u) != 0) {
+                            // 中文翻译：CAM 首段 Z 阶段包含非 Z 轴运动
+                            if (startError) *startError = tr(
+                                "CAM initial Z phase contains a non-Z axis movement");
+                            return false;
+                        }
+                    }
+                    const double targetZ = approach.transition.segments.at(phaseEnd - 1)
+                        .target.axes[2];
+                    const double velocity = tool.m_dIdleZVelocity > 0.0
+                        ? tool.m_dIdleZVelocity : rapidTool.m_dLineVelocity;
+                    const DeviceCommandResult move = m_deviceQueue->executeAndWait(
+                        DeviceCommandQueue::ResultCommand(
+                            [this, targetZ, velocity] {
+                                return m_service->moveAbsoluteAndWait(
+                                    Axis::Z, targetZ, velocity, 30000, 0.05);
+                            }),
+                        TaskPriority::Workflow, 35000);
+                    if (!move.success) {
+                        // 中文翻译：CAM 首段 Z 轴绝对运动失败
+                        if (startError) *startError = move.error.isEmpty()
+                            ? tr("Initial CAM absolute Z movement failed") : move.error;
+                        return false;
+                    }
+                } else {
+                    QVector<MachinePose5> rapidPoses;
+                    rapidPoses.reserve(phaseEnd - segmentIndex);
+                    for (int index = segmentIndex; index < phaseEnd; ++index)
+                        rapidPoses.append(solvedRapidPose(
+                            approach.transition.segments.at(index)));
+                    if (!submitCoordinatedRapid(rapidPoses)) {
+                        // 中文翻译：CAM 首段执行失败
+                        if (startError) *startError = commandError.isEmpty()
+                            ? tr("Initial CAM approach execution failed") : commandError;
+                        return false;
+                    }
+                }
+                LCNC_INFO(lcnc::LogCode::Generic,
+                          "stage=process.initial_approach.execute_phase event=end phase={} segments={} elapsed_ms={}",
+                          static_cast<int>(phase), phaseEnd - segmentIndex,
+                          phaseElapsed.elapsed());
+                segmentIndex = phaseEnd;
             }
+            // Direct absolute-Z phases bypass the buffered sink. Re-establish
+            // cutting parameters even when SafeXY/SafeAC contained no motion.
+            // 中文翻译：Z 轴绝对运动绕过缓存指令汇；即使 SafeXY/SafeAC 无位移，
+            // 也必须在切割前重新建立切割参数。
+            commandSink.resetProgram();
+            commandSink.applyToolMotionParams(tool, /*jump=*/false);
         }
         if (tool.m_bCuttingHead)
             commandSink.startCuttingHead(tool);
+        initialApproachSucceeded = true;
     }
 
     commandSink.setShutterTimings(tool.m_dBeforeOn, tool.m_dAfterOn,
@@ -635,7 +786,7 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
                 return DeviceCommandResult{success, startError};
             }),
             TaskPriority::Workflow,
-            30000);
+            -1);
         if (!result.success) {
             if (errorMessage)
                 *errorMessage = result.error;
@@ -827,9 +978,10 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
             row.data.contour = contour;
             row.data.points  = snapshot.pointsByContourId.value(contour.contourId);
             if (const auto* transition = snapshot.travelPlan.transitionTo(contour.contourId);
-                transition && transition->fromContourId == previousSelectedContourId) {
+                transition
+                && canReuseCommittedTransition(previousSelectedContourId, *transition)) {
                 row.entryTransition = *transition;
-                row.hasEntryTransition = transition->isValid();
+                row.hasEntryTransition = true;
             }
             row.compensationOffsetX = offsetX;
             row.compensationOffsetY = offsetY;

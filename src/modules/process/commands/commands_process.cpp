@@ -209,7 +209,10 @@ bool CmdRunStop::isEnabled() const
     auto* p = lcnc::Kernel::current().service<lcnc::IProcessFacade>();
     if (!p) return false;
     auto s = p->state();
-    return s == lcnc::ProcessRunState::Running || s == lcnc::ProcessRunState::Paused;
+    auto* module = lcnc::Kernel::current().service<ProcessModule>();
+    return s == lcnc::ProcessRunState::Running
+        || s == lcnc::ProcessRunState::Paused
+        || (module && module->isMachiningInteractionLocked());
 }
 void CmdRunStop::execute()
 {

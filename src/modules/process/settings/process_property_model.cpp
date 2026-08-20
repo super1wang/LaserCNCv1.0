@@ -80,6 +80,12 @@ QVariant ProcessPropertyModel::data(const QModelIndex& index, int role) const
                 if (role == Qt::DisplayRole)
                     return QVariant{};
             }
+            if (field->type == ParameterValueType::Enum
+                && role == Qt::DisplayRole
+                && field->enumLabels.size() == field->enumValues.size()) {
+                const int enumIndex = field->enumValues.indexOf(value.toString());
+                return enumIndex >= 0 ? field->enumLabels.at(enumIndex) : value;
+            }
             if (role == Qt::DisplayRole || role == Qt::EditRole)
                 return value;
         }
@@ -134,7 +140,14 @@ QWidget* ProcessPropertyDelegate::createEditor(QWidget* parent, const QStyleOpti
     if (field->type == ParameterValueType::Int) { auto* editor = new QSpinBox(parent); editor->setRange(int(field->minimum), int(field->maximum)); return editor; }
     if (field->type == ParameterValueType::Double) { auto* editor = new QDoubleSpinBox(parent); editor->setRange(field->minimum, field->maximum); editor->setDecimals(field->decimals); return editor; }
     if (field->type == ParameterValueType::Enum || field->type == ParameterValueType::AxisRef || field->type == ParameterValueType::IoRef || field->type == ParameterValueType::ToolRef) {
-        auto* editor = new QComboBox(parent); editor->addItems(field->enumValues); return editor;
+        auto* editor = new QComboBox(parent);
+        if (field->enumLabels.size() == field->enumValues.size()) {
+            for (int enumIndex = 0; enumIndex < field->enumValues.size(); ++enumIndex)
+                editor->addItem(field->enumLabels.at(enumIndex), field->enumValues.at(enumIndex));
+        } else {
+            editor->addItems(field->enumValues);
+        }
+        return editor;
     }
     return new QLineEdit(parent);
 }
@@ -144,7 +157,11 @@ void ProcessPropertyDelegate::setEditorData(QWidget* editor, const QModelIndex& 
     const QVariant value = index.data(Qt::EditRole);
     if (auto* intSpin = qobject_cast<QSpinBox*>(editor)) intSpin->setValue(value.toInt());
     else if (auto* doubleSpin = qobject_cast<QDoubleSpinBox*>(editor)) doubleSpin->setValue(value.toDouble());
-    else if (auto* combo = qobject_cast<QComboBox*>(editor)) combo->setCurrentText(value.toString());
+    else if (auto* combo = qobject_cast<QComboBox*>(editor)) {
+        const int dataIndex = combo->findData(value.toString());
+        if (dataIndex >= 0) combo->setCurrentIndex(dataIndex);
+        else combo->setCurrentText(value.toString());
+    }
     else if (auto* line = qobject_cast<QLineEdit*>(editor)) line->setText(value.toString());
 }
 
@@ -152,7 +169,10 @@ void ProcessPropertyDelegate::setModelData(QWidget* editor, QAbstractItemModel* 
 {
     if (auto* intSpin = qobject_cast<QSpinBox*>(editor)) model->setData(index, intSpin->value());
     else if (auto* doubleSpin = qobject_cast<QDoubleSpinBox*>(editor)) model->setData(index, doubleSpin->value());
-    else if (auto* combo = qobject_cast<QComboBox*>(editor)) model->setData(index, combo->currentText());
+    else if (auto* combo = qobject_cast<QComboBox*>(editor)) {
+        const QVariant stableValue = combo->currentData();
+        model->setData(index, stableValue.isValid() ? stableValue : QVariant(combo->currentText()));
+    }
     else if (auto* line = qobject_cast<QLineEdit*>(editor)) model->setData(index, line->text());
 }
 

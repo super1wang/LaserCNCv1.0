@@ -164,6 +164,7 @@ int main(int argc, char* argv[])
     persistedContour.points.push_back(persistedPoint);
     sourceCam.toolpath().contours().push_back(persistedContour);
     sourceCam.ensureToolpathLayers();
+    sourceCam.layerManager()->setLastAutoSortAxis(lcnc::cam::AutoSortAxis::YNeg);
     const QString packagePath = QDir(temporary.path()).filePath(QStringLiteral("roundtrip.lcnc"));
     QString error;
     lcnc::LcncProjectManifest manifest;
@@ -181,6 +182,9 @@ int main(int argc, char* argv[])
         || restoredSnapshot != expectedSnapshot
         || restoredCam.machiningMode() != lcnc::MachiningMode::RotaryTube4Axis
         || restoredCam.machineAxisLayout() != sourceLayout
+        || restoredCam.layerContainer().lastAutoSortAxis() != lcnc::cam::AutoSortAxis::YNeg
+        || restoredCam.toolpath().layers().empty()
+        || restoredCam.toolpath().layers().front().toolName != QStringLiteral("default")
         || restoredCam.solvedMachineConfigurationFingerprint() != QStringLiteral("test-fingerprint"))
         return fail(QStringLiteral("v5 package did not preserve the required tool snapshot"));
 

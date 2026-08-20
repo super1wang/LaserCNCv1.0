@@ -5,6 +5,7 @@
 #include "modules/process/system/regex_patterns.h"
 #include "core/logging/logger.h"
 #include "modules/process/settings/process_settings_service.h"
+#include "modules/process/runtime/coordinated_motion_command_sink.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
 #include "modules/process/runtime/i_motion_command_sink.h"
 #include "modules/process/runtime/process_cutting_safety.h"
@@ -23,6 +24,7 @@
 #include <set>
 
 #include <QElapsedTimer>
+#include <QScopeGuard>
 #include <QThread>
 
 using lcnc::process::AnalogIN;
@@ -62,6 +64,83 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveAbsolute(
     const bool ok = m_motionControl->MoveAbsolute(axis, position, velocity);
     // 中文翻译：绝对运动命令失败
     return {ok, ok ? QString() : QObject::tr("Absolute motion command failed")};
+}
+
+lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveAbsoluteAndWait(
+    Axis axis, double position, double velocity, int timeoutMs,
+    double positionTolerance)
+{
+    if (!std::isfinite(position) || !std::isfinite(velocity) || velocity <= 0.0
+        || timeoutMs <= 0 || !std::isfinite(positionTolerance)
+        || positionTolerance < 0.0) {
+        // 中文翻译：绝对运动参数无效
+        return {false, QObject::tr("Absolute motion parameters are invalid")};
+    }
+    QElapsedTimer timer;
+    timer.start();
+    bool completed = false;
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "stage=process.motion.absolute event=begin axis={} target={} velocity={} timeout_ms={}",
+              magic_enum::enum_name(axis), position, velocity, timeoutMs);
+    const auto motionLog = qScopeGuard([&] {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.motion.absolute event=end result={} axis={} target={} elapsed_ms={}",
+                  completed ? "success" : "failed", magic_enum::enum_name(axis),
+                  position, timer.elapsed());
+    });
+    {
+        const auto lock = lockDeviceAccess();
+        if (!m_motionControl || !m_motionControl->IsConnected())
+            // 中文翻译：未连接控制器，请先连接设备
+            return {false, QObject::tr("The controller is not connected, please connect the device first")};
+        if (!m_motionControl->IsMotorCreated(axis))
+            // 中文翻译：轴未注册
+            return {false, QObject::tr("Axis not registered")};
+        if (!m_motionControl->MoveAbsolute(axis, position, velocity))
+            // 中文翻译：绝对运动命令失败
+            return {false, QObject::tr("Absolute motion command failed")};
+    }
+
+    for (;;) {
+        bool moving = false;
+        {
+            // Hold the vendor-SDK lease only for one status call. Keeping it
+            // for the whole move prevented the independent 150 ms monitor
+            // from publishing APOS, which froze the UI until the axis stopped.
+            // 中文翻译：每次状态调用才短暂持有设备租约，运动等待期间允许状态线程持续发布 APOS。
+            const auto lock = lockDeviceAccess();
+            if (!m_motionControl || !m_motionControl->IsConnected())
+                // 中文翻译：绝对运动等待期间控制器连接已断开
+                return {false, QObject::tr("The controller disconnected while waiting for absolute motion")};
+            moving = m_motionControl->IsAxisMoving(axis);
+            if (moving && timer.elapsed() > timeoutMs) {
+                (void)m_motionControl->StopMotion(axis);
+                // 中文翻译：等待绝对运动完成超时
+                return {false, QObject::tr("Timed out waiting for absolute motion to complete")};
+            }
+        }
+        if (!moving)
+            break;
+        QThread::msleep(20);
+    }
+    {
+        const auto lock = lockDeviceAccess();
+        if (!m_motionControl || !m_motionControl->IsConnected())
+            // 中文翻译：绝对运动结束时控制器连接已断开
+            return {false, QObject::tr("The controller disconnected after absolute motion")};
+        int fault = 0;
+        if (!m_motionControl->IsAxisStatusNormal(fault) || fault != 0)
+            // 中文翻译：绝对运动后控制器状态异常
+            return {false, QObject::tr("Controller status is abnormal after absolute motion")};
+        double actual = 0.0;
+        if (!m_motionControl->GetActualPos(axis, actual)
+            || std::abs(actual - position) > positionTolerance) {
+            // 中文翻译：绝对运动未到达目标坐标
+            return {false, QObject::tr("Absolute motion did not reach the target coordinate")};
+        }
+    }
+    completed = true;
+    return {};
 }
 
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::jog(
@@ -630,7 +709,11 @@ std::unique_ptr<lcnc::process::IMotionCommandSink> ProcessDeviceRuntime::createM
     const lcnc::MachineAxisLayout& layout)
 {
     const auto lock = lockDeviceAccess();
-    return lcnc::process::MotionSinkFactory::create(
+    auto sink = lcnc::process::MotionSinkFactory::create(
         simulationMode ? nullptr : m_motionControl.get(), simulationMode, simTicker,
         callbacks, layout);
+    if (!sink || simulationMode)
+        return sink;
+    return std::make_unique<lcnc::process::CoordinatedMotionCommandSink>(
+        std::move(sink), m_deviceCoordinator);
 }

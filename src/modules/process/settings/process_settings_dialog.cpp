@@ -36,9 +36,9 @@ ProcessSettingsDialog::ProcessSettingsDialog(ProcessSettingsService* settings,
     // 中文翻译：复制工具
     toolbar->addAction(tr("copy tool"), this, [this] { copyTool(); });
     // 中文翻译：重命名
-    toolbar->addAction(tr("Rename"), this, [this] { renameTool(); });
+    m_renameToolAction = toolbar->addAction(tr("Rename"), this, [this] { renameTool(); });
     // 中文翻译：删除工具
-    toolbar->addAction(tr("removal tool"), this, [this] { deleteTool(); });
+    m_deleteToolAction = toolbar->addAction(tr("removal tool"), this, [this] { deleteTool(); });
     toolbar->addSeparator();
     // 中文翻译：添加 I/O
     toolbar->addAction(tr("Add I/O"), this, [this] {
@@ -126,6 +126,12 @@ void ProcessSettingsDialog::rebuildObjectTree()
 void ProcessSettingsDialog::showCurrentObject()
 {
     const auto* item = m_objects->currentItem();
+    const QString selectedTool = selectedToolName();
+    const bool protectedDefault = ProcessSettingsService::isDefaultToolName(selectedTool);
+    if (m_renameToolAction)
+        m_renameToolAction->setEnabled(!selectedTool.isEmpty() && !protectedDefault);
+    if (m_deleteToolAction)
+        m_deleteToolAction->setEnabled(!selectedTool.isEmpty() && !protectedDefault);
     if (!item || !item->parent()) return;
     const int index = item->data(0, Qt::UserRole).toInt();
     if (index < 0 || index >= m_objectDescriptors.size()) return;

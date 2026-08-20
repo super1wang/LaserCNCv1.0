@@ -74,7 +74,10 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
     controller.fields = {controllerType};
     objects.append(controller);
 
-    auto machine = lcnc::Kernel::current().services().getService<lcnc::MachineConfigurationService>();
+    lcnc::Kernel* kernel = lcnc::Kernel::tryCurrent();
+    auto machine = kernel
+        ? kernel->services().getService<lcnc::MachineConfigurationService>()
+        : nullptr;
     if (machine) {
         for (const auto& axis : machine->axisConfigurations()) {
             ParameterObjectDescriptor object;
@@ -146,6 +149,37 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
                     // 中文翻译：启用回水泵；回水泵
                     field("pump", QObject::tr("Enable return water pump"), QObject::tr("Return water pump"), ParameterValueType::Bool, ProcessConfigArea::Operations, "Pump", "bPump", false)};
     objects.append(water);
+
+    // Initial motion is a Process policy but CAM remains the sole owner of
+    // automatic five-axis planning and collision validation.
+    // 中文翻译：首段设置；加工起始运动。
+    ParameterObjectDescriptor initialApproach{
+        QStringLiteral("initial-approach"), QObject::tr("Initial segment settings"),
+        QObject::tr("Medium and process")};
+    // 中文翻译：规划模式；首段。
+    auto initialMode = field(
+        QStringLiteral("mode"), QObject::tr("Planning mode"), QObject::tr("Initial segment"),
+        ParameterValueType::Enum, ProcessConfigArea::Workflow,
+        QStringLiteral("InitialApproach"), QStringLiteral("sMode"),
+        QStringLiteral("Automatic"));
+    initialMode.enumValues = {QStringLiteral("Manual"), QStringLiteral("Automatic")};
+    // 中文翻译：手动规划；自动规划。
+    initialMode.enumLabels = {QObject::tr("Manual planning"), QObject::tr("Automatic planning")};
+    initialApproach.fields = {
+        initialMode,
+        // 中文翻译：Z 安全坐标（控制器绝对坐标）；首段。
+        field(QStringLiteral("safetyZ"), QObject::tr("Z safety coordinate (absolute motion)"),
+              QObject::tr("Initial segment"), ParameterValueType::Double,
+              ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
+              QStringLiteral("fSafetyZ"), 0.0, QStringLiteral("mm"),
+              -1000000.0, 1000000.0, 3),
+        // 中文翻译：首段碰撞校验；首段。
+        field(QStringLiteral("collision"), QObject::tr("Initial segment collision validation"),
+              QObject::tr("Initial segment"), ParameterValueType::Bool,
+              ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
+              QStringLiteral("bCollisionCheck"), false)
+    };
+    objects.append(initialApproach);
 
     // IO channels are a collection editor, not property objects.  Keeping
     // exactly four nodes avoids a long duplicated object tree and lets each

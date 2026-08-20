@@ -120,6 +120,8 @@ public:
     bool saveProcess(const QString& filePath) override;
 
     State state() const;
+    /// 加工预检、运行和暂停期间锁定所有可能改变加工输入的交互。
+    bool isMachiningInteractionLocked() const { return m_machiningInteractionLocked; }
     QMap<QString, double> currentAxisPositions() const;
     void setAxisPosition(const QString& axisName, double value);
     void setAxisPositions(const QMap<QString, double>& positions);
@@ -154,6 +156,7 @@ signals:
     void connectionChanged(bool connected);
     void simulationModeChanged(bool enabled);
     void stateChanged(State state);
+    void machiningInteractionLockChanged(bool locked);
     void axisPositionChanged(const QString& axisName, double value);
     void axisEnabledChanged(const QString& axisName, bool enabled);
     void digitalOutputChanged(const QString& outputName, const QString& channel, bool value);
@@ -191,6 +194,7 @@ private:
     /// The sole software stop path for operator Stop, workflow faults and completion.
     void requestStop(StopOutcome outcome, const QString& statusMessage);
     void setState(State state, const QString& statusMessage);
+    void updateMachiningInteractionLock();
     void setStatusMessage(const QString& message);
     void startDeviceMonitoring();
     void stopDeviceMonitoring();
@@ -213,6 +217,7 @@ private:
 #endif
     bool                  m_homing{false};
     bool                  m_preflightInFlight{false};
+    bool                  m_machiningInteractionLocked{false};
     bool                  m_stopInFlight{false};
     bool                  m_stopRecoveryRequired{false};
     bool                  m_stopRecoveryInFlight{false};

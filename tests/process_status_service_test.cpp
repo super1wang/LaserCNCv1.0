@@ -32,7 +32,6 @@ int main(int argc, char* argv[])
     std::atomic_int hardwareCalls{0};
     std::atomic_int peripheralCalls{0};
     lcnc::process::ProcessStatusService service(
-        queue,
         [&hardwareCalls](const QStringList& axes, const QVector<QPair<QString, QString>>&) {
             ++hardwareCalls;
             lcnc::process::DeviceStatusSnapshot snapshot;
@@ -88,7 +87,6 @@ int main(int argc, char* argv[])
     QSemaphore releaseFirstPoll;
     std::atomic_int generationPollCalls{0};
     lcnc::process::ProcessStatusService generationService(
-        queue,
         [&firstPollEntered, &releaseFirstPoll, &generationPollCalls](const QStringList&, const QVector<QPair<QString, QString>>&) {
             const int call = ++generationPollCalls;
             if (call == 1) {
@@ -126,6 +124,50 @@ int main(int argc, char* argv[])
     assert(generationPollCalls == 2);
     assert(deliveredPosition == 2.0);
     generationService.stop();
+
+    // A workflow command can remain on the main device queue for an entire
+    // move. Coordinate polling must still execute on its independent queue;
+    // actual SDK serialization is handled inside ProcessDeviceRuntime.
+    // 中文翻译：主设备队列被长运动占用时，独立坐标轮询仍须持续执行。
+    QSemaphore workflowEntered;
+    QSemaphore releaseWorkflow;
+    assert(queue.submit([&] {
+        workflowEntered.release();
+        releaseWorkflow.acquire();
+    }, TaskPriority::Workflow));
+    assert(workflowEntered.tryAcquire(1, 2000));
+
+    std::atomic_int independentCalls{0};
+    lcnc::process::ProcessStatusService independentService(
+        [&independentCalls](const QStringList&, const QVector<QPair<QString, QString>>&) {
+            ++independentCalls;
+            lcnc::process::DeviceStatusSnapshot snapshot;
+            snapshot.connected = true;
+            snapshot.axes.push_back({QStringLiteral("Z"), 42.0, true, true});
+            return snapshot;
+        },
+        [] { return lcnc::process::DevicePeripheralSnapshot{}; });
+    independentService.setRequestProvider([] {
+        lcnc::process::ProcessStatusRequest request;
+        request.connected = true;
+        request.simulationMode = true;
+        request.acsSimulator = true;
+        request.axisNames = {QStringLiteral("Z")};
+        return request;
+    });
+    int independentDeliveries = 0;
+    independentService.setHardwareHandler(
+        [&independentDeliveries](const lcnc::process::DeviceCommandResult& result,
+                                 const lcnc::process::DeviceStatusSnapshot& snapshot) {
+            assert(result.success && snapshot.connected);
+            assert(snapshot.axes.front().pos == 42.0);
+            ++independentDeliveries;
+        });
+    independentService.start();
+    assert(spinUntil([&] { return independentDeliveries > 0; }));
+    assert(independentCalls > 0);
+    independentService.stop();
+    releaseWorkflow.release();
 
     assert(queue.shutdown(2000));
     return 0;

@@ -18,6 +18,8 @@ using toml::table;
 using toml::value;
 namespace {
 
+constexpr const char* kDefaultToolName = "default";
+
 QString ioBucketName(ProcessIoBucket bucket)
 {
     switch (bucket) {
@@ -198,21 +200,27 @@ void ProcessSettingsService::seedDefaults()
     ensureChildTable(sectionRef(ProcessConfigArea::Operations, QStringLiteral("Water")), "Water")["bWater"] = false;
     table& toolSection = sectionRef(ProcessConfigArea::Tools);
     table& toolIndex = ensureChildTable(toolSection, "ToolIndex");
-    toolIndex["sToolIndex"] = "Default";
-    toolIndex["sTool_0"] = "Default";
+    toolIndex["sToolIndex"] = kDefaultToolName;
+    toolIndex["sTool_0"] = kDefaultToolName;
     table tool;
     tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0;
     tool["fIdelAcc"] = 100.0; tool["fIdelJerk"] = 1000.0;
     tool["fEnergy"] = 20.0; tool["fFrequency"] = 30; tool["fPluse"] = 20;
     tool["fBeforeOpenLaser"] = 0.0; tool["fAfterCloseLaser"] = 0.0;
     ensureToolMotionDefaults(tool);
-    toolSection["Default"] = tool;
+    toolSection[kDefaultToolName] = tool;
     // Keep every domain structurally valid even when it has no fields yet.
     sectionRef(ProcessConfigArea::Devices, QStringLiteral("Internet"));
     sectionRef(ProcessConfigArea::Devices, QStringLiteral("Camera"));
     sectionRef(ProcessConfigArea::Operations, QStringLiteral("Cutting"));
     sectionRef(ProcessConfigArea::Operations, QStringLiteral("LoadingPos"));
     sectionRef(ProcessConfigArea::Workflow, QStringLiteral("Special"));
+    table& initialApproach = ensureChildTable(
+        sectionRef(ProcessConfigArea::Workflow, QStringLiteral("InitialApproach")),
+        "InitialApproach");
+    initialApproach["sMode"] = "Automatic";
+    initialApproach["fSafetyZ"] = 0.0;
+    initialApproach["bCollisionCheck"] = false;
     seedBuiltinIo();
 }
 
@@ -289,6 +297,17 @@ bool ProcessSettingsService::initialize()
                  error.toStdString());
         return false;
     }
+    // Existing schema-v2 workflow files predate the InitialApproach table.
+    // Materialize typed defaults in memory without rejecting or silently
+    // rewriting the user's file; the next explicit settings commit persists it.
+    // 中文翻译：旧的 v2 流程设置没有首段表；先在内存中补齐默认值，
+    // 不因新字段拒绝现有配置，下次用户显式应用设置时再持久化。
+    table& initialApproach = ensureChildTable(
+        sectionRef(ProcessConfigArea::Workflow, QStringLiteral("InitialApproach")),
+        "InitialApproach");
+    if (!initialApproach.count("sMode")) initialApproach["sMode"] = "Automatic";
+    if (!initialApproach.count("fSafetyZ")) initialApproach["fSafetyZ"] = 0.0;
+    if (!initialApproach.count("bCollisionCheck")) initialApproach["bCollisionCheck"] = false;
     const QString indexPath = QDir(rootDir()).filePath(QStringLiteral("tools/index.toml"));
     if (!QFileInfo::exists(indexPath) && !writeTools(&error, nullptr)) {
         LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
@@ -334,6 +353,13 @@ bool ProcessSettingsService::initialize()
             return false;
         }
     }
+    const bool defaultToolMigrated = normalizeDefaultTool();
+    if (defaultToolMigrated && !writeTools(&error, nullptr)) {
+        LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
+                 "process.settings: failed to persist canonical default tool: {}",
+                 error.toStdString());
+        return false;
+    }
     seedBuiltinIo();
     // No legacy file is inspected.  First run persists only the new default store.
     m_committed.value = m_draft;
@@ -368,6 +394,58 @@ QStringList ProcessSettingsService::toolNames() const
         if (!name.isEmpty() && !result.contains(name)) result.append(name);
     }
     return result;
+}
+
+bool ProcessSettingsService::isDefaultToolName(const QString& name)
+{
+    return name.trimmed().compare(QString::fromLatin1(kDefaultToolName),
+                                  Qt::CaseInsensitive) == 0;
+}
+
+bool ProcessSettingsService::normalizeDefaultTool()
+{
+    table& tools = sectionRef(ProcessConfigArea::Tools);
+    QStringList indexedNames = toolNames();
+    QString legacyDefault;
+    for (const QString& name : indexedNames) {
+        if (isDefaultToolName(name)) {
+            legacyDefault = name;
+            break;
+        }
+    }
+
+    const QString canonical = QString::fromLatin1(kDefaultToolName);
+    bool changed = legacyDefault != canonical;
+    if (!legacyDefault.isEmpty() && legacyDefault != canonical) {
+        const auto legacy = tools.find(legacyDefault.toStdString());
+        if (legacy != tools.end()) {
+            tools[kDefaultToolName] = legacy->second;
+            tools.erase(legacy);
+        }
+        if (m_toolIds.contains(legacyDefault)) {
+            m_toolIds.insert(canonical, m_toolIds.take(legacyDefault));
+        }
+    }
+    if (!tools.count(kDefaultToolName)) {
+        table fallback;
+        ensureToolMotionDefaults(fallback);
+        fallback["fEnergy"] = 20.0;
+        tools[kDefaultToolName] = fallback;
+        changed = true;
+    }
+
+    indexedNames.removeIf([](const QString& name) {
+        return ProcessSettingsService::isDefaultToolName(name);
+    });
+    indexedNames.prepend(canonical);
+    table index;
+    index["sToolIndex"] = kDefaultToolName;
+    for (int i = 0; i < indexedNames.size(); ++i)
+        index["sTool_" + std::to_string(i)] = indexedNames.at(i).toStdString();
+    if (!tools.count("ToolIndex") || !sameToml(tools.at("ToolIndex"), toml::value(index)))
+        changed = true;
+    tools["ToolIndex"] = index;
+    return changed;
 }
 
 QStringList ProcessSettingsService::toolDisplayNames() const { return toolNames(); }
@@ -408,6 +486,24 @@ toml::table ProcessSettingsService::axisRuntimeTable(const QString& axisName) co
         return result;
     }
     return {};
+}
+
+ProcessInitialApproachSettings ProcessSettingsService::initialApproachSettings() const
+{
+    ProcessInitialApproachSettings settings;
+    const QString mode = rawValue(
+        ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
+        QStringLiteral("sMode"), QStringLiteral("Automatic")).toString();
+    settings.mode = mode.compare(QStringLiteral("Manual"), Qt::CaseInsensitive) == 0
+        ? ProcessInitialApproachMode::Manual
+        : ProcessInitialApproachMode::Automatic;
+    settings.safetyZ = rawValue(
+        ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
+        QStringLiteral("fSafetyZ"), 0.0).toDouble();
+    settings.collisionCheckEnabled = rawValue(
+        ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
+        QStringLiteral("bCollisionCheck"), false).toBool();
+    return settings;
 }
 
 QVariant ProcessSettingsService::machineAxisValue(const QString& axisName, const QString& key) const
@@ -522,7 +618,12 @@ bool ProcessSettingsService::removeIoChannel(ProcessIoBucket bucket, const QStri
 bool ProcessSettingsService::createTool(const QString& name, QString* error)
 {
     // 中文翻译：工具名称为空或重复。
-    const QString clean = name.trimmed(); if (clean.isEmpty() || toolNames().contains(clean)) { if (error) *error = QObject::tr("Tool name is empty or duplicate."); return false; }
+    const QString clean = name.trimmed();
+    const bool duplicate = std::any_of(toolNames().cbegin(), toolNames().cend(),
+        [&clean](const QString& existing) {
+            return existing.compare(clean, Qt::CaseInsensitive) == 0;
+        });
+    if (clean.isEmpty() || duplicate) { if (error) *error = QObject::tr("Tool name is empty or duplicate."); return false; }
     table tool; tool["fLineVel"] = 10.0; tool["fCutAcc"] = 100.0; tool["fCutJerk"] = 1000.0; tool["fEnergy"] = 20.0;
     for (const auto& axis : m_axisDraft) tool[("f" + axis.axis.name + "Vel").toStdString()] = 10.0;
     table& all = sectionRef(ProcessConfigArea::Tools); all[clean.toStdString()] = tool; table& index = ensureChildTable(all, "ToolIndex"); index["sTool_" + std::to_string(toolNames().size())] = clean.toStdString(); if (!index.count("sToolIndex")) index["sToolIndex"] = clean.toStdString(); return true;
@@ -530,9 +631,10 @@ bool ProcessSettingsService::createTool(const QString& name, QString* error)
 
 // 中文翻译：源工具不存在。
 bool ProcessSettingsService::copyTool(const QString& source, const QString& target, QString* error) { const table all = sectionRef(ProcessConfigArea::Tools); const auto it = all.find(source.toStdString()); if (it == all.end()) { if (error) *error = QObject::tr("The source tool does not exist."); return false; } if (!createTool(target, error)) return false; sectionRef(ProcessConfigArea::Tools)[target.trimmed().toStdString()] = it->second; return true; }
-bool ProcessSettingsService::renameTool(const QString& source, const QString& target, QString* error) { if (source == target) return true; if (!copyTool(source, target, error)) return false; return deleteTool(source, error); }
+// 中文翻译：默认工具固定存在，不能重命名或删除。
+bool ProcessSettingsService::renameTool(const QString& source, const QString& target, QString* error) { if (source == target) return true; if (isDefaultToolName(source)) { if (error) *error = QObject::tr("The default tool is fixed and cannot be renamed or deleted."); return false; } if (!copyTool(source, target, error)) return false; return deleteTool(source, error); }
 // 中文翻译：至少保留一个工具。
-bool ProcessSettingsService::deleteTool(const QString& name, QString* error) { auto names = toolNames(); if (names.size() <= 1 || !names.removeOne(name)) { if (error) *error = QObject::tr("Keep at least one tool."); return false; } table& all = sectionRef(ProcessConfigArea::Tools); all.erase(name.toStdString()); table idx; idx["sToolIndex"] = names.first().toStdString(); for (int i = 0; i < names.size(); ++i) idx["sTool_" + std::to_string(i)] = names[i].toStdString(); all["ToolIndex"] = idx; return true; }
+bool ProcessSettingsService::deleteTool(const QString& name, QString* error) { if (isDefaultToolName(name)) { if (error) *error = QObject::tr("The default tool is fixed and cannot be renamed or deleted."); return false; } auto names = toolNames(); if (!names.removeOne(name)) { if (error) *error = QObject::tr("Keep at least one tool."); return false; } table& all = sectionRef(ProcessConfigArea::Tools); all.erase(name.toStdString()); table idx; idx["sToolIndex"] = kDefaultToolName; for (int i = 0; i < names.size(); ++i) idx["sTool_" + std::to_string(i)] = names[i].toStdString(); all["ToolIndex"] = idx; return true; }
 
 ProcessSettingsChangeSet ProcessSettingsService::changesSinceCommitted() const
 {
@@ -546,7 +648,8 @@ ProcessSettingsChangeSet ProcessSettingsService::changesSinceCommitted() const
 
 bool ProcessSettingsService::hasChanges() const { return !changesSinceCommitted().empty(); }
 // 中文翻译：至少需要保留一个工具。
-bool ProcessSettingsService::validate(QString* error) const { if (toolNames().isEmpty()) { if (error) *error = QObject::tr("At least one tool needs to be kept."); return false; } return true; }
+// 中文翻译：默认工具必须保持为第一个工具。
+bool ProcessSettingsService::validate(QString* error) const { const auto names = toolNames(); if (names.isEmpty() || !isDefaultToolName(names.first())) { if (error) *error = QObject::tr("The default tool must remain the first tool."); return false; } return true; }
 
 bool ProcessSettingsService::writeDomain(const QString& fileName, const QStringList& sections, QString* error) const
 {

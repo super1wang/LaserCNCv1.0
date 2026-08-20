@@ -4,6 +4,7 @@
 #include <QAction>
 #include <QString>
 #include <QMap>
+#include <QSet>
 #include <functional>
 
 class IAppContext;
@@ -69,8 +70,12 @@ public:
 
     /// Refresh enabled state for all registered commands.
     void updateAllStates();
+    /// While machining, only explicitly allowed safety/view commands remain enabled.
+    void setInteractionLocked(bool locked, const QSet<QString>& allowedNames = {});
 
 private:
     IAppContext*                m_ctx;
     QMap<QString, CommandBase*> m_map;
+    bool m_interactionLocked{false};
+    QSet<QString> m_allowedWhileLocked;
 };

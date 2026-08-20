@@ -16,4 +16,13 @@ MachinePose5 solvedRapidPose(const lcnc::cam::RapidMoveSegment& segment)
     return pose;
 }
 
+bool canReuseCommittedTransition(
+    std::uint64_t previousSelectedContourId,
+    const lcnc::cam::RapidTransition& transition)
+{
+    return previousSelectedContourId != 0
+        && transition.fromContourId == previousSelectedContourId
+        && transition.isValid();
+}
+
 } // namespace lcnc::process

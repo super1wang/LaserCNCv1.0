@@ -39,8 +39,19 @@ QAction* CommandContainer::findAction(const QString& name) const
 
 void CommandContainer::updateAllStates()
 {
-    for (auto* cmd : m_map) {
+    for (auto it = m_map.cbegin(); it != m_map.cend(); ++it) {
+        auto* cmd = it.value();
         if (cmd->action())
-            cmd->action()->setEnabled(cmd->isEnabled());
+            cmd->action()->setEnabled(cmd->isEnabled()
+                && (!m_interactionLocked
+                    || it.key().startsWith(QStringLiteral("view."))
+                    || m_allowedWhileLocked.contains(it.key())));
     }
+}
+
+void CommandContainer::setInteractionLocked(bool locked, const QSet<QString>& allowedNames)
+{
+    m_interactionLocked = locked;
+    m_allowedWhileLocked = allowedNames;
+    updateAllStates();
 }

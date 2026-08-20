@@ -202,7 +202,7 @@ struct ToolpathLayer
     std::uint64_t signature{0};   ///< Deterministic key fingerprint (mirrors LaserContour::signature)
     QString name;
     QColor color{QColor(80, 190, 150)};
-    QString toolName;             ///< 该图层的工具名（自 Phase B 起为唯一权威，替代原 Process 端副本）。
+    QString toolName{QStringLiteral("default")}; ///< 新图层固定从内置 default 工具开始。
     bool enabled{true};
     std::vector<std::uint64_t> contourIds;
 

@@ -134,6 +134,35 @@ CmdSetLeadIn::CmdSetLeadIn(IAppContext* ctx)
     setAction(a);
 }
 
+// =============================================================================
+// CmdValidateCamCollisions
+// =============================================================================
+
+CmdValidateCamCollisions::CmdValidateCamCollisions(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    // 中文翻译：碰撞校验
+    auto* a = new QAction(QIcon("themeicons:cutting_plan.svg"), tr("Collision validation"), this);
+    // 中文翻译：无视自动碰撞检测开关，对当前已求解刀路执行一次完整碰撞校验
+    a->setStatusTip(tr("Run full collision validation for the current solved toolpath regardless of the automatic collision-detection switch"));
+    setAction(a);
+}
+
+bool CmdValidateCamCollisions::isEnabled() const
+{
+    return context() && context()->camModule() && context()->camModule()->hasToolpath();
+}
+
+void CmdValidateCamCollisions::execute()
+{
+    QString error;
+    if (!context()->camModule()->validateCurrentToolpathCollisions(&error)) {
+        // 中文翻译：碰撞校验
+        QMessageBox::warning(nullptr, tr("Collision validation"), error);
+    }
+    context()->updateCommandStates();
+}
+
 bool CmdSetLeadIn::isEnabled() const
 {
     return context()->camModule()->hasToolpath();

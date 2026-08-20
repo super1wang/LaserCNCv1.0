@@ -300,7 +300,7 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
         m_connectionService.get(), [](lcnc::process::ProcessConnectionService*) {});
     kernel.services().registerService<lcnc::process::ProcessConnectionService>(connectionService);
     m_statusService = std::make_unique<lcnc::process::ProcessStatusService>(
-        *m_service, *m_deviceCommandQueue, this);
+        *m_service, this);
     auto statusService = std::shared_ptr<lcnc::process::ProcessStatusService>(
         m_statusService.get(), [](lcnc::process::ProcessStatusService*) {});
     kernel.services().registerService<lcnc::process::ProcessStatusService>(statusService);
@@ -354,7 +354,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
 
     // 普通切割管线：CAM 顺序链表 → MotionControl 指令序列；PureSim 由 ticker 驱动模型。
     m_normalCuttingManager = std::make_unique<lcnc::process::NormalCuttingManager>(
-        m_service.get(), camProvider, makeNormalCuttingCallbacks(this), m_deviceCommandQueue.get(), this);
+        m_service.get(), camProvider, makeNormalCuttingCallbacks(this),
+        m_deviceCommandQueue.get(), m_settingsService.get(), this);
     connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::logMessage,
             this, &ProcessModule::setStatusMessage);
     connect(m_normalCuttingManager.get(), &lcnc::process::NormalCuttingManager::contourStarted,
@@ -1479,6 +1480,7 @@ void ProcessModule::runStart()
 
     const std::uint64_t requestGeneration = ++m_runRequestGeneration;
     m_preflightInFlight = true;
+    updateMachiningInteractionLock();
     // 中文翻译：正在后台检查加工环境...
     setStatusMessage(tr("Checking the processing environment in the background..."));
 
@@ -1494,8 +1496,10 @@ void ProcessModule::runStart()
                     if (!self)
                         return;
                     self->m_preflightInFlight = false;
-                    if (generation != self->m_runRequestGeneration)
+                    if (generation != self->m_runRequestGeneration) {
+                        self->updateMachiningInteractionLock();
                         return;
+                    }
                     if (!result.success) {
                         self->setState(State::Error,
                             // 中文翻译：加工环境检查失败: %1
@@ -1517,6 +1521,7 @@ void ProcessModule::runStart()
                     }
                     self->startDeviceMonitoring();
                     self->startWorkflowAfterPreflight();
+                    self->updateMachiningInteractionLock();
                 }, Qt::QueuedConnection);
         });
     if (!ticket.accepted) {
@@ -2251,7 +2256,20 @@ void ProcessModule::setState(State state, const QString& statusMessage)
         emit processLogMessage(QStringLiteral("state"), tr("State machine switches to %1").arg(processStateText(m_state)));
     }
 
+    updateMachiningInteractionLock();
     setStatusMessage(statusMessage);
+}
+
+void ProcessModule::updateMachiningInteractionLock()
+{
+    const bool locked = m_preflightInFlight
+        || m_state == State::Running
+        || m_state == State::Paused;
+    if (m_machiningInteractionLocked == locked)
+        return;
+
+    m_machiningInteractionLocked = locked;
+    emit machiningInteractionLockChanged(locked);
 }
 
 void ProcessModule::setStatusMessage(const QString& message)

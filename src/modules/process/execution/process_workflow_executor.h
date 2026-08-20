@@ -9,6 +9,7 @@
 #include <QVariant>
 #include <QVector>
 #include <QFutureWatcher>
+#include <QElapsedTimer>
 #include <QThreadPool>
 #include <functional>
 
@@ -104,6 +105,8 @@ private:
     QTimer* m_stepTimer{nullptr};
     QFutureWatcher<QPair<bool, QString>>* m_stepWatcher{nullptr};
     QThreadPool m_workflowPool;
+    QElapsedTimer m_workflowElapsed;
+    QElapsedTimer m_stepElapsed;
     int m_currentIndex{-1};
     bool m_dispatching{false};   ///< true: 当前正同步运行 plugin->execute()，pause 在 checkpoint 内生效
     ProcessCancellationToken m_token;

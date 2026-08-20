@@ -34,6 +34,8 @@ public:
     void updateSimulationMode(bool enabled);
     void updateSystemStatus(const QString& status);
     void updateRunState(lcnc::ProcessRunState state);
+    /// 加工期间仅保留暂停、继续、停止以及只读状态/日志交互。
+    void setMachiningInteractionLocked(bool locked);
     /// 新加工运行开始时清零进度和计时；暂停恢复不调用此接口。
     void beginProcessingRun();
     void updateProcessingProgress(int completedContours, int totalContours);
@@ -118,6 +120,7 @@ private:
     JogMode        m_jogMode{JogMode::Relative};
     bool           m_connected{false};
     bool           m_simulationMode{true};
+    bool           m_machiningInteractionLocked{false};
     lcnc::ProcessRunState m_runState{lcnc::ProcessRunState::Idle};
     QString        m_statusText;
     int            m_jogSpeedLevel{1};

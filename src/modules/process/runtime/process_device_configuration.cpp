@@ -42,7 +42,7 @@ void ProcessDeviceRuntime::setToolTable()
     if (i == 0)
     {
         Tool fallback;
-        fallback.m_strName       = "Default";
+        fallback.m_strName       = "default";
         fallback.m_dLineVelocity  = 600.0;   // 10 mm/s — 与 sanitizedDefaultTool 一致
         fallback.m_dLineAcc       = 100.0;
         fallback.m_dLineJerk      = 1000.0;

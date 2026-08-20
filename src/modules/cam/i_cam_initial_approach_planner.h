@@ -12,12 +12,22 @@
 
 namespace lcnc::cam {
 
+enum class InitialApproachPlanningMode : std::uint8_t
+{
+    Manual = 0,
+    Automatic
+};
+
 struct InitialApproachRequest
 {
     std::uint64_t toolpathRevision{0};
     std::uint64_t targetContourId{0};
     QString machineConfigurationFingerprint;
     QMap<QString, double> axisPositions;
+    InitialApproachPlanningMode planningMode{InitialApproachPlanningMode::Automatic};
+    /// Signed absolute controller coordinate. Axis direction is comparison-only.
+    double safetyAxisZ{0.0};
+    bool collisionCheckEnabled{false};
 };
 
 struct InitialApproachSnapshot

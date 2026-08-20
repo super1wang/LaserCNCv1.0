@@ -76,6 +76,11 @@ public:
     /// inside the runtime boundary.
     lcnc::process::DeviceCommandResult moveRelative(lcnc::process::Axis axis, double distance, double velocity);
     lcnc::process::DeviceCommandResult moveAbsolute(lcnc::process::Axis axis, double position, double velocity);
+    /// Issues a controller absolute-axis command and verifies that the axis
+    /// has stopped at the requested coordinate before the next safe-zone phase.
+    lcnc::process::DeviceCommandResult moveAbsoluteAndWait(
+        lcnc::process::Axis axis, double position, double velocity,
+        int timeoutMs = 30000, double positionTolerance = 0.05);
     lcnc::process::DeviceCommandResult jog(lcnc::process::Axis axis, bool positive, double velocity);
     lcnc::process::DeviceCommandResult stopAxis(lcnc::process::Axis axis);
     lcnc::process::DeviceCommandResult stopAllMotion();

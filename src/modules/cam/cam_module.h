@@ -21,6 +21,7 @@
 #include "modules/cam/i_cam_facade.h"
 #include "modules/cam/i_cam_contour_sequence_provider.h"
 #include "modules/cam/i_cam_collision_configuration_provider.h"
+#include "modules/cam/i_cam_collision_safety_domain.h"
 #include "modules/cam/i_cam_initial_approach_planner.h"
 #include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 #include "modules/cam/services/machining_face_pipeline_service.h"
@@ -180,6 +181,10 @@ public:
     void assignShapesToAxis(const QStringList& entries, const QString& axisName);
     void unassignShape(const QString& entry);
     lcnc::cam::CollisionConfigurationSnapshot collisionConfiguration() const;
+    lcnc::cam::CollisionSafetyDomainSnapshot collisionSafetyDomain() const;
+    lcnc::cam::CollisionValidationSnapshot validateCollisionPath(
+        const lcnc::cam::CollisionSafetyPathRequest& request,
+        std::atomic_bool* cancelRequested = nullptr) const;
     lcnc::cam::InitialApproachSnapshot planInitialApproach(
         const lcnc::cam::InitialApproachRequest& request,
         std::atomic_bool* cancelRequested = nullptr) const;
@@ -318,6 +323,8 @@ public:
     /// Applies CAM's persisted automatic order and resolves the complete
     /// machine-coordinate sequence at the single CAM solve boundary.
     bool applyAutoContourSort(lcnc::cam::AutoSortAxis axis, QString* errorMessage = nullptr);
+    /// 无视自动碰撞检测开关，对当前已求解刀路执行一次完整碰撞校验。
+    bool validateCurrentToolpathCollisions(QString* errorMessage = nullptr);
     /// Sets the persisted CAM manual order, resolves it, then rebuilds the
     /// matching rapid plan used by both the view and Process.
     bool setManualContourOrder(const QVector<lcnc::cam::ContourId>& orderedContourIds,
@@ -604,8 +611,15 @@ private:
     void attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
     void applyToolMotionOffsets(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
     void attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
-    void scheduleFullEnvironmentVerification(const lcnc::cam::ToolpathExportSnapshot& snapshot);
+    void scheduleFullEnvironmentVerification(const lcnc::cam::ToolpathExportSnapshot& snapshot,
+                                             bool force = false);
+    void scheduleCollisionSafetyDomainPreparation(
+        const lcnc::cam::ToolpathExportSnapshot& snapshot);
     bool rebuildTravelPlanForCurrentOrder(QString* errorMessage = nullptr);
+    QVector<lcnc::cam::ContourId> planAutoContourOrder(
+        lcnc::cam::AutoSortAxis axis, QString* errorMessage = nullptr) const;
+    bool preparePersistedAutoSort(QString* errorMessage = nullptr);
+    void clearToolpathSelectionState();
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
     bool clearMountedWorkpieceDisplay(bool refreshView);
@@ -621,7 +635,10 @@ private:
     void applyToolpathLayerColors(bool updateView = true);
     QList<int> selectedCamContourIndexes() const;
 
-    void refreshMachineDisplay();
+    /// Rebuilds the machine presentation. Pure visibility restoration must not
+    /// publish a machine-domain data change because that can trigger unrelated
+    /// workspace resynchronization.
+    void refreshMachineDisplay(bool notifyDomainChange = true);
     void syncCamDocumentContours(bool forceRebuild = false);
     /// 把当前刀路的轮廓 wire 作为 EntityKind::Cam 实体写入统一工程文档，记录 xcafEntry。
     void writeContourGeometryToDocument();
@@ -666,6 +683,7 @@ private:
     /// 中文翻译：仅碰撞使用的不可变网格/包围盒，由后台任务建立并按环境键复用。
     std::shared_ptr<CamTravelCollisionGeometryCache> m_travelCollisionGeometryCache;
     TaskId                      m_travelVerificationTask{kInvalidTaskId};
+    TaskId                      m_collisionDomainPreparationTask{kInvalidTaskId};
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
     mutable QList<Handle(AIS_Shape)> m_camContourAisCache;
     QString                     m_machineModelPath;

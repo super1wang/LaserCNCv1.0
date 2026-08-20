@@ -528,6 +528,12 @@ DocumentId CadModule::openDocument(const QString& filePath)
         return kInvalidDocumentId;
     }
     const DocumentId docId = pendingDoc->id();
+    const auto stageTimer = std::make_shared<QElapsedTimer>();
+    stageTimer->start();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "stage=workpiece.load event=begin mode=open format='{}' path='{}'",
+              isProjectPackage ? "lcnc" : ext.toStdString(),
+              fileInfo.absoluteFilePath().toStdString());
 
     if (isProjectPackage) {
         auto error = std::make_shared<QString>();
@@ -565,7 +571,12 @@ DocumentId CadModule::openDocument(const QString& filePath)
             });
 
         m_taskScope.track(taskId);
-        watchTask(this, taskId, [this, taskId, filePath, pendingWorkspace, loadResult, error, openGeneration](bool success) {
+        watchTask(this, taskId, [this, taskId, filePath, pendingWorkspace, loadResult,
+                                 error, openGeneration, stageTimer](bool success) {
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "stage=workpiece.load event=end mode=open format=lcnc result={} elapsed_ms={} path='{}'",
+                      success ? "success" : "failed", stageTimer->elapsed(),
+                      filePath.toStdString());
             m_taskScope.release(taskId);
             auto* project = lcnc::Kernel::current().projectManager();
             if (!project->isSingleDocumentOpenCurrent(openGeneration))
@@ -678,7 +689,13 @@ DocumentId CadModule::openDocument(const QString& filePath)
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
     m_taskScope.track(taskId);
-    watchTask(this, taskId, [this, taskId, pendingWorkspace, docId, displayName, sourceFilePath, error, openGeneration](bool success) {
+    watchTask(this, taskId, [this, taskId, pendingWorkspace, docId, displayName,
+                             sourceFilePath, error, openGeneration, stageTimer,
+                             ext](bool success) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=workpiece.load event=end mode=open format='{}' result={} elapsed_ms={} path='{}'",
+                  ext.toStdString(), success ? "success" : "failed",
+                  stageTimer->elapsed(), sourceFilePath.toStdString());
         m_taskScope.release(taskId);
         auto* project = lcnc::Kernel::current().projectManager();
         if (!project->isSingleDocumentOpenCurrent(openGeneration))
@@ -724,6 +741,11 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
     }
 
     auto error = std::make_shared<QString>();
+    const auto stageTimer = std::make_shared<QElapsedTimer>();
+    stageTimer->start();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "stage=workpiece.load event=begin mode=import format=step path='{}'",
+              fileInfo.absoluteFilePath().toStdString());
     const auto* documentIo = m_documentIoService.get();
     const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
         // 中文翻译：导入 STEP: %1
@@ -753,7 +775,12 @@ DocumentId CadModule::importStep(const QString& filePath, DocumentId targetDocId
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
     m_taskScope.track(taskId);
-    watchTask(this, taskId, [this, taskId, docId, createdNew, displayName, sourceFilePath, error](bool success) {
+    watchTask(this, taskId, [this, taskId, docId, createdNew, displayName,
+                             sourceFilePath, error, stageTimer](bool success) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=workpiece.load event=end mode=import format=step result={} elapsed_ms={} path='{}'",
+                  success ? "success" : "failed", stageTimer->elapsed(),
+                  sourceFilePath.toStdString());
         m_taskScope.release(taskId);
         if (!success) {
             if (createdNew)
@@ -794,6 +821,11 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
         return kInvalidDocumentId;
     }
 
+    const auto stageTimer = std::make_shared<QElapsedTimer>();
+    stageTimer->start();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "stage=workpiece.load event=begin mode=import format=stl path='{}'",
+              fileInfo.absoluteFilePath().toStdString());
     const auto task = m_documentIoService
         ? m_documentIoService->importStlAsync(doc, filePath)
         : lcnc::cad::CadDocumentIoService::ImportTask{};
@@ -808,7 +840,12 @@ DocumentId CadModule::importStl(const QString& filePath, DocumentId targetDocId)
     const QString displayName = fileInfo.completeBaseName();
     const QString sourceFilePath = fileInfo.absoluteFilePath();
     m_taskScope.track(task.id);
-    watchTask(this, task.id, [this, task, taskId = task.id, docId, createdNew, displayName, sourceFilePath](bool success) {
+    watchTask(this, task.id, [this, task, taskId = task.id, docId, createdNew,
+                              displayName, sourceFilePath, stageTimer](bool success) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=workpiece.load event=end mode=import format=stl result={} elapsed_ms={} path='{}'",
+                  success ? "success" : "failed", stageTimer->elapsed(),
+                  sourceFilePath.toStdString());
         m_taskScope.release(taskId);
         if (!success) {
             if (createdNew)

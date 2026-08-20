@@ -39,6 +39,7 @@ public:
     bool renameTool(const QString& source, const QString& target, QString* error = nullptr);
     bool deleteTool(const QString& name, QString* error = nullptr);
     QStringList toolDisplayNames() const;
+    static bool isDefaultToolName(const QString& name);
 
     QVector<ProcessIoChannel> ioChannels(ProcessIoBucket bucket) const;
     QStringList ioDisplayNames(ProcessIoBucket bucket) const;
@@ -52,6 +53,7 @@ public:
     toml::table rawTable(ProcessConfigArea area, const QString& tableName = {}) const;
     QVariant rawValue(ProcessConfigArea area, const QString& tableName, const QString& key, const QVariant& fallback = {}) const;
     toml::table axisRuntimeTable(const QString& axisName) const;
+    ProcessInitialApproachSettings initialApproachSettings() const;
 
 private:
     QString rootDir() const;
@@ -70,6 +72,7 @@ private:
     bool setMachineAxisValue(const QString& axisName, const QString& key, const QVariant& value, QString* error);
     void seedDefaults();
     void seedBuiltinIo();
+    bool normalizeDefaultTool();
 
     ProcessSettingsSnapshot m_committed;
     toml::value m_draft{toml::table{}};

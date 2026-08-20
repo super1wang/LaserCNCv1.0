@@ -26,6 +26,9 @@ struct ParameterDescriptor
     double maximum{std::numeric_limits<double>::max()};
     int decimals{3};
     QStringList enumValues;
+    /// Optional translated labels parallel to enumValues. Persisted values
+    /// remain stable English tokens while the editor displays localized text.
+    QStringList enumLabels;
     ProcessConfigArea area{ProcessConfigArea::Workflow};
     QString tableName;
     QString key;

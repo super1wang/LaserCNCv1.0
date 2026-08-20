@@ -385,6 +385,7 @@ set(SRCS_CORE
     src/core/algorithms/cam/laser_toolpath.cpp
     src/core/algorithms/cam/contour_order_planner.cpp
     src/core/algorithms/cam/travel_path_planner.cpp
+    src/core/algorithms/cam/collision_safety_domain.cpp
     src/core/algorithms/cam/surface_collision_prefilter.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp
@@ -518,6 +519,8 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/axis_map.h
     src/modules/process/runtime/axis_map.cpp
     src/modules/process/runtime/i_motion_command_sink.h
+    src/modules/process/runtime/coordinated_motion_command_sink.h
+    src/modules/process/runtime/coordinated_motion_command_sink.cpp
     src/modules/process/runtime/gtn_buffered_command_sink.h
     src/modules/process/runtime/pure_simulation_sink.h
     src/modules/process/runtime/pure_simulation_sink.cpp
@@ -1020,6 +1023,10 @@ if(BUILD_TESTING)
         tests/surface_collision_prefilter_test.cpp
     )
     target_link_libraries(lcnc_surface_collision_prefilter_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_collision_safety_domain_test
+        tests/collision_safety_domain_test.cpp
+    )
+    target_link_libraries(lcnc_collision_safety_domain_test PRIVATE lcnc_core Qt6::Core)
     target_compile_definitions(lcnc_surface_collision_prefilter_test PRIVATE
         LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
     )
@@ -1216,6 +1223,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_occt_exact_operation_lock_test)
     add_test(NAME lcnc_surface_collision_prefilter_test
         COMMAND lcnc_surface_collision_prefilter_test)
+    add_test(NAME lcnc_collision_safety_domain_test
+        COMMAND lcnc_collision_safety_domain_test)
     add_test(NAME lcnc_cam_motion_plan_contract_test
         COMMAND lcnc_cam_motion_plan_contract_test)
     add_test(NAME lcnc_cam_data_manager_test
@@ -1257,6 +1266,7 @@ if(BUILD_TESTING)
         lcnc_travel_path_planner_test
         lcnc_occt_exact_operation_lock_test
         lcnc_surface_collision_prefilter_test
+        lcnc_collision_safety_domain_test
         lcnc_cam_motion_plan_contract_test
         lcnc_machine_topology_solver_test
         PROPERTIES LABELS "critical;algorithm")

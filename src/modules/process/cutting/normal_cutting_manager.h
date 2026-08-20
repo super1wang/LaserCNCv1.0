@@ -15,12 +15,16 @@
 
 class ProcessDeviceRuntime;
 
-namespace lcnc::cam { class ICamToolpathProvider; }
+namespace lcnc::cam {
+class ICamToolpathProvider;
+struct InitialApproachSnapshot;
+}
 
 namespace lcnc::process {
 
 class PureSimulationToolpathTicker;
 class ProcessCuttingPlanService;
+class ProcessSettingsService;
 class IMotionCommandSink;
 class DeviceCommandQueue;
 
@@ -58,6 +62,7 @@ public:
                          std::shared_ptr<lcnc::cam::ICamToolpathProvider> toolpathProvider,
                          NormalCuttingCallbacks callbacks,
                          DeviceCommandQueue* deviceQueue,
+                         ProcessSettingsService* settings,
                          QObject* parent = nullptr);
     ~NormalCuttingManager() override;
 
@@ -121,11 +126,16 @@ private:
                         int contourIndex,
                         int total,
                         QString* errorMessage);
+    bool prepareInitialApproach(const CuttingRow& row,
+                                ProcessInterruptContext& interrupt,
+                                lcnc::cam::InitialApproachSnapshot* approach,
+                                QString* errorMessage);
 
     ProcessDeviceRuntime* m_service{nullptr};
     std::shared_ptr<lcnc::cam::ICamToolpathProvider> m_toolpathProvider;
     NormalCuttingCallbacks m_callbacks;
     DeviceCommandQueue* m_deviceQueue{nullptr};
+    ProcessSettingsService* m_settings{nullptr};
     std::unique_ptr<ProcessToolpathService> m_toolpathService;
     std::unique_ptr<PureSimulationToolpathTicker> m_simTicker;
     ProcessCuttingPlanService* m_planService{nullptr};

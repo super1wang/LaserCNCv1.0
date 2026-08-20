@@ -623,6 +623,27 @@ void WidgetLaserControl::updateRunState(lcnc::ProcessRunState state)
     refreshStatusBanner();
 }
 
+void WidgetLaserControl::setMachiningInteractionLocked(bool locked)
+{
+    m_machiningInteractionLocked = locked;
+    if (m_axisGroup)
+        m_axisGroup->setEnabled(!locked);
+    if (m_jogGroup)
+        m_jogGroup->setEnabled(!locked);
+    if (m_ioGroup)
+        m_ioGroup->setEnabled(!locked);
+    if (m_btnRun)
+        m_btnRun->setEnabled(!locked);
+
+    // 暂停/继续和停止是加工中的安全操作，不能被全局锁覆盖。
+    if (m_btnPause)
+        m_btnPause->setEnabled(true);
+    if (m_btnResume)
+        m_btnResume->setEnabled(true);
+    if (m_btnStop)
+        m_btnStop->setEnabled(true);
+}
+
 void WidgetLaserControl::beginProcessingRun()
 {
     resetProcessingProgress();

@@ -1,14 +1,14 @@
 #include "modules/process/runtime/process_status_service.h"
 
+#include "core/logging/logger.h"
+
 #include <QMetaObject>
 
 namespace lcnc::process {
 
 ProcessStatusService::ProcessStatusService(ProcessDeviceRuntime& runtime,
-                                           DeviceCommandQueue& queue,
                                            QObject* parent)
     : ProcessStatusService(
-          queue,
           [&runtime](const QStringList& axes, const QVector<QPair<QString, QString>>& outputs) {
               return runtime.pollStatus(axes, outputs);
           },
@@ -17,12 +17,10 @@ ProcessStatusService::ProcessStatusService(ProcessDeviceRuntime& runtime,
 {
 }
 
-ProcessStatusService::ProcessStatusService(DeviceCommandQueue& queue,
-                                           HardwarePoller hardwarePoller,
+ProcessStatusService::ProcessStatusService(HardwarePoller hardwarePoller,
                                            PeripheralPoller peripheralPoller,
                                            QObject* parent)
     : QObject(parent)
-    , m_queue(queue)
     , m_hardwarePoller(std::move(hardwarePoller))
     , m_peripheralPoller(std::move(peripheralPoller))
 {
@@ -30,6 +28,31 @@ ProcessStatusService::ProcessStatusService(DeviceCommandQueue& queue,
     m_peripheralTimer.setInterval(2000);
     connect(&m_hardwareTimer, &QTimer::timeout, this, &ProcessStatusService::onHardwareTimer);
     connect(&m_peripheralTimer, &QTimer::timeout, this, &ProcessStatusService::onPeripheralTimer);
+}
+
+ProcessStatusService::~ProcessStatusService()
+{
+    // ProcessModule owns this service and its safety monitor as separate
+    // members. During C++ member teardown the monitor is already gone, so the
+    // destructor must not invoke the external safety callback again.
+    // 中文翻译：析构阶段外部安全监控对象可能已销毁，只停止自身轮询，禁止再次回调。
+    ++m_generation;
+    m_active = false;
+    m_hardwareTimer.stop();
+    m_peripheralTimer.stop();
+    if (m_hardwareTicket != 0)
+        (void)m_hardwareQueue.cancel(m_hardwareTicket);
+    if (m_peripheralTicket != 0)
+        (void)m_peripheralQueue.cancel(m_peripheralTicket);
+    m_hardwareTicket = 0;
+    m_peripheralTicket = 0;
+    const bool hardwareStopped = m_hardwareQueue.shutdown(5000);
+    const bool peripheralStopped = m_peripheralQueue.shutdown(5000);
+    if (!hardwareStopped || !peripheralStopped) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.status: polling executor shutdown timed out hardware={} peripheral={}",
+                 hardwareStopped, peripheralStopped);
+    }
 }
 
 void ProcessStatusService::setRequestProvider(RequestProvider provider)
@@ -59,6 +82,11 @@ void ProcessStatusService::start()
     const ProcessStatusRequest request = m_requestProvider ? m_requestProvider() : ProcessStatusRequest{};
     if (!request.connected || (request.simulationMode && !request.acsSimulator))
         return;
+    if (!m_hardwareQueue.start() || !m_peripheralQueue.start()) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.status: failed to start independent polling executors");
+        return;
+    }
     ++m_generation;
     m_active = true;
     m_hardwareTimer.start();
@@ -68,6 +96,8 @@ void ProcessStatusService::start()
     requestPeripheralPoll();
     if (m_safetyMonitoringHandler)
         m_safetyMonitoringHandler(!request.acsSimulator);
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "process.status: independent polling started interval_ms=150 peripheral_interval_ms=2000");
 }
 
 void ProcessStatusService::stop()
@@ -77,9 +107,9 @@ void ProcessStatusService::stop()
     m_hardwareTimer.stop();
     m_peripheralTimer.stop();
     if (m_hardwareTicket != 0)
-        (void)m_queue.cancel(m_hardwareTicket);
+        (void)m_hardwareQueue.cancel(m_hardwareTicket);
     if (m_peripheralTicket != 0)
-        (void)m_queue.cancel(m_peripheralTicket);
+        (void)m_peripheralQueue.cancel(m_peripheralTicket);
     m_hardwareTicket = 0;
     m_peripheralTicket = 0;
     m_hardwareInFlight = false;
@@ -110,7 +140,7 @@ void ProcessStatusService::requestHardwarePoll()
     m_hardwareInFlight = true;
     const std::uint64_t generation = m_generation;
     auto snapshot = std::make_shared<DeviceStatusSnapshot>();
-    const auto ticket = m_queue.submitWithTicket(
+    const auto ticket = m_hardwareQueue.submitWithTicket(
         [this, request, snapshot] {
             if (m_hardwarePoller)
                 *snapshot = m_hardwarePoller(request.axisNames, request.digitalOutputs);
@@ -144,7 +174,7 @@ void ProcessStatusService::requestPeripheralPoll()
     m_peripheralInFlight = true;
     const std::uint64_t generation = m_generation;
     auto snapshot = std::make_shared<DevicePeripheralSnapshot>();
-    const auto ticket = m_queue.submitWithTicket(
+    const auto ticket = m_peripheralQueue.submitWithTicket(
         [this, snapshot] {
             if (m_peripheralPoller)
                 *snapshot = m_peripheralPoller();

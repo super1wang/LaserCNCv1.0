@@ -4,8 +4,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QTextStream>
+
+#include <algorithm>
 
 namespace {
 
@@ -35,6 +38,43 @@ int main(int argc, char* argv[])
     if (!current.initialize())
         return fail(QStringLiteral("Current Process settings did not initialize"));
 
+    const auto initialDefaults = current.initialApproachSettings();
+    if (initialDefaults.mode
+            != lcnc::process::ProcessInitialApproachMode::Automatic
+        || initialDefaults.safetyZ != 0.0
+        || initialDefaults.collisionCheckEnabled) {
+        return fail(QStringLiteral("Initial-approach settings defaults are invalid"));
+    }
+    const auto settingsObjects = current.objects();
+    const auto initialObject = std::find_if(
+        settingsObjects.cbegin(), settingsObjects.cend(),
+        [](const lcnc::process::ParameterObjectDescriptor& object) {
+            return object.id == QStringLiteral("initial-approach");
+        });
+    if (initialObject == settingsObjects.cend())
+        return fail(QStringLiteral("Initial-approach settings object is missing"));
+    const auto setInitialField = [&current, &initialObject](
+                                     const QString& id, const QVariant& value) {
+        const auto field = std::find_if(
+            initialObject->fields.cbegin(), initialObject->fields.cend(),
+            [&id](const lcnc::process::ParameterDescriptor& descriptor) {
+                return descriptor.id == id;
+            });
+        QString error;
+        return field != initialObject->fields.cend()
+            && current.setFieldValue(*field, initialObject->id, value, &error);
+    };
+    if (!setInitialField(QStringLiteral("mode"), QStringLiteral("Manual"))
+        || !setInitialField(QStringLiteral("safetyZ"), 42.5)
+        || !setInitialField(QStringLiteral("collision"), true)) {
+        return fail(QStringLiteral("Initial-approach settings could not be edited"));
+    }
+    const auto initialCommit = current.commit();
+    if (!initialCommit.success
+        || !initialCommit.changes.domains.contains(QStringLiteral("workflow"))) {
+        return fail(QStringLiteral("Initial-approach settings were not committed to workflow"));
+    }
+
     const QString devices = directory.filePath(QStringLiteral("devices.toml"));
     const QByteArray currentData = [&] {
         QFile file(devices);
@@ -48,7 +88,17 @@ int main(int argc, char* argv[])
     const QDir toolsDirectory(directory.filePath(QStringLiteral("tools")));
     QStringList toolFiles = toolsDirectory.entryList({QStringLiteral("*.toml")}, QDir::Files);
     toolFiles.removeAll(QStringLiteral("index.toml"));
+    const QString persistedToolId = toolFiles.isEmpty()
+        ? QString() : QFileInfo(toolFiles.constFirst()).completeBaseName();
     if (toolFiles.size() != 1
+        || !overwrite(toolsDirectory.filePath(QStringLiteral("index.toml")),
+                      QStringLiteral(
+                          "schemaVersion = 2\n"
+                          "tools = [{ id = \"%1\", name = \"Default\" }]\n"
+                          "[Setting.Tool.ToolIndex]\n"
+                          "sToolIndex = \"Default\"\n"
+                          "sTool_0 = \"Default\"\n")
+                          .arg(persistedToolId).toUtf8())
         || !overwrite(toolsDirectory.filePath(toolFiles.constFirst()),
                       "schemaVersion = 2\n"
                       "[Setting.Tool.Default]\n"
@@ -61,9 +111,24 @@ int main(int argc, char* argv[])
     lcnc::process::ProcessSettingsService currentReload(directory.path());
     if (!currentReload.initialize())
         return fail(QStringLiteral("Current Process settings were rejected"));
+    const auto reloadedInitial = currentReload.initialApproachSettings();
+    if (reloadedInitial.mode != lcnc::process::ProcessInitialApproachMode::Manual
+        || reloadedInitial.safetyZ != 42.5
+        || !reloadedInitial.collisionCheckEnabled) {
+        return fail(QStringLiteral("Initial-approach settings did not round-trip"));
+    }
+
+    const QStringList toolNames = currentReload.toolDisplayNames();
+    if (toolNames.isEmpty() || toolNames.first() != QStringLiteral("default"))
+        return fail(QStringLiteral("Protected default tool was not canonicalized first"));
+    QString protectedError;
+    if (currentReload.renameTool(QStringLiteral("default"), QStringLiteral("renamed"), &protectedError)
+        || currentReload.deleteTool(QStringLiteral("default"), &protectedError)) {
+        return fail(QStringLiteral("Protected default tool could be renamed or deleted"));
+    }
 
     const toml::table defaultTool = currentReload.rawTable(
-        lcnc::process::ProcessConfigArea::Tools, QStringLiteral("Default"));
+        lcnc::process::ProcessConfigArea::Tools, QStringLiteral("default"));
     const auto idleAcceleration = defaultTool.find("fIdelAcc");
     const auto idleJerk = defaultTool.find("fIdelJerk");
     const auto cuttingAcceleration = defaultTool.find("fCutAcc");

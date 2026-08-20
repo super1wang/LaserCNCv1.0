@@ -83,6 +83,9 @@ bool ProcessWorkflowExecutor::start(ProcessFlowDocument& document, QString* erro
     Q_UNUSED(errorMessage);
     m_currentIndex = -1;
     m_token.reset();
+    m_workflowElapsed.start();
+    LCNC_INFO(lcnc::LogCode::Generic,
+              "stage=process.workflow event=begin steps={}", m_plan.size());
     setState(State::Running);
     runNextStep();
     return true;
@@ -148,6 +151,12 @@ void ProcessWorkflowExecutor::stop()
 {
     if (m_state == State::Idle)
         return;
+    if (m_workflowElapsed.isValid()) {
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.workflow event=end result=stopped elapsed_ms={}",
+                  m_workflowElapsed.elapsed());
+        m_workflowElapsed.invalidate();
+    }
     m_token.requestStop();
     m_stepTimer->stop();
     if (m_state != State::Error) {
@@ -249,6 +258,12 @@ void ProcessWorkflowExecutor::runNextStep()
         while (true) {
             ++m_currentIndex;
             if (m_currentIndex >= m_plan.size()) {
+                if (m_workflowElapsed.isValid()) {
+                    LCNC_INFO(lcnc::LogCode::Generic,
+                              "stage=process.workflow event=end result=success elapsed_ms={}",
+                              m_workflowElapsed.elapsed());
+                    m_workflowElapsed.invalidate();
+                }
                 setState(State::Idle);
                 // 中文翻译：流程运行完成
                 emit messageLogged(tr("The process is completed"));
@@ -260,6 +275,11 @@ void ProcessWorkflowExecutor::runNextStep()
         }
 
         const ProcessExecutionStep& step = m_plan.at(m_currentIndex);
+        m_stepElapsed.start();
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.workflow.step event=begin index={} node='{}' executor='{}' name='{}'",
+                  m_currentIndex, step.nodeId.toStdString(),
+                  step.executorKey.toStdString(), step.name.toStdString());
         setNodeState(step.nodeId, ProcessNodeState::Running);
         emit nodeStarted(step.nodeId);
         if (!m_stepRegistry || !m_stepContext) {
@@ -325,6 +345,11 @@ void ProcessWorkflowExecutor::completeCurrentStep()
 
     if (m_currentIndex >= 0 && m_currentIndex < m_plan.size()) {
         const QString nodeId = m_plan.at(m_currentIndex).nodeId;
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.workflow.step event=end result=success index={} node='{}' elapsed_ms={}",
+                  m_currentIndex, nodeId.toStdString(),
+                  m_stepElapsed.isValid() ? m_stepElapsed.elapsed() : -1);
+        m_stepElapsed.invalidate();
         setNodeState(nodeId, ProcessNodeState::Stopped);
         emit nodeFinished(nodeId);
     }
@@ -339,9 +364,18 @@ void ProcessWorkflowExecutor::failCurrentStep(const QString& message)
         setNodeState(nodeId, ProcessNodeState::Stopped);
     }
     LCNC_ERR(lcnc::LogCode::Generic,
-             "process.executor: node '{}' failed: {}",
+             "stage=process.workflow.step event=end result=failed index={} node='{}' elapsed_ms={} error='{}'",
+             m_currentIndex,
              nodeId.toStdString(),
+             m_stepElapsed.isValid() ? m_stepElapsed.elapsed() : -1,
              message.toStdString());
+    m_stepElapsed.invalidate();
+    if (m_workflowElapsed.isValid()) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "stage=process.workflow event=end result=failed elapsed_ms={} error='{}'",
+                 m_workflowElapsed.elapsed(), message.toStdString());
+        m_workflowElapsed.invalidate();
+    }
     emit nodeFailed(nodeId, message);
     setState(State::Error);
 }

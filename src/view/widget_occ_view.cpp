@@ -267,6 +267,11 @@ void WidgetOccView::applyCadSnapSelectionMode()
     m_context->Deactivate();
 
     if (m_activeDoc) {
+        if (!m_modelSelectionEnabled) {
+            if (!m_activeDoc->viewCube().IsNull())
+                m_context->Activate(m_activeDoc->viewCube(), 0, Standard_False);
+            return;
+        }
         int selectionMode = 0;
         switch (m_cadSnapMode) {
         case CadSnapMode::Vertex:
@@ -291,7 +296,7 @@ void WidgetOccView::applyCadSnapSelectionMode()
 
 void WidgetOccView::beginLeadInPick()
 {
-    if (m_view.IsNull() || m_context.IsNull())
+    if (!m_modelSelectionEnabled || m_view.IsNull() || m_context.IsNull())
         return;
 
     if (m_facePickActive) {
@@ -318,7 +323,7 @@ void WidgetOccView::endLeadInPick()
 
 void WidgetOccView::beginFacePick()
 {
-    if (m_view.IsNull() || m_context.IsNull() || !m_activeDoc)
+    if (!m_modelSelectionEnabled || m_view.IsNull() || m_context.IsNull() || !m_activeDoc)
         return;
 
     clearRubberBand();
@@ -388,6 +393,33 @@ void WidgetOccView::setCadSnapMode(CadSnapMode mode)
     // QAction can be checked already when the user selects it; apply even in
     // that case so the ribbon state and the OCC selection filter cannot drift.
     applyCadSnapSelectionMode();
+}
+
+void WidgetOccView::setModelSelectionEnabled(bool enabled)
+{
+    if (m_modelSelectionEnabled == enabled)
+        return;
+    m_modelSelectionEnabled = enabled;
+    if (!enabled) {
+        if (m_leadInPickActive) {
+            endLeadInPick();
+            emit leadInPickCanceled();
+        }
+        if (m_facePickActive) {
+            endFacePick();
+            emit facePickCanceled();
+        }
+        clearRubberBand();
+        resetSketchOverlayDrag();
+        resetTransformGizmoDrag();
+        if (!m_context.IsNull()) {
+            m_context->ClearSelected(Standard_False);
+            emit selectionChanged();
+        }
+    }
+    applyCadSnapSelectionMode();
+    if (!m_view.IsNull())
+        m_view->Redraw();
 }
 
 bool WidgetOccView::screenToSketchPlane(const QPoint& pos,
@@ -576,6 +608,8 @@ void WidgetOccView::mousePressEvent(QMouseEvent* e)
     if (e->button() == Qt::LeftButton) {
         clearRubberBand();
         m_context->MoveTo(e->pos().x(), e->pos().y(), m_view, false);
+        if (!m_modelSelectionEnabled)
+            return;
         int gizmoOperation = 0;
         int gizmoAxis = 0;
         if (m_transformGizmoRenderer.detectedPart(m_context, &gizmoOperation, &gizmoAxis)) {
@@ -705,6 +739,13 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
         m_context->MoveTo(e->pos().x(), e->pos().y(), m_view, Standard_True);
         emit facePickMoved(e->pos());
         m_view->Redraw();
+        m_prevPos = e->pos();
+        return;
+    }
+
+    if (!m_modelSelectionEnabled && (e->buttons() & Qt::LeftButton)) {
+        // Laser-processing view keeps camera gestures and ViewCube clicks, but
+        // never starts rectangle selection or any draggable model overlay.
         m_prevPos = e->pos();
         return;
     }
@@ -884,6 +925,9 @@ void WidgetOccView::handleSelection(const QPoint& pos)
             return;
         }
     }
+
+    if (!m_modelSelectionEnabled)
+        return;
 
     const QString overlayKey = m_sketchOverlayRenderer.detectedKey(m_context);
     if (!overlayKey.isEmpty()) {

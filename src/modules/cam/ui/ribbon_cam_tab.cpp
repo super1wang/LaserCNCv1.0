@@ -12,6 +12,7 @@
 #include <QAction>
 #include <QComboBox>
 #include <QIcon>
+#include <QSignalBlocker>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -36,6 +37,7 @@ void registerCommands(CommandContainer* container)
     container->addCommand<CmdClearMachiningFaces>(CmdClearMachiningFaces::Name);
     container->addCommand<CmdManualAppendSelectedToCamOrder>(CmdManualAppendSelectedToCamOrder::Name);
     container->addCommand<CmdAutoSortCamOrder>(CmdAutoSortCamOrder::Name);
+    container->addCommand<CmdValidateCamCollisions>(CmdValidateCamCollisions::Name);
     container->addCommand<CmdToggleCamTravelPath>(CmdToggleCamTravelPath::Name);
     container->addCommand<CmdToggleCamContourOrderLabel>(CmdToggleCamContourOrderLabel::Name);
 
@@ -66,6 +68,7 @@ void buildRibbonTab(SARibbonCategory* cat,
     panelPath->addLargeAction(container->findAction(CmdSetLeadIn::Name));
     panelPath->addLargeAction(container->findAction(CmdRecalcToolpath::Name));
     panelPath->addLargeAction(container->findAction(CmdToolpathPreview::Name));
+    panelPath->addLargeAction(container->findAction(CmdValidateCamCollisions::Name));
 
     // ── 加工面 ─────────────────────────────────────────────────────────────
     // 中文翻译：加工面
@@ -93,8 +96,15 @@ void buildRibbonTab(SARibbonCategory* cat,
         }
         return QStringLiteral("X+");
     };
-    if (auto* cam = lcnc::Kernel::current().service<CamModule>())
+    if (auto* cam = lcnc::Kernel::current().service<CamModule>()) {
         axisCombo->setCurrentText(axisText(cam->lastAutoContourSortAxis()));
+        const auto syncAxis = [axisCombo, cam, axisText] {
+            const QSignalBlocker blocker(axisCombo);
+            axisCombo->setCurrentText(axisText(cam->lastAutoContourSortAxis()));
+        };
+        QObject::connect(cam, &CamModule::toolpathGenerated, axisCombo, syncAxis);
+        QObject::connect(cam, &CamModule::toolpathCleared, axisCombo, syncAxis);
+    }
     QObject::connect(axisCombo, &QComboBox::currentTextChanged, parent,
                      [](const QString& text) {
                          auto* cam = lcnc::Kernel::current().service<CamModule>();

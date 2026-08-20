@@ -33,7 +33,9 @@ enum class RapidSynchronization : std::uint8_t
 enum class RapidPathKind : std::uint8_t
 {
     None = 0,
-    SurfaceOffset
+    SurfaceOffset,
+    InitialAxisThreePhase,
+    InitialSafeZone
 };
 
 struct RapidPose

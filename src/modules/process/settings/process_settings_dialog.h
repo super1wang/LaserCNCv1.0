@@ -7,6 +7,7 @@
 #include <functional>
 
 class QLineEdit;
+class QAction;
 class QStackedWidget;
 class QTableView;
 class QTreeView;
@@ -49,5 +50,7 @@ private:
     ProcessPropertyModel* m_model{nullptr};
     ProcessIoTableModel* m_ioModel{nullptr};
     QVector<ParameterObjectDescriptor> m_objectDescriptors;
+    QAction* m_renameToolAction{nullptr};
+    QAction* m_deleteToolAction{nullptr};
 };
 } // namespace lcnc::process

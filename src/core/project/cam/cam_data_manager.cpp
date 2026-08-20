@@ -206,6 +206,7 @@ void CamDataManager::ensureToolpathLayers()
                                     // 中文翻译：未分组
                                     ? QStringLiteral("Not grouped") : key;
                 layer.color     = palette.at((layerIdByKey.size()) % palette.size());
+                layer.toolName  = QStringLiteral("default");
                 m_toolpath.layers().push_back(layer);
                 layerIdByKey.insert(key, lid);
                 m_signatureToLayerId.insert(layerSig, lid);
@@ -236,6 +237,7 @@ std::uint64_t CamDataManager::addLayer(const QString& name, const QColor& color)
     layer.name = trimmed.isEmpty() ? QStringLiteral("Layer %1").arg(layer.layerId) : trimmed;
     if (color.isValid())
         layer.color = color;
+    layer.toolName = QStringLiteral("default");
     m_toolpath.layers().push_back(layer);
     m_dirty = true;
     if (m_layerManager)

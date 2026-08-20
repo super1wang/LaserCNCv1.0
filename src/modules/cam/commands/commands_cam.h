@@ -126,6 +126,18 @@ public:
     void execute() override;
 };
 
+/// Runs collision validation for the current solved toolpath regardless of
+/// the automatic collision-detection switch.
+class CmdValidateCamCollisions : public CommandBase
+{
+    Q_OBJECT
+public:
+    inline static const QString Name = "cam.validateCollisions";
+    explicit CmdValidateCamCollisions(IAppContext* ctx);
+    bool isEnabled() const override;
+    void execute() override;
+};
+
 /// Toggles the CAM-owned rapid-travel overlay.
 class CmdToggleCamTravelPath : public CommandBase
 {

@@ -34,6 +34,8 @@ enum class RapidSegmentPhase : std::uint8_t
 {
     Retract = 0,
     Traverse,
+    SafeXY,
+    SafeAC,
     Approach
 };
 

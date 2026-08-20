@@ -88,11 +88,16 @@ int main(int argc, char* argv[])
     }
 
     manager.ensureToolpathLayers();
+    if (manager.toolpath().layers().empty()
+        || manager.toolpath().layers().front().toolName != QStringLiteral("default")) {
+        return fail(QStringLiteral("Generated CAM layer did not use the default tool"));
+    }
     const std::uint64_t extraLayer =
         manager.addLayer(QStringLiteral("Finish"), QColor(10, 20, 30));
     if (extraLayer == 0
+        || manager.toolpathLayer(extraLayer)->toolName != QStringLiteral("default")
         || !manager.updateToolpathLayer(extraLayer, QStringLiteral("Finish2"),
-                                        QColor(30, 20, 10), QStringLiteral("Default"))
+                                        QColor(30, 20, 10), QStringLiteral("default"))
         || !manager.setToolpathLayerEnabled(extraLayer, false)
         || !manager.removeLayer(extraLayer)) {
         return fail(QStringLiteral("CAM layer add/update/remove regression"));
