@@ -1,4 +1,4 @@
-#include "modules/cam/ui/widget_machine_tree.h"
+#include "modules/cam/ui/machine/widget_machine_tree.h"
 
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"

@@ -1,4 +1,4 @@
-#include "modules/cam/services/toolpath_generation_service.h"
+#include "modules/cam/toolpath/toolpath_generation_service.h"
 
 #include <algorithm>
 #include <cmath>

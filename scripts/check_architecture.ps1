@@ -22,11 +22,11 @@ Find-ForbiddenInclude (Join-Path $srcPath 'core/algorithms') '#\s*include\s*[<"]
 # CAM is the sole toolpath producer.  Cross-module contracts intentionally
 # expose detached catalog/execution snapshots only: neither Process nor the
 # offline sandbox may ask CAM to solve/reorder/slice a path or write layer data.
-$toolpathProviderContract = Join-Path $srcPath 'modules/cam/i_cam_toolpath_provider.h'
+$toolpathProviderContract = Join-Path $srcPath 'modules/cam/contracts/i_cam_toolpath_provider.h'
 foreach ($match in (Select-String -LiteralPath $toolpathProviderContract -Pattern '\bsolveToolpathForOrder\s*\(|\bexportToolpathSnapshotForOrder\s*\(')) {
     $violations.Add("CAM toolpath consumer contract must be read-only: ${toolpathProviderContract}:$($match.LineNumber): $($match.Line.Trim())")
 }
-$layerProviderContract = Join-Path $srcPath 'modules/cam/i_cam_layer_provider.h'
+$layerProviderContract = Join-Path $srcPath 'modules/cam/contracts/i_cam_layer_provider.h'
 foreach ($match in (Select-String -LiteralPath $layerProviderContract -Pattern '\bsetLayer|\bsetManual|\bappendToManual|\bremoveFromManual|\bclearManual|\bsetSortStrategy|\bsetLastAuto')) {
     $violations.Add("CAM layer consumer contract must be read-only: ${layerProviderContract}:$($match.LineNumber): $($match.Line.Trim())")
 }

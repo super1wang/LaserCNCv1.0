@@ -1,7 +1,7 @@
-#include "modules/cam/ui/widget_collision_detection_panel.h"
+#include "modules/cam/ui/collision/widget_collision_detection_panel.h"
 
 #include "core/kernel/kernel.h"
-#include "modules/cam/i_cam_collision_configuration_provider.h"
+#include "modules/cam/contracts/i_cam_collision_configuration_provider.h"
 
 #include <QCheckBox>
 #include <QGroupBox>

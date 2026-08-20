@@ -1,4 +1,4 @@
-#include "modules/cam/ui/widget_toolpath_panel.h"
+#include "modules/cam/ui/toolpath/widget_toolpath_panel.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 
 #include <QVBoxLayout>

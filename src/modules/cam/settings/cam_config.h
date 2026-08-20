@@ -137,22 +137,6 @@ public:
                                             gp_Pnt* outPosition) const;
     void clearLegacyWorkpieceInstallPositionForMachine(const QString& machinePath);
 
-    /// 标定位的物理 A/C 角度（度）。已记录返回 true，否则保持 outA/outC 不变。
-    bool acAngleOffsetForMachine(const QString& machinePath,
-                                 double* outA,
-                                 double* outC) const;
-    /// 写入标定位对应的物理 A/C 角度（度），自动持久化。
-    void setAcAngleOffsetForMachine(const QString& machinePath,
-                                    double aAngle,
-                                    double cAngle);
-
-    /// 用户在向导中输入的物理 AC 中心 XYZ（mm）。已记录返回 true。
-    bool physicalAcCenterForMachine(const QString& machinePath,
-                                    gp_Pnt* outCenter) const;
-    /// 写入物理 AC 中心 XYZ（mm），自动持久化；用于向导回显。
-    void setPhysicalAcCenterForMachine(const QString& machinePath,
-                                       const gp_Pnt& center);
-
 protected:
     void readFrom(const toml::value& root) override;
     void writeTo(toml::value& root) const override;
@@ -170,11 +154,6 @@ private:
         QSet<QString> passiveCollisionSources{QStringLiteral("workpiece")};
         bool hasWorkpieceInstallPosition{false}; // legacy input only
         gp_Pnt workpieceInstallPosition;
-        bool hasAcAngleOffset{false};
-        double acAngleOffsetA{0.0};
-        double acAngleOffsetC{0.0};
-        bool hasPhysicalAcCenter{false};
-        gp_Pnt physicalAcCenter{};
     };
 
     static QString configDirectoryPath();

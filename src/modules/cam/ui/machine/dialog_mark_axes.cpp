@@ -1,4 +1,4 @@
-#include "modules/cam/ui/dialog_mark_axes.h"
+#include "modules/cam/ui/machine/dialog_mark_axes.h"
 #include "core/kernel/kernel.h"
 #include "modules/cam/cam_module.h"
 #include "core/document/lcnc_document.h"

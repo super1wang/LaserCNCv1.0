@@ -1,9 +1,9 @@
 #include "modules/process/cutting/process_cutting_plan_service.h"
 
 #include "core/logging/logger.h"
-#include "modules/cam/i_cam_layer_provider.h"
-#include "modules/cam/i_cam_contour_sequence_provider.h"
-#include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/cam/contracts/i_cam_layer_provider.h"
+#include "modules/cam/contracts/i_cam_contour_sequence_provider.h"
+#include "modules/cam/contracts/i_cam_toolpath_provider.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/tool/tool_factory.h"
 

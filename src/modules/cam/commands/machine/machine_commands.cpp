@@ -1,5 +1,5 @@
-#include "modules/cam/commands/commands_machine.h"
-#include "modules/cam/ui/dialog_mark_axes.h"
+#include "modules/cam/commands/machine/machine_commands.h"
+#include "modules/cam/ui/machine/dialog_mark_axes.h"
 #include "app/app_command_context.h"
 
 #include "core/project/project_types.h"

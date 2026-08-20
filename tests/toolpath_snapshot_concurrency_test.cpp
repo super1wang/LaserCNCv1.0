@@ -1,4 +1,4 @@
-#include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/cam/contracts/i_cam_toolpath_provider.h"
 #include "modules/process/toolpath/process_toolpath_service.h"
 
 #include <QCoreApplication>

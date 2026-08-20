@@ -1374,6 +1374,34 @@ Please complete the configuration on the Machine Configuration page of the appli
         <source>Validate current toolpath collisions</source>
         <translation>校验当前刀路碰撞</translation>
     </message>
+    <message>
+        <source>The machine workspace or model path is unavailable.</source>
+        <translation>机台工作区或模型路径不可用。</translation>
+    </message>
+    <message>
+        <source>The machine model file does not exist.</source>
+        <translation>机台模型文件不存在。</translation>
+    </message>
+    <message>
+        <source>The background task service is unavailable.</source>
+        <translation>后台任务服务不可用。</translation>
+    </message>
+    <message>
+        <source>Unable to read the machine model.</source>
+        <translation>无法读取机台模型。</translation>
+    </message>
+    <message>
+        <source>The machine workspace was closed before the model could be committed.</source>
+        <translation>提交模型前机台工作区已关闭。</translation>
+    </message>
+    <message>
+        <source>The machine workspace or export path is unavailable.</source>
+        <translation>机台工作区或导出路径不可用。</translation>
+    </message>
+    <message>
+        <source>Failed to write the machine model.</source>
+        <translation>写入机台模型失败。</translation>
+    </message>
 </context>
 <context>
     <name>CmdValidateCamCollisions</name>

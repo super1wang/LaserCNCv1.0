@@ -2,8 +2,8 @@
 
 #include "core/logging/logger.h"
 #include "core/kernel/kernel.h"
-#include "modules/cam/i_cam_initial_approach_planner.h"
-#include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/cam/contracts/i_cam_initial_approach_planner.h"
+#include "modules/cam/contracts/i_cam_toolpath_provider.h"
 #include "modules/process/runtime/process_device_runtime.h"
 #include "modules/process/tool/tool.h"
 #include "modules/process/tool/tool_factory.h"

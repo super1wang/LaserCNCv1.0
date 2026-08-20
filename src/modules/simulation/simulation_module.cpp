@@ -12,7 +12,7 @@
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
 #include "modules/cam/cam_module.h"
-#include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/cam/contracts/i_cam_toolpath_provider.h"
 #include "view/gui_document.h"
 #include "view/machine_guide_renderer.h"
 #include "view/toolpath_renderer.h"

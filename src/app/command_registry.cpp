@@ -4,7 +4,7 @@
 #include "core/command/commands_api.h"
 #include "core/logging/logger.h"
 #include "modules/cad/ui/ribbon_cad_tab.h"
-#include "modules/cam/ui/ribbon_cam_tab.h"
+#include "modules/cam/ui/ribbon/ribbon_cam_tab.h"
 #include "modules/process/ui/ribbon_process_tab.h"
 #include "view/widget_occ_view.h"
 

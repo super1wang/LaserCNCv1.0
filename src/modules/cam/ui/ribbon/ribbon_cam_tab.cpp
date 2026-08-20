@@ -1,10 +1,10 @@
-#include "modules/cam/ui/ribbon_cam_tab.h"
+#include "modules/cam/ui/ribbon/ribbon_cam_tab.h"
 
 #include "core/command/commands_api.h"
 #include "core/kernel/kernel.h"
 #include "core/logging/logger.h"
-#include "modules/cam/commands/commands_machine.h"
-#include "modules/cam/commands/commands_cam.h"
+#include "modules/cam/commands/machine/machine_commands.h"
+#include "modules/cam/commands/toolpath/toolpath_commands.h"
 #include "modules/cam/cam_module.h"
 
 #include <SARibbonCategory.h>

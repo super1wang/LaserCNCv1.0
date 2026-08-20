@@ -9,8 +9,11 @@
 #include "core/algorithms/cad/primitives.h"
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/project/cam/cam_data_manager.h"
-#include "modules/cam/services/machining_face_pipeline_service.h"
-#include "modules/cam/services/toolpath_generation_service.h"
+#include "modules/cam/pipeline/machining_face_pipeline_service.h"
+#include "modules/cam/toolpath/toolpath_generation_service.h"
+#include "modules/cam/toolpath/toolpath_solve_service.h"
+#include "modules/cam/toolpath/toolpath_sequence_service.h"
+#include "core/kinematics/machine_kinematics.h"
 
 #include <QTextStream>
 
@@ -27,6 +30,7 @@
 #include <gp_Pnt.hxx>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace {
@@ -318,6 +322,78 @@ int verifyAsynchronousResultContracts()
     return 0;
 }
 
+int verifyTransactionalOrderedSolve()
+{
+    LaserContour contour;
+    contour.contourId = 42;
+    ToolpathPoint point;
+    point.position = gp_Pnt(3.0, 2.0, 1.0);
+    point.machineCoord.x = 123.0;
+    point.machineCoord.valid = true;
+    contour.points.push_back(point);
+    std::vector<LaserContour> contours{contour};
+
+    MachineKinematics planningKinematics;
+    QString error;
+    const bool solved = lcnc::cam::ToolpathSolveService::solveTransactionally(
+        &contours, QVector<std::uint64_t>{42}, &planningKinematics,
+        lcnc::MachineModeDefinition{}, lcnc::WorkpieceSetupTransform{},
+        lcnc::HeadToolGeometry{}, &error);
+    if (solved || error.isEmpty())
+        return fail(QStringLiteral("Invalid ordered solve unexpectedly succeeded"));
+    if (contours.size() != 1 || contours.front().points.size() != 1
+        || !contours.front().points.front().machineCoord.valid
+        || std::abs(contours.front().points.front().machineCoord.x - 123.0) > 1e-12
+        || contours.front().points.front().position.Distance(gp_Pnt(3.0, 2.0, 1.0)) > 1e-12) {
+        return fail(QStringLiteral("Failed ordered solve mutated the committed contour"));
+    }
+    return 0;
+}
+
+int verifyExecutionRevisionCoverage()
+{
+    LaserToolpath toolpath;
+    LaserContour contour;
+    contour.contourId = 7;
+    contour.layerId = 11;
+    contour.name = QStringLiteral("profile");
+    contour.workpieceEntry = QStringLiteral("0:1");
+    contour.points.push_back(ToolpathPoint{});
+    toolpath.contours().push_back(contour);
+    ToolpathLayer layer;
+    layer.layerId = 11;
+    layer.name = QStringLiteral("layer");
+    layer.toolName = QStringLiteral("tool-a");
+    layer.contourIds = {7};
+    toolpath.layers().push_back(layer);
+
+    const auto revision = lcnc::cam::ToolpathSequenceService::computeToolpathRevision(
+        toolpath, false, true);
+    auto changed = toolpath;
+    changed.contours().front().appliedParams.cuttingOffsetMm += 0.25;
+    if (lcnc::cam::ToolpathSequenceService::computeToolpathRevision(changed, false, true)
+        == revision) {
+        return fail(QStringLiteral("Cutting offset did not invalidate CAM revision"));
+    }
+    changed = toolpath;
+    changed.contours().front().appliedParams.rapidOffsetMm += 1.0;
+    if (lcnc::cam::ToolpathSequenceService::computeToolpathRevision(changed, false, true)
+        == revision) {
+        return fail(QStringLiteral("Rapid offset did not invalidate CAM revision"));
+    }
+    changed = toolpath;
+    changed.layers().front().toolName = QStringLiteral("tool-b");
+    if (lcnc::cam::ToolpathSequenceService::computeToolpathRevision(changed, false, true)
+        == revision) {
+        return fail(QStringLiteral("Tool mapping did not invalidate CAM revision"));
+    }
+    if (lcnc::cam::ToolpathSequenceService::computeToolpathRevision(toolpath, false, false)
+        == revision) {
+        return fail(QStringLiteral("Incomplete CAM pipeline did not invalidate CAM revision"));
+    }
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -348,6 +424,10 @@ int main()
     if (int rc = verifyPipelineChain())
         return rc;
     if (int rc = verifyAsynchronousResultContracts())
+        return rc;
+    if (int rc = verifyTransactionalOrderedSolve())
+        return rc;
+    if (int rc = verifyExecutionRevisionCoverage())
         return rc;
 
     QTextStream(stderr) << "cam_algorithm_pipeline_test: ok\n";

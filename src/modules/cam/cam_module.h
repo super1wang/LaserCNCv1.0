@@ -18,14 +18,14 @@
 #include "core/project/cam/cam_data_contracts.h"
 #include "core/project/cam/cam_data_manager.h"
 #include "modules/cam/settings/cam_config.h"
-#include "modules/cam/i_cam_facade.h"
-#include "modules/cam/i_cam_contour_sequence_provider.h"
-#include "modules/cam/i_cam_collision_configuration_provider.h"
-#include "modules/cam/i_cam_collision_safety_domain.h"
-#include "modules/cam/i_cam_initial_approach_planner.h"
+#include "modules/cam/contracts/i_cam_facade.h"
+#include "modules/cam/contracts/i_cam_contour_sequence_provider.h"
+#include "modules/cam/contracts/i_cam_collision_configuration_provider.h"
+#include "modules/cam/contracts/i_cam_collision_safety_domain.h"
+#include "modules/cam/contracts/i_cam_initial_approach_planner.h"
 #include "modules/cam/contracts/i_cam_project_explorer_projection.h"
-#include "modules/cam/services/machining_face_pipeline_service.h"
-#include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/cam/pipeline/machining_face_pipeline_service.h"
+#include "modules/cam/contracts/i_cam_toolpath_provider.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
@@ -47,7 +47,6 @@ class WidgetOccView;
 class gp_Vec;
 class gp_Ax1;
 class gp_Pnt;
-struct CamTravelCollisionGeometryCache;
 
 namespace lcnc::view {
 class ToolpathRenderer;
@@ -58,6 +57,7 @@ class ContourOrderLabelRenderer;
 
 namespace lcnc::cam {
 class CamDisplayProjectionService;
+struct TravelCollisionGeometryCache;
 }
 
 namespace lcnc::cam {
@@ -191,32 +191,21 @@ public:
     void setCollisionDetectionEnabled(bool enabled);
     void setCollisionSources(const QSet<QString>& active,
                              const QSet<QString>& passive);
-    void clearAxisAssignments(const QString& axisName);
     QList<AxisOption> axisOptions(bool includeDetachOption = false) const;
     /// Return the preferred workpiece mount axis for the current machine preset.
     QString defaultWorkpieceMountAxis() const;
     gp_Pnt axisOrigin(const QString& axisName) const;
     void setAxisOrigin(const QString& axisName, const gp_Pnt& origin);
     bool setAxisLimits(const QString& axisName, double minVal, double maxVal);
-    bool supportsAcCenterCalibration() const;
     bool currentAcRotationCenter(gp_Pnt& center) const;
     gp_Pnt cutterHeadModelPosition() const;
     gp_Pnt cutterHeadPhysicalPosition() const;
-    void setCutterHeadModelPosition(const gp_Pnt& position);
-    void setCutterHeadPhysicalPosition(const gp_Pnt& position);
-    bool fillAxisOriginFromReferenceFace(WidgetOccView* occView,
-                                         const QPoint& screenPos,
-                                         const QString& axisName);
-    bool setCutterHeadModelPositionFromReferenceFace(WidgetOccView* occView,
-                                                     const QPoint& screenPos);
     /// 拾取一个平面参考面，返回其几何中心（已叠加 LocalTransformation）。
     /// 仅做查询、不修改任何模块状态，供标定向导使用。
     bool pickReferenceFaceCenter(WidgetOccView* occView,
                                  const QPoint& screenPos,
                                  gp_Pnt& center,
                                  QString* errorMessage = nullptr) const;
-    bool alignMachineToPhysicalCenter(const gp_Pnt& physicalCenter);
-    bool alignMachineToPhysicalCutterHead();
     /// 三段式模型对齐：用拾取到的模型参考交点平移机台几何，使其对齐到构型配置页
     /// 中手动填写的旋转中心。此流程不写入/修改 A/C 物理旋转中心。
     bool applyAxisCalibration(const AxisCalibrationInputs& inputs, QString* errorMessage = nullptr);
@@ -228,36 +217,19 @@ public:
                                       QString* errorMessage = nullptr);
     /// 切割头当前世界坐标（受当前 X/Y/Z 轴位置影响）。
     gp_Pnt cutterHeadWorldPosition() const;
-    /// 当前生效的标定 AC 角度偏移（度）；未标定时返回 false。
-    bool acAngleOffset(double& outA, double& outC) const;
-    /// 当前机台已记录的物理 AC 中心 XYZ（mm）；未标定时返回 false。
-    bool physicalAcCenter(gp_Pnt& outCenter) const;
-    /// 当前机台是否已经完成至少一次三段式标定（cam.toml 里有完整记录）。
-    /// 用于向导启动时回填 + 状态指示。
-    bool isMachineCalibrated() const;
     QList<WorkpieceMountCandidate> mountableWorkpieces() const;
     bool autoInstallWorkpiece() const;
     void setAutoInstallWorkpiece(bool enabled);
     bool autoInstallCurrentWorkpiece();
-    QStringList mountedWorkpieceEntriesForSourceEntries(const QStringList& sourceEntries) const;
     QStringList sourceWorkpieceEntriesForMountedEntries(const QStringList& mountedEntries) const;
-    void setMountedWorkpieceEntriesVisible(const QStringList& sourceEntries, bool visible);
-    void setSelectedMountedWorkpieceEntries(const QStringList& sourceEntries);
-    bool supportsWorkpieceRotationAlignment() const;
     /// Sets the unified CAD-to-fixture setup origin to the configured workpiece
     /// rotation center.  It never moves or rewrites CAD geometry.
     bool alignWorkpieceSetupToRotationCenter();
-    /// Legacy compatibility entry point.  New UI must use
-    /// alignWorkpieceSetupToRotationCenter().
-    bool alignWorkpieceInstallPositionToRotationCenter();
 
     // ── Workpiece Installation ───────────────────────────────────────────
     /// Mount the current Workpiece source document to an axis.  Placement is
     /// exclusively defined by WorkpieceSetupTransform and geometry is never moved.
     void mountWorkpiece(DocumentId sourceDocId, const QString& axisName, bool alignToInstallPosition = true);
-
-    /// Clear workpiece-axis bindings without deleting Workpiece section geometry.
-    void unmountAllWorkpieces();
 
     // ── Shape Operations on Machine Doc (delegates to ShapeService) ──────
     bool moveShape(const QString& entry, const gp_Vec& translation);
@@ -274,16 +246,12 @@ public:
     enum class AutoPipelineFaceMode { AutoSeparate, ReuseCurrent };
 
     // ── Toolpath ─────────────────────────────────────────────────────────
-    bool generateToolpath(double smoothAngle, bool useFaceClassification, double deflection = 0.1);
     TaskId generateToolpathAsync(double smoothAngle, bool useFaceClassification,
                                  double deflection = 0.1,
                                  AutoPipelineFaceMode mode = AutoPipelineFaceMode::AutoSeparate);
     void clearToolpath();
 
     // ── Explicit CAM pipeline ───────────────────────────────────────────
-    /// Compute the first-stage face set.  Manual entries are retained and the
-    /// result is the only face input intended for subsequent stages.
-    bool separateMachiningFaces();
     /// Asynchronously identify automatic machining faces from the workpiece.
     /// Manual mode remains an explicit Apply action because it has no geometry
     /// recognition work to schedule.
@@ -291,10 +259,6 @@ public:
     /// Commit the current manually edited face set and invalidate all
     /// downstream stages.  It never regenerates faces behind the user's back.
     bool applyMachiningFaces();
-    bool extractContoursFromMachiningFaces();
-    bool discretizeCurrentContours();
-    bool buildCurrentGeometricToolpath();
-    bool solveCurrentGeometricToolpath();
     TaskId extractContoursFromMachiningFacesAsync();
     TaskId discretizeCurrentContoursAsync();
     TaskId buildCurrentGeometricToolpathAsync();
@@ -329,14 +293,11 @@ public:
     /// matching rapid plan used by both the view and Process.
     bool setManualContourOrder(const QVector<lcnc::cam::ContourId>& orderedContourIds,
                                QString* errorMessage = nullptr);
-    int appendToManualContourOrder(const QVector<lcnc::cam::ContourId>& contourIds,
-                                   QString* errorMessage = nullptr);
     QVector<lcnc::cam::ContourId> manualContourOrder() const;
     lcnc::cam::AutoSortAxis lastAutoContourSortAxis() const;
     void setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis axis);
     bool solveToolpathForOrder(const QVector<std::uint64_t>& orderedContourIds);
     lcnc::cam::ToolpathExportSnapshot exportToolpathBaseSnapshot() const;
-    lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds) const;
 
@@ -361,8 +322,6 @@ public:
     bool setActiveContourDeflection(double mm);
     bool setActiveContourCuttingOffset(double mm);
     bool setActiveContourRapidOffset(double mm);
-    ContourGenerationParams activeContourPendingParams() const;
-    bool activeContourNeedsRecalculation() const;
     void setContourEnabled(int contourIdx, bool enabled);
     void setAllContoursEnabled(bool enabled);
     lcnc::cam::ContourId contourIdAt(int contourIdx) const;
@@ -375,8 +334,6 @@ public:
     QList<int> contourIndexesInLayer(std::uint64_t layerId) const;
     /// 工程文档级图层管理：新建图层，返回 layerId（重命名/改色走 updateToolpathLayer）。
     std::uint64_t addToolpathLayer(const QString& name, const QColor& color = QColor());
-    /// 删除图层；其下轮廓重挂到 reassignTo（0=自动选其余图层）。
-    bool removeToolpathLayer(std::uint64_t layerId, std::uint64_t reassignTo = 0);
     /// 删除图层及其下所有轮廓（连同 XCAF/AIS/选择状态一并清理）。
     bool removeToolpathLayerWithContours(std::uint64_t layerId);
     /// 把一组轮廓移动到指定图层下。
@@ -393,8 +350,6 @@ public:
                              const QString& toolName);
     bool setToolpathLayerEnabled(std::uint64_t layerId, bool enabled);
 
-    /// Apply pending parameters and rebuild/solve only the active contour.
-    bool recalcToolpath();
     /// Asynchronous variant used by UI commands. OCC calculation runs against
     /// a copied contour/kinematics snapshot; document and view updates remain
     /// on the GUI thread.
@@ -440,9 +395,6 @@ public:
     /// faces remain internal reference data and are never rendered here.
     void   setMachiningFacesVisible(bool visible);
     bool   machiningFacesVisible() const;
-    /// Faces captured from the last automatic strategy extraction.
-    void   setAutoMachiningFaces(const std::vector<TopoDS_Face>& faces,
-                                 const QString& workpieceEntry);
     /// Manual picks only (fed into ManualFaceSelection extraction).
     std::vector<TopoDS_Face> manualMachiningFaces() const;
     /// Refresh the semi-transparent highlight AIS for the current face set.
@@ -477,12 +429,8 @@ public:
     /// dirty 为空等价于 @ref refreshMachineTransforms 全量刷新。
     void refreshMachineTransforms(const QStringList& dirtyAxes);
 
-    /// 取共享的 MachinePose 指针（CAM 持有所有权；UI/控制器只读/写值）。
-    lcnc::MachinePose* machinePose() const;
-
     // ── Selection / Visibility ──────────────────────────────────────────
     void setEntityVisible(const QString& entry, bool visible);
-    bool isEntityVisible(const QString& entry) const;
     QStringList visibleMachineEntries() const;
     void setMachineModelVisible(bool visible);
     bool isMachineModelVisible() const;
@@ -582,7 +530,6 @@ private:
 
     /// Refresh axis guide AIS via MachineGuideRenderer.
     void displayAxisGuides();
-    void eraseAxisGuideDisplay();
     void updateAxisGuideTransforms();
     bool resolveLeadInHit(WidgetOccView* occView,
                           const QPoint& screenPos,
@@ -596,14 +543,11 @@ private:
                                      QString* errorMessage) const;
     bool ensureAcCenterCalibrationAvailable(QString* errorMessage = nullptr) const;
     bool currentWorkpieceRotationCenter(gp_Pnt& center) const;
-    bool translateMachineWorkspace(const gp_Vec& translation, const QString& operationTitle);
     bool translateMachineGeometryOnly(const gp_Vec& translation, const QString& operationTitle);
     void translateToolpathWorldData(const gp_Vec& translation);
     void autoDetectAxisOrigins();
     void applyStoredMachineProfile(const QString& machinePath);
     bool applyConfiguredMachineAxes(bool updateView);
-    QVector<lcnc::cam::ContourId> defaultCuttingOrderByCAxis() const;
-    void applyDefaultCuttingOrder();
     lcnc::cam::ToolpathExportSnapshot buildToolpathExportSnapshot(
         const std::vector<LaserContour>& contours,
         std::uint64_t revision,
@@ -625,9 +569,6 @@ private:
     bool clearMountedWorkpieceDisplay(bool refreshView);
     LcncDocument* workpieceDocument() const;
     DocumentId workpieceDocumentId() const;
-    void refreshWorkpieceDisplay();
-    void resetWorkpieceDisplayLocation();
-    bool translateWorkpieceDocument(const gp_Vec& translation);
     void setCamContoursVisible(bool visible, bool updateView = true);
     void setCamContourVisible(int contourIndex, bool visible, bool updateView = true);
     void applyCamContourVisibility();
@@ -681,7 +622,7 @@ private:
     /// Immutable collision-only meshes/bounds.  It is filled by the background
     /// rapid verifier and reused while the machine/environment key is stable.
     /// 中文翻译：仅碰撞使用的不可变网格/包围盒，由后台任务建立并按环境键复用。
-    std::shared_ptr<CamTravelCollisionGeometryCache> m_travelCollisionGeometryCache;
+    std::shared_ptr<lcnc::cam::TravelCollisionGeometryCache> m_travelCollisionGeometryCache;
     TaskId                      m_travelVerificationTask{kInvalidTaskId};
     TaskId                      m_collisionDomainPreparationTask{kInvalidTaskId};
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
@@ -694,11 +635,6 @@ private:
     lcnc::RenderQualityPreset   m_machineRenderQualityPreset{lcnc::RenderQualityPreset::Medium};
     gp_Pnt                      m_cutterHeadModelPosition{0.0, 0.0, 0.0};
     gp_Pnt                      m_cutterHeadPhysicalPosition{0.0, 0.0, 0.0};
-    bool                        m_hasAcAngleOffset{false};
-    double                      m_acAngleOffsetA{0.0};
-    double                      m_acAngleOffsetC{0.0};
-    bool                        m_hasPhysicalAcCenter{false};
-    gp_Pnt                      m_physicalAcCenter{0.0, 0.0, 0.0};
     double                      m_smoothAngle{5.0};
     bool                        m_useFaceClassification{true};
     int                         m_extractionStrategy{0}; ///< LargestSmoothConnectedSurface

@@ -1,4 +1,4 @@
-#include "modules/cam/services/cam_display_projection_service.h"
+#include "modules/cam/display/cam_display_projection_service.h"
 
 #include "core/document/lcnc_document.h"
 #include "core/kinematics/machine_kinematics.h"

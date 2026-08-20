@@ -1,8 +1,9 @@
-#include "modules/cam/services/machine_io.h"
+#include "modules/cam/machine/machine_io.h"
 
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "core/logging/logger.h"
 #include "core/task/task_manager.h"
 
 #include <BRep_Builder.hxx>
@@ -11,6 +12,7 @@
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPCAFControl_Writer.hxx>
 #include <StlAPI_Reader.hxx>
+#include <Standard_Failure.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <TDF_LabelSequence.hxx>
 #include <TDataStd_Name.hxx>
@@ -26,11 +28,13 @@
 #include <QString>
 #include <QStringList>
 
+#include <exception>
+
 namespace lcnc::cam::machine_io {
 
-bool readMachineFile(const QString& filePath,
-                     TaskProgress* progress,
-                     MachineImportResult* result)
+static bool readMachineFileImpl(const QString& filePath,
+                                TaskProgress* progress,
+                                MachineImportResult* result)
 {
     if (!result)
         return false;
@@ -164,30 +168,35 @@ bool readMachineFile(const QString& filePath,
     return true;
 }
 
-bool loadMachineFromFile(LcncDocument* doc,
-                         const QString& filePath,
-                         TaskProgress* progress,
-                         const std::function<void(const QString& entry, const TopoDS_Shape& shape)>& onShapeLoaded)
+bool readMachineFile(const QString& filePath,
+                     TaskProgress* progress,
+                     MachineImportResult* result)
 {
-    if (!doc)
-        return false;
-
-    MachineImportResult result;
-    if (!readMachineFile(filePath, progress, &result))
-        return false;
-
-    for (const MachineImportResult::Part& part : std::as_const(result.parts)) {
-        const TDF_Label label = doc->addShapeEntity(
-            part.shape, part.name, LcncDocument::EntityKind::Machine);
-        if (onShapeLoaded)
-            onShapeLoaded(XcafUtils::entry(label), part.shape);
+    try {
+        return readMachineFileImpl(filePath, progress, result);
+    } catch (const Standard_Failure& failure) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.machine_io: OCCT import failure: {}",
+                 failure.GetMessageString());
+        if (result)
+            result->error = QString::fromUtf8(failure.GetMessageString());
+    } catch (const std::exception& failure) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.machine_io: machine import failure: {}", failure.what());
+        if (result)
+            result->error = QString::fromUtf8(failure.what());
+    } catch (...) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.machine_io: unknown machine import failure");
+        if (result)
+            result->error = QStringLiteral("Unknown machine import failure");
     }
-    return true;
+    return false;
 }
 
-bool exportMachineToFile(LcncDocument* doc,
-                         MachineKinematics* kin,
-                         const QString& filePath)
+static bool exportMachineToFileImpl(LcncDocument* doc,
+                                    MachineKinematics* kin,
+                                    const QString& filePath)
 {
     if (!doc || !kin || filePath.isEmpty())
         return false;
@@ -266,6 +275,26 @@ bool exportMachineToFile(LcncDocument* doc,
     if (writer.Transfer(xdeExport) != IFSelect_RetDone)
         return false;
     return writer.Write(filePath.toUtf8().constData()) == IFSelect_RetDone;
+}
+
+bool exportMachineToFile(LcncDocument* doc,
+                         MachineKinematics* kin,
+                         const QString& filePath)
+{
+    try {
+        return exportMachineToFileImpl(doc, kin, filePath);
+    } catch (const Standard_Failure& failure) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.machine_io: OCCT export failure: {}",
+                 failure.GetMessageString());
+    } catch (const std::exception& failure) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.machine_io: machine export failure: {}", failure.what());
+    } catch (...) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "cam.machine_io: unknown machine export failure");
+    }
+    return false;
 }
 
 } // namespace lcnc::cam::machine_io

@@ -1,4 +1,4 @@
-#include "modules/cam/services/reference_pick.h"
+#include "modules/cam/interaction/reference_pick.h"
 
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "view/widget_occ_view.h"

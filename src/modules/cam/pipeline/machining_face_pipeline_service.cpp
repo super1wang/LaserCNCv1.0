@@ -1,4 +1,4 @@
-#include "modules/cam/services/machining_face_pipeline_service.h"
+#include "modules/cam/pipeline/machining_face_pipeline_service.h"
 
 #include "core/algorithms/cam/laser_toolpath.h"
 

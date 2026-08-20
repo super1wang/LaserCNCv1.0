@@ -1,7 +1,7 @@
 #include "modules/process/toolpath/process_toolpath_service.h"
 
 #include "core/logging/logger.h"
-#include "modules/cam/i_cam_toolpath_provider.h"
+#include "modules/cam/contracts/i_cam_toolpath_provider.h"
 // process_settings.h removed - using simplified types
 
 #include <QObject>

@@ -1,4 +1,4 @@
-#include "modules/cam/ui/widget_machine_panel.h"
+#include "modules/cam/ui/machine/widget_machine_panel.h"
 #include "core/kernel/kernel.h"
 
 #include "modules/cam/cam_module.h"

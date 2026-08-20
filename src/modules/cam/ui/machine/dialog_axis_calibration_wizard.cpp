@@ -1,4 +1,4 @@
-#include "modules/cam/ui/dialog_axis_calibration_wizard.h"
+#include "modules/cam/ui/machine/dialog_axis_calibration_wizard.h"
 
 #include "modules/cam/cam_module.h"
 #include "core/logging/logger.h"

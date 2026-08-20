@@ -6,8 +6,6 @@ class TaskProgress;
 class QString;
 class TopoDS_Shape;
 
-#include <functional>
-
 #include <QString>
 #include <QVector>
 
@@ -43,14 +41,6 @@ struct MachineImportResult {
 bool readMachineFile(const QString& filePath,
                      TaskProgress* progress,
                      MachineImportResult* result);
-
-/// 把 STEP/STL/BREP 文件读入 LcncDocument 的 Machine 实体集合。
-/// 由调用方在 TaskProgress 任务内调用，进度区间假定 [0,100]。
-/// 失败返回 false（文件不存在/格式不支持/读取失败）。
-bool loadMachineFromFile(LcncDocument* doc,
-                         const QString& filePath,
-                         TaskProgress* progress,
-                         const std::function<void(const QString& entry, const TopoDS_Shape& shape)>& onShapeLoaded = {});
 
 /// 把当前机台 LcncDocument 按轴分组导出为 STEP（含 LCNC_AXIS_* 命名）。
 /// 失败返回 false。

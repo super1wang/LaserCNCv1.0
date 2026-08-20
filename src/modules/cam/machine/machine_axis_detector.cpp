@@ -1,4 +1,4 @@
-#include "modules/cam/services/machine_axis_detector.h"
+#include "modules/cam/machine/machine_axis_detector.h"
 
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"

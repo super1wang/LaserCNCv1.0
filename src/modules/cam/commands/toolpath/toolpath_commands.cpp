@@ -1,4 +1,4 @@
-#include "modules/cam/commands/commands_cam.h"
+#include "modules/cam/commands/toolpath/toolpath_commands.h"
 #include "app/app_command_context.h"
 #include "view/widget_occ_view.h"
 

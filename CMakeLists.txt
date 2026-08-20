@@ -444,24 +444,35 @@ set(SRCS_MODULE_CAD
 
 set(SRCS_MODULE_CAM
     src/modules/cam/cam_module.cpp
+    src/modules/cam/internal/cam_module_support.cpp
+    src/modules/cam/machine/cam_module_machine.cpp
+    src/modules/cam/pipeline/cam_module_pipeline.cpp
+    src/modules/cam/collision/cam_module_collision.cpp
+    src/modules/cam/toolpath/cam_module_toolpath.cpp
+    src/modules/cam/display/cam_module_display.cpp
     src/modules/cam/contracts/toolpath_export_dto.cpp
     src/modules/cam/settings/cam_config.cpp
-    src/modules/cam/services/machine_axis_detector.cpp
-    src/modules/cam/services/cam_display_projection_service.cpp
-    src/modules/cam/services/machining_face_pipeline_service.cpp
-    src/modules/cam/services/toolpath_generation_service.cpp
-    src/modules/cam/services/machine_io.cpp
-    src/modules/cam/services/reference_pick.cpp
-    src/modules/cam/commands/commands_machine.cpp
-    src/modules/cam/commands/commands_cam.cpp
-    src/modules/cam/ui/widget_machine_panel.cpp
-    src/modules/cam/ui/widget_collision_detection_panel.cpp
-    src/modules/cam/ui/widget_machine_tree.cpp
-    src/modules/cam/ui/widget_machine_tree.h
-    src/modules/cam/ui/widget_toolpath_panel.cpp
-    src/modules/cam/ui/dialog_mark_axes.cpp
-    src/modules/cam/ui/dialog_axis_calibration_wizard.cpp
-    src/modules/cam/ui/ribbon_cam_tab.cpp
+    src/modules/cam/machine/machine_axis_detector.cpp
+    src/modules/cam/display/cam_display_projection_service.cpp
+    src/modules/cam/integration/cam_service_adapters.cpp
+    src/modules/cam/collision/collision_geometry_cache.cpp
+    src/modules/cam/collision/cutter_collision_geometry.cpp
+    src/modules/cam/toolpath/toolpath_sequence_service.cpp
+    src/modules/cam/toolpath/toolpath_solve_service.cpp
+    src/modules/cam/pipeline/machining_face_pipeline_service.cpp
+    src/modules/cam/toolpath/toolpath_generation_service.cpp
+    src/modules/cam/machine/machine_io.cpp
+    src/modules/cam/interaction/reference_pick.cpp
+    src/modules/cam/commands/machine/machine_commands.cpp
+    src/modules/cam/commands/toolpath/toolpath_commands.cpp
+    src/modules/cam/ui/machine/widget_machine_panel.cpp
+    src/modules/cam/ui/collision/widget_collision_detection_panel.cpp
+    src/modules/cam/ui/machine/widget_machine_tree.cpp
+    src/modules/cam/ui/machine/widget_machine_tree.h
+    src/modules/cam/ui/toolpath/widget_toolpath_panel.cpp
+    src/modules/cam/ui/machine/dialog_mark_axes.cpp
+    src/modules/cam/ui/machine/dialog_axis_calibration_wizard.cpp
+    src/modules/cam/ui/ribbon/ribbon_cam_tab.cpp
 )
 
 set(SRCS_MODULE_SIMULATION
