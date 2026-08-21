@@ -8,7 +8,7 @@
 #include "modules/process/device/process_io_types.h"
 #include "modules/process/runtime/process_axis_types.h"
 #include "modules/process/system/message_code.h"
-#include "tool_factory.h"
+#include "modules/process/tool/tool_factory.h"
 #include "toml.hpp"
 
 namespace lcnc::process { class ProcessSettingsService; class ProcessRuntimeConfiguration; }

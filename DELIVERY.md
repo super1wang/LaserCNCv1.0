@@ -2,39 +2,38 @@
 
 更新日期：2026-08-21
 
-源码基线：`47e5408`
+产品版本：`1.5.9`（由 CMake 单一版本源生成）
 
 ## 当前结论
 
-当前版本可作为继续开发、自动化回归和 SDK 模拟器集成的基线；不建议标记为实体机生产发布。完整原因见 [AUDIT.md](AUDIT.md)，实施顺序见 [todo.md](todo.md)。
+本次已经关闭审计 P0-1～P0-3，并完成当前范围内的 P1/P2 架构与工程卫生整改。代码可作为后续功能开发和下一版本完整碰撞工作的稳定基座；P0-4 连续碰撞、GUI/长稳及物理设备验证仍是实体机生产发布门禁。
 
-本轮文档更新没有修改业务源码，也没有宣称修复审计发现。它完成了全项目文件级复核、架构事实同步、历史文档去重和最新 TODO 重排。
+## 本次收口
 
-## 已确认能力
+- 真实激光：ULTRON 协议改为有界纯函数和 RAII；Raycus/QCW 清除裸缓冲区、参数检查错误及不确定返回。
+- 设备稳定性：ACS/GTN 等待统一 deadline/cancellation；状态轮询与工作流共用全局优先级设备队列。
+- CAD：STEP/IGES/STL/BREP 在 worker 构造 detached payload，文档所有者线程提交；任务按文档跟踪和取消。
+- 跨模块：Process/Simulation 不再依赖具体 `CamModule`；离线仿真消费 revision 化不可变快照。
+- 所有权：`ServiceRegistry` 显式注册 borrowed service；CAM pipeline 不再外泄可变 entry 容器。
+- 目录与规范：供应商 BDAQ 头迁入 `3rd/`，`setting/` 合并到 `settings/schema/`，设备头统一 `#pragma once`，增加统一数学常量、`.clang-format` 和架构门禁。
+- 构建：模块实现/UI 链接依赖尽量收紧为 `PRIVATE`；CMake 版本、应用版本、模块信息和工程包 fallback 统一为 `1.5.9`。
 
-- Kernel 按 `cad -> cam -> {simulation, process}` 编排模块，失败/关闭按反向顺序清理。
-- 每工作区使用统一 Workpiece+CAM XCAF 文档与独立 `CamDataManager`；机台由独立 `MachineWorkspace` 持有。
-- CAM 唯一生产轮廓顺序、偏置、Retract/Traverse/Approach、物理轴坐标和碰撞验证快照。
-- Process 只消费 OCC-free 快照，对 Pending/Indeterminate/过期碰撞状态失败关闭；真实控制器失败不回退 PureSimulation。
-- 工程包 v4 具备 `tools.toml`、staging 原子替换、失败保留旧包、机台指纹门禁和受控离线升级工具。
-- CAM 已按 contracts/pipeline/toolpath/collision/machine/display/integration 等目录拆分，求解失败不提前破坏已提交运动计划。
-- 自动化测试按 algorithm/flow/safety/sdk-integration/support 分层，并使用真实 `model/半球.stp` 覆盖制造流程。
-
-## 本轮验证
+## 验证
 
 | 验证 | 结果 |
 | --- | --- |
-| 架构脚本 | 通过。 |
+| `git diff --check` | 通过；仅有 Git 行尾转换提示。 |
+| `scripts/check_architecture.ps1 -Root .` | 通过。 |
 | 日常 ACS+GTN Debug 构建 | 通过。 |
-| 日常完整 CTest | 35/35 通过，57.08 秒。 |
-| real-laser Debug 构建 | 可链接，但暴露 ULTRON 未初始化使用/缺失返回及多项旧协议告警，不满足真实激光启用条件。 |
+| 日常完整 CTest | 39/39 通过，59.97 秒。 |
+| real-laser Debug 构建 | 通过；原 ULTRON 未初始化/缺失返回和 Raycus/QCW 协议告警已消除。 |
+| ASan | 全量构建通过；本轮关键所有权、协议、等待、状态和 CAD detached 导入 7/7 通过，6.10 秒。 |
 
-## 发布阻断项
+## 仍未放行
 
-1. 修复并回归真实激光 ULTRON 的释放后使用、未初始化变量和缺失返回。
-2. 给 ACS/GTN 无界等待增加 deadline/cancellation，证明 Stop/关机不被轮询或供应商调用无限阻塞。
-3. 完成 CAD detached 文档事务，禁止 worker 直接写活动 XCAF。
-4. 完成连续段碰撞安全证明、完整机台性能门限和碰撞后重规划策略。
-5. 补 GUI、ASan/Application Verifier、长稳和物理 ACS/GTN/激光证据。
+1. P0-4：完整机台连续段碰撞证明、重规划和性能门限。
+2. GUI 人工验收、8 小时资源趋势和重复连接/开关压力测试。
+3. 真实 ACS/GTN、激光器和 IO 的低速加工及安全停机验证。
+4. 供应商函数自身永不返回时的厂商级超时或进程外看门狗。
 
-自动化通过、SimulatorCMHP、GUI 人工验收和物理机证据是四类独立证据，交付记录必须分别标注。
+自动化、SDK 仿真、GUI 和物理机是四类独立证据。完整审计见 [AUDIT.md](AUDIT.md)，剩余工作见 [todo.md](todo.md)。

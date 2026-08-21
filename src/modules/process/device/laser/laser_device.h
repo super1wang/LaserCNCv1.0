@@ -3,12 +3,9 @@
 /************************************************************************/
 #pragma once 
 
-#include "serial_port.h"
+#include "modules/process/device/connect/serial_port.h"
 #include "toml.hpp"
 #include "modules/process/settings/process_settings_service.h"
-
-using namespace std;
-using toml::table;
 
 enum class LaserResponseMode
 {
@@ -62,9 +59,9 @@ struct LaserCommunicationConfig
 	{
 	}
 
-	string strHost;
+	std::string strHost;
 	int iPort;
-	string strPath;
+	std::string strPath;
 	int iTimeOut;
 };
 
@@ -81,9 +78,9 @@ public:
 
 	// 下发
 	virtual ErrorCode		setLaserTable();
-	virtual ErrorCode		setLaserTable(const table& tableLaser) = 0;
+	virtual ErrorCode		setLaserTable(const toml::table& tableLaser) = 0;
 
-	virtual const string&	GetName() = 0;
+	virtual const std::string& GetName() = 0;
 	virtual bool			IsInited() = 0;
 	virtual bool			StartLaser() = 0;
 	virtual bool			StopLaser() = 0;
@@ -99,14 +96,14 @@ public:
 		LaserResponseMode = LaserResponseMode::Strict) { return false; }
 
 	// 获取实际参数 
-	virtual string			GetEnergy() = 0;
-	virtual string			GetFrequency() = 0;
-	virtual string			GetPulseWidth() = 0;
+	virtual std::string		GetEnergy() = 0;
+	virtual std::string		GetFrequency() = 0;
+	virtual std::string		GetPulseWidth() = 0;
 
 	// IPG
 	virtual double			GetAveragePower() = 0;
-	virtual string			GetTemperature() = 0;
-	virtual string			GetTroubleshooting() = 0;
+	virtual std::string		GetTemperature() = 0;
+	virtual std::string		GetTroubleshooting() = 0;
 
 	//// 设置最大电流（单位A）
 	//virtual void SetLaserMaxCurrent(double dCurrent) = 0;
@@ -127,7 +124,7 @@ protected:
 	explicit LaserDevice(lcnc::process::ProcessSettingsService& settings)
 		: m_settings(settings) {}
 
-	table processLaserTable(const QString& name = {}) const
+	toml::table processLaserTable(const QString& name = {}) const
 	{
 		return m_settings.rawTable(lcnc::process::ProcessConfigArea::Devices, name);
 	}

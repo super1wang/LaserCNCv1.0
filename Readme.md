@@ -2,7 +2,7 @@
 
 LaserCNC 是面向五轴激光加工的 Windows 桌面软件，将 CAD、CAM、离线仿真与 Process 加工执行放在统一工程工作区中。项目使用 C++17、Qt 6、OpenCASCADE/XCAF、SARibbon、QuaZip、toml11 与 spdlog。
 
-当前源码基线为 2026-08-21 的 `47e5408`。仓库已经具备清晰的分层骨架和较完整的算法/流程回归，但本轮文件级审计仍发现真实激光适配器、供应商阻塞调用、CAD 异步文档事务等高优先级问题，因此当前结论是：适合继续集成开发与自动化回归，不应据此标记为可直接进行实体机生产发布。
+当前版本为 `1.5.9`。本轮已经关闭文件级审计中的真实激光未定义行为、可轮询供应商无界等待和 CAD 异步活动文档写入，并收紧跨模块契约、服务所有权、设备队列、目录与代码规范。代码适合作为继续开发和自动化回归的稳定基座；完整机台连续碰撞、GUI/长稳和物理设备验证仍未完成，因此不能据此标记为实体机生产发布。
 
 ## 系统组成
 
@@ -42,7 +42,7 @@ cmd /c "call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x6
 ctest --test-dir build-cmake --build-config Debug --output-on-failure
 ```
 
-截至本轮审计，日常 ACS+GTN Debug 构建和 35/35 CTest 通过。该证据包含真实 STEP 制造流程和 SimulatorCMHP SDK 集成，但不替代 GUI 人工验收、长时间资源趋势或 ACS/GTN/激光物理硬件验证。唯一构建约定见 [BUILD.md](BUILD.md)，测试分层见 [tests/README.md](tests/README.md)。
+截至本轮整改，日常 ACS+GTN Debug、real-laser Debug 构建和 39/39 CTest 通过。新增回归覆盖 ULTRON 协议、统一设备等待、ServiceRegistry 生命周期和真实 STEP detached CAD 导入。该证据仍不替代 GUI 人工验收、长时间资源趋势、连续碰撞证明或 ACS/GTN/激光物理硬件验证。唯一构建约定见 [BUILD.md](BUILD.md)，测试分层见 [tests/README.md](tests/README.md)。
 
 ## 工程包
 

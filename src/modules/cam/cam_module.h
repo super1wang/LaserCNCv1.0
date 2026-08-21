@@ -29,6 +29,7 @@
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
+#include "core/kernel/event_bus.h"
 #include "core/project/project_types.h"
 #include "core/task/task_manager.h"
 
@@ -641,7 +642,10 @@ private:
 
     using MachiningFaceEntry = lcnc::cam::MachiningFacePipelineService::Entry;
     std::unique_ptr<lcnc::cam::MachiningFacePipelineService> m_machiningFacePipeline;
-    std::vector<MachiningFaceEntry>& m_machiningFaces;
+    const std::vector<MachiningFaceEntry>& machiningFaces() const noexcept
+    {
+        return m_machiningFacePipeline->entries();
+    }
     bool                        m_machiningFacesVisible{true};
 
     double                      m_deflection{0.1};
@@ -672,4 +676,5 @@ private:
 
     /// 上一帧 OCC 视图中已选的 CAM contourId 集合，用于把"新增/移除"差分推给 SelectionService。
     QSet<std::uint64_t> m_lastCamSelectionContourIds;
+    std::vector<lcnc::SubscriptionId> m_eventSubscriptions;
 };

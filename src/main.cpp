@@ -201,7 +201,7 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     const bool smokeTest = app.arguments().contains(QStringLiteral("--smoke-test"));
     app.setApplicationName(QStringLiteral("LaserCNC"));
-    app.setApplicationVersion(QStringLiteral("1.0.0"));
+    app.setApplicationVersion(QStringLiteral(LCNC_VERSION_STRING));
     app.setOrganizationName(QStringLiteral("LaserCNC"));
 
     // ── Core infrastructure ──────────────────────────────────────────────

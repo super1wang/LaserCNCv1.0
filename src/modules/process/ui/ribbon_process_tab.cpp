@@ -40,6 +40,7 @@ void buildRibbonTab(SARibbonCategory* cat,
                     CommandContainer* container,
                     QObject* parent)
 {
+    Q_UNUSED(parent);
     LCNC_DEBUG(lcnc::LogCode::Generic, "lcnc::process::buildRibbonTab begin");
 
     // ── 连接 ───────────────────────────────────────────────────────────────

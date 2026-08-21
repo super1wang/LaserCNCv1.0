@@ -1,4 +1,5 @@
 #include "core/kinematics/ik_solver.h"
+#include "core/math/numeric_constants.h"
 
 #include <gp_Vec.hxx>
 #include <gp_Ax1.hxx>
@@ -6,16 +7,14 @@
 #include <cmath>
 #include <utility>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 namespace {
 
 gp_Trsf axisRotation(const MachineAxisDef& axis, double angleDeg)
 {
     gp_Trsf trsf;
-    trsf.SetRotation(gp_Ax1(axis.origin, axis.direction), angleDeg * M_PI / 180.0);
+    trsf.SetRotation(gp_Ax1(axis.origin, axis.direction),
+                     lcnc::math::degreesToRadians(angleDeg));
     return trsf;
 }
 
@@ -178,7 +177,7 @@ bool solveRotationAboutAxis(const MachineAxisDef& axis,
     double angle = std::acos(dotV);
     if (fromPerp.Crossed(toPerp).Dot(axisVec) < 0.0)
         angle = -angle;
-    angleDeg = normalizeSigned180(angle * 180.0 / M_PI);
+    angleDeg = normalizeSigned180(lcnc::math::radiansToDegrees(angle));
     return true;
 }
 
@@ -312,7 +311,7 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
             double ang = std::acos(dotV);
             gp_Vec cv = n2n.Crossed(ttn);
             if (cv.Dot(a2v) < 0) ang = -ang;
-            r2deg = ang * 180.0 / M_PI;
+            r2deg = lcnc::math::radiansToDegrees(ang);
         }
 
         // 真实对齐误差：施加 r2 后看 n_final 与 target 的夹角。
@@ -395,9 +394,11 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
             //   R·sin φ = A、R·cos φ = B   →   φ = atan2(A, B)
             double phaseAngle = std::atan2(Av, Bv);
             // 主分支：r1 + φ = asin(sinVal)  ⇒  r1 = asin - φ
-            double r1cand1 = (std::asin(sinVal) - phaseAngle) * 180.0 / M_PI;
+            double r1cand1 = lcnc::math::radiansToDegrees(
+                std::asin(sinVal) - phaseAngle);
             // 次分支：r1 + φ = π - asin(sinVal)
-            double r1cand2 = ((M_PI - std::asin(sinVal)) - phaseAngle) * 180.0 / M_PI;
+            double r1cand2 = lcnc::math::radiansToDegrees(
+                (lcnc::math::kPi - std::asin(sinVal)) - phaseAngle);
             computeAndPick(r1cand1, r1cand2);
         }
     }
@@ -616,8 +617,9 @@ MachineCoord IKSolver::solveHeadType(const MachineKinematics* kin,
             double baseAngle = std::asin(sinVal);
             double phaseAngle = std::atan2(B, A);
             // Two solutions: pick the one with smaller absolute value
-            double r1a = (baseAngle - phaseAngle) * 180.0 / M_PI;
-            double r1b = (M_PI - baseAngle - phaseAngle) * 180.0 / M_PI;
+            double r1a = lcnc::math::radiansToDegrees(baseAngle - phaseAngle);
+            double r1b = lcnc::math::radiansToDegrees(
+                lcnc::math::kPi - baseAngle - phaseAngle);
             // Normalize to [-180, 180]
             auto normalize = [](double deg) {
                 while (deg > 180.0) deg -= 360.0;
@@ -646,7 +648,8 @@ MachineCoord IKSolver::solveHeadType(const MachineKinematics* kin,
 
     // Apply R1 to z_neg
     gp_Trsf rot1;
-    rot1.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis1Dir), result.r1 * M_PI / 180.0);
+    rot1.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis1Dir),
+                     lcnc::math::degreesToRadians(result.r1));
     gp_Vec v_after_r1 = z_neg;
     v_after_r1.Transform(rot1);
 
@@ -669,7 +672,7 @@ MachineCoord IKSolver::solveHeadType(const MachineKinematics* kin,
         double angle = std::acos(dotVal);
         gp_Vec crossVal = v1_perp.Crossed(d_perp);
         if (crossVal.Dot(a2) < 0) angle = -angle;
-        result.r2 = angle * 180.0 / M_PI;
+        result.r2 = lcnc::math::radiansToDegrees(angle);
     }
 
     // Clamp r2

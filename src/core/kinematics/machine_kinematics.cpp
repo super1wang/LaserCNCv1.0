@@ -1,4 +1,5 @@
 #include "core/kinematics/machine_kinematics.h"
+#include "core/math/numeric_constants.h"
 
 #include <gp_Vec.hxx>
 #include <gp_Ax1.hxx>
@@ -7,9 +8,6 @@
 #include <cmath>
 #include <utility>
 
-#ifndef M_PI
-#  define M_PI 3.14159265358979323846
-#endif
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
@@ -245,7 +243,7 @@ gp_Trsf MachineKinematics::axisLocalTrsf(const MachineAxisDef& axis, bool home) 
         t.SetTranslation(gp_Vec(axis.direction) * axis.currentPos);
     } else {
         t.SetRotation(gp_Ax1(axis.origin, axis.direction),
-                      axis.currentPos * M_PI / 180.0);
+                      lcnc::math::degreesToRadians(axis.currentPos));
     }
     return t;
 }

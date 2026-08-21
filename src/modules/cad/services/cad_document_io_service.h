@@ -16,6 +16,8 @@ class LcncProjectManager;
 
 namespace lcnc::cad {
 
+struct CadImportPayload;
+
 /**
  * @brief Transaction boundary for project document lifecycle operations.
  *
@@ -23,13 +25,11 @@ namespace lcnc::cad {
  * workers are added here incrementally so CadModule remains an event bridge
  * instead of becoming another file-format implementation.
  */
-class CadDocumentIoService final : public QObject, public lcnc::IService
-{
+class CadDocumentIoService final : public QObject, public lcnc::IService {
     Q_OBJECT
-public:
+  public:
     explicit CadDocumentIoService(lcnc::LcncProjectManager& projectManager,
-                                  TaskManager& taskManager,
-                                  QObject* parent = nullptr);
+                                  TaskManager& taskManager, QObject* parent = nullptr);
 
     struct ExportTask {
         TaskId id{kInvalidTaskId};
@@ -38,35 +38,39 @@ public:
     struct ImportTask {
         TaskId id{kInvalidTaskId};
         std::shared_ptr<QString> error;
+        std::shared_ptr<CadImportPayload> payload;
     };
 
     DocumentId createDocument(const QString& name = QString()) const;
-    bool saveDocument(LcncDocument* document,
-                      const QString& path,
+    bool saveDocument(LcncDocument* document, const QString& path,
                       QString* errorMessage = nullptr) const;
     bool closeDocument(DocumentId documentId) const;
     ExportTask exportStepAsync(LcncDocument* document, const QString& filePath) const;
-    ImportTask importStlAsync(LcncDocument* document, const QString& filePath) const;
-    bool importStlIntoDocument(LcncDocument* document,
-                               const QString& filePath,
-                               TaskProgress* progress,
-                               QString* errorMessage) const;
-    ImportTask importBrepAsync(LcncDocument* document, const QString& filePath) const;
-    bool importBrepIntoDocument(LcncDocument* document,
-                                const QString& filePath,
-                                TaskProgress* progress,
-                                QString* errorMessage) const;
-    bool importStepIntoDocument(LcncDocument* document,
-                                const QString& filePath,
-                                QString* errorMessage) const;
-    bool importIgesIntoDocument(LcncDocument* document,
-                                const QString& filePath,
-                                QString* errorMessage) const;
-    bool prepareDisplayMesh(LcncDocument* document,
-                            TaskProgress* progress,
-                            QString* errorMessage) const;
+    /// Read and mesh an import into detached OCC storage. Never mutates a project document.
+    ImportTask readImportAsync(const QString& filePath) const;
+    /// Commit a completed detached import to a document on its owning thread.
+    static bool commitImport(LcncDocument* document,
+                             const std::shared_ptr<CadImportPayload>& payload,
+                             QString* errorMessage = nullptr);
 
-private:
+    // The IntoDocument methods are restricted to detached/pending documents.
+    static bool importStlIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                              TaskProgress* progress, QString* errorMessage);
+    static bool importBrepIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                               TaskProgress* progress, QString* errorMessage);
+    static bool importStepIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                               QString* errorMessage);
+    static bool importIgesIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                               QString* errorMessage);
+    static bool prepareDisplayMesh(LcncDocument* document, TaskProgress* progress,
+                                   QString* errorMessage);
+
+  private:
+    static bool readImport(const QString& filePath, TaskProgress* progress,
+                           const std::shared_ptr<CadImportPayload>& payload, QString* errorMessage);
+    static bool prepareImportMesh(const std::shared_ptr<CadImportPayload>& payload,
+                                  TaskProgress* progress, QString* errorMessage);
+
     lcnc::LcncProjectManager& m_projectManager;
     TaskManager& m_taskManager;
 };

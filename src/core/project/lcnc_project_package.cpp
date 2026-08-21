@@ -189,7 +189,7 @@ lcnc::LcncProjectManifest prepareSaveManifest(const LcncDocument& workpieceDocum
     manifest.savedUtc = now;
     if (manifest.softwareVersion.trimmed().isEmpty())
         manifest.softwareVersion = QCoreApplication::applicationVersion().isEmpty()
-            ? QStringLiteral("1.0.0") : QCoreApplication::applicationVersion();
+            ? QStringLiteral(LCNC_VERSION_STRING) : QCoreApplication::applicationVersion();
     if (manifest.configurationSchemaVersion.trimmed().isEmpty())
         manifest.configurationSchemaVersion = QStringLiteral("1");
     if (manifest.toolpathAlgorithmVersion.trimmed().isEmpty())

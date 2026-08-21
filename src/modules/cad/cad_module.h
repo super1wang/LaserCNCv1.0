@@ -1,33 +1,40 @@
 #pragma once
 
-#include <QObject>
-#include <QList>
-#include <QSet>
-#include <QStringList>
-#include <QVector>
-#include <QVariantMap>
-#include <memory>
-
-#include "core/task/module_task_scope.h"
-#include <TDF_Label.hxx>
-#include <TopoDS_Shape.hxx>
-
 #include "core/document/lcnc_document.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
 #include "core/project/project_types.h"
+#include "core/task/module_task_scope.h"
 #include "core/task/task_manager.h"
-#include "modules/cad/i_cad_facade.h"
 #include "modules/cad/contracts/i_cad_project_explorer_projection.h"
+#include "modules/cad/i_cad_facade.h"
 #include "modules/cad/selection/cad_selection.h"
+
+#include <QList>
+#include <QObject>
+#include <QSet>
+#include <QStringList>
+#include <QVariantMap>
+#include <QVector>
+#include <TDF_Label.hxx>
+#include <TopoDS_Shape.hxx>
+#include <map>
+#include <memory>
 
 class GuiDocument;
 class GuiApplication;
 class TaskManager;
 class gp_Vec;
 class gp_Ax1;
-namespace lcnc::cad { class CadDocumentRegistry; class CadDocumentIoService; class CadModelingSession; class SketchManager; }
-namespace lcnc::cad::task { class CadCommandDispatcher; }
+namespace lcnc::cad {
+class CadDocumentRegistry;
+class CadDocumentIoService;
+class CadModelingSession;
+class SketchManager;
+} // namespace lcnc::cad
+namespace lcnc::cad::task {
+class CadCommandDispatcher;
+}
 
 /**
  * @brief CAD module singleton — manages documents, file I/O, and modeling operations.
@@ -48,12 +55,9 @@ namespace lcnc::cad::task { class CadCommandDispatcher; }
  * 自动创建实例 —— 必须先 @c kernel.addModule(std::make_unique<CadModule>())
  * 并 @c bootstrap() 之后才能拿到非空指针。
  */
-class CadModule : public QObject,
-                  public lcnc::IModule,
-                  public lcnc::ICadFacade
-{
+class CadModule : public QObject, public lcnc::IModule, public lcnc::ICadFacade {
     Q_OBJECT
-public:
+  public:
     /// 公开构造函数：由 Kernel/main 通过 @c std::make_unique 持有；其余
     /// 代码应使用 @ref instance() 取得唯一实例，禁止再 new 第二个。
     explicit CadModule(QObject* parent = nullptr);
@@ -136,32 +140,32 @@ public:
     void stop() override;
 
     // ── Project / Workpiece Management ──────────────────────────────────
-    DocumentId  newDocument(const QString& name = QString());
-    DocumentId  openDocument(const QString& filePath);
-    DocumentId  importStep(const QString& filePath,
-                           DocumentId targetDocId = kInvalidDocumentId);
-    DocumentId  importStl(const QString& filePath,
-                          DocumentId targetDocId = kInvalidDocumentId);
-    bool        saveDocument(DocumentId id, const QString& path = QString());
-    void        exportStep(DocumentId id, const QString& filePath);
-    void        closeDocument(DocumentId id);
-    DocumentId  importFile(const QString& filePath);
+    DocumentId newDocument(const QString& name = QString());
+    DocumentId openDocument(const QString& filePath);
+    DocumentId importStep(const QString& filePath, DocumentId targetDocId = kInvalidDocumentId);
+    DocumentId importStl(const QString& filePath, DocumentId targetDocId = kInvalidDocumentId);
+    bool saveDocument(DocumentId id, const QString& path = QString());
+    void exportStep(DocumentId id, const QString& filePath);
+    void closeDocument(DocumentId id);
+    DocumentId importFile(const QString& filePath);
 
     // ── Project Domain Access ────────────────────────────────────────────
-    DocumentId    workpieceDocumentId() const override;
+    DocumentId workpieceDocumentId() const override;
     LcncDocument* workpieceDocument() const;
-    GuiDocument*  activeGuiDocument() const;
+    GuiDocument* activeGuiDocument() const;
     LcncDocument* domainDocumentById(DocumentId id) const;
-    void          requestWorkpieceView(DocumentId id = kInvalidDocumentId) override;
+    void requestWorkpieceView(DocumentId id = kInvalidDocumentId) override;
 
     /// ICadFacade：用于让调用方挂接 CadModule 的 Qt 信号。
-    QObject* asQObject() override { return this; }
+    QObject* asQObject() override {
+        return this;
+    }
 
     LcncDocument* projectExplorerWorkpieceDocument() const;
     bool projectExplorerIsSketchEditing() const;
     QList<lcnc::cad::ProjectExplorerSketchElement> projectExplorerActiveSketchElements() const;
-    QList<lcnc::cad::ProjectExplorerSketch> projectExplorerFinishedSketches(
-        DocumentId documentId) const;
+    QList<lcnc::cad::ProjectExplorerSketch>
+    projectExplorerFinishedSketches(DocumentId documentId) const;
 
     // ── Selection / Visibility ──────────────────────────────────────────
     void setEntityVisible(DocumentId docId, const QString& entry, bool visible);
@@ -169,62 +173,49 @@ public:
     void setSelectedEntries(DocumentId docId, const QStringList& entries);
     QStringList selectedEntries(DocumentId docId) const;
     void syncSelectionFromView(DocumentId docId = kInvalidDocumentId);
-    lcnc::cad::selection::CadSelectionContext selectionContext(
-        DocumentId docId = kInvalidDocumentId) const;
+    lcnc::cad::selection::CadSelectionContext
+    selectionContext(DocumentId docId = kInvalidDocumentId) const;
     void setSelectionContext(const lcnc::cad::selection::CadSelectionContext& context);
 
     // ── Modeling Operations (delegates to ShapeService + refreshes display) ──
     /// Move a shape by translation vector. Returns true on success.
     bool moveShape(DocumentId docId, const TDF_Label& label, const gp_Vec& translation);
-    bool moveShapes(DocumentId docId, const QList<TDF_Label>& labels,
-                    const gp_Vec& translation);
+    bool moveShapes(DocumentId docId, const QList<TDF_Label>& labels, const gp_Vec& translation);
 
     /// Rotate a shape around an axis by angleDeg degrees. Returns true on success.
-    bool rotateShape(DocumentId docId, const TDF_Label& label,
-                     const gp_Ax1& axis, double angleDeg);
-    bool rotateShapes(DocumentId docId, const QList<TDF_Label>& labels,
-                      const gp_Ax1& axis, double angleDeg);
+    bool rotateShape(DocumentId docId, const TDF_Label& label, const gp_Ax1& axis, double angleDeg);
+    bool rotateShapes(DocumentId docId, const QList<TDF_Label>& labels, const gp_Ax1& axis,
+                      double angleDeg);
 
     /// Delete a shape from a document by its label entry string.
     bool deleteShape(DocumentId docId, const QString& entry);
     bool deleteShapes(DocumentId docId, const QStringList& entries);
 
     /// Explode a compound into sub-shapes. Returns child count.
-    int  explodeShape(DocumentId docId, const TDF_Label& label, int entityKind);
+    int explodeShape(DocumentId docId, const TDF_Label& label, int entityKind);
 
     /// Add a new shape to the document. Returns the new label.
-    TDF_Label createShape(DocumentId docId, const TopoDS_Shape& shape,
-                          const QString& name,
+    TDF_Label createShape(DocumentId docId, const TopoDS_Shape& shape, const QString& name,
                           int entityKind = static_cast<int>(LcncDocument::EntityKind::Workpiece));
 
     /// Request the UI to enter a primitive creation tool from Ribbon or Task home.
     void requestPrimitiveTool(int primitiveIndex);
     /// Build a transient primitive preview shape without modifying any document.
-    bool buildPrimitivePreview(int primitiveIndex,
-                               const PrimitiveParameters& params,
-                               TopoDS_Shape* outShape,
-                               QString* errMsg = nullptr);
+    bool buildPrimitivePreview(int primitiveIndex, const PrimitiveParameters& params,
+                               TopoDS_Shape* outShape, QString* errMsg = nullptr);
     /// Create a primitive and commit it to the active or newly created document.
     bool createPrimitive(int primitiveIndex, const PrimitiveParameters& params);
     /// Build a preview through the CAD tool dispatcher.
-    bool previewTool(const QString& toolId,
-                     const QVariantMap& params,
-                     TopoDS_Shape* outShape,
+    bool previewTool(const QString& toolId, const QVariantMap& params, TopoDS_Shape* outShape,
                      QString* errMsg = nullptr);
     /// Execute a parameterized CAD tool through the dispatcher.
-    bool executeTool(const QString& toolId,
-                     const QVariantMap& params,
-                     QString* errMsg = nullptr);
+    bool executeTool(const QString& toolId, const QVariantMap& params, QString* errMsg = nullptr);
     /// Build a transient transform preview for the selected shapes.
-    bool buildTransformPreview(const TransformParameters& params,
-                               TopoDS_Shape* outShape,
-                               double* refX = nullptr,
-                               double* refY = nullptr,
-                               double* refZ = nullptr,
-                               QString* errMsg = nullptr) const;
+    bool buildTransformPreview(const TransformParameters& params, TopoDS_Shape* outShape,
+                               double* refX = nullptr, double* refY = nullptr,
+                               double* refZ = nullptr, QString* errMsg = nullptr) const;
     /// Apply an interactive transform to the selected shapes.
-    bool applyTransform(const TransformParameters& params,
-                        QString* errMsg = nullptr);
+    bool applyTransform(const TransformParameters& params, QString* errMsg = nullptr);
 
     // ── Sketch + Feature Modeling ───────────────────────────────────────
     /// Start a lightweight sketch session on the requested plane index.
@@ -234,11 +225,8 @@ public:
     /// Apply a feature to the currently selected finished sketch and commit it.
     bool applyFeature(int featureIndex, double length, double angleDeg);
     /// Build a transient feature preview shape without modifying any document.
-    bool buildFeaturePreview(int featureIndex,
-                             double length,
-                             double angleDeg,
-                             TopoDS_Shape* outShape,
-                             QString* errMsg = nullptr);
+    bool buildFeaturePreview(int featureIndex, double length, double angleDeg,
+                             TopoDS_Shape* outShape, QString* errMsg = nullptr);
     /// Clear the current transient modeling operation without document mutation.
     void cancelModelingOperation();
     /// Returns true while the module has an editable sketch session.
@@ -250,7 +238,8 @@ public:
     /// Select a finished sketch by id (0 to clear). Emits sketchSelectionChanged.
     void setSelectedSketchId(int sketchId);
     /// Snapshot of finished sketches for the active document.
-    QList<FinishedSketchSnapshot> finishedSketchSnapshots(DocumentId docId = kInvalidDocumentId) const;
+    QList<FinishedSketchSnapshot>
+    finishedSketchSnapshots(DocumentId docId = kInvalidDocumentId) const;
     /// Set visibility flag of a finished sketch (manager-side bookkeeping; view layer pending).
     bool setSketchVisible(DocumentId docId, int sketchId, bool visible);
     /// Delete a finished sketch by id.
@@ -267,15 +256,13 @@ public:
     /// Move a sketch element in the active sketch session.
     bool moveSketchElement(int elementId, double deltaX, double deltaY, QString* errMsg = nullptr);
     /// Move a specific sketch element handle in the active sketch session.
-    bool moveSketchElementHandle(int elementId,
-                                 int handleIndex,
-                                 double deltaX,
-                                 double deltaY,
+    bool moveSketchElementHandle(int elementId, int handleIndex, double deltaX, double deltaY,
                                  QString* errMsg = nullptr);
     /// Snapshot of current sketch elements for tree/list rendering.
     QList<SketchElementSnapshot> sketchElementSnapshots() const;
     /// Snapshot of sketch elements for view-layer overlay rendering.
-    QList<SketchOverlaySnapshot> sketchOverlaySnapshots(DocumentId docId = kInvalidDocumentId) const;
+    QList<SketchOverlaySnapshot>
+    sketchOverlaySnapshots(DocumentId docId = kInvalidDocumentId) const;
 
     // ── Undo / Redo ─────────────────────────────────────────────────────
     bool canUndo(DocumentId docId) const;
@@ -283,7 +270,7 @@ public:
     void undo(DocumentId docId);
     void redo(DocumentId docId);
 
-signals:
+  signals:
     /// Emitted whenever the document list changes (add/remove).
     void documentListChanged();
     /// Emitted when the workpiece section tree should be rebuilt.
@@ -307,9 +294,12 @@ signals:
     /// Emitted when the selected finished sketch changes.
     void sketchSelectionChanged(int sketchId);
 
-private:
+  private:
     void refreshDisplay(DocumentId docId);
     bool cancelOwnedTasks(int timeoutMs);
+    bool cancelDocumentTasks(DocumentId docId, int timeoutMs);
+    void trackDocumentTask(DocumentId docId, TaskId taskId);
+    void releaseDocumentTask(DocumentId docId, TaskId taskId);
 
     /// 标记 init() 是否已成功执行（避免重复注册）。
     bool m_initialized{false};
@@ -320,4 +310,5 @@ private:
     std::unique_ptr<lcnc::cad::CadDocumentIoService> m_documentIoService;
     std::unique_ptr<lcnc::cad::task::CadCommandDispatcher> m_commandDispatcher;
     lcnc::ModuleTaskScope m_taskScope;
+    std::map<DocumentId, lcnc::ModuleTaskScope> m_documentTaskScopes;
 };

@@ -1,16 +1,16 @@
 #pragma once
 
 #include "laser_device.h"
-#include "http_client.h"
+#include "modules/process/device/connect/http_client.h"
 
-class PharosLaserDevice : public LaserDevice
+class PharosLaserDevice final : public LaserDevice
 {
 	public:
 	explicit PharosLaserDevice(lcnc::process::ProcessSettingsService& settings);
 
-	virtual ErrorCode		setLaserTable(const table& tableLaser = table{});
+	ErrorCode setLaserTable(const toml::table& tableLaser = {}) override;
 
-	virtual const string&	GetName();
+	const std::string& GetName() override;
 	virtual bool			IsInited();
 	virtual bool			StartLaser();
 	virtual bool			StopLaser();
@@ -24,17 +24,17 @@ class PharosLaserDevice : public LaserDevice
 	virtual bool			SetPpDividerOnly(double dPpDivider,
 		LaserResponseMode eResponseMode = LaserResponseMode::Strict);
 
-	virtual string			GetEnergy();
-	virtual string			GetFrequency();
-	virtual string			GetPulseWidth();
+	std::string GetEnergy() override;
+	std::string GetFrequency() override;
+	std::string GetPulseWidth() override;
 
 	virtual double			GetAveragePower();
-	virtual string			GetTemperature();
-	virtual string			GetTroubleshooting();
+	std::string GetTemperature() override;
+	std::string GetTroubleshooting() override;
 
 private:
-	table					MergeLaserTable(const table& tableLaser) const;
-	void					UpdateHttpCache(const table& tableMerged);
+	toml::table MergeLaserTable(const toml::table& tableLaser) const;
+	void UpdateHttpCache(const toml::table& tableMerged);
 	QString					BuildRequestUrl(const QString& suffix) const;
 	bool					PutLaserParameter(const QString& suffix, double dValue,
 		LaserResponseMode eResponseMode = LaserResponseMode::Strict);
@@ -44,7 +44,7 @@ private:
 
 private:
 	HTTPClient				m_httpClient;
-	string					m_strName;
+	std::string				m_strName;
 	bool					m_bIsInited;
 	LaserCommunicationConfig m_communicationConfig;
 	double					m_dAttenuatorPercentage;

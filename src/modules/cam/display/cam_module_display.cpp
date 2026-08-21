@@ -129,12 +129,12 @@ using lcnc::cam::detail::entityEntries;
 
 int CamModule::machiningFaceCount() const
 {
-    return static_cast<int>(m_machiningFaces.size());
+    return static_cast<int>(machiningFaces().size());
 }
 
 bool CamModule::hasManualMachiningFaces() const
 {
-    for (const auto& entry : m_machiningFaces)
+    for (const auto& entry : machiningFaces())
         if (entry.manual)
             return true;
     return false;
@@ -143,9 +143,9 @@ bool CamModule::hasManualMachiningFaces() const
 QList<CamModule::MachiningFaceInfo> CamModule::machiningFacesForTree() const
 {
     QList<MachiningFaceInfo> result;
-    result.reserve(static_cast<int>(m_machiningFaces.size()));
+    result.reserve(static_cast<int>(machiningFaces().size()));
     int autoIdx = 0, manualIdx = 0;
-    for (const auto& entry : m_machiningFaces) {
+    for (const auto& entry : machiningFaces()) {
         // Cross sections are algorithmic reference faces.  They intentionally
         // stay out of the operator-facing machining-face tree.
         if (entry.role == lcnc::cam::MachiningFaceRole::CrossSection)
@@ -177,7 +177,7 @@ QList<CamModule::MachiningFaceInfo> CamModule::machiningFacesForTree() const
 std::vector<TopoDS_Face> CamModule::manualMachiningFaces() const
 {
     std::vector<TopoDS_Face> faces;
-    for (const auto& entry : m_machiningFaces)
+    for (const auto& entry : machiningFaces())
         if (entry.manual && !entry.face.IsNull())
             faces.push_back(entry.face);
     return faces;
@@ -274,7 +274,7 @@ void CamModule::clearMachiningFaces()
     // 中文翻译：编辑加工面
     if (rejectConflictingPipelineOperation(tr("Edit machining surface")))
         return;
-    if (m_machiningFaces.empty())
+    if (machiningFaces().empty())
         return;
     m_machiningFacePipeline->clearEntries();
     pushMachiningFaceRecordsToCamData();
@@ -293,8 +293,8 @@ void CamModule::refreshMachiningFaceDisplay()
     if (!m_displayProjectionService)
         return;
     std::vector<lcnc::cam::MachiningFaceDisplaySnapshot> snapshot;
-    snapshot.reserve(m_machiningFaces.size());
-    for (const auto& entry : m_machiningFaces) {
+    snapshot.reserve(machiningFaces().size());
+    for (const auto& entry : machiningFaces()) {
         snapshot.push_back({entry.faceId, entry.face, entry.workpieceEntry,
                             entry.manual, entry.role});
     }
@@ -362,7 +362,7 @@ void CamModule::rebindMachiningFacesFromRecords()
 
     LCNC_INFO(lcnc::LogCode::Generic,
               "cam.machiningFace: rebound {} faces from persisted signatures",
-              m_machiningFaces.size());
+              machiningFaces().size());
 }
 
 bool CamModule::pickMachiningFace(WidgetOccView* view, const QPoint& pos, QString* error)

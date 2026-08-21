@@ -1,5 +1,4 @@
-#ifndef _GSN_MOTION_CONTROL_
-#define _GSN_MOTION_CONTROL_
+#pragma once
 
 #include "motion_control.h"
 //#include "ACSC.h"
@@ -11,6 +10,7 @@
 #include <time.h>
 #include <map>
 #include <array>
+#include <atomic>
 #include <string>
 
 //#define     deviceDescription L"PCI-1730,BID#0"
@@ -88,7 +88,7 @@ private:
 	bool					IsPressureMonitoring;
 	double					m_dBlowDelay;
 
-	bool					m_bStop;					// 停止轴系
+	std::atomic_bool		m_bStop{false};			// 停止轴系
 protected:
 	bool					m_bConnectFlag;				//是否连接的标志状态
 	bool					m_bErrorOccurred;
@@ -265,5 +265,3 @@ public:
 	bool AfterOpenComm() { return true; }
 	bool ErrorOccurred() const override { return true; }
 };
-
-#endif

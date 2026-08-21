@@ -2,7 +2,7 @@
 
 #include "laser_device.h"
 
-class   SimulatorLaserDevice : public LaserDevice
+class SimulatorLaserDevice final : public LaserDevice
 {
 public:
 	explicit SimulatorLaserDevice(lcnc::process::ProcessSettingsService& settings);
@@ -11,9 +11,9 @@ public:
 	virtual bool			Connect() override;
 	virtual void			Disconnect() override;
 
-	virtual ErrorCode		setLaserTable(const table& tableLaser = table{});
+	ErrorCode setLaserTable(const toml::table& tableLaser = {}) override;
 
-	virtual const string&	GetName();
+	const std::string& GetName() override;
 	virtual bool			IsInited();
 	virtual bool			StartLaser();
 	virtual bool			StopLaser();
@@ -27,12 +27,12 @@ public:
 	virtual bool			SetLaserParameter(const LaserParameter& parameter);
 
 	// 获取实际参数 
-	virtual string			GetEnergy();
-	virtual string			GetFrequency();
-	virtual string			GetPulseWidth();
+	std::string GetEnergy() override;
+	std::string GetFrequency() override;
+	std::string GetPulseWidth() override;
 
 private:  
-	string					m_strName;
+	std::string				m_strName;
 	bool					m_bIsInited;
 	double					m_dMaxCurrent;
 	double					m_dSimmerCurrent;
@@ -41,7 +41,7 @@ private:
 public:
 	// 非本型号函数
 	virtual double GetAveragePower()	{ return 0; };
-	virtual string GetTemperature()		{ return ""; };
-	virtual string GetTroubleshooting() { return ""; };
+	std::string GetTemperature() override { return {}; }
+	std::string GetTroubleshooting() override { return {}; }
 	
 };

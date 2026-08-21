@@ -1,4 +1,5 @@
 #include "core/algorithms/cad/measure.h"
+#include "core/math/numeric_constants.h"
 #include "core/algorithms/occt_exact_operation_lock.h"
 
 #include <BRepAdaptor_Surface.hxx>
@@ -17,9 +18,6 @@
 #include <cmath>
 #include <stdexcept>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 namespace lcnc::cad_algo {
 
@@ -59,7 +57,7 @@ double angleBetween(const gp_Vec& a, const gp_Vec& b)
     if (la < 1e-9 || lb < 1e-9) return -1.0;
     double cosA = a.Dot(b) / (la * lb);
     cosA = std::max(-1.0, std::min(1.0, cosA));
-    return std::acos(cosA) * 180.0 / M_PI;
+    return lcnc::math::radiansToDegrees(std::acos(cosA));
 }
 
 double surfaceArea(const TopoDS_Shape& shape)

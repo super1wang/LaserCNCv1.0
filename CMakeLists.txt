@@ -9,7 +9,7 @@ if(_lcnc_binary_dir STREQUAL _lcnc_legacy_build_dir)
         "or vs-acs-gtn (build-vs/).")
 endif()
 
-project(LaserCNC VERSION 1.2.1 LANGUAGES CXX)
+project(LaserCNC VERSION 1.5.9 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -294,6 +294,7 @@ target_include_directories(lcnc_common INTERFACE
     ${OpenCASCADE_INCLUDE_DIR}
 )
 target_compile_definitions(lcnc_common INTERFACE
+    LCNC_VERSION_STRING="${PROJECT_VERSION}"
     LCNC_PROCESS_HAS_ACS=$<BOOL:${LCNC_WITH_ACS}>
     LCNC_PROCESS_HAS_GTN=$<BOOL:${LCNC_WITH_GTN}>
     LCNC_PROCESS_HAS_BDAQ=$<BOOL:${LCNC_WITH_BDAQ}>
@@ -509,13 +510,14 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/process_interactive_io_service.cpp
     src/modules/process/runtime/process_status_service.h
     src/modules/process/runtime/process_status_service.cpp
-    src/modules/process/setting/builtin_io_defs.cpp
+    src/modules/process/settings/schema/builtin_io_defs.cpp
     src/modules/process/device/motion_control/motion_control.cpp
     src/modules/process/device/motion_control/simulate_cmhp_motion_control.cpp
     src/modules/process/device/connect/serial_port.cpp
     src/modules/process/device/laser/ld_factory.cpp
     src/modules/process/device/laser/analog_laser_device.cpp
     src/modules/process/device/laser/laser_device.cpp
+    src/modules/process/device/laser/protocol/ultron_protocol.cpp
     src/modules/process/device/laser/simulator_laser_device.cpp
     src/modules/process/tool/tool.cpp
     src/modules/process/tool/tool_factory.cpp
@@ -650,8 +652,8 @@ target_link_libraries(lcnc_view PUBLIC
 # cad module ──────────────────────────────────────────────────────────────────
 add_library(lcnc_module_cad STATIC ${SRCS_MODULE_CAD})
 set_target_properties(lcnc_module_cad PROPERTIES AUTOMOC ON)
-target_link_libraries(lcnc_module_cad PUBLIC
-    lcnc_view
+target_link_libraries(lcnc_module_cad PUBLIC lcnc_view)
+target_link_libraries(lcnc_module_cad PRIVATE
     SARibbonBar::SARibbonBar
     Qt6::UiTools
 )
@@ -659,8 +661,8 @@ target_link_libraries(lcnc_module_cad PUBLIC
 # cam module (depends on cad — see cam_module.cpp pulling cad/services) ───────
 add_library(lcnc_module_cam STATIC ${SRCS_MODULE_CAM})
 set_target_properties(lcnc_module_cam PROPERTIES AUTOMOC ON)
-target_link_libraries(lcnc_module_cam PUBLIC
-    lcnc_view
+target_link_libraries(lcnc_module_cam PUBLIC lcnc_view)
+target_link_libraries(lcnc_module_cam PRIVATE
     lcnc_module_cad
     SARibbonBar::SARibbonBar
 )
@@ -669,8 +671,8 @@ target_link_libraries(lcnc_module_cam PUBLIC
 # this target separate makes accidental Process/controller dependencies visible.
 add_library(lcnc_module_simulation STATIC ${SRCS_MODULE_SIMULATION})
 set_target_properties(lcnc_module_simulation PROPERTIES AUTOMOC ON)
-target_link_libraries(lcnc_module_simulation PUBLIC
-    lcnc_view
+target_link_libraries(lcnc_module_simulation PUBLIC lcnc_view)
+target_link_libraries(lcnc_module_simulation PRIVATE
     lcnc_module_cam
     Qt6::Widgets
 )
@@ -679,9 +681,8 @@ add_library(lcnc_module_process STATIC ${SRCS_MODULE_PROCESS})
 set_target_properties(lcnc_module_process PROPERTIES
     AUTOMOC ON
 )
-target_include_directories(lcnc_module_process PUBLIC
+target_include_directories(lcnc_module_process PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/system
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/setting
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/tool
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/motion_control
     ${CMAKE_CURRENT_SOURCE_DIR}/src/modules/process/device/laser
@@ -701,9 +702,8 @@ target_link_libraries(lcnc_module_process PRIVATE
     "${_lcnc_boost_lib_dir}/boost_chrono-${_lcnc_boost_lib_suffix}.lib"
     "${_lcnc_boost_lib_dir}/boost_system-${_lcnc_boost_lib_suffix}.lib"
 )
-target_link_libraries(lcnc_module_process PUBLIC
-    lcnc_view
-    lcnc_module_cam
+target_link_libraries(lcnc_module_process PUBLIC lcnc_view lcnc_module_cam Qt6::SerialPort)
+target_link_libraries(lcnc_module_process PRIVATE
     SARibbonBar::SARibbonBar
     Qt6::Network
     Qt6::UiTools
@@ -720,17 +720,19 @@ if(LCNC_WITH_BDAQ)
     target_include_directories(lcnc_module_process PRIVATE "${LCNC_BDAQ_INCLUDE_DIR}")
     target_link_libraries(lcnc_module_process PRIVATE "${LCNC_BDAQ_LIB}")
 endif()
-target_link_libraries(lcnc_module_process PUBLIC Qt6::SerialPort)
-
 # app — bundles the three modules so the exe only needs to link lcnc_app ──────
 add_library(lcnc_app STATIC ${SRCS_APP})
 set_target_properties(lcnc_app PROPERTIES AUTOMOC ON)
 target_link_libraries(lcnc_app PUBLIC
+    lcnc_common
+    Qt6::Widgets
+    SARibbonBar::SARibbonBar
+)
+target_link_libraries(lcnc_app PRIVATE
     lcnc_module_cad
     lcnc_module_cam
     lcnc_module_simulation
     lcnc_module_process
-    SARibbonBar::SARibbonBar
 )
 
 # ─── Executable ───────────────────────────────────────────────────────────────
@@ -954,6 +956,10 @@ if(BUILD_TESTING)
         tests/task_manager_test.cpp
     )
     target_link_libraries(lcnc_task_manager_test PRIVATE lcnc_core Qt6::Core Qt6::Concurrent)
+    add_executable(lcnc_service_registry_lifetime_test
+        tests/service_registry_lifetime_test.cpp
+    )
+    target_link_libraries(lcnc_service_registry_lifetime_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_cam_lead_in_test
         tests/cam_lead_in_test.cpp
     )
@@ -982,6 +988,14 @@ if(BUILD_TESTING)
         tests/device_command_queue_test.cpp
     )
     target_link_libraries(lcnc_device_command_queue_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_device_wait_test
+        tests/device_wait_test.cpp
+    )
+    target_link_libraries(lcnc_device_wait_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_ultron_protocol_test
+        tests/ultron_protocol_test.cpp
+    )
+    target_link_libraries(lcnc_ultron_protocol_test PRIVATE lcnc_module_process Qt6::Core)
     add_executable(lcnc_process_preflight_service_test
         tests/process_preflight_service_test.cpp
     )
@@ -1065,6 +1079,13 @@ if(BUILD_TESTING)
         tests/cad_algorithm_contract_test.cpp
     )
     target_link_libraries(lcnc_cad_algorithm_contract_test PRIVATE lcnc_module_cad Qt6::Core)
+    add_executable(lcnc_cad_detached_import_test
+        tests/cad_detached_import_test.cpp
+    )
+    target_link_libraries(lcnc_cad_detached_import_test PRIVATE lcnc_module_cad Qt6::Core)
+    target_compile_definitions(lcnc_cad_detached_import_test PRIVATE
+        LCNC_CAD_IMPORT_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
+    )
     add_executable(lcnc_project_explorer_controller_test
         tests/project_explorer_controller_test.cpp
     )
@@ -1090,60 +1111,50 @@ if(BUILD_TESTING)
         target_link_libraries(lcnc_simulator_cmhp_sdk_integration_test PRIVATE
             lcnc_module_process Qt6::Core)
     endif()
-    if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
-        add_dependencies(lcnc_project_package_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_task_manager_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cam_lead_in_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cam_offset_display_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cam_algorithm_pipeline_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_runtime_configuration_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_device_command_queue_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_preflight_service_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_cutting_safety_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_status_service_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_connection_service_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_manual_motion_service_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_workflow_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_process_current_schema_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_contour_order_planner_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_manufacturing_flow_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_occt_exact_operation_lock_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_surface_collision_prefilter_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cam_data_manager_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_machine_topology_solver_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_toolpath_snapshot_concurrency_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_cad_algorithm_contract_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_project_explorer_controller_test lcnc_runtime_deploy_build)
-        add_dependencies(lcnc_translation_context_test lcnc_runtime_deploy_build)
-        if(LCNC_WITH_ACS)
-            add_dependencies(lcnc_acs_rapid_command_test lcnc_runtime_deploy_build)
-            add_dependencies(lcnc_simulator_cmhp_sdk_integration_test lcnc_runtime_deploy_build)
-        endif()
+    set(LCNC_TEST_EXECUTABLE_TARGETS
+        lcnc_project_package_test
+        lcnc_task_manager_test
+        lcnc_service_registry_lifetime_test
+        lcnc_cam_lead_in_test
+        lcnc_cam_offset_display_test
+        lcnc_cam_algorithm_pipeline_test
+        lcnc_process_runtime_configuration_test
+        lcnc_device_command_queue_test
+        lcnc_device_wait_test
+        lcnc_ultron_protocol_test
+        lcnc_process_preflight_service_test
+        lcnc_process_cutting_safety_test
+        lcnc_process_status_service_test
+        lcnc_process_connection_service_test
+        lcnc_process_manual_motion_service_test
+        lcnc_process_workflow_test
+        lcnc_process_current_schema_test
+        lcnc_contour_order_planner_test
+        lcnc_manufacturing_flow_test
+        lcnc_occt_exact_operation_lock_test
+        lcnc_surface_collision_prefilter_test
+        lcnc_cam_data_manager_test
+        lcnc_machine_topology_solver_test
+        lcnc_toolpath_snapshot_concurrency_test
+        lcnc_cad_algorithm_contract_test
+        lcnc_cad_detached_import_test
+        lcnc_project_explorer_controller_test
+        lcnc_translation_context_test
+    )
+    if(LCNC_WITH_ACS)
+        list(APPEND LCNC_TEST_EXECUTABLE_TARGETS
+            lcnc_acs_rapid_command_test
+            lcnc_simulator_cmhp_sdk_integration_test)
     endif()
-    lcnc_deploy_tbb_runtime(lcnc_project_package_test)
-    lcnc_deploy_tbb_runtime(lcnc_task_manager_test)
-    lcnc_deploy_tbb_runtime(lcnc_cam_lead_in_test)
-    lcnc_deploy_tbb_runtime(lcnc_cam_offset_display_test)
-    lcnc_deploy_tbb_runtime(lcnc_cam_algorithm_pipeline_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_runtime_configuration_test)
-    lcnc_deploy_tbb_runtime(lcnc_device_command_queue_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_preflight_service_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_cutting_safety_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_status_service_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_connection_service_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_manual_motion_service_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_workflow_test)
-    lcnc_deploy_tbb_runtime(lcnc_process_current_schema_test)
-    lcnc_deploy_tbb_runtime(lcnc_contour_order_planner_test)
-    lcnc_deploy_tbb_runtime(lcnc_manufacturing_flow_test)
-    lcnc_deploy_tbb_runtime(lcnc_occt_exact_operation_lock_test)
-    lcnc_deploy_tbb_runtime(lcnc_surface_collision_prefilter_test)
-    lcnc_deploy_tbb_runtime(lcnc_cam_data_manager_test)
-    lcnc_deploy_tbb_runtime(lcnc_machine_topology_solver_test)
-    lcnc_deploy_tbb_runtime(lcnc_toolpath_snapshot_concurrency_test)
-    lcnc_deploy_tbb_runtime(lcnc_cad_algorithm_contract_test)
-    lcnc_deploy_tbb_runtime(lcnc_project_explorer_controller_test)
-    lcnc_deploy_tbb_runtime(lcnc_translation_context_test)
+    foreach(_lcnc_test_target IN LISTS LCNC_TEST_EXECUTABLE_TARGETS)
+        if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
+            add_dependencies(${_lcnc_test_target} lcnc_runtime_deploy_build)
+        endif()
+        lcnc_deploy_tbb_runtime(${_lcnc_test_target})
+        if(LCNC_ENABLE_ASAN)
+            lcnc_deploy_asan_runtime(${_lcnc_test_target})
+        endif()
+    endforeach()
     if(LCNC_WITH_ACS)
         lcnc_deploy_tbb_runtime(lcnc_acs_rapid_command_test)
         lcnc_deploy_tbb_runtime(lcnc_simulator_cmhp_sdk_integration_test)
@@ -1151,36 +1162,6 @@ if(BUILD_TESTING)
         lcnc_deploy_gtn_runtime(lcnc_simulator_cmhp_sdk_integration_test)
     endif()
     lcnc_deploy_qt_offscreen_platform(lcnc_project_explorer_controller_test)
-    if(LCNC_ENABLE_ASAN)
-        lcnc_deploy_asan_runtime(lcnc_project_package_test)
-        lcnc_deploy_asan_runtime(lcnc_task_manager_test)
-        lcnc_deploy_asan_runtime(lcnc_cam_lead_in_test)
-        lcnc_deploy_asan_runtime(lcnc_cam_offset_display_test)
-        lcnc_deploy_asan_runtime(lcnc_cam_algorithm_pipeline_test)
-        lcnc_deploy_asan_runtime(lcnc_process_runtime_configuration_test)
-        lcnc_deploy_asan_runtime(lcnc_device_command_queue_test)
-        lcnc_deploy_asan_runtime(lcnc_process_preflight_service_test)
-        lcnc_deploy_asan_runtime(lcnc_process_cutting_safety_test)
-        lcnc_deploy_asan_runtime(lcnc_process_status_service_test)
-        lcnc_deploy_asan_runtime(lcnc_process_connection_service_test)
-        lcnc_deploy_asan_runtime(lcnc_process_manual_motion_service_test)
-        lcnc_deploy_asan_runtime(lcnc_process_workflow_test)
-        lcnc_deploy_asan_runtime(lcnc_process_current_schema_test)
-        lcnc_deploy_asan_runtime(lcnc_contour_order_planner_test)
-        lcnc_deploy_asan_runtime(lcnc_manufacturing_flow_test)
-        lcnc_deploy_asan_runtime(lcnc_occt_exact_operation_lock_test)
-        lcnc_deploy_asan_runtime(lcnc_surface_collision_prefilter_test)
-        lcnc_deploy_asan_runtime(lcnc_cam_data_manager_test)
-        lcnc_deploy_asan_runtime(lcnc_machine_topology_solver_test)
-        lcnc_deploy_asan_runtime(lcnc_toolpath_snapshot_concurrency_test)
-        lcnc_deploy_asan_runtime(lcnc_cad_algorithm_contract_test)
-        lcnc_deploy_asan_runtime(lcnc_project_explorer_controller_test)
-        lcnc_deploy_asan_runtime(lcnc_translation_context_test)
-        if(LCNC_WITH_ACS)
-            lcnc_deploy_asan_runtime(lcnc_acs_rapid_command_test)
-            lcnc_deploy_asan_runtime(lcnc_simulator_cmhp_sdk_integration_test)
-        endif()
-    endif()
     add_test(NAME architecture_checks
         COMMAND "${LCNC_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_architecture.ps1"
@@ -1194,6 +1175,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_project_package_test)
     add_test(NAME lcnc_task_manager_test
         COMMAND lcnc_task_manager_test)
+    add_test(NAME lcnc_service_registry_lifetime_test
+        COMMAND lcnc_service_registry_lifetime_test)
     add_test(NAME lcnc_cam_lead_in_test
         COMMAND lcnc_cam_lead_in_test)
     add_test(NAME lcnc_cam_offset_display_test
@@ -1204,6 +1187,10 @@ if(BUILD_TESTING)
         COMMAND lcnc_process_runtime_configuration_test)
     add_test(NAME lcnc_device_command_queue_test
         COMMAND lcnc_device_command_queue_test)
+    add_test(NAME lcnc_device_wait_test
+        COMMAND lcnc_device_wait_test)
+    add_test(NAME lcnc_ultron_protocol_test
+        COMMAND lcnc_ultron_protocol_test)
     add_test(NAME lcnc_process_preflight_service_test
         COMMAND lcnc_process_preflight_service_test)
     add_test(NAME lcnc_process_cutting_safety_test
@@ -1246,6 +1233,8 @@ if(BUILD_TESTING)
         COMMAND lcnc_toolpath_snapshot_concurrency_test)
     add_test(NAME lcnc_cad_algorithm_contract_test
         COMMAND lcnc_cad_algorithm_contract_test)
+    add_test(NAME lcnc_cad_detached_import_test
+        COMMAND lcnc_cad_detached_import_test)
     add_test(NAME lcnc_project_explorer_controller_test
         COMMAND lcnc_project_explorer_controller_test)
     set_tests_properties(lcnc_project_explorer_controller_test PROPERTIES

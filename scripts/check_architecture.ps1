@@ -18,6 +18,43 @@ Find-ForbiddenInclude (Join-Path $srcPath 'core') '#\s*include\s*[<"](?:view|mod
 Find-ForbiddenInclude (Join-Path $srcPath 'view') '#\s*include\s*[<"](?:modules|app)/' 'view may not depend on modules/app'
 Find-ForbiddenInclude (Join-Path $srcPath 'modules/process') '#\s*include\s*[<"](?:TopoDS|AIS_|gp_|Geom_|BRep|XCAF)' 'Process may not include OCC types'
 Find-ForbiddenInclude (Join-Path $srcPath 'core/algorithms') '#\s*include\s*[<"](?:QWidget|QAction|QDialog|core/document/lcnc_document|view/gui_document|core/kernel/kernel)' 'core algorithms must remain independent of UI, documents, and Kernel'
+Find-ForbiddenInclude (Join-Path $srcPath 'modules/process') '#\s*include\s*[<"]modules/(?:cad|cam|simulation)/[^" >]*_module\.h' 'Process may not depend on another concrete Module'
+Find-ForbiddenInclude (Join-Path $srcPath 'modules/simulation') '#\s*include\s*[<"]modules/(?:cad|cam|process)/[^" >]*_module\.h' 'Simulation may not depend on another concrete Module'
+
+$legacyProcessSettingPath = Join-Path $srcPath 'modules/process/setting'
+if ((Test-Path -LiteralPath $legacyProcessSettingPath) -and
+    (Get-ChildItem -LiteralPath $legacyProcessSettingPath -Recurse -File)) {
+    $violations.Add("Process settings must use one canonical directory: $legacyProcessSettingPath")
+}
+
+Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules/process/device') -Recurse -File |
+    Where-Object { $_.Extension -in '.h', '.hpp' } |
+    ForEach-Object {
+        $headerText = Get-Content -LiteralPath $_.FullName -Raw
+        if ($headerText -notmatch '(?m)^\s*#pragma\s+once\b') {
+            $violations.Add("Process device header must use #pragma once: $($_.FullName)")
+        }
+        foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern '^\s*using\s+namespace\s+')) {
+            $violations.Add("Process device public header may not use namespace-wide using: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+        }
+    }
+
+Get-ChildItem -LiteralPath $srcPath -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
+    foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern '\bM_PI\b')) {
+        $violations.Add("Use core/math/numeric_constants.h instead of M_PI: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+    }
+}
+
+Get-ChildItem -LiteralPath (Join-Path $srcPath 'modules') -Recurse -File -Include *.h,*.hpp,*.cpp | ForEach-Object {
+    foreach ($match in (Select-String -LiteralPath $_.FullName -Pattern 'shared_ptr<[^>]+>\s*\([^\r\n]*\[\]\([^)]*\)\s*(?:noexcept\s*)?\{\s*\}\s*\)')) {
+        $violations.Add("Module borrowed services must use registerBorrowedService: $($_.FullName):$($match.LineNumber): $($match.Line.Trim())")
+    }
+}
+
+$cadIoService = Join-Path $srcPath 'modules/cad/services/cad_document_io_service.cpp'
+foreach ($match in (Select-String -LiteralPath $cadIoService -Pattern '\bimport(?:Step|Iges|Stl|Brep)IntoDocument\s*\(')) {
+    $violations.Add("CAD worker imports must remain detached until commit: ${cadIoService}:$($match.LineNumber): $($match.Line.Trim())")
+}
 
 # CAM is the sole toolpath producer.  Cross-module contracts intentionally
 # expose detached catalog/execution snapshots only: neither Process nor the

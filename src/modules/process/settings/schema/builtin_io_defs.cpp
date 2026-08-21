@@ -1,4 +1,4 @@
-#include "modules/process/setting/builtin_io_defs.h"
+#include "modules/process/settings/schema/builtin_io_defs.h"
 
 #include <cstddef>
 

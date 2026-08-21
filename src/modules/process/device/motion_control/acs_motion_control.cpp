@@ -5,8 +5,9 @@
 #include <fstream>
 #include <limits>
 //#include "CoreUtils.h"
-#include "bdaqctrl.h"
+#include <advantech/bdaqctrl.h>
 #include "core/logging/logger.h"
+#include "modules/process/device/runtime/device_wait.h"
 #include "modules/process/system/process_numeric_constants.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
 
@@ -1152,8 +1153,20 @@ bool ACSMotionControl::StopBuffer(int iBufferIndex)
 		LogError();
 		return false;
 	}
-	while (IsBufferRunning(iBufferIndex))
-		Sleep(10);
+	constexpr auto kStopTimeout = std::chrono::seconds(30);
+	const auto result = lcnc::process::waitForDeviceCondition(
+		[this, iBufferIndex] { return !IsBufferRunning(iBufferIndex); },
+		kStopTimeout,
+		std::chrono::milliseconds(10));
+	if (result != lcnc::process::DeviceWaitStatus::Completed)
+	{
+		LCNC_ERR(lcnc::LogCode::Generic,
+			"ACS StopBuffer timed out after {} ms for buffer {}",
+			std::chrono::duration_cast<std::chrono::milliseconds>(kStopTimeout).count(),
+			iBufferIndex);
+		m_bErrorOccurred = true;
+		return false;
+	}
 	return true;
 }
 

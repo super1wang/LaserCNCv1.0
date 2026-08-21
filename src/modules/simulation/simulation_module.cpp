@@ -3,16 +3,14 @@
 #include "core/document/lcnc_document.h"
 #include "core/algorithms/cam/collision_scan_policy.h"
 #include "core/algorithms/occt_exact_operation_lock.h"
-#include "core/document/xcaf_utils.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/logging/logger.h"
-#include "core/project/lcnc_project_manager.h"
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
-#include "modules/cam/cam_module.h"
-#include "modules/cam/contracts/i_cam_toolpath_provider.h"
+#include "modules/cam/contracts/cam_events.h"
+#include "modules/cam/contracts/i_cam_offline_simulation_provider.h"
 #include "view/gui_document.h"
 #include "view/machine_guide_renderer.h"
 #include "view/toolpath_renderer.h"
@@ -31,12 +29,10 @@
 #include <Graphic3d_Camera.hxx>
 #include <OSD_Parallel.hxx>
 #include <OSD_ThreadPool.hxx>
-#include <TDF_LabelSequence.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_MapOfShape.hxx>
 #include <TopoDS_Compound.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
 #include <Quantity_NameOfColor.hxx>
 #include <Quantity_Color.hxx>
 #include <gp_Ax3.hxx>
@@ -293,14 +289,23 @@ public:
     {
         QElapsedTimer openTimer;
         openTimer.start();
-        auto* cam = lcnc::Kernel::current().service<CamModule>();
-        auto toolpathProvider = lcnc::Kernel::current().service<lcnc::cam::ICamToolpathProvider>();
-        if (!cam || !toolpathProvider || !cam->hasToolpath() || !cam->kinematics()) {
+        m_sourceProvider = lcnc::Kernel::current()
+            .services().getService<lcnc::cam::ICamOfflineSimulationProvider>();
+        if (!m_sourceProvider) {
             if (error) *error = QObject::tr("A solved CAM toolpath and machine kinematics are required");
             return nullptr;
         }
-        m_sourceRevision = cam->toolpathRevision();
-        const auto snapshot = toolpathProvider->exportCommittedExecutionSnapshot();
+        const auto source = m_sourceProvider->captureOfflineSimulationSnapshot();
+        if (!source.valid()) {
+            if (error) {
+                *error = source.error.isEmpty()
+                    ? QObject::tr("A solved CAM toolpath and machine kinematics are required")
+                    : source.error;
+            }
+            return nullptr;
+        }
+        m_sourceRevision = source.revision;
+        const auto& snapshot = source.execution;
         if (!snapshot.motionPlan.collision.complete
             || snapshot.motionPlan.collision.state
                 == lcnc::cam::CollisionValidationState::Pending) {
@@ -327,14 +332,14 @@ public:
         const bool includeRapid = !snapshot.travelPlan.stale
             && (snapshot.travelPlan.failureReason.isEmpty()
                 || !snapshot.travelPlan.transitions.isEmpty());
-        captureSceneSnapshot(cam, snapshot);
+        captureSceneSnapshot(source);
         m_layout = snapshot.machineAxisLayout;
         const auto* machineConfig = lcnc::Kernel::current()
             .service<lcnc::MachineConfigurationService>();
         const lcnc::MachineModeDefinition definition = machineConfig
             ? machineConfig->modeDefinition(snapshot.machiningMode)
             : lcnc::MachineModeDefinition{};
-        copyKinematics(cam->kinematics(), definition);
+        copyKinematics(source, definition);
         if (!buildNodes(snapshot, orderedContourIds, includeRapid, error) || m_nodes.isEmpty()) {
             if (error && error->isEmpty())
                 *error = QObject::tr("The current CAM sequence has no resolved cutting nodes");
@@ -363,7 +368,7 @@ public:
         m_toolpathRenderer = std::make_unique<lcnc::view::ToolpathRenderer>();
         m_travelPathRenderer = std::make_unique<lcnc::view::TravelPathRenderer>();
         m_guideRenderer = std::make_unique<lcnc::view::MachineGuideRenderer>();
-        collectBodies(cam);
+        collectBodies(source);
         if (!m_collisionDetectionEnabled) {
             m_status->setText(QObject::tr("Collision detection is disabled; simulation playback is not verified."));
         } else if (!m_collisionConfigurationValid) {
@@ -409,15 +414,12 @@ public:
         // The page intentionally never hot-reloads.  Freeze CAM geometry,
         // render choices and machine calibration as one coherent scene, then
         // reject playback if any of those source inputs changes.
-        QObject::connect(cam, &CamModule::machineWorkspaceChanged, m_page, invalidateFrozenSource);
-        QObject::connect(cam, &CamModule::axisAssignmentsChanged, m_page, invalidateFrozenSource);
-        QObject::connect(cam, &CamModule::toolpathGenerated, m_page, invalidateFrozenSource);
-        QObject::connect(cam, &CamModule::toolpathCleared, m_page, invalidateFrozenSource);
-        QObject::connect(cam, &CamModule::toolpathLayersChanged, m_page, invalidateFrozenSource);
-        QObject::connect(cam, &CamModule::cutterCollisionConfigurationChanged, m_page, invalidateFrozenSource);
-        QObject::connect(cam, &CamModule::collisionConfigurationChanged, m_page, invalidateFrozenSource);
-        QObject::connect(cam, &CamModule::contourOrderTravelPlanRebuilt, m_page,
-                         [invalidateFrozenSource](const QVector<std::uint64_t>&) { invalidateFrozenSource(); });
+        m_sourceSubscription = lcnc::Kernel::current().events().subscribe<
+            lcnc::cam::events::OfflineSimulationSourceChanged>(
+            [invalidateFrozenSource](
+                const lcnc::cam::events::OfflineSimulationSourceChanged&) {
+                invalidateFrozenSource();
+            });
         // The simulation page is not visible until MainWindow adds it to the
         // central tabs.  WidgetOccView therefore defers its OCC window setup;
         // fit again on the next event-loop turn after that setup completed.
@@ -472,8 +474,8 @@ public:
     QWidget* page() const { return m_page; }
     bool isOpen() const { return m_page != nullptr; }
     void run() {
-        auto* cam = lcnc::Kernel::current().service<CamModule>();
-        if (m_sourceInvalidated || (cam && cam->toolpathRevision() != m_sourceRevision)) {
+        if (m_sourceInvalidated
+            || (m_sourceProvider && m_sourceProvider->revision() != m_sourceRevision)) {
             m_scanFinished = false;
             if (m_status) m_status->setText(QObject::tr("CAM data changed; exit and re-enter offline simulation"));
             return;
@@ -504,6 +506,10 @@ public:
     void close()
     {
         pause();
+        if (m_sourceSubscription != lcnc::kInvalidSubscription) {
+            lcnc::Kernel::current().events().unsubscribe(m_sourceSubscription);
+            m_sourceSubscription = lcnc::kInvalidSubscription;
+        }
         if (m_scanTask != kInvalidTaskId) {
             if (auto* tasks = lcnc::Kernel::current().taskManager()) tasks->requestAbort(m_scanTask);
             m_scanTask = kInvalidTaskId;
@@ -528,48 +534,39 @@ public:
         m_travelPathRenderer.reset();
         m_guideRenderer.reset();
         m_sceneSnapshot = {};
+        m_sourceProvider.reset();
         if (m_page) { delete m_page; m_page = nullptr; }
         m_gui = nullptr; m_view = nullptr; m_slider = nullptr; m_timeline = nullptr; m_status = nullptr; m_timer = nullptr;
     }
 
 private:
-    void captureSceneSnapshot(CamModule* cam,
-                              const lcnc::cam::ToolpathExportSnapshot& snapshot)
+    void captureSceneSnapshot(
+        const lcnc::cam::OfflineSimulationSnapshot& source)
     {
-        m_sceneSnapshot.toolpath = cam->toolpath();
-        m_sceneSnapshot.cutterHeadModelPosition = cam->cutterHeadModelPosition();
-        m_sceneSnapshot.showToolpath = cam->isToolpathVisible();
-        m_sceneSnapshot.showTravel = cam->isTravelPathVisible();
-        m_sceneSnapshot.showNormals = cam->showNormals();
-        m_sceneSnapshot.showMachine = cam->isMachineModelVisible();
-        const QStringList visibleMachineEntries = cam->visibleMachineEntries();
-        m_sceneSnapshot.visibleMachineEntries = QSet<QString>(
-            visibleMachineEntries.cbegin(), visibleMachineEntries.cend());
-        m_sceneSnapshot.showRotaryGuides = cam->rotaryAxisGuidesVisible();
-        m_sceneSnapshot.showCutterHeadGuide = cam->cutterHeadGuideVisible();
-        m_sceneSnapshot.normalSampleStep = cam->normalSampleStep();
-        if (GuiDocument* sourceView = cam->activeGuiDocument(); sourceView && !sourceView->view().IsNull()) {
-            m_sceneSnapshot.camera = new Graphic3d_Camera();
-            m_sceneSnapshot.camera->Copy(sourceView->view()->Camera());
-        }
-        QString proxyError;
-        m_sceneSnapshot.cutterProxy = cam->cutterCollisionProxyShape(&proxyError);
-        if (m_sceneSnapshot.cutterProxy.IsNull() && !proxyError.isEmpty()) {
-            LCNC_WARN(lcnc::LogCode::Generic,
-                      "Offline simulation scene snapshot has no cutter proxy: {}",
-                      proxyError.toStdString());
-        }
+        const auto& snapshot = source.execution;
+        m_sceneSnapshot.toolpath = source.toolpath;
+        m_sceneSnapshot.cutterHeadModelPosition = source.cutterHeadModelPosition;
+        m_sceneSnapshot.showToolpath = source.showToolpath;
+        m_sceneSnapshot.showTravel = source.showTravel;
+        m_sceneSnapshot.showNormals = source.showNormals;
+        m_sceneSnapshot.showMachine = source.showMachine;
+        m_sceneSnapshot.visibleMachineEntries = source.visibleMachineEntries;
+        m_sceneSnapshot.showRotaryGuides = source.showRotaryGuides;
+        m_sceneSnapshot.showCutterHeadGuide = source.showCutterHeadGuide;
+        m_sceneSnapshot.normalSampleStep = source.normalSampleStep;
+        m_sceneSnapshot.camera = source.camera;
+        m_sceneSnapshot.cutterProxy = source.cutterProxy;
 
         QHash<std::uint64_t, const lcnc::cam::ToolpathExportContour*> contours;
         for (const auto& contour : snapshot.contours)
             contours.insert(contour.contourId, &contour);
         for (const auto& transition : snapshot.travelPlan.transitions) {
-            const auto* source = contours.value(transition.fromContourId, nullptr);
-            if (!source || transition.surfacePreviewPoints.size() < 2)
+            const auto* sourceContour = contours.value(transition.fromContourId, nullptr);
+            if (!sourceContour || transition.surfacePreviewPoints.size() < 2)
                 continue;
             lcnc::view::TravelPathRenderer::Segment segment;
             segment.contourId = transition.toContourId;
-            segment.workpieceEntry = source->workpieceEntry;
+            segment.workpieceEntry = sourceContour->workpieceEntry;
             segment.verified = snapshot.travelPlan.isExecutable();
             const auto& points = transition.workpieceLocalPreviewPoints.isEmpty()
                 ? transition.surfacePreviewPoints : transition.workpieceLocalPreviewPoints;
@@ -679,46 +676,50 @@ private:
         return true;
     }
 
-    void copyKinematics(const MachineKinematics* source,
+    void copyKinematics(const lcnc::cam::OfflineSimulationSnapshot& source,
                         const lcnc::MachineModeDefinition& definition)
     {
-        if (!source)
-            return;
         m_planningBaselineAxes = lcnc::cam_algo::offlinePlanningAxisBaseline(
-            source->axes(), definition);
-        m_kinematics.setAxes(m_planningBaselineAxes, source->configType());
-        m_kinematics.setWorkpieceSetupTransform(source->workpieceSetupTransform());
-        for (auto it = source->shapeAssignments().cbegin(); it != source->shapeAssignments().cend(); ++it)
+            source.axes, definition);
+        m_kinematics.setAxes(m_planningBaselineAxes, source.kinematicsType);
+        m_kinematics.setWorkpieceSetupTransform(source.workpieceSetup);
+        for (auto it = source.shapeAssignments.cbegin();
+             it != source.shapeAssignments.cend(); ++it) {
             m_kinematics.assignShape(it.key(), it.value());
-        for (auto it = source->wpcMounts().cbegin(); it != source->wpcMounts().cend(); ++it)
+        }
+        for (auto it = source.workpieceMounts.cbegin();
+             it != source.workpieceMounts.cend(); ++it) {
             m_kinematics.mountWorkpiece(it.key(), it.value());
+        }
     }
 
-    void collectBodies(CamModule* cam)
+    void collectBodies(const lcnc::cam::OfflineSimulationSnapshot& source)
     {
-        const auto collision = cam->collisionConfiguration();
+        const auto& collision = source.collision;
         m_collisionDetectionEnabled = collision.enabled;
         m_collisionConfigurationValid = collision.valid;
         m_collisionConfigurationRevision = collision.revision;
-        const auto add = [this, cam, collision](LcncDocument* document, LcncDocument::EntityKind kind, bool workpiece) {
-            if (!document || !document->shapeTool()) return;
-            const auto labels = document->entityLabels(kind);
-            for (int index = 1; index <= labels.Length(); ++index) {
-                const TDF_Label& label = labels.Value(index);
-                const TopoDS_Shape shape = document->shapeTool()->GetShape(label);
-                if (shape.IsNull()) continue;
+        m_collisionClearanceMm = source.collisionClearanceMm;
+        for (const auto& sourceBody : source.bodies) {
+                const TopoDS_Shape& shape = sourceBody.shape;
+                if (shape.IsNull())
+                    continue;
                 SimulationBody body;
-                body.id = XcafUtils::entry(label); body.workpiece = workpiece; body.shape = shape;
-                body.attachment = workpiece ? m_kinematics.mountedAxis(body.id) : m_kinematics.axisForShape(body.id);
-                if (workpiece) {
+                body.id = sourceBody.entry;
+                body.workpiece = sourceBody.workpiece;
+                body.shape = shape;
+                body.attachment = body.workpiece
+                    ? m_kinematics.mountedAxis(body.id)
+                    : m_kinematics.axisForShape(body.id);
+                if (body.workpiece) {
                     ++m_workpieceBodyCount;
                     if (!body.attachment.isEmpty()) ++m_mountedWorkpieceBodyCount;
                 } else {
                     ++m_machineBodyCount;
                 }
-                body.collisionSource = workpiece ? QStringLiteral("workpiece")
+                body.collisionSource = body.workpiece ? QStringLiteral("workpiece")
                     : collisionAxisSourceId(body.attachment);
-                body.collisionRole = workpiece ? QStringLiteral("workpiece")
+                body.collisionRole = body.workpiece ? QStringLiteral("workpiece")
                     : (body.attachment == QStringLiteral("BASE")
                         ? QStringLiteral("static") : QStringLiteral("moving"));
                 body.collisionActive = m_collisionDetectionEnabled
@@ -731,8 +732,13 @@ private:
                 // left the sandbox camera with no model bounds to fit.
                 // 中文翻译：投影必须登记到 GuiDocument，否则 FitAll 无法取得模型包围盒。
                 body.ais = m_gui->displayShape(
-                    workpiece ? lcnc::ProjectDomain::Workpiece : lcnc::ProjectDomain::Machine,
-                    document, static_cast<int>(kind), shape, body.id, false,
+                    body.workpiece ? lcnc::ProjectDomain::Workpiece
+                                   : lcnc::ProjectDomain::Machine,
+                    nullptr,
+                    static_cast<int>(body.workpiece
+                        ? LcncDocument::EntityKind::Workpiece
+                        : LcncDocument::EntityKind::Machine),
+                    shape, body.id, false,
                     /*deferPresentationUpdate=*/true);
                 if (!body.ais.IsNull() && !body.ais->Attributes().IsNull()) {
                     // The main document view displays imported model meshes
@@ -749,17 +755,13 @@ private:
                     body.ais->Attributes()->SetIsoOnTriangulation(Standard_False);
                     body.ais->Attributes()->SetFaceBoundaryDraw(Standard_False);
                 }
-                if (!workpiece && m_gui->context()
+                if (!body.workpiece && m_gui->context()
                     && (!m_sceneSnapshot.showMachine
                         || !m_sceneSnapshot.visibleMachineEntries.contains(body.id))) {
                     m_gui->context()->Erase(body.ais, Standard_False);
                 }
                 m_bodies.append(std::move(body));
-            }
-        };
-        add(cam->machineDocument(), LcncDocument::EntityKind::Machine, false);
-        if (auto* project = lcnc::Kernel::current().projectManager())
-            add(project->workpieceDocument(), LcncDocument::EntityKind::Workpiece, true);
+        }
 
         // The cutter/nozzle is not necessarily part of the imported machine
         // assembly.  Project CAM's exact local +Z collision proxy as an
@@ -1120,8 +1122,7 @@ private:
         const auto cutterHeadModelPosition = m_sceneSnapshot.cutterHeadModelPosition;
         const QStringList activeSources =
             lcnc::cam_algo::orderedActiveCollisionSources(activeSourceSet);
-        const double clearanceMm = lcnc::Kernel::current().service<CamModule>()->config()
-            .cutterCollisionClearanceMm();
+        const double clearanceMm = m_collisionClearanceMm;
         const quint64 generation = m_generation;
         // Pending nodes remain gray until the worker publishes their result.
         auto result = std::make_shared<QVector<qint8>>(nodes.size(), -1);
@@ -1450,6 +1451,8 @@ private:
     QPair<int, int> m_highlightedCollisionPair{-1, -1};
     TaskId m_scanTask{kInvalidTaskId}; TaskId m_collisionPreparationTask{kInvalidTaskId};
     quint64 m_generation{1}; std::uint64_t m_sourceRevision{0};
+    std::shared_ptr<lcnc::cam::ICamOfflineSimulationProvider> m_sourceProvider;
+    lcnc::SubscriptionId m_sourceSubscription{lcnc::kInvalidSubscription};
     int m_machineBodyCount{0}; int m_workpieceBodyCount{0}; int m_mountedWorkpieceBodyCount{0};
     double m_speed{1.0}; bool m_playing{false}; bool m_scanFinished{false};
     bool m_advancingPlayback{false}; bool m_scanStarted{false}; bool m_applyingAxisGroupSelection{false};
@@ -1458,12 +1461,23 @@ private:
     bool m_collisionDetectionEnabled{false};
     bool m_collisionConfigurationValid{false};
     std::uint64_t m_collisionConfigurationRevision{0};
+    double m_collisionClearanceMm{0.0};
 };
 
 SimulationModule::SimulationModule(QObject* parent) : QObject(parent) {}
 SimulationModule::~SimulationModule() { stop(); }
-lcnc::ModuleInfo SimulationModule::info() const { return {QStringLiteral("simulation"), QStringLiteral("Offline machine simulation"), QStringLiteral("1.0.0"), {QStringLiteral("cam")}}; }
-bool SimulationModule::init(lcnc::IKernel& kernel) { auto self = std::shared_ptr<SimulationModule>(this, [](SimulationModule*) {}); kernel.services().registerService<SimulationModule>(self); return true; }
+lcnc::ModuleInfo SimulationModule::info() const
+{
+    return {QStringLiteral("simulation"),
+            QStringLiteral("Offline machine simulation"),
+            QStringLiteral(LCNC_VERSION_STRING),
+            {QStringLiteral("cam")}};
+}
+bool SimulationModule::init(lcnc::IKernel& kernel)
+{
+    kernel.services().registerBorrowedService<SimulationModule>(*this);
+    return true;
+}
 bool SimulationModule::start() { return true; }
 void SimulationModule::stop() { exitSimulation(); }
 QWidget* SimulationModule::enterSimulation() {

@@ -12,6 +12,7 @@
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kernel/i_module.h"
 #include "core/kernel/i_service.h"
+#include "core/kernel/event_bus.h"
 #include "core/task/task_manager.h"
 #include "core/task/module_task_scope.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
@@ -269,6 +270,7 @@ private:
     std::atomic_bool      m_normalCuttingActive{false};  ///< 见 setNormalCuttingActive
     lcnc::ModuleTaskScope m_taskScope;
     DeviceOperation       m_deviceOperation{DeviceOperation::None};
+    lcnc::SubscriptionId  m_camPlanSubscription{lcnc::kInvalidSubscription};
 
 };
 

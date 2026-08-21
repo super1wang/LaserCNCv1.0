@@ -133,7 +133,7 @@ void CamModule::clearToolpath()
     clearToolpathViewState(/*emitSignals=*/false);
     m_camData->clearToolpath();
     // 加工面集合随刀路一并清空（避免上一工程/工件的高亮残留）。
-    m_machiningFaces.clear();
+    m_machiningFacePipeline->clearEntries();
     m_camData->setMachiningFaceRecords({});
     refreshMachiningFaceDisplay();
     // 统一工程文档：清掉轮廓几何(EntityKind::Cam)实体。

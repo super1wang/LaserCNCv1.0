@@ -23,6 +23,13 @@ ctest --test-dir build-cmake --build-config Debug -L safety --output-on-failure
 - `sdk-integration`：ACS 文本命令和 `SimulatorCMHP`。它证明 SDK 模拟器路径，不等同于实体硬件验证。
 - `support`：架构之外的 UI、翻译、显示和启动冒烟等辅助回归。
 
+本次审计整改新增四个可独立定位的基座测试：
+
+- `lcnc_ultron_protocol_test`：二进制帧 CRC、边界和兼容 ASCII 响应解析。
+- `lcnc_device_wait_test`：完成、取消、超时和有限轮询语义。
+- `lcnc_service_registry_lifetime_test`：borrowed service 不取得所有权且清理后不可查询。
+- `lcnc_cad_detached_import_test`：使用真实 `model/半球.stp` 验证 worker detached 读取和所有者线程提交。
+
 ## 流程测试边界
 
 `lcnc_manufacturing_flow_test` 由多个独立 CTest 用例调用同一程序：

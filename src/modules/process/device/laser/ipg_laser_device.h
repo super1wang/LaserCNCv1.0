@@ -2,20 +2,17 @@
 /*                            IPG激光器实现类                           */
 /************************************************************************/
 
-#ifndef _IPG_LASER_DEVICE_
-#define _IPG_LASER_DEVICE_
+#pragma once
 
 #include "laser_device.h"
 #include <string>
-using namespace std;
-
-class IPGLaserDevice : public LaserDevice
+class IPGLaserDevice final : public LaserDevice
 {
 public:
 	explicit IPGLaserDevice(lcnc::process::ProcessSettingsService& settings);
-	virtual ErrorCode		setLaserTable(const table& tableLaser = table{});
+	ErrorCode setLaserTable(const toml::table& tableLaser = {}) override;
 
-	virtual const string&	GetName();
+	const std::string& GetName() override;
 	virtual bool			IsInited();
 	virtual bool			IsAvailableData(const QByteArray& data);
 	virtual bool			StartLaser();
@@ -30,27 +27,26 @@ public:
 	virtual bool			SetLaserParameter(const LaserParameter& parameter);
 
 	// 获取实际参数 
-	virtual string			GetEnergy();
-	virtual string			GetFrequency();
-	virtual string			GetPulseWidth();
+	std::string GetEnergy() override;
+	std::string GetFrequency() override;
+	std::string GetPulseWidth() override;
 
 	//IPG
 	virtual double			GetAveragePower();		//平均功率
-	virtual string			GetTemperature();		//激光器温度
-	virtual string			GetTroubleshooting();
+	std::string GetTemperature() override;		//激光器温度
+	std::string GetTroubleshooting() override;
 
 	
 
 private:
-	string					m_strName;
+	std::string				m_strName;
 	bool					m_bIsInited;
 	double					m_dMaxCurrent;
 	double					m_dSimmerCurrent;
 	int						m_iWaveShape;
-	string					m_strTemperature;
+	std::string				m_strTemperature;
 
 public:
 	// 非本型号函数
 	
 };
-#endif

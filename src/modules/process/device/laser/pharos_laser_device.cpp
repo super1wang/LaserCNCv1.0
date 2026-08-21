@@ -6,6 +6,9 @@
 #include <QJsonObject>
 #include <QJsonValue>
 
+using std::string;
+using toml::table;
+
 namespace
 {
 	constexpr int kDefaultFastSendTimeoutMs = 50;

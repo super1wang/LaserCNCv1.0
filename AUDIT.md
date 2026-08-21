@@ -2,7 +2,7 @@
 
 审计日期：2026-08-21
 
-源码基线：`47e5408`（`main`）
+审计源码基线：`47e5408`（`main`）；整改基线：`f5f1f82` 后当前工作区
 
 审计前工作区：干净
 
@@ -10,9 +10,9 @@
 
 项目的总体方向合理：Kernel/模块生命周期、统一工程文档、独立机台工作区、workspace-bound view、CAM 权威快照、Process OCC-free 边界和自动化分层均已成立。最新 CAM 拆分也明显降低了单个入口实现文件的密度。
 
-但当前仍是“可继续集成开发，不可据此声明实体机生产就绪”。本轮发现 4 组 P0：真实激光适配器存在可静态证明的未定义行为；ACS/GTN 有无 deadline 的等待环；CAD worker 直接修改活动 XCAF 文档；完整机台碰撞仍缺连续段安全证明。另有 concrete Module 耦合、入口/头文件过大、版本漂移和规范执行不足等 P1/P2 债务。
+初始审计发现 4 组 P0：真实激光适配器存在可静态证明的未定义行为；ACS/GTN 有无 deadline 的等待环；CAD worker 直接修改活动 XCAF 文档；完整机台碰撞仍缺连续段安全证明。本次整改已经关闭 P0-1～P0-3，并完成审计列出的可在不改变现有功能语义前提下收口的 P1/P2 项。P0-4 按范围约定保留到下一版本。
 
-日常 ACS+GTN Debug 构建与 35/35 CTest 全部通过，说明现有自动化基线稳定；这些测试没有覆盖上述真实激光代码、供应商卡死、CAD 活动文档并发写或物理机连续碰撞，因此绿色结果与审计问题并不矛盾。
+当前日常 ACS+GTN Debug 与 real-laser 变体均构建通过，完整 CTest 为 39/39；新增测试覆盖 ULTRON 纯协议、统一设备等待、ServiceRegistry 非拥有生命周期及真实 STEP detached 导入。该证据仍不替代 GUI、长稳、物理设备和连续碰撞验证。
 
 ## 1. 范围和方法
 
@@ -27,7 +27,18 @@
 
 执行的方法包括：文件清单与行数热点、include/target 依赖、淘汰 API、Process OCC、跨模块具体类型、TaskManager/QtConcurrent、SDK 锁与等待环、裸内存、头文件规范、长行/缩写实现、版本值和文档引用扫描；随后运行日常构建、完整 CTest 和 real-laser 独立构建。
 
-## 2. P0：必须优先关闭
+### 整改闭环状态
+
+| 审计项 | 状态 | 本次结果 |
+| --- | --- | --- |
+| P0-1 真实激光未定义行为 | 已关闭 | ULTRON 协议改为有界纯函数和 RAII；Raycus/QCW 同步清理裸缓冲区、参数校验和错误返回；real-laser 构建无原安全告警。 |
+| P0-2 无界设备等待 | 已关闭 | ACS/GTN 轮询统一为 monotonic deadline、取消检查和有限轮询；Stop、工作流和最低优先级轮询共用一个 `DeviceCommandQueue`。 |
+| P0-3 CAD worker 写活动文档 | 已关闭 | worker 只构造 detached payload；所有者线程按 document id 提交；任务按文档跟踪并在关闭时取消。 |
+| P0-4 完整机台连续碰撞 | 延后 | 保留现有失败关闭，不在基座整改中扩张算法范围；列为下一版本首要工作。 |
+| P1 跨模块与所有权 | 已收口基座项 | Process/Simulation 不再依赖具体 `CamModule`；Simulation 使用不可变场景快照；非拥有服务注册显式化；CAM 可变容器不再外泄。App 组合根的 UI 接线保留，后续逐步下沉。 |
+| P2 目录与规范 | 已完成当前范围 | vendor 头迁入 `3rd/`，`setting/` 合并到 `settings/schema/`，公共头规范化，统一数学常量、格式基线和新增架构门禁。 |
+
+## 2. 初始 P0 发现与修复依据
 
 ### P0-1 真实激光 ULTRON 初始化存在未定义行为
 
@@ -62,7 +73,7 @@ real-laser `/W4` 构建实际报告 C4456、C4700、C4715，静态源码还能�
 
 当前 CAM 已能失败关闭 Pending/Indeterminate/过期快照，并有 BVH/精确距离证据，但采样点之间尚无连续段扫掠或保守细分证明，也不会在碰撞后自动重规划。完整机台模式的高耗时尚无稳定性能门限。真实加工必须继续把该能力视为未完成发布门禁，详见 [docs/collision_detection_todo.md](docs/collision_detection_todo.md)。
 
-## 3. P1：结构和耦合
+## 3. 初始 P1 结构和耦合清单
 
 | 编号 | 文件/范围 | 发现 | 建议 |
 | --- | --- | --- | --- |
@@ -95,7 +106,7 @@ real-laser `/W4` 构建实际报告 C4456、C4700、C4715，静态源码还能�
 
 `bdaqctrl.h` 为 5,011 行供应商头，不应计入自有代码质量指标，长期应迁入明确的 `3rd/` SDK 边界。
 
-## 5. P2：规范和工程化
+## 5. 初始 P2 规范和工程化清单
 
 - 9 个 Process 设备头仍使用传统 include guard 而非规范要求的 `#pragma once`。
 - 多个激光公共头包含 `using namespace std;`，会污染所有包含者命名空间。
@@ -123,11 +134,13 @@ real-laser `/W4` 构建实际报告 C4456、C4700、C4715，静态源码还能�
 | --- | --- |
 | `scripts/check_architecture.ps1 -Root .` | 通过。 |
 | `cmake --build --preset acs-gtn-debug --parallel 16` | 通过，`x64/ninja/Debug/LaserCNC.exe` 链接成功。 |
-| `ctest --test-dir build-cmake --build-config Debug --output-on-failure` | 35/35 通过，57.08 秒。 |
-| `cmake --preset real-laser` + `cmake --build --preset real-laser --parallel 16` | 构建/链接通过，但出现真实激光源 `/W4` 告警；ULTRON 的 C4456/C4700/C4715 与 P0-1 一致。 |
+| `ctest --test-dir build-cmake --build-config Debug --output-on-failure` | 39/39 通过，59.97 秒。 |
+| `cmake --preset real-laser` + `cmake --build --preset real-laser --parallel 16` | 构建/链接通过；ULTRON、Raycus、Raycus QCW 原安全相关告警未回归。 |
+| `cmake --preset asan` + `cmake --build --preset asan` | ASan 全量构建通过。 |
+| ASan 关键回归 | 任务取消、borrowed service、设备队列/等待、ULTRON 协议、Process 状态和真实 STEP detached 导入 7/7 通过，6.10 秒。 |
 
-本轮未执行 ASan、Application Verifier、GUI 人工遍历、8 小时资源趋势或物理 ACS/GTN/激光验证。real-laser 构建通过不代表协议和内存安全通过。
+本轮未执行 Application Verifier、GUI 人工遍历、8 小时资源趋势或物理 ACS/GTN/激光验证。real-laser 与 ASan 通过证明本轮静态/自动化边界已收口，但不代表真实协议链路或实体机安全放行。
 
 ## 8. 发布判断
 
-当前适合作为后续架构收口和功能开发基线；在 P0-1/P0-2/P0-3、连续碰撞门禁及对应失败注入回归完成前，不建议启用真实激光或声明实体机生产安全。实施顺序以 [todo.md](todo.md) 为准。
+本次整改后的代码适合作为后续功能开发与下一阶段碰撞安全工作的基座。P0-1～P0-3 不再是静态代码发布阻断项；但在 P0-4 连续碰撞门禁、GUI/长稳和物理设备验证完成前，仍不得声明实体机生产安全或把 real-laser 编译成功等同于真实激光放行。后续顺序以 [todo.md](todo.md) 为准。

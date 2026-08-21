@@ -1,4 +1,6 @@
 #include "gtn_motion_control.h"
+
+#include "modules/process/device/runtime/device_wait.h"
 #include <boost/lexical_cast.hpp>
 #include <fstream>
 //#include "bdaqctrl.h"
@@ -612,10 +614,16 @@ bool GTNMotionControl::StopMotion()
 		LogError("StopMotion", "GTN_Stop","", sRtn);
 		return false;
 	}
-	do 
+	constexpr auto kStopTimeout = std::chrono::seconds(30);
+	if (lcnc::process::waitForDeviceCondition(
+			[this] { return !IsAxisMoving(); },
+			kStopTimeout,
+			std::chrono::milliseconds(100))
+		!= lcnc::process::DeviceWaitStatus::Completed)
 	{
-		Sleep(100);
-	} while (IsAxisMoving());
+		LogError("StopMotion", "axis stop timeout", "", -2);
+		return false;
+	}
 	sRtn = GTN_CrdClear(m_iCore, 1, m_iWriteBuf);
 	if (sRtn != 0)
 	{
@@ -635,10 +643,16 @@ bool GTNMotionControl::StopMotion(Axis eAxis)
 	sRtn = GTN_Stop(m_iCore, mask, mask);//急停
 	if (sRtn != 0)
 		return LogError("StopMotion", "GTN_Stop", magic_enum::enum_name(eAxis).data(), sRtn),false;
-	do
+	constexpr auto kStopTimeout = std::chrono::seconds(30);
+	if (lcnc::process::waitForDeviceCondition(
+			[this, eAxis] { return !IsAxisMoving(eAxis); },
+			kStopTimeout,
+			std::chrono::milliseconds(100))
+		!= lcnc::process::DeviceWaitStatus::Completed)
 	{
-		Sleep(100);
-	} while (IsAxisMoving(eAxis));
+		LogError("StopMotion", "axis stop timeout", magic_enum::enum_name(eAxis).data(), -2);
+		return false;
+	}
 	sRtn = GTN_CrdClear(m_iCore, 1, m_iWriteBuf);
 	if (sRtn != 0)
 		return LogError("StopMotion", "GTN_CrdClear", magic_enum::enum_name(eAxis).data(), sRtn), false;
@@ -1514,10 +1528,16 @@ bool GTNMotionControl::StopAllBuffer()
 	sRtn = GTN_Stop(m_iCore, allMask, 0x0);
 	if (sRtn)
 		return LogError("StopAllBuffer", "GTN_Stop", "", sRtn), false;
-	do
+	constexpr auto kStopTimeout = std::chrono::seconds(30);
+	if (lcnc::process::waitForDeviceCondition(
+			[this] { return !IsAxisMoving(); },
+			kStopTimeout,
+			std::chrono::milliseconds(100))
+		!= lcnc::process::DeviceWaitStatus::Completed)
 	{
-		Sleep(100);
-	} while (IsAxisMoving());
+		LogError("StopAllBuffer", "axis stop timeout", "", -2);
+		return false;
+	}
 	sRtn = GTN_CrdClear(m_iCore, 1, m_iWriteBuf);
 	if (sRtn)
 		return LogError("StopAllBuffer", "GTN_CrdClear", "", sRtn), false;
@@ -1722,11 +1742,23 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 				return LogError("InitCrd", "duplicate five-axis cutting axis", "", -1), false;
 		}
 	}
-	//确保创建前瞻前没有轴系运动
-	do 
+	// 确保创建前瞻前没有轴系运动；设备异常时不得无限占用全局租约。
+	constexpr auto kCoordinateIdleTimeout = std::chrono::seconds(30);
+	const auto idleResult = lcnc::process::waitForDeviceCondition(
+		[this] { return !IsAxisMoving(); },
+		[this] { return m_bStop.load(); },
+		kCoordinateIdleTimeout,
+		std::chrono::milliseconds(50));
+	if (idleResult != lcnc::process::DeviceWaitStatus::Completed)
 	{
-		Sleep(50);
-	} while (IsAxisMoving());
+		LogError("InitCrd",
+			idleResult == lcnc::process::DeviceWaitStatus::Cancelled
+				? "cancelled waiting for axes to stop"
+				: "timeout waiting for axes to stop",
+			"",
+			-2);
+		return false;
+	}
 	// 建立号坐标系，设置坐标系参数
 	TCrdPrm crdPrm;
 	memset(&crdPrm, 0, sizeof(crdPrm));
@@ -2089,14 +2121,31 @@ bool GTNMotionControl::MovePostion(Axis aAxis, double dVel, double dPos)
 	sRtn = GTN_Update(m_iCore, mask);//启动轴运动
 	if (sRtn) return LogError("MovePostion", "GTN_Update", magic_enum::enum_name(aAxis).data(), sRtn), false;
 
-	do
+	bool statusReadFailed = false;
+	constexpr auto kMoveTimeout = std::chrono::minutes(2);
+	const auto moveResult = lcnc::process::waitForDeviceCondition(
+		[this, aAxis, &sts, &statusReadFailed] {
+			const short statusResult = GTN_GetSts(
+				m_iCore, m_mapMotorValue[aAxis].AxisIndex, &sts);
+			if (statusResult != 0)
+			{
+				statusReadFailed = true;
+				LogError("MovePostion", "GTN_GetSts",
+					magic_enum::enum_name(aAxis).data(), statusResult);
+				return true;
+			}
+			return (sts & 0x400) == 0;
+		},
+		[this] { return m_bStop.load(); },
+		kMoveTimeout,
+		std::chrono::milliseconds(10));
+	if (statusReadFailed || moveResult != lcnc::process::DeviceWaitStatus::Completed)
 	{
-		sRtn = GTN_GetSts(m_iCore, m_mapMotorValue[aAxis].AxisIndex, &sts);
-		if (sRtn)
-			return LogError("MovePostion", "GTN_GetSts", magic_enum::enum_name(aAxis).data(), sRtn),false;
-		if (m_bStop)
-			return false;
-	} while (sts & 0x400);// 等待AXIS轴规划停止
+		if (!statusReadFailed && moveResult == lcnc::process::DeviceWaitStatus::TimedOut)
+			LogError("MovePostion", "axis motion timeout",
+				magic_enum::enum_name(aAxis).data(), -2);
+		return false;
+	}
 	return true;
 }
 

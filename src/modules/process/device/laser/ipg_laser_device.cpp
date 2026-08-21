@@ -11,6 +11,7 @@
 #include <fstream>
 using std::ostringstream;
 using namespace std;
+using toml::table;
 
 IPGLaserDevice::IPGLaserDevice(lcnc::process::ProcessSettingsService& settings) : LaserDevice(settings), m_strName("IPG"), m_bIsInited(false), m_dMaxCurrent(0),
                                    m_dSimmerCurrent(0), m_iWaveShape(0), m_strTemperature("")

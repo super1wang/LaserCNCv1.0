@@ -1,4 +1,5 @@
 #include "modules/cad/services/shape_service.h"
+#include "core/math/numeric_constants.h"
 
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
@@ -12,9 +13,6 @@
 #include <gp_Vec.hxx>
 #include <gp_Ax1.hxx>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 namespace ShapeService {
 
@@ -45,7 +43,7 @@ bool rotateShape(LcncDocument* doc, const TDF_Label& label,
     if (shape.IsNull()) return false;
 
     gp_Trsf trsf;
-    trsf.SetRotation(axis, angleDeg * M_PI / 180.0);
+    trsf.SetRotation(axis, lcnc::math::degreesToRadians(angleDeg));
     BRepBuilderAPI_Transform xform(shape, trsf, Standard_True);
     if (!xform.IsDone()) return false;
 

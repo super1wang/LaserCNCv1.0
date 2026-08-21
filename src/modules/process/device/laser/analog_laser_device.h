@@ -2,20 +2,17 @@
 /*                            Analog激光器实现类                           */
 /************************************************************************/
 
-#ifndef _ANALOG_LASER_DEVICE_
-#define _ANALOG_LASER_DEVICE_
+#pragma once
 
 #include "laser_device.h"
 #include <string>
-using namespace std;
-
-class AnalogLaserDevice : public LaserDevice
+class AnalogLaserDevice final : public LaserDevice
 {
 public:
 	explicit AnalogLaserDevice(lcnc::process::ProcessSettingsService& settings);
-	virtual ErrorCode		setLaserTable(const table& tableLaser = table{});
+	ErrorCode setLaserTable(const toml::table& tableLaser = {}) override;
 
-	virtual const string&	GetName();
+	const std::string& GetName() override;
 	virtual bool			IsInited() { return true; };
 	virtual bool			IsAvailableData(const QByteArray&) { return true; };
 	virtual bool			StartLaser() { return true; };
@@ -30,27 +27,26 @@ public:
 	virtual bool			SetLaserParameter(const LaserParameter& parameter) { LaserDevice::UpdateLaserParameter(parameter); return true; };
 
 	// 获取实际参数 
-	virtual string			GetEnergy() { return "NotConnected"; };
-	virtual string			GetFrequency() { return "NotConnected"; };
-	virtual string			GetPulseWidth() { return "NotConnected"; };
+	std::string GetEnergy() override { return "NotConnected"; }
+	std::string GetFrequency() override { return "NotConnected"; }
+	std::string GetPulseWidth() override { return "NotConnected"; }
 
 	//IPG
 	virtual double			GetAveragePower() { return 0.0; };		//平均功率
-	virtual string			GetTemperature() { return "NotConnected"; };		//激光器温度
-	virtual string			GetTroubleshooting() { return "NotConnected"; };
+	std::string GetTemperature() override { return "NotConnected"; }		//激光器温度
+	std::string GetTroubleshooting() override { return "NotConnected"; }
 
 	
 
 private:
-	string					m_strName;
+	std::string				m_strName;
 	bool					m_bIsInited;
 	double					m_dMaxCurrent;
 	double					m_dSimmerCurrent;
 	int						m_iWaveShape;
-	string					m_strTemperature;
+	std::string				m_strTemperature;
 
 public:
 	// 非本型号函数
 	
 };
-#endif

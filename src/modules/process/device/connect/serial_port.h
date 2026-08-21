@@ -8,13 +8,8 @@
 #include "windows.h"
 #include <atomic>
 #include <string>
-#include "message_code.h"
+#include "modules/process/system/message_code.h"
 #include "toml.hpp"
-
-using std::vector;
-using std::wstring;
-using std::string;
-using toml::table;
 
 class SerialPort : public QObject
 {
@@ -28,7 +23,7 @@ public slots:
 	void                slotReadData();                             // 处理接收到的数据
 
 public:
-	virtual ErrorCode   SetComTable(const table& tableCom, bool& bConnectChange);
+	virtual ErrorCode   SetComTable(const toml::table& tableCom, bool& bConnectChange);
 	virtual bool        Connect();
 	virtual void        Disconnect();
 	virtual bool        IsConnected();
@@ -40,10 +35,10 @@ public:
 	//bool				OnceData(const string& send, int iTimeOut = 1000);							// 一次通讯
 	//bool				OnceData(const string& send, string& recv, int iTimeOut = 1000);			// 一次通讯
 
-	bool                IsComChange(string strCom, string strBaudRate, string strDataBits, string strParity, string strStopBits); // 对比参数是否改变
+	bool                IsComChange(std::string strCom, std::string strBaudRate, std::string strDataBits, std::string strParity, std::string strStopBits); // 对比参数是否改变
 
 	// 设置端口参数
-	void                SetComSetting(string strCom, string strBaudRate, string strDataBits, string strParity, string strStopBits);
+	void                SetComSetting(std::string strCom, std::string strBaudRate, std::string strDataBits, std::string strParity, std::string strStopBits);
 	void                SetPortName(const QString& wstrPort)	{ m_qstrPort = wstrPort;	 };
 	void                SetBaudRate(DWORD dwBaudRate)			{ m_dwBaudRate = dwBaudRate; };
 	void                SetDataBits(int iByteSize)				{ m_iDataBits = iByteSize;	 };

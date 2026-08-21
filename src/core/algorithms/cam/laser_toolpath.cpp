@@ -1,4 +1,5 @@
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/math/numeric_constants.h"
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/kinematics/ik_solver.h"
 #include "core/kinematics/toolpath_kinematics_solver.h"
@@ -62,9 +63,6 @@
 #include <limits>
 #include <utility>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 // =============================================================================
 // LaserToolpath
@@ -342,7 +340,7 @@ bool pointRotaryAngleDeg(const gp_Pnt& point,
     const gp_Vec zeroVec(zeroDir);
     const double sinV = axisVec.Dot(zeroVec.Crossed(radial));
     const double cosV = zeroVec.Dot(radial);
-    angleDeg = normalizeSigned180(std::atan2(sinV, cosV) * 180.0 / M_PI);
+    angleDeg = normalizeSigned180(lcnc::math::radiansToDegrees(std::atan2(sinV, cosV)));
     return true;
 }
 
@@ -1408,7 +1406,7 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
     // is bounded entirely by concave cavity edges.
     TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
     TopExp::MapShapesAndAncestors(workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
-    BRepOffset_Analyse concavity(workpiece, M_PI / 180.0);
+    BRepOffset_Analyse concavity(workpiece, lcnc::math::kRadiansPerDegree);
     if (concavity.IsDone()) {
         candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
                                         [&edgeToFaces, &concavity](const FaceCandidate& candidate) {

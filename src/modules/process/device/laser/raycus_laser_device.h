@@ -2,21 +2,18 @@
 /*                            锐科激光器实现类                           */
 /************************************************************************/
 
-#ifndef _RAYCUS_LASER_DEVICE_
-#define _RAYCUS_LASER_DEVICE_
+#pragma once
 
 #include "laser_device.h"
 #include <string>
-using namespace std;
-
-class RaycusLaserDevice : public LaserDevice
+class RaycusLaserDevice final : public LaserDevice
 {
 public:
 	explicit RaycusLaserDevice(lcnc::process::ProcessSettingsService& settings);
 
-	virtual ErrorCode		setLaserTable(const table& tableLaser = table{});
+	ErrorCode setLaserTable(const toml::table& tableLaser = {}) override;
 
-	virtual const string&	GetName();
+	const std::string& GetName() override;
 	virtual bool			IsInited();
 	virtual bool			IsAvailableData(const QByteArray& data);
 	virtual bool			StartLaser();
@@ -31,16 +28,12 @@ public:
 	virtual bool			SetLaserParameter(const LaserParameter& parameter);
 
 	// 获取实际参数
-	virtual string			GetEnergy();
-	virtual string			GetFrequency();
-	virtual string			GetPulseWidth();
+	std::string GetEnergy() override;
+	std::string GetFrequency() override;
+	std::string GetPulseWidth() override;
 
 private:
-	char*					hextochs(char* ascii);
-	char*					ftoa(double res, char* des, int type);
-
-private:
-	string					m_strName;
+	std::string				m_strName;
 	bool					m_bIsInited;
 	double					m_dMaxCurrent;
 	double					m_dSimmerCurrent;
@@ -49,8 +42,7 @@ private:
 public:
 	// 非本型号函数
 	virtual double GetAveragePower()	{ return 0; };
-	virtual string GetTemperature()		{ return ""; };
-	virtual string GetTroubleshooting()	{ return ""; };
+	std::string GetTemperature() override { return {}; }
+	std::string GetTroubleshooting() override { return {}; }
 	
 };
-#endif

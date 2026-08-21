@@ -153,7 +153,7 @@ lcnc::ModuleInfo CamModule::info() const
         QStringLiteral("cam"),
         // 中文翻译：CAM模块
         QStringLiteral("CAM module"),
-        QStringLiteral("1.0.0"),
+        QStringLiteral(LCNC_VERSION_STRING),
         { QStringLiteral("cad") }
     };
 }
@@ -161,15 +161,12 @@ lcnc::ModuleInfo CamModule::info() const
 bool CamModule::init(lcnc::IKernel& kernel)
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CamModule::init begin");
-    auto svc = std::shared_ptr<CamModule>(this, [](CamModule*) {});
-    kernel.services().registerService<CamModule>(svc);
-    auto facade = std::shared_ptr<lcnc::ICamFacade>(svc, static_cast<lcnc::ICamFacade*>(this));
-    kernel.services().registerService<lcnc::ICamFacade>(facade);
+    kernel.services().registerBorrowedService<CamModule>(*this);
+    kernel.services().registerBorrowedService<lcnc::ICamFacade>(*this);
     lcnc::cam::registerCamServiceAdapters(kernel, *this);
     if (m_pose) {
         // 把 MachinePose 也作为共享 IService 暴露，跨模块（process/UI）可读写姿态。
-        auto poseSvc = std::shared_ptr<lcnc::MachinePose>(m_pose.get(), [](lcnc::MachinePose*) {});
-        kernel.services().registerService<lcnc::MachinePose>(poseSvc);
+        kernel.services().registerBorrowedService<lcnc::MachinePose>(*m_pose);
     }
 
     // 工程核心 CAM 数据的加载/保存已下沉到 core（LcncProjectManager + cam_toolpath_io）。
@@ -195,19 +192,57 @@ bool CamModule::init(lcnc::IKernel& kernel)
 
     // 中文翻译：切割路径显示
     // 订阅 CAM 顺序/显示事件，驱动视图覆盖层。
-    kernel.events().subscribe<lcnc::cam::events::TravelPathVisibilityToggled>(
+    m_eventSubscriptions.push_back(kernel.events().subscribe<lcnc::cam::events::TravelPathVisibilityToggled>(
         [this](const lcnc::cam::events::TravelPathVisibilityToggled& e) {
             setTravelPathVisible(e.visible);
-        });
+        }));
     // 中文翻译：切割链表序号显示
-    kernel.events().subscribe<lcnc::cam::events::ContourOrderLabelVisibilityToggled>(
+    m_eventSubscriptions.push_back(kernel.events().subscribe<lcnc::cam::events::ContourOrderLabelVisibilityToggled>(
         [this](const lcnc::cam::events::ContourOrderLabelVisibilityToggled& e) {
             setContourOrderLabelVisible(e.visible);
-        });
-    kernel.events().subscribe<lcnc::cam::events::ContourSequenceChanged>(
+        }));
+    m_eventSubscriptions.push_back(kernel.events().subscribe<lcnc::cam::events::ContourSequenceChanged>(
         [this](const lcnc::cam::events::ContourSequenceChanged&) {
             refreshCuttingOrderOverlays();
-        });
+        }));
+
+    connect(this, &CamModule::cutterCollisionConfigurationChanged, this, [] {
+        lcnc::Kernel::current().events().publish(lcnc::cam::events::ExecutionPlanChanged{
+            lcnc::cam::events::ExecutionPlanChangeKind::Configuration});
+    });
+    connect(this, &CamModule::contourOrderTravelPlanRebuilt, this,
+            [](const QVector<std::uint64_t>&) {
+                auto& events = lcnc::Kernel::current().events();
+                events.publish(lcnc::cam::events::ContourSequenceChanged{});
+                events.publish(lcnc::cam::events::ExecutionPlanChanged{
+                    lcnc::cam::events::ExecutionPlanChangeKind::Sequence});
+            });
+    connect(this, &CamModule::toolpathLayersChanged, this, [] {
+        lcnc::Kernel::current().events().publish(lcnc::cam::events::ExecutionPlanChanged{
+            lcnc::cam::events::ExecutionPlanChangeKind::Layers});
+    });
+    const auto publishSimulationInvalidation = [] {
+        lcnc::Kernel::current().events().publish(
+            lcnc::cam::events::OfflineSimulationSourceChanged{});
+    };
+    connect(this, &CamModule::machineWorkspaceChanged,
+            this, publishSimulationInvalidation);
+    connect(this, &CamModule::axisAssignmentsChanged,
+            this, publishSimulationInvalidation);
+    connect(this, &CamModule::toolpathGenerated,
+            this, publishSimulationInvalidation);
+    connect(this, &CamModule::toolpathCleared,
+            this, publishSimulationInvalidation);
+    connect(this, &CamModule::toolpathLayersChanged,
+            this, publishSimulationInvalidation);
+    connect(this, &CamModule::cutterCollisionConfigurationChanged,
+            this, publishSimulationInvalidation);
+    connect(this, &CamModule::collisionConfigurationChanged,
+            this, publishSimulationInvalidation);
+    connect(this, &CamModule::contourOrderTravelPlanRebuilt, this,
+            [publishSimulationInvalidation](const QVector<std::uint64_t>&) {
+                publishSimulationInvalidation();
+            });
 
     return true;
 }
@@ -222,6 +257,9 @@ void CamModule::stop()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "CamModule::stop begin");
     if (!m_initialized) return;
+    for (const lcnc::SubscriptionId id : m_eventSubscriptions)
+        lcnc::Kernel::current().events().unsubscribe(id);
+    m_eventSubscriptions.clear();
     if (!cancelOwnedTasks(10000)) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "CamModule::stop: machine/CAM task cancellation timed out; retaining core-owned workspace state");
@@ -247,7 +285,6 @@ CamModule::CamModule(QObject* parent)
     , m_contourOrderLabelRenderer(std::make_unique<lcnc::view::ContourOrderLabelRenderer>())
     , m_displayProjectionService(std::make_unique<lcnc::cam::CamDisplayProjectionService>())
     , m_machiningFacePipeline(std::make_unique<lcnc::cam::MachiningFacePipelineService>())
-    , m_machiningFaces(m_machiningFacePipeline->entries())
     , m_camData(lcnc::Kernel::current().projectManager()->camData())
 {
     // 加载当前持久化 TOML 配置。

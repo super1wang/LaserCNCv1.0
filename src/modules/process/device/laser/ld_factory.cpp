@@ -1,5 +1,8 @@
 #include "ld_factory.h"
 
+using std::string;
+using std::vector;
+
 LDFactory::LDFactory(lcnc::process::ProcessSettingsService& settings)
     : m_simulator(settings)
 #if defined(LCNC_PROCESS_HAS_REAL_LASER) && LCNC_PROCESS_HAS_REAL_LASER

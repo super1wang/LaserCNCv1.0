@@ -1,5 +1,4 @@
-#ifndef _ACS_MOTION_CONTROL_
-#define _ACS_MOTION_CONTROL_
+#pragma once
 
 #include "motion_control.h"
 #include "ACSC.h"
@@ -10,6 +9,7 @@
 #include <time.h>
 #include <map>
 #include <string>
+#include <atomic>
 
 #define     deviceDescription L"PCI-1730,BID#0"
 
@@ -78,7 +78,7 @@ private:
 	bool					IsPressureMonitoring;
 	double					m_dBlowDelay;
 
-	bool					m_bStop;					// 停止轴系
+	std::atomic_bool		m_bStop{false};			// 停止轴系
 protected:
 	int						m_iProgramBufferIndex;
 	bool					m_bConnectFlag;				//是否连接的标志状态
@@ -227,5 +227,3 @@ private:
 	bool InitCrd(const Tool&) { return true; };
 	bool PrfTrapAxis() { return true; };
 };
-
-#endif

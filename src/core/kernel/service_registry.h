@@ -1,11 +1,11 @@
 #pragma once
 
+#include "core/kernel/i_service.h"
+#include "core/logging/logger.h"
+
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
-
-#include "core/kernel/i_service.h"
-#include "core/logging/logger.h"
 
 namespace lcnc {
 
@@ -23,37 +23,38 @@ namespace lcnc {
  *   - **线程安全**：当前实现假定注册阶段在主线程、查询阶段也以主线程为主；
  *     若未来需多线程查询再视情况引入读写锁。
  */
-class ServiceRegistry
-{
-public:
+class ServiceRegistry {
+  public:
     /**
      * @brief 注册一个服务实例，类型由模板参数 T 唯一索引。
      * @tparam T  必须是 @ref IService 的派生接口类型。
      * @param svc 共享指针；不可为空。
      * @return    true 表示首次注册；false 表示参数无效或为空指针。
      */
-    template <class T>
-    bool registerService(std::shared_ptr<T> svc);
+    template <class T> bool registerService(std::shared_ptr<T> svc);
+
+    /** Register a non-owning service whose lifetime is controlled by a module.
+     * Borrowed entries are cleared by Kernel::shutdown() before module objects
+     * are destroyed and must not be retained beyond kernel shutdown.
+     */
+    template <class T> bool registerBorrowedService(T& svc);
 
     /**
      * @brief 取消注册类型 T 的服务。
      * @return true 表示存在并已移除。
      */
-    template <class T>
-    bool unregisterService();
+    template <class T> bool unregisterService();
 
     /**
      * @brief 取得类型 T 的服务实例。
      * @return 若未注册返回空 shared_ptr，调用方需自行空判。
      */
-    template <class T>
-    std::shared_ptr<T> getService() const;
+    template <class T> std::shared_ptr<T> getService() const;
 
     /**
      * @brief 判断类型 T 的服务是否已注册。
      */
-    template <class T>
-    bool has() const;
+    template <class T> bool has() const;
 
     /**
      * @brief 清空所有服务。@warning 需保证此时无任何模块仍持有这些服务。
@@ -61,25 +62,24 @@ public:
     void clear();
 
     /// 当前已注册服务数量（调试/检视用）。
-    std::size_t size() const noexcept { return m_map.size(); }
+    std::size_t size() const noexcept {
+        return m_map.size();
+    }
 
-private:
+  private:
     std::unordered_map<std::type_index, std::shared_ptr<IService>> m_map;
 };
 
 // ─── 模板实现 ────────────────────────────────────────────────────────────────
 
-template <class T>
-bool ServiceRegistry::registerService(std::shared_ptr<T> svc)
-{
+template <class T> bool ServiceRegistry::registerService(std::shared_ptr<T> svc) {
     static_assert(std::is_base_of_v<IService, T>,
                   // 中文翻译：ServiceRegistry::registerService<T>: T 必须继承自 lcnc::IService
                   "ServiceRegistry::registerService<T>: T must inherit from lcnc::IService");
 
     if (!svc) {
         LCNC_WARN(LogCode::InternalUnexpectedState,
-                  "ServiceRegistry: registerService<{}>() got null pointer",
-                  typeid(T).name());
+                  "ServiceRegistry: registerService<{}>() got null pointer", typeid(T).name());
         return false;
     }
 
@@ -91,47 +91,46 @@ bool ServiceRegistry::registerService(std::shared_ptr<T> svc)
     }
 
     m_map[key] = std::static_pointer_cast<IService>(svc);
-    LCNC_DEBUG(LogCode::Generic,
-               "ServiceRegistry: registered '{}' (count={})",
-               typeid(T).name(), m_map.size());
+    LCNC_DEBUG(LogCode::Generic, "ServiceRegistry: registered '{}' (count={})", typeid(T).name(),
+               m_map.size());
     return true;
 }
 
-template <class T>
-bool ServiceRegistry::unregisterService()
-{
+template <class T> bool ServiceRegistry::registerBorrowedService(T& svc) {
+    static_assert(
+        std::is_base_of_v<IService, T>,
+        "ServiceRegistry::registerBorrowedService<T>: T must inherit from lcnc::IService");
+    // Centralize the no-op deleter so call sites explicitly declare the
+    // lifetime contract instead of disguising a borrowed object as owned.
+    return registerService<T>(std::shared_ptr<T>(&svc, [](T*) noexcept {}));
+}
+
+template <class T> bool ServiceRegistry::unregisterService() {
     const auto key = std::type_index(typeid(T));
     auto it = m_map.find(key);
     if (it == m_map.end()) {
-        LCNC_DEBUG(LogCode::Generic,
-                   "ServiceRegistry: unregisterService<{}>() not found",
+        LCNC_DEBUG(LogCode::Generic, "ServiceRegistry: unregisterService<{}>() not found",
                    typeid(T).name());
         return false;
     }
     m_map.erase(it);
-    LCNC_DEBUG(LogCode::Generic,
-               "ServiceRegistry: unregistered '{}' (count={})",
-               typeid(T).name(), m_map.size());
+    LCNC_DEBUG(LogCode::Generic, "ServiceRegistry: unregistered '{}' (count={})", typeid(T).name(),
+               m_map.size());
     return true;
 }
 
-template <class T>
-std::shared_ptr<T> ServiceRegistry::getService() const
-{
+template <class T> std::shared_ptr<T> ServiceRegistry::getService() const {
     const auto key = std::type_index(typeid(T));
     auto it = m_map.find(key);
     if (it == m_map.end()) {
-        LCNC_DEBUG(LogCode::Generic,
-                   "ServiceRegistry: getService<{}>() returned null",
+        LCNC_DEBUG(LogCode::Generic, "ServiceRegistry: getService<{}>() returned null",
                    typeid(T).name());
         return {};
     }
     return std::static_pointer_cast<T>(it->second);
 }
 
-template <class T>
-bool ServiceRegistry::has() const
-{
+template <class T> bool ServiceRegistry::has() const {
     return m_map.count(std::type_index(typeid(T))) != 0;
 }
 

@@ -1,5 +1,8 @@
 #include "simulator_laser_device.h"
 
+using std::string;
+using toml::table;
+
 SimulatorLaserDevice::SimulatorLaserDevice(lcnc::process::ProcessSettingsService& settings) : LaserDevice(settings), m_strName("Simulator"), m_bIsInited(false)
 											, m_dMaxCurrent(0), m_dSimmerCurrent(0), m_iWaveShape(0)
 {

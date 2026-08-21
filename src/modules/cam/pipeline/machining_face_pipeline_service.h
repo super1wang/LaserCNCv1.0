@@ -51,8 +51,6 @@ public:
     };
 
     const std::vector<Entry>& entries() const noexcept { return m_entries; }
-    std::vector<Entry>& entries() noexcept { return m_entries; }
-    std::uint64_t nextFaceId() noexcept { return m_nextFaceId++; }
 
     void reset() noexcept;
     void clearEntries() noexcept;
@@ -68,6 +66,7 @@ public:
     std::vector<CamDataManager::MachiningFaceRecord> persistenceRecords() const;
 
 private:
+    std::uint64_t nextFaceId() noexcept { return m_nextFaceId++; }
     static bool facesShareBoundaryEdge(const TopoDS_Face& first, const TopoDS_Face& second);
     static bool containsEquivalent(const std::vector<Entry>& entries,
                                    const Candidate& candidate);

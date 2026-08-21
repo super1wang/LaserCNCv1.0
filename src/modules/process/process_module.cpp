@@ -8,16 +8,15 @@
 #include "core/project/lcnc_project_manager.h"
 #include "core/task/task_manager.h"
 #include "core/task/task_progress.h"
-#include "modules/cam/cam_module.h"
+#include "modules/cam/contracts/cam_events.h"
 #include "modules/cam/contracts/i_cam_layer_provider.h"
 #include "modules/cam/contracts/i_cam_contour_sequence_provider.h"
 #include "modules/cam/contracts/i_cam_toolpath_provider.h"
-#include "core/project/cam/layer_manager.h"
 #include "modules/process/cutting/normal_cutting_manager.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/execution/process_workflow_executor.h"
 #include "modules/process/monitor/process_monitor_service.h"
-#include "modules/process/setting/builtin_io_defs.h"
+#include "modules/process/settings/schema/builtin_io_defs.h"
 #include "modules/process/settings/process_settings_service.h"
 #include "modules/process/runtime/device_command_queue.h"
 #include "modules/process/runtime/process_axis_utilities.h"
@@ -255,7 +254,7 @@ lcnc::ModuleInfo ProcessModule::info() const
         QStringLiteral("process"),
         // 中文翻译：加工进程模块
         QStringLiteral("Process module"),
-        QStringLiteral("1.0.0"),
+        QStringLiteral(LCNC_VERSION_STRING),
         { QStringLiteral("cam") }
     };
 }
@@ -282,11 +281,8 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     m_preflightService = std::make_shared<lcnc::process::ProcessPreflightService>(
         *m_service, *m_deviceCommandQueue);
     kernel.services().registerService<lcnc::process::ProcessPreflightService>(m_preflightService);
-    auto workflowService = std::shared_ptr<lcnc::process::ProcessWorkflowService>(
-        m_workflowService.get(), [](lcnc::process::ProcessWorkflowService*) {});
-    kernel.services().registerService<lcnc::process::ProcessWorkflowService>(workflowService);
-    auto workflowFacade = std::static_pointer_cast<lcnc::process::IProcessWorkflowService>(workflowService);
-    kernel.services().registerService<lcnc::process::IProcessWorkflowService>(workflowFacade);
+    kernel.services().registerBorrowedService<lcnc::process::ProcessWorkflowService>(*m_workflowService);
+    kernel.services().registerBorrowedService<lcnc::process::IProcessWorkflowService>(*m_workflowService);
     m_connectionService = std::make_unique<lcnc::process::ProcessConnectionService>(
         *m_service, *m_deviceCommandQueue, this);
     m_manualMotionService = std::make_unique<lcnc::process::ProcessManualMotionService>(
@@ -296,23 +292,17 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
         [this] {
             return !m_stopRecoveryRequired;
         });
-    auto connectionService = std::shared_ptr<lcnc::process::ProcessConnectionService>(
-        m_connectionService.get(), [](lcnc::process::ProcessConnectionService*) {});
-    kernel.services().registerService<lcnc::process::ProcessConnectionService>(connectionService);
+    kernel.services().registerBorrowedService<lcnc::process::ProcessConnectionService>(*m_connectionService);
     m_statusService = std::make_unique<lcnc::process::ProcessStatusService>(
-        *m_service, this);
-    auto statusService = std::shared_ptr<lcnc::process::ProcessStatusService>(
-        m_statusService.get(), [](lcnc::process::ProcessStatusService*) {});
-    kernel.services().registerService<lcnc::process::ProcessStatusService>(statusService);
+        *m_service, *m_deviceCommandQueue, this);
+    kernel.services().registerBorrowedService<lcnc::process::ProcessStatusService>(*m_statusService);
     m_motionStepService = std::make_unique<lcnc::process::ProcessMotionWorkflowService>(
         m_service.get(), m_deviceCommandQueue.get());
     m_ioStepService = std::make_unique<lcnc::process::ProcessIoWorkflowService>(
         m_service.get(), m_deviceCommandQueue.get());
     m_cuttingStepService = std::make_unique<lcnc::process::CallbackProcessCuttingService>();
-    auto svc = std::shared_ptr<ProcessModule>(this, [](ProcessModule*) {});
-    kernel.services().registerService<ProcessModule>(svc);
-    auto facade = std::shared_ptr<lcnc::IProcessFacade>(svc, static_cast<lcnc::IProcessFacade*>(this));
-    kernel.services().registerService<lcnc::IProcessFacade>(facade);
+    kernel.services().registerBorrowedService<ProcessModule>(*this);
+    kernel.services().registerBorrowedService<lcnc::IProcessFacade>(*this);
     connect(m_workflowService.get(), &lcnc::process::ProcessWorkflowService::flowChanged,
             this, &ProcessModule::processFlowChanged);
 
@@ -375,53 +365,22 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
     // Phase B：把 CAM 端图层视图注入，图层级状态以 CAM 容器为权威。
     if (auto layerProvider = kernel.services().getService<lcnc::cam::ICamLayerProvider>()) {
         m_cuttingPlanService->setLayerProvider(layerProvider);
-        if (auto* mgr = qobject_cast<lcnc::cam::LayerManager*>(layerProvider->notifier())) {
-            auto* cuttingPlan = m_cuttingPlanService.get();
-            connect(mgr, &lcnc::cam::LayerManager::layersReset,
-                    cuttingPlan, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
-            connect(mgr, &lcnc::cam::LayerManager::layerAdded,
-                    cuttingPlan, [cuttingPlan](std::uint64_t) { cuttingPlan->notifyExternalPlanChanged(); });
-            connect(mgr, &lcnc::cam::LayerManager::layerRemoved,
-                    cuttingPlan, [cuttingPlan](std::uint64_t) { cuttingPlan->notifyExternalPlanChanged(); });
-            connect(mgr, &lcnc::cam::LayerManager::layersReordered,
-                    cuttingPlan, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
-            connect(mgr, &lcnc::cam::LayerManager::layerPropertyChanged,
-                    cuttingPlan, [cuttingPlan](std::uint64_t, lcnc::cam::LayerProperty) {
-                        cuttingPlan->notifyExternalPlanChanged();
-                    });
-            connect(mgr, &lcnc::cam::LayerManager::contourMembershipChanged,
-                    cuttingPlan, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
-            connect(mgr, &lcnc::cam::LayerManager::manualContourOrderChanged,
-                    cuttingPlan, &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
-            connect(mgr, &lcnc::cam::LayerManager::sortStrategyChanged,
-                    cuttingPlan, [cuttingPlan](lcnc::cam::CuttingPlanSortStrategy) {
-                        cuttingPlan->notifyExternalPlanChanged();
-                    });
-        }
     }
     if (auto sequenceProvider = kernel.services().getService<lcnc::cam::ICamContourSequenceProvider>())
         m_cuttingPlanService->setContourSequenceProvider(sequenceProvider);
     {
-        auto planService = std::shared_ptr<lcnc::process::ProcessCuttingPlanService>(
-            m_cuttingPlanService.get(), [](lcnc::process::ProcessCuttingPlanService*) {});
-        kernel.services().registerService<lcnc::process::ProcessCuttingPlanService>(planService);
+        kernel.services().registerBorrowedService<lcnc::process::ProcessCuttingPlanService>(
+            *m_cuttingPlanService);
     }
-    // CAM 图层变更（新增/删除/重命名）时自动同步映射表。
-    if (auto cam = kernel.services().getService<CamModule>()) {
-        connect(cam.get(), &CamModule::cutterCollisionConfigurationChanged,
-                m_cuttingPlanService.get(),
-                &lcnc::process::ProcessCuttingPlanService::notifyExternalPlanChanged);
-        connect(cam.get(), &CamModule::contourOrderTravelPlanRebuilt,
-                m_cuttingPlanService.get(),
-                [cuttingPlan = m_cuttingPlanService.get()](const QVector<std::uint64_t>&) {
-                    cuttingPlan->notifyExternalPlanChanged();
-                });
-        connect(cam.get(), &CamModule::toolpathLayersChanged,
-                this, [this]() {
-                    if (m_cuttingPlanService)
-                        m_cuttingPlanService->syncFromCam();
-                });
-    }
+    m_camPlanSubscription = kernel.events().subscribe<lcnc::cam::events::ExecutionPlanChanged>(
+        [this](const lcnc::cam::events::ExecutionPlanChanged& event) {
+            if (!m_cuttingPlanService)
+                return;
+            if (event.kind == lcnc::cam::events::ExecutionPlanChangeKind::Layers)
+                m_cuttingPlanService->syncFromCam();
+            else
+                m_cuttingPlanService->notifyExternalPlanChanged();
+        });
     // 项目文件 IO 已全部下沉到 core：CAM 数据（含 v1 process_cutting_plan.toml 兼容迁移）
     // 由 LcncProjectManager + cam_toolpath_io 统一读写。Process 不再做任何项目文件 IO，
     // 仅在工程重置时清空派生状态、在 open 后从 CAM 容器重新派生切割链表。
@@ -702,6 +661,10 @@ void ProcessModule::stop()
 {
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::stop begin");
     if (!m_initialized) return;
+    if (m_kernel && m_camPlanSubscription != lcnc::kInvalidSubscription) {
+        m_kernel->events().unsubscribe(m_camPlanSubscription);
+        m_camPlanSubscription = lcnc::kInvalidSubscription;
+    }
     ++m_runRequestGeneration;
     if (m_deviceCommandQueue)
         m_deviceCommandQueue->beginStopOnly();

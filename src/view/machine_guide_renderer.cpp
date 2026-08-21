@@ -1,4 +1,5 @@
 #include "view/machine_guide_renderer.h"
+#include "core/math/numeric_constants.h"
 
 #include "view/gui_document.h"
 #include "view/graphics_scene.h"
@@ -189,7 +190,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
         if (baseMaker.IsDone())
             builder.Add(coneWire, baseMaker.Edge());
         for (int i = 0; i < 8; ++i) {
-            const double angle = (2.0 * M_PI * i) / 8.0;
+            const double angle = (2.0 * lcnc::math::kPi * i) / 8.0;
             const gp_Pnt basePoint(coneRadius * std::cos(angle),
                                    coneRadius * std::sin(angle),
                                    coneHeight);

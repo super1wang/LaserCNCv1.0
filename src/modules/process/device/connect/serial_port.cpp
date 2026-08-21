@@ -6,6 +6,8 @@
 #include "boost/thread.hpp"
 #include "core/logging/logger.h"
 
+using std::string;
+using toml::table;
 
 SerialPort::SerialPort(QObject* parent)
 	: QObject(parent)

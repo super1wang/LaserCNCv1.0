@@ -1,59 +1,59 @@
-/************************************************************************/
-/*                            奥创激光器实现类                           */
-/************************************************************************/
+#pragma once
 
-#ifndef _ULTRON_LASER_DEVICE_
-#define _ULTRON_LASER_DEVICE_
+#include "modules/process/device/laser/laser_device.h"
 
-#include "laser_device.h"
+#include <cstdint>
 #include <string>
-using namespace std;
 
-class ULTRONLaserDevice : public LaserDevice
-{
-public:
-	explicit ULTRONLaserDevice(lcnc::process::ProcessSettingsService& settings);
-	virtual ErrorCode		setLaserTable(const table& tableLaser = table{});
+/**
+ * @brief Minimal, fail-closed ULTRON serial adapter.
+ *
+ * Protocol framing lives in protocol/ultron_protocol.* so it can be tested
+ * without a serial port or physical laser.
+ */
+class ULTRONLaserDevice final : public LaserDevice {
+  public:
+    explicit ULTRONLaserDevice(lcnc::process::ProcessSettingsService& settings);
 
-	virtual const string&	GetName();
-	virtual bool			IsInited();
-	virtual bool			IsAvailableData(const QByteArray& data);
-	virtual bool			StartLaser();
-	virtual bool			StopLaser(); 
-	
+    ErrorCode setLaserTable(const toml::table& laserTable = {}) override;
+    const std::string& GetName() override;
+    bool IsInited() override;
+    bool IsAvailableData(const QByteArray& data) override;
+    bool StartLaser() override;
+    bool StopLaser() override;
 
-	// 下发参数
-	virtual bool			SetEnergy(double dEnergy);
-	virtual bool			SetFrequency(double dFrequency);
-	virtual bool			SetLaserParameter(const LaserParameter& parameter);
-	virtual bool			SetPulseWidth(double dPulsePickerDivider);
+    bool SetEnergy(double energy) override;
+    bool SetFrequency(double frequency) override;
+    bool SetLaserParameter(const LaserParameter& parameter) override;
+    bool SetPulseWidth(double pulseWidth) override;
 
-	// 获取实际参数 
-	virtual string			GetEnergy();
-	virtual string			GetFrequency();
-	virtual string			GetPulseWidth();
-	
-private:
-	bool InitLaser();
-	uint16_t crc16(const std::vector<uint8_t>& data);  //crc16校验
-	uint16_t swap_bits(uint16_t& value);
-	char* hextochs(char* ascii);
-	string hexStrToDecString(const string& hexStr);
-private:
-	string					m_strName;
-	bool					m_bIsInited;
-	double					m_dMaxCurrent;
-	double					m_dSimmerCurrent;
-	int						m_iWaveShape;
-	string					m_strTemperature;
-public:
-	// 非本型号函数
-	virtual bool			StartAimingBeam() { return false; };
-	virtual bool			StopAimingBeam() { return false; };
+    std::string GetEnergy() override;
+    std::string GetFrequency() override;
+    std::string GetPulseWidth() override;
 
-	//IPG
-	virtual double			GetAveragePower() { return 0; };		//平均功率
-	virtual string			GetTemperature() { return ""; };		//激光器温度
-	virtual string			GetTroubleshooting() { return ""; };
+    bool StartAimingBeam() override {
+        return false;
+    }
+    bool StopAimingBeam() override {
+        return false;
+    }
+    double GetAveragePower() override {
+        return 0.0;
+    }
+    std::string GetTemperature() override {
+        return {};
+    }
+    std::string GetTroubleshooting() override {
+        return {};
+    }
+
+  private:
+    bool initLaser();
+    bool writeRegister(std::uint16_t address, std::uint16_t value);
+    bool readRegister(std::uint16_t address, std::uint16_t* value);
+    static bool scaledRegisterValue(double value, double scale,
+                                    std::uint16_t* registerValue) noexcept;
+
+    std::string m_name{"ULTRON"};
+    bool m_initialized{false};
 };
-#endif

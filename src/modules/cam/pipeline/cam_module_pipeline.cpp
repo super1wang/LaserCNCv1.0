@@ -572,7 +572,7 @@ bool CamModule::applyMachiningFaces()
     // 中文翻译：应用加工面
     if (rejectConflictingPipelineOperation(tr("Application processing surface")))
         return false;
-    if (!m_camData || m_machiningFaces.empty())
+    if (!m_camData || machiningFaces().empty())
         return false;
 
     // A changed face set invalidates all derived data.  Preserve stale data for
@@ -606,7 +606,7 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
     // 中文翻译：提取轮廓
     if (rejectConflictingPipelineOperation(tr("Extract contours")))
         return kInvalidTaskId;
-    if (!m_camData || m_machiningFaces.empty()) {
+    if (!m_camData || machiningFaces().empty()) {
         // 中文翻译：提取轮廓；请先分离或手动应用加工面。
         emit operationFailed(tr("Extract contours"), tr("Please separate or manually apply the machined surface first."));
         return kInvalidTaskId;
@@ -621,7 +621,7 @@ TaskId CamModule::extractContoursFromMachiningFacesAsync()
     }
 
     const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
-    const std::vector<MachiningFaceEntry> faces = m_machiningFaces;
+    const std::vector<MachiningFaceEntry> faces = machiningFaces();
     const double smoothAngle = m_smoothAngle;
     const double deflection = m_deflection;
     const double leadInLength = toolpathRef().globalLeadInLength();
@@ -1133,14 +1133,14 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     params.strategy = static_cast<ExtractionStrategy>(m_extractionStrategy);
     // Reusing the current face set means the operator confirmed "use current
     // machining faces": drive the worker through the explicit-face path so the
-    // current m_machiningFaces is the sole face input, instead of re-running
+    // The current machining-face snapshot is the sole input instead of re-running
     // auto face selection and stacking detected faces on top of the manual picks.
     if (reuseCurrentFaces)
         params.strategy = ExtractionStrategy::ManualFaceSelection;
     if (params.strategy == ExtractionStrategy::ManualFaceSelection)
         params.selectedMachiningFaces = manualMachiningFaces();
     params.deflection = deflection;
-    const std::vector<MachiningFaceEntry> selectedFaceEntries = m_machiningFaces;
+    const std::vector<MachiningFaceEntry> selectedFaceEntries = machiningFaces();
     lcnc::cam::ToolpathGenerationStamp generationStamp;
     generationStamp.toolpathRevision = sourceRevision;
     generationStamp.machiningFaceRevision = faceSetRevision;

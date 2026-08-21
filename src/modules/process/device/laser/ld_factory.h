@@ -1,5 +1,4 @@
-#ifndef _LDFACTORY_
-#define _LDFACTORY_
+#pragma once
 
 #include "laser_device.h"
 #if defined(LCNC_PROCESS_HAS_REAL_LASER) && LCNC_PROCESS_HAS_REAL_LASER
@@ -13,12 +12,15 @@
 #include "simulator_laser_device.h"
 #include "analog_laser_device.h"
 
+#include <string>
+#include <vector>
+
 class	LDFactory
 {
 public:
 	explicit LDFactory(lcnc::process::ProcessSettingsService& settings);
-	LaserDevice *		laserDevice(const string & sLaserDeviceName);
-	void					GetAll_LDName(vector<string> & vecName);
+	LaserDevice* laserDevice(const std::string& laserDeviceName);
+	void GetAll_LDName(std::vector<std::string>& names);
 	
 private:
 	SimulatorLaserDevice m_simulator;
@@ -32,4 +34,3 @@ private:
 	#endif
 	AnalogLaserDevice	m_analog;
 };
-#endif

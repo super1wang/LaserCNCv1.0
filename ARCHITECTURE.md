@@ -1,6 +1,6 @@
 # LaserCNC 架构说明
 
-本文描述截至 2026-08-21、源码提交 `47e5408` 的实际架构。源码和 `CMakeLists.txt` 是实现事实；本文是架构事实源；尚未收口的偏差记录在 [AUDIT.md](AUDIT.md) 与 [todo.md](todo.md)。历史版本文档不得覆盖当前事实。
+本文描述截至 2026-08-21、本次审计整改工作区的实际架构。源码和 `CMakeLists.txt` 是实现事实；本文是架构事实源；尚未收口的偏差记录在 [AUDIT.md](AUDIT.md) 与 [todo.md](todo.md)。历史版本文档不得覆盖当前事实。
 
 ## 1. 系统边界
 
@@ -51,7 +51,7 @@ lcnc_core
                  -> LaserCNC
 ```
 
-该图反映当前链接事实，不代表所有边界已收口：主模块依赖多为 `PUBLIC`，App、Simulation 和部分 Process 仍直接获取具体 `CadModule`/`CamModule`/`ProcessModule`。目标是只公开契约和必要 DTO，把实现库与 UI 依赖改为最小 `PRIVATE` 传播。
+模块实现和 UI 依赖已收紧为 `PRIVATE`，只把公共头实际暴露的 view/contract/Qt 依赖设为 `PUBLIC`。Process 与 Simulation 不再获取具体 `CamModule`；App 仍作为组合根持有具体模块并完成 UI 信号接线，这是顶层装配职责，业务层不得沿该路径反向调用实现。
 
 ## 3. Kernel、服务和生命周期
 
@@ -70,7 +70,7 @@ lcnc_core
 
 `GuiApplication` 由 `main()` 拥有并以非拥有指针注入 Kernel；`CommandContainer` 由 `MainWindow` 拥有。模块依赖为 `cad -> cam -> {simulation, process}`，停止顺序相反。模块启动的任务必须由 `ModuleTaskScope` 跟踪，`stop()` 先取消、有限等待，再释放借用状态；超时时不能销毁仍被 worker/SDK 使用的对象。
 
-当前 `ServiceRegistry` 还会注册以 no-op deleter 包装模块 `this` 的 `shared_ptr`。它实际是非拥有句柄，生命周期安全依赖 ModuleRegistry 和注册表清空顺序；后续应改成显式非拥有服务句柄或只注册独立拥有的 facade/service，避免共享所有权语义失真。
+`ServiceRegistry::registerBorrowedService(T&)` 显式表达模块 facade 的非拥有生命周期，并集中实现借用句柄；独立服务继续使用拥有型注册。模块停止后由 Kernel 按逆拓扑清空注册表，不再在各模块散落 no-op-deleter `shared_ptr(this)`。
 
 ## 4. 工程、文档和视图所有权
 
@@ -88,7 +88,7 @@ lcnc_core
 
 CAD 负责工件导入导出、建模、草图、选择和 Workpiece 域写回。纯 OCC 建模位于 `core/algorithms/cad`；`CadDocumentIoService` 承接工程/STEP/IGES/STL/BREP IO 和显示网格准备。
 
-当前工程包打开使用 pending workspace，成功后再采纳；但普通 CAD 导入仍可能由 `TaskManager` worker 捕获裸 `LcncDocument*` 并直接调用 `addShapeEntity()` 或 STEP/IGES transfer 写入活动 XCAF 文档。关闭只按模块整体取消任务，尚未形成 document-scoped task ownership。目标事务是：
+工程包打开使用 pending workspace，成功后再采纳。普通 CAD 导入已采用两阶段事务：worker 只读取 STEP/IGES/STL/BREP、构造临时文档/shape 并生成 `CadImportPayload`，不捕获或修改活动 `LcncDocument`；返回所有者线程后重新解析 document id 并一次提交。任务由 document id 对应的 `ModuleTaskScope` 跟踪，关闭只取消相关文档任务。
 
 ```text
 worker 读取文件并构造 detached shape/document
@@ -97,7 +97,7 @@ worker 读取文件并构造 detached shape/document
   -> 刷新显示和 dirty
 ```
 
-失败、取消或陈旧任务不得留下半提交实体。
+失败、取消、文档已关闭或陈旧任务不得留下半提交实体。导入提交不包裹 OCC undo command：这是现有 XCAF 导入销毁稳定性的已知约束，回归测试覆盖真实 `model/半球.stp` 的 detached 读取和提交。
 
 ## 6. CAM
 
@@ -114,13 +114,13 @@ CAM 的权威契约：
 
 碰撞以私有几何、AABB/OBB、表面网格/BVH 和受全局 `OcctExactOperationLock` 保护的精确距离组成。Pending、Indeterminate、环境过期或 `complete=false` 必须阻断真实加工。当前仍是离散节点/稀疏证书体系，连续段保守扫掠、碰撞后重规划和完整 C1-C3 安全域见专项计划。
 
-`MachiningFacePipelineService` 已复用等价自动面的稳定 ID，`CamDisplayProjectionService` 已记录 AIS owning context；但 service 仍公开 mutable `entries()`，`CamModule` 仍长期持有其可变引用，双工作区投影回归也未完成。
+`MachiningFacePipelineService` 独占 entry 写入，只向调用方发布 const 视图和 revision；`CamModule` 不再长期持有可变容器引用。`CamDisplayProjectionService` 记录 AIS owning context；双工作区反复投影仍是后续回归项。
 
 ## 7. Simulation
 
 `SimulationModule` 创建独立 `GuiDocument`/OCC 沙箱，冻结 CAM 刀路、轮廓顺序、机台运动学、显示和碰撞输入后回放。它不连接控制器、激光器或串口，不写项目/CAM，也不改变实时机台姿态。
 
-链接层面 Simulation 只依赖 CAM 与 view；源码层面仍直接获取 `CamModule` 以读取配置、机台和场景信息，同时使用部分 CAM contracts。目标是由一个完整的 `OfflineSimulationSnapshotProvider` 提供不可变快照，彻底移除对具体 CAM 入口的依赖。
+Simulation 只通过 `ICamOfflineSimulationProvider` 在会话开始时捕获不可变 `OfflineSimulationSnapshot`。快照包含已提交执行/激光刀路、轴与机台配置、装配、机台/工件形状、碰撞和显示参数；CAM 通过 revision 与 `OfflineSimulationSourceChanged` 事件通知失效。Simulation 不再 include、查询或持有具体 `CamModule`。
 
 ## 8. Process
 
@@ -133,7 +133,7 @@ Process 负责执行，不负责几何。其输入是 CAM 的 OCC-free 快照和
 - `DeviceCommandQueue`：Stop/Workflow/Interactive/Normal/Polling 优先级队列。
 - `ProcessConnectionService`、`ProcessStatusService`、`ProcessPreflightService`、手动运动和交互 IO service。
 
-实际设备执行拓扑不是单一队列：主运行队列之外，`ProcessStatusService` 还拥有控制器状态和外设状态两个独立 `DeviceCommandQueue`。三者最终通过同一个 `ProcessDeviceCoordinator` 递归互斥租约串行进入 SDK。这样可避免轮询长期排在工作流之后，但 Stop 优先级只在主队列内部成立，无法抢占另一个队列中已经持有租约的供应商调用。因此所有 SDK 调用必须有真实 deadline/abort；当前 ACS/GTN 尚有无超时等待环，是发布阻断项。
+设备执行使用模块级单一 `DeviceCommandQueue`：Stop、Workflow、Interactive、Normal、Polling 形成全局优先级，`ProcessStatusService` 的控制器和外设轮询使用最低优先级，不再绕过主队列。`ProcessDeviceCoordinator` 仍是进入供应商 SDK 的递归串行租约。ACS/GTN 可轮询等待统一使用 monotonic deadline、取消条件和有限轮询间隔；供应商函数自身若永不返回，仍需厂商超时或进程外看门狗，软件队列不能抢占正在执行的外部调用。
 
 Process 的安全边界：
 
@@ -163,16 +163,15 @@ v1/v2/v3 不由桌面应用或普通库路径兼容。`src/tools/lcnc_project_up
 
 唯一构建约定见 [BUILD.md](BUILD.md)。`build-cmake/` 与 `build-vs/` 不能共享生成树或并发构建；运行输出按生成器/变体隔离。
 
-当前存在三套版本语义：CMake `project(... VERSION 1.2.1)`、`QApplication` 的 `1.0.0` 和文档交付记录 `v1.5.9`。在建立单一版本源前，不应把任一值单独声明为完整产品版本；`v1.5.9` 仅表示本轮文档基线。
+版本由 CMake `project(... VERSION 1.5.9)` 单点定义并生成 `LCNC_VERSION_STRING`；`QApplication`、模块信息和工程包 fallback 使用同一值。版本交付文档必须与该值一致。
 
-`scripts/check_architecture.ps1` 当前拒绝 core/view 反向依赖、pure algorithm 污染、Process OCC include、淘汰 API、settings singleton、runtime 外原始设备访问和孤儿 `.cpp`。它尚不能证明 CAD worker 事务、具体 Module 耦合、供应商调用有界、catch 日志、格式风格或新 `tr()` 已进入 catalog。
+`scripts/check_architecture.ps1` 拒绝 core/view 反向依赖、pure algorithm 污染、Process OCC include、淘汰 API、settings singleton、runtime 外原始设备访问、Process/Simulation 具体跨模块头、旧 CAD 活动文档导入入口、重复 settings 目录、设备公共头命名空间污染、`M_PI` 和孤儿 `.cpp`。运行时 deadline、catch 日志、格式风格和新 `tr()` catalog 仍需测试或后续门禁补充。
 
-2026-08-21 审计验证：日常 ACS+GTN Debug 构建通过，35/35 CTest 通过；real-laser Debug 变体可链接，但暴露真实激光源的未初始化使用、非全路径返回和大量 `/W4` 告警。构建/CTest/SimulatorCMHP 不是 GUI、长稳或实体机证据。
+2026-08-21 整改验证：日常 ACS+GTN Debug 与 real-laser Debug 构建通过，完整 CTest 39/39 通过；新增协议、等待、服务生命周期和真实 STEP detached 导入测试。构建/CTest/SimulatorCMHP 不是 GUI、长稳或实体机证据。
 
 ## 11. 后续架构顺序
 
-1. 先关闭真实激光未定义行为、供应商无界等待、CAD worker 活动文档写入和连续碰撞发布门禁。
-2. 将所有设备调用收敛为可证明有界的设备 actor/命令模型，确保 Stop 不被轮询或长调用无限阻塞。
-3. 让 App、Simulation、Process 和 module UI 只依赖 facade/immutable snapshot contract，停止注册具体 Module 公共服务。
-4. 继续拆分 `MainWindow`、`ProcessModule`、`CadModule`、`SimulationModule`、CAM 大状态面和超大算法文件。
-5. 建立单一版本源、CMake helper、格式化/lint 和架构门禁，防止结构债务重新增长。
+1. 下一版本优先完成连续碰撞证书、保守扫掠/细分、重规划和真实机台性能门限。
+2. 为不可中断的外部 SDK 调用补厂商硬超时或进程外看门狗，并完成真实设备低速验证。
+3. 继续把 `MainWindow` UI 接线、`ProcessModule` 编排、CAM 大状态面和超大适配器下沉为窄 controller/service。
+4. 扩展双工作区、长稳、GUI 和物理机证据，同时保持自动化、SDK 仿真和实体机结论相互独立。

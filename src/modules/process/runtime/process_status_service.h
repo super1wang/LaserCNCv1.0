@@ -6,7 +6,6 @@
 
 #include <QObject>
 #include <QTimer>
-
 #include <cstdint>
 #include <functional>
 
@@ -22,22 +21,22 @@ struct ProcessStatusRequest {
     QVector<QPair<QString, QString>> digitalOutputs;
 };
 
-class ProcessStatusService final : public QObject, public lcnc::IService
-{
-public:
+class ProcessStatusService final : public QObject, public lcnc::IService {
+  public:
     using RequestProvider = std::function<ProcessStatusRequest()>;
     using HardwarePoller = std::function<DeviceStatusSnapshot(
         const QStringList&, const QVector<QPair<QString, QString>>&)>;
     using PeripheralPoller = std::function<DevicePeripheralSnapshot()>;
-    using HardwareHandler = std::function<void(const DeviceCommandResult&, const DeviceStatusSnapshot&)>;
-    using PeripheralHandler = std::function<void(const DeviceCommandResult&, const DevicePeripheralSnapshot&)>;
+    using HardwareHandler =
+        std::function<void(const DeviceCommandResult&, const DeviceStatusSnapshot&)>;
+    using PeripheralHandler =
+        std::function<void(const DeviceCommandResult&, const DevicePeripheralSnapshot&)>;
     using SafetyMonitoringHandler = std::function<void(bool)>;
 
-    ProcessStatusService(ProcessDeviceRuntime& runtime,
+    ProcessStatusService(ProcessDeviceRuntime& runtime, DeviceCommandQueue& commandQueue,
                          QObject* parent = nullptr);
-    ProcessStatusService(HardwarePoller hardwarePoller,
-                         PeripheralPoller peripheralPoller,
-                         QObject* parent = nullptr);
+    ProcessStatusService(HardwarePoller hardwarePoller, PeripheralPoller peripheralPoller,
+                         DeviceCommandQueue& commandQueue, QObject* parent = nullptr);
     ~ProcessStatusService() override;
 
     void setRequestProvider(RequestProvider provider);
@@ -49,20 +48,20 @@ public:
     void stop();
     void requestHardwarePoll();
     void requestPeripheralPoll();
-    bool isActive() const { return m_active; }
+    bool isActive() const {
+        return m_active;
+    }
 
-private:
+  private:
     void onHardwareTimer();
     void onPeripheralTimer();
 
-    // Controller coordinates and low-frequency peripherals must not wait
-    // behind a workflow command which can remain active for an entire move.
-    // The runtime's ProcessDeviceCoordinator remains the single SDK lease, so
-    // these independent executors interleave only at bounded SDK call edges.
-    // 中文翻译：坐标轮询和低频外设各自使用独立执行器，不排在长时间加工指令之后；
-    // 实际 SDK 调用仍由 ProcessDeviceCoordinator 串行化。
-    DeviceCommandQueue m_hardwareQueue;
-    DeviceCommandQueue m_peripheralQueue;
+    // All vendor SDK access shares one ordered queue. Polling is the lowest
+    // priority lane, so stop/workflow ordering cannot be bypassed by a second
+    // executor. Every individual device command must remain bounded.
+    // 中文翻译：所有厂商 SDK 访问共用一个有序队列；轮询处于最低优先级，
+    // 不允许通过独立执行器绕过停止或流程命令的顺序。
+    DeviceCommandQueue& m_commandQueue;
     HardwarePoller m_hardwarePoller;
     PeripheralPoller m_peripheralPoller;
     QTimer m_hardwareTimer;

@@ -5,6 +5,8 @@
 
 #include "laser_device.h"
 
+using toml::table;
+
 // Configuration access is provided by LaserDevice's injected settings reference.
 
 double LaserDevice::m_dEnergy		= 0.0;

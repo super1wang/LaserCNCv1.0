@@ -44,7 +44,8 @@ int main(int argc, char* argv[])
             ++peripheralCalls;
             return lcnc::process::DevicePeripheralSnapshot{
                 QStringLiteral("test"), true, true, {}, true};
-        });
+        },
+        queue);
     service.setRequestProvider([] {
         lcnc::process::ProcessStatusRequest request;
         request.connected = true;
@@ -98,7 +99,8 @@ int main(int argc, char* argv[])
             snapshot.axes.push_back({QStringLiteral("X"), static_cast<double>(call), true, true});
             return snapshot;
         },
-        [] { return lcnc::process::DevicePeripheralSnapshot{}; });
+        [] { return lcnc::process::DevicePeripheralSnapshot{}; },
+        queue);
     generationService.setRequestProvider([] {
         lcnc::process::ProcessStatusRequest request;
         request.connected = true;
@@ -125,10 +127,9 @@ int main(int argc, char* argv[])
     assert(deliveredPosition == 2.0);
     generationService.stop();
 
-    // A workflow command can remain on the main device queue for an entire
-    // move. Coordinate polling must still execute on its independent queue;
-    // actual SDK serialization is handled inside ProcessDeviceRuntime.
-    // 中文翻译：主设备队列被长运动占用时，独立坐标轮询仍须持续执行。
+    // Polling shares the device queue and must not bypass a running workflow
+    // command. Once the bounded workflow command completes, polling resumes.
+    // 中文翻译：轮询共用设备队列，不得越过正在运行的流程命令；流程结束后恢复。
     QSemaphore workflowEntered;
     QSemaphore releaseWorkflow;
     assert(queue.submit([&] {
@@ -146,7 +147,8 @@ int main(int argc, char* argv[])
             snapshot.axes.push_back({QStringLiteral("Z"), 42.0, true, true});
             return snapshot;
         },
-        [] { return lcnc::process::DevicePeripheralSnapshot{}; });
+        [] { return lcnc::process::DevicePeripheralSnapshot{}; },
+        queue);
     independentService.setRequestProvider([] {
         lcnc::process::ProcessStatusRequest request;
         request.connected = true;
@@ -164,10 +166,15 @@ int main(int argc, char* argv[])
             ++independentDeliveries;
         });
     independentService.start();
+    QCoreApplication::processEvents();
+    QThread::msleep(20);
+    QCoreApplication::processEvents();
+    assert(independentDeliveries == 0);
+    assert(independentCalls == 0);
+    releaseWorkflow.release();
     assert(spinUntil([&] { return independentDeliveries > 0; }));
     assert(independentCalls > 0);
     independentService.stop();
-    releaseWorkflow.release();
 
     assert(queue.shutdown(2000));
     return 0;

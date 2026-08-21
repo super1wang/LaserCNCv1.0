@@ -1,4 +1,5 @@
 #include "core/algorithms/cam/face_classifier.h"
+#include "core/math/numeric_constants.h"
 
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -26,9 +27,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 // =============================================================================
 // FaceClassification convenience accessors
@@ -246,7 +244,7 @@ FaceClassification FaceClassifier::classifyFaces(const TopoDS_Shape& workpiece,
     if (workpiece.IsNull())
         return result;
 
-    const double thresholdRad = smoothAngleThresholdDeg * M_PI / 180.0;
+    const double thresholdRad = lcnc::math::degreesToRadians(smoothAngleThresholdDeg);
 
     // ── Step 1: extract all faces ────────────────────────────────────────
     TopTools_IndexedMapOfShape faceMap;
