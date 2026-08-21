@@ -1,54 +1,57 @@
-# LaserCNC 剩余工作
+# LaserCNC 待办
 
-更新日期：2026-08-19
-当前审计：[AUDIT.md](AUDIT.md)
+更新日期：2026-08-21
 
-本文件只保留未完成事项；已经完成的工作与验证证据不再重复维护。
+来源：[AUDIT.md](AUDIT.md)
 
-## P0：安全与发布门禁
+本文件只维护尚未完成的工作。已完成事项由源码、测试和 `docs/versions/` 中的交付记录承载，不在这里重复累积。
 
-> 碰撞检测、安全域缓存和首段/空程规划的完整分阶段事项已拆分到 `docs/collision_detection_todo.md`；本节仅保留发布门禁摘要。
+## P0：真实设备与数据安全
 
-- [ ] 优化完整机台模式的碰撞校验性能。非机台模式人工测试基本通过，但选择完整运动轴和多个被动轴时仍有严重耗时；需要按轴刚性组统计 BVH 候选、网格拒绝率和精确复检次数，并增加代表性 AC/BC/摆头自动性能夹具。
-- [ ] 完成机台模型加载、碰撞源选择和离线仿真的 GUI 与代表性样件验证。当前已具备 detached 机台解析、主动/被动碰撞源、CAM 完整路径校验、独立 OCC 沙箱和碰撞时间线，但这些自动化/静态证据不能作为真机安全证据。
-- [ ] 将机台环境校验从离散姿态检查升级为连续段扫掠或保守细分，并在碰撞后生成新的抬高/侧移候选路径；当前外表面网格 BVH 和候选精确距离检查仍不能证明采样点之间安全，也不会主动绕开机台障碍。
-- [ ] 完成碰撞对配置与诊断：验证 Z/摆头轴子树中的未直接归轴子件，支持持久化的主动/被动对覆盖和显式忽略对，并输出失败部件、姿态和最小间隙。当前碰撞源由运动学挂接关系推导，尚无成对覆盖配置。
-- [ ] 完成无激光、低速条件下的 AC/BC 转台和摆头验证：机台模型显示/隐藏结果一致，真实切割头与轻量刀嘴基准一致，夹具/卡盘随轴链正确变换，碰撞计划硬阻止加工，并记录安装误差和各控制器实际同步插补行为。
-- [ ] 扩展 `SimulatorCMHP` SDK 集成测试，使单个测试进程内可稳定重复完整的连接、建轴、使能、轮询、回零、短刀路、暂停、Stop、急停、安全输出复位和断开循环；当前只完成真实 SDK/`Simulator.prg` 初始化、100 次设备线程会话命令及同线程断开/销毁，供应商 RPC 释放窗口仍会阻止稳定的 100 次进程级重连。
-- [ ] ACS/GTN 真机各执行不少于 100 次连接/断开和加工停止循环，验证激光、红光、吹气及运动输出安全复位。
-- [ ] 逐项确认供应商调用的 timeout/abort 能力；对不可中断调用定义停止发新命令、对象保活和人工恢复流程。
-- [ ] 在禁用第三方输入法注入的受控环境执行 ASan GUI、Application Verifier/页堆和 8 小时资源趋势；ASan 构建及全部 CTest 已通过，但不替代这些交互与长稳证据。
+- [ ] 修复 `UltronLaserDevice::InitLaser()`：消除释放后使用、未初始化变量、局部变量遮蔽和缺失返回值；将协议解析改成有边界、可测试的纯函数。
+- [ ] 为 ACS `StopBuffer()`、GTN 运动完成/停止等待和规划停止循环增加超时、取消、退避与确定的失败状态；任何供应商 SDK 等待都不得无限占用设备租约。
+- [ ] 统一设备队列的全局安全语义：Stop/关闭必须能够打断或超越状态轮询、外设轮询和普通命令；在完成前不得宣称 Stop 具有进程级抢占能力。
+- [ ] 增加真实激光假传输层测试，以及 ACS/GTN “设备永不完成”故障注入测试，验证有限时间退出和安全输出关闭。
+- [ ] CAD STEP/IGES/STL/BREP 导入改为后台构造独立形状或临时文档，再由文档线程按 workspace generation 原子提交；worker 不得直接修改活动 XCAF 文档。
+- [ ] CAD 导入、网格和大模型任务改为按 document/workspace 记录 task-id；关闭工程、切换工程和模块停止时取消并有限等待。
+- [ ] 完成全机碰撞的连续扫掠或保守自适应细分、路径重规划和碰撞对可解释输出；详细分阶段工作见 [docs/collision_detection_todo.md](docs/collision_detection_todo.md)。
+- [ ] 对真实机台执行低速验证：首段、轮廓间空程、急停/断连、重启恢复、轴限位和激光安全输出。自动化、SDK 仿真和 GUI 检查不能替代此项。
 
-## P1：结构收口
+## P1：架构收敛
 
-- [ ] 完成 Process 运行安全事务下沉，不再以行数为目标：让 `ProcessRunCoordinator` 真正拥有 run/preflight/Stop/Emergency/Recovery completion 和合法状态迁移；`ProcessModule` 只转发 facade 与信号。motion sink 生命周期仍应继续隐藏到 typed executor 私有 contract。
-- [ ] 完成 CAM 高收益下沉：`MachiningFacePipelineService` 不再暴露 mutable `entries()`，下游只消费 immutable snapshot；已为等价自动面重算复用稳定 ID，`CamDisplayProjectionService` 已按 document 记录 owning AIS context。仍需双工作区 offscreen 回归，并继续迁移机台、轴导引、刀路和 travel path 投影；machine calibration 独立成 service。
-- [ ] 完成 CAD 文档事务：异步 reader 只生成 detached 结果，generation 匹配后在文档所属线程一次提交；`CadModule` 关闭及项目管理器关闭 workspace 均先取消并等待模块任务，超时会拒绝关闭并保留 document，保存已拒绝非活动文档；仍需文档级任务归属与显式 workspace/document identity 的保存/导出 API。随后下沉 `CadModelingController`、`CadSelectionController`。
-- [ ] 继续收敛 MainWindow 和跨模块调用：`AppContext`、commands、module UI、`DialogOptions`、`CadTaskPanelController` 改用 facade/service/controller contract，迁移后删除具体 Module 的公共 service 注册。合并 MainWindow/controller 重复的 primitive/feature/transform 参数映射，避免预览与执行 schema 漂移。
-- [ ] 收敛 real-laser 配置中旧厂商协议适配器的项目 `/W4` 告警，使该配置也能启用 `/WX`；ACS+GTN 质量预设已达到 `/W4 /WX`。
+- [ ] 让 app/commands/UI 只依赖 `ICadFacade`、`ICamFacade`、`IProcessFacade` 与专用查询/命令服务；移除对具体 `*Module` 的直接查找。
+- [ ] 为 Simulation 提供 CAM 场景与机床配置的窄只读 provider，移除对 `CamModule` 具体类型的依赖。
+- [ ] 将 Process 的 prepare/start/pause/resume/stop 状态机抽成 `ProcessRunCoordinator`；继续拆分 `ProcessModule`、ACS、GTN 和设置对话框热点文件。
+- [ ] 明确三条设备命令队列与 `ProcessDeviceCoordinator` 的边界，或合并成能保证全局优先级的单一调度器；补充所有权、关闭顺序和阻塞预算文档。
+- [ ] 替换 ServiceRegistry 中指向模块自身的 no-op-deleter `shared_ptr` 注册方式，使用非拥有引用或生命周期明确的服务对象。
+- [ ] 收紧 `MachiningFacePipelineService`：不向外暴露可变容器引用，CamModule 不长期保存内部 entry 引用。
+- [ ] 继续将 `cam_module_toolpath.cpp`、`cam_module_collision.cpp`、`cam_module_pipeline.cpp` 拆为服务/控制器，并保持 CamModule 只做生命周期和协调。
+- [ ] 将 CAD 文件操作和特征创建从 `CadModule` 拆到 document-scoped service；继续拆分 `MainWindow` 和 `DialogOptions`。
+- [ ] 建立唯一版本源，由 CMake、`QApplication`、About、包 manifest 和交付文档共同生成或读取；消除 `1.2.1`、`1.0.0` 与交付编号漂移。
+- [ ] 将 CMake 模块依赖从宽泛 `PUBLIC` 收紧为实际需要的 `PRIVATE`/接口依赖，并用 gate 防止传播依赖掩盖 include 越层。
 
-## P1：自动化回归
+## P1：回归与发布证据
 
-- [ ] 扩展 Stop 安全事务和 Emergency 锁存回归：已覆盖 E-stop 后交互数字输出拒绝；仍需覆盖 workflow/非 workflow 的排队失败、执行失败、超时、轴使能拒绝与恢复前完整健康复核；`SimulatorCMHP` 每轮验证所有安全输出保持关闭。
-- [ ] 增加 CAD 文档 IO 集成测试：已有/新建工作区的成功、失败、取消、关闭并发、非活动文档保存和失败不提交；用线程检查证明 worker 不直接修改活动 XCAF 文档。
-- [ ] 增加双工作区 AIS 投影回归及各并发关闭场景循环 100 次；Process status 快速 stop/start 旧 completion、DeviceCommandQueue completion 抛异常、CAM 等价自动面稳定 ID 已有独立回归。
-- [ ] 增加工作流专用线程、PureSimulation/SDK 线程亲和、轮询关闭和 Process 并发关闭测试，并分别重复运行 100 次；队列 lifecycle 和运行状态迁移已有独立回归。
-- [ ] 补齐 CAM 实际异步任务入口的全局生成/当前轮廓重算集成测试；当前 service 级测试已覆盖成功、取消、工件/加工面/参数/轮廓 revision 变化及陈旧结果拒绝。
-- [ ] 增加完整机台校验与离线仿真回归：覆盖碰撞源空选择持久化、校验任务被新顺序替换、工件安装变换、异步退出释放，以及 AC/BC/摆头代表性模型的碰撞时间线结果。
-- [ ] 测量大模型轮廓提取、面分类、IK 和 GUI 提交阶段的取消延迟与最长卡顿。
+- [ ] 增加 CAD 导入取消、关闭工程竞争、失败提交不污染文档的自动化测试。
+- [ ] 增加双工程反复打开/关闭、CAM 重算、模拟开始/停止和 Process 连接/断开循环测试，观测线程、句柄和私有字节增长。
+- [ ] 增加全机连续扫掠、首段重规划、关键碰撞对和缓存失效的真实 `model/` STEP 回归，并记录耗时基线。
+- [ ] 对所有权、异步、OCC 或供应商 SDK 改动运行 ASan preset；Application Verifier 仅在明确的交互测试窗口使用。
+- [ ] 建立 GUI 验收表，覆盖项目生命周期、三域显示、国际化、CAM 预览、Simulation 和 Process 状态转换。
 
-## P2：规范与门禁
+## P2：规范与工程卫生
 
-- [ ] 为 `CadDocumentIoService`、`ProcessWorkflowExecutor`、`CamModule` 等仍未记录的 catch 补 `LCNC_ERR`；架构检查增加“catch 必须有错误日志”的可维护规则。
-- [ ] 将 `ProcessManualMotionService`、`ProcessInteractiveIoService` 的新增可见文本加入 `translations/lasercnc_zh_CN.ts`，补齐相邻中文翻译注释，并增加新增 `tr()` catalog 检查。
-- [ ] 在上述结构债务清理后继续扩展架构扫描：禁止 app/commands/module UI 获取具体 Module，并禁止 CAD worker 直接写活动文档。Process public runtime/sink contract 的 `ProcessModule*` 门禁已落地。
+- [ ] 补齐 Process 设备公共头的 `#pragma once`，移除公共头中的 `using namespace`。
+- [ ] 引入可执行的格式检查；拆分超长函数和压缩单行，清理混合 Tab/空格与极端长行。
+- [ ] 合并 `src/modules/process/setting/` 与 `settings/`，隔离或包装供应商 `bdaqctrl.h`，避免其污染自有代码指标。
+- [ ] 用 `<numbers>` 或统一常量替换多处 `M_PI` 宏定义。
+- [ ] 抽取 CMake 测试目标、运行库部署和 variant 配置 helper，降低 1300 行根 `CMakeLists.txt` 的重复。
+- [ ] 扩展 `architecture_checks`：禁止 app/commands 新增具体模块依赖，检查 CAD worker 修改活动文档、无界 SDK 等待、公共头 `using namespace` 和缺失 include guard。
+- [ ] 持续完成可见 UI/日志文本的英文源文本、邻接中文注释和 `translations/lasercnc_zh_CN.ts` 同步。
 
-## 每次提交最小检查
+## 每次提交的最低门禁
 
 - [ ] `git diff --check`
-- [ ] `cmake --preset acs-gtn`
-- [ ] `cmake --build --preset acs-gtn-debug --parallel 16`
+- [ ] 按 [BUILD.md](BUILD.md) 使用对应 preset 构建，且 Ninja 与 VS 生成树不混用、不并发。
 - [ ] `ctest --test-dir build-cmake --build-config Debug --output-on-failure`
-- [ ] `scripts/check_architecture.ps1 -Root .`
-- [ ] `scripts/run_quality_gates.ps1`
-- [ ] 涉及真实硬件时执行输出安全、Stop 优先级和断开检查
+- [ ] 分层、旧 API、Process OCC-free 和 architecture_checks 通过。
+- [ ] 对涉及域完成对应 smoke；真实设备结论只来自真实设备验证。

@@ -1,120 +1,133 @@
-# LaserCNC 文件级代码与架构审计
+# LaserCNC 全项目文件级代码与架构审计
 
-审计日期：2026-08-03
+审计日期：2026-08-21
 
-审计基线：`4bec435c13c5bfc84541f1c6f80f408f5dccb451..61c9535`（今日 23 个提交）
+源码基线：`47e5408`（`main`）
 
-工作区状态：仅有未跟踪的 `ctest.log`，未纳入审计改动
+审计前工作区：干净
 
 ## 结论
 
-今日提交完成了有价值的入口下沉：Process typed runtime/预检/连接/状态/流程/手动操作，CAD 文档 IO，CAM 加工面状态与显示投影，以及 MainWindow 的 TaskPanel/工程树控制器均已形成独立文件和测试骨架。分层、Process OCC-free、CMake 源文件收录、`/W4 /WX` quality 构建和 23/23 CTest 当前均通过。
+项目的总体方向合理：Kernel/模块生命周期、统一工程文档、独立机台工作区、workspace-bound view、CAM 权威快照、Process OCC-free 边界和自动化分层均已成立。最新 CAM 拆分也明显降低了单个入口实现文件的密度。
 
-审阅后已优先修复全部 2 组 P0 与 4 组可局部关闭的 P1 缺口，并为队列 completion、状态跨代和自动面稳定 ID 添加回归。CAD detached 事务、CAM immutable/multi-workspace 回归和入口 facade 化仍未完成；当前仍不能作为物理加工安全发布候选。
+但当前仍是“可继续集成开发，不可据此声明实体机生产就绪”。本轮发现 4 组 P0：真实激光适配器存在可静态证明的未定义行为；ACS/GTN 有无 deadline 的等待环；CAD worker 直接修改活动 XCAF 文档；完整机台碰撞仍缺连续段安全证明。另有 concrete Module 耦合、入口/头文件过大、版本漂移和规范执行不足等 P1/P2 债务。
 
-## 1. 审计范围与方法
+日常 ACS+GTN Debug 构建与 35/35 CTest 全部通过，说明现有自动化基线稳定；这些测试没有覆盖上述真实激光代码、供应商卡死、CAD 活动文档并发写或物理机连续碰撞，因此绿色结果与审计问题并不矛盾。
 
-### 1.1 今日提交
+## 1. 范围和方法
 
-逐文件审阅今日 23 个提交涉及的 92 个文件，按以下边界核对：
+本轮扫描并抽查全部已跟踪源码、测试、CMake、维护脚本和项目文档：
 
-| 文件组 | 审阅重点 | 结论 |
-| --- | --- | --- |
-| `core/task/module_task_scope.*`、TaskManager 测试 | task-id 所有权、取消、有限等待 | 模块停止路径可用；尚未覆盖文档级关闭。 |
-| `modules/process/runtime/*`、`workflow/*`、`process_module.*`、普通切割 | SDK 线程、队列 completion、Stop/E-stop、预检 generation、轮询生命周期 | Stop completion、E-stop stop-only、IO 锁存和轮询 generation 已修；完整失败注入仍待补。 |
-| `modules/cad/services/cad_document_io_service.*`、`cad_module.*` | 导入事务、文档寿命、OCC 异常、工作区身份 | 已在关闭前取消模块任务、拒绝非活动文档保存、STL/BREP 的提交点前取消；裸指针与 detached import 仍待修。 |
-| `modules/cam/services/*`、`cam_module.*`、CAM 命令 | 加工面 ID/revision、陈旧提交、AIS 所有权 | stale-result、自动面稳定 ID 与 document-owned context 已修；缺少 immutable state 和双工作区回归。 |
-| `app/controllers/*`、`main_window.*`、工程树 projection | 具体 Module 依赖、选择/显隐/排序语义 | 控制器迁移有效，但入口与 concrete Module 耦合仍大量存在。 |
-| `CMakeLists.txt`、架构脚本、测试、翻译和版本文档 | 收录、门禁真实性、测试覆盖与事实一致性 | 构建/CTest 绿色；门禁尚未覆盖本次发现的关键竞态。 |
+| 范围 | 文件/规模 | 审阅重点 |
+| --- | ---: | --- |
+| `src/` 自有 `.h/.cpp` | 440 文件，约 90,414 行 | 分层、职责、所有权、并发、异常、设备和规范；不含 5,011 行供应商 `bdaqctrl.h`。 |
+| `tests/` | 30 个源码/脚本，约 5,473 行 | 算法、流程、安全、SDK、GUI/长稳覆盖缺口。 |
+| CMake/脚本 | `CMakeLists.txt` 1,324 行及 presets/scripts | target 依赖、可选变体、源文件收录和门禁真实性。 |
+| 文档 | 审计前 60 份版本记录及根目录/专题文档；本轮新增第 61 份记录 | 与当前源码、构建和测试事实交叉核对。 |
 
-### 1.2 全项目架构
+执行的方法包括：文件清单与行数热点、include/target 依赖、淘汰 API、Process OCC、跨模块具体类型、TaskManager/QtConcurrent、SDK 锁与等待环、裸内存、头文件规范、长行/缩写实现、版本值和文档引用扫描；随后运行日常构建、完整 CTest 和 real-laser 独立构建。
 
-同时扫描全部 `src/`、`tests/`、CMake 与维护脚本：
+## 2. P0：必须优先关闭
 
-- `core -> view/modules/app`、`view -> modules/app` 反向 include：0。
-- Process OCC 类型/include：0。
-- 淘汰文档 API与 runtime 外 `motionControl()/laserDevice()/lockDeviceAccess()` 调用：0。
-- 旧迁移入口 `loadForMigration()`、`lcnc_project_upgrade`：0。
-- 今日入口规模：`MainWindow` 2414 行、`CadModule` 2020 行、`CamModule` 6444 行、`ProcessModule` 2122 行。行数不作为完成标准，但业务密度仍表明四个入口均未完成 facade 化。
+### P0-1 真实激光 ULTRON 初始化存在未定义行为
 
-未在问题表中单列的文件未发现可静态证明的独立缺陷；这不等于证明不存在运行时缺陷。
+位置：`src/modules/process/device/laser/ultron_laser_device.cpp:390-466`
 
-## 2. 代码审阅发现
+- `charArray` 在循环内 `delete[]` 后继续被 `std::copy` 和 `QByteArray` 使用，形成释放后写/读。
+- 外层 `ivalue` 未初始化，内层又声明同名变量；循环条件读取未初始化的外层值。
+- `InitLaser()` 存在非所有路径返回值。
 
-### 已修复 P0：加工安全事务
+real-laser `/W4` 构建实际报告 C4456、C4700、C4715，静态源码还能直接证明释放后使用。该变体虽然最终链接成功，但不能进入真实激光调试或验收。应改用 `QByteArray`/`std::array` RAII，消除裸数组、变量遮蔽并为全部路径返回明确结果；增加协议帧、超时、失败响应和 ASan 回归。
 
-| 编号 | 文件/位置 | 问题与影响 | 必须完成的修正 |
+### P0-2 Stop/关机可能被无界供应商等待阻塞
+
+位置示例：
+
+- `acs_motion_control.cpp:1155-1156`：`StopBuffer()` 无 deadline 等待 buffer 结束。
+- `gtn_motion_control.cpp:615-618`、`638-641`、`1517-1520`：停止后无 deadline 等待轴停止。
+- `gtn_motion_control.cpp:1726-1729`：建坐标系前无 deadline 等待。
+- `gtn_motion_control.cpp:2092-2099`：忙轮询规划停止，无 sleep/deadline。
+
+`ProcessStatusService` 的两个轮询队列和主设备队列共享 `ProcessDeviceCoordinator` 租约；已经运行的调用不可由 Stop lane 抢占。任何无界循环都可能占住租约，使安全停机、断开和模块关闭超时。所有等待必须统一使用 monotonic deadline、stop token、有限轮询间隔和具体错误；为“状态永不结束/SDK 不返回”加入故障注入测试。
+
+### P0-3 CAD worker 直接修改活动 XCAF 文档
+
+位置：`cad_module.cpp` 的 open/import worker 与 `cad_document_io_service.cpp` 的 `import*IntoDocument()`。
+
+异步 lambda 捕获裸 `LcncDocument*`，在 TaskManager worker 中调用 STEP/IGES transfer、`addShapeEntity()` 和网格准备。导入到现有工作区时，GUI/view 可能同时读取同一文档；失败或取消也缺少统一原子提交边界。当前关闭守卫能降低悬空风险，但不能提供 XCAF 线程安全或事务保证。
+
+应让 worker 只产生 detached `TopoDS_Shape`/临时文档和诊断；以 workspace id、document id、generation 校验后在文档线程一次提交。任务所有权从模块级细化到文档级，关闭、切换和新导入只取消相关任务。
+
+### P0-4 完整机台碰撞仍是离散验证
+
+当前 CAM 已能失败关闭 Pending/Indeterminate/过期快照，并有 BVH/精确距离证据，但采样点之间尚无连续段扫掠或保守细分证明，也不会在碰撞后自动重规划。完整机台模式的高耗时尚无稳定性能门限。真实加工必须继续把该能力视为未完成发布门禁，详见 [docs/collision_detection_todo.md](docs/collision_detection_todo.md)。
+
+## 3. P1：结构和耦合
+
+| 编号 | 文件/范围 | 发现 | 建议 |
 | --- | --- | --- | --- |
-| P0-1 | `process_module.cpp` 的 workflow device stopper、`runStop()` | 普通 Stop 先报告正常停止，失败可能被忽略。 | 已将普通 Stop 改为 Stop-lane completion 事务；排队/执行失败进入 Error，成功后才进入 Stopped。 |
-| P0-2 | `ProcessModule::requestStop()/resetStop()/setDigitalOutput()/setAxisEnabled()` | Stop 后交互 IO 可重新进入，恢复未复核。 | 已引入 stop-only 门禁；安全停机事务未完成时交互 IO 拒绝，成功后恢复队列通道。停止复位在 executor 中安全停机，复查加工配置和 contour-boundary 健康状态后才回 Idle。 |
+| P1-1 | `app/app_context.*`、`main_window.cpp`、module UI/commands | facade 已存在，但 App 仍返回并广泛调用具体 `CadModule/CamModule/ProcessModule`。 | 扩充窄 contract/controller；迁移后取消具体 Module 的公共服务注册。 |
+| P1-2 | `simulation_module.cpp` | 直接获取 `CamModule` 读取配置、机台和场景，同时只对刀路使用 contract。 | 增加完整的 immutable offline-simulation snapshot provider。 |
+| P1-3 | CMake target graph | CAD/CAM/Simulation/Process/App 依赖多为 `PUBLIC`，实现头和 UI 依赖被传递暴露。 | 拆 contracts target，能 `PRIVATE` 的链接改为 `PRIVATE`。 |
+| P1-4 | `ServiceRegistry` 与模块 init | 使用 no-op deleter `shared_ptr(this)` 注册具体模块，表现为共享所有权但实际非拥有。 | 使用显式非拥有句柄，或注册真正独立拥有的 facade/service。 |
+| P1-5 | Process 设备拓扑 | 主队列、硬件轮询队列、外设轮询队列通过全局递归 mutex 串行，Stop 优先级不是全局优先级。 | 收敛为单设备 actor，或建立可证明有界、可抢占语义的命令协议。 |
+| P1-6 | `MachiningFacePipelineService` | 仍暴露 mutable `entries()`，`CamModule` 长期持有可变引用。 | service 独占写入，只发布 immutable snapshot/revision。 |
+| P1-7 | 版本信息 | CMake 为 `1.2.1`、应用为 `1.0.0`、本轮文档交付记录为 `v1.5.9`。 | 用 CMake 单一版本源生成应用、manifest、about 和版本文档元数据。 |
+| P1-8 | 测试边界 | 缺 CAD IO 并发/取消事务、双工作区 AIS、真实激光协议、供应商卡死、完整 Stop 故障注入。 | 优先增加失败注入和真实输入端到端测试，再扩展功能测试。 |
 
-### P1：并发、所有权与数据一致性
+## 4. 文件级热点
 
-| 编号 | 文件/位置 | 问题与影响 | 建议 |
-| --- | --- | --- | --- |
-| P1-1 | `cad_document_io_service.cpp` 的异步 import/export 与 `closeDocument()` | TaskManager worker 捕获裸 `LcncDocument*`，而关闭工作区不会先取消该文档任务；关闭期间可能发生悬空访问。导入还直接在 worker 修改活动 XCAF 文档，与 GUI 读取缺少串行边界。 | 任务只构建 detached 结果；以 workspace/document generation 验证后在所属线程提交。关闭前按文档取消并等待任务。 |
-| P1-2 | 同文件的 STL/BREP/STEP/IGES 导入与 `saveDocument()` | STL/BREP 在 `addShapeEntity()` 后才检查取消，失败/取消可留下半提交实体；导入已有文档不是事务式。`saveDocument(document, ...)` 只校验指针，实际调用当前活动 workspace 的保存/导出接口，非活动文档可能保存错工程。 | 所有格式先导入临时 XCAF/shape snapshot，成功且 generation 匹配后一次提交；保存 API 必须显式携带 workspace/document identity。 |
-| P1-3 | `process_status_service.cpp` 的 `stop()` 与 completion | 旧 completion 可污染新会话。 | 已按 start generation 隔离 completion，并在 stop 取消 pending ticket；快速 stop/start 回归通过。 |
-| P1-4 | `cam_display_projection_service.cpp` | 旧 context 的 AIS 可能用新 context 移除。 | 已按 document 保存 projection 与 owning context，并在 context 更换前用旧 context 清理；双工作区 offscreen 回归仍待添加。 |
-| P1-5 | `machining_face_pipeline_service.cpp::replaceAutomaticFaces()` | 等价自动面重算更换 ID。 | 已以 workpiece entry、role 与签名复用 ID；重建相同 box 的独立回归通过。 |
-| P1-6 | `device_command_queue.cpp::runWorker()` | completion 抛异常会重复回调。 | 已分离 command/completion 异常边界，completion 只通知一次；throwing-completion 回归通过。 |
+以下为自有代码中最高风险/最高维护密度文件；行数不是缺陷本身，但与职责数量和变化频率结合后应作为拆分顺序：
 
-### P2：规范与可维护性
+| 文件 | 行数 | 主要问题 |
+| --- | ---: | --- |
+| `cam/toolpath/cam_module_toolpath.cpp` | 2,888 | 多条刀路入口、偏置、顺序、IK、显示状态和提交逻辑仍共享入口状态。 |
+| `app/main_window.cpp` | 2,774 | Ribbon、工作区、CAD/CAM/Process 接线、工程树、最近文件和仿真入口集中。 |
+| `core/algorithms/cam/laser_toolpath.cpp` | 2,374 | 面分类、轮廓、引线、偏置与显示几何混在同一算法文件。 |
+| `process/process_module.cpp` | 2,283 | service 装配、run/stop、UI 状态、仿真和设备事务仍高度集中。 |
+| `process/device/motion_control/gtn_motion_control.cpp` | 2,197 | 旧式资源管理、阻塞等待和完整供应商表面集中。 |
+| `cad/cad_module.cpp` | 2,086 | 文档 IO 编排、建模、草图、选择和显示协调尚未完全下沉。 |
+| `process/device/motion_control/acs_motion_control.cpp` | 1,818 | 控制器会话、回零、buffer、IO 和阻塞等待集中。 |
+| `app/dialog/dialog_options.cpp` | 1,760 | 应用、渲染、机台与 Process 配置在单对话框实现内耦合。 |
+| `cam/collision/cam_module_collision.cpp` | 1,583 | 碰撞缓存、扫描、首段安全域和异步发布仍依赖 CamModule 大状态面。 |
+| `cam/pipeline/cam_module_pipeline.cpp` | 1,583 | 多阶段 pipeline、task watcher、revision 提交和 UI 信号集中。 |
+| `simulation/simulation_module.cpp` | 1,491 | session/page/快照/回放/碰撞扫描全部在两个文件内。 |
 
-| 编号 | 文件/范围 | 问题 | 建议 |
-| --- | --- | --- | --- |
-| P2-1 | `cad_document_io_service.cpp`、`process_workflow_executor.cpp`、`cam_module.cpp` 等 | 仍有 catch 未执行 `LCNC_ERR`，其中 CAD 新 service 的 OCC catch 违反本轮边界约定。 | 按异常边界补结构化错误日志，再转换为 UI 错误。 |
-| P2-2 | `process_manual_motion_service.cpp`、`process_interactive_io_service.cpp` | 新增 27 处可见 `tr()` 文本，但 `lasercnc_zh_CN.ts` 没有对应 service context；中文界面会回退英文，且部分新文本缺相邻中文翻译注释。 | 更新 TS catalog 和注释，并加翻译 catalog 检查。 |
-| P2-3 | `CadTaskPanelController` 与 `MainWindow` | 两处重复 primitive/feature/transform 参数映射；controller 仍直接持有 `CadModule*`。后续参数 schema 变化容易出现预览与执行不一致。 | 抽取共享 typed request/controller contract，并让 controller 依赖 `CadModelingController`/facade。 |
+`bdaqctrl.h` 为 5,011 行供应商头，不应计入自有代码质量指标，长期应迁入明确的 `3rd/` SDK 边界。
 
-## 3. 全项目架构评价
+## 5. P2：规范和工程化
 
-### 已成立的边界
+- 9 个 Process 设备头仍使用传统 include guard 而非规范要求的 `#pragma once`。
+- 多个激光公共头包含 `using namespace std;`，会污染所有包含者命名空间。
+- 排除供应商头后仍有 319 行超过 140 字符；Process steps/settings 中存在 500-1,488 字符的压缩单行实现。
+- 16 个 Process 文件同时混用 tab 和四空格；与新代码风格差异明显。
+- `setting/` 与 `settings/` 两个同级目录表达相近职责，增加查找和 include 认知成本。
+- 多个源文件重复定义 `M_PI`，应统一为项目 `constexpr` 数学常量。
+- `CMakeLists.txt` 手工重复测试 target、runtime deployment、ASan deployment 和标签注册；应提取 helper/CMake module。
+- 当前门禁未检查 concrete Module 依赖、供应商有界等待、catch 必须日志、格式/长行或新增 `tr()` catalog 完整性。
 
-- Kernel、统一工程文档、MachineWorkspace 和 workspace-bound GuiDocument 的总体所有权清晰。
-- core/view 分层与 Process OCC-free 门禁有效。
-- 桌面工程/CAM v4、当前 workflow、Process settings v2 的拒绝门禁仍在。
-- DeviceCommandQueue 已形成单设备线程、五级优先级、FIFO、合并、取消、超时 barrier 和关闭语义。
-- 普通切割真实硬件 sink 的创建、调用和销毁目前都经设备队列执行，轮廓前双门禁仍在。
-- ModuleTaskScope 统一了模块级 TaskManager 取消/等待。
+建议引入仓库级 `.clang-format`、格式检查 target 和渐进式基线：先要求所有新增/修改文件通过，再分批清理旧设备适配器，避免一次全局格式化掩盖功能差异。
 
-### 仍未完成的入口瘦身
+## 6. 已成立的优点
 
-1. `AppContext`、commands、module UI、`DialogOptions` 和 `MainWindow` 仍广泛获取 `CadModule/CamModule/ProcessModule`；具体 Module 也仍注册为公共 service。已批准的“外部只依赖 facade/service contract”尚未完成。
-2. `ProcessRunCoordinator` 仅是状态迁移表；run/preflight/stop completion、缓存和 UI 信号仍由 `ProcessModule` 组合。`ProcessDeviceRuntime::createMotionSink()` 的 public contract 仍暴露 `ProcessModule*`，`NormalCuttingManager` 和 simulation sink 反向持有入口。
-3. `MachiningFacePipelineService` 暴露 mutable `entries()`，`CamModule` 长期持有其可变引用；“service 独占状态、下游只读 immutable snapshot”尚未成立。`CamDisplayProjectionService` 只覆盖加工面，机台、轴导引、刀路、travel path 仍在入口。
-4. `CadDocumentIoService` 已注册，但 `CadModelingController`、`CadSelectionController` 尚不存在；CAD facade 仍执行建模、草图、选择和显示业务。
-5. `CadTaskPanelController`、工程树写回、最近文件、CAM panel 和机器视图接线仍在 `MainWindow`。当前控制器拆分减少了局部复杂度，但还没有切断 concrete Module 耦合。
+- `scripts/check_architecture.ps1` 当前通过；core/view 反向 include、Process OCC include、淘汰文档 API和孤儿 `.cpp` 均为 0。
+- CAM/Process 通过 OCC-free immutable snapshot 分隔，碰撞 Pending/Indeterminate/过期状态能失败关闭。
+- 工程包 v4 staging/原子替换、工具快照、机台指纹和离线升级工具有回归。
+- TaskManager、DeviceCommandQueue、Process preflight/status/connection/manual motion 和制造流程已有独立可定位测试。
+- CAM 最新拆分把 `cam_module.cpp` 缩为生命周期和装配入口，并修复了有序求解的事务提交。
+- 自动化明确区分 algorithm/flow/safety/sdk-integration/support 标签，文档也没有把 SimulatorCMHP 冒充物理机证据。
 
-### 门禁缺口
+## 7. 验证证据
 
-当前 `check_architecture.ps1` 不能发现：
+| 验证 | 结果 |
+| --- | --- |
+| `scripts/check_architecture.ps1 -Root .` | 通过。 |
+| `cmake --build --preset acs-gtn-debug --parallel 16` | 通过，`x64/ninja/Debug/LaserCNC.exe` 链接成功。 |
+| `ctest --test-dir build-cmake --build-config Debug --output-on-failure` | 35/35 通过，57.08 秒。 |
+| `cmake --preset real-laser` + `cmake --build --preset real-laser --parallel 16` | 构建/链接通过，但出现真实激光源 `/W4` 告警；ULTRON 的 C4456/C4700/C4715 与 P0-1 一致。 |
 
-- app/commands/module UI 对具体 Module 的获取；
-- Process E-stop 后 Interactive/Normal 命令重新进入；
-- Process runtime/sink public contract 中的 `ProcessModule*` 反向依赖；
-- CAD worker 对活动文档的直接写入和文档关闭竞态；
-- CAM projection 是否按 workspace 隔离；
-- 所有 catch 是否记录 `LCNC_ERR`；
-- 新增 `tr()` 是否进入翻译 catalog。
+本轮未执行 ASan、Application Verifier、GUI 人工遍历、8 小时资源趋势或物理 ACS/GTN/激光验证。real-laser 构建通过不代表协议和内存安全通过。
 
-这些规则应在对应实现修复后加入，避免先把现有债务固化成误报豁免。
+## 8. 发布判断
 
-## 4. 验证证据
-
-本次修复后工作区实测：
-
-- `git diff --check`：通过。
-- `scripts/check_architecture.ps1 -Root .`：通过。
-- quality Ninja `/W4 /WX` 增量构建：通过。
-- `ctest --test-dir build-cmake-quality -C Debug --output-on-failure`：23/23 通过，总耗时 25.60 s。
-- `lcnc_simulator_cmhp_sdk_integration_test`：通过，使用真实 ACS SDK Simulator；该证据不等于 ACS/GTN/激光物理硬件验证。
-- `lcnc_startup_smoke_test`：通过，Qt platform plugin 部署当前有效。
-
-新增回归已覆盖队列 completion 抛异常、status 快速 stop/start、自动面稳定 ID、交互 IO 锁存，以及 workspace 关闭被任务守卫拒绝后文档仍存活。Stop 完整失败注入、CAD detached 提交和双工作区 AIS offscreen 场景仍未覆盖。
-
-## 5. 发布判断
-
-当前状态为“审阅发现的 P0 实现缺口及可局部关闭的 P1 竞态已修复，静态/自动化基线绿色；剩余工作集中在 CAD detached 文档事务、完整安全故障注入、CAM immutable/multi-workspace 投影和入口 facade 化”。后续继续按 `todo.md` 的未完成项推进。
-
-物理 ACS/GTN/激光、供应商 abort、Application Verifier/页堆、8 小时资源趋势和性能门限仍是独立发布门禁，不能由 SimulatorCMHP 或普通 CTest 代替。
+当前适合作为后续架构收口和功能开发基线；在 P0-1/P0-2/P0-3、连续碰撞门禁及对应失败注入回归完成前，不建议启用真实激光或声明实体机生产安全。实施顺序以 [todo.md](todo.md) 为准。
