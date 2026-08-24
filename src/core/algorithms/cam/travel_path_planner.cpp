@@ -1,5 +1,7 @@
 #include "core/algorithms/cam/travel_path_planner.h"
 
+#include "core/logging/logger.h"
+
 #include <BRepAdaptor_Surface.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <TopAbs_ShapeEnum.hxx>
@@ -128,7 +130,10 @@ bool buildSphericalReference(const TopoDS_Shape& workpiece,
             }
             return points->size() >= 2;
         }
-    } catch (const Standard_Failure&) {
+    } catch (const Standard_Failure& failure) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "Unable to construct a rapid surface reference: {}",
+                 failure.GetMessageString());
         points->clear();
     }
     return false;
@@ -208,11 +213,9 @@ bool hasValidPlanningInputs(const TravelPlanningRequest& request,
     if (!std::isfinite(request.proxySafetyRadiusMm)
         || !std::isfinite(request.minimumClearanceMm)
         || !std::isfinite(request.maximumSafetyOffsetMm)
-        || !std::isfinite(request.collisionSampleStepMm)
         || !std::isfinite(request.surfacePathStepMm)
         || request.minimumClearanceMm < 0.0
         || request.maximumSafetyOffsetMm < 0.0
-        || request.collisionSampleStepMm <= 0.0
         || request.surfacePathStepMm <= 0.0
         || request.motionProfile.supportedCoordinatedMask == 0
         || (request.motionProfile.supportedCoordinatedMask & ~kKnownAxes) != 0) {

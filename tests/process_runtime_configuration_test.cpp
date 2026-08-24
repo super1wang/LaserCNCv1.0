@@ -203,20 +203,6 @@ int main(int argc, char* argv[])
             90.0, 98.0, 1.0, -100.0, 100.0, 5.0, 5.0);
     if (limitFailure.isValid())
         return fail(QStringLiteral("Automatic Z search ignored the physical upper limit"));
-    if (lcnc::cam_algo::shouldValidateInitialApproachMachine(
-            false, lcnc::cam_algo::InitialApproachAxisMode::AutomaticSafeZone, true)
-        || lcnc::cam_algo::shouldValidateInitialApproachMachine(
-            false, lcnc::cam_algo::InitialApproachAxisMode::Manual, true)) {
-        return fail(QStringLiteral("Initial approach required machine collision sources without a machine model"));
-    }
-    if (!lcnc::cam_algo::shouldValidateInitialApproachMachine(
-            true, lcnc::cam_algo::InitialApproachAxisMode::AutomaticSafeZone, false)
-        || !lcnc::cam_algo::shouldValidateInitialApproachMachine(
-            true, lcnc::cam_algo::InitialApproachAxisMode::Manual, true)
-        || lcnc::cam_algo::shouldValidateInitialApproachMachine(
-            true, lcnc::cam_algo::InitialApproachAxisMode::Manual, false)) {
-        return fail(QStringLiteral("Initial approach machine-validation policy is invalid"));
-    }
     if (lcnc::cam_algo::shouldRetryAutomaticSafetyZCandidate(
             lcnc::cam::CollisionValidationState::Collision, true,
             lcnc::cam::RapidSegmentPhase::Retract)

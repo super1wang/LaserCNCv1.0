@@ -19,6 +19,8 @@
 #include "modules/cam/toolpath/toolpath_sequence_service.h"
 #include "modules/cam/toolpath/toolpath_solve_service.h"
 #include "core/machine/machine_workspace.h"
+#include "core/machine/machine_safety_package.h"
+#include "core/algorithms/cam/machine_safety_index.h"
 #include "modules/cam/contracts/cam_events.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kernel/kernel.h"
@@ -51,18 +53,22 @@
 
 #include <QElapsedTimer>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPoint>
 #include <QPointer>
+#include <QProcess>
 #include <QScopeGuard>
 #include <QSignalBlocker>
 #include <QByteArray>
 #include <QThread>
 #include <QTimer>
+#include <QTemporaryDir>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -80,7 +86,6 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
-#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepTools.hxx>
 #include <STEPControl_Reader.hxx>
 #include <StlAPI_Reader.hxx>
@@ -132,6 +137,57 @@ using lcnc::cam::collisionAxisSourceId;
 using lcnc::cam::collisionGeometryKey;
 using lcnc::cam::transformCollisionAabb;
 using lcnc::cam::transformCollisionObb;
+
+QByteArray sha256File(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    return hash.addData(&file) ? hash.result() : QByteArray{};
+}
+
+QString machineSafetyBuildStageText(const QByteArray& token)
+{
+    // 中文翻译：启动机台安全包生成器；解压已有机台安全包；加载并分析机台 STEP 模型；
+    // 准备安全索引；构建持久化表面 BVH；构建基础安全网格；复用基础网格断点。
+    if (token == "starting")
+        return QObject::tr("Starting machine safety package generator");
+    if (token == "extracting_package")
+        return QObject::tr("Extracting existing machine safety package");
+    if (token == "loading_machine")
+        return QObject::tr("Loading and analyzing the machine STEP model");
+    if (token == "preparing_index")
+        return QObject::tr("Preparing the machine safety index");
+    if (token == "surface_bvh")
+        return QObject::tr("Building persistent surface BVH data");
+    if (token == "base_grid")
+        return QObject::tr("Building the base machine safety grid");
+    if (token == "base_grid_reused" || token == "resuming_checkpoint")
+        return QObject::tr("Reusing the machine safety checkpoint");
+
+    // 中文翻译：抽样精确碰撞候选；保存安全索引断点；构建一级细化；构建热区细化；
+    // 完成安全索引；保存索引；审计安全姿态；打包；生成完成。
+    if (token == "exact_sampling")
+        return QObject::tr("Sampling exact collision candidates");
+    if (token == "saving_checkpoint")
+        return QObject::tr("Saving the machine safety checkpoint");
+    if (token == "refinement_level_1")
+        return QObject::tr("Building level-1 machine safety refinement");
+    if (token.startsWith("hot_refinement_"))
+        return QObject::tr("Building hot-zone machine safety refinement");
+    if (token == "finalizing_index" || token == "index_complete")
+        return QObject::tr("Finalizing the machine safety index");
+    if (token == "saving_index")
+        return QObject::tr("Saving the machine safety index");
+    if (token == "auditing_safe")
+        return QObject::tr("Auditing CertifiedSafe poses");
+    if (token == "packaging")
+        return QObject::tr("Packaging the machine model and safety index");
+    if (token == "complete")
+        return QObject::tr("Machine safety package generation completed");
+    return QObject::tr("Building the machine safety package");
+}
 using lcnc::cam::detail::entityEntries;
 using lcnc::cam::detail::faceBelongsToSource;
 using lcnc::cam::detail::shapeCenter;
@@ -150,6 +206,8 @@ void CamModule::configureMachine(const QString& presetName)
         return;
 
     const bool sameConfig = (kin->configType() == presetName);
+    invalidateMachineSafetyPackage();
+    invalidateMachineEnvironment();
     kin->loadPreset(presetName);
     m_config.setMachinePreset(presetName);
     if (m_machineConfig)
@@ -192,6 +250,21 @@ void CamModule::loadMachine(const QString& filePath)
     }
 
     const QString normalizedPath = fi.absoluteFilePath();
+    const bool packageInput = lcnc::MachineSafetyPackage::isPackagePath(normalizedPath);
+    const auto packageExtraction = packageInput
+        ? std::make_shared<QTemporaryDir>() : std::shared_ptr<QTemporaryDir>{};
+    if (packageExtraction && !packageExtraction->isValid()) {
+        emit operationFailed(tr("Loading machine"),
+                             tr("Unable to create the machine safety package extraction directory."));
+        return;
+    }
+    const auto packageLoad = std::make_shared<lcnc::MachineSafetyPackageLoadResult>();
+    const auto packageIndex = std::make_shared<lcnc::cam_algo::MachineSafetyIndex>();
+    if (packageInput)
+        m_machineSafetyPackageManager.beginLoad(normalizedPath);
+    else
+        m_machineSafetyPackageManager.clear();
+    emit machineSafetyPackageChanged();
     const auto stageTimer = std::make_shared<QElapsedTimer>();
     stageTimer->start();
     LCNC_INFO(lcnc::LogCode::Generic,
@@ -209,10 +282,23 @@ void CamModule::loadMachine(const QString& filePath)
 
     // 中文翻译：加载机台: %1
     TaskId taskId = taskManager->run(tr("Loading machine: %1").arg(fi.fileName()),
-        [filePath, result](TaskProgress* prog) {
+        [normalizedPath, packageInput, packageExtraction, packageLoad,
+         packageIndex, result](TaskProgress* prog) {
             if (prog->isAbortRequested())
                 throw std::runtime_error("machine load cancelled");
-            if (!lcnc::cam::machine_io::readMachineFile(filePath, prog, result.get())) {
+            QString modelPath = normalizedPath;
+            if (packageInput) {
+                QString packageError;
+                if (!lcnc::MachineSafetyPackage::extractAndValidate(
+                        normalizedPath, packageExtraction->path(), packageLoad.get(),
+                        &packageError)
+                    || !packageIndex->load(packageLoad->safetyIndexPath, &packageError)) {
+                    result->error = packageError;
+                    throw std::runtime_error(packageError.toStdString());
+                }
+                modelPath = packageLoad->modelPath;
+            }
+            if (!lcnc::cam::machine_io::readMachineFile(modelPath, prog, result.get())) {
                 throw std::runtime_error(result->error.isEmpty()
                     ? "machine model parse failed" : result->error.toStdString());
             }
@@ -222,7 +308,8 @@ void CamModule::loadMachine(const QString& filePath)
 
     m_taskScope.track(taskId);
     watchTask(this, taskId, [this, taskId, normalizedPath, loadGeneration, result,
-                             stageTimer](bool ok) {
+                             packageInput, packageExtraction, packageLoad,
+                             packageIndex, stageTimer](bool ok) {
         bool committed = false;
         const auto stageLog = qScopeGuard([&] {
             LCNC_INFO(lcnc::LogCode::Generic,
@@ -240,6 +327,13 @@ void CamModule::loadMachine(const QString& filePath)
         }
         m_machineLoadPending.store(false);
         if (!ok || !result->isValid()) {
+            if (packageInput) {
+                m_machineSafetyPackageManager.markInvalid(
+                    result->error.isEmpty()
+                        ? tr("Unable to read the machine safety package")
+                        : result->error);
+                emit machineSafetyPackageChanged();
+            }
             LCNC_ERR(lcnc::LogCode::Generic,
                      "cam.machine: loading '{}' failed: {}",
                      normalizedPath.toStdString(), result->error.toStdString());
@@ -275,10 +369,230 @@ void CamModule::loadMachine(const QString& filePath)
         applyConfiguredMachineAxes(false);
         autoDetectAxes();
         applyStoredMachineProfile(activeMachineProfilePath());
+        const QByteArray actualRuntimeFingerprint =
+            machineSafetyConfigurationFingerprint();
+        if (packageInput
+            && packageIndex
+            && packageIndex->bodies().size() == result->parts.size()
+            && packageLoad->manifest.runtimeConfigurationSha256.size() == 32
+            && packageLoad->manifest.runtimeConfigurationSha256
+                == actualRuntimeFingerprint) {
+            m_machineSafetyPackageManager.publish(
+                *packageLoad, packageIndex, packageExtraction);
+            const auto publishedStatus =
+                m_machineSafetyPackageManager.status();
+            if (!publishedStatus.executionEligible()) {
+                setCollisionDetectionEnabled(false);
+                emit operationWarning(
+                    tr("Machine safety package"),
+                    publishedStatus.reason.isEmpty()
+                        ? tr("The machine safety package is incomplete and collision detection remains disabled.")
+                        : publishedStatus.reason);
+            }
+        } else if (packageInput) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "Machine safety runtime fingerprint mismatch package='{}' expected={} actual={} parts={} assignments={}",
+                      normalizedPath.toStdString(),
+                      packageLoad->manifest.runtimeConfigurationSha256.toHex().toStdString(),
+                      actualRuntimeFingerprint.toHex().toStdString(),
+                      result->parts.size(),
+                      liveDocument->machineKinematics()->shapeAssignments().size());
+            m_machineSafetyPackageManager.markInvalid(
+                tr("The current machine kinematics or part assignments do not match the machine safety package"));
+            setCollisionDetectionEnabled(false);
+            // 中文翻译：机台安全包；当前机台运动学或零件归属与安全包不一致，包内安全文件已失效。
+            emit operationWarning(tr("Machine safety package"),
+                tr("The current machine kinematics or part assignments do not match the machine safety package. The embedded safety index is disabled."));
+        }
         refreshMachineDisplay();
+        scheduleWorkpieceSafetyOverlayPreparation();
+        emit machineSafetyPackageChanged();
         emit machineLoaded();
         committed = true;
     });
+}
+
+bool CamModule::buildOrUpdateMachineSafetyPackage(QString* errorMessage)
+{
+    if (m_machineSafetyPackageBuildTask != kInvalidTaskId) {
+        if (errorMessage)
+            *errorMessage = tr("A machine safety package is already being generated");
+        return false;
+    }
+    const QString sourcePath = activeMachineProfilePath();
+    if (sourcePath.isEmpty() || !QFileInfo(sourcePath).isFile()) {
+        if (errorMessage)
+            *errorMessage = tr("Load a machine model before generating its safety package");
+        return false;
+    }
+    auto* tasks = lcnc::Kernel::current().taskManager();
+    if (!tasks) {
+        if (errorMessage)
+            *errorMessage = tr("The background task service is unavailable");
+        return false;
+    }
+    const QFileInfo sourceInfo(sourcePath);
+    const QString outputPath = lcnc::MachineSafetyPackage::isPackagePath(sourcePath)
+        ? sourceInfo.absoluteFilePath()
+        : sourceInfo.absoluteDir().filePath(sourceInfo.completeBaseName()
+                                            + QStringLiteral(".lmsp"));
+    const QString program = QDir(QCoreApplication::applicationDirPath()).filePath(
+#ifdef Q_OS_WIN
+        QStringLiteral("lcnc_machine_safety_index.exe"));
+#else
+        QStringLiteral("lcnc_machine_safety_index"));
+#endif
+    if (!QFileInfo(program).isFile()) {
+        if (errorMessage)
+            *errorMessage = tr("The machine safety package generator is unavailable: %1")
+                                .arg(program);
+        return false;
+    }
+    const QByteArray runtimeConfigurationSha256 =
+        machineSafetyConfigurationFingerprint();
+    if (runtimeConfigurationSha256.size() != 32) {
+        if (errorMessage)
+            *errorMessage = tr("The current machine safety configuration is incomplete");
+        return false;
+    }
+    const auto currentPackage = m_machineSafetyPackageManager.status();
+    const QByteArray sourceModelSha256 =
+        lcnc::MachineSafetyPackage::isPackagePath(sourcePath)
+            && currentPackage.packagePath == sourcePath
+            && currentPackage.modelSha256.size() == 32
+        ? currentPackage.modelSha256 : sha256File(sourcePath);
+    if (sourceModelSha256.size() != 32) {
+        if (errorMessage)
+            *errorMessage = tr("Unable to fingerprint the machine model");
+        return false;
+    }
+    // A rebuild is monitored by the main process, but collision detection is
+    // an explicit opt-in again only after the resulting package is reloaded and
+    // validated. The non-collision machining workflow remains available.
+    // 中文翻译：重建期间关闭碰撞检测；新包重新加载并验证后由操作者再次显式启用。
+    setCollisionDetectionEnabled(false);
+    m_machineSafetyPackageManager.beginBuild(
+        sourceModelSha256, runtimeConfigurationSha256);
+    emit machineSafetyPackageChanged();
+
+    struct BuildResult {
+        QString error;
+        QByteArray output;
+    };
+    const auto buildResult = std::make_shared<BuildResult>();
+    const TaskId taskId = tasks->run(
+        tr("Generate machine safety package: %1").arg(sourceInfo.fileName()),
+        [sourcePath, outputPath, program, runtimeConfigurationSha256,
+         buildResult](TaskProgress* progress) {
+            QProcess process;
+            progress->setRange(0, 100);
+            progress->setStepName(
+                machineSafetyBuildStageText(QByteArrayLiteral("starting")));
+            progress->setValue(0);
+            process.setProgram(program);
+            QStringList arguments{
+                QStringLiteral("--machine"), sourcePath,
+                QStringLiteral("--package-output"), outputPath,
+                QStringLiteral("--runtime-configuration-sha256"),
+                QString::fromLatin1(runtimeConfigurationSha256.toHex()),
+                QStringLiteral("--exact-budget"), QStringLiteral("1"),
+                QStringLiteral("--audit-safe"), QStringLiteral("32"),
+                // The real AC-table STEP fixture spends more than 15 minutes
+                // in OCCT surface triangulation at 0.5 mm. Leaf BVH remains
+                // conservative and completed the same package in about two
+                // minutes; persisted surface meshes stay an opt-in high-detail
+                // profile instead of blocking the one-click production gate.
+                // 中文翻译：真实 AC 转台模型的表面三角化超过 15 分钟；一键生产包默认使用
+                // 保守叶级 BVH，高精持久化表面网格保留为显式离线档。
+                QStringLiteral("--surface-bvh"), QStringLiteral("off"),
+                QStringLiteral("--leaf-bvh"), QStringLiteral("on"),
+                QStringLiteral("--dependency-cache"), QStringLiteral("on"),
+                QStringLiteral("--refine-threads"), QStringLiteral("8"),
+                QStringLiteral("--checkpoint"),
+                outputPath + QStringLiteral(".checkpoint.lmsi")};
+            const QString hotFeedbackPath = outputPath
+                + QStringLiteral(".hot_apos.txt");
+            if (QFileInfo::exists(hotFeedbackPath)) {
+                arguments.append({QStringLiteral("--hot-apos-file"),
+                                  hotFeedbackPath});
+            }
+            arguments.append({QStringLiteral("--refine-levels"),
+                              QFileInfo::exists(hotFeedbackPath)
+                                  ? QStringLiteral("2")
+                                  : QStringLiteral("1")});
+            process.setArguments(arguments);
+            process.start();
+            if (!process.waitForStarted(10'000)) {
+                buildResult->error = process.errorString();
+                throw std::runtime_error("machine safety package generator did not start");
+            }
+
+            QByteArray pendingOutput;
+            const auto consumeProcessOutput = [&] {
+                const QByteArray standardOutput = process.readAllStandardOutput();
+                if (!standardOutput.isEmpty()) {
+                    buildResult->output.append(standardOutput);
+                    pendingOutput.append(standardOutput);
+                }
+                while (true) {
+                    const qsizetype newline = pendingOutput.indexOf('\n');
+                    if (newline < 0)
+                        break;
+                    const QByteArray line = pendingOutput.left(newline).trimmed();
+                    pendingOutput.remove(0, newline + 1);
+                    if (!line.startsWith("LCNC_PROGRESS|"))
+                        continue;
+                    const QList<QByteArray> fields = line.split('|');
+                    bool percentOk = false;
+                    const int percent = fields.size() >= 2
+                        ? fields.at(1).toInt(&percentOk) : 0;
+                    if (!percentOk || fields.size() < 3)
+                        continue;
+                    progress->setStepName(
+                        machineSafetyBuildStageText(fields.at(2)));
+                    progress->setValue(qBound(0, percent, 100));
+                }
+                const QByteArray standardError = process.readAllStandardError();
+                if (!standardError.isEmpty())
+                    buildResult->error.append(QString::fromUtf8(standardError));
+            };
+            while (!process.waitForFinished(250)) {
+                consumeProcessOutput();
+                if (progress->isAbortRequested()) {
+                    process.kill();
+                    process.waitForFinished(10'000);
+                    consumeProcessOutput();
+                    throw std::runtime_error("machine safety package generation cancelled");
+                }
+            }
+            consumeProcessOutput();
+            if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+                throw std::runtime_error(buildResult->error.isEmpty()
+                    ? "machine safety package generator failed"
+                    : buildResult->error.toStdString());
+        });
+    m_machineSafetyPackageBuildTask = taskId;
+    m_taskScope.track(taskId);
+    watchTask(this, taskId, [this, taskId, sourcePath, outputPath, buildResult](bool ok) {
+        m_taskScope.release(taskId);
+        m_machineSafetyPackageBuildTask = kInvalidTaskId;
+        if (!ok || !QFileInfo(outputPath).isFile()) {
+            m_machineSafetyPackageManager.finishBuildFailure(
+                buildResult->error.isEmpty()
+                    ? tr("Machine safety package generation failed")
+                    : buildResult->error);
+            emit machineSafetyPackageChanged();
+            emit operationFailed(tr("Generate machine safety package"),
+                buildResult->error.isEmpty()
+                    ? tr("Machine safety package generation failed")
+                    : buildResult->error);
+            return;
+        }
+        m_config.copyMachineProfile(sourcePath, outputPath);
+        setMachineModelPath(outputPath);
+        loadMachine(outputPath);
+    });
+    return true;
 }
 
 void CamModule::unloadMachine()
@@ -296,6 +610,7 @@ void CamModule::unloadMachine()
 
     ++m_machineLoadGeneration;
     m_machineLoadPending.store(false);
+    m_machineSafetyPackageManager.clear();
     invalidateMachineEnvironment();
     m_machineModelPath.clear();
     m_loadedMachineModelPath.clear();
@@ -303,6 +618,7 @@ void CamModule::unloadMachine()
         m_machineWorkspace->setModelFilePath(QString());
     m_config.setMachineModelPath(QString());
     refreshMachineDisplay();
+    emit machineSafetyPackageChanged();
     emit machineUnloaded();
 }
 
@@ -353,6 +669,7 @@ void CamModule::applyAxisAssignments(const QMap<QString, QString>& entryToAxis)
             kin->assignShape(it.key(), it.value());
     }
 
+    invalidateMachineSafetyPackage();
     invalidateMachineEnvironment();
     if (auto* gd = activeGuiDocument())
         gd->applyMachineDisplayStyle();
@@ -755,6 +1072,7 @@ bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QS
     }
 
     translateToolpathWorldData(translation);
+    invalidateMachineSafetyPackage();
     invalidateMachineEnvironment();
     if (hasToolpath())
         updateToolpathMachineCoordinates();
@@ -1068,6 +1386,7 @@ bool CamModule::moveShape(const QString& entry, const gp_Vec& translation)
         if (XcafUtils::entry(labels.Value(i)) == entry) {
             bool ok = ShapeService::moveShape(doc, labels.Value(i), translation);
             if (ok) {
+                invalidateMachineSafetyPackage();
                 invalidateMachineEnvironment();
                 refreshMachineDisplay();
             }
@@ -1099,6 +1418,7 @@ bool CamModule::rotateShape(const QString& entry, const gp_Ax1& axis, double ang
         if (XcafUtils::entry(labels.Value(i)) == entry) {
             bool ok = ShapeService::rotateShape(doc, labels.Value(i), axis, angleDeg);
             if (ok) {
+                invalidateMachineSafetyPackage();
                 invalidateMachineEnvironment();
                 refreshMachineDisplay();
             }
@@ -1125,10 +1445,22 @@ void CamModule::deleteShape(const QString& entry)
     LcncDocument* doc = machineDocument();
     if (!doc || entry.isEmpty()) return;
 
+    bool deletingMachineShape = false;
+    const TDF_LabelSequence machineLabels =
+        doc->entityLabels(LcncDocument::EntityKind::Machine);
+    for (int index = 1; index <= machineLabels.Length(); ++index) {
+        if (XcafUtils::entry(machineLabels.Value(index)) == entry) {
+            deletingMachineShape = true;
+            break;
+        }
+    }
+
     if (auto* gd = activeGuiDocument())
         gd->eraseEntity(doc->id(), entry);
 
     ShapeService::deleteShape(doc, entry);
+    if (deletingMachineShape)
+        invalidateMachineSafetyPackage();
     invalidateMachineEnvironment();
     refreshMachineTransforms();
     lcnc::Kernel::current().projectManager()->notifyDomainChanged(lcnc::ProjectDomain::Machine);

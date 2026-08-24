@@ -9,7 +9,7 @@ class QVBoxLayout;
 
 namespace lcnc::cam::ui {
 
-/// CAM-side source selection for offline/full-machine collision verification.
+/// CAM-side status for the fixed machine package and current workpiece field.
 class WidgetCollisionDetectionPanel final : public QWidget
 {
     Q_OBJECT

@@ -27,7 +27,7 @@
 namespace lcnc::cam {
 namespace {
 
-TopoDS_Shape normalizeNozzleCollisionShape(const TopoDS_Shape& source)
+TopoDS_Shape normalizeNozzleDisplayShape(const TopoDS_Shape& source)
 {
     if (source.IsNull())
         return {};
@@ -45,12 +45,12 @@ TopoDS_Shape normalizeNozzleCollisionShape(const TopoDS_Shape& source)
     return moved.IsDone() ? moved.Shape() : TopoDS_Shape{};
 }
 
-TopoDS_Shape loadNozzleCollisionShape(const QString& filePath, QString* error)
+TopoDS_Shape loadNozzleDisplayShape(const QString& filePath, QString* error)
 {
     const QFileInfo info(filePath);
     if (!info.exists() || !info.isFile()) {
         if (error)
-            *error = QObject::tr("The cutting nozzle collision model file does not exist");
+            *error = QObject::tr("The cutting nozzle display model file does not exist");
         return {};
     }
     const QByteArray nativePath = QFile::encodeName(info.absoluteFilePath());
@@ -90,16 +90,16 @@ TopoDS_Shape loadNozzleCollisionShape(const QString& filePath, QString* error)
             }
         } else {
             if (error)
-                *error = QObject::tr("Unsupported cutting nozzle collision model format");
+                *error = QObject::tr("Unsupported cutting nozzle display model format");
             return {};
         }
-        shape = normalizeNozzleCollisionShape(shape);
+        shape = normalizeNozzleDisplayShape(shape);
         if (shape.IsNull() && error)
-            *error = QObject::tr("The cutting nozzle collision model contains no usable geometry");
+            *error = QObject::tr("The cutting nozzle display model contains no usable geometry");
         return shape;
     } catch (const Standard_Failure& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.collision_proxy: failed to load nozzle geometry: {}",
+                 "cam.cutter_display_proxy: failed to load nozzle geometry: {}",
                  failure.GetMessageString());
         if (error)
             *error = QString::fromUtf8(failure.GetMessageString());
@@ -109,10 +109,10 @@ TopoDS_Shape loadNozzleCollisionShape(const QString& filePath, QString* error)
 
 } // namespace
 
-TopoDS_Shape buildCutterCollisionProxy(const CamConfig& config, QString* errorMessage)
+TopoDS_Shape buildCutterDisplayProxy(const CamConfig& config, QString* errorMessage)
 {
     if (config.cutterCollisionProxyMode() == CutterCollisionProxyMode::ModelFile)
-        return loadNozzleCollisionShape(config.cutterNozzleModelPath(), errorMessage);
+        return loadNozzleDisplayShape(config.cutterNozzleModelPath(), errorMessage);
     try {
         if (std::abs(config.simulatedConeTipRadiusMm()
                      - config.simulatedConeBaseRadiusMm()) <= Precision::Confusion()) {
@@ -124,7 +124,7 @@ TopoDS_Shape buildCutterCollisionProxy(const CamConfig& config, QString* errorMe
                                    config.simulatedConeLengthMm()).Shape();
     } catch (const Standard_Failure& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.collision_proxy: failed to build analytic nozzle geometry: {}",
+                 "cam.cutter_display_proxy: failed to build analytic nozzle geometry: {}",
                  failure.GetMessageString());
         if (errorMessage)
             *errorMessage = QString::fromUtf8(failure.GetMessageString());

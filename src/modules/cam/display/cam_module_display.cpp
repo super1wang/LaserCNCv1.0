@@ -80,7 +80,6 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
-#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepTools.hxx>
 #include <STEPControl_Reader.hxx>
 #include <StlAPI_Reader.hxx>
@@ -422,17 +421,17 @@ void CamModule::displayAxisGuides()
                 settings->colors.cutterHeadTransparency,
                 settings->colors.cutterHeadScale});
     }
-    if (m_cutterCollisionProxyShape.IsNull()) {
+    if (m_cutterDisplayProxyShape.IsNull()) {
         QString proxyError;
-        m_cutterCollisionProxyShape = lcnc::cam::buildCutterCollisionProxy(
+        m_cutterDisplayProxyShape = lcnc::cam::buildCutterDisplayProxy(
             m_config, &proxyError);
-        if (m_cutterCollisionProxyShape.IsNull() && !proxyError.isEmpty()) {
+        if (m_cutterDisplayProxyShape.IsNull() && !proxyError.isEmpty()) {
             LCNC_WARN(lcnc::LogCode::Generic,
-                      "cam.collisionProxy: visual proxy unavailable: {}",
+                      "cam.cutterDisplayProxy: visual proxy unavailable: {}",
                       proxyError.toStdString());
         }
     }
-    m_guideRenderer->setCutterCollisionProxy(m_cutterCollisionProxyShape);
+    m_guideRenderer->setCutterDisplayProxy(m_cutterDisplayProxyShape);
     m_guideRenderer->refresh(activeGuiDocument(), kinematics(), cutterHeadWorldPosition());
 }
 
@@ -482,8 +481,8 @@ void CamModule::clearToolpathViewState(bool emitSignals)
     if (GuiDocument* gd = activeGuiDocument())
         gd->eraseAllContours();
 
-    m_workpieceShape.Nullify();
-    m_travelCollisionGeometryCache.reset();
+    // Clearing CAM/toolpath presentation must not discard the independently
+    // loaded workpiece or its safety overlay.
     m_previewLeadInContour = -1;
     m_previewLeadInPointIndex = -1;
     m_previewLeadInParam = 0.0;
@@ -1108,6 +1107,9 @@ void CamModule::onCamDataLoaded()
     // core 已把刀路灌入 CamDataManager；此处恢复程序级全局参数与工程轮廓 wire，
     // 再把数据映射到渲染层。
     applyGenerationParamsFromCamData();
+    m_workpieceShape = collectWorkpieceShape();
+    invalidateMachineEnvironment();
+    scheduleWorkpieceSafetyOverlayPreparation();
     if (!m_camData || !m_camData->hasToolpath()) {
         clearToolpathViewState(/*emitSignals=*/true);
         LCNC_INFO(lcnc::LogCode::Generic,
@@ -1116,8 +1118,6 @@ void CamModule::onCamDataLoaded()
     }
 
     relinkContourGeometryFromDocument();
-    m_workpieceShape = collectWorkpieceShape();
-    m_travelCollisionGeometryCache.reset();
     // Rebind any persisted manual machining faces after project reload.
     rebindMachiningFacesFromRecords();
     const QList<WorkpieceShapeSource> sources = collectWorkpieceShapes();
@@ -1217,7 +1217,9 @@ void CamModule::refreshTravelPath()
                 continue;
             lcnc::view::TravelPathRenderer::Segment segment;
             segment.contourId = transition.toContourId;
-            segment.verified = plannedPlan.isExecutable();
+            segment.collisionState = plannedPlan.fullEnvironmentVerificationPending
+                ? lcnc::cam::CollisionValidationState::Pending
+                : plannedPlan.collision.state;
             segment.workpieceEntry = source->workpieceEntry;
 
             // surfacePreviewPoints now describe the executable, offset path.
@@ -1232,7 +1234,13 @@ void CamModule::refreshTravelPath()
                 const auto phase = index > 0 && index - 1 < transition.segments.size()
                     ? transition.segments.at(index - 1).phase
                     : lcnc::cam::RapidSegmentPhase::Traverse;
-                segment.waypoints.append({preview.x, preview.y, preview.z, phase});
+                auto state = segment.collisionState;
+                if (index > 0 && index - 1 < transition.collisionStates.size()) {
+                    state = lcnc::cam::collisionValidationStateForCertificate(
+                        transition.collisionStates.at(index - 1));
+                }
+                segment.waypoints.append(
+                    {preview.x, preview.y, preview.z, phase, state});
             }
             plannedSegments.append(std::move(segment));
         }

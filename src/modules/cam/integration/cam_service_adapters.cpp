@@ -48,7 +48,9 @@ class CamToolpathProviderAdapter final : public QObject, public ICamToolpathProv
                          [this](lcnc::MachiningMode) { refreshCache(true); });
         QObject::connect(&m_module, &CamModule::workpieceSetupTransformChanged, this,
                          [this] { refreshCache(true); });
-        QObject::connect(&m_module, &CamModule::cutterCollisionConfigurationChanged, this,
+        QObject::connect(&m_module, &CamModule::collisionConfigurationChanged, this,
+                         [this] { refreshCache(true); });
+        QObject::connect(&m_module, &CamModule::machineSafetyPackageChanged, this,
                          [this] { refreshCache(true); });
         QObject::connect(&m_module, &CamModule::pipelineStageChanged, this,
                          [this](CamPipelineStage) { refreshCache(); });
@@ -123,10 +125,14 @@ class CamToolpathProviderAdapter final : public QObject, public ICamToolpathProv
             return true;
         };
         if (samePlannedOrder()) {
-            // Verification updates collision state only. Preserve coordinates
-            // solved continuously with the committed rapid path.
-            m_plannedSnapshot.travelPlan = snapshot.travelPlan;
-            m_plannedSnapshot.motionPlan.collision = snapshot.motionPlan.collision;
+            // Verification completes asynchronously after the planned
+            // snapshot was first cached. Preserve coordinates solved with the
+            // committed rapid path, but refresh every collision proof field;
+            // otherwise Process keeps seeing Job Overlay=Building and missing
+            // edge certificates after CAM has already published both.
+            // 中文翻译：异步校验完成时保留已提交的运动坐标，但必须同步工件缓存就绪状态、
+            // 碰撞结果和连续边证书，避免 Process 永久读取构建中的旧快照。
+            m_plannedSnapshot.mergeCollisionProofFrom(snapshot);
         } else {
             m_plannedSnapshot = std::move(snapshot);
         }
@@ -206,9 +212,9 @@ class CamOfflineSimulationProviderAdapter final : public QObject,
             snapshot.camera->Copy(sourceView->view()->Camera());
         }
         QString proxyError;
-        snapshot.cutterProxy = m_module.cutterCollisionProxyShape(&proxyError);
-        if (snapshot.cutterProxy.IsNull() && !proxyError.isEmpty()) {
-            LCNC_WARN(lcnc::LogCode::Generic, "Offline simulation snapshot has no cutter proxy: {}",
+        snapshot.cutterDisplayProxy = m_module.cutterDisplayProxyShape(&proxyError);
+        if (snapshot.cutterDisplayProxy.IsNull() && !proxyError.isEmpty()) {
+            LCNC_WARN(lcnc::LogCode::Generic, "Offline simulation snapshot has no cutter display proxy: {}",
                       proxyError.toStdString());
         }
 
@@ -375,8 +381,9 @@ class CamCollisionConfigurationProviderAdapter final : public ICamCollisionConfi
     CollisionConfigurationSnapshot collisionConfiguration() const override {
         return m_module.collisionConfiguration();
     }
-    void setCollisionDetectionEnabled(bool enabled) override {
-        m_module.setCollisionDetectionEnabled(enabled);
+    bool setCollisionDetectionEnabled(bool enabled,
+                                      QString* errorMessage = nullptr) override {
+        return m_module.setCollisionDetectionEnabled(enabled, errorMessage);
     }
     void setCollisionSources(const QSet<QString>& active, const QSet<QString>& passive) override {
         m_module.setCollisionSources(active, passive);
@@ -408,6 +415,10 @@ class CamCollisionSafetyDomainAdapter final : public ICamCollisionSafetyDomain {
     validateCollisionPath(const CollisionSafetyPathRequest& request,
                           std::atomic_bool* cancelRequested) const override {
         return m_module.validateCollisionPath(request, cancelRequested);
+    }
+    CamMotionPermit requestMotionPermit(
+        const CamMotionPermitRequest& request) const override {
+        return m_module.requestMotionPermit(request);
     }
 
   private:

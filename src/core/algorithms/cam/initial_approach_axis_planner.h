@@ -32,17 +32,6 @@ enum class InitialApproachAxisMode : std::uint8_t
     AutomaticSafeZone
 };
 
-inline bool shouldValidateInitialApproachMachine(
-    bool machineModelLoaded,
-    InitialApproachAxisMode mode,
-    bool manualCollisionCheckEnabled)
-{
-    if (!machineModelLoaded)
-        return false;
-    return mode == InitialApproachAxisMode::AutomaticSafeZone
-        || manualCollisionCheckEnabled;
-}
-
 /// Higher automatic safety-Z candidates extend the same physical retract ray.
 /// A blocked retract prefix is therefore terminal, while a later SafeXY,
 /// SafeAC or Approach collision may still be avoided by a higher candidate.

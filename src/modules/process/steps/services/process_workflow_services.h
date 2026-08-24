@@ -2,6 +2,10 @@
 
 #include "modules/process/steps/process_step_context.h"
 
+#include <QMap>
+
+#include <functional>
+
 class ProcessDeviceRuntime;
 
 namespace lcnc::process {
@@ -11,10 +15,17 @@ class DeviceCommandQueue;
 class ProcessMotionWorkflowService final : public IProcessMotionService
 {
 public:
+    using FixedMotionPermit = std::function<bool(
+        const QMap<QString, double>&, bool, QString*)>;
+
     explicit ProcessMotionWorkflowService(ProcessDeviceRuntime* service = nullptr,
-                                          DeviceCommandQueue* deviceQueue = nullptr);
+                                          DeviceCommandQueue* deviceQueue = nullptr,
+                                          FixedMotionPermit permit = {});
     void setService(ProcessDeviceRuntime* service) { m_service = service; }
     void setDeviceCommandQueue(DeviceCommandQueue* deviceQueue) { m_deviceQueue = deviceQueue; }
+    void setFixedMotionPermit(FixedMotionPermit permit) {
+        m_fixedMotionPermit = std::move(permit);
+    }
 
     bool moveAxis(const QString& axis,
                   const QString& mode,
@@ -34,6 +45,7 @@ public:
 private:
     ProcessDeviceRuntime* m_service{nullptr};
     DeviceCommandQueue* m_deviceQueue{nullptr};
+    FixedMotionPermit m_fixedMotionPermit;
 };
 
 class ProcessIoWorkflowService final : public IProcessIoService

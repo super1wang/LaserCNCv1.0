@@ -247,7 +247,6 @@ void ProcessSettingsService::seedDefaults() {
                          "InitialApproach");
     initialApproach["sMode"] = "Automatic";
     initialApproach["fSafetyZ"] = 0.0;
-    initialApproach["bCollisionCheck"] = false;
     seedBuiltinIo();
 }
 
@@ -330,8 +329,6 @@ bool ProcessSettingsService::initialize() {
         initialApproach["sMode"] = "Automatic";
     if (!initialApproach.count("fSafetyZ"))
         initialApproach["fSafetyZ"] = 0.0;
-    if (!initialApproach.count("bCollisionCheck"))
-        initialApproach["bCollisionCheck"] = false;
     const QString indexPath = QDir(rootDir()).filePath(QStringLiteral("tools/index.toml"));
     if (!QFileInfo::exists(indexPath) && !writeTools(&error, nullptr)) {
         LCNC_ERR(lcnc::LogCode::SettingsParseFailed,
@@ -538,10 +535,6 @@ ProcessInitialApproachSettings ProcessSettingsService::initialApproachSettings()
     settings.safetyZ = rawValue(ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
                                 QStringLiteral("fSafetyZ"), 0.0)
                            .toDouble();
-    settings.collisionCheckEnabled =
-        rawValue(ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
-                 QStringLiteral("bCollisionCheck"), false)
-            .toBool();
     return settings;
 }
 

@@ -13,7 +13,10 @@
         "LCNC_WITH_ACS": "ON",
         "LCNC_WITH_GTN": "ON",
         "LCNC_WITH_BDAQ": "OFF",
-        "LCNC_WITH_REAL_LASER": "OFF"
+        "LCNC_WITH_REAL_LASER": "OFF",
+        "LCNC_WITH_COAL_COLLISION": "ON",
+        "LCNC_COAL_ROOT": "${sourceDir}/x64/deps/install/coal-release",
+        "LCNC_COAL_DEBUG_ROOT": "${sourceDir}/x64/deps/install/coal-debug"
       }
     },
     {

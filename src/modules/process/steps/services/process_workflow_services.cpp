@@ -64,9 +64,11 @@ bool executeDeviceCommand(DeviceCommandQueue* queue,
 } // namespace
 
 ProcessMotionWorkflowService::ProcessMotionWorkflowService(ProcessDeviceRuntime* service,
-                                                           DeviceCommandQueue* deviceQueue)
+                                                           DeviceCommandQueue* deviceQueue,
+                                                           FixedMotionPermit permit)
     : m_service(service)
     , m_deviceQueue(deviceQueue)
+    , m_fixedMotionPermit(std::move(permit))
 {
 }
 
@@ -77,6 +79,12 @@ bool ProcessMotionWorkflowService::moveAxis(const QString& axis,
                                           int timeoutMs,
                                           QString* errorMessage)
 {
+    if (m_fixedMotionPermit) {
+        QMap<QString, double> targets;
+        targets.insert(axis.trimmed().toUpper(), target);
+        if (!m_fixedMotionPermit(targets, isRelativeMode(mode), errorMessage))
+            return false;
+    }
     ProcessDeviceRuntime* const service = m_service;
     return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
         [service, axis, mode, target, velocity] {
@@ -98,10 +106,9 @@ bool ProcessMotionWorkflowService::moveAxes(const QVariantList& rows,
                                           int timeoutMs,
                                           QString* errorMessage)
 {
+    // 中文翻译：同步
     const bool sync = mode.compare(QStringLiteral("sync"), Qt::CaseInsensitive) == 0
-        || mode.compare(QStringLiteral("synchronous"), Qt::CaseInsensitive) == 0
-        // 中文翻译：同步
-        || mode.compare(QStringLiteral("sync"), Qt::CaseInsensitive) == 0;
+        || mode.compare(QStringLiteral("synchronous"), Qt::CaseInsensitive) == 0;
     if (!sync) {
         for (const QVariant& item : rows) {
             const QVariantMap row = item.toMap();
@@ -117,16 +124,44 @@ bool ProcessMotionWorkflowService::moveAxes(const QVariantList& rows,
         return true;
     }
 
+    bool relative = false;
+    bool relativeInitialized = false;
+    for (const QVariant& item : rows) {
+        const QVariantMap row = item.toMap();
+        const bool rowRelative = isRelativeMode(row.value(
+            QStringLiteral("mode"), QStringLiteral("absolute")).toString());
+        if (relativeInitialized && rowRelative != relative) {
+            if (errorMessage) {
+                // 中文翻译：同步多轴运动不能混用绝对与相对坐标模式。
+                *errorMessage = QObject::tr(
+                    "Synchronous multi-axis motion cannot mix absolute and relative modes");
+            }
+            return false;
+        }
+        relative = rowRelative;
+        relativeInitialized = true;
+    }
+
+    if (m_fixedMotionPermit) {
+        QMap<QString, double> targets;
+        for (const QVariant& item : rows) {
+            const QVariantMap row = item.toMap();
+            targets.insert(row.value(QStringLiteral("axis")).toString().trimmed().toUpper(),
+                           row.value(QStringLiteral("target"), 0.0).toDouble());
+        }
+        if (!m_fixedMotionPermit(targets, relative, errorMessage))
+            return false;
+    }
+
     ProcessDeviceRuntime* const service = m_service;
     return executeDeviceCommand(m_deviceQueue, TaskPriority::Workflow, timeoutMs,
-        [service, rows] {
+        [service, rows, relative] {
             if (!service)
                 // 中文翻译：运动控制器未连接
                 return DeviceCommandResult{false, QObject::tr("Motion controller not connected")};
             QVector<Axis> axes;
             QVector<double> positions;
             double velocity = 5.0;
-            bool relative = false;
             for (const QVariant& item : rows) {
                 const QVariantMap row = item.toMap();
                 const QString axisName = row.value(QStringLiteral("axis")).toString().trimmed().toUpper();
@@ -137,7 +172,6 @@ bool ProcessMotionWorkflowService::moveAxes(const QVariantList& rows,
                 axes.push_back(axis.value());
                 positions.push_back(row.value(QStringLiteral("target"), 0.0).toDouble());
                 velocity = row.value(QStringLiteral("velocity"), velocity).toDouble();
-                relative = isRelativeMode(row.value(QStringLiteral("mode"), QStringLiteral("absolute")).toString());
             }
             return service->moveAxes(axes, positions, velocity, relative);
         }, errorMessage);

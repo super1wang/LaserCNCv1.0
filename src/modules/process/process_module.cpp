@@ -12,6 +12,7 @@
 #include "modules/cam/contracts/i_cam_layer_provider.h"
 #include "modules/cam/contracts/i_cam_contour_sequence_provider.h"
 #include "modules/cam/contracts/i_cam_toolpath_provider.h"
+#include "modules/cam/contracts/i_cam_collision_safety_domain.h"
 #include "modules/process/cutting/normal_cutting_manager.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/execution/process_workflow_executor.h"
@@ -37,6 +38,7 @@
 
 #include <QList>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QPointer>
@@ -297,7 +299,32 @@ bool ProcessModule::init(lcnc::IKernel& kernel)
         *m_service, *m_deviceCommandQueue, this);
     kernel.services().registerBorrowedService<lcnc::process::ProcessStatusService>(*m_statusService);
     m_motionStepService = std::make_unique<lcnc::process::ProcessMotionWorkflowService>(
-        m_service.get(), m_deviceCommandQueue.get());
+        m_service.get(), m_deviceCommandQueue.get(),
+        [guarded = QPointer<ProcessModule>(this)](
+            const QMap<QString, double>& targets, bool relative,
+            QString* errorMessage) {
+            if (!guarded) {
+                if (errorMessage)
+                    // 中文翻译：Process 碰撞许可证持有者已不可用
+                    *errorMessage = QObject::tr("Process collision-permit owner is unavailable");
+                return false;
+            }
+            bool allowed = false;
+            QString error;
+            const auto request = [&] {
+                if (guarded)
+                    allowed = guarded->acquireFixedMotionPermit(
+                        targets, relative, &error);
+            };
+            if (guarded->thread() == QThread::currentThread())
+                request();
+            else
+                QMetaObject::invokeMethod(guarded.data(), request,
+                                          Qt::BlockingQueuedConnection);
+            if (!allowed && errorMessage)
+                *errorMessage = error;
+            return allowed;
+        });
     m_ioStepService = std::make_unique<lcnc::process::ProcessIoWorkflowService>(
         m_service.get(), m_deviceCommandQueue.get());
     m_cuttingStepService = std::make_unique<lcnc::process::CallbackProcessCuttingService>();
@@ -659,6 +686,11 @@ bool ProcessModule::start()
 
 void ProcessModule::stop()
 {
+    if (m_continuousJogPermitTimer)
+        m_continuousJogPermitTimer->stop();
+    m_permittedJogAxis.clear();
+    m_permittedJogDirection = 0;
+    m_permittedJogVelocity = 0.0;
     LCNC_DEBUG(lcnc::LogCode::Generic, "ProcessModule::stop begin");
     if (!m_initialized) return;
     if (m_kernel && m_camPlanSubscription != lcnc::kInvalidSubscription) {
@@ -781,6 +813,11 @@ ProcessModule::ProcessModule(QObject* parent)
     m_simTimer = new QTimer(this);
     m_simTimer->setInterval(100);
     connect(m_simTimer, &QTimer::timeout, this, &ProcessModule::onSimulationTick);
+
+    m_continuousJogPermitTimer = new QTimer(this);
+    m_continuousJogPermitTimer->setInterval(100);
+    connect(m_continuousJogPermitTimer, &QTimer::timeout,
+            this, &ProcessModule::renewContinuousJogPermit);
 
     setStatusMessage(defaultStatusText(m_simulationMode, m_connected));
 }
@@ -982,6 +1019,14 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
     const QString normalizedAxis = axisName.trimmed().toUpper();
     const double step = distance > 1e-9 ? distance : jogStepForLevel(speedLevel);
     const double delta = step * (direction > 0 ? 1.0 : -1.0);
+    QString permitError;
+    if (!acquireManualMotionPermit(false, normalizedAxis,
+                                   m_axisPositions.value(normalizedAxis) + delta,
+                                   direction, std::abs(delta), 2000,
+                                   &permitError)) {
+        setStatusMessage(permitError);
+        return;
+    }
     QPointer<ProcessModule> self(this);
     m_manualMotionService->moveRelative(normalizedAxis, delta, jogVelocityForLevel(speedLevel),
         m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired,
@@ -993,6 +1038,15 @@ void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, i
     if (!m_manualMotionService)
         return;
     const QString normalizedAxis = axisName.trimmed().toUpper();
+    QString permitError;
+    if (!acquireManualMotionPermit(false, normalizedAxis, position,
+                                   position >= m_axisPositions.value(normalizedAxis)
+                                       ? 1 : -1,
+                                   std::abs(position - m_axisPositions.value(normalizedAxis)),
+                                   2000, &permitError)) {
+        setStatusMessage(permitError);
+        return;
+    }
     QPointer<ProcessModule> self(this);
     m_manualMotionService->moveAbsolute(normalizedAxis, position, jogVelocityForLevel(speedLevel),
         m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired,
@@ -1004,19 +1058,173 @@ void ProcessModule::startContinuousJog(const QString& axisName, int direction, i
     if (direction == 0 || !m_manualMotionService)
         return;
     const QString normalizedAxis = axisName.trimmed().toUpper();
+    const double velocity = jogVelocityForLevel(speedLevel);
+    const double horizonDistance = std::max(0.05, velocity * 0.25);
+    QString permitError;
+    if (!acquireManualMotionPermit(
+            true, normalizedAxis,
+            m_axisPositions.value(normalizedAxis)
+                + (direction > 0 ? horizonDistance : -horizonDistance),
+            direction, horizonDistance, 300, &permitError)) {
+        setStatusMessage(permitError);
+        return;
+    }
+    m_permittedJogAxis = normalizedAxis;
+    m_permittedJogDirection = direction > 0 ? 1 : -1;
+    m_permittedJogVelocity = velocity;
+    m_continuousJogPermitTimer->start();
     QPointer<ProcessModule> self(this);
-    m_manualMotionService->startContinuous(normalizedAxis, direction > 0, jogVelocityForLevel(speedLevel),
+    const auto ticket = m_manualMotionService->startContinuous(
+        normalizedAxis, direction > 0, velocity,
         m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired,
         [self](const QString& message) { if (self) self->setStatusMessage(message); });
+    if (!ticket.accepted) {
+        m_continuousJogPermitTimer->stop();
+        m_permittedJogAxis.clear();
+        m_permittedJogDirection = 0;
+        m_permittedJogVelocity = 0.0;
+    }
 }
 
 void ProcessModule::stopContinuousJog(const QString& axisName)
 {
     if (!m_manualMotionService)
         return;
+    if (m_continuousJogPermitTimer)
+        m_continuousJogPermitTimer->stop();
+    m_permittedJogAxis.clear();
+    m_permittedJogDirection = 0;
+    m_permittedJogVelocity = 0.0;
     QPointer<ProcessModule> self(this);
     m_manualMotionService->stopContinuous(axisName,
         [self](const QString& message) { if (self) self->setStatusMessage(message); });
+}
+
+bool ProcessModule::acquireManualMotionPermit(
+    bool continuousJog,
+    const QString& axisName,
+    double targetPosition,
+    int direction,
+    double maximumDistance,
+    qint64 validityMs,
+    QString* errorMessage)
+{
+    auto* provider = lcnc::Kernel::current().service<
+        lcnc::cam::ICamCollisionSafetyDomain>();
+    if (!provider) {
+        if (m_simulationMode)
+            return true;
+        if (errorMessage) {
+            // 中文翻译：CAM 碰撞许可证服务不可用；真实机台运动已失败关闭
+            *errorMessage = tr("The CAM collision-permit service is unavailable; real-machine motion is fail-closed");
+        }
+        return false;
+    }
+    lcnc::cam::CamMotionPermitRequest request;
+    request.kind = continuousJog
+        ? lcnc::cam::CamMotionPermitKind::ContinuousJog
+        : lcnc::cam::CamMotionPermitKind::FixedMotion;
+    request.firstApos = m_axisPositions;
+    request.lastApos = m_axisPositions;
+    request.lastApos.insert(axisName, targetPosition);
+    request.commandedAxis = axisName;
+    request.direction = direction;
+    request.maximumDistance = maximumDistance;
+    request.validityMs = validityMs;
+    const auto permit = provider->requestMotionPermit(request);
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!permit.executionEligible(now)) {
+        if (errorMessage) {
+            // 中文翻译：碰撞系统未签发安全运动许可证
+            *errorMessage = permit.reason.isEmpty()
+                ? tr("The collision system did not issue a safe motion permit")
+                : permit.reason;
+        }
+        return false;
+    }
+    return true;
+}
+
+bool ProcessModule::acquireFixedMotionPermit(
+    const QMap<QString, double>& requestedTargets,
+    bool relative,
+    QString* errorMessage)
+{
+    if (requestedTargets.isEmpty()) {
+        if (errorMessage)
+            // 中文翻译：固定运动许可证没有目标轴
+            *errorMessage = tr("The fixed-motion permit has no target axes");
+        return false;
+    }
+    auto* provider = lcnc::Kernel::current().service<
+        lcnc::cam::ICamCollisionSafetyDomain>();
+    if (!provider) {
+        if (m_simulationMode)
+            return true;
+        if (errorMessage)
+            // 中文翻译：CAM 碰撞许可证服务不可用；真实机台运动已失败关闭
+            *errorMessage = tr("The CAM collision-permit service is unavailable; real-machine motion is fail-closed");
+        return false;
+    }
+    lcnc::cam::CamMotionPermitRequest request;
+    request.kind = lcnc::cam::CamMotionPermitKind::FixedMotion;
+    request.firstApos = m_axisPositions;
+    request.lastApos = m_axisPositions;
+    double maximumDistance = 0.0;
+    QStringList axes;
+    for (auto it = requestedTargets.cbegin(); it != requestedTargets.cend(); ++it) {
+        const QString axis = it.key().trimmed().toUpper();
+        const double first = request.firstApos.value(axis);
+        const double last = relative ? first + it.value() : it.value();
+        request.lastApos.insert(axis, last);
+        maximumDistance = std::max(maximumDistance, std::abs(last - first));
+        axes.append(axis);
+    }
+    request.commandedAxis = axes.join(QLatin1Char(','));
+    request.maximumDistance = maximumDistance;
+    request.validityMs = 2000;
+    const auto permit = provider->requestMotionPermit(request);
+    if (!permit.executionEligible(QDateTime::currentMSecsSinceEpoch())) {
+        if (errorMessage)
+            // 中文翻译：碰撞系统未签发安全固定运动许可证
+            *errorMessage = permit.reason.isEmpty()
+                ? tr("The collision system did not issue a safe fixed-motion permit")
+                : permit.reason;
+        return false;
+    }
+    return true;
+}
+
+void ProcessModule::renewContinuousJogPermit()
+{
+    if (m_permittedJogAxis.isEmpty() || !m_manualMotionService) {
+        if (m_continuousJogPermitTimer)
+            m_continuousJogPermitTimer->stop();
+        return;
+    }
+    const double horizonDistance = std::max(0.05,
+                                            m_permittedJogVelocity * 0.25);
+    QString permitError;
+    if (acquireManualMotionPermit(
+            true, m_permittedJogAxis,
+            m_axisPositions.value(m_permittedJogAxis)
+                + m_permittedJogDirection * horizonDistance,
+            m_permittedJogDirection, horizonDistance, 300,
+            &permitError)) {
+        return;
+    }
+    const QString axis = m_permittedJogAxis;
+    if (m_continuousJogPermitTimer)
+        m_continuousJogPermitTimer->stop();
+    m_permittedJogAxis.clear();
+    m_permittedJogDirection = 0;
+    m_permittedJogVelocity = 0.0;
+    QPointer<ProcessModule> self(this);
+    m_manualMotionService->stopContinuous(
+        axis, [self, permitError](const QString&) {
+            if (self)
+                self->setStatusMessage(permitError);
+        });
 }
 
 void ProcessModule::home()
@@ -1179,6 +1387,12 @@ void ProcessModule::moveToConfiguredPosition(bool loading)
         return;
     }
 
+    QString permitError;
+    if (!acquireFixedMotionPermit(targets, false, &permitError)) {
+        setStatusMessage(permitError);
+        return;
+    }
+
     m_deviceOperation = DeviceOperation::PresetMove;
     // 中文翻译：正在移动至%1（共 %2 个轴）
     setStatusMessage(tr("Moving to %1 of %2 axes").arg(positionName).arg(targets.size()));
@@ -1288,7 +1502,8 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
             // 中文翻译：刀路机床构型指纹不匹配，请重新求解机床坐标
             return fail(tr("The toolpath machine configuration fingerprint does not match; please solve the machine coordinates again"));
 
-        const QString camBlockReason = lcnc::process::camExecutionBlockReason(snapshot);
+        const QString camBlockReason = lcnc::process::camExecutionBlockReason(
+            snapshot, !m_simulationMode);
         if (!camBlockReason.isEmpty())
             return fail(tr("Machining cannot start: %1").arg(camBlockReason));
 

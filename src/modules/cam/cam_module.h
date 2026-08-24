@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QObject>
+#include <QByteArray>
 #include <QColor>
 #include <QList>
 #include <QMap>
@@ -25,6 +26,8 @@
 #include "modules/cam/contracts/i_cam_initial_approach_planner.h"
 #include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 #include "modules/cam/pipeline/machining_face_pipeline_service.h"
+#include "modules/cam/safety/machine_safety_package_manager.h"
+#include "modules/cam/safety/job_safety_overlay_manager.h"
 #include "modules/cam/contracts/i_cam_toolpath_provider.h"
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/kernel/i_module.h"
@@ -165,6 +168,14 @@ public:
     /// Load machine model geometry using the current machine configuration.
     void loadMachine(const QString& filePath);
 
+    /// Build or update a .lmsp package in the offline tool. On success the
+    /// configured machine path is switched to the package and reloaded.
+    bool buildOrUpdateMachineSafetyPackage(QString* errorMessage = nullptr);
+
+    bool hasValidMachineSafetyPackage() const;
+    QString loadedMachineSafetyPackagePath() const;
+    lcnc::cam::MachineSafetyPackageStatus machineSafetyPackageStatus() const;
+
     /// True between accepting a load request and accepting or rejecting its
     /// latest detached parse result.  Process uses this to reject stale rapid
     /// plans while the physical environment is indeterminate.
@@ -186,10 +197,13 @@ public:
     lcnc::cam::CollisionValidationSnapshot validateCollisionPath(
         const lcnc::cam::CollisionSafetyPathRequest& request,
         std::atomic_bool* cancelRequested = nullptr) const;
+    lcnc::cam::CamMotionPermit requestMotionPermit(
+        const lcnc::cam::CamMotionPermitRequest& request) const;
     lcnc::cam::InitialApproachSnapshot planInitialApproach(
         const lcnc::cam::InitialApproachRequest& request,
         std::atomic_bool* cancelRequested = nullptr) const;
-    void setCollisionDetectionEnabled(bool enabled);
+    bool setCollisionDetectionEnabled(bool enabled,
+                                      QString* errorMessage = nullptr);
     void setCollisionSources(const QSet<QString>& active,
                              const QSet<QString>& passive);
     QList<AxisOption> axisOptions(bool includeDetachOption = false) const;
@@ -441,12 +455,14 @@ public:
     bool cutterHeadGuideVisible() const;
     /// 按 AppSettings 中的刀头外观（颜色/透明度/缩放）重建刀头锥指示器。
     void refreshCutterHeadAppearance();
-    /// 应用刀嘴/模拟锥碰撞配置，立即重建 View 中的代理并使执行缓存失效。
+    /// 应用刀嘴/模拟锥显示配置；不参与碰撞，不使执行缓存失效。
     bool refreshCutterCollisionConfiguration();
-    /// Returns the immutable local +Z cutter/nozzle collision proxy used by
-    /// CAM rapid planning.  This accessor never changes the machine pose or
-    /// project data; it only initializes the derived proxy cache on demand.
-    TopoDS_Shape cutterCollisionProxyShape(QString* errorMessage = nullptr);
+    /// Applies clearance/path-safety settings and rebuilds only the workpiece
+    /// overlay whose geometry policy actually changed.
+    void refreshCollisionSafetyPolicy();
+    /// Presentation-only nozzle/cone. Collision uses the complete Z-axis
+    /// geometry from the immutable machine package.
+    TopoDS_Shape cutterDisplayProxyShape(QString* errorMessage = nullptr);
     void setSelectedEntries(const QStringList& entries);
     QStringList selectedEntries() const;
     void syncSelectionFromView();
@@ -479,6 +495,7 @@ signals:
     void operationWarning(const QString& title, const QString& message);
     void machineLoaded();
     void machineUnloaded();
+    void machineSafetyPackageChanged();
     void workpieceMounted(const QString& entry);
     void workpieceUnmounted();
     void toolpathGenerated();
@@ -520,6 +537,10 @@ private:
     bool rejectConflictingPipelineOperation(const QString& operation);
     std::uint64_t machiningFaceSetRevision() const;
     std::uint64_t machineSetupRevision() const;
+    /// Revision of the fixed machine plus the current workpiece overlay.
+    /// Display settings, collision enablement and toolpath order are excluded.
+    std::uint64_t collisionEnvironmentRevision() const;
+    QByteArray machineSafetyConfigurationFingerprint() const;
     /// Identity of the geometry currently committed to the machine workspace.
     /// It differs from the configured next-startup path while an operator edits
     /// options, preventing roles/profiles for one model being applied to another.
@@ -528,6 +549,7 @@ private:
     /// or role mutation.  Geometry is intentionally versioned separately from
     /// the kinematic configuration because both participate in safety checks.
     void invalidateMachineEnvironment();
+    void invalidateMachineSafetyPackage();
 
     /// Refresh axis guide AIS via MachineGuideRenderer.
     void displayAxisGuides();
@@ -560,6 +582,9 @@ private:
                                              bool force = false);
     void scheduleCollisionSafetyDomainPreparation(
         const lcnc::cam::ToolpathExportSnapshot& snapshot);
+    /// Starts the Job Overlay as soon as a workpiece and a valid immutable
+    /// machine package coexist; no toolpath is required.
+    void scheduleWorkpieceSafetyOverlayPreparation();
     bool rebuildTravelPlanForCurrentOrder(QString* errorMessage = nullptr);
     QVector<lcnc::cam::ContourId> planAutoContourOrder(
         lcnc::cam::AutoSortAxis axis, QString* errorMessage = nullptr) const;
@@ -617,19 +642,21 @@ private:
     lcnc::cam::MachineWorkspace*                         m_machineWorkspace{nullptr};
 
     TopoDS_Shape                m_workpieceShape;
-    TopoDS_Shape                m_cutterCollisionProxyShape;
+    TopoDS_Shape                m_cutterDisplayProxyShape;
     std::uint64_t               m_collisionConfigurationRevision{1};
     mutable lcnc::cam::TravelPlanSnapshot m_travelPlanCache;
     /// Immutable collision-only meshes/bounds.  It is filled by the background
     /// rapid verifier and reused while the machine/environment key is stable.
     /// 中文翻译：仅碰撞使用的不可变网格/包围盒，由后台任务建立并按环境键复用。
-    std::shared_ptr<lcnc::cam::TravelCollisionGeometryCache> m_travelCollisionGeometryCache;
+    lcnc::cam::JobSafetyOverlayManager m_jobSafetyOverlayManager;
     TaskId                      m_travelVerificationTask{kInvalidTaskId};
     TaskId                      m_collisionDomainPreparationTask{kInvalidTaskId};
+    TaskId                      m_machineSafetyPackageBuildTask{kInvalidTaskId};
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
     mutable QList<Handle(AIS_Shape)> m_camContourAisCache;
     QString                     m_machineModelPath;
     QString                     m_loadedMachineModelPath;
+    lcnc::cam::MachineSafetyPackageManager m_machineSafetyPackageManager;
     std::uint64_t               m_machineGeometryRevision{0};
     std::uint64_t               m_machineLoadGeneration{0};
     std::atomic_bool            m_machineLoadPending{false};

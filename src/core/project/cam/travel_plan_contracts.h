@@ -87,6 +87,10 @@ struct RapidTransition
     std::uint64_t fromContourId{0};
     std::uint64_t toContourId{0};
     QVector<RapidMoveSegment> segments;
+    /// One certificate state per executable rapid segment. Empty means that
+    /// continuous verification is still pending. This derived UI aid is never
+    /// persisted or consumed by Process.
+    QVector<CamMotionCertificateState> collisionStates;
     QVector<RapidSurfacePreviewPoint> surfacePreviewPoints;
     /// Display-only workpiece-local copy frozen when CAM creates the plan.
     /// Process ignores it; the renderer applies the live WPC transform exactly
@@ -149,6 +153,9 @@ struct TravelPlanSnapshot
     /// CAM-owned full-path validation.  This is transient and intentionally
     /// travels with the derived plan rather than project-persisted contour data.
     CollisionValidationSnapshot collision;
+    /// Continuous certificates for every adjacent node in the canonical
+    /// motion plan. They are derived and replaced atomically with validation.
+    QVector<CamMotionEdgeCertificate> motionCertificates;
 
     bool isExecutable() const {
         return !stale && !fullEnvironmentVerificationPending && failureReason.isEmpty();

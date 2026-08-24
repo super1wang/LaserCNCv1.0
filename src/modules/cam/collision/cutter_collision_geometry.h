@@ -8,7 +8,10 @@ class CamConfig;
 namespace lcnc::cam {
 
 /// Loads and normalizes the configured nozzle model, or builds the configured
-/// analytic fallback. The returned proxy is expressed in cutter-local space.
-TopoDS_Shape buildCutterCollisionProxy(const CamConfig& config, QString* errorMessage);
+/// analytic fallback for presentation only.  This shape must never be added
+/// to collision geometry; the complete cutting head belongs to the fixed
+/// machine package's Z-axis body.
+TopoDS_Shape buildCutterDisplayProxy(const CamConfig& config,
+                                     QString* errorMessage);
 
 } // namespace lcnc::cam

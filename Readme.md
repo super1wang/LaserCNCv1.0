@@ -2,7 +2,7 @@
 
 LaserCNC 是面向五轴激光加工的 Windows 桌面软件，将 CAD、CAM、离线仿真与 Process 加工执行放在统一工程工作区中。项目使用 C++17、Qt 6、OpenCASCADE/XCAF、SARibbon、QuaZip、toml11 与 spdlog。
 
-当前版本为 `1.5.9`。本轮已经关闭文件级审计中的真实激光未定义行为、可轮询供应商无界等待和 CAD 异步活动文档写入，并收紧跨模块契约、服务所有权、设备队列、目录与代码规范。代码适合作为继续开发和自动化回归的稳定基座；完整机台连续碰撞、GUI/长稳和物理设备验证仍未完成，因此不能据此标记为实体机生产发布。
+当前版本为 `1.6.0`。本轮在既有审计整改基线上完成 `.lmsp/.lmsi → Job Overlay → Surface-BVH/Coal → 连续运动证书 → Process O(1)` 软件碰撞闭环，并统一首刀、刀路、固定运动和连续点动的失败关闭入口。代码适合作为继续开发和自动化回归的稳定基座；正式夹具、扩大 exact 审计、GUI/长稳和物理设备验证仍未完成，因此不能据此标记为实体机生产发布。
 
 ## 系统组成
 
@@ -42,7 +42,7 @@ cmd /c "call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x6
 ctest --test-dir build-cmake --build-config Debug --output-on-failure
 ```
 
-截至本轮整改，日常 ACS+GTN Debug、real-laser Debug 构建和 39/39 CTest 通过。新增回归覆盖 ULTRON 协议、统一设备等待、ServiceRegistry 生命周期和真实 STEP detached CAD 导入。该证据仍不替代 GUI 人工验收、长时间资源趋势、连续碰撞证明或 ACS/GTN/激光物理硬件验证。唯一构建约定见 [BUILD.md](BUILD.md)，测试分层见 [tests/README.md](tests/README.md)。
+截至本轮整改，日常 ACS+GTN Debug 构建和 41/41 CTest 通过。新增回归覆盖机台安全包、真实 AC 转台索引、Coal、混合实体/开放面包含、连续证书、首刀与 Process 失败关闭，同时保留既有协议、设备等待和真实 STEP 流程回归。该证据仍不替代 GUI 人工验收、长时间资源趋势或 ACS/GTN/激光物理硬件验证。唯一构建约定见 [BUILD.md](BUILD.md)，测试分层见 [tests/README.md](tests/README.md)。
 
 ## 工程包
 
@@ -61,7 +61,7 @@ tools.toml
 ## 当前维护文档
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)：当前架构事实、所有权、调用方向和已知偏差。
-- [AUDIT.md](AUDIT.md)：2026-08-21 全项目文件级审计、风险分级和验证证据。
+- [AUDIT.md](AUDIT.md)：截至 2026-08-24 的全项目文件级审计、风险分级和验证证据。
 - [todo.md](todo.md)：从本次审计生成的未完成工作和验收顺序。
 - [DELIVERY.md](DELIVERY.md)：当前交付边界与可声明/不可声明的验证结论。
 - [代码规范.md](代码规范.md)：代码、分层、异常、设备和提交规范。

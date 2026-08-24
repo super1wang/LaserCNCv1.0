@@ -7,6 +7,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QLayoutItem>
+#include <QMessageBox>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -52,8 +53,15 @@ WidgetCollisionDetectionPanel::WidgetCollisionDetectionPanel(QWidget* parent)
 
     connect(m_enabled, &QCheckBox::toggled, this, [this](bool enabled) {
         if (m_syncing) return;
-        if (auto* provider = lcnc::Kernel::current().service<ICamCollisionConfigurationProvider>())
-            provider->setCollisionDetectionEnabled(enabled);
+        if (auto* provider = lcnc::Kernel::current().service<ICamCollisionConfigurationProvider>()) {
+            QString error;
+            if (!provider->setCollisionDetectionEnabled(enabled, &error)
+                && !error.isEmpty()) {
+                // 中文翻译：无法启用碰撞检测
+                QMessageBox::warning(this, tr("Unable to enable collision detection"),
+                                     error);
+            }
+        }
         refresh();
     });
     refreshNow();
@@ -97,11 +105,14 @@ void WidgetCollisionDetectionPanel::rebuildSources()
 
     const CollisionConfigurationSnapshot snapshot = provider->collisionConfiguration();
     m_enabled->setChecked(snapshot.enabled);
-    m_enabled->setEnabled(snapshot.valid || snapshot.enabled);
-    if (!snapshot.valid) {
+    m_enabled->setEnabled(snapshot.enabled
+                          || (snapshot.activationAvailable && snapshot.valid));
+    if (!snapshot.activationAvailable) {
+        m_status->setText(snapshot.activationFailureReason);
+    } else if (!snapshot.valid) {
         m_status->setText(tr("Select at least one available active source and one available passive source before enabling detection."));
     } else if (snapshot.enabled) {
-        m_status->setText(tr("Collision detection is enabled. Only active-to-passive pairs are checked."));
+        m_status->setText(tr("Collision detection is enabled. Machine roles are derived from the immutable package; the workpiece is the only variable."));
     } else {
         m_status->setText(tr("Collision detection is disabled; rapid path generation remains available without full-machine verification."));
     }
@@ -118,7 +129,9 @@ void WidgetCollisionDetectionPanel::rebuildSources()
             tr("%1 (%2 parts)").arg(source.displayName).arg(source.bodyCount),
             active ? static_cast<QWidget*>(m_activeGroup) : static_cast<QWidget*>(m_passiveGroup));
         check->setChecked((active ? snapshot.activeSources : snapshot.passiveSources).contains(source.id));
-        check->setEnabled(source.available);
+        check->setEnabled(snapshot.sourceSelectionMutable && source.available);
+        if (!snapshot.sourceSelectionMutable)
+            check->setToolTip(tr("Collision roles are fixed by the machine assembly and workpiece mount chain."));
         if (!source.available)
             check->setToolTip(tr("No collision geometry is available for this source."));
         connect(check, &QCheckBox::toggled, this, [this, provider, source, active](bool checked) {

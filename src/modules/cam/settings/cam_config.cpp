@@ -164,8 +164,9 @@ void CamConfig::readFrom(const toml::value& root)
             if (mp.contains("cutterHeadPhysicalPosition") && pointFromToml(mp.at("cutterHeadPhysicalPosition"), &p)) { profile.hasCutterHeadPhysical    = true; profile.cutterHeadPhysicalPosition    = p; }
             if (mp.contains("workpieceInstallPosition")   && pointFromToml(mp.at("workpieceInstallPosition"),   &p)) { profile.hasWorkpieceInstallPosition = true; profile.workpieceInstallPosition   = p; }
 
-            // Legacy collisionRoles deliberately have no migration path:
-            // source selection is now defined by cutter/workpiece/axis units.
+            // Legacy collision source arrays are read only for compatible
+            // round-trip. Runtime roles are derived from fixed machine
+            // topology plus the current workpiece and ignore these values.
             profile.collisionDetectionEnabled = get_bool(mp, "collisionDetectionEnabled", false);
             const auto readSources = [&mp](const char* name, const QString& fallback) {
                 QSet<QString> result;
@@ -561,6 +562,20 @@ void CamConfig::setCollisionSourcesForMachine(const QString& machinePath,
         && profile->passiveCollisionSources == normalizedPassive) return;
     profile->activeCollisionSources = normalizedActive;
     profile->passiveCollisionSources = normalizedPassive;
+    saveDefault();
+}
+
+void CamConfig::copyMachineProfile(const QString& sourceMachinePath,
+                                   const QString& targetMachinePath)
+{
+    const QString sourceKey = machineKey(sourceMachinePath);
+    const QString targetKey = machineKey(targetMachinePath);
+    if (sourceKey == targetKey)
+        return;
+    const auto source = m_machineProfiles.constFind(sourceKey);
+    if (source == m_machineProfiles.cend())
+        return;
+    m_machineProfiles.insert(targetKey, source.value());
     saveDefault();
 }
 

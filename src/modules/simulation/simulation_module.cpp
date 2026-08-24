@@ -35,7 +35,6 @@
 #include <TopoDS_Compound.hxx>
 #include <Quantity_NameOfColor.hxx>
 #include <Quantity_Color.hxx>
-#include <gp_Ax3.hxx>
 #include <gp_Dir.hxx>
 #include <Precision.hxx>
 
@@ -110,7 +109,6 @@ struct SimulationBody {
     bool workpiece{false};
     bool collisionActive{false};
     bool collisionPassive{false};
-    bool cutterProxy{false};
     TopoDS_Shape shape;
     QVector<CollisionLeaf> collisionLeaves;
     Bnd_Box collisionGroupAabb;
@@ -205,7 +203,7 @@ struct SimulationSceneSnapshot {
     LaserToolpath toolpath;
     QVector<lcnc::view::TravelPathRenderer::Segment> rapidSegments;
     gp_Pnt cutterHeadModelPosition{0.0, 0.0, 0.0};
-    TopoDS_Shape cutterProxy;
+    TopoDS_Shape cutterDisplayProxy;
     bool showToolpath{true};
     bool showTravel{false};
     bool showNormals{false};
@@ -249,22 +247,6 @@ TopoDS_Shape transformed(const TopoDS_Shape& shape, const gp_Trsf& trsf)
     if (shape.IsNull()) return {};
     BRepBuilderAPI_Transform transform(shape, trsf, Standard_False);
     return transform.IsDone() ? transform.Shape() : TopoDS_Shape{};
-}
-
-gp_Trsf cutterProxyTransform(const SimulationNode& node, const gp_Pnt& headTip)
-{
-    gp_Vec normal(node.normalX, node.normalY, node.normalZ);
-    if (normal.SquareMagnitude() <= 1e-16)
-        normal = gp_Vec(0.0, 0.0, 1.0);
-    normal.Normalize();
-    // The visual and collision cutter follows the solved machine pose exactly.
-    // CAM has already included any rapid offset before solving these axes.
-    const gp_Pnt tip = headTip;
-    // The shared CAM proxy has its tip at local origin and longitudinal axis
-    // along +Z.  Map that local frame directly onto the solved TCP frame.
-    gp_Trsf trsf;
-    trsf.SetDisplacement(gp_Ax3(), gp_Ax3(tip, gp_Dir(normal)));
-    return trsf;
 }
 
 gp_Pnt cutterHeadWorldPosition(const MachineKinematics& kinematics,
@@ -372,7 +354,7 @@ public:
         if (!m_collisionDetectionEnabled) {
             m_status->setText(QObject::tr("Collision detection is disabled; simulation playback is not verified."));
         } else if (!m_collisionConfigurationValid) {
-            m_status->setText(QObject::tr("Collision detection is enabled but the active/passive source configuration is incomplete."));
+            m_status->setText(QObject::tr("Collision detection is enabled but the immutable machine/workpiece safety environment is incomplete."));
         } else if (snapshot.motionPlan.collision.complete) {
             m_status->setText(QObject::tr("Showing collision validation completed by CAM."));
         } else {
@@ -386,10 +368,6 @@ public:
         // separately is quadratic and made entering the tab visibly stall.
         // 中文翻译：仿真投影复用 CAM 视图外观；全部模型登记后一次性套用，避免逐件重复处理造成卡顿。
         m_gui->finalizeDisplayBatch();
-        for (const SimulationBody& body : std::as_const(m_bodies)) {
-            if (body.cutterProxy)
-                applyCutterProxyAppearance(body);
-        }
         projectFrozenCamOverlays();
         refreshFrozenGuides();
         applyNode(0);
@@ -555,7 +533,7 @@ private:
         m_sceneSnapshot.showCutterHeadGuide = source.showCutterHeadGuide;
         m_sceneSnapshot.normalSampleStep = source.normalSampleStep;
         m_sceneSnapshot.camera = source.camera;
-        m_sceneSnapshot.cutterProxy = source.cutterProxy;
+        m_sceneSnapshot.cutterDisplayProxy = source.cutterDisplayProxy;
 
         QHash<std::uint64_t, const lcnc::cam::ToolpathExportContour*> contours;
         for (const auto& contour : snapshot.contours)
@@ -567,7 +545,10 @@ private:
             lcnc::view::TravelPathRenderer::Segment segment;
             segment.contourId = transition.toContourId;
             segment.workpieceEntry = sourceContour->workpieceEntry;
-            segment.verified = snapshot.travelPlan.isExecutable();
+            segment.collisionState =
+                snapshot.travelPlan.fullEnvironmentVerificationPending
+                ? lcnc::cam::CollisionValidationState::Pending
+                : snapshot.travelPlan.collision.state;
             const auto& points = transition.workpieceLocalPreviewPoints.isEmpty()
                 ? transition.surfacePreviewPoints : transition.workpieceLocalPreviewPoints;
             for (int index = 0; index < points.size(); ++index) {
@@ -575,7 +556,14 @@ private:
                 const auto phase = index > 0 && index - 1 < transition.segments.size()
                     ? transition.segments.at(index - 1).phase
                     : lcnc::cam::RapidSegmentPhase::Traverse;
-                segment.waypoints.append({point.x, point.y, point.z, phase});
+                auto state = segment.collisionState;
+                if (index > 0
+                    && index - 1 < transition.collisionStates.size()) {
+                    state = lcnc::cam::collisionValidationStateForCertificate(
+                        transition.collisionStates.at(index - 1));
+                }
+                segment.waypoints.append(
+                    {point.x, point.y, point.z, phase, state});
             }
             m_sceneSnapshot.rapidSegments.append(std::move(segment));
         }
@@ -763,38 +751,11 @@ private:
                 m_bodies.append(std::move(body));
         }
 
-        // The cutter/nozzle is not necessarily part of the imported machine
-        // assembly.  Project CAM's exact local +Z collision proxy as an
-        // independent sandbox-only body, so it is visible and participates in
-        // the same scan as the configured machine/workpiece collision roles.
-        // 中文翻译：将 CAM 的刀嘴/模拟锥代理作为沙箱私有部件投影并参与碰撞，
-        // 不修改机台文档或主视图。
-        const TopoDS_Shape& proxy = m_sceneSnapshot.cutterProxy;
-        if (proxy.IsNull()) {
-            LCNC_WARN(lcnc::LogCode::Generic,
-                      "Offline simulation cutter proxy is unavailable");
-        } else {
-            // Match MachineGuideRenderer: generate the proxy's presentation
-            // mesh once, then disable per-view lazy meshing below.  This keeps
-            // the visible cone/nozzle deterministic without remeshing it on
-            // every sandbox entry.
-            BRepMesh_IncrementalMesh(proxy, 0.5);
-            SimulationBody body;
-            body.id = QStringLiteral("__offline_simulation_cutter_proxy__");
-            body.collisionRole = QStringLiteral("cutter");
-            body.collisionSource = QStringLiteral("cutter");
-            body.cutterProxy = true;
-            body.collisionActive = m_collisionDetectionEnabled
-                && collision.activeSources.contains(body.collisionSource);
-            body.shape = proxy;
-            if (body.attachment.isEmpty())
-                body.attachment = QStringLiteral("Z");
-            // The visible cutter is owned by the same MachineGuideRenderer
-            // used in the ordinary machine view.  Keep this BRep collision
-            // only, otherwise two independently transformed nozzle visuals
-            // would appear in the sandbox.
-            m_bodies.append(std::move(body));
-        }
+        // The cone/nozzle proxy is presented only by MachineGuideRenderer.
+        // Collision uses the complete fixed cutting-head geometry imported as
+        // part of the Z-axis machine body; never append the visual proxy to the
+        // simulation collision scene.
+        // 中文翻译：示意锥头仅由渲染器显示，仿真碰撞只使用机台模型中的 Z 轴完整几何。
         if (m_workpieceBodyCount == 0) {
             LCNC_WARN(lcnc::LogCode::Generic,
                       "Offline simulation has no project workpiece to project; machine model remains available");
@@ -810,8 +771,7 @@ private:
 
     gp_Trsf bodyTransform(const SimulationBody& body, const SimulationNode& node) const
     {
-        if (body.cutterProxy)
-            return cutterProxyTransform(node, cutterHeadWorldPosition());
+        Q_UNUSED(node);
         return body.workpiece ? m_kinematics.computeWpcTransform(body.id)
                               : m_kinematics.computeShapeTransform(body.id);
     }
@@ -904,29 +864,10 @@ private:
                                                        settings->colors.cutterHeadTransparency,
                                                        settings->colors.cutterHeadScale});
         }
-        m_guideRenderer->setCutterCollisionProxy(m_sceneSnapshot.cutterProxy);
+        m_guideRenderer->setCutterDisplayProxy(m_sceneSnapshot.cutterDisplayProxy);
         m_guideRenderer->refresh(m_gui, &m_kinematics, cutterHeadWorldPosition());
         m_guideRenderer->setRotaryAxisVisible(m_gui, m_sceneSnapshot.showRotaryGuides);
         m_guideRenderer->setCutterHeadVisible(m_gui, m_sceneSnapshot.showCutterHeadGuide);
-    }
-
-    void applyCutterProxyAppearance(const SimulationBody& body) const
-    {
-        if (body.ais.IsNull())
-            return;
-        QColor color(255, 0, 0);
-        double transparency = 0.0;
-        if (const auto* settings = lcnc::Kernel::current().appSettings()) {
-            color = settings->colors.cutterHeadColor;
-            transparency = settings->colors.cutterHeadTransparency;
-        }
-        body.ais->SetColor(Quantity_Color(color.redF(), color.greenF(), color.blueF(),
-                                           Quantity_TOC_RGB));
-        body.ais->SetTransparency(qBound(0.0, transparency, 1.0));
-        if (!body.ais->Attributes().IsNull()) {
-            body.ais->Attributes()->SetAutoTriangulation(Standard_False);
-            body.ais->Attributes()->SetFaceBoundaryDraw(Standard_False);
-        }
     }
 
     QString selectionGroupKey(const SimulationBody& body) const
@@ -1080,7 +1021,7 @@ private:
         if (!m_collisionConfigurationValid) {
             m_scanStarted = true;
             m_scanFinished = true;
-            if (m_status) m_status->setText(QObject::tr("Collision source configuration is incomplete; no scan was started."));
+            if (m_status) m_status->setText(QObject::tr("The immutable machine/workpiece safety environment is incomplete; no scan was started."));
             return;
         }
         if (!m_collisionPreparationFinished) {
@@ -1119,7 +1060,6 @@ private:
         const auto assignments = m_kinematics.shapeAssignments();
         const auto mounts = m_kinematics.wpcMounts();
         const auto layout = m_layout;
-        const auto cutterHeadModelPosition = m_sceneSnapshot.cutterHeadModelPosition;
         const QStringList activeSources =
             lcnc::cam_algo::orderedActiveCollisionSources(activeSourceSet);
         const double clearanceMm = m_collisionClearanceMm;
@@ -1133,7 +1073,7 @@ private:
         TaskSpec spec; spec.label = QObject::tr("Offline collision scan"); spec.scope = QStringLiteral("simulation.collision"); spec.userVisible = false;
         m_scanTask = tasks->run(spec, [nodes, activeBodies, passiveBodies, activeIndices, activeSources,
             passiveIndices, axes, config, workpieceSetup, assignments, mounts, layout,
-            cutterHeadModelPosition, clearanceMm, result, pairs, resultMutex, progressMutex,
+            clearanceMm, result, pairs, resultMutex, progressMutex,
             completed](TaskProgress* progress) {
             const int scanSteps = nodes.size() * activeSources.size();
             progress->setRange(0, qMax(1, scanSteps));
@@ -1162,7 +1102,7 @@ private:
                 const QString activeSource = activeSources.at(phase);
                 const bool finalPhase = phase + 1 == activeSources.size();
                 launcher.Perform(0, nodes.size(), [nodes, activeBodies, passiveBodies,
-                activeIndices, passiveIndices, axes, layout, cutterHeadModelPosition,
+                activeIndices, passiveIndices, axes, layout,
                 activeSource, finalPhase, scanSteps, clearanceMm, result, pairs, resultMutex,
                 progressMutex, completed, workerKinematics, progress](int threadIndex, int n) {
                 if (progress->isAbortRequested()) return;
@@ -1191,8 +1131,6 @@ private:
                     Bnd_Box aabb;
                     Bnd_OBB obb;
                     int bodyIndex{-1};
-                    bool cutterProxy{false};
-                    bool workpiece{false};
                 };
                 QVector<PoseLeaf> activeLeaves;
                 QVector<PoseLeaf> passiveLeaves;
@@ -1205,12 +1143,9 @@ private:
                 };
                 QVector<PoseGroup> activeGroups;
                 QVector<PoseGroup> passiveGroups;
-                const auto bodyTransformForNode = [&kin, &node, &cutterHeadModelPosition](const SimulationBody& body) {
-                    const gp_Trsf trsf = body.cutterProxy ? cutterProxyTransform(
-                        node, ::cutterHeadWorldPosition(kin, cutterHeadModelPosition))
-                        : (body.workpiece ? kin.computeWpcTransform(body.id)
-                                          : kin.computeShapeTransform(body.id));
-                    return trsf;
+                const auto bodyTransformForNode = [&kin](const SimulationBody& body) {
+                    return body.workpiece ? kin.computeWpcTransform(body.id)
+                                          : kin.computeShapeTransform(body.id);
                 };
                 const auto appendGroups = [&bodyTransformForNode, clearanceMm, &activeSource](const QVector<SimulationBody>& bodies,
                                                                                    const QVector<int>& bodyIndices,
@@ -1254,8 +1189,6 @@ private:
                             world.aabb = transformAabb(leaf.localAabb, trsf, clearanceMm);
                             world.obb = transformObb(leaf.localObb, trsf, clearanceMm);
                             world.bodyIndex = bodyIndices.at(body);
-                            world.cutterProxy = source.cutterProxy;
-                            world.workpiece = source.workpiece;
                             target->append(std::move(world));
                         }
                     }
@@ -1297,31 +1230,6 @@ private:
                             pairState = 3;
                         } else if (distance.Value() <= Precision::Confusion()) {
                             pairState = 1;
-                            // At a cutting node only the nozzle tip's intended
-                            // zero contact may be ignored. Move the nozzle a
-                            // tiny distance along the outward normal: a true
-                            // penetration remains at zero distance, while a
-                            // tangent tip contact separates. This avoids an
-                            // expensive and crash-prone Boolean Common.
-                            if (active.cutterProxy && passive.workpiece
-                                && node.kind == NodeKind::Cutting) {
-                                gp_Vec outward(node.normalX, node.normalY, node.normalZ);
-                                if (outward.SquareMagnitude() <= Precision::SquareConfusion())
-                                    outward = gp_Vec(0.0, 0.0, 1.0);
-                                outward.Normalize();
-                                outward.Multiply(qMax(0.05, Precision::Confusion() * 10.0));
-                                gp_Trsf probeTransform;
-                                probeTransform.SetTranslation(outward);
-                                const TopoDS_Shape probe = transformed(one, probeTransform);
-                                BRepExtrema_DistShapeShape probeDistance(probe, two);
-                                probeDistance.SetDeflection(0.025);
-                                probeDistance.SetMultiThread(Standard_False);
-                                probeDistance.Perform();
-                                if (!probeDistance.IsDone())
-                                    pairState = 3;
-                                else if (probeDistance.Value() > Precision::Confusion())
-                                    pairState = 0;
-                            }
                         } else if (distance.Value() <= clearanceMm) {
                             pairState = 2;
                         }
@@ -1430,10 +1338,6 @@ private:
         // generic default colour.
         // 中文翻译：碰撞红色标记撤销后恢复应用程序配置的轴/工件颜色。
         m_gui->applyMachineDisplayStyle();
-        for (const SimulationBody& body : std::as_const(m_bodies)) {
-            if (body.cutterProxy)
-                applyCutterProxyAppearance(body);
-        }
         m_highlightedCollisionPair = {-1, -1};
     }
 

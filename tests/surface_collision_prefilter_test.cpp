@@ -1,8 +1,10 @@
 #include "core/algorithms/cam/surface_collision_prefilter.h"
 
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <STEPControl_Reader.hxx>
@@ -10,7 +12,9 @@
 #include <gp_Ax3.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Vec.hxx>
+#include <TopoDS_Compound.hxx>
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -70,6 +74,19 @@ int main(int argc, char* argv[])
     if (!cutterSurface.isValid())
         return fail(QStringLiteral("Cannot build cutter surface BVH: %1")
                     .arg(QString::fromStdString(error)));
+    const auto restoredWorkpieceSurface =
+        lcnc::cam_algo::SurfaceCollisionModel::buildFromTriangleSoup(
+            workpieceSurface.triangleSoup(),
+            workpieceSurface.linearDeflectionMm(),
+            workpieceSurface.isClosedSolid(), &error);
+    if (!restoredWorkpieceSurface.isValid()
+        || restoredWorkpieceSurface.triangleCount()
+            != workpieceSurface.triangleCount()
+        || restoredWorkpieceSurface.isClosedSolid()
+            != workpieceSurface.isClosedSolid()) {
+        return fail(QStringLiteral("Persisted triangle soup did not rebuild the surface BVH: %1")
+                    .arg(QString::fromStdString(error)));
+    }
 
     Bnd_Box bounds;
     BRepBndLib::Add(workpiece, bounds);
@@ -87,6 +104,12 @@ int main(int argc, char* argv[])
         workpieceSurface, gp_Trsf(), guardedDistance);
     if (!safe.valid || !safe.definitelySeparated)
         return fail(QStringLiteral("1 mm cutting offset was not rejected by the surface BVH"));
+    const auto restoredSafe = lcnc::cam_algo::prefilterSurfaceCollision(
+        cutterSurface, translation(centerX, centerY, zMax + 1.0),
+        restoredWorkpieceSurface, gp_Trsf(), guardedDistance);
+    if (!restoredSafe.valid
+        || restoredSafe.definitelySeparated != safe.definitelySeparated)
+        return fail(QStringLiteral("Restored surface BVH changed a separation decision"));
 
     const auto penetrating = lcnc::cam_algo::prefilterSurfaceCollision(
         cutterSurface, translation(centerX, centerY, zMax - 2.0),
@@ -130,6 +153,46 @@ int main(int argc, char* argv[])
         innerBox, translation(49.5, 49.5, 49.5), outerBox, gp_Trsf(), guardedDistance);
     if (!contained.valid || contained.definitelySeparated)
         return fail(QStringLiteral("Surface BVH incorrectly rejected a contained solid"));
+
+    const TopoDS_Shape mixedSolid =
+        BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+    const TopoDS_Shape mixedOpenFace = BRepBuilderAPI_MakeFace(
+        gp_Pln(gp_Pnt(20.0, 0.0, 0.0), gp_Dir(1.0, 0.0, 0.0)),
+        -50.0, 50.0, -50.0, 50.0).Shape();
+    TopoDS_Compound mixedBody;
+    BRep_Builder mixedBuilder;
+    mixedBuilder.MakeCompound(mixedBody);
+    mixedBuilder.Add(mixedBody, mixedSolid);
+    mixedBuilder.Add(mixedBody, mixedOpenFace);
+    const auto solidOnlySurface = lcnc::cam_algo::SurfaceCollisionModel::build(
+        mixedSolid, 0.05, &error);
+    const auto mixedSurface = lcnc::cam_algo::SurfaceCollisionModel::build(
+        mixedBody, 0.05, &error);
+    if (!solidOnlySurface.isValid() || !mixedSurface.isValid()
+        || mixedSurface.triangleCount() <= solidOnlySurface.triangleCount()) {
+        return fail(QStringLiteral(
+            "Mixed solid/open-face collision mesh dropped the open face"));
+    }
+    const auto containedInMixed =
+        lcnc::cam_algo::SurfaceCollisionModel::build(
+            BRepPrimAPI_MakeBox(gp_Pnt(2.0, 2.0, 2.0), 2.0, 2.0, 2.0).Shape(),
+            0.05, &error);
+    if (!containedInMixed.isValid()
+        || !lcnc::cam_algo::surfaceCollisionContainmentDetected(
+            containedInMixed, gp_Trsf(), mixedSurface, gp_Trsf())) {
+        return fail(QStringLiteral(
+            "Mixed solid/open-face collision mesh lost solid containment"));
+    }
+    const auto restoredMixedSurface =
+        lcnc::cam_algo::SurfaceCollisionModel::buildFromTriangleSoup(
+            mixedSurface.triangleSoup(), mixedSurface.containmentTriangleSoup(),
+            mixedSurface.linearDeflectionMm(), mixedSurface.isClosedSolid(), &error);
+    if (!restoredMixedSurface.isValid()
+        || !lcnc::cam_algo::surfaceCollisionContainmentDetected(
+            containedInMixed, gp_Trsf(), restoredMixedSurface, gp_Trsf())) {
+        return fail(QStringLiteral(
+            "Persisted mixed collision mesh lost solid containment"));
+    }
 
     constexpr int threadCount = 4;
     constexpr int queriesPerThread = 2500;

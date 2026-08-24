@@ -1,22 +1,22 @@
 # LaserCNC 当前交付状态
 
-更新日期：2026-08-21
+更新日期：2026-08-24
 
-产品版本：`1.5.9`（由 CMake 单一版本源生成）
+产品版本：`1.6.0`（由 CMake 单一版本源生成）
 
 ## 当前结论
 
-本次已经关闭审计 P0-1～P0-3，并完成当前范围内的 P1/P2 架构与工程卫生整改。代码可作为后续功能开发和下一版本完整碰撞工作的稳定基座；P0-4 连续碰撞、GUI/长稳及物理设备验证仍是实体机生产发布门禁。
+本次完成固定机台安全包、工件 Job Overlay、Surface-BVH/Coal 保守回退、连续运动证书和 Process 许可证的软件闭环，并对全部工作区修改做了文件级审阅。真实加工只消费与包键、环境代际和运动端点一致的不可变证书；缺失、构建中、失效、BoundaryUnknown 或不完整状态失败关闭。该结果可作为生产架构基线，但正式夹具、扩大 exact 审计、GUI/长稳和物理设备验证仍是实体机发布门禁。
 
-## 本次收口
+## 本次交付
 
-- 真实激光：ULTRON 协议改为有界纯函数和 RAII；Raycus/QCW 清除裸缓冲区、参数检查错误及不确定返回。
-- 设备稳定性：ACS/GTN 等待统一 deadline/cancellation；状态轮询与工作流共用全局优先级设备队列。
-- CAD：STEP/IGES/STL/BREP 在 worker 构造 detached payload，文档所有者线程提交；任务按文档跟踪和取消。
-- 跨模块：Process/Simulation 不再依赖具体 `CamModule`；离线仿真消费 revision 化不可变快照。
-- 所有权：`ServiceRegistry` 显式注册 borrowed service；CAM pipeline 不再外泄可变 entry 容器。
-- 目录与规范：供应商 BDAQ 头迁入 `3rd/`，`setting/` 合并到 `settings/schema/`，设备头统一 `#pragma once`，增加统一数学常量、`.clang-format` 和架构门禁。
-- 构建：模块实现/UI 链接依赖尽量收紧为 `PRIVATE`；CMake 版本、应用版本、模块信息和工程包 fallback 统一为 `1.5.9`。
+- `.lmsp`：QuaZip 原子打包机台模型、唯一 `.lmsi` 和多层 SHA-256/运行时配置指纹；模型或必要机台配置变化使索引失效。
+- `.lmsi`：多级稀疏细化、断点续建、热 APOS 反馈、叶级 BVH 和 schema 5 持久表面数据；混合部件的完整距离 BVH 与封闭实体包含 BVH 分离。
+- Job Overlay：工件作为唯一运行时几何变量后台构建局部保守场，发布不可变快照并按环境代际失效。
+- 统一查询：Rapid、LeadIn、Cutting、Traverse 和首刀规划统一生成连续边证书；自动生成不再重复逐节点 OCCT，显式诊断仍保留 OCCT 审计后端。
+- Process：真实加工 O(1) 校验证书；相对/绝对点动、预设位置和流程运动申请固定许可证，连续点动周期续签。
+- 显示/仿真：模拟锥头和喷嘴只用于示意；空程按 Safe、Pending、BoundaryUnknown/Warning、Collision 分桶显示。
+- 工程审查补强：修复重建期碰撞意图被错误折叠、混合几何包含漏判、同步多轴模式混用以及遗留 workpiece-proxy 诊断分支。
 
 ## 验证
 
@@ -24,16 +24,20 @@
 | --- | --- |
 | `git diff --check` | 通过；仅有 Git 行尾转换提示。 |
 | `scripts/check_architecture.ps1 -Root .` | 通过。 |
-| 日常 ACS+GTN Debug 构建 | 通过。 |
-| 日常完整 CTest | 39/39 通过，59.97 秒。 |
-| real-laser Debug 构建 | 通过；原 ULTRON 未初始化/缺失返回和 Raycus/QCW 协议告警已消除。 |
-| ASan | 全量构建通过；本轮关键所有权、协议、等待、状态和 CAD detached 导入 7/7 通过，6.10 秒。 |
+| 日常 ACS+GTN Debug 构建 | 通过，`x64/ninja/Debug/LaserCNC.exe` 链接成功。 |
+| 日常完整 CTest | 41/41 通过，167.58 秒。 |
+| 真实 AC 转台索引回归 | 生成、QuaZip 打包、加载、50 万次查询、校验和破坏拒绝均通过；单项 104.12 秒。 |
+| 混合几何回归 | 开放面保留、实体内部包含及 schema 5 持久化往返均通过。 |
+| ACS+GTN Release | 构建通过；Surface-BVH、Coal、运动证书契约和 Process 失败关闭 4/4 通过，5.51 秒。 |
+| ASan | 全量构建通过；TaskManager、碰撞、证书、Process 安全和快照并发关键回归 6/6 通过，15.94 秒。 |
+| real-laser 变体 | 构建/链接通过；该结果只证明编译边界，不是物理激光器放行。 |
 
-## 仍未放行
+## 已知边界
 
-1. P0-4：完整机台连续段碰撞证明、重规划和性能门限。
-2. GUI 人工验收、8 小时资源趋势和重复连接/开关压力测试。
-3. 真实 ACS/GTN、激光器和 IO 的低速加工及安全停机验证。
-4. 供应商函数自身永不返回时的厂商级超时或进程外看门狗。
+1. 任意未规划 APOS 的 `.lmsi + Coal` 仍适合后台预测而非硬实时；硬实时边界是预先构建的 O(1) 证书/许可证。
+2. 正式夹具模型、挂接关系和指纹 DTO 尚未接入 Job Overlay。
+3. 自动绕障/重规划尚未实现；碰撞和 Unknown 会安全阻断，不会改写 CAM 权威路径。
+4. 点动许可证仍需实体机量化 APOS 新鲜度、跟随误差和最坏制动距离。
+5. 未完成 GUI 人工验收、8 小时资源趋势、Application Verifier 或真实 ACS/GTN/激光/IO 低速加工验证。
 
-自动化、SDK 仿真、GUI 和物理机是四类独立证据。完整审计见 [AUDIT.md](AUDIT.md)，剩余工作见 [todo.md](todo.md)。
+自动化、SDK 仿真、GUI 和物理机是四类独立证据。完整审计见 [AUDIT.md](AUDIT.md)，专项指标见 [docs/collision_detection_todo.md](docs/collision_detection_todo.md)，剩余工作见 [todo.md](todo.md)。

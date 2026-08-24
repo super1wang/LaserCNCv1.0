@@ -74,7 +74,8 @@ void CmdLoadMachine::execute()
             // 中文翻译：选择机台模型文件
             nullptr, tr("Select machine model file"), configuredPath,
             // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;
-            tr("3D model files (*.stp *.step *.stl *.brep);;"
+            tr("Machine safety packages (*.lmsp);;"
+               "3D model files (*.stp *.step *.stl *.brep);;"
                "STEP (*.stp *.step);;"
                "STL (*.stl);;"
                "BREP (*.brep)"));
@@ -84,6 +85,34 @@ void CmdLoadMachine::execute()
     }
 
     context()->camModule()->loadMachine(pathToLoad);
+    context()->updateCommandStates();
+}
+
+// ── CmdBuildMachineSafetyPackage ─────────────────────────────────────────────
+
+CmdBuildMachineSafetyPackage::CmdBuildMachineSafetyPackage(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    // 中文翻译：生成安全包
+    auto* a = new QAction(QIcon("themeicons:machine.svg"), tr("Generate safety package"), this);
+    // 中文翻译：在独立工具中生成或更新机台安全包，完成后自动切换为 .lmsp 路径
+    a->setStatusTip(tr("Generate or update the machine safety package in the offline tool and switch to the .lmsp path when complete"));
+    setAction(a);
+}
+
+bool CmdBuildMachineSafetyPackage::isEnabled() const
+{
+    return context()->camModule()
+        && !context()->camModule()->machineModelPath().isEmpty();
+}
+
+void CmdBuildMachineSafetyPackage::execute()
+{
+    QString error;
+    if (!context()->camModule()->buildOrUpdateMachineSafetyPackage(&error)) {
+        // 中文翻译：生成机台安全包
+        QMessageBox::warning(nullptr, tr("Generate machine safety package"), error);
+    }
     context()->updateCommandStates();
 }
 

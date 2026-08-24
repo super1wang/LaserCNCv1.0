@@ -41,8 +41,7 @@ int main(int argc, char* argv[])
     const auto initialDefaults = current.initialApproachSettings();
     if (initialDefaults.mode
             != lcnc::process::ProcessInitialApproachMode::Automatic
-        || initialDefaults.safetyZ != 0.0
-        || initialDefaults.collisionCheckEnabled) {
+        || initialDefaults.safetyZ != 0.0) {
         return fail(QStringLiteral("Initial-approach settings defaults are invalid"));
     }
     const auto settingsObjects = current.objects();
@@ -65,8 +64,7 @@ int main(int argc, char* argv[])
             && current.setFieldValue(*field, initialObject->id, value, &error);
     };
     if (!setInitialField(QStringLiteral("mode"), QStringLiteral("Manual"))
-        || !setInitialField(QStringLiteral("safetyZ"), 42.5)
-        || !setInitialField(QStringLiteral("collision"), true)) {
+        || !setInitialField(QStringLiteral("safetyZ"), 42.5)) {
         return fail(QStringLiteral("Initial-approach settings could not be edited"));
     }
     const auto initialCommit = current.commit();
@@ -113,8 +111,7 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("Current Process settings were rejected"));
     const auto reloadedInitial = currentReload.initialApproachSettings();
     if (reloadedInitial.mode != lcnc::process::ProcessInitialApproachMode::Manual
-        || reloadedInitial.safetyZ != 42.5
-        || !reloadedInitial.collisionCheckEnabled) {
+        || reloadedInitial.safetyZ != 42.5) {
         return fail(QStringLiteral("Initial-approach settings did not round-trip"));
     }
 

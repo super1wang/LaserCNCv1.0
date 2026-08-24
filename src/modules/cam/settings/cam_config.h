@@ -120,8 +120,9 @@ public:
     void setCutterHeadPhysicalPositionForMachine(const QString& machinePath,
                                                  const gp_Pnt& position);
 
-    /// Collision sources are persisted per machine profile.  An empty path
-    /// addresses the dedicated no-machine (virtual cutter/workpiece) profile.
+    /// Collision enablement is persisted per immutable machine-package
+    /// profile. Source sets below are legacy storage accessors only; runtime
+    /// roles are derived from machine topology and the current workpiece.
     bool collisionDetectionEnabledForMachine(const QString& machinePath) const;
     void setCollisionDetectionEnabledForMachine(const QString& machinePath, bool enabled);
     QSet<QString> activeCollisionSourcesForMachine(const QString& machinePath) const;
@@ -129,6 +130,8 @@ public:
     void setCollisionSourcesForMachine(const QString& machinePath,
                                        const QSet<QString>& active,
                                        const QSet<QString>& passive);
+    void copyMachineProfile(const QString& sourceMachinePath,
+                            const QString& targetMachinePath);
 
     /// Legacy v4 machine-profile value.  It is accepted only to migrate XYZ
     /// into MachineConfigurationService::WorkpieceSetupTransform and is never

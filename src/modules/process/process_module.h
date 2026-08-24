@@ -204,6 +204,17 @@ private:
     void applyPeripheralStatus(const lcnc::process::DeviceCommandResult& result,
                                const lcnc::process::DevicePeripheralSnapshot& sample);
     bool validateProcessingConfiguration(QString* errorMessage, bool requireIdle = true);
+    bool acquireManualMotionPermit(bool continuousJog,
+                                   const QString& axisName,
+                                   double targetPosition,
+                                   int direction,
+                                   double maximumDistance,
+                                   qint64 validityMs,
+                                   QString* errorMessage = nullptr);
+    bool acquireFixedMotionPermit(const QMap<QString, double>& requestedTargets,
+                                  bool relative,
+                                  QString* errorMessage = nullptr);
+    void renewContinuousJogPermit();
     void startWorkflowAfterPreflight();
     /// 请求本模块任务取消并等待；false 表示仍有 worker 未在期限内退出。
     bool cancelOwnedTasks(int timeoutMs);
@@ -235,6 +246,10 @@ private:
     QMap<QString, double> m_activeLockedAxisTargets;
     QMap<QString, bool>   m_digitalOutputs;
     QTimer*               m_simTimer{nullptr};
+    QTimer*               m_continuousJogPermitTimer{nullptr};
+    QString               m_permittedJogAxis;
+    int                   m_permittedJogDirection{0};
+    double                m_permittedJogVelocity{0.0};
     QString               m_lastPeripheralDiagnostic;
     double                m_feedOverride{1.0};
     double                m_simPhase{0.0};

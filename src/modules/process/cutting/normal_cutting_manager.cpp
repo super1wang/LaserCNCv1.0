@@ -20,6 +20,7 @@
 
 #include <QString>
 #include <QStringList>
+#include <QByteArray>
 #include <QElapsedTimer>
 #include <QScopeGuard>
 #include <QVariantMap>
@@ -451,18 +452,18 @@ bool NormalCuttingManager::prepareInitialApproach(
             ? lcnc::cam::InitialApproachPlanningMode::Manual
             : lcnc::cam::InitialApproachPlanningMode::Automatic;
         request.safetyAxisZ = initialSettings.safetyZ;
-        request.collisionCheckEnabled = initialSettings.collisionCheckEnabled;
 
         QElapsedTimer planningElapsed;
         planningElapsed.start();
         *approach = planner->planInitialApproach(request, &interrupt.stopRequested);
         LCNC_INFO(lcnc::LogCode::Generic,
-                  "stage=process.initial_approach.plan event=end result={} mode={} segments={} elapsed_ms={}",
+                  "stage=process.initial_approach.plan event=end result={} mode={} segments={} certificates={} elapsed_ms={}",
                   approach->isExecutable(approach->collision.blockWarning)
                       ? "success" : "failed",
                   initialSettings.mode == ProcessInitialApproachMode::Manual
                       ? "manual" : "automatic",
-                  approach->transition.segments.size(), planningElapsed.elapsed());
+                  approach->transition.segments.size(),
+                  approach->edgeCertificates.size(), planningElapsed.elapsed());
         if (!approach->isExecutable(approach->collision.blockWarning)) {
             // 中文翻译：CAM 首段未通过碰撞校验
             if (errorMessage) {
@@ -479,12 +480,52 @@ bool NormalCuttingManager::prepareInitialApproach(
                 *errorMessage = approachError;
             return false;
         }
-        if (!poseDrifted(before, after))
+        const auto latestExecution = m_toolpathProvider
+            ? m_toolpathProvider->exportCommittedExecutionSnapshot()
+            : lcnc::cam::ToolpathExportSnapshot{};
+        bool collisionProofDrifted = latestExecution.revision
+                != approach->toolpathRevision
+            || latestExecution.machineConfigurationFingerprint
+                != approach->machineConfigurationFingerprint;
+        if (!collisionProofDrifted && !approach->edgeCertificates.isEmpty()) {
+            const bool approachCollisionEnabled =
+                approach->edgeCertificates.constFirst().state
+                != lcnc::cam::CamMotionCertificateState::Disabled;
+            collisionProofDrifted = approachCollisionEnabled
+                != latestExecution.collisionSafety.enabled;
+            if (latestExecution.collisionSafety.enabled) {
+                const QByteArray packageKey = QByteArray::fromHex(
+                    latestExecution.collisionSafety.packageKeySha256.toLatin1());
+                collisionProofDrifted = collisionProofDrifted
+                    || !latestExecution.collisionSafety.machinePackageReady
+                    || latestExecution.collisionSafety.packageBuildInProgress
+                    || (latestExecution.collisionSafety.jobOverlayRequired
+                        && (!latestExecution.collisionSafety.jobOverlayReady
+                            || latestExecution.collisionSafety.jobOverlayBuildInProgress));
+                for (const auto& certificate : approach->edgeCertificates) {
+                    if (certificate.packageKeySha256 != packageKey
+                        || certificate.environmentRevision
+                            != latestExecution.travelPlan.key.environmentRevision) {
+                        collisionProofDrifted = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!poseDrifted(before, after) && !collisionProofDrifted)
             return true;
         if (attempt == 1) {
-            // 中文翻译：首段规划期间控制器位置发生变化
-            if (errorMessage)
-                *errorMessage = tr("Controller position changed while planning the initial approach");
+            if (errorMessage) {
+                if (collisionProofDrifted) {
+                    // 中文翻译：首刀规划期间碰撞安全状态发生变化。
+                    *errorMessage = tr(
+                        "Collision safety state changed while planning the initial approach");
+                } else {
+                    // 中文翻译：首段规划期间控制器位置发生变化
+                    *errorMessage = tr(
+                        "Controller position changed while planning the initial approach");
+                }
+            }
             return false;
         }
     }
@@ -918,7 +959,10 @@ NormalCuttingManager::buildCuttingList(const lcnc::cam::ToolpathExportSnapshot& 
 
     QVector<CuttingRow> out;
 
-    const QString camBlockReason = camExecutionBlockReason(snapshot);
+    const bool realMachineExecution = !m_callbacks.simulationModeProvider
+        || !m_callbacks.simulationModeProvider();
+    const QString camBlockReason = camExecutionBlockReason(
+        snapshot, realMachineExecution);
     if (!camBlockReason.isEmpty()) {
         if (errorMessage) {
             *errorMessage = tr("Machining cannot start: %1").arg(camBlockReason);

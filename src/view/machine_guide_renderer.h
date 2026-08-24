@@ -36,9 +36,9 @@ public:
 
     /// 设置刀头锥外观（颜色/透明度/缩放），在下一次 refresh() 生效。
     void setCutterHeadAppearance(const CutterHeadAppearance& appearance);
-    /// Set the same local +Z nozzle/cone proxy used by offline collision
-    /// planning.  A null shape keeps the legacy visual cone fallback.
-    void setCutterCollisionProxy(const TopoDS_Shape& shape);
+    /// Set a presentation-only local +Z nozzle/cone. A null shape keeps the
+    /// legacy visual cone fallback. It is never collision geometry.
+    void setCutterDisplayProxy(const TopoDS_Shape& shape);
 
     /// 重新创建所有引导 AIS（先 erase 再 display）。
     void refresh(GuiDocument* gd,
@@ -67,7 +67,7 @@ private:
 private:
     QHash<GuiDocument*, QMap<QString, Handle(AIS_Shape)>> m_axisGuideAisByDocument;
     CutterHeadAppearance m_cutterHeadAppearance;
-    TopoDS_Shape m_cutterCollisionProxy;
+    TopoDS_Shape m_cutterDisplayProxy;
     bool m_rotaryAxisVisible{true};
     bool m_cutterHeadVisible{true};
 };

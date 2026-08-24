@@ -28,7 +28,6 @@ struct TravelPlanningDiagnostics
 {
     std::uint64_t candidateCount{0};
     std::uint64_t evaluatedCandidateCount{0};
-    std::uint64_t exactDistanceCheckCount{0};
 };
 
 struct TravelPlanningRequest
@@ -39,9 +38,6 @@ struct TravelPlanningRequest
     // remains useful for compact tests and simple callers.
     QVector<TravelEndpointPair> transitions;
     TopoDS_Shape workpiece;
-    /// Local collision proxy.  Its tip is at the origin and its longitudinal
-    /// axis points along local +Z, away from the machining surface.
-    TopoDS_Shape cutterCollisionProxy;
     /// Selects post-solve real-machine validation in the CAM caller.  Model
     /// visibility must not affect this value.
     bool fullEnvironment{false};
@@ -52,10 +48,6 @@ struct TravelPlanningRequest
     double minimumClearanceMm{0.0};
     /// Maximum additional normal offset the offline planner may search.
     double maximumSafetyOffsetMm{100.0};
-    /// Collision checks use a coarser bounded sampling than the display/IK
-    /// curve.  The greatest safe offset of adjacent checked samples is
-    /// propagated across the interval.
-    double collisionSampleStepMm{2.0};
     /// Maximum sample chord for the nominal reference curve.
     double surfacePathStepMm{1.0};
     TravelPlanningDiagnostics* diagnostics{nullptr};

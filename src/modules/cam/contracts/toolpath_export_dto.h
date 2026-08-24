@@ -79,6 +79,26 @@ struct ToolpathExportContour
     bool endpointsValid{false};
 };
 
+/// Immutable collision-runtime identity captured together with the solved
+/// motion. Process uses it as a real-machine preflight gate; it deliberately
+/// contains no geometry or mutable service pointer.
+struct CollisionSafetyExecutionSnapshot
+{
+    bool enabled{false};
+    bool machinePackageRequired{false};
+    bool machinePackageReady{false};
+    bool packageBuildInProgress{false};
+    bool jobOverlayRequired{false};
+    bool jobOverlayReady{false};
+    bool jobOverlayBuildInProgress{false};
+    QString packageState;
+    QString jobOverlayState;
+    QString packageKeySha256;
+    QString runtimeConfigurationSha256;
+    QString failureReason;
+    QString jobOverlayFailureReason;
+};
+
 /**
  * @brief Full immutable CAM toolpath snapshot consumed by Process runtime services.
  */
@@ -93,6 +113,7 @@ struct ToolpathExportSnapshot
     QString machineConfigurationFingerprint;
     QString solverId;
     int solverVersion{0};
+    CollisionSafetyExecutionSnapshot collisionSafety;
     /// Derived only: never persisted in a .lcnc package.  A stale/failed plan
     /// is deliberately exported so Process can reject unsafe execution.
     TravelPlanSnapshot travelPlan;
@@ -102,6 +123,18 @@ struct ToolpathExportSnapshot
 
     bool hasEnabledContours() const;
     int totalPointCount() const;
+
+    /// Refreshes collision-runtime state after asynchronous CAM verification
+    /// without replacing the already committed solved coordinates and nodes.
+    /// The adapter uses this when contour order and geometry revision are
+    /// unchanged but Job Overlay readiness and edge certificates have advanced.
+    void mergeCollisionProofFrom(const ToolpathExportSnapshot& verified)
+    {
+        collisionSafety = verified.collisionSafety;
+        travelPlan = verified.travelPlan;
+        motionPlan.collision = verified.motionPlan.collision;
+        motionPlan.edgeCertificates = verified.motionPlan.edgeCertificates;
+    }
 };
 
 } // namespace lcnc::cam

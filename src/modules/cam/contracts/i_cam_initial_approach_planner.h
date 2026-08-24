@@ -27,7 +27,6 @@ struct InitialApproachRequest
     InitialApproachPlanningMode planningMode{InitialApproachPlanningMode::Automatic};
     /// Signed absolute controller coordinate. Axis direction is comparison-only.
     double safetyAxisZ{0.0};
-    bool collisionCheckEnabled{false};
 };
 
 struct InitialApproachSnapshot
@@ -37,12 +36,34 @@ struct InitialApproachSnapshot
     QString machineConfigurationFingerprint;
     RapidTransition transition;
     CollisionValidationSnapshot collision;
+    /// One immutable continuous certificate per initial-approach segment.
+    /// Process must reject the plan if this vector is incomplete or any edge
+    /// is not execution eligible.
+    QVector<CamMotionEdgeCertificate> edgeCertificates;
     QString failureReason;
 
     bool isExecutable(bool blockWarning = true) const
     {
-        return failureReason.isEmpty() && transition.isValid()
-            && !collision.blocksExecution(blockWarning);
+        if (!failureReason.isEmpty() || !transition.isValid() || !collision.complete
+            || collision.blocksExecution(blockWarning)
+            || edgeCertificates.size() != transition.segments.size()) {
+            return false;
+        }
+        for (int edge = 0; edge < edgeCertificates.size(); ++edge) {
+            const auto& certificate = edgeCertificates.at(edge);
+            if (!certificate.executionEligible()
+                || certificate.firstNode != edge
+                || certificate.lastNode != edge + 1
+                || certificate.phase != CamMotionPhase::Rapid
+                || (edge > 0
+                    && (certificate.packageKeySha256
+                            != edgeCertificates.constFirst().packageKeySha256
+                        || certificate.environmentRevision
+                            != edgeCertificates.constFirst().environmentRevision))) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 

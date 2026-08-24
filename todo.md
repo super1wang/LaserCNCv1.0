@@ -1,19 +1,22 @@
 # LaserCNC 待办
 
-更新日期：2026-08-21
+更新日期：2026-08-24
 
 来源：[AUDIT.md](AUDIT.md)
 
-本文件只维护本次审计整改后仍未完成的工作。P0-1～P0-3、已收口的 P1/P2 项及其验证记录见 [v1.5.9 交付记录](docs/versions/v1.5.9-2026-08-21.md)。
+本文件只维护本次审计整改后仍未完成的工作。P0-1～P0-3 的历史整改见 [v1.5.9 交付记录](docs/versions/v1.5.9-2026-08-21.md)，当前连续碰撞闭环见 [v1.6.0 交付记录](docs/versions/v1.6.0-2026-08-24.md)。
 
 ## 下一版本 P0：完整机台碰撞闭环
 
-- [ ] 完成连续扫掠或可证明保守的自适应细分，覆盖首段、轮廓内、轮廓间和回退路径。
-- [ ] 引入可执行边证书，保证 CAM 验证路点、阶段和 AC/BC 插补顺序与 Process 实际消费完全一致。
-- [ ] 完成碰撞后重规划、关键碰撞对解释、缓存失效和完整机台性能门限。
-- [ ] 使用真实 `model/` STEP 建立 C0～C3、首段重规划和连续段回归；详细计划见 [docs/collision_detection_todo.md](docs/collision_detection_todo.md)。
+- [x] 使用 `.lmsi` supercover 与 Coal 保守自适应细分覆盖 Rapid、LeadIn、Cutting、Traverse 全部运动边。
+- [x] 引入可执行边证书和固定/连续点动许可证，CAM 绑定路点、阶段、包键和环境代际，Process 只消费完整证书。
+- [x] 完成机台包/Job Overlay 缓存失效、构建中失败关闭、真实机台性能门限和热区反馈续建。
+- [x] 使用 `精简ac转台.stp` 与 `半球.stp` 建立安全包、连续证书、Coal 回退和 Process 契约回归；详细状态见 [docs/collision_detection_todo.md](docs/collision_detection_todo.md)。
+- [x] 完成工作区审查补强：构建中保持全局碰撞意图并失败关闭；混合实体/开放面使用独立封闭实体包含 BVH；同步多轴拒绝混用绝对/相对模式。
+- [ ] 增加碰撞后自动绕障/重规划和关键 Coal 碰撞对解释；当前系统会安全阻断，不会自动改写 CAM 权威路径。
+- [ ] 完成夹具正式数据契约、扩大 exact 反向审计，并完成 GUI/SDK/无激光低速实体机验收。
 
-在以上门禁完成前，真实加工继续对 Pending、Indeterminate、Collision、过期或 `complete=false` 快照失败关闭，不得把离散点验证表述为连续路径安全证明。
+软件连续证书链已经成立，但在夹具、扩大审计和实体机门禁完成前，不得声明整机生产安全。真实加工继续对 Pending、Indeterminate、Collision、BoundaryUnknown、过期或 `complete=false` 快照失败关闭。
 
 ## P1：后续结构优化
 

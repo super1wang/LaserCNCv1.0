@@ -830,16 +830,16 @@ void DialogOptions::buildMachineConfigurationPage()
     form->addRow(tr("Tool path algorithm"), m_lblMachineAlgorithm);
     root->addWidget(group);
 
-    // 中文翻译：切割嘴碰撞代理
-    auto* nozzleGroup = new QGroupBox(tr("Cutting nozzle collision proxy"), page);
+    // 中文翻译：切割嘴示意显示
+    auto* nozzleGroup = new QGroupBox(tr("Cutting nozzle display"), page);
     auto* nozzleForm = new QFormLayout(nozzleGroup);
     m_cbCutterCollisionProxyMode = new QComboBox(nozzleGroup);
     // 中文翻译：模拟锥头
     m_cbCutterCollisionProxyMode->addItem(tr("Simulated cone"), 0);
     // 中文翻译：刀嘴模型文件
     m_cbCutterCollisionProxyMode->addItem(tr("Nozzle model file"), 1);
-    // 中文翻译：代理类型
-    nozzleForm->addRow(tr("Proxy type"), m_cbCutterCollisionProxyMode);
+    // 中文翻译：显示类型
+    nozzleForm->addRow(tr("Display type"), m_cbCutterCollisionProxyMode);
 
     auto* nozzlePathRow = new QWidget(nozzleGroup);
     auto* nozzlePathLayout = new QHBoxLayout(nozzlePathRow);
@@ -977,7 +977,7 @@ void DialogOptions::buildMachineConfigurationPage()
                     tr("Select machine model file"),
                     dir,
                     // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;所有文件 (*)
-                    tr("3D model files (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;All files (*)"));
+                    tr("Machine safety packages (*.lmsp);;3D model files (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;All files (*)"));
                 if (!path.isEmpty() && m_editMachineModelPath)
                     m_editMachineModelPath->setText(QFileInfo(path).absoluteFilePath());
             });
@@ -1000,8 +1000,8 @@ void DialogOptions::buildMachineConfigurationPage()
                     ? QString() : QFileInfo(currentPath).absolutePath();
                 const QString path = QFileDialog::getOpenFileName(
                     this,
-                    // 中文翻译：选择切割嘴碰撞模型
-                    tr("Select cutting nozzle collision model"), dir,
+                    // 中文翻译：选择切割嘴显示模型
+                    tr("Select cutting nozzle display model"), dir,
                     // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;所有文件 (*)
                     tr("3D model files (*.stp *.step *.stl *.brep);;All files (*)"));
                 if (!path.isEmpty() && m_editCutterNozzleModelPath)
@@ -1558,14 +1558,16 @@ bool DialogOptions::applyChanges()
         || m_originalRecentLimit != newRecentLimit;
     const bool machineModelPathDirty = m_originalMachineModelPath != newMachineModelPath;
     const bool autoLoadMachineDirty = m_originalAutoLoadMachineModel != newAutoLoadMachineModel;
-    const bool cutterCollisionDirty =
+    const bool cutterDisplayDirty =
         m_originalCutterCollisionProxyMode != newCutterCollisionProxyMode
         || m_originalCutterNozzleModelPath != newCutterNozzleModelPath
         || m_originalSimulatedConeLength != newSimulatedConeLength
         || m_originalSimulatedConeTipRadius != newSimulatedConeTipRadius
-        || m_originalSimulatedConeBaseRadius != newSimulatedConeBaseRadius
-        || m_originalCutterCollisionClearance != newCutterCollisionClearance
+        || m_originalSimulatedConeBaseRadius != newSimulatedConeBaseRadius;
+    const bool collisionSafetyDirty =
+        m_originalCutterCollisionClearance != newCutterCollisionClearance
         || m_originalMaximumRapidSafetyOffset != newMaximumRapidSafetyOffset;
+    const bool cutterCollisionDirty = cutterDisplayDirty || collisionSafetyDirty;
     const bool machineDirty = m_machineConfig
         && (m_originalMachinePreset != newMachinePreset
             || !sameMachineAxisDefinitions(m_originalMachineConfigs, newMachineAxes)
@@ -1580,9 +1582,9 @@ bool DialogOptions::applyChanges()
     if (newCutterCollisionProxyMode == 1
         && (!QFileInfo::exists(newCutterNozzleModelPath)
             || !QFileInfo(newCutterNozzleModelPath).isFile())) {
-        // 中文翻译：请选择有效的切割嘴碰撞模型文件。
+        // 中文翻译：请选择有效的切割嘴显示模型文件。
         QMessageBox::warning(this, tr("Application Options"),
-            tr("Select a valid cutting nozzle collision model file."));
+            tr("Select a valid cutting nozzle display model file."));
         return false;
     }
 
@@ -1709,11 +1711,12 @@ bool DialogOptions::applyChanges()
             cam->config().setSimulatedConeBaseRadiusMm(newSimulatedConeBaseRadius);
             cam->config().setCutterCollisionClearanceMm(newCutterCollisionClearance);
             cam->config().setMaximumRapidSafetyOffsetMm(newMaximumRapidSafetyOffset);
-            if (!cam->refreshCutterCollisionConfiguration()) {
-                // Restore the last usable collision proxy configuration.  A
+            if (cutterDisplayDirty
+                && !cam->refreshCutterCollisionConfiguration()) {
+                // Restore the last usable display proxy configuration.  A
                 // file that merely exists may still contain invalid STEP/STL
                 // data; Apply must not persist a proxy that planning cannot load.
-                // 中文翻译：模型文件即使存在也可能无法解析；应用失败时恢复上一份可用碰撞代理配置。
+                // 中文翻译：模型文件即使存在也可能无法解析；应用失败时恢复上一份可用显示代理配置。
                 cam->config().setCutterCollisionProxyMode(
                     m_originalCutterCollisionProxyMode == 1
                         ? CutterCollisionProxyMode::ModelFile
@@ -1727,6 +1730,8 @@ bool DialogOptions::applyChanges()
                 cam->refreshCutterCollisionConfiguration();
                 return false;
             }
+            if (collisionSafetyDirty)
+                cam->refreshCollisionSafetyPolicy();
         }
         m_originalMachineModelPath = cam->machineModelPath();
         m_originalAutoLoadMachineModel = cam->config().autoLoadMachineModel();

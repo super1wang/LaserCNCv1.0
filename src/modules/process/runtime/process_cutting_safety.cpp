@@ -30,12 +30,28 @@ DeviceCommandResult evaluateContourBoundaryHealth(const ContourBoundaryHealth& h
     return {};
 }
 
-QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapshot)
+QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapshot,
+                                bool realMachineExecution)
 {
     const auto cuttingTr = [](const char* source) {
         return QCoreApplication::translate("lcnc::process::NormalCuttingManager", source);
     };
     const auto& collision = snapshot.motionPlan.collision;
+    const auto& safety = snapshot.collisionSafety;
+    if (realMachineExecution && safety.enabled && safety.machinePackageRequired
+        && (!safety.machinePackageReady || safety.packageBuildInProgress)) {
+        if (!safety.failureReason.isEmpty())
+            return safety.failureReason;
+        // 中文翻译：机台安全包尚未就绪或正在构建；真实机台运动已失败关闭
+        return cuttingTr("The machine safety package is not ready or is being built; real-machine motion is fail-closed");
+    }
+    if (realMachineExecution && safety.enabled && safety.jobOverlayRequired
+        && (!safety.jobOverlayReady || safety.jobOverlayBuildInProgress)) {
+        if (!safety.jobOverlayFailureReason.isEmpty())
+            return safety.jobOverlayFailureReason;
+        // 中文翻译：工件碰撞叠加缓存尚未就绪或正在构建；真实机台运动已失败关闭
+        return cuttingTr("The workpiece collision overlay is not ready or is being built; real-machine motion is fail-closed");
+    }
     if (!collision.complete
         || collision.state == lcnc::cam::CollisionValidationState::Pending) {
         // 中文翻译：CAM 全路径碰撞校验尚未完成
@@ -52,6 +68,21 @@ QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapsho
         return snapshot.travelPlan.failureReason.isEmpty()
             ? cuttingTr("The rapid travel plan is missing or out of date")
             : snapshot.travelPlan.failureReason;
+    }
+    if (realMachineExecution && safety.enabled && snapshot.motionPlan.nodes.size() > 1) {
+        const int expectedEdges = snapshot.motionPlan.nodes.size() - 1;
+        if (snapshot.motionPlan.edgeCertificates.size() != expectedEdges) {
+            // 中文翻译：CAM 连续运动证书缺失或数量不完整；真实机台运动已失败关闭
+            return cuttingTr("CAM continuous-motion certificates are missing or incomplete; real-machine motion is fail-closed");
+        }
+        for (const auto& certificate : snapshot.motionPlan.edgeCertificates) {
+            if (!certificate.executionEligible()) {
+                if (!certificate.reason.isEmpty())
+                    return certificate.reason;
+                // 中文翻译：CAM 连续运动证书未确认整段路径安全
+                return cuttingTr("A CAM continuous-motion certificate did not confirm the complete edge as safe");
+            }
+        }
     }
     return {};
 }

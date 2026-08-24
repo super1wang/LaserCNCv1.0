@@ -32,6 +32,7 @@
 #include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/collision_scan_policy.h"
 #include "core/algorithms/cam/collision_safety_domain.h"
+#include "core/algorithms/cam/machine_safety_fingerprint.h"
 #include "core/algorithms/cam/initial_approach_axis_planner.h"
 #include "core/algorithms/cam/surface_collision_prefilter.h"
 #include "core/algorithms/occt_exact_operation_lock.h"
@@ -52,7 +53,6 @@
 #include <QElapsedTimer>
 #include <QCoreApplication>
 #include <QDateTime>
-#include <QFile>
 #include <QFileInfo>
 #include <QMutex>
 #include <QMutexLocker>
@@ -80,7 +80,6 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
-#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepTools.hxx>
 #include <STEPControl_Reader.hxx>
 #include <StlAPI_Reader.hxx>
@@ -339,16 +338,108 @@ std::uint64_t CamModule::machineSetupRevision() const
     return hash;
 }
 
+std::uint64_t CamModule::collisionEnvironmentRevision() const
+{
+    const LcncDocument* machine = machineDocument();
+    const bool hasMachineGeometry = machine
+        && machine->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0
+        && !m_loadedMachineModelPath.trimmed().isEmpty();
+    std::uint64_t revision = machineSetupRevision()
+        ^ static_cast<std::uint64_t>(qHash(activeMachineProfilePath()))
+        ^ static_cast<std::uint64_t>(hasMachineGeometry ? 1u : 0u)
+        ^ static_cast<std::uint64_t>(qHash(
+            m_machineConfig ? m_machineConfig->configurationFingerprint()
+                            : QString{}));
+    // Clearance affects the conservative mesh/field error budget. Motion
+    // limits and enablement are query inputs, not geometry-cache identity.
+    const QString fieldPolicy = QStringLiteral("workpiece-field-v2|%1")
+        .arg(m_config.cutterCollisionClearanceMm(), 0, 'g', 15);
+    revision ^= static_cast<std::uint64_t>(qHash(fieldPolicy));
+    return revision;
+}
+
+QByteArray CamModule::machineSafetyConfigurationFingerprint() const
+{
+    const MachineKinematics* machine = kinematics();
+    if (!machine)
+        return {};
+    QList<lcnc::cam_algo::MachineSafetyRuntimeAxis> axes;
+    axes.reserve(machine->axes().size());
+    for (const MachineAxisDef& axis : machine->axes()) {
+        lcnc::cam_algo::MachineSafetyRuntimeAxis runtimeAxis;
+        runtimeAxis.name = axis.name;
+        runtimeAxis.motionType = static_cast<std::uint8_t>(axis.motionType);
+        runtimeAxis.direction = {axis.direction.X(), axis.direction.Y(), axis.direction.Z()};
+        runtimeAxis.origin = {axis.origin.X(), axis.origin.Y(), axis.origin.Z()};
+        runtimeAxis.minimum = axis.minVal;
+        runtimeAxis.maximum = axis.maxVal;
+        runtimeAxis.parentAxis = axis.parentAxis;
+        axes.append(runtimeAxis);
+    }
+
+    // The package model hash already binds the exact STEP bytes and therefore
+    // its part order. XCAF entries are transient document ids: clear/reload
+    // allocates different ids even for the same model, so they must never enter
+    // a persistent fingerprint. Keep the assignment check by recording the axis
+    // of every machine part in deterministic STEP/import order.
+    // 中文翻译：包内模型哈希已绑定 STEP 零件顺序；XCAF 条目号是重载后会变化的文档内部 ID。
+    QStringList partAxisSequence;
+    if (const LcncDocument* document = machineDocument()) {
+        const TDF_LabelSequence labels = document->entityLabels(
+            LcncDocument::EntityKind::Machine);
+        partAxisSequence.reserve(labels.Length());
+        for (int index = 1; index <= labels.Length(); ++index) {
+            partAxisSequence.append(
+                machine->axisForShape(XcafUtils::entry(labels.Value(index))));
+        }
+    }
+    return lcnc::cam_algo::machineSafetyRuntimeFingerprint(
+        machine->configType(), axes, partAxisSequence,
+        lcnc::MachineSafetyPackageManifest::kCurrentFormatVersion);
+}
+
 void CamModule::invalidateMachineEnvironment()
 {
     ++m_machineGeometryRevision;
     m_travelPlanCache.stale = true;
-    m_travelCollisionGeometryCache.reset();
+    m_jobSafetyOverlayManager.invalidate(
+        tr("Machine or workpiece collision geometry changed"));
     if (m_collisionDomainPreparationTask != kInvalidTaskId) {
         if (auto* tasks = lcnc::Kernel::current().taskManager())
             tasks->requestAbort(m_collisionDomainPreparationTask);
         m_collisionDomainPreparationTask = kInvalidTaskId;
     }
+}
+
+void CamModule::invalidateMachineSafetyPackage()
+{
+    const auto before = m_machineSafetyPackageManager.status();
+    m_machineSafetyPackageManager.invalidate(
+        tr("Machine geometry or safety configuration changed"));
+    const auto after = m_machineSafetyPackageManager.status();
+    // A stale machine package cannot remain an implicitly requested collision
+    // mode.  Disabling the switch preserves the explicitly supported
+    // non-collision machining workflow until a new package is loaded and the
+    // operator opts in again.
+    // 中文翻译：机台安全包失效后自动关闭碰撞检测；普通加工流程仍可继续，重新加载有效包后需显式启用。
+    setCollisionDetectionEnabled(false);
+    if (before.state != after.state || before.packageKeySha256 != after.packageKeySha256)
+        emit machineSafetyPackageChanged();
+}
+
+bool CamModule::hasValidMachineSafetyPackage() const
+{
+    return m_machineSafetyPackageManager.status().executionEligible();
+}
+
+QString CamModule::loadedMachineSafetyPackagePath() const
+{
+    return m_machineSafetyPackageManager.status().packagePath;
+}
+
+lcnc::cam::MachineSafetyPackageStatus CamModule::machineSafetyPackageStatus() const
+{
+    return m_machineSafetyPackageManager.status();
 }
 
 QString CamModule::activeMachineProfilePath() const
@@ -1480,7 +1571,10 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             m_useFaceClassification = effectiveUseFaceClassification;
             m_deflection = deflection;
             m_workpieceShape = collectWorkpieceShape();
-            m_travelCollisionGeometryCache.reset();
+            // Toolpath regeneration does not mutate the workpiece or the
+            // collision-mesh policy. Reuse the expensive Job Overlay; actual
+            // workpiece/configuration changes invalidate it at their source.
+            // 中文翻译：重新生成刀路不会改变工件或碰撞网格策略，继续复用昂贵的工件安全缓存。
             if (!reuseCurrentFaces) {
                 // Capture the exact automatic face group.  It is project data,
                 // not a renderer-only side effect: later manual stages continue

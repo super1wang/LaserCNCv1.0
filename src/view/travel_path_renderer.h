@@ -16,6 +16,7 @@
 #include <AIS_Shape.hxx>
 
 #include <cstdint>
+#include <array>
 
 class GuiDocument;
 class MachineKinematics;
@@ -36,12 +37,15 @@ public:
             /// first waypoint has no incoming segment and keeps the default.
             lcnc::cam::RapidSegmentPhase incomingPhase{
                 lcnc::cam::RapidSegmentPhase::Traverse};
+            lcnc::cam::CollisionValidationState collisionState{
+                lcnc::cam::CollisionValidationState::Pending};
         };
         std::uint64_t contourId{0};
         QString workpieceEntry;
         double sx{0.0}, sy{0.0}, sz{0.0};
         double ex{0.0}, ey{0.0}, ez{0.0};
-        bool verified{true};
+        lcnc::cam::CollisionValidationState collisionState{
+            lcnc::cam::CollisionValidationState::Pending};
         /// When provided, render the collision-verified rapid polyline rather
         /// than the historical straight endpoint connection. Coordinates are
         /// workpiece-local and follow workpieceEntry during transform refresh.
@@ -68,7 +72,7 @@ public:
 
 private:
     bool                m_visible{false};
-    Handle(AIS_Shape)   m_ais;
+    std::array<Handle(AIS_Shape), 4> m_aisByState;
     QString             m_workpieceEntry;
 };
 

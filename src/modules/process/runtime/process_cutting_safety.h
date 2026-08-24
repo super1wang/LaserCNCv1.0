@@ -19,6 +19,7 @@ DeviceCommandResult evaluateContourBoundaryHealth(const ContourBoundaryHealth& h
 
 /// Returns an operator-facing reason when the immutable CAM execution
 /// snapshot is not safe to execute. Applies to single- and multi-contour jobs.
-QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapshot);
+QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapshot,
+                                bool realMachineExecution = false);
 
 } // namespace lcnc::process

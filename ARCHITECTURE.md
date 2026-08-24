@@ -1,6 +1,6 @@
 # LaserCNC 架构说明
 
-本文描述截至 2026-08-21、本次审计整改工作区的实际架构。源码和 `CMakeLists.txt` 是实现事实；本文是架构事实源；尚未收口的偏差记录在 [AUDIT.md](AUDIT.md) 与 [todo.md](todo.md)。历史版本文档不得覆盖当前事实。
+本文描述截至 2026-08-24、本次审计整改工作区的实际架构。源码和 `CMakeLists.txt` 是实现事实；本文是架构事实源；尚未收口的偏差记录在 [AUDIT.md](AUDIT.md) 与 [todo.md](todo.md)。历史版本文档不得覆盖当前事实。
 
 ## 1. 系统边界
 
@@ -112,7 +112,7 @@ CAM 的权威契约：
 
 刀路生成遵循“GUI 快照 → 后台 OCC/IK → revision 校验 → 原子提交”。有序求解在副本上完成，全量成功后才替换已提交坐标。切割偏置、空程偏置和工具高度只在 CAM 应用一次；Process 与 Simulation 不得重排、重求或再次叠加。
 
-碰撞以私有几何、AABB/OBB、表面网格/BVH 和受全局 `OcctExactOperationLock` 保护的精确距离组成。Pending、Indeterminate、环境过期或 `complete=false` 必须阻断真实加工。当前仍是离散节点/稀疏证书体系，连续段保守扫掠、碰撞后重规划和完整 C1-C3 安全域见专项计划。
+碰撞生产链为“离线固定 `.lmsp/.lmsi` 机台域（完整切割头属于 Z 轴实体） AND 工件局部 Job Overlay → Surface-BVH/Coal 极窄残差 → 连续运动边证书”。模拟锥头/喷嘴代理只用于显示，工件是唯一运行时几何变量；有效包与工件同时存在后即后台准备 Overlay。Rapid、LeadIn、Cutting 和 Traverse 每条边都必须有与包键、环境代际和端点绑定的证书；Process 不做 OCC 或在线几何，只校验证书和固定/连续点动许可证。生产连续证书的 OCCT exact 预算为 0，exact 仅由 CAM 保留作离线 CertifiedSafe 反向审计。Pending、Indeterminate、BoundaryUnknown、环境过期、证书缺失或 `complete=false` 必须阻断真实加工。碰撞后自动绕障/重规划仍见专项计划。
 
 `MachiningFacePipelineService` 独占 entry 写入，只向调用方发布 const 视图和 revision；`CamModule` 不再长期持有可变容器引用。`CamDisplayProjectionService` 记录 AIS owning context；双工作区反复投影仍是后续回归项。
 
@@ -142,6 +142,7 @@ Process 的安全边界：
 - 设备关闭先关闭激光/红光/吹气等输出，再停止运动并断开。
 - GUI 不得同步等待普通设备命令；供应商对象不得跨 worker 边界泄漏。
 - 机台指纹不匹配、CAM 快照不完整、碰撞 Pending/Collision/Indeterminate 都必须阻止真实加工。
+- 固定运动必须持有未过期的端点许可证；连续点动按 100 ms 续签 300 ms 视界，续签失败立即排队停止。
 
 ## 9. 工程包和迁移
 
@@ -163,15 +164,15 @@ v1/v2/v3 不由桌面应用或普通库路径兼容。`src/tools/lcnc_project_up
 
 唯一构建约定见 [BUILD.md](BUILD.md)。`build-cmake/` 与 `build-vs/` 不能共享生成树或并发构建；运行输出按生成器/变体隔离。
 
-版本由 CMake `project(... VERSION 1.5.9)` 单点定义并生成 `LCNC_VERSION_STRING`；`QApplication`、模块信息和工程包 fallback 使用同一值。版本交付文档必须与该值一致。
+版本由 CMake `project(... VERSION 1.6.0)` 单点定义并生成 `LCNC_VERSION_STRING`；`QApplication`、模块信息和工程包 fallback 使用同一值。版本交付文档必须与该值一致。
 
 `scripts/check_architecture.ps1` 拒绝 core/view 反向依赖、pure algorithm 污染、Process OCC include、淘汰 API、settings singleton、runtime 外原始设备访问、Process/Simulation 具体跨模块头、旧 CAD 活动文档导入入口、重复 settings 目录、设备公共头命名空间污染、`M_PI` 和孤儿 `.cpp`。运行时 deadline、catch 日志、格式风格和新 `tr()` catalog 仍需测试或后续门禁补充。
 
-2026-08-21 整改验证：日常 ACS+GTN Debug 与 real-laser Debug 构建通过，完整 CTest 39/39 通过；新增协议、等待、服务生命周期和真实 STEP detached 导入测试。构建/CTest/SimulatorCMHP 不是 GUI、长稳或实体机证据。
+2026-08-24 碰撞闭环验证：日常 ACS+GTN Debug 构建通过，完整 CTest 41/41 通过；真实 AC 转台生产档约 108 秒生成，索引 21.94 MB、包 11.45 MB，32/32 CertifiedSafe 抽样无假安全；真实半球第六轮 4,255 条连续边全部生成安全证书且几何回退为 0，Process 查询 P99 0.2 us。索引 schema 5 将全表面距离 BVH 与封闭实体包含 BVH 分离并一同持久化，旧持久网格要求重建。构建/CTest/benchmark/SimulatorCMHP 不是 GUI、长稳或实体机证据。
 
 ## 11. 后续架构顺序
 
-1. 下一版本优先完成连续碰撞证书、保守扫掠/细分、重规划和真实机台性能门限。
+1. 在现有连续碰撞证书基线上补碰撞后自动绕障/重规划、正式夹具 Overlay、扩大 exact 审计和实体机性能门限。
 2. 为不可中断的外部 SDK 调用补厂商硬超时或进程外看门狗，并完成真实设备低速验证。
 3. 继续把 `MainWindow` UI 接线、`ProcessModule` 编排、CAM 大状态面和超大适配器下沉为窄 controller/service。
 4. 扩展双工作区、长稳、GUI 和物理机证据，同时保持自动化、SDK 仿真和实体机结论相互独立。

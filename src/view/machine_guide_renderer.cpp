@@ -35,9 +35,9 @@ void MachineGuideRenderer::setCutterHeadAppearance(const CutterHeadAppearance& a
     m_cutterHeadAppearance = appearance;
 }
 
-void MachineGuideRenderer::setCutterCollisionProxy(const TopoDS_Shape& shape)
+void MachineGuideRenderer::setCutterDisplayProxy(const TopoDS_Shape& shape)
 {
-    m_cutterCollisionProxy = shape;
+    m_cutterDisplayProxy = shape;
 }
 
 QMap<QString, Handle(AIS_Shape)>& MachineGuideRenderer::guideMap(GuiDocument* gd)
@@ -154,7 +154,7 @@ void MachineGuideRenderer::refresh(GuiDocument* gd,
     // 若直接判断 IsDone() 会永远走线框回退分支--这正是刀头锥一直显示为红色线框
     // （8 条母线 + 底圆，比完整线框更少线条）的根因。必须显式 Build()。
     coneMaker.Build();
-    TopoDS_Shape coneShape = m_cutterCollisionProxy;
+    TopoDS_Shape coneShape = m_cutterDisplayProxy;
     if (coneShape.IsNull() && coneMaker.IsDone())
         coneShape = coneMaker.Shape();
     if (!coneShape.IsNull()) {

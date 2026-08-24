@@ -1402,6 +1402,214 @@ Please complete the configuration on the Machine Configuration page of the appli
         <source>Failed to write the machine model.</source>
         <translation>写入机台模型失败。</translation>
     </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="216" />
+        <source>Unable to create the machine safety package extraction directory.</source>
+        <translation>无法创建机台安全包解压目录。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="345" />
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="362" />
+        <source>Machine safety package</source>
+        <translation>机台安全包</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="363" />
+        <source>The current machine kinematics or part assignments do not match the machine safety package. The embedded safety index is disabled.</source>
+        <translation>当前机台运动学或零件轴归属与机台安全包不一致，包内安全索引已禁用。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="359" />
+        <source>The current machine kinematics or part assignments do not match the machine safety package</source>
+        <translation>当前机台运动学或零件轴归属与机台安全包不一致</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="248" />
+        <source>Load a machine safety package before enabling collision detection.</source>
+        <translation>请先加载机台安全包，再启用碰撞检测。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="252" />
+        <source>The machine safety package is being built; collision detection cannot be enabled until it has been validated.</source>
+        <translation>机台安全包正在构建；完成并通过验证前无法启用碰撞检测。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="257" />
+        <source>The loaded machine has no valid safety package; generate or load a valid .lmsp package before enabling collision detection.</source>
+        <translation>当前机台没有有效安全包；请先生成或加载有效的 .lmsp 包，再启用碰撞检测。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="377" />
+        <source>A machine safety package is already being generated</source>
+        <translation>机台安全包正在生成中</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="383" />
+        <source>Load a machine model before generating its safety package</source>
+        <translation>请先加载机台模型，再生成安全包</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="405" />
+        <source>The machine safety package generator is unavailable: %1</source>
+        <translation>机台安全包生成工具不可用：%1</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="413" />
+        <source>The current machine safety configuration is incomplete</source>
+        <translation>当前机台安全配置不完整</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="442" />
+        <source>Generate machine safety package: %1</source>
+        <translation>生成机台安全包：%1</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="508" />
+        <source>Generate machine safety package</source>
+        <translation>生成机台安全包</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="505" />
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="510" />
+        <source>Machine safety package generation failed</source>
+        <translation>机台安全包生成失败</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="442" />
+        <source>The machine safety package blocks this pose</source>
+        <translation>机台安全包判定该姿态不可执行</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="468" />
+        <source>The machine safety package blocks this motion edge</source>
+        <translation>机台安全包判定该运动边不可执行</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="608" />
+        <source>The online collision query cannot fall back to an expensive OCCT exact calculation</source>
+        <translation>在线碰撞查询不允许回退到耗时的 OCCT 精确计算</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="743" />
+        <source>The motion permit is missing machine kinematics or APOS endpoints</source>
+        <translation>运动许可证缺少机台运动学或 APOS 端点</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="756" />
+        <source>Collision detection configuration is incomplete; the motion permit is fail-closed</source>
+        <translation>碰撞检测配置不完整，运动许可证已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="764" />
+        <source>The machine safety package is unavailable or being built; the motion permit is fail-closed</source>
+        <translation>机台安全包不可用或正在构建，运动许可证已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="1249" />
+        <source>The machine safety package is unavailable for collision validation</source>
+        <translation>碰撞校验所需的机台安全包不可用</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="773" />
+        <source>The workpiece collision overlay is unavailable or being built; the motion permit is fail-closed</source>
+        <translation>工件碰撞叠加缓存不可用或正在构建，运动许可证已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="1311" />
+        <source>Collision detection configuration is incomplete; the initial-approach validation is fail-closed</source>
+        <translation>碰撞检测配置不完整，首刀连续运动校验已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="1322" />
+        <source>The machine safety package is unavailable or being built; the initial-approach validation is fail-closed</source>
+        <translation>机台安全包不可用或正在构建，首刀连续运动校验已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="1334" />
+        <source>The workpiece collision overlay is unavailable or being built; the initial-approach validation is fail-closed</source>
+        <translation>工件碰撞叠加缓存不可用或正在构建，首刀连续运动校验已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="1343" />
+        <source>The workpiece collision overlay does not match the current toolpath environment</source>
+        <translation>工件碰撞叠加缓存与当前刀路环境版本不一致</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="1644" />
+        <source>Initial-approach continuous-motion certificates did not cover every motion edge</source>
+        <translation>首刀连续运动证书未覆盖全部运动边</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="1681" />
+        <source>Initial-approach continuous-motion validation failed closed</source>
+        <translation>首刀连续运动校验已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="801" />
+        <source>The motion permit could not establish a physical axis layout</source>
+        <translation>运动许可证无法建立物理轴布局</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="811" />
+        <source>The motion permit could not determine the mounted workpiece coordinate system</source>
+        <translation>运动许可证无法确定工件安装坐标系</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="885" />
+        <source>The motion permit did not produce exactly one continuous-motion certificate</source>
+        <translation>运动许可证未生成唯一的连续运动证书</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="1177" />
+        <source>Job collision overlay preparation failed or was cancelled</source>
+        <translation>工件碰撞叠加缓存准备失败或已取消</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="2153" />
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="2160" />
+        <source>Full-path collision validation was cancelled or failed</source>
+        <translation>全路径碰撞校验失败或已取消</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="926" />
+        <source>The immutable machine package has incomplete axis assignments or the current workpiece is unavailable.</source>
+        <translation>不可变机台安全包的轴归属不完整，或当前工件不可用。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="2210" />
+        <source>Cutting nozzle display proxy</source>
+        <translation>切割嘴显示代理</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="2235" />
+        <source>Workpiece collision-field policy changed</source>
+        <translation>工件碰撞场策略已变更</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="205" />
+        <source>Workpiece setup translation changed</source>
+        <translation>工件装夹平移已变更</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="347" />
+        <source>The machine safety package is incomplete and collision detection remains disabled.</source>
+        <translation>机台安全包不完整，碰撞检测保持禁用。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/pipeline/cam_module_pipeline.cpp" line="406" />
+        <source>Machine or workpiece collision geometry changed</source>
+        <translation>机台或工件碰撞几何已变更</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/pipeline/cam_module_pipeline.cpp" line="418" />
+        <source>Machine geometry or safety configuration changed</source>
+        <translation>机台几何或安全配置已变更</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/toolpath/cam_module_toolpath.cpp" line="1162" />
+        <source>Collision detection is enabled but the immutable machine/workpiece safety environment is incomplete</source>
+        <translation>碰撞检测已启用，但不可变机台/工件安全环境不完整</translation>
+    </message>
 </context>
 <context>
     <name>CmdValidateCamCollisions</name>
@@ -1908,6 +2116,11 @@ continue?</source>
         <location filename="../src/modules/cam/commands/commands_machine.cpp" line="77"/>
         <source>3D model files (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep)</source>
         <translation>3D 模型文件 (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep)</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/commands/machine/machine_commands.cpp" line="77" />
+        <source>Machine safety packages (*.lmsp);;3D model files (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep)</source>
+        <translation>机台安全包 (*.lmsp);;3D 模型文件 (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep)</translation>
     </message>
 </context>
 <context>
@@ -3762,6 +3975,31 @@ continue?</source>
         <source>The language change will take effect after restarting the application.</source>
         <translation>语言修改将在重启应用程序后生效。</translation>
     </message>
+    <message>
+        <location filename="../src/app/dialog/dialog_options.cpp" line="834" />
+        <source>Cutting nozzle display</source>
+        <translation>切割嘴示意显示</translation>
+    </message>
+    <message>
+        <location filename="../src/app/dialog/dialog_options.cpp" line="842" />
+        <source>Display type</source>
+        <translation>显示类型</translation>
+    </message>
+    <message>
+        <location filename="../src/app/dialog/dialog_options.cpp" line="1004" />
+        <source>Select cutting nozzle display model</source>
+        <translation>选择切割嘴显示模型</translation>
+    </message>
+    <message>
+        <location filename="../src/app/dialog/dialog_options.cpp" line="1587" />
+        <source>Select a valid cutting nozzle display model file.</source>
+        <translation>请选择有效的切割嘴显示模型文件。</translation>
+    </message>
+    <message>
+        <location filename="../src/app/dialog/dialog_options.cpp" line="980" />
+        <source>Machine safety packages (*.lmsp);;3D model files (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;All files (*)</source>
+        <translation>机台安全包 (*.lmsp);;三维模型文件 (*.stp *.step *.stl *.brep);;STEP (*.stp *.step);;STL (*.stl);;BREP (*.brep);;所有文件 (*)</translation>
+    </message>
 </context>
 <context>
     <name>DialogTaskManager</name>
@@ -4744,6 +4982,11 @@ continue?</source>
         <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="564"/>
         <source>Controller position changed while planning the initial approach</source>
         <translation>首段规划期间控制器位置发生变化</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="522"/>
+        <source>Collision safety state changed while planning the initial approach</source>
+        <translation>首刀规划期间碰撞安全状态发生变化</translation>
     </message>
     <message>
         <location filename="../src/modules/process/cutting/normal_cutting_manager.cpp" line="573"/>
@@ -5754,6 +5997,27 @@ continue?</source>
         <location filename="../src/modules/process/process_module.cpp" line="2082"/>
         <source>Locked-axis position drift occurred during processing: %1; safe shutdown was requested</source>
         <translation>加工期间锁定轴发生位置漂移：%1；已请求安全停机</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/process_module.cpp" line="1119" />
+        <location filename="../src/modules/process/process_module.cpp" line="1166" />
+        <source>The CAM collision-permit service is unavailable; real-machine motion is fail-closed</source>
+        <translation>CAM 碰撞许可证服务不可用，真实机台运动已失败关闭</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/process_module.cpp" line="1140" />
+        <source>The collision system did not issue a safe motion permit</source>
+        <translation>碰撞系统未签发安全运动许可证</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/process_module.cpp" line="1156" />
+        <source>The fixed-motion permit has no target axes</source>
+        <translation>固定运动许可证没有目标轴</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/process_module.cpp" line="1191" />
+        <source>The collision system did not issue a safe fixed-motion permit</source>
+        <translation>碰撞系统未签发安全固定运动许可证</translation>
     </message>
 </context>
 <context>
@@ -8354,6 +8618,11 @@ continue?</source>
         <translation>设备命令队列不可用</translation>
     </message>
     <message>
+        <location filename="../src/modules/process/steps/services/process_workflow_services.cpp" line="130"/>
+        <source>Synchronous multi-axis motion cannot mix absolute and relative modes</source>
+        <translation>同步多轴运动不能混用绝对与相对坐标模式</translation>
+    </message>
+    <message>
         <source>Axis %1 movement failed</source>
         <translation type="vanished">轴 %1 运动失败</translation>
     </message>
@@ -8898,6 +9167,144 @@ continue?</source>
     <message>
         <source>Full-machine collision clearance warning between %1 and %2</source>
         <translation>%1 与 %2 之间的完整机台碰撞间隙不足</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/process_module.cpp" line="309" />
+        <source>Process collision-permit owner is unavailable</source>
+        <translation>Process 碰撞许可证持有者已不可用</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="1608" />
+        <source>Continuous-motion certificate generation did not cover every motion edge</source>
+        <translation>连续运动证书未覆盖全部运动边</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="2072" />
+        <source>A continuous-motion edge endpoint has a confirmed collision</source>
+        <translation>连续运动边端点已确认发生碰撞</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="2081" />
+        <source>A continuous-motion edge endpoint is not certified safe</source>
+        <translation>连续运动边端点未被认证为安全</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/continuous_motion_certificate_builder.cpp" line="907" />
+        <source>Continuous-motion certificate generation was cancelled</source>
+        <translation>连续运动证书构建已取消</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/continuous_motion_certificate_builder.cpp" line="917" />
+        <source>A continuous-motion edge crosses different or unknown workpiece coordinate systems</source>
+        <translation>连续运动边跨越不同或未知的工件坐标系</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/continuous_motion_certificate_builder.cpp" line="956" />
+        <source>The machine safety index found a collision sample on the continuous-motion edge</source>
+        <translation>机台安全索引在连续运动边上发现碰撞样本</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/continuous_motion_certificate_builder.cpp" line="1005" />
+        <source>LMSI and the geometric fallback backends could not conservatively certify the complete continuous-motion edge</source>
+        <translation>LMSI 与几何回退后端无法保守认证完整连续运动边</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/continuous_motion_certificate_builder.cpp" line="1001" />
+        <source>Continuous-motion certification exceeded its conservative query budget</source>
+        <translation>连续运动认证已超过保守查询预算</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cutter_collision_geometry.cpp" line="53" />
+        <source>The cutting nozzle display model file does not exist</source>
+        <translation>切割嘴显示模型文件不存在</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cutter_collision_geometry.cpp" line="93" />
+        <source>Unsupported cutting nozzle display model format</source>
+        <translation>不支持的切割嘴显示模型格式</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/collision/cutter_collision_geometry.cpp" line="98" />
+        <source>The cutting nozzle display model contains no usable geometry</source>
+        <translation>切割嘴显示模型不包含可用几何</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/simulation/simulation_module.cpp" line="1024" />
+        <source>The immutable machine/workpiece safety environment is incomplete; no scan was started.</source>
+        <translation>不可变机台/工件安全环境不完整，未启动扫描。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/simulation/simulation_module.cpp" line="357" />
+        <source>Collision detection is enabled but the immutable machine/workpiece safety environment is incomplete.</source>
+        <translation>碰撞检测已启用，但不可变机台/工件安全环境不完整。</translation>
+    </message>
+    <message>
+        <source>Starting machine safety package generator</source>
+        <translation>正在启动机台安全包生成器</translation>
+    </message>
+    <message>
+        <source>Extracting existing machine safety package</source>
+        <translation>正在解压已有机台安全包</translation>
+    </message>
+    <message>
+        <source>Loading and analyzing the machine STEP model</source>
+        <translation>正在加载并分析机台 STEP 模型</translation>
+    </message>
+    <message>
+        <source>Preparing the machine safety index</source>
+        <translation>正在准备机台安全索引</translation>
+    </message>
+    <message>
+        <source>Building persistent surface BVH data</source>
+        <translation>正在构建持久化表面 BVH 数据</translation>
+    </message>
+    <message>
+        <source>Building the base machine safety grid</source>
+        <translation>正在构建机台基础安全网格</translation>
+    </message>
+    <message>
+        <source>Reusing the machine safety checkpoint</source>
+        <translation>正在复用机台安全索引断点</translation>
+    </message>
+    <message>
+        <source>Sampling exact collision candidates</source>
+        <translation>正在抽样精确碰撞候选</translation>
+    </message>
+    <message>
+        <source>Saving the machine safety checkpoint</source>
+        <translation>正在保存机台安全索引断点</translation>
+    </message>
+    <message>
+        <source>Building level-1 machine safety refinement</source>
+        <translation>正在构建一级机台安全细化</translation>
+    </message>
+    <message>
+        <source>Building hot-zone machine safety refinement</source>
+        <translation>正在构建机台安全热区细化</translation>
+    </message>
+    <message>
+        <source>Finalizing the machine safety index</source>
+        <translation>正在完成机台安全索引</translation>
+    </message>
+    <message>
+        <source>Saving the machine safety index</source>
+        <translation>正在保存机台安全索引</translation>
+    </message>
+    <message>
+        <source>Auditing CertifiedSafe poses</source>
+        <translation>正在审计 CertifiedSafe 姿态</translation>
+    </message>
+    <message>
+        <source>Packaging the machine model and safety index</source>
+        <translation>正在打包机台模型与安全索引</translation>
+    </message>
+    <message>
+        <source>Machine safety package generation completed</source>
+        <translation>机台安全包生成完成</translation>
+    </message>
+    <message>
+        <source>Building the machine safety package</source>
+        <translation>正在生成机台安全包</translation>
     </message>
 </context>
 <context>
@@ -11989,6 +12396,37 @@ No available reference surfaces are currently detected.</source>
     <message>
         <source>Process step execution failed</source>
         <translation type="vanished">流程步骤执行失败</translation>
+    </message>
+</context>
+<context>
+    <name>CmdBuildMachineSafetyPackage</name>
+    <message>
+        <location filename="../src/modules/cam/commands/machine/machine_commands.cpp" line="97" />
+        <source>Generate safety package</source>
+        <translation>生成安全包</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/commands/machine/machine_commands.cpp" line="99" />
+        <source>Generate or update the machine safety package in the offline tool and switch to the .lmsp path when complete</source>
+        <translation>使用离线工具生成或更新机台安全包，完成后自动切换到 .lmsp 路径</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/commands/machine/machine_commands.cpp" line="114" />
+        <source>Generate machine safety package</source>
+        <translation>生成机台安全包</translation>
+    </message>
+</context>
+<context>
+    <name>WidgetCollisionDetectionPanel</name>
+    <message>
+        <location filename="../src/modules/cam/ui/collision/widget_collision_detection_panel.cpp" line="115" />
+        <source>Collision detection is enabled. Machine roles are derived from the immutable package; the workpiece is the only variable.</source>
+        <translation>碰撞检测已启用。机台角色由不可变安全包确定，工件是唯一变量。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/ui/collision/widget_collision_detection_panel.cpp" line="134" />
+        <source>Collision roles are fixed by the machine assembly and workpiece mount chain.</source>
+        <translation>碰撞角色由机台装配关系和工件安装链固定确定。</translation>
     </message>
 </context>
 </TS>

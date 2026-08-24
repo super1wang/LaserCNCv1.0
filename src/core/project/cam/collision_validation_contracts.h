@@ -4,6 +4,7 @@
 
 #include <QString>
 #include <QVector>
+#include <QByteArray>
 
 #include <array>
 #include <cstdint>
@@ -28,6 +29,71 @@ enum class CamMotionPhase : std::uint8_t
     Rapid,
     LeadIn,
     Cutting
+};
+
+/// A continuous certificate applies to the complete interpolation interval
+/// between two adjacent canonical motion nodes.  It is intentionally an
+/// OCC-free value object so Process can validate the frozen CAM result without
+/// invoking geometry code online.
+enum class CamMotionCertificateState : std::uint8_t
+{
+    Invalid = 0,
+    Disabled,
+    CertifiedSafe,
+    Blocked,
+    BoundaryUnknown
+};
+
+inline CollisionValidationState collisionValidationStateForCertificate(
+    CamMotionCertificateState state)
+{
+    switch (state) {
+    case CamMotionCertificateState::Disabled:
+    case CamMotionCertificateState::CertifiedSafe:
+        return CollisionValidationState::Safe;
+    case CamMotionCertificateState::Blocked:
+        return CollisionValidationState::Collision;
+    case CamMotionCertificateState::Invalid:
+    case CamMotionCertificateState::BoundaryUnknown:
+    default:
+        return CollisionValidationState::Indeterminate;
+    }
+}
+
+struct CamMotionEdgeCertificate
+{
+    std::uint64_t edgeId{0};
+    int firstNode{-1};
+    int lastNode{-1};
+    CamMotionPhase phase{CamMotionPhase::Rapid};
+    CamMotionCertificateState state{CamMotionCertificateState::Invalid};
+    QByteArray packageKeySha256;
+    std::uint64_t environmentRevision{0};
+    std::uint64_t intervalQueries{0};
+    std::uint64_t broadPhaseRejected{0};
+    std::uint64_t localFieldQueries{0};
+    std::uint64_t localFieldRejected{0};
+    std::uint64_t surfaceBvhQueries{0};
+    std::uint64_t surfaceBvhRejected{0};
+    std::uint64_t coalPairQueries{0};
+    std::uint64_t occtExactQueries{0};
+    std::uint64_t surfaceBvhQueryNs{0};
+    std::uint64_t localFieldQueryNs{0};
+    std::uint64_t coalQueryNs{0};
+    std::uint64_t occtExactQueryNs{0};
+    std::uint64_t occtExactLockWaitNs{0};
+    std::uint64_t occtExactMaximumQueryNs{0};
+    QString occtExactSlowestPair;
+    int maximumSubdivisionDepth{0};
+    bool budgetExhausted{false};
+    QString fallbackSourcePair;
+    QString reason;
+
+    bool executionEligible() const
+    {
+        return state == CamMotionCertificateState::CertifiedSafe
+            || state == CamMotionCertificateState::Disabled;
+    }
 };
 
 enum class RapidSegmentPhase : std::uint8_t
@@ -95,6 +161,7 @@ struct CamMotionPlanSnapshot
 {
     std::uint64_t revision{0};
     QVector<CamMotionNode> nodes;
+    QVector<CamMotionEdgeCertificate> edgeCertificates;
     CollisionValidationSnapshot collision;
 };
 

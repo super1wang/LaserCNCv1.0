@@ -80,7 +80,6 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
-#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepTools.hxx>
 #include <STEPControl_Reader.hxx>
 #include <StlAPI_Reader.hxx>
@@ -206,10 +205,6 @@ bool CamModule::init(lcnc::IKernel& kernel)
             refreshCuttingOrderOverlays();
         }));
 
-    connect(this, &CamModule::cutterCollisionConfigurationChanged, this, [] {
-        lcnc::Kernel::current().events().publish(lcnc::cam::events::ExecutionPlanChanged{
-            lcnc::cam::events::ExecutionPlanChangeKind::Configuration});
-    });
     connect(this, &CamModule::contourOrderTravelPlanRebuilt, this,
             [](const QVector<std::uint64_t>&) {
                 auto& events = lcnc::Kernel::current().events();
@@ -264,7 +259,7 @@ void CamModule::stop()
         LCNC_ERR(lcnc::LogCode::Generic,
                  "CamModule::stop: machine/CAM task cancellation timed out; retaining core-owned workspace state");
     }
-    m_travelCollisionGeometryCache.reset();
+    m_jobSafetyOverlayManager.clear();
     m_initialized = false;
     LCNC_INFO(lcnc::LogCode::Generic, "CamModule stop done");
 }
@@ -301,7 +296,14 @@ CamModule::CamModule(QObject* parent)
     if (m_machineConfig) {
         connect(m_machineConfig, &lcnc::MachineConfigurationService::machineConfigurationChanged,
                 this, [this] {
+                    const QByteArray previousMachineSafetyFingerprint =
+                        machineSafetyConfigurationFingerprint();
+                    invalidateMachineEnvironment();
                     applyConfiguredMachineAxes(true);
+                    if (previousMachineSafetyFingerprint
+                        != machineSafetyConfigurationFingerprint()) {
+                        invalidateMachineSafetyPackage();
+                    }
                 });
     }
 
@@ -350,6 +352,9 @@ CamModule::CamModule(QObject* parent)
                 // is therefore deliberately left untouched.
                 // 中文翻译：切换到新工程时，按当前机床初始化其加工模式与轴布局。
                 applyConfiguredMachineAxes(false);
+                m_workpieceShape = collectWorkpieceShape();
+                invalidateMachineEnvironment();
+                scheduleWorkpieceSafetyOverlayPreparation();
                 const auto activeId = project->activeWorkspaceId();
                 m_machineModelVisible = m_machineVisibleWorkspaceIds.contains(activeId);
                 if (auto* gd = activeGuiDocument()) {
@@ -376,6 +381,10 @@ CamModule::CamModule(QObject* parent)
                     if (m_pose && m_pose->kinematics() != kinematics())
                         m_pose->setKinematics(kinematics());
                     emit machineWorkspaceChanged();
+                } else if (domain == lcnc::ProjectDomain::Workpiece) {
+                    m_workpieceShape = collectWorkpieceShape();
+                    invalidateMachineEnvironment();
+                    scheduleWorkpieceSafetyOverlayPreparation();
                 } else if (domain == lcnc::ProjectDomain::Cam
                            && !m_clearingToolpath
                            && (!m_camData || !m_camData->hasToolpath())) {

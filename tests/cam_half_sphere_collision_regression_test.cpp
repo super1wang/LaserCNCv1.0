@@ -247,11 +247,9 @@ int verifyCollisionFlow(bool fullEnvironment)
 
     lcnc::cam_algo::TravelPlanningRequest request;
     request.workpiece = workpiece;
-    request.cutterCollisionProxy = cone;
     request.minimumClearanceMm = kSafetyClearanceMm;
     request.maximumSafetyOffsetMm = 50.0;
     request.surfacePathStepMm = 1.0;
-    request.collisionSampleStepMm = 2.0;
     request.fullEnvironment = fullEnvironment;
     request.motionProfile.supportedCoordinatedMask = 0x07;
     request.motionProfile.velocity.fill(100.0);

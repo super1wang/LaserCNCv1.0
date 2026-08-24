@@ -9,7 +9,7 @@ if(_lcnc_binary_dir STREQUAL _lcnc_legacy_build_dir)
         "or vs-acs-gtn (build-vs/).")
 endif()
 
-project(LaserCNC VERSION 1.5.9 LANGUAGES CXX)
+project(LaserCNC VERSION 1.6.0 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -139,6 +139,21 @@ endif()
 # MSVC AddressSanitizer runtime through the `asan` configure preset.
 option(LCNC_ENABLE_ASAN "Enable MSVC AddressSanitizer for project code" OFF)
 option(LCNC_WARNINGS_AS_ERRORS "Treat warnings in LaserCNC-owned targets as errors" OFF)
+option(LCNC_ENABLE_FCL_COLLISION_BENCHMARK
+    "Build the opt-in FCL machine collision feasibility benchmark" OFF)
+option(LCNC_ENABLE_COAL_COLLISION_BENCHMARK
+    "Build the opt-in Coal machine collision feasibility benchmark" OFF)
+option(LCNC_WITH_COAL_COLLISION
+    "Use Coal as the production collision narrow-phase backend" OFF)
+set(LCNC_FCL_ROOT "" CACHE PATH "FCL install prefix used by the optional benchmark")
+set(LCNC_COAL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/x64/deps/install/coal-release"
+    CACHE PATH "Coal install prefix used by production collision and the optional benchmark")
+set(LCNC_COAL_DEBUG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/x64/deps/install/coal-debug"
+    CACHE PATH "Coal Debug install prefix")
+set(LCNC_COLLISION_BENCHMARK_INDEX "" CACHE FILEPATH
+    "Optional LMSI package used by the Coal combined online benchmark")
+set(LCNC_COLLISION_BENCHMARK_PACKAGE "" CACHE FILEPATH
+    "Optional LMSP package used by the production continuous-certificate gate")
 if(LCNC_ENABLE_ASAN AND NOT MSVC)
     message(FATAL_ERROR "LCNC_ENABLE_ASAN currently requires MSVC")
 endif()
@@ -240,6 +255,58 @@ set(LCNC_BOOST_ROOT "G:/environment/vcpkg-master/vcpkg/installed/x64-windows" CA
 set(LCNC_BOOST_INCLUDE_DIR "${LCNC_BOOST_ROOT}/include" CACHE PATH "Boost include directory")
 set(LCNC_BOOST_LIB_DIR_RELEASE "${LCNC_BOOST_ROOT}/lib" CACHE PATH "Boost release library directory")
 set(LCNC_BOOST_LIB_DIR_DEBUG "${LCNC_BOOST_ROOT}/debug/lib" CACHE PATH "Boost debug library directory")
+set(LCNC_EIGEN3_DIR "${LCNC_BOOST_ROOT}/share/eigen3" CACHE PATH "Eigen3 package directory used by Coal")
+
+if(LCNC_WITH_COAL_COLLISION OR LCNC_ENABLE_COAL_COLLISION_BENCHMARK)
+    if(NOT LCNC_COAL_ROOT)
+        message(FATAL_ERROR "Coal collision support requires LCNC_COAL_ROOT")
+    endif()
+    set(Eigen3_DIR "${LCNC_EIGEN3_DIR}" CACHE PATH "Eigen3 package directory" FORCE)
+    set(Boost_INCLUDE_DIR "${LCNC_BOOST_INCLUDE_DIR}" CACHE PATH "Boost include directory" FORCE)
+    set(Boost_LIBRARY_DIR_DEBUG "${LCNC_BOOST_LIB_DIR_DEBUG}" CACHE PATH "Boost debug library directory" FORCE)
+    set(Boost_LIBRARY_DIR_RELEASE "${LCNC_BOOST_LIB_DIR_RELEASE}" CACHE PATH "Boost release library directory" FORCE)
+    find_package(coal 3 CONFIG REQUIRED
+        PATHS "${LCNC_COAL_ROOT}/lib/cmake/coal"
+              "${LCNC_COAL_ROOT}/share/coal/cmake"
+        NO_DEFAULT_PATH)
+    if(EXISTS "${LCNC_COAL_DEBUG_ROOT}/lib/coal.lib"
+        AND EXISTS "${LCNC_COAL_DEBUG_ROOT}/bin/coal.dll")
+        set_property(TARGET coal::coal APPEND PROPERTY IMPORTED_CONFIGURATIONS DEBUG)
+        set_target_properties(coal::coal PROPERTIES
+            IMPORTED_IMPLIB_DEBUG "${LCNC_COAL_DEBUG_ROOT}/lib/coal.lib"
+            IMPORTED_LOCATION_DEBUG "${LCNC_COAL_DEBUG_ROOT}/bin/coal.dll")
+    endif()
+    file(GLOB _lcnc_coal_common_runtime CONFIGURE_DEPENDS
+        "${LCNC_BOOST_ROOT}/bin/boost_filesystem-*.dll"
+        "${LCNC_BOOST_ROOT}/bin/boost_serialization-*.dll")
+    file(GLOB _lcnc_coal_release_runtime CONFIGURE_DEPENDS
+        "${LCNC_BOOST_ROOT}/bin/assimp-*.dll"
+        "${LCNC_BOOST_ROOT}/bin/poly2tri.dll"
+        "${LCNC_BOOST_ROOT}/bin/minizip.dll"
+        "${LCNC_BOOST_ROOT}/bin/zlib1.dll"
+        "${LCNC_BOOST_ROOT}/bin/kubazip.dll"
+        "${LCNC_BOOST_ROOT}/bin/pugixml.dll")
+    file(GLOB _lcnc_coal_debug_runtime CONFIGURE_DEPENDS
+        "${LCNC_BOOST_ROOT}/debug/bin/assimp-*.dll"
+        "${LCNC_BOOST_ROOT}/debug/bin/poly2tri.dll"
+        "${LCNC_BOOST_ROOT}/debug/bin/minizip.dll"
+        "${LCNC_BOOST_ROOT}/debug/bin/zlibd1.dll"
+        "${LCNC_BOOST_ROOT}/debug/bin/kubazip.dll"
+        "${LCNC_BOOST_ROOT}/debug/bin/pugixml.dll")
+    if(NOT _lcnc_coal_common_runtime OR NOT _lcnc_coal_release_runtime
+        OR NOT _lcnc_coal_debug_runtime)
+        message(FATAL_ERROR "Coal runtime dependency closure is unavailable under ${LCNC_BOOST_ROOT}/bin")
+    endif()
+    set(LCNC_COAL_RUNTIME_DEPENDENCIES ${_lcnc_coal_common_runtime})
+    foreach(_lcnc_coal_dll IN LISTS _lcnc_coal_debug_runtime)
+        list(APPEND LCNC_COAL_RUNTIME_DEPENDENCIES
+            "$<$<CONFIG:Debug>:${_lcnc_coal_dll}>")
+    endforeach()
+    foreach(_lcnc_coal_dll IN LISTS _lcnc_coal_release_runtime)
+        list(APPEND LCNC_COAL_RUNTIME_DEPENDENCIES
+            "$<$<NOT:$<CONFIG:Debug>>:${_lcnc_coal_dll}>")
+    endforeach()
+endif()
 
 function(lcnc_require_existing path label)
     if(NOT EXISTS "${path}")
@@ -367,6 +434,8 @@ set(SRCS_CORE
     src/core/project/cam/layer_manager.h
     src/core/machine/machine_workspace.cpp
     src/core/machine/machine_workspace.h
+    src/core/machine/machine_safety_package.cpp
+    src/core/machine/machine_safety_package.h
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_kinematics.cpp
@@ -387,6 +456,14 @@ set(SRCS_CORE
     src/core/algorithms/cam/contour_order_planner.cpp
     src/core/algorithms/cam/travel_path_planner.cpp
     src/core/algorithms/cam/collision_safety_domain.cpp
+    src/core/algorithms/cam/collision_policy.h
+    src/core/algorithms/cam/collision_policy.cpp
+    src/core/algorithms/cam/machine_safety_fingerprint.h
+    src/core/algorithms/cam/machine_safety_fingerprint.cpp
+    src/core/algorithms/cam/machine_motion_certificate.h
+    src/core/algorithms/cam/machine_motion_certificate.cpp
+    src/core/algorithms/cam/machine_safety_index.h
+    src/core/algorithms/cam/machine_safety_index.cpp
     src/core/algorithms/cam/surface_collision_prefilter.cpp
     src/core/task/task_progress.cpp
     src/core/task/task_manager.cpp
@@ -457,7 +534,17 @@ set(SRCS_MODULE_CAM
     src/modules/cam/display/cam_display_projection_service.cpp
     src/modules/cam/integration/cam_service_adapters.cpp
     src/modules/cam/collision/collision_geometry_cache.cpp
+    src/modules/cam/collision/continuous_motion_certificate_builder.h
+    src/modules/cam/collision/continuous_motion_certificate_builder.cpp
+    src/modules/cam/collision/workpiece_clearance_field.h
+    src/modules/cam/collision/workpiece_clearance_field.cpp
+    src/modules/cam/collision/coal_collision_backend.h
+    src/modules/cam/collision/coal_collision_backend.cpp
     src/modules/cam/collision/cutter_collision_geometry.cpp
+    src/modules/cam/safety/machine_safety_package_manager.cpp
+    src/modules/cam/safety/machine_safety_package_manager.h
+    src/modules/cam/safety/job_safety_overlay_manager.cpp
+    src/modules/cam/safety/job_safety_overlay_manager.h
     src/modules/cam/toolpath/toolpath_sequence_service.cpp
     src/modules/cam/toolpath/toolpath_solve_service.cpp
     src/modules/cam/pipeline/machining_face_pipeline_service.cpp
@@ -666,6 +753,10 @@ target_link_libraries(lcnc_module_cam PRIVATE
     lcnc_module_cad
     SARibbonBar::SARibbonBar
 )
+if(LCNC_WITH_COAL_COLLISION)
+    target_link_libraries(lcnc_module_cam PRIVATE coal::coal)
+    target_compile_definitions(lcnc_module_cam PRIVATE LCNC_WITH_COAL_COLLISION=1)
+endif()
 
 # Offline simulation deliberately depends on CAM and rendering only.  Keeping
 # this target separate makes accidental Process/controller dependencies visible.
@@ -854,10 +945,26 @@ endif()
 function(lcnc_deploy_tbb_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<IF:$<CONFIG:Debug>,${LCNC_TBB_BIN_DIR}/tbb12_debug.dll,${LCNC_TBB_BIN_DIR}/tbb12.dll>"
+            "${LCNC_TBB_BIN_DIR}/tbb12_debug.dll"
             "$<TARGET_FILE_DIR:${target}>"
-        COMMENT "Copying OCCT TBB runtime for ${target}")
+        COMMENT "Copying the TBB runtime required by the bundled OCCT for ${target}")
 endfunction()
+
+function(lcnc_deploy_coal_runtime target)
+    if(LCNC_WITH_COAL_COLLISION OR LCNC_ENABLE_COAL_COLLISION_BENCHMARK)
+        target_link_libraries(${target} PRIVATE coal::coal)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${target}>
+                ${LCNC_COAL_RUNTIME_DEPENDENCIES}
+                "$<TARGET_FILE_DIR:${target}>"
+            COMMAND_EXPAND_LISTS
+            COMMENT "Copying the Coal runtime closure for ${target}")
+    endif()
+endfunction()
+if(LCNC_WITH_COAL_COLLISION)
+    lcnc_deploy_coal_runtime(LaserCNC)
+endif()
 
 function(lcnc_deploy_qt_offscreen_platform target)
     add_custom_command(TARGET ${target} POST_BUILD
@@ -941,6 +1048,19 @@ target_link_libraries(lcnc_project_upgrade PRIVATE lcnc_core Qt6::Core QuaZip::Q
 set_target_properties(lcnc_project_upgrade PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_DIRECTORY}"
 )
+
+add_executable(lcnc_machine_safety_index
+    src/tools/lcnc_machine_safety_index.cpp
+)
+target_link_libraries(lcnc_machine_safety_index PRIVATE lcnc_core Qt6::Core)
+set_target_properties(lcnc_machine_safety_index PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${LCNC_RUNTIME_OUTPUT_DIRECTORY}"
+)
+if(TARGET lcnc_runtime_deploy_app)
+    add_dependencies(lcnc_machine_safety_index lcnc_runtime_deploy_app)
+endif()
+lcnc_deploy_tbb_runtime(lcnc_machine_safety_index)
+add_dependencies(LaserCNC lcnc_machine_safety_index)
 
 if(BUILD_TESTING)
     find_program(LCNC_POWERSHELL_EXECUTABLE NAMES powershell pwsh REQUIRED)
@@ -1048,10 +1168,109 @@ if(BUILD_TESTING)
         tests/surface_collision_prefilter_test.cpp
     )
     target_link_libraries(lcnc_surface_collision_prefilter_test PRIVATE lcnc_core Qt6::Core)
+    if(LCNC_WITH_COAL_COLLISION)
+        add_executable(lcnc_coal_collision_backend_test
+            tests/coal_collision_backend_test.cpp)
+        target_link_libraries(lcnc_coal_collision_backend_test PRIVATE
+            lcnc_module_cam Qt6::Core)
+        add_executable(lcnc_production_collision_certificate_benchmark
+            tests/production_collision_certificate_benchmark.cpp)
+        target_link_libraries(lcnc_production_collision_certificate_benchmark PRIVATE
+            lcnc_module_cam Qt6::Core)
+        target_compile_definitions(
+            lcnc_production_collision_certificate_benchmark PRIVATE
+            LCNC_AC_TABLE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/精简ac转台.stp"
+            LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp")
+        if(LCNC_COLLISION_BENCHMARK_PACKAGE)
+            add_test(NAME lcnc_production_collision_certificate_benchmark
+                COMMAND lcnc_production_collision_certificate_benchmark
+                    --package "${LCNC_COLLISION_BENCHMARK_PACKAGE}")
+            set_tests_properties(
+                lcnc_production_collision_certificate_benchmark PROPERTIES
+                TIMEOUT 120 LABELS "collision;production-benchmark")
+        endif()
+    endif()
     add_executable(lcnc_collision_safety_domain_test
         tests/collision_safety_domain_test.cpp
     )
     target_link_libraries(lcnc_collision_safety_domain_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_machine_safety_index_test
+        tests/machine_safety_index_test.cpp
+    )
+    target_link_libraries(lcnc_machine_safety_index_test PRIVATE
+        lcnc_core Qt6::Core QuaZip::QuaZip)
+    add_dependencies(lcnc_machine_safety_index_test lcnc_machine_safety_index)
+    target_compile_definitions(lcnc_machine_safety_index_test PRIVATE
+        LCNC_MACHINE_SAFETY_INDEX_TOOL_PATH="$<TARGET_FILE:lcnc_machine_safety_index>"
+        LCNC_AC_TABLE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/精简ac转台.stp"
+    )
+    if(LCNC_ENABLE_FCL_COLLISION_BENCHMARK)
+        if(NOT LCNC_FCL_ROOT)
+            message(FATAL_ERROR
+                "LCNC_ENABLE_FCL_COLLISION_BENCHMARK requires LCNC_FCL_ROOT")
+        endif()
+        find_package(fcl 0.7 CONFIG REQUIRED
+            PATHS "${LCNC_FCL_ROOT}/CMake" NO_DEFAULT_PATH)
+        add_executable(lcnc_fcl_machine_collision_benchmark
+            tests/machine_collision_backend_benchmark.cpp
+        )
+        target_link_libraries(lcnc_fcl_machine_collision_benchmark PRIVATE
+            lcnc_core Qt6::Core fcl)
+        target_compile_definitions(lcnc_fcl_machine_collision_benchmark PRIVATE
+            LCNC_COLLISION_BACKEND_FCL=1
+            LCNC_AC_TABLE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/精简ac转台.stp"
+            LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
+            LCNC_UNKNOWN_AUDIT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/machine_safety_unknown_audit_64.csv"
+        )
+        add_custom_command(TARGET lcnc_fcl_machine_collision_benchmark POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:lcnc_fcl_machine_collision_benchmark>
+                $<TARGET_FILE_DIR:lcnc_fcl_machine_collision_benchmark>
+            COMMAND_EXPAND_LISTS)
+        if(TARGET lcnc_runtime_deploy_build)
+            add_dependencies(lcnc_fcl_machine_collision_benchmark
+                lcnc_runtime_deploy_build)
+        endif()
+        lcnc_deploy_tbb_runtime(lcnc_fcl_machine_collision_benchmark)
+        add_test(NAME lcnc_fcl_machine_collision_benchmark
+            COMMAND lcnc_fcl_machine_collision_benchmark)
+    endif()
+    if(LCNC_ENABLE_COAL_COLLISION_BENCHMARK)
+        if(NOT LCNC_COAL_ROOT)
+            message(FATAL_ERROR
+                "LCNC_ENABLE_COAL_COLLISION_BENCHMARK requires LCNC_COAL_ROOT")
+        endif()
+        add_executable(lcnc_coal_machine_collision_benchmark
+            tests/machine_collision_backend_benchmark.cpp
+        )
+        target_link_libraries(lcnc_coal_machine_collision_benchmark PRIVATE
+            lcnc_core Qt6::Core coal::coal)
+        target_compile_definitions(lcnc_coal_machine_collision_benchmark PRIVATE
+            LCNC_COLLISION_BACKEND_COAL=1
+            LCNC_AC_TABLE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/精简ac转台.stp"
+            LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
+            LCNC_UNKNOWN_AUDIT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/machine_safety_unknown_audit_64.csv"
+        )
+        add_custom_command(TARGET lcnc_coal_machine_collision_benchmark POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:lcnc_coal_machine_collision_benchmark>
+                $<TARGET_FILE_DIR:lcnc_coal_machine_collision_benchmark>
+            COMMAND_EXPAND_LISTS)
+        if(TARGET lcnc_runtime_deploy_build)
+            add_dependencies(lcnc_coal_machine_collision_benchmark
+                lcnc_runtime_deploy_build)
+        endif()
+        lcnc_deploy_tbb_runtime(lcnc_coal_machine_collision_benchmark)
+        lcnc_deploy_coal_runtime(lcnc_coal_machine_collision_benchmark)
+        if(LCNC_COLLISION_BENCHMARK_INDEX)
+            add_test(NAME lcnc_coal_machine_collision_benchmark
+                COMMAND lcnc_coal_machine_collision_benchmark
+                    --index "${LCNC_COLLISION_BENCHMARK_INDEX}")
+        else()
+            add_test(NAME lcnc_coal_machine_collision_benchmark
+                COMMAND lcnc_coal_machine_collision_benchmark)
+        endif()
+    endif()
     target_compile_definitions(lcnc_surface_collision_prefilter_test PRIVATE
         LCNC_HALF_SPHERE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/半球.stp"
     )
@@ -1133,6 +1352,7 @@ if(BUILD_TESTING)
         lcnc_manufacturing_flow_test
         lcnc_occt_exact_operation_lock_test
         lcnc_surface_collision_prefilter_test
+        lcnc_machine_safety_index_test
         lcnc_cam_data_manager_test
         lcnc_machine_topology_solver_test
         lcnc_toolpath_snapshot_concurrency_test
@@ -1146,11 +1366,16 @@ if(BUILD_TESTING)
             lcnc_acs_rapid_command_test
             lcnc_simulator_cmhp_sdk_integration_test)
     endif()
+    if(LCNC_WITH_COAL_COLLISION)
+        list(APPEND LCNC_TEST_EXECUTABLE_TARGETS
+            lcnc_coal_collision_backend_test)
+    endif()
     foreach(_lcnc_test_target IN LISTS LCNC_TEST_EXECUTABLE_TARGETS)
         if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
             add_dependencies(${_lcnc_test_target} lcnc_runtime_deploy_build)
         endif()
         lcnc_deploy_tbb_runtime(${_lcnc_test_target})
+        lcnc_deploy_coal_runtime(${_lcnc_test_target})
         if(LCNC_ENABLE_ASAN)
             lcnc_deploy_asan_runtime(${_lcnc_test_target})
         endif()
@@ -1221,8 +1446,16 @@ if(BUILD_TESTING)
         COMMAND lcnc_occt_exact_operation_lock_test)
     add_test(NAME lcnc_surface_collision_prefilter_test
         COMMAND lcnc_surface_collision_prefilter_test)
+    if(LCNC_WITH_COAL_COLLISION)
+        add_test(NAME lcnc_coal_collision_backend_test
+            COMMAND lcnc_coal_collision_backend_test)
+        set_tests_properties(lcnc_coal_collision_backend_test
+            PROPERTIES LABELS "critical;safety;algorithm")
+    endif()
     add_test(NAME lcnc_collision_safety_domain_test
         COMMAND lcnc_collision_safety_domain_test)
+    add_test(NAME lcnc_machine_safety_index_test
+        COMMAND lcnc_machine_safety_index_test)
     add_test(NAME lcnc_cam_motion_plan_contract_test
         COMMAND lcnc_cam_motion_plan_contract_test)
     add_test(NAME lcnc_cam_data_manager_test
@@ -1267,6 +1500,7 @@ if(BUILD_TESTING)
         lcnc_occt_exact_operation_lock_test
         lcnc_surface_collision_prefilter_test
         lcnc_collision_safety_domain_test
+        lcnc_machine_safety_index_test
         lcnc_cam_motion_plan_contract_test
         lcnc_machine_topology_solver_test
         PROPERTIES LABELS "critical;algorithm")

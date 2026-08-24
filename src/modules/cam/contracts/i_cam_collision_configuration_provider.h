@@ -12,7 +12,6 @@ namespace lcnc::cam {
 
 enum class CollisionSemanticRole : std::uint8_t
 {
-    CuttingHead,
     MovingPart,
     StaticFrame,
     Workpiece
@@ -33,12 +32,17 @@ struct CollisionConfigurationSnapshot
 {
     bool enabled{false};
     bool valid{false};
+    bool activationAvailable{false};
+    QString activationFailureReason;
     QString machineProfilePath;
     std::uint64_t revision{0};
     QVector<CollisionSourceDescriptor> sources;
     QSet<QString> activeSources;
     QSet<QString> passiveSources;
     int unassignedMachineBodyCount{0};
+    /// Source roles are derived from the immutable machine assembly and the
+    /// workpiece mount chain. They are informative, not operator-editable.
+    bool sourceSelectionMutable{false};
 };
 
 /// CAM-owned and OCC-free collision source configuration contract.
@@ -48,7 +52,8 @@ public:
     ~ICamCollisionConfigurationProvider() override = default;
 
     virtual CollisionConfigurationSnapshot collisionConfiguration() const = 0;
-    virtual void setCollisionDetectionEnabled(bool enabled) = 0;
+    virtual bool setCollisionDetectionEnabled(bool enabled,
+                                              QString* errorMessage = nullptr) = 0;
     virtual void setCollisionSources(const QSet<QString>& active,
                                      const QSet<QString>& passive) = 0;
 };

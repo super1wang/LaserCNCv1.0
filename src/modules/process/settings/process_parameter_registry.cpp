@@ -172,12 +172,7 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
               QObject::tr("Initial segment"), ParameterValueType::Double,
               ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
               QStringLiteral("fSafetyZ"), 0.0, QStringLiteral("mm"),
-              -1000000.0, 1000000.0, 3),
-        // 中文翻译：首段碰撞校验；首段。
-        field(QStringLiteral("collision"), QObject::tr("Initial segment collision validation"),
-              QObject::tr("Initial segment"), ParameterValueType::Bool,
-              ProcessConfigArea::Workflow, QStringLiteral("InitialApproach"),
-              QStringLiteral("bCollisionCheck"), false)
+              -1000000.0, 1000000.0, 3)
     };
     objects.append(initialApproach);
 

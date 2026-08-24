@@ -46,7 +46,6 @@ lcnc::cam_algo::TravelPlanningRequest baseRequest()
     lcnc::cam_algo::TravelPlanningRequest request;
     request.workpiece = BRepPrimAPI_MakeBox(
         gp_Pnt(-5.0, -5.0, -1.0), 30.0, 10.0, 1.0).Shape();
-    request.cutterCollisionProxy = BRepPrimAPI_MakeCone(0.1, 1.0, 10.0).Shape();
     request.minimumClearanceMm = 0.5;
     request.surfacePathStepMm = 1.0;
     request.motionProfile.supportedCoordinatedMask = 0x1f;
@@ -173,7 +172,6 @@ int main(int argc, char* argv[])
         const TopoDS_Shape boss = BRepPrimAPI_MakeBox(
             gp_Pnt(8.0, 2.0, 0.0), 4.0, 2.0, 6.0).Shape();
         request.workpiece = BRepAlgoAPI_Fuse(base, boss).Shape();
-        request.cutterCollisionProxy = BRepPrimAPI_MakeCone(0.2, 4.0, 15.0).Shape();
         request.maximumSafetyOffsetMm = 30.0;
         lcnc::cam_algo::TravelPlanningDiagnostics diagnostics;
         request.diagnostics = &diagnostics;
@@ -184,18 +182,8 @@ int main(int argc, char* argv[])
             || std::abs(plan.transitions.front().maximumSurfaceOffsetMm - 5.0) > 1e-9) {
             return fail(QStringLiteral("Rapid planner did not preserve the strict configured offset"));
         }
-        if (diagnostics.exactDistanceCheckCount != 0
-            || plan.transitions.front().segments.size() > 64) {
-            return fail(QStringLiteral("Collision envelope regressed to exact checks or excessive motion segments"));
-        }
-        auto narrowRequest = request;
-        narrowRequest.diagnostics = nullptr;
-        narrowRequest.cutterCollisionProxy = BRepPrimAPI_MakeCone(0.1, 0.2, 15.0).Shape();
-        const auto narrowPlan = lcnc::cam_algo::TravelPathPlanner::plan(narrowRequest);
-        if (!narrowPlan.isExecutable()
-            || std::abs(narrowPlan.transitions.front().maximumSurfaceOffsetMm
-                        - plan.transitions.front().maximumSurfaceOffsetMm) > 1e-9) {
-            return fail(QStringLiteral("Collision proxy dimensions modified strict rapid geometry"));
+        if (plan.transitions.front().segments.size() > 64) {
+            return fail(QStringLiteral("Rapid planning produced excessive motion segments"));
         }
         const auto& preview = plan.transitions.front().surfacePreviewPoints;
         if (preview.isEmpty() || std::abs(preview.front().z) > 1e-9

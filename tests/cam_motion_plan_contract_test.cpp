@@ -1,4 +1,6 @@
 #include "core/algorithms/cam/collision_scan_policy.h"
+#include "modules/cam/contracts/i_cam_initial_approach_planner.h"
+#include "modules/cam/contracts/toolpath_export_dto.h"
 
 #include <QCoreApplication>
 #include <QTextStream>
@@ -87,6 +89,18 @@ int main(int argc, char* argv[])
     validation.state = lcnc::cam::CollisionValidationState::Collision;
     if (!validation.blocksExecution(false))
         return fail(QStringLiteral("Confirmed collision must always block execution"));
+    if (lcnc::cam::collisionValidationStateForCertificate(
+            lcnc::cam::CamMotionCertificateState::CertifiedSafe)
+            != lcnc::cam::CollisionValidationState::Safe
+        || lcnc::cam::collisionValidationStateForCertificate(
+               lcnc::cam::CamMotionCertificateState::Blocked)
+            != lcnc::cam::CollisionValidationState::Collision
+        || lcnc::cam::collisionValidationStateForCertificate(
+               lcnc::cam::CamMotionCertificateState::BoundaryUnknown)
+            != lcnc::cam::CollisionValidationState::Indeterminate) {
+        return fail(QStringLiteral(
+            "Per-edge certificate state cannot be rendered independently"));
+    }
 
     lcnc::cam::CamMotionPlanSnapshot plan;
     plan.revision = 42;
@@ -102,6 +116,36 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("Motion node contract did not preserve final CAM data"));
     if (plan.nodes.constFirst().rapidPhase != lcnc::cam::RapidSegmentPhase::Retract)
         return fail(QStringLiteral("Motion node contract lost the CAM rapid segment phase"));
+
+    // Process may execute an initial approach only when CAM supplies exactly
+    // one execution-eligible continuous certificate for every rapid segment.
+    lcnc::cam::InitialApproachSnapshot initialApproach;
+    initialApproach.transition.pathKind =
+        lcnc::cam::RapidPathKind::InitialSafeZone;
+    initialApproach.transition.segments.append(lcnc::cam::RapidMoveSegment{});
+    initialApproach.collision.state = lcnc::cam::CollisionValidationState::Safe;
+    initialApproach.collision.complete = true;
+    if (initialApproach.isExecutable()) {
+        return fail(QStringLiteral(
+            "Initial approach without a continuous certificate was executable"));
+    }
+    lcnc::cam::CamMotionEdgeCertificate initialCertificate;
+    initialCertificate.firstNode = 0;
+    initialCertificate.lastNode = 1;
+    initialCertificate.phase = lcnc::cam::CamMotionPhase::Rapid;
+    initialCertificate.state =
+        lcnc::cam::CamMotionCertificateState::CertifiedSafe;
+    initialApproach.edgeCertificates.append(initialCertificate);
+    if (!initialApproach.isExecutable()) {
+        return fail(QStringLiteral(
+            "Fully certified initial approach was not executable"));
+    }
+    initialApproach.edgeCertificates.front().state =
+        lcnc::cam::CamMotionCertificateState::BoundaryUnknown;
+    if (initialApproach.isExecutable()) {
+        return fail(QStringLiteral(
+            "Boundary-unknown initial approach was executable"));
+    }
 
     lcnc::cam::CamMotionNode cutting;
     cutting.phase = lcnc::cam::CamMotionPhase::Cutting;
@@ -161,6 +205,39 @@ int main(int argc, char* argv[])
         || std::abs(offlineA->currentPos - 90.0) > 1e-9) {
         return fail(QStringLiteral(
             "Offline motion pose did not use solved and locked axis values"));
+    }
+
+    // Asynchronous collision completion must advance the immutable execution
+    // proof without replacing coordinates from the committed planned path.
+    lcnc::cam::ToolpathExportSnapshot cached;
+    cached.collisionSafety.enabled = true;
+    cached.collisionSafety.jobOverlayRequired = true;
+    cached.collisionSafety.jobOverlayBuildInProgress = true;
+    cached.motionPlan.nodes.append(cutting);
+    cached.motionPlan.nodes.front().tcpX = 123.0;
+    lcnc::cam::ToolpathExportSnapshot verified;
+    verified.collisionSafety.enabled = true;
+    verified.collisionSafety.jobOverlayRequired = true;
+    verified.collisionSafety.jobOverlayReady = true;
+    verified.travelPlan.collision.state =
+        lcnc::cam::CollisionValidationState::Safe;
+    verified.travelPlan.collision.complete = true;
+    lcnc::cam::CamMotionEdgeCertificate edgeCertificate;
+    edgeCertificate.state =
+        lcnc::cam::CamMotionCertificateState::CertifiedSafe;
+    verified.motionPlan.collision = verified.travelPlan.collision;
+    verified.motionPlan.edgeCertificates.append(edgeCertificate);
+    cached.mergeCollisionProofFrom(verified);
+    if (!cached.collisionSafety.jobOverlayReady
+        || cached.collisionSafety.jobOverlayBuildInProgress
+        || !cached.motionPlan.collision.complete
+        || cached.motionPlan.edgeCertificates.size() != 1
+        || cached.motionPlan.edgeCertificates.constFirst().state
+            != lcnc::cam::CamMotionCertificateState::CertifiedSafe
+        || cached.motionPlan.nodes.size() != 1
+        || std::abs(cached.motionPlan.nodes.constFirst().tcpX - 123.0) > 1e-9) {
+        return fail(QStringLiteral(
+            "Collision proof refresh retained stale Job Overlay state or replaced committed coordinates"));
     }
     return 0;
 }

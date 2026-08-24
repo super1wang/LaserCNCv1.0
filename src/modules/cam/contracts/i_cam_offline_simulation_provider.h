@@ -41,7 +41,8 @@ struct OfflineSimulationSnapshot {
     QVector<OfflineSimulationBodySnapshot> bodies;
     CollisionConfigurationSnapshot collision;
     gp_Pnt cutterHeadModelPosition{0.0, 0.0, 0.0};
-    TopoDS_Shape cutterProxy;
+    /// Presentation-only nozzle/cone; never participates in collision checks.
+    TopoDS_Shape cutterDisplayProxy;
     bool showToolpath{true};
     bool showTravel{false};
     bool showNormals{false};

@@ -14,7 +14,6 @@ struct ProcessInitialApproachSettings
 {
     ProcessInitialApproachMode mode{ProcessInitialApproachMode::Automatic};
     double safetyZ{0.0};
-    bool collisionCheckEnabled{false};
 };
 
 struct ProcessIoChannel

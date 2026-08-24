@@ -21,6 +21,17 @@ public:
     void execute()   override;
 };
 
+class CmdBuildMachineSafetyPackage : public CommandBase
+{
+    Q_OBJECT
+public:
+    explicit CmdBuildMachineSafetyPackage(IAppContext* ctx);
+    static constexpr const char* Name = "machine.build_safety_package";
+
+    bool isEnabled() const override;
+    void execute() override;
+};
+
 /**
  * @brief Open DialogMarkAxes so the user can review / reassign shapes to axes.
  *
