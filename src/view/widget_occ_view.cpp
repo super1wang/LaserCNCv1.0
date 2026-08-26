@@ -18,6 +18,7 @@
 #include <AIS_ViewCube.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
+#include <NCollection_Vec2.hxx>
 #include <Quantity_Color.hxx>
 #include <SelectMgr_EntityOwner.hxx>
 #include <TopAbs_ShapeEnum.hxx>
@@ -696,8 +697,8 @@ void WidgetOccView::mouseReleaseEvent(QMouseEvent* e)
             const QRect selRect = QRect(m_pressPos, e->pos()).normalized();
             clearRubberBand();
             m_context->SelectRectangle(
-                Graphic3d_Vec2i(selRect.left(), selRect.top()),
-                Graphic3d_Vec2i(selRect.right(), selRect.bottom()),
+                NCollection_Vec2<int>(selRect.left(), selRect.top()),
+                NCollection_Vec2<int>(selRect.right(), selRect.bottom()),
                 m_view);
             emit selectionChanged();
             m_view->Redraw();

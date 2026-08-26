@@ -16,7 +16,6 @@
 // View and gizmo includes
 #include <AIS_ViewCube.hxx>
 #include <AIS_Trihedron.hxx>
-#include <AIS_ListOfInteractive.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <Geom_Axis2Placement.hxx>
@@ -27,6 +26,8 @@
 #include <Graphic3d_AspectFillArea3d.hxx>
 #include <Graphic3d_Camera.hxx>
 #include <Image_AlienPixMap.hxx>
+#include <NCollection_List.hxx>
+#include <NCollection_Vec2.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <Aspect_TypeOfTriedronPosition.hxx>
@@ -248,9 +249,10 @@ bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int h
     if (workpieceShapes.isEmpty())
         return false;
 
-    AIS_ListOfInteractive displayedObjects;
+    NCollection_List<Handle(AIS_InteractiveObject)> displayedObjects;
     ctx->DisplayedObjects(displayedObjects);
-    for (AIS_ListIteratorOfListOfInteractive it(displayedObjects); it.More(); it.Next()) {
+    for (NCollection_List<Handle(AIS_InteractiveObject)>::Iterator it(displayedObjects);
+         it.More(); it.Next()) {
         const Handle(AIS_InteractiveObject)& object = it.Value();
         hideTemporarily(object);
     }
@@ -326,7 +328,7 @@ void GuiDocument::initGizmos()
     Handle(Graphic3d_TransformPers) tPers =
         new Graphic3d_TransformPers(Graphic3d_TMF_TriedronPers,
                                     Aspect_TOTP_LEFT_LOWER,
-                                    Graphic3d_Vec2i(70, 70));
+                                    NCollection_Vec2<int>(70, 70));
     m_trihedron->SetTransformPersistence(tPers);
     ctx->Display(m_trihedron, AIS_WireFrame, 0, false);
     ctx->Deactivate(m_trihedron); // not selectable
@@ -344,7 +346,7 @@ void GuiDocument::initGizmos()
     Handle(Graphic3d_TransformPers) vPers =
         new Graphic3d_TransformPers(Graphic3d_TMF_TriedronPers,
                                     Aspect_TOTP_RIGHT_UPPER,
-                                    Graphic3d_Vec2i(110, 110));
+                                    NCollection_Vec2<int>(110, 110));
     m_viewCube->SetTransformPersistence(vPers);
     ctx->Display(m_viewCube, false);
 

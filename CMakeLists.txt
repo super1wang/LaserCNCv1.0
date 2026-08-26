@@ -9,7 +9,7 @@ if(_lcnc_binary_dir STREQUAL _lcnc_legacy_build_dir)
         "or vs-acs-gtn (build-vs/).")
 endif()
 
-project(LaserCNC VERSION 1.6.1 LANGUAGES CXX)
+project(LaserCNC VERSION 1.6.2 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -193,9 +193,9 @@ set(Qt6_DIR "${LCNC_QT6_ROOT}/lib/cmake/Qt6" CACHE PATH "Qt6 CMake package direc
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Concurrent Network SerialPort UiTools LinguistTools)
 
 # ─── OpenCASCADE ──────────────────────────────────────────────────────────────
-set(LCNC_OCCT_ROOT "G:/environment/occt7.9-vc144-64-combined/occt-vc144-64" CACHE PATH "OpenCASCADE installation root")
+set(LCNC_OCCT_ROOT "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/opencascade-8.0.1-vc14-64" CACHE PATH "OpenCASCADE installation root")
 set(OpenCASCADE_DIR "${LCNC_OCCT_ROOT}/cmake" CACHE PATH "OpenCASCADE CMake package directory")
-find_package(OpenCASCADE REQUIRED)
+find_package(OpenCASCADE 8.0.1 EXACT REQUIRED)
 
 # ─── SARibbon ─────────────────────────────────────────────────────────────────
 set(LCNC_SARIBBON_ROOT "F:/wangchao/SARibbon/bin_qt6.9.1_MSVC_x64" CACHE PATH "SARibbon installation root")
@@ -204,7 +204,7 @@ find_package(SARibbonBar REQUIRED)
 
 # ─── QuaZip (.lcnc 打包后端，替换原 PowerShell Compress-Archive/Expand-Archive) ─
 set(LCNC_QUAZIP_ROOT "E:/GitHub/quazip" CACHE PATH "QuaZip source tree")
-set(LCNC_ZLIB_ROOT "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64/zlib-1.2.8-vc14-64"
+set(LCNC_ZLIB_ROOT "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/3rdparty-vc14-64/zlib-1.2.8-vc14-64"
     CACHE PATH "zlib root used by QuaZip (defaults to the OCCT 3rdparty zlib)")
 # 让 QuaZip 的 find_package(ZLIB) 命中 OCCT 自带的静态 zlib（无需额外 DLL / 不联网下载）。
 set(ZLIB_INCLUDE_DIR "${LCNC_ZLIB_ROOT}/include" CACHE PATH "" FORCE)
@@ -401,7 +401,7 @@ set(OCC_LIBS
     TKDE TKXSBase TKDESTEP TKXCAF TKDEIGES TKDESTL TKRWMesh TKDECascade TKBinXCAF TKXmlXCAF TKDEGLTF
 )
 
-set(LCNC_OCCT_3RDPARTY_DIR "G:/environment/occt7.9-vc144-64-combined/3rdparty-vc14-64" CACHE PATH "OpenCASCADE third-party library root")
+set(LCNC_OCCT_3RDPARTY_DIR "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/3rdparty-vc14-64" CACHE PATH "OpenCASCADE third-party library root")
 
 target_link_libraries(lcnc_occ INTERFACE ${OCC_LIBS})
 target_link_directories(lcnc_occ INTERFACE
@@ -934,7 +934,7 @@ set(LCNC_RUNTIME_BIN_DIR_DEBUG   "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_de
 set(LCNC_RUNTIME_BIN_DIR_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/bin_release" CACHE PATH "Runtime DLL directory (Release)")
 set(LCNC_ZLIB_RUNTIME_DLL "${CMAKE_CURRENT_SOURCE_DIR}/3rd/runtime/common/zlib1.dll"
     CACHE FILEPATH "Compatibility zlib runtime DLL for LaserCNC deployments")
-set(LCNC_TBB_BIN_DIR "C:/work/occt/3rdparty-vc14-64/tbb-2021.13.0-x64/bin"
+set(LCNC_TBB_BIN_DIR "${LCNC_OCCT_3RDPARTY_DIR}/tbb-2021.13.0-x64/bin"
     CACHE PATH "OCCT TBB runtime DLL directory")
 
 if(NOT EXISTS "${LCNC_ZLIB_RUNTIME_DLL}")
@@ -945,7 +945,8 @@ endif()
 function(lcnc_deploy_tbb_runtime target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${LCNC_TBB_BIN_DIR}/tbb12_debug.dll"
+            "$<IF:$<CONFIG:Debug>,${LCNC_TBB_BIN_DIR}/tbb12_debug.dll,${LCNC_TBB_BIN_DIR}/tbb12.dll>"
+            "$<IF:$<CONFIG:Debug>,${LCNC_TBB_BIN_DIR}/tbbmalloc_debug.dll,${LCNC_TBB_BIN_DIR}/tbbmalloc.dll>"
             "$<TARGET_FILE_DIR:${target}>"
         COMMENT "Copying the TBB runtime required by the bundled OCCT for ${target}")
 endfunction()
@@ -996,6 +997,15 @@ endfunction()
 
 set(_lcnc_runtime_bin "$<IF:$<CONFIG:Debug>,${LCNC_RUNTIME_BIN_DIR_DEBUG},${LCNC_RUNTIME_BIN_DIR_RELEASE}>")
 if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
+    set(_lcnc_current_runtime_dependencies
+        $<TARGET_RUNTIME_DLLS:LaserCNC>
+        "$<IF:$<CONFIG:Debug>,${LCNC_TBB_BIN_DIR}/tbb12_debug.dll,${LCNC_TBB_BIN_DIR}/tbb12.dll>"
+        "$<IF:$<CONFIG:Debug>,${LCNC_TBB_BIN_DIR}/tbbmalloc_debug.dll,${LCNC_TBB_BIN_DIR}/tbbmalloc.dll>")
+    if(LCNC_WITH_COAL_COLLISION OR LCNC_ENABLE_COAL_COLLISION_BENCHMARK)
+        list(APPEND _lcnc_current_runtime_dependencies
+            "$<TARGET_FILE:coal::coal>"
+            ${LCNC_COAL_RUNTIME_DEPENDENCIES})
+    endif()
     # All test executables share ${CMAKE_BINARY_DIR}/<config>. A POST_BUILD
     # copy on each target races under a parallel build, so deploy the snapshot
     # once per output directory and make consumers depend on that deployment.
@@ -1003,22 +1013,35 @@ if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_REL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${_lcnc_runtime_bin}"
             "${CMAKE_BINARY_DIR}/$<CONFIG>"
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+            "${CMAKE_BINARY_DIR}/$<CONFIG>/$<IF:$<CONFIG:Debug>,tbb12.dll,tbb12_debug.dll>"
+            "${CMAKE_BINARY_DIR}/$<CONFIG>/$<IF:$<CONFIG:Debug>,tbbmalloc.dll,tbbmalloc_debug.dll>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${LCNC_ZLIB_RUNTIME_DLL}"
+            ${_lcnc_current_runtime_dependencies}
             "${CMAKE_BINARY_DIR}/$<CONFIG>"
+        COMMAND_EXPAND_LISTS
         COMMENT "Copying runtime DLLs to build output directory"
     )
     add_custom_target(lcnc_runtime_deploy_app
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${_lcnc_runtime_bin}"
             "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+            "$<TARGET_FILE_DIR:LaserCNC>/$<IF:$<CONFIG:Debug>,tbb12.dll,tbb12_debug.dll>"
+            "$<TARGET_FILE_DIR:LaserCNC>/$<IF:$<CONFIG:Debug>,tbbmalloc.dll,tbbmalloc_debug.dll>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${LCNC_ZLIB_RUNTIME_DLL}"
+            ${_lcnc_current_runtime_dependencies}
             "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMAND_EXPAND_LISTS
         COMMENT "Copying runtime DLLs to LaserCNC output directory"
     )
     add_dependencies(LaserCNC lcnc_runtime_deploy_app)
 endif()
+file(GENERATE
+    OUTPUT "${CMAKE_BINARY_DIR}/lcnc_runtime_dlls_$<CONFIG>.txt"
+    CONTENT "$<JOIN:$<TARGET_RUNTIME_DLLS:LaserCNC>,\n>\n")
 # The canonical application output is shared by the Ninja and VS generator
 # trees.  Keep zlib attached to the executable's own POST_BUILD action so a
 # generator's custom-target scheduling cannot leave the smoke-test binary
@@ -1374,15 +1397,14 @@ if(BUILD_TESTING)
         if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
             add_dependencies(${_lcnc_test_target} lcnc_runtime_deploy_build)
         endif()
-        lcnc_deploy_tbb_runtime(${_lcnc_test_target})
-        lcnc_deploy_coal_runtime(${_lcnc_test_target})
+        if(LCNC_WITH_COAL_COLLISION OR LCNC_ENABLE_COAL_COLLISION_BENCHMARK)
+            target_link_libraries(${_lcnc_test_target} PRIVATE coal::coal)
+        endif()
         if(LCNC_ENABLE_ASAN)
             lcnc_deploy_asan_runtime(${_lcnc_test_target})
         endif()
     endforeach()
     if(LCNC_WITH_ACS)
-        lcnc_deploy_tbb_runtime(lcnc_acs_rapid_command_test)
-        lcnc_deploy_tbb_runtime(lcnc_simulator_cmhp_sdk_integration_test)
         lcnc_deploy_acs_simulator_program(lcnc_simulator_cmhp_sdk_integration_test)
         lcnc_deploy_gtn_runtime(lcnc_simulator_cmhp_sdk_integration_test)
     endif()

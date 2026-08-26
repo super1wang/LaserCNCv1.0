@@ -2,7 +2,7 @@
 
 LaserCNC 是面向五轴激光加工的 Windows 桌面软件，将 CAD、CAM、离线仿真与 Process 加工执行放在统一工程工作区中。项目使用 C++17、Qt 6、OpenCASCADE/XCAF、SARibbon、QuaZip、toml11 与 spdlog。
 
-当前版本为 `1.6.1`。本轮在 v1.6.0 软件碰撞闭环基线上，将 CAM 自动排序方向收归软件级配置，完善 Process 设置对话框的应用/确认/取消事务语义，并修正机台绝对坐标标定：AC 中心与模拟锥头保持世界坐标，XYZ 校正只沿对应运动子树传播。代码适合作为继续开发和自动化回归的稳定基座；GUI 标定实机复核、长稳和物理设备验证仍未完成，因此不能据此标记为实体机生产发布。
+当前版本为 `1.6.2`。本轮在 v1.6.1 基线上将 OpenCASCADE 升级到 8.0.1，完成视图 API 适配、Debug/Release 运行库闭包更新，并修复 Visual Studio 生成树继续使用旧 OCCT 缓存的问题。Ninja 与 VS/MSBuild 的 Debug/Release 构建及自动化冒烟已验证；大型目标 STEP 已不再复现旧栈溢出，但导入耗时、峰值内存和取消及时性仍未达到验收条件，GUI、长稳及物理设备验证也未完成，因此不能据此标记为实体机生产发布。
 
 ## 系统组成
 
@@ -23,7 +23,7 @@ CAM 是轮廓顺序、切割偏置、Retract/Traverse/Approach 空程和最终�
 
 ## 构建与测试
 
-构建要求 CMake 3.20+、MSVC 2022 x64、Qt 6.9.1、OpenCASCADE 7.9.0 与 SARibbon。两条生成路线必须隔离：
+构建要求 CMake 3.20+、MSVC 2022 x64、Qt 6.9.1、OpenCASCADE 8.0.1 与 SARibbon。两条生成路线必须隔离：
 
 | 路线 | 生成树 | 运行输出 |
 | --- | --- | --- |

@@ -9,8 +9,6 @@
 #include "view/gui_document.h"
 
 #include <AIS_InteractiveContext.hxx>
-#include <AIS_ListIteratorOfListOfInteractive.hxx>
-#include <AIS_ListOfInteractive.hxx>
 #include <Aspect_TypeOfLine.hxx>
 #include <Graphic3d_MaterialAspect.hxx>
 #include <Graphic3d_NameOfMaterial.hxx>
@@ -18,6 +16,7 @@
 #include <Graphic3d_RenderingParams.hxx>
 #include <Graphic3d_TypeOfBackfacingModel.hxx>
 #include <Graphic3d_AspectFillArea3d.hxx>
+#include <NCollection_List.hxx>
 #include <Prs3d_Drawer.hxx>
 #include <Prs3d_LineAspect.hxx>
 #include <Prs3d_ShadingAspect.hxx>
@@ -343,9 +342,10 @@ void RenderingManager::applyHighlight()
                              hover, m_colors.highlightDisplayMode, m_colors.highlightLineWidth);
     configureHighlightDrawer(ctx->HighlightStyle(Prs3d_TypeOfHighlight_LocalDynamic),
                              hover, m_colors.highlightDisplayMode, m_colors.highlightLineWidth);
-    AIS_ListOfInteractive displayed;
+    NCollection_List<Handle(AIS_InteractiveObject)> displayed;
     ctx->DisplayedObjects(displayed);
-    for (AIS_ListIteratorOfListOfInteractive it(displayed); it.More(); it.Next()) {
+    for (NCollection_List<Handle(AIS_InteractiveObject)>::Iterator it(displayed);
+         it.More(); it.Next()) {
         if (Handle(AIS_Shape) shape = Handle(AIS_Shape)::DownCast(it.Value()); !shape.IsNull()) {
             if (m_colors.highlightDisplayMode >= 0)
                 shape->SetHilightMode(m_colors.highlightDisplayMode);

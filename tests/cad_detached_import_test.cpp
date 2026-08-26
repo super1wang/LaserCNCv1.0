@@ -11,6 +11,9 @@
 
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
+    const QString modelPath = application.arguments().size() > 1
+        ? application.arguments().at(1)
+        : QString::fromUtf8(LCNC_CAD_IMPORT_MODEL_PATH);
     auto projectManager = std::make_unique<lcnc::LcncProjectManager>();
     auto taskManager = std::make_unique<TaskManager>();
     auto service = std::make_unique<lcnc::cad::CadDocumentIoService>(*projectManager, *taskManager);
@@ -20,7 +23,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    auto task = service->readImportAsync(QString::fromUtf8(LCNC_CAD_IMPORT_MODEL_PATH));
+    auto task = service->readImportAsync(modelPath);
     if (task.id == kInvalidTaskId || !task.payload || !task.error) {
         std::cerr << "unable to schedule detached import\n";
         return 2;
@@ -34,7 +37,8 @@ int main(int argc, char** argv) {
                          finishedSuccessfully = success;
                          waitLoop.quit();
                      });
-    QTimer::singleShot(60000, &waitLoop, &QEventLoop::quit);
+    const int timeoutMs = application.arguments().size() > 1 ? 300000 : 60000;
+    QTimer::singleShot(timeoutMs, &waitLoop, &QEventLoop::quit);
     waitLoop.exec();
     if (!finishedSuccessfully) {
         std::cerr << "detached import failed: " << task.error->toStdString() << '\n';

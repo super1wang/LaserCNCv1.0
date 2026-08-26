@@ -29,7 +29,7 @@ cmake --build --preset vs-acs-gtn-debug --parallel 16
 
 - Single CMake target: `LaserCNC` (WIN32 executable).
 - Requires CMake 3.20+, MSVC 2022 x64 (19.44+), C++17.
-- Qt 6.9.1, OpenCASCADE 7.9.0, SARibbon — paths configured via CMake cache variables (`LCNC_QT6_ROOT`, `LCNC_OCCT_ROOT`, `LCNC_SARIBBON_ROOT`).
+- Qt 6.9.1, OpenCASCADE 8.0.1, SARibbon — paths configured via CMake cache variables (`LCNC_QT6_ROOT`, `LCNC_OCCT_ROOT`, `LCNC_SARIBBON_ROOT`).
 - Vendored 3rd-party libs in `3rd/`: spdlog (logging), toml11 (config).
 - OCC and SARibbon DLLs are copied to the output directory via POST_BUILD commands.
 - Conditional Process device SDKs (ACS, GTN, BDAQ, real laser) are OFF by default; enable with CMake `-D` options (`LCNC_WITH_ACS`, etc.).

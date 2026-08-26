@@ -16,7 +16,12 @@
         "LCNC_WITH_REAL_LASER": "OFF",
         "LCNC_WITH_COAL_COLLISION": "ON",
         "LCNC_COAL_ROOT": "${sourceDir}/x64/deps/install/coal-release",
-        "LCNC_COAL_DEBUG_ROOT": "${sourceDir}/x64/deps/install/coal-debug"
+        "LCNC_COAL_DEBUG_ROOT": "${sourceDir}/x64/deps/install/coal-debug",
+        "LCNC_OCCT_ROOT": "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/opencascade-8.0.1-vc14-64",
+        "OpenCASCADE_DIR": "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/opencascade-8.0.1-vc14-64/cmake",
+        "LCNC_ZLIB_ROOT": "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/3rdparty-vc14-64/zlib-1.2.8-vc14-64",
+        "LCNC_OCCT_3RDPARTY_DIR": "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/3rdparty-vc14-64",
+        "LCNC_TBB_BIN_DIR": "J:/Develop/OCC8.0.1/occt-combined-with-debug-pch/3rdparty-vc14-64/tbb-2021.13.0-x64/bin"
       }
     },
     {

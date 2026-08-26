@@ -4,30 +4,31 @@
 # 需要随 exe 一起部署的 DLL 后。运行后必须把 3rd/runtime/ 的差异提交到 git。
 #
 # 工作原理：
-#   1. 以 build-cmake/ 或 build-vs/ 的当前配置重新链接 LaserCNC.exe。
-#   2. 用 windeployqt 让 Qt 自己分析 x64/<Config>/LaserCNC.exe 的 import，把它需要的 Qt
+#   1. 以 build-cmake/ 的当前配置重新链接 LaserCNC.exe。
+#   2. 用 windeployqt 让 Qt 自己分析 x64/<variant>/<Config>/LaserCNC.exe 的 import，把它需要的 Qt
 #      DLL + 插件子目录 (platforms/, imageformats/, ...) 拷贝到该运行目录。
-#   3. 把 OCC 的 TK*.dll、OCC 的 3rd-party (FreeImage / freetype / ffmpeg /
-#      openvr / tbb / jemalloc) 以及仓库备份的 zlib1.dll 拷过来。OCC 在这台机上只有 release 版，
-#      debug 配置仍然链 release OCC（OCC 一向如此分发）。
+#   3. 从 CMake 当前选中的 OCC 根拷贝配置匹配的 TK*.dll，并补齐 TBB 和 zlib 运行时。
 #   4. SARibbon、boost、ACSCL_x64.dll。
-#   5. 把 x64/<Config>/ 里所有 .dll + 插件子目录原样镜像到
+#   5. 把 x64/<variant>/<Config>/ 里所有 .dll + 插件子目录原样镜像到
 #      3rd/runtime/bin_<config>/，覆盖旧快照。
 
 param(
     [ValidateSet("debug","release")]
     [string]$Config = "debug",
+    [string]$BuildDir = "",
+    [string]$OcctRoot = "",
     [string]$AcsDllDebug   = "F:\wangchao\Axis4-3D\trunk\bin\Debug\ACSCL_x64.dll",
     [string]$AcsDllRelease = "F:\wangchao\Axis4-3D\trunk\bin\Release\ACSCL_x64.dll",
-    [string]$TbbBinDir     = "C:\work\occt\3rdparty-vc14-64\tbb-2021.13.0-x64\bin"
+    [string]$TbbBinDir     = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path "$PSScriptRoot\.."
-$BuildDir = Join-Path $RepoRoot "build"
+if ([string]::IsNullOrWhiteSpace($BuildDir)) {
+    $BuildDir = Join-Path $RepoRoot "build-cmake"
+}
 $CmakeConfig = (Get-Culture).TextInfo.ToTitleCase($Config)
-$RuntimeDir = Join-Path $RepoRoot ("x64\" + $CmakeConfig)
 $Target   = Join-Path $RepoRoot "3rd\runtime\bin_$Config"
 $ZlibDll = Join-Path $RepoRoot "3rd\runtime\common\zlib1.dll"
 $IsDebug  = ($Config -eq "debug")
@@ -35,6 +36,22 @@ $AcsDll   = if ($IsDebug) { $AcsDllDebug } else { $AcsDllRelease }
 
 if (-not (Test-Path (Join-Path $BuildDir "CMakeCache.txt"))) {
     throw "Build directory not configured: $BuildDir. Configure the ACS+GTN preset first (cmake --preset acs-gtn)."
+}
+
+$cache = Get-Content (Join-Path $BuildDir "CMakeCache.txt")
+$runtimeVariant = ($cache | Select-String '^LCNC_RUNTIME_VARIANT:.*=(.+)$').Matches.Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($runtimeVariant)) {
+    throw "LCNC_RUNTIME_VARIANT is missing from $BuildDir\CMakeCache.txt"
+}
+$RuntimeDir = Join-Path $RepoRoot ("x64\" + $runtimeVariant + "\" + $CmakeConfig)
+if ([string]::IsNullOrWhiteSpace($OcctRoot)) {
+    $OcctRoot = ($cache | Select-String '^LCNC_OCCT_ROOT:.*=(.+)$').Matches.Groups[1].Value
+}
+if ([string]::IsNullOrWhiteSpace($OcctRoot) -or -not (Test-Path -LiteralPath $OcctRoot)) {
+    throw "LCNC_OCCT_ROOT is unavailable: $OcctRoot"
+}
+if ([string]::IsNullOrWhiteSpace($TbbBinDir)) {
+    $TbbBinDir = ($cache | Select-String '^LCNC_TBB_BIN_DIR:.*=(.+)$').Matches.Groups[1].Value
 }
 
 Write-Host "== Step 1: build LaserCNC ($Config) =="
@@ -45,7 +62,6 @@ if (-not (Test-Path (Join-Path $RuntimeDir "LaserCNC.exe"))) {
 }
 
 Write-Host "== Step 2: run windeployqt =="
-$cache = Get-Content (Join-Path $BuildDir "CMakeCache.txt")
 $qt6Dir = ($cache | Select-String '^Qt6_DIR:.*=(.+)$').Matches.Groups[1].Value
 $qtBin = Join-Path $qt6Dir "..\..\..\bin"
 $wd = Join-Path $qtBin "windeployqt.exe"
@@ -55,7 +71,33 @@ if (-not $IsDebug) { $wdArgs += "--release" }
 & $wd @wdArgs (Join-Path $RuntimeDir "LaserCNC.exe")
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
-Write-Host "== Step 3: ensure ACSCL_x64.dll present in $RuntimeDir =="
+Write-Host "== Step 3: deploy OpenCASCADE $CmakeConfig runtime into $RuntimeDir =="
+$runtimeManifest = Join-Path $BuildDir "lcnc_runtime_dlls_$CmakeConfig.txt"
+if (-not (Test-Path -LiteralPath $runtimeManifest)) {
+    throw "CMake runtime manifest not found: $runtimeManifest"
+}
+$occtRootResolved = (Resolve-Path -LiteralPath $OcctRoot).Path
+$occtDlls = Get-Content -LiteralPath $runtimeManifest |
+    ForEach-Object {
+        if ($_) {
+            $candidate = [System.IO.Path]::GetFullPath($_)
+            if ([System.IO.Path]::GetFileName($candidate) -like "TK*.dll" -and
+                $candidate.StartsWith($occtRootResolved, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $candidate
+            }
+        }
+    }
+if ($occtDlls.Count -eq 0) {
+    throw "OpenCASCADE runtime closure is missing from $runtimeManifest"
+}
+Get-ChildItem -LiteralPath $RuntimeDir -Filter "TK*.dll" -File | ForEach-Object {
+    [System.IO.File]::Delete($_.FullName)
+}
+foreach ($occtDll in $occtDlls) {
+    Copy-Item -LiteralPath $occtDll -Destination $RuntimeDir -Force
+}
+
+Write-Host "== Step 3a: ensure ACSCL_x64.dll present in $RuntimeDir =="
 if (Test-Path $AcsDll) {
     Copy-Item -Force $AcsDll $RuntimeDir
 } else {
