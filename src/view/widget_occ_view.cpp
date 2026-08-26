@@ -270,7 +270,7 @@ void WidgetOccView::applyCadSnapSelectionMode()
     if (m_activeDoc) {
         if (!m_modelSelectionEnabled) {
             if (!m_activeDoc->viewCube().IsNull())
-                m_context->Activate(m_activeDoc->viewCube(), 0, Standard_False);
+                m_context->Activate(m_activeDoc->viewCube(), 0, false);
             return;
         }
         int selectionMode = 0;
@@ -289,7 +289,7 @@ void WidgetOccView::applyCadSnapSelectionMode()
         }
         m_activeDoc->setEntitySelectionMode(selectionMode);
         if (!m_activeDoc->viewCube().IsNull())
-            m_context->Activate(m_activeDoc->viewCube(), 0, Standard_False);
+            m_context->Activate(m_activeDoc->viewCube(), 0, false);
     }
 }
 
@@ -414,7 +414,7 @@ void WidgetOccView::setModelSelectionEnabled(bool enabled)
         resetSketchOverlayDrag();
         resetTransformGizmoDrag();
         if (!m_context.IsNull()) {
-            m_context->ClearSelected(Standard_False);
+            m_context->ClearSelected(false);
             emit selectionChanged();
         }
     }
@@ -431,12 +431,12 @@ bool WidgetOccView::screenToSketchPlane(const QPoint& pos,
     if (m_view.IsNull() || !outX || !outY)
         return false;
 
-    Standard_Real px = 0.0;
-    Standard_Real py = 0.0;
-    Standard_Real pz = 0.0;
-    Standard_Real vx = 0.0;
-    Standard_Real vy = 0.0;
-    Standard_Real vz = 0.0;
+    double px = 0.0;
+    double py = 0.0;
+    double pz = 0.0;
+    double vx = 0.0;
+    double vy = 0.0;
+    double vz = 0.0;
     m_view->ConvertWithProj(pos.x(), pos.y(), px, py, pz, vx, vy, vz);
 
     double denom = 0.0;
@@ -720,9 +720,9 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
 
     // Convert 返回鼠标屏幕位置在当前 OCC 视图投影平面上的世界坐标。
     // 无论当前处于拾取、旋转或平移状态，状态栏都应反映鼠标所在位置。
-    Standard_Real x = 0.0;
-    Standard_Real y = 0.0;
-    Standard_Real z = 0.0;
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
     m_view->Convert(e->pos().x(), e->pos().y(), x, y, z);
     emit cursorPositionChanged(x, y, z);
 
@@ -737,7 +737,7 @@ void WidgetOccView::mouseMoveEvent(QMouseEvent* e)
         // needs MoveTo() to update OCCT's dynamic highlight under the cursor.
         // Previously this branch emitted an unconnected signal and returned,
         // leaving the operator with no visual confirmation before clicking.
-        m_context->MoveTo(e->pos().x(), e->pos().y(), m_view, Standard_True);
+        m_context->MoveTo(e->pos().x(), e->pos().y(), m_view, true);
         emit facePickMoved(e->pos());
         m_view->Redraw();
         m_prevPos = e->pos();
@@ -892,7 +892,7 @@ void WidgetOccView::keyPressEvent(QKeyEvent* e)
     switch (e->key()) {
     case Qt::Key_Escape:
         if (!m_context.IsNull()) {
-            m_context->ClearSelected(Standard_True);
+            m_context->ClearSelected(true);
             emit selectionChanged();
             m_view->Redraw();
         }

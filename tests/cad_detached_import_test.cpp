@@ -4,6 +4,7 @@
 #include "modules/cad/services/cad_document_io_service.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QEventLoop>
 #include <QTimer>
@@ -29,7 +30,18 @@ int main(int argc, char** argv) {
         return 2;
     }
     bool finishedSuccessfully = false;
+    QElapsedTimer elapsed;
+    elapsed.start();
     QEventLoop waitLoop;
+    QString lastStep;
+    QObject::connect(taskManager.get(), &TaskManager::taskStepChanged, &waitLoop,
+                     [&](TaskId changedId, const QString& step) {
+                         if (changedId != task.id || step == lastStep)
+                             return;
+                         lastStep = step;
+                         std::cerr << "phase " << elapsed.elapsed() << " ms: " << step.toStdString()
+                                   << '\n';
+                     });
     QObject::connect(taskManager.get(), &TaskManager::taskFinished, &waitLoop,
                      [&](TaskId finishedId, bool success) {
                          if (finishedId != task.id)

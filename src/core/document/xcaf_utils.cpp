@@ -12,7 +12,7 @@
 
 TDF_Label XcafUtils::findOrCreateChild(const TDF_Label& parent, int tag)
 {
-    return parent.FindChild(tag, /*create=*/Standard_True);
+    return parent.FindChild(tag, /*create=*/true);
 }
 
 void XcafUtils::setName(const TDF_Label& label, const QString& name)
@@ -28,7 +28,7 @@ QString XcafUtils::name(const TDF_Label& label)
         const TCollection_ExtendedString& ext = nameAttr->Get();
         std::wstring ws;
         ws.reserve(static_cast<size_t>(ext.Length()));
-        for (Standard_Integer i = 1; i <= ext.Length(); ++i)
+        for (int i = 1; i <= ext.Length(); ++i)
             ws.push_back(static_cast<wchar_t>(ext.Value(i)));
         return QString::fromStdWString(ws);
     }

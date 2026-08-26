@@ -44,7 +44,7 @@ bool resolveReferencePlaneCenter(WidgetOccView* occView,
     }
 
     const Handle(AIS_InteractiveContext)& context = occView->context();
-    context->MoveTo(screenPos.x(), screenPos.y(), occView->view(), Standard_False);
+    context->MoveTo(screenPos.x(), screenPos.y(), occView->view(), false);
 
     const Handle(SelectMgr_EntityOwner) owner = context->DetectedOwner();
     Handle(StdSelect_BRepOwner) brepOwner = Handle(StdSelect_BRepOwner)::DownCast(owner);
@@ -106,8 +106,8 @@ bool resolveLeadInHit(WidgetOccView* occView,
 
         for (int pointIndex = 0; pointIndex < static_cast<int>(contour.points.size()); ++pointIndex) {
             const ToolpathPoint& point = contour.points[pointIndex];
-            Standard_Integer px = 0;
-            Standard_Integer py = 0;
+            int px = 0;
+            int py = 0;
             view->Convert(point.position.X(), point.position.Y(), point.position.Z(), px, py);
 
             const double dx = static_cast<double>(px - screenPos.x());

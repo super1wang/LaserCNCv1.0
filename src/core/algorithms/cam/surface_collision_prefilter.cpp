@@ -2,24 +2,24 @@
 
 #include "core/logging/logger.h"
 
-#include <BRep_Builder.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <NCollection_Map.hxx>
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
+#include <Standard_Failure.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
-#include <TopTools_MapOfShape.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
-#include <gp_Pnt.hxx>
-#include <Standard_Failure.hxx>
-
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <gp_Pnt.hxx>
 #include <limits>
 #include <numeric>
 #include <utility>
@@ -479,14 +479,14 @@ SurfaceCollisionModel SurfaceCollisionModel::buildInternal(
         return {};
     }
     try {
-        BRepBuilderAPI_Copy copy(shape, Standard_True, Standard_True);
+        BRepBuilderAPI_Copy copy(shape, true, true);
         if (!copy.IsDone()) {
             if (error) *error = "Cannot copy collision surface geometry";
             return {};
         }
         const TopoDS_Shape privateShape = copy.Shape();
         int solidCount = 0;
-        TopTools_MapOfShape solidFaces;
+        NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> solidFaces;
         TopoDS_Compound solidCompound;
         BRep_Builder solidBuilder;
         solidBuilder.MakeCompound(solidCompound);
@@ -513,8 +513,7 @@ SurfaceCollisionModel SurfaceCollisionModel::buildInternal(
         // 中文翻译：保留全部碰撞面；混合部件只取实体外壳会丢失开放壳/面，
         // 从而让网格查询产生假安全。
         const TopoDS_Shape surfaceShape = privateShape;
-        BRepMesh_IncrementalMesh mesh(surfaceShape, linearDeflectionMm,
-                                      Standard_False, 0.35, Standard_False);
+        BRepMesh_IncrementalMesh mesh(surfaceShape, linearDeflectionMm, false, 0.35, false);
         auto impl = std::make_shared<Impl>();
         impl->linearDeflectionMm = linearDeflectionMm;
         impl->closedSolid = solidCount > 0;
@@ -571,10 +570,10 @@ SurfaceCollisionModel SurfaceCollisionModel::buildInternal(
         }
         return SurfaceCollisionModel(std::move(impl));
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "OCCT failed to build collision surface mesh: {}",
-                 failure.GetMessageString());
-        if (error) *error = failure.GetMessageString();
+        LCNC_ERR(lcnc::LogCode::Generic, "OCCT failed to build collision surface mesh: {}",
+                 failure.what());
+        if (error)
+            *error = failure.what();
     } catch (const std::exception& exception) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Failed to build collision surface mesh: {}", exception.what());

@@ -27,11 +27,12 @@
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
+#include <NCollection_Sequence.hxx>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <Standard_Failure.hxx>
 #include <StlAPI_Reader.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
@@ -193,7 +194,7 @@ TDF_Label labelByEntry(LcncDocument* doc, const QString& entry) {
     if (!doc || entry.isEmpty())
         return {};
 
-    TDF_LabelSequence freeShapes;
+    NCollection_Sequence<TDF_Label> freeShapes;
     doc->shapeTool()->GetFreeShapes(freeShapes);
     for (int index = 1; index <= freeShapes.Length(); ++index) {
         const TDF_Label label = freeShapes.Value(index);
@@ -236,12 +237,12 @@ bool modelCenterForLabels(LcncDocument* doc, const QList<TDF_Label>& labels, gp_
         return false;
     }
 
-    Standard_Real xMin = 0.0;
-    Standard_Real yMin = 0.0;
-    Standard_Real zMin = 0.0;
-    Standard_Real xMax = 0.0;
-    Standard_Real yMax = 0.0;
-    Standard_Real zMax = 0.0;
+    double xMin = 0.0;
+    double yMin = 0.0;
+    double zMin = 0.0;
+    double xMax = 0.0;
+    double yMax = 0.0;
+    double zMax = 0.0;
     box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
     *outCenter = gp_Pnt((xMin + xMax) * 0.5, (yMin + yMax) * 0.5, (zMin + zMax) * 0.5);
     return true;
@@ -620,65 +621,17 @@ DocumentId CadModule::openDocument(const QString& filePath) {
                "CadModule::openDocument replacing workpiece docId={} ext={} path={}", docId,
                ext.toStdString(), filePath.toStdString());
 
-    auto error = std::make_shared<QString>();
-    const TaskId taskId = lcnc::Kernel::current().taskManager()->run(
-        // 中文翻译：打开: %1
-        tr("Open: %1").arg(fileInfo.fileName()),
-        [filePath, ext, pendingWorkspace, error](TaskProgress* prog) {
-            LcncDocument* doc = pendingWorkspace ? pendingWorkspace->workpieceDocument() : nullptr;
-            LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "CadModule::openDocument worker begin docId={} ext={} path={}",
-                       doc ? doc->id() : kInvalidDocumentId, ext.toStdString(),
-                       filePath.toStdString());
-            prog->setRange(0, 100);
-            if (prog->isAbortRequested())
-                throw std::runtime_error("document open cancelled");
-
-            if (ext == "stp" || ext == "step") {
-                // 中文翻译：读取 STEP...
-                prog->setStepName(QStringLiteral("Read STEP..."));
-                prog->setValue(50);
-                // 中文翻译：转换形体...
-                prog->setStepName(QStringLiteral("Transform body..."));
-                if (!lcnc::cad::CadDocumentIoService::importStepIntoDetachedDocument(doc, filePath,
-                                                                                     error.get())) {
-                    throw std::runtime_error("step open failed");
-                }
-            } else if (ext == "igs" || ext == "iges") {
-                // 中文翻译：读取 IGES...
-                prog->setStepName(QStringLiteral("Read IGES..."));
-                prog->setValue(50);
-                // 中文翻译：转换形体...
-                prog->setStepName(QStringLiteral("Transform body..."));
-                if (!lcnc::cad::CadDocumentIoService::importIgesIntoDetachedDocument(doc, filePath,
-                                                                                     error.get())) {
-                    throw std::runtime_error("iges open failed");
-                }
-            } else if (ext == "stl") {
-                if (!lcnc::cad::CadDocumentIoService::importStlIntoDetachedDocument(
-                        doc, filePath, prog, error.get())) {
-                    throw std::runtime_error("stl open failed");
-                }
-            } else if (ext == "brep") {
-                if (!lcnc::cad::CadDocumentIoService::importBrepIntoDetachedDocument(
-                        doc, filePath, prog, error.get())) {
-                    throw std::runtime_error("brep open failed");
-                }
-            }
-
-            // 中文翻译：生成显示网格...
-            prog->setStepName(QStringLiteral("Generate display grid..."));
-            if (!lcnc::cad::CadDocumentIoService::prepareDisplayMesh(doc, prog, error.get()))
-                throw std::runtime_error("display mesh preparation failed");
-
-            LCNC_DEBUG(lcnc::LogCode::Generic,
-                       "CadModule::openDocument worker done docId={} workpieceCount={}",
-                       doc ? doc->id() : kInvalidDocumentId,
-                       entityCount(doc, LcncDocument::EntityKind::Workpiece));
-            if (prog->isAbortRequested())
-                throw std::runtime_error("document open cancelled");
-            prog->setValue(100);
-        });
+    const auto task = m_documentIoService ? m_documentIoService->readImportAsync(filePath)
+                                          : lcnc::cad::CadDocumentIoService::ImportTask{};
+    if (task.id == kInvalidTaskId) {
+        // 中文翻译：打开失败
+        emit operationFailed(tr("Open failed"),
+                             // 中文翻译：打开文件失败
+                             !task.error || task.error->isEmpty() ? tr("Failed to open file")
+                                                                   : *task.error);
+        return kInvalidDocumentId;
+    }
+    const TaskId taskId = task.id;
 
     LCNC_DEBUG(lcnc::LogCode::Generic, "CadModule::openDocument task scheduled docId={} taskId={}",
                docId, taskId);
@@ -687,17 +640,27 @@ DocumentId CadModule::openDocument(const QString& filePath) {
     const QString sourceFilePath = fileInfo.absoluteFilePath();
     trackDocumentTask(docId, taskId);
     watchTask(this, taskId,
-              [this, taskId, pendingWorkspace, docId, displayName, sourceFilePath, error,
+              [this, task, taskId, pendingWorkspace, docId, displayName, sourceFilePath,
                openGeneration, stageTimer, ext](bool success) {
+                  releaseDocumentTask(docId, taskId);
+                  auto* project = lcnc::Kernel::current().projectManager();
+                  if (!project->isSingleDocumentOpenCurrent(openGeneration))
+                      return;
+
+                  LcncDocument* pendingDocument = pendingWorkspace->workpieceDocument();
+                  if (success && pendingDocument) {
+                      success = lcnc::cad::CadDocumentIoService::commitImport(
+                          pendingDocument, task.payload, task.error.get());
+                  } else if (success && task.error) {
+                      // 中文翻译：目标文档已关闭
+                      *task.error = tr("The target document has been closed");
+                      success = false;
+                  }
                   LCNC_INFO(lcnc::LogCode::Generic,
                             "stage=workpiece.load event=end mode=open format='{}' result={} "
                             "elapsed_ms={} path='{}'",
                             ext.toStdString(), success ? "success" : "failed",
                             stageTimer->elapsed(), sourceFilePath.toStdString());
-                  releaseDocumentTask(docId, taskId);
-                  auto* project = lcnc::Kernel::current().projectManager();
-                  if (!project->isSingleDocumentOpenCurrent(openGeneration))
-                      return;
 
                   LCNC_DEBUG(lcnc::LogCode::Generic,
                              "CadModule::openDocument task done docId={} success={}", docId,
@@ -706,7 +669,9 @@ DocumentId CadModule::openDocument(const QString& filePath) {
                       // 中文翻译：打开失败
                       emit operationFailed(tr("Open failed"),
                                            // 中文翻译：打开文件失败
-                                           error->isEmpty() ? tr("Failed to open file") : *error);
+                                           !task.error || task.error->isEmpty()
+                                               ? tr("Failed to open file")
+                                               : *task.error);
                       return;
                   }
 

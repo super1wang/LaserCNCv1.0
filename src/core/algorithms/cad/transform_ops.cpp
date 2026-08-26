@@ -19,7 +19,7 @@ void applyTrsf(TopoDS_Shape* shape, const gp_Trsf& trsf)
     if (!shape || shape->IsNull())
         throw std::invalid_argument("Transform input shape is null");
 
-    BRepBuilderAPI_Transform transform(*shape, trsf, Standard_True);
+    BRepBuilderAPI_Transform transform(*shape, trsf, true);
     if (!transform.IsDone())
         throw Standard_Failure("Body transformation failed");
     *shape = transform.Shape();

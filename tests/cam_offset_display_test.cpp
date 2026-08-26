@@ -69,8 +69,8 @@ int verifySharpRectangleOffset()
     if (display.IsNull() || display.ShapeType() != TopAbs_EDGE)
         return fail(QStringLiteral("offset display is not one compact polyline edge"));
 
-    Standard_Real firstParameter = 0.0;
-    Standard_Real lastParameter = 0.0;
+    double firstParameter = 0.0;
+    double lastParameter = 0.0;
     const Handle(Geom_Curve) curve = BRep_Tool::Curve(
         TopoDS::Edge(display), firstParameter, lastParameter);
     const Handle(Geom_BSplineCurve) polyline =

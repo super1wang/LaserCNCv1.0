@@ -18,6 +18,8 @@
 #include <IGESCAFControl_Reader.hxx>
 #include <IGESControl_Reader.hxx>
 #include <IMeshTools_Parameters.hxx>
+#include <Message_ProgressIndicator.hxx>
+#include <NCollection_Sequence.hxx>
 #include <QFileInfo>
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPControl_Reader.hxx>
@@ -25,17 +27,94 @@
 #include <Standard_Failure.hxx>
 #include <StlAPI_Reader.hxx>
 #include <TCollection_ExtendedString.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <TDocStd_Document.hxx>
+#include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS_Shape.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <algorithm>
 #include <exception>
+#include <mutex>
 #include <vector>
 
 namespace lcnc::cad {
+
+namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+constexpr std::size_t kComplexDisplayFaceCount = 8000;
+constexpr std::size_t kVeryComplexDisplayFaceCount = 14000;
+
+struct DisplayMeshProfile {
+    double deflection{0.05};
+    double angle{5.0 * kPi / 180.0};
+    bool lowCost{false};
+    bool veryComplex{false};
+};
+
+DisplayMeshProfile displayMeshProfile(double maxSize, std::size_t faceCount) {
+    DisplayMeshProfile profile;
+    profile.deflection = std::clamp(0.0005 * maxSize, 0.005, 0.05);
+    if (faceCount >= kVeryComplexDisplayFaceCount) {
+        profile.deflection = std::clamp(0.002 * maxSize, 0.05, 0.5);
+        profile.angle = 15.0 * kPi / 180.0;
+        profile.lowCost = true;
+        profile.veryComplex = true;
+    } else if (faceCount >= kComplexDisplayFaceCount) {
+        profile.deflection = std::clamp(0.001 * maxSize, 0.02, 0.2);
+        profile.angle = 10.0 * kPi / 180.0;
+        profile.lowCost = true;
+    }
+    return profile;
+}
+
+std::size_t countFaces(const std::vector<TopoDS_Shape>& shapes) {
+    std::size_t faceCount = 0;
+    for (const TopoDS_Shape& shape : shapes) {
+        for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next())
+            ++faceCount;
+    }
+    return faceCount;
+}
+
+class TaskProgressIndicator final : public Message_ProgressIndicator {
+  public:
+    TaskProgressIndicator(TaskProgress* progress, int firstPercent, int lastPercent)
+        : m_progress(progress), m_firstPercent(firstPercent),
+          m_percentSpan(std::max(0, lastPercent - firstPercent)) {}
+
+  protected:
+    bool UserBreak() override {
+        return m_progress && m_progress->isAbortRequested();
+    }
+
+    void Show(const Message_ProgressScope&, bool) override {
+        if (m_progress)
+            m_progress->setValue(m_firstPercent + int(GetPosition() * m_percentSpan));
+    }
+
+  private:
+    TaskProgress* m_progress{nullptr};
+    int m_firstPercent{0};
+    int m_percentSpan{0};
+};
+
+occ::handle<Message_ProgressIndicator> progressIndicator(TaskProgress* progress, int firstPercent,
+                                                         int lastPercent) {
+    return progress ? new TaskProgressIndicator(progress, firstPercent, lastPercent) : nullptr;
+}
+
+std::mutex& igesReaderMutex() {
+    // OCCT 8 permits independent STEP readers on separate threads, while IGES
+    // reader state is still process-global. Keep IGES transfer serialized
+    // without reducing STEP import concurrency or parallel meshing.
+    static std::mutex mutex;
+    return mutex;
+}
+
+} // namespace
 
 struct CadImportPayload {
     Handle(TDocStd_Document) xcafDocument;
@@ -111,7 +190,7 @@ CadDocumentIoService::exportStepAsync(LcncDocument* document, const QString& fil
 
     auto shapes = std::make_shared<std::vector<TopoDS_Shape>>();
     const Handle(XCAFDoc_ShapeTool) shapeTool = document->shapeTool();
-    TDF_LabelSequence labels;
+    NCollection_Sequence<TDF_Label> labels;
     shapeTool->GetFreeShapes(labels);
     shapes->reserve(static_cast<std::size_t>(labels.Length()));
     for (int index = 1; index <= labels.Length(); ++index) {
@@ -188,7 +267,7 @@ bool CadDocumentIoService::readImport(const QString& filePath, TaskProgress* pro
     if (progress) {
         progress->setRange(0, 100);
         // 中文翻译：读取 CAD 文件...
-        progress->setStepName(QStringLiteral("Read CAD file..."));
+        progress->setStepName(QObject::tr("Read CAD file..."));
         progress->setValue(10);
     }
 
@@ -198,18 +277,31 @@ bool CadDocumentIoService::readImport(const QString& filePath, TaskProgress* pro
                 new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
             XCAFDoc_DocumentTool::Set(xdeDocument->Main());
             STEPCAFControl_Reader reader;
-            reader.SetNameMode(Standard_True);
-            if (reader.ReadFile(filePath.toUtf8().constData()) == IFSelect_RetDone &&
-                reader.Transfer(xdeDocument)) {
-                TDF_LabelSequence roots;
+            reader.SetNameMode(true);
+            if (progress) {
+                // 中文翻译：解析 STEP 记录...
+                progress->setStepName(QObject::tr("Parse STEP records..."));
+            }
+            const bool readDone =
+                reader.ReadFile(filePath.toUtf8().constData()) == IFSelect_RetDone;
+            if (progress) {
+                // 中文翻译：传输 STEP 几何...
+                progress->setStepName(QObject::tr("Transfer STEP geometry..."));
+            }
+            const auto transferProgress = progressIndicator(progress, 15, 55);
+            if (readDone &&
+                reader.Transfer(xdeDocument, Message_ProgressIndicator::Start(transferProgress))) {
+                NCollection_Sequence<TDF_Label> roots;
                 XCAFDoc_DocumentTool::ShapeTool(xdeDocument->Main())->GetFreeShapes(roots);
                 if (roots.Length() > 0)
                     payload->xcafDocument = xdeDocument;
             }
             if (payload->xcafDocument.IsNull()) {
                 STEPControl_Reader fallback;
+                const auto fallbackProgress = progressIndicator(progress, 15, 55);
                 if (fallback.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone ||
-                    fallback.TransferRoots() <= 0) {
+                    fallback.TransferRoots(Message_ProgressIndicator::Start(fallbackProgress)) <=
+                        0) {
                     if (errorMessage)
                         // 中文翻译：无法读取 STEP 文件: %1
                         *errorMessage = QObject::tr("Unable to read STEP file: %1").arg(filePath);
@@ -218,14 +310,15 @@ bool CadDocumentIoService::readImport(const QString& filePath, TaskProgress* pro
                 payload->fallbackShape = fallback.OneShape();
             }
         } else if (suffix == QStringLiteral("igs") || suffix == QStringLiteral("iges")) {
+            std::lock_guard<std::mutex> lock(igesReaderMutex());
             Handle(TDocStd_Document) xdeDocument =
                 new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
             XCAFDoc_DocumentTool::Set(xdeDocument->Main());
             IGESCAFControl_Reader reader;
-            reader.SetNameMode(Standard_True);
+            reader.SetNameMode(true);
             if (reader.ReadFile(filePath.toUtf8().constData()) == IFSelect_RetDone &&
                 reader.Transfer(xdeDocument)) {
-                TDF_LabelSequence roots;
+                NCollection_Sequence<TDF_Label> roots;
                 XCAFDoc_DocumentTool::ShapeTool(xdeDocument->Main())->GetFreeShapes(roots);
                 if (roots.Length() > 0)
                     payload->xcafDocument = xdeDocument;
@@ -255,11 +348,11 @@ bool CadDocumentIoService::readImport(const QString& filePath, TaskProgress* pro
         }
     } catch (const Standard_Failure& exception) {
         LCNC_ERR(lcnc::LogCode::Generic, "Detached CAD import failed path='{}': {}",
-                 filePath.toStdString(), exception.GetMessageString());
+                 filePath.toStdString(), exception.what());
         if (errorMessage)
             // 中文翻译：读取 CAD 文件失败: %1
-            *errorMessage = QObject::tr("Failed to read CAD file: %1")
-                                .arg(QString::fromUtf8(exception.GetMessageString()));
+            *errorMessage =
+                QObject::tr("Failed to read CAD file: %1").arg(QString::fromUtf8(exception.what()));
         return false;
     } catch (const std::exception& exception) {
         LCNC_ERR(lcnc::LogCode::Generic, "Detached CAD import failed path='{}': {}",
@@ -295,9 +388,13 @@ bool CadDocumentIoService::prepareImportMesh(const std::shared_ptr<CadImportPayl
     if (!payload || payload->empty())
         return false;
 
+    if (progress) {
+        // 中文翻译：分析显示网格...
+        progress->setStepName(QObject::tr("Analyze display mesh..."));
+    }
     std::vector<TopoDS_Shape> shapes;
     if (!payload->xcafDocument.IsNull()) {
-        TDF_LabelSequence roots;
+        NCollection_Sequence<TDF_Label> roots;
         const Handle(XCAFDoc_ShapeTool) shapeTool =
             XCAFDoc_DocumentTool::ShapeTool(payload->xcafDocument->Main());
         shapeTool->GetFreeShapes(roots);
@@ -308,6 +405,8 @@ bool CadDocumentIoService::prepareImportMesh(const std::shared_ptr<CadImportPayl
         shapes.push_back(payload->fallbackShape);
     }
 
+    const std::size_t faceCount = countFaces(shapes);
+
     int completed = 0;
     for (const TopoDS_Shape& shape : shapes) {
         if (progress && progress->isAbortRequested())
@@ -316,21 +415,42 @@ bool CadDocumentIoService::prepareImportMesh(const std::shared_ptr<CadImportPayl
             continue;
         try {
             Bnd_Box box;
-            BRepBndLib::Add(shape, box, Standard_False);
-            Standard_Real xMin = 0.0, yMin = 0.0, zMin = 0.0;
-            Standard_Real xMax = 0.0, yMax = 0.0, zMax = 0.0;
+            BRepBndLib::Add(shape, box, false);
+            double xMin = 0.0, yMin = 0.0, zMin = 0.0;
+            double xMax = 0.0, yMax = 0.0, zMax = 0.0;
             if (!box.IsVoid())
                 box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
             const double maxSize =
                 box.IsVoid() ? 1.0 : std::max({xMax - xMin, yMax - yMin, zMax - zMin});
+            const DisplayMeshProfile profile = displayMeshProfile(maxSize, faceCount);
             BRepTools::Clean(shape);
             IMeshTools_Parameters parameters;
-            parameters.InParallel = Standard_True;
-            parameters.AllowQualityDecrease = Standard_False;
-            parameters.Relative = Standard_False;
-            parameters.Deflection = std::clamp(0.0005 * maxSize, 0.005, 0.05);
-            parameters.Angle = 5.0 * 3.14159265358979323846 / 180.0;
-            BRepMesh_IncrementalMesh mesher(shape, parameters);
+            parameters.InParallel = true;
+            parameters.AllowQualityDecrease = false;
+            parameters.Relative = false;
+            parameters.Deflection = profile.deflection;
+            parameters.DeflectionInterior = profile.deflection;
+            parameters.Angle = profile.angle;
+            parameters.AngleInterior = 2.0 * profile.angle;
+            parameters.InternalVerticesMode = !profile.veryComplex;
+            parameters.ControlSurfaceDeflection = !profile.veryComplex;
+            if (progress) {
+                progress->setStepName(
+                    // 中文翻译：生成低成本显示网格（%1 个面）...
+                    profile.lowCost ? QObject::tr("Generate low-cost display mesh (%1 faces)...")
+                                          .arg(qulonglong(faceCount))
+                                    // 中文翻译：生成显示网格（%1 个面）...
+                                    : QObject::tr("Generate display mesh (%1 faces)...")
+                                          .arg(qulonglong(faceCount)));
+            }
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "CAD display mesh profile faces={} lowCost={} veryComplex={} "
+                      "deflection={} angleDeg={}",
+                      faceCount, profile.lowCost, profile.veryComplex, profile.deflection,
+                      profile.angle * 180.0 / kPi);
+            const auto meshProgress = progressIndicator(progress, 60, 95);
+            BRepMesh_IncrementalMesh mesher(shape, parameters,
+                                            Message_ProgressIndicator::Start(meshProgress));
             if (!mesher.IsDone()) {
                 if (errorMessage)
                     // 中文翻译：模型显示网格生成未完成
@@ -339,11 +459,11 @@ bool CadDocumentIoService::prepareImportMesh(const std::shared_ptr<CadImportPayl
             }
         } catch (const Standard_Failure& exception) {
             LCNC_ERR(lcnc::LogCode::Generic, "Detached CAD mesh generation failed: {}",
-                     exception.GetMessageString());
+                     exception.what());
             if (errorMessage)
                 // 中文翻译：模型显示网格生成失败: %1
                 *errorMessage = QObject::tr("Model display mesh generation failed: %1")
-                                    .arg(QString::fromUtf8(exception.GetMessageString()));
+                                    .arg(QString::fromUtf8(exception.what()));
             return false;
         }
         ++completed;
@@ -380,12 +500,11 @@ bool CadDocumentIoService::commitImport(LcncDocument* document,
         }
         return true;
     } catch (const Standard_Failure& exception) {
-        LCNC_ERR(lcnc::LogCode::Generic, "CAD import commit failed: {}",
-                 exception.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "CAD import commit failed: {}", exception.what());
         if (errorMessage)
             // 中文翻译：提交 CAD 导入失败: %1
             *errorMessage = QObject::tr("Failed to commit CAD import: %1")
-                                .arg(QString::fromUtf8(exception.GetMessageString()));
+                                .arg(QString::fromUtf8(exception.what()));
     } catch (const std::exception& exception) {
         LCNC_ERR(lcnc::LogCode::Generic, "CAD import commit failed: {}", exception.what());
         if (errorMessage)
@@ -473,7 +592,7 @@ bool CadDocumentIoService::importStepIntoDetachedDocument(LcncDocument* document
         new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
     XCAFDoc_DocumentTool::Set(xdeDocument->Main());
     STEPCAFControl_Reader reader;
-    reader.SetNameMode(Standard_True);
+    reader.SetNameMode(true);
     if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
         if (errorMessage)
             // 中文翻译：无法读取 STEP 文件: %1
@@ -481,7 +600,7 @@ bool CadDocumentIoService::importStepIntoDetachedDocument(LcncDocument* document
         return false;
     }
 
-    const Standard_Boolean transferOk = reader.Transfer(xdeDocument);
+    const bool transferOk = reader.Transfer(xdeDocument);
     document->importFromXcaf(xdeDocument, LcncDocument::EntityKind::Workpiece);
     const int importedCount =
         document->entityLabels(LcncDocument::EntityKind::Workpiece).Length() - beforeCount;
@@ -497,7 +616,7 @@ bool CadDocumentIoService::importStepIntoDetachedDocument(LcncDocument* document
             *errorMessage = tr("Unable to read STEP file: %1").arg(filePath);
         return false;
     }
-    const Standard_Integer transferred = fallbackReader.TransferRoots();
+    const int transferred = fallbackReader.TransferRoots();
     const TopoDS_Shape shape = fallbackReader.OneShape();
     if (transferred <= 0 || shape.IsNull()) {
         if (errorMessage)
@@ -520,12 +639,14 @@ bool CadDocumentIoService::importIgesIntoDetachedDocument(LcncDocument* document
     if (!document)
         return false;
 
+    std::lock_guard<std::mutex> lock(igesReaderMutex());
+
     const int beforeCount = document->entityLabels(LcncDocument::EntityKind::Workpiece).Length();
     Handle(TDocStd_Document) xdeDocument =
         new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
     XCAFDoc_DocumentTool::Set(xdeDocument->Main());
     IGESCAFControl_Reader reader;
-    reader.SetNameMode(Standard_True);
+    reader.SetNameMode(true);
     if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
         if (errorMessage)
             // 中文翻译：无法读取 IGES 文件: %1
@@ -533,7 +654,7 @@ bool CadDocumentIoService::importIgesIntoDetachedDocument(LcncDocument* document
         return false;
     }
 
-    const Standard_Boolean transferOk = reader.Transfer(xdeDocument);
+    const bool transferOk = reader.Transfer(xdeDocument);
     document->importFromXcaf(xdeDocument, LcncDocument::EntityKind::Workpiece);
     const int importedCount =
         document->entityLabels(LcncDocument::EntityKind::Workpiece).Length() - beforeCount;
@@ -549,7 +670,7 @@ bool CadDocumentIoService::importIgesIntoDetachedDocument(LcncDocument* document
             *errorMessage = tr("Unable to read IGES file: %1").arg(filePath);
         return false;
     }
-    const Standard_Integer transferred = fallbackReader.TransferRoots();
+    const int transferred = fallbackReader.TransferRoots();
     const TopoDS_Shape shape = fallbackReader.OneShape();
     if (transferred <= 0 || shape.IsNull()) {
         if (errorMessage)
@@ -571,40 +692,69 @@ bool CadDocumentIoService::prepareDisplayMesh(LcncDocument* document, TaskProgre
                                               QString* errorMessage) {
     if (!document)
         return false;
-    const TDF_LabelSequence labels = document->entityLabels(LcncDocument::EntityKind::Workpiece);
-    const int count = labels.Length();
-    for (int index = 1; index <= count; ++index) {
+    const NCollection_Sequence<TDF_Label> labels =
+        document->entityLabels(LcncDocument::EntityKind::Workpiece);
+    std::vector<TopoDS_Shape> shapes;
+    shapes.reserve(static_cast<std::size_t>(labels.Length()));
+    for (int index = 1; index <= labels.Length(); ++index) {
+        const TopoDS_Shape shape = XcafUtils::shape(labels.Value(index));
+        if (!shape.IsNull())
+            shapes.push_back(shape);
+    }
+    const std::size_t faceCount = countFaces(shapes);
+    int completed = 0;
+    for (const TopoDS_Shape& shape : shapes) {
         if (progress && progress->isAbortRequested())
             return false;
-        const TopoDS_Shape shape = XcafUtils::shape(labels.Value(index));
-        if (shape.IsNull())
-            continue;
         try {
             Bnd_Box box;
-            BRepBndLib::Add(shape, box, Standard_False);
-            Standard_Real xMin = 0.0, yMin = 0.0, zMin = 0.0;
-            Standard_Real xMax = 0.0, yMax = 0.0, zMax = 0.0;
+            BRepBndLib::Add(shape, box, false);
+            double xMin = 0.0, yMin = 0.0, zMin = 0.0;
+            double xMax = 0.0, yMax = 0.0, zMax = 0.0;
             if (!box.IsVoid())
                 box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
             const double maxSize =
                 box.IsVoid() ? 1.0 : std::max({xMax - xMin, yMax - yMin, zMax - zMin});
+            const DisplayMeshProfile profile = displayMeshProfile(maxSize, faceCount);
             // GuiDocument deliberately disables AIS auto triangulation for
             // imported workpieces so the presentation uses this prepared mesh.
-            // The former 0.4 %-of-model / 20 degree policy made circular
-            // workpiece features visibly polygonal on large assemblies.  Drop
-            // any serialized or earlier coarse triangulation first, then use
-            // bounded display-quality values.  This runs before the document
-            // is published to a GUI view, therefore the intentional mesh reset
-            // cannot invalidate a live AIS presentation.
+            // Drop any serialized or earlier triangulation before selecting a
+            // bounded profile from the exact B-Rep face count. This runs before
+            // the document is published to a GUI view, therefore the
+            // intentional mesh reset cannot invalidate a live AIS presentation.
             BRepTools::Clean(shape);
 
             IMeshTools_Parameters params;
-            params.InParallel = Standard_True;
-            params.AllowQualityDecrease = Standard_False;
-            params.Relative = Standard_False;
-            params.Deflection = std::clamp(0.0005 * maxSize, 0.005, 0.05);
-            params.Angle = 5.0 * 3.14159265358979323846 / 180.0;
-            BRepMesh_IncrementalMesh mesher(shape, params);
+            params.InParallel = true;
+            params.AllowQualityDecrease = false;
+            params.Relative = false;
+            params.Deflection = profile.deflection;
+            params.DeflectionInterior = profile.deflection;
+            params.Angle = profile.angle;
+            params.AngleInterior = 2.0 * profile.angle;
+            params.InternalVerticesMode = !profile.veryComplex;
+            params.ControlSurfaceDeflection = !profile.veryComplex;
+            if (progress) {
+                progress->setStepName(
+                    // 中文翻译：生成低成本显示网格（%1 个面）...
+                    profile.lowCost ? QObject::tr("Generate low-cost display mesh (%1 faces)...")
+                                          .arg(qulonglong(faceCount))
+                                    // 中文翻译：生成显示网格（%1 个面）...
+                                    : QObject::tr("Generate display mesh (%1 faces)...")
+                                          .arg(qulonglong(faceCount)));
+            }
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "CAD document display mesh profile faces={} lowCost={} veryComplex={} "
+                      "deflection={} angleDeg={}",
+                      faceCount, profile.lowCost, profile.veryComplex, profile.deflection,
+                      profile.angle * 180.0 / kPi);
+            const int meshStart =
+                60 + (35 * completed) / std::max(1, static_cast<int>(shapes.size()));
+            const int meshEnd =
+                60 + (35 * (completed + 1)) / std::max(1, static_cast<int>(shapes.size()));
+            const auto meshProgress = progressIndicator(progress, meshStart, meshEnd);
+            BRepMesh_IncrementalMesh mesher(shape, params,
+                                            Message_ProgressIndicator::Start(meshProgress));
             if (!mesher.IsDone()) {
                 if (errorMessage)
                     // 中文翻译：模型显示网格生成未完成
@@ -613,15 +763,17 @@ bool CadDocumentIoService::prepareDisplayMesh(LcncDocument* document, TaskProgre
             }
         } catch (const Standard_Failure& exception) {
             LCNC_ERR(lcnc::LogCode::Generic, "CAD display mesh generation failed: {}",
-                     exception.GetMessageString());
+                     exception.what());
             if (errorMessage)
                 // 中文翻译：模型显示网格生成失败: %1
                 *errorMessage = QObject::tr("Model display mesh generation failed: %1")
-                                    .arg(QString::fromUtf8(exception.GetMessageString()));
+                                    .arg(QString::fromUtf8(exception.what()));
             return false;
         }
+        ++completed;
         if (progress)
-            progress->setValue(60 + (35 * index) / std::max(1, count));
+            progress->setValue(60 + (35 * completed) /
+                                        std::max(1, static_cast<int>(shapes.size())));
     }
     return true;
 }

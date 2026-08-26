@@ -129,9 +129,8 @@ void SketchOverlayRenderer::render(const Handle(AIS_InteractiveContext)& context
         try {
             shape = buildOverlayShape(item);
         } catch (const Standard_Failure& exception) {
-            LCNC_ERR(lcnc::LogCode::Generic,
-                     "Sketch overlay OCC projection failed: {}",
-                     exception.GetMessageString());
+            LCNC_ERR(lcnc::LogCode::Generic, "Sketch overlay OCC projection failed: {}",
+                     exception.what());
             continue;
         } catch (const std::exception& exception) {
             LCNC_ERR(lcnc::LogCode::Generic,

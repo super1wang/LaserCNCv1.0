@@ -1,32 +1,31 @@
 #include "core/algorithms/cam/face_classifier.h"
+
 #include "core/math/numeric_constants.h"
 
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepGProp.hxx>
+#include <BRepTools.hxx>
+#include <BRep_tool.hxx>
+#include <GProp_GProps.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <Geom_Surface.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <NCollection_List.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Vertex.hxx>
-#include <BRep_tool.hxx>
-#include <BRepTools.hxx>
-#include <BRepBndLib.hxx>
-#include <BRepGProp.hxx>
-#include <BRepAdaptor_Curve.hxx>
-#include <BRepBuilderAPI_MakeWire.hxx>
-#include <Geom_Surface.hxx>
-#include <GeomLProp_SLProps.hxx>
-#include <TopTools_IndexedMapOfShape.hxx>
-#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
-#include <TopTools_ListOfShape.hxx>
-
+#include <cmath>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
-#include <GProp_GProps.hxx>
-
-#include <cmath>
 #include <limits>
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
-
 
 // =============================================================================
 // FaceClassification convenience accessors
@@ -109,10 +108,10 @@ bool computeNormalAtEdgeMid(const TopoDS_Face& face,
                             const TopoDS_Edge& edge,
                             gp_Dir& outNormal)
 {
-    Standard_Real umin, umax, vmin, vmax;
+    double umin, umax, vmin, vmax;
     BRepTools::UVBounds(face, edge, umin, umax, vmin, vmax);
-    Standard_Real umid = (umin + umax) * 0.5;
-    Standard_Real vmid = (vmin + vmax) * 0.5;
+    double umid = (umin + umax) * 0.5;
+    double vmid = (vmin + vmax) * 0.5;
 
     Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
     if (surf.IsNull())
@@ -247,14 +246,16 @@ FaceClassification FaceClassifier::classifyFaces(const TopoDS_Shape& workpiece,
     const double thresholdRad = lcnc::math::degreesToRadians(smoothAngleThresholdDeg);
 
     // ── Step 1: extract all faces ────────────────────────────────────────
-    TopTools_IndexedMapOfShape faceMap;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faceMap;
     TopExp::MapShapes(workpiece, TopAbs_FACE, faceMap);
     const int nFaces = faceMap.Extent();
     if (nFaces == 0)
         return result;
 
     // ── Step 2: build edge-to-face adjacency ─────────────────────────────
-    TopTools_IndexedDataMapOfShapeListOfShape edgeToFaceMap;
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                               TopTools_ShapeMapHasher>
+        edgeToFaceMap;
     TopExp::MapShapesAndAncestors(workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaceMap);
 
     // ── Step 3: Union-Find — merge smoothly-connected face pairs ─────────
@@ -275,7 +276,7 @@ FaceClassification FaceClassifier::classifyFaces(const TopoDS_Shape& workpiece,
         if (BRep_Tool::Degenerated(edge))
             continue;
 
-        const TopTools_ListOfShape& adjFaces = edgeToFaceMap.FindFromIndex(ei);
+        const NCollection_List<TopoDS_Shape>& adjFaces = edgeToFaceMap.FindFromIndex(ei);
         if (adjFaces.Extent() != 2)
             continue; // boundary edge or non-manifold
 
@@ -324,7 +325,7 @@ FaceClassification FaceClassifier::classifyFaces(const TopoDS_Shape& workpiece,
     double highestExtent = -std::numeric_limits<double>::max();
     for (int gi = 0; gi < static_cast<int>(result.groups.size()); ++gi) {
         const double area = smoothGroupArea(result.groups[gi].faces);
-        Standard_Real xMin, yMin, zMin, xMax, yMax, zMax;
+        double xMin, yMin, zMin, xMax, yMax, zMax;
         result.groups[gi].bbox.Get(xMin, yMin, zMin, xMax, yMax, zMax);
         // Equal-area top/bottom plate faces are both external candidates. Pick
         // the upper one deterministically so the Z-light strategy starts with
@@ -392,19 +393,19 @@ std::vector<TopoDS_Edge> FaceClassifier::extractContourEdges(
 
     // Build a set of all outer faces for quick lookup
     const FaceGroup& outerGrp = *classification.outerGroup();
-    TopTools_IndexedMapOfShape outerFaceMap;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> outerFaceMap;
     for (const auto& f : outerGrp.faces)
         outerFaceMap.Add(f);
 
     // Build a set of all cross-section faces
-    TopTools_IndexedMapOfShape crossFaceMap;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> crossFaceMap;
     for (const auto* cg : classification.crossSectionGroups())
         for (const auto& f : cg->faces)
             crossFaceMap.Add(f);
 
     // For each outer face, collect edges that are also adjacent to a cross-section face.
     // We iterate edges of outer faces and check if any ancestor face is a cross-section.
-    TopTools_IndexedMapOfShape collectedEdges; // dedup
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> collectedEdges; // dedup
     for (const auto& outerFace : outerGrp.faces) {
         for (TopExp_Explorer exp(outerFace, TopAbs_EDGE); exp.More(); exp.Next()) {
             const TopoDS_Edge& edge = TopoDS::Edge(exp.Current());
@@ -456,7 +457,7 @@ std::vector<TopoDS_Wire> FaceClassifier::chainEdgesToWires(
 
     for (const auto& e : edges) {
         TopoDS_Vertex vFirst, vLast;
-        TopExp::Vertices(e, vFirst, vLast, Standard_True);
+        TopExp::Vertices(e, vFirst, vLast, true);
         if (vFirst.IsNull() || vLast.IsNull())
             continue;
         entries.push_back({e,

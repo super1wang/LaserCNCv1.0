@@ -178,10 +178,10 @@ bool TransformGizmoRenderer::axisScreenVector(const Handle(V3d_View)& view,
     gp_Pnt end = center;
     end.Translate(gp_Vec(axisDir(axis)).Multiplied(m_state.size));
 
-    Standard_Integer centerX = 0;
-    Standard_Integer centerY = 0;
-    Standard_Integer endX = 0;
-    Standard_Integer endY = 0;
+    int centerX = 0;
+    int centerY = 0;
+    int endX = 0;
+    int endY = 0;
     view->Convert(center.X(), center.Y(), center.Z(), centerX, centerY);
     view->Convert(end.X(), end.Y(), end.Z(), endX, endY);
 

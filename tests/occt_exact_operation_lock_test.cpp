@@ -55,7 +55,7 @@ int main(int argc, char* argv[])
                            && !maximumHolders.compare_exchange_weak(observed, active)) {
                     }
                     BRepExtrema_DistShapeShape distance(first, second);
-                    distance.SetMultiThread(Standard_False);
+                    distance.SetMultiThread(false);
                     distance.Perform();
                     if (!distance.IsDone())
                         failed.store(true);

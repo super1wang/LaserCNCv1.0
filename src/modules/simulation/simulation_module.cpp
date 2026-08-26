@@ -1,8 +1,8 @@
 #include "modules/simulation/simulation_module.h"
 
-#include "core/document/lcnc_document.h"
 #include "core/algorithms/cam/collision_scan_policy.h"
 #include "core/algorithms/occt_exact_operation_lock.h"
+#include "core/document/lcnc_document.h"
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
 #include "core/kinematics/machine_configuration_service.h"
@@ -19,25 +19,18 @@
 
 #include <AIS_Shape.hxx>
 #include <BRepBndLib.hxx>
-#include <BRep_Builder.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
 #include <Bnd_OBB.hxx>
 #include <Graphic3d_Camera.hxx>
+#include <NCollection_Map.hxx>
 #include <OSD_Parallel.hxx>
 #include <OSD_ThreadPool.hxx>
-#include <TopAbs_ShapeEnum.hxx>
-#include <TopExp_Explorer.hxx>
-#include <TopTools_MapOfShape.hxx>
-#include <TopoDS_Compound.hxx>
-#include <Quantity_NameOfColor.hxx>
-#include <Quantity_Color.hxx>
-#include <gp_Dir.hxx>
 #include <Precision.hxx>
-
 #include <QBoxLayout>
 #include <QElapsedTimer>
 #include <QHash>
@@ -48,10 +41,16 @@
 #include <QSet>
 #include <QSlider>
 #include <QTimer>
-
+#include <Quantity_Color.hxx>
+#include <Quantity_NameOfColor.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
+#include <TopoDS_Compound.hxx>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <gp_Dir.hxx>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -124,13 +123,12 @@ CollisionGeometry buildCollisionGeometry(const TopoDS_Shape& source)
     // Keep a private immutable topology and calculate bounds directly from
     // BRep. Collision workers therefore never create or share mesh caches.
     // 中文翻译：碰撞几何使用私有只读拓扑，并直接按 BRep 计算包围盒，不共享网格缓存。
-    BRepBuilderAPI_Copy copy(source, Standard_True, Standard_True);
+    BRepBuilderAPI_Copy copy(source, true, true);
     const TopoDS_Shape collisionShape = copy.IsDone() ? copy.Shape() : TopoDS_Shape{};
     if (collisionShape.IsNull())
         return result;
-    BRepBndLib::AddOptimal(collisionShape, result.groupAabb, Standard_False, Standard_False);
-    BRepBndLib::AddOBB(collisionShape, result.groupObb, Standard_False, Standard_False,
-                        Standard_False);
+    BRepBndLib::AddOptimal(collisionShape, result.groupAabb, false, false);
+    BRepBndLib::AddOBB(collisionShape, result.groupObb, false, false, false);
     result.leaves = buildCollisionLeaves(collisionShape);
     return result;
 }
@@ -141,15 +139,14 @@ QVector<CollisionLeaf> buildCollisionLeaves(const TopoDS_Shape& source)
     if (source.IsNull())
         return leaves;
 
-    TopTools_MapOfShape seen;
+    NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
     const auto append = [&leaves, &seen](const TopoDS_Shape& shape) {
         if (shape.IsNull() || !seen.Add(shape))
             return;
         CollisionLeaf leaf;
         leaf.shape = shape;
-        BRepBndLib::AddOptimal(shape, leaf.localAabb, Standard_False, Standard_False);
-        BRepBndLib::AddOBB(shape, leaf.localObb, Standard_False, Standard_False,
-                            Standard_False);
+        BRepBndLib::AddOptimal(shape, leaf.localAabb, false, false);
+        BRepBndLib::AddOBB(shape, leaf.localObb, false, false, false);
         if (!leaf.localAabb.IsVoid() && !leaf.localObb.IsVoid())
             leaves.append(std::move(leaf));
     };
@@ -170,7 +167,7 @@ Bnd_Box transformAabb(const Bnd_Box& local, const gp_Trsf& trsf, double gapMm)
     Bnd_Box result;
     if (local.IsVoid())
         return result;
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0, xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0, xmax = 0.0, ymax = 0.0, zmax = 0.0;
     local.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     for (const double x : {xmin, xmax}) for (const double y : {ymin, ymax})
         for (const double z : {zmin, zmax}) {
@@ -245,7 +242,7 @@ private:
 TopoDS_Shape transformed(const TopoDS_Shape& shape, const gp_Trsf& trsf)
 {
     if (shape.IsNull()) return {};
-    BRepBuilderAPI_Transform transform(shape, trsf, Standard_False);
+    BRepBuilderAPI_Transform transform(shape, trsf, false);
     return transform.IsDone() ? transform.Shape() : TopoDS_Shape{};
 }
 
@@ -736,14 +733,14 @@ private:
                     // only; collision still operates on the untouched BRep.
                     // 中文翻译：仿真视图复用文件/机台视图已准备好的显示网格，
                     // 禁止 AIS 按本视图质量配置重新粗略三角化；碰撞仍使用原始 BRep。
-                    body.ais->Attributes()->SetAutoTriangulation(Standard_False);
-                    body.ais->Attributes()->SetIsoOnTriangulation(Standard_False);
-                    body.ais->Attributes()->SetFaceBoundaryDraw(Standard_False);
+                    body.ais->Attributes()->SetAutoTriangulation(false);
+                    body.ais->Attributes()->SetIsoOnTriangulation(false);
+                    body.ais->Attributes()->SetFaceBoundaryDraw(false);
                 }
                 if (!body.workpiece && m_gui->context()
                     && (!m_sceneSnapshot.showMachine
                         || !m_sceneSnapshot.visibleMachineEntries.contains(body.id))) {
-                    m_gui->context()->Erase(body.ais, Standard_False);
+                    m_gui->context()->Erase(body.ais, false);
                 }
                 m_bodies.append(std::move(body));
         }
@@ -815,9 +812,9 @@ private:
             if (m_gui->context()) {
                 m_gui->context()->Deactivate(ais);
                 if (m_sceneSnapshot.showToolpath && contour.enabled)
-                    m_gui->context()->Display(ais, Standard_False);
+                    m_gui->context()->Display(ais, false);
                 else
-                    m_gui->context()->Erase(ais, Standard_False);
+                    m_gui->context()->Erase(ais, false);
             }
         }
 
@@ -842,7 +839,7 @@ private:
                 if (ais.IsNull())
                     continue;
                 ais->SetLocalTransformation(m_kinematics.computeWpcTransform(contour.workpieceEntry));
-                context->RecomputePrsOnly(ais, Standard_False);
+                context->RecomputePrsOnly(ais, false);
             }
         }
         if (m_toolpathRenderer)
@@ -895,10 +892,10 @@ private:
             return;
 
         m_applyingAxisGroupSelection = true;
-        ctx->ClearSelected(Standard_False);
+        ctx->ClearSelected(false);
         for (const SimulationBody& body : std::as_const(m_bodies)) {
             if (!body.ais.IsNull() && selectionGroupKey(body) == group)
-                ctx->AddOrRemoveSelected(body.ais, Standard_False);
+                ctx->AddOrRemoveSelected(body.ais, false);
         }
         ctx->UpdateCurrentViewer();
         if (m_gui->hasView())
@@ -1220,7 +1217,7 @@ private:
                         lcnc::OcctExactOperationLock exactOperationLock;
                         BRepExtrema_DistShapeShape distance(one, two);
                         distance.SetDeflection(0.025);
-                        distance.SetMultiThread(Standard_False);
+                        distance.SetMultiThread(false);
                         distance.Perform();
                         if (!distance.IsDone()) {
                             pairState = 3;

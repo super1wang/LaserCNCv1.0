@@ -1,18 +1,13 @@
-#include "modules/cad/commands/commands_cad.h"
-
 #include "app/app_command_context.h"
 #include "core/document/xcaf_utils.h"
 #include "modules/cad/cad_module.h"
 #include "modules/cad/commands/command_helpers.h"
+#include "modules/cad/commands/commands_cad.h"
 #include "view/gui_document.h"
 
 #include <AIS_InteractiveContext.hxx>
 #include <AIS_Shape.hxx>
-#include <TDataStd_Integer.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <TopoDS_Iterator.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-
+#include <NCollection_Sequence.hxx>
 #include <QAction>
 #include <QComboBox>
 #include <QDialog>
@@ -22,6 +17,10 @@
 #include <QKeySequence>
 #include <QMessageBox>
 #include <QVBoxLayout>
+#include <TDF_Label.hxx>
+#include <TDataStd_Integer.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 
 using namespace lcnc::cad::commands;
 
@@ -39,7 +38,7 @@ bool CmdDeleteShape::isEnabled() const
 {
     if (LcncDocument* doc = contextualDocument(context())) {
         Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
-        TDF_LabelSequence freeShapes;
+        NCollection_Sequence<TDF_Label> freeShapes;
         shapeTool->GetFreeShapes(freeShapes);
         return freeShapes.Length() > 0;
     }
@@ -53,7 +52,7 @@ void CmdDeleteShape::execute()
         return;
 
     Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
-    TDF_LabelSequence freeShapes;
+    NCollection_Sequence<TDF_Label> freeShapes;
     shapeTool->GetFreeShapes(freeShapes);
 
     QList<EntityInfo> all;
@@ -161,7 +160,7 @@ void CmdExplodeShape::execute()
         if (aisContext.IsNull())
             return {};
 
-        TDF_LabelSequence labels = doc->entityLabels(kind);
+        NCollection_Sequence<TDF_Label> labels = doc->entityLabels(kind);
         Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
         for (int index = 1; index <= labels.Length(); ++index) {
             TDF_Label label = labels.Value(index);
@@ -200,7 +199,7 @@ void CmdExplodeShape::execute()
         LcncDocument::EntityKind kind = doc == context()->machineDocument()
             ? LcncDocument::EntityKind::Machine
             : LcncDocument::EntityKind::Workpiece;
-        TDF_LabelSequence labels = doc->entityLabels(kind);
+        NCollection_Sequence<TDF_Label> labels = doc->entityLabels(kind);
         if (labels.IsEmpty())
             return;
 

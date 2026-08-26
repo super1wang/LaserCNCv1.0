@@ -8,27 +8,9 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <Bnd_OBB.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <NCollection_Map.hxx>
+#include <NCollection_Sequence.hxx>
 #include <Precision.hxx>
-#include <STEPCAFControl_Reader.hxx>
-#include <Standard_Failure.hxx>
-#include <TCollection_ExtendedString.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <TDataStd_Name.hxx>
-#include <TDocStd_Document.hxx>
-#include <TopAbs_ShapeEnum.hxx>
-#include <TopExp_Explorer.hxx>
-#include <TopLoc_Location.hxx>
-#include <TopTools_MapOfShape.hxx>
-#include <TopoDS_Shape.hxx>
-#include <XCAFDoc_DocumentTool.hxx>
-#include <XCAFDoc_Location.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <gp_Ax1.hxx>
-#include <gp_Dir.hxx>
-#include <gp_Pnt.hxx>
-#include <gp_Trsf.hxx>
-#include <gp_Vec.hxx>
-
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -37,13 +19,31 @@
 #include <QFileInfo>
 #include <QSaveFile>
 #include <QSet>
-
+#include <STEPCAFControl_Reader.hxx>
+#include <Standard_Failure.hxx>
+#include <TCollection_ExtendedString.hxx>
+#include <TDF_Label.hxx>
+#include <TDataStd_Name.hxx>
+#include <TDocStd_Document.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
+#include <TopoDS_Shape.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_Location.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <gp_Ax1.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -145,8 +145,8 @@ QString axisFromPartName(const QString& name)
 
 std::array<double, 3> boxCenterCoordinates(const Bnd_Box& box)
 {
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-    Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+    double xmax = 0.0, ymax = 0.0, zmax = 0.0;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     return {(xmin + xmax) * 0.5,
             (ymin + ymax) * 0.5,
@@ -169,8 +169,8 @@ void buildLeafBvh(SourceBody* body)
             body->leafBvh[nodeIndex].leaf = indices.at(begin);
             return nodeIndex;
         }
-        Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-        Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+        double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+        double xmax = 0.0, ymax = 0.0, zmax = 0.0;
         node.localAabb.Get(xmin, ymin, zmin, xmax, ymax, zmax);
         const std::array<double, 3> extents{xmax - xmin, ymax - ymin, zmax - zmin};
         const int splitAxis = static_cast<int>(std::distance(
@@ -214,7 +214,7 @@ bool appendRootOrComponents(const Handle(XCAFDoc_ShapeTool)& shapes,
                             int rootIndex,
                             QVector<SourceBody>* bodies)
 {
-    TDF_LabelSequence components;
+    NCollection_Sequence<TDF_Label> components;
     shapes->GetComponents(root, components);
     if (components.IsEmpty()) {
         const TopoDS_Shape shape = shapes->GetShape(root);
@@ -270,7 +270,7 @@ bool readMachineBodies(const QString& filePath,
         new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
     XCAFDoc_DocumentTool::Set(document->Main());
     STEPCAFControl_Reader reader;
-    reader.SetNameMode(Standard_True);
+    reader.SetNameMode(true);
     if (reader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone
         || !reader.Transfer(document)) {
         if (errorMessage)
@@ -279,7 +279,7 @@ bool readMachineBodies(const QString& filePath,
     }
     const Handle(XCAFDoc_ShapeTool) shapes =
         XCAFDoc_DocumentTool::ShapeTool(document->Main());
-    TDF_LabelSequence roots;
+    NCollection_Sequence<TDF_Label> roots;
     shapes->GetFreeShapes(roots);
     for (int index = 1; index <= roots.Length(); ++index)
         appendRootOrComponents(shapes, roots.Value(index), index, bodies);
@@ -291,24 +291,21 @@ bool readMachineBodies(const QString& filePath,
         return false;
     }
     for (SourceBody& body : *bodies) {
-        BRepBndLib::AddOptimal(body.shape, body.localAabb,
-                               Standard_False, Standard_False);
+        BRepBndLib::AddOptimal(body.shape, body.localAabb, false, false);
         if (body.localAabb.IsVoid()) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("Machine body has no usable bounds: %1")
                                     .arg(body.name);
             return false;
         }
-        TopTools_MapOfShape seen;
+        NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
         const auto appendLeaf = [&body, &seen](const TopoDS_Shape& shape) {
             if (shape.IsNull() || !seen.Add(shape))
                 return;
             SourceBody::Leaf leaf;
             leaf.shape = shape;
-            BRepBndLib::AddOptimal(shape, leaf.localAabb,
-                                   Standard_False, Standard_False);
-            BRepBndLib::AddOBB(shape, leaf.localObb,
-                               Standard_False, Standard_False, Standard_False);
+            BRepBndLib::AddOptimal(shape, leaf.localAabb, false, false);
+            BRepBndLib::AddOBB(shape, leaf.localObb, false, false, false);
             if (!leaf.localAabb.IsVoid() && !leaf.localObb.IsVoid())
                 body.leaves.append(std::move(leaf));
         };
@@ -412,8 +409,8 @@ Bnd_Box transformBox(const Bnd_Box& local, const gp_Trsf& transform)
     Bnd_Box result;
     if (local.IsVoid())
         return result;
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-    Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+    double xmax = 0.0, ymax = 0.0, zmax = 0.0;
     local.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     for (double x : {xmin, xmax}) {
         for (double y : {ymin, ymax}) {
@@ -449,8 +446,8 @@ Bnd_OBB transformObb(const Bnd_OBB& local,
 
 double maximumRadius(const Bnd_Box& box, const gp_Pnt& origin)
 {
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-    Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+    double xmax = 0.0, ymax = 0.0, zmax = 0.0;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     double result = 0.0;
     for (double x : {xmin, xmax}) {
@@ -468,8 +465,8 @@ double maximumRadiusFromAxis(const Bnd_Box& box,
 {
     if (box.IsVoid())
         return 0.0;
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-    Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+    double xmax = 0.0, ymax = 0.0, zmax = 0.0;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     const gp_Vec axis(direction);
     double result = 0.0;
@@ -580,8 +577,8 @@ Bnd_Box enlargeBoxDirectional(const Bnd_Box& box,
     Bnd_Box result;
     if (box.IsVoid())
         return result;
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-    Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+    double xmax = 0.0, ymax = 0.0, zmax = 0.0;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     result.Update(xmin - bound.components[0],
                   ymin - bound.components[1],
@@ -596,10 +593,10 @@ double boxDistance(const Bnd_Box& first, const Bnd_Box& second)
 {
     if (first.IsVoid() || second.IsVoid())
         return std::numeric_limits<double>::infinity();
-    Standard_Real ax0 = 0.0, ay0 = 0.0, az0 = 0.0;
-    Standard_Real ax1 = 0.0, ay1 = 0.0, az1 = 0.0;
-    Standard_Real bx0 = 0.0, by0 = 0.0, bz0 = 0.0;
-    Standard_Real bx1 = 0.0, by1 = 0.0, bz1 = 0.0;
+    double ax0 = 0.0, ay0 = 0.0, az0 = 0.0;
+    double ax1 = 0.0, ay1 = 0.0, az1 = 0.0;
+    double bx0 = 0.0, by0 = 0.0, bz0 = 0.0;
+    double bx1 = 0.0, by1 = 0.0, bz1 = 0.0;
     first.Get(ax0, ay0, az0, ax1, ay1, az1);
     second.Get(bx0, by0, bz0, bx1, by1, bz1);
     const double dx = std::max({0.0, ax0 - bx1, bx0 - ax1});
@@ -612,10 +609,10 @@ bool boxContains(const Bnd_Box& outer, const Bnd_Box& inner)
 {
     if (outer.IsVoid() || inner.IsVoid())
         return false;
-    Standard_Real ax0 = 0.0, ay0 = 0.0, az0 = 0.0;
-    Standard_Real ax1 = 0.0, ay1 = 0.0, az1 = 0.0;
-    Standard_Real bx0 = 0.0, by0 = 0.0, bz0 = 0.0;
-    Standard_Real bx1 = 0.0, by1 = 0.0, bz1 = 0.0;
+    double ax0 = 0.0, ay0 = 0.0, az0 = 0.0;
+    double ax1 = 0.0, ay1 = 0.0, az1 = 0.0;
+    double bx0 = 0.0, by0 = 0.0, bz0 = 0.0;
+    double bx1 = 0.0, by1 = 0.0, bz1 = 0.0;
     outer.Get(ax0, ay0, az0, ax1, ay1, az1);
     inner.Get(bx0, by0, bz0, bx1, by1, bz1);
     return ax0 <= bx0 && ay0 <= by0 && az0 <= bz0
@@ -626,8 +623,8 @@ double boxVolume(const Bnd_Box& box)
 {
     if (box.IsVoid())
         return 0.0;
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-    Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+    double xmax = 0.0, ymax = 0.0, zmax = 0.0;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     return std::max(0.0, xmax - xmin)
         * std::max(0.0, ymax - ymin)
@@ -712,10 +709,10 @@ double overlapVolume(const Bnd_Box& first, const Bnd_Box& second)
 {
     if (first.IsVoid() || second.IsVoid())
         return 0.0;
-    Standard_Real ax0 = 0.0, ay0 = 0.0, az0 = 0.0;
-    Standard_Real ax1 = 0.0, ay1 = 0.0, az1 = 0.0;
-    Standard_Real bx0 = 0.0, by0 = 0.0, bz0 = 0.0;
-    Standard_Real bx1 = 0.0, by1 = 0.0, bz1 = 0.0;
+    double ax0 = 0.0, ay0 = 0.0, az0 = 0.0;
+    double ax1 = 0.0, ay1 = 0.0, az1 = 0.0;
+    double bx0 = 0.0, by0 = 0.0, bz0 = 0.0;
+    double bx1 = 0.0, by1 = 0.0, bz1 = 0.0;
     first.Get(ax0, ay0, az0, ax1, ay1, az1);
     second.Get(bx0, by0, bz0, bx1, by1, bz1);
     const double dx = std::max(0.0, std::min(ax1, bx1) - std::max(ax0, bx0));
@@ -783,7 +780,7 @@ PairExactEvaluation evaluatePairExact(const SourceBody& firstBody,
                     .shape.Moved(TopLoc_Location(secondTransform));
                 BRepExtrema_DistShapeShape distance(first, second);
                 distance.SetDeflection(0.025);
-                distance.SetMultiThread(Standard_False);
+                distance.SetMultiThread(false);
                 distance.Perform();
                 ++result.leafExactQueries;
                 if (!distance.IsDone())
@@ -808,7 +805,7 @@ PairExactEvaluation evaluatePairExact(const SourceBody& firstBody,
     lcnc::OcctExactOperationLock exactOperationLock;
     BRepExtrema_DistShapeShape distance(first, second);
     distance.SetDeflection(0.025);
-    distance.SetMultiThread(Standard_False);
+    distance.SetMultiThread(false);
     distance.Perform();
     ++result.wholeShapeExactQueries;
     if (!distance.IsDone())
@@ -1667,11 +1664,10 @@ bool MachineSafetyIndexCompiler::loadMachine(const QString& machineFilePath,
         m_impl->importMs = timer.elapsed();
         return true;
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "Machine safety index import OCCT failure: {}",
-                 failure.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "Machine safety index import OCCT failure: {}",
+                 failure.what());
         if (errorMessage)
-            *errorMessage = QString::fromUtf8(failure.GetMessageString());
+            *errorMessage = QString::fromUtf8(failure.what());
     } catch (const std::exception& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Machine safety index import failure: {}", failure.what());
@@ -2611,11 +2607,10 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
         reportProgress(100, QStringLiteral("index_complete"));
         return true;
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "Machine safety index build OCCT failure: {}",
-                 failure.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "Machine safety index build OCCT failure: {}",
+                 failure.what());
         if (errorMessage)
-            *errorMessage = QString::fromUtf8(failure.GetMessageString());
+            *errorMessage = QString::fromUtf8(failure.what());
     } catch (const std::exception& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Machine safety index build failure: {}", failure.what());
@@ -2685,11 +2680,10 @@ MachineSafetyExactResult MachineSafetyIndexCompiler::validatePoseExact(
         }
         return result;
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "Machine safety exact pose OCCT failure: {}",
-                 failure.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "Machine safety exact pose OCCT failure: {}",
+                 failure.what());
         result.state = MachineSafetyIndexState::Unknown;
-        result.failureReason = QString::fromUtf8(failure.GetMessageString());
+        result.failureReason = QString::fromUtf8(failure.what());
     } catch (const std::exception& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "Machine safety exact pose failure: {}", failure.what());

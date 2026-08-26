@@ -53,7 +53,8 @@ class CadDocumentIoService final : public QObject, public lcnc::IService {
                              const std::shared_ptr<CadImportPayload>& payload,
                              QString* errorMessage = nullptr);
 
-    // The IntoDocument methods are restricted to detached/pending documents.
+    // Legacy direct helpers remain for internal compatibility. New UI paths use
+    // readImportAsync() + commitImport() to keep parsing and meshing transactional.
     static bool importStlIntoDetachedDocument(LcncDocument* document, const QString& filePath,
                                               TaskProgress* progress, QString* errorMessage);
     static bool importBrepIntoDetachedDocument(LcncDocument* document, const QString& filePath,

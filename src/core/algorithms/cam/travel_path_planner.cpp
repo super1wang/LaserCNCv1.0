@@ -83,7 +83,7 @@ bool buildSphericalReference(const TopoDS_Shape& workpiece,
         const gp_Pnt targetPoint = pointOf(target);
         for (TopExp_Explorer explorer(workpiece, TopAbs_FACE);
              explorer.More(); explorer.Next()) {
-            BRepAdaptor_Surface surface(TopoDS::Face(explorer.Current()), Standard_True);
+            BRepAdaptor_Surface surface(TopoDS::Face(explorer.Current()), true);
             if (surface.GetType() != GeomAbs_Sphere)
                 continue;
 
@@ -131,9 +131,8 @@ bool buildSphericalReference(const TopoDS_Shape& workpiece,
             return points->size() >= 2;
         }
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "Unable to construct a rapid surface reference: {}",
-                 failure.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "Unable to construct a rapid surface reference: {}",
+                 failure.what());
         points->clear();
     }
     return false;

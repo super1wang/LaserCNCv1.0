@@ -6,15 +6,20 @@
 #include "core/logging/logger.h"
 #include "core/task/task_manager.h"
 
-#include <BRep_Builder.hxx>
 #include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <NCollection_Sequence.hxx>
+#include <QFileInfo>
+#include <QSet>
+#include <QString>
+#include <QStringList>
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPCAFControl_Writer.hxx>
-#include <StlAPI_Reader.hxx>
 #include <Standard_Failure.hxx>
+#include <StlAPI_Reader.hxx>
 #include <TCollection_ExtendedString.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <TDataStd_Name.hxx>
 #include <TDocStd_Document.hxx>
 #include <TopLoc_Location.hxx>
@@ -22,12 +27,6 @@
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_Location.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
-
-#include <QFileInfo>
-#include <QSet>
-#include <QString>
-#include <QStringList>
-
 #include <exception>
 
 namespace lcnc::cam::machine_io {
@@ -62,7 +61,7 @@ static bool readMachineFileImpl(const QString& filePath,
             new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
         XCAFDoc_DocumentTool::Set(xdeDoc->Main());
         STEPCAFControl_Reader cafReader;
-        cafReader.SetNameMode(Standard_True);
+        cafReader.SetNameMode(true);
         if (cafReader.ReadFile(filePath.toUtf8().constData()) != IFSelect_RetDone) {
             result->error = QStringLiteral("Unable to read STEP machine model");
             if (progress)
@@ -81,11 +80,11 @@ static bool readMachineFileImpl(const QString& filePath,
         if (progress)
             progress->setValue(80);
         Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
-        TDF_LabelSequence roots;
+        NCollection_Sequence<TDF_Label> roots;
         shapes->GetFreeShapes(roots);
         for (int i = 1; i <= roots.Length(); ++i) {
             const TDF_Label root = roots.Value(i);
-            TDF_LabelSequence components;
+            NCollection_Sequence<TDF_Label> components;
             shapes->GetComponents(root, components);
             if (components.IsEmpty()) {
                 const TopoDS_Shape shape = shapes->GetShape(root);
@@ -175,11 +174,9 @@ bool readMachineFile(const QString& filePath,
     try {
         return readMachineFileImpl(filePath, progress, result);
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.machine_io: OCCT import failure: {}",
-                 failure.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "cam.machine_io: OCCT import failure: {}", failure.what());
         if (result)
-            result->error = QString::fromUtf8(failure.GetMessageString());
+            result->error = QString::fromUtf8(failure.what());
     } catch (const std::exception& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "cam.machine_io: machine import failure: {}", failure.what());
@@ -219,7 +216,7 @@ static bool exportMachineToFileImpl(LcncDocument* doc,
         bb.MakeCompound(axisCompound);
         bool hasShape = false;
 
-        TDF_LabelSequence freeShapes;
+        NCollection_Sequence<TDF_Label> freeShapes;
         stMach->GetFreeShapes(freeShapes);
 
         for (const QString& entry : entries) {
@@ -240,13 +237,13 @@ static bool exportMachineToFileImpl(LcncDocument* doc,
             continue;
 
         const QString axisLabel = QStringLiteral("LCNC_AXIS_") + axis.name;
-        TDF_Label lbl = stExp->AddShape(axisCompound, Standard_False);
+        TDF_Label lbl = stExp->AddShape(axisCompound, false);
         TDataStd_Name::Set(lbl, TCollection_ExtendedString(axisLabel.toStdString().c_str()));
     }
 
     // 未分配组：导出剩余自由形体。
     {
-        TDF_LabelSequence freeShapes;
+        NCollection_Sequence<TDF_Label> freeShapes;
         stMach->GetFreeShapes(freeShapes);
         BRep_Builder bb;
         TopoDS_Compound unassigned;
@@ -265,13 +262,13 @@ static bool exportMachineToFileImpl(LcncDocument* doc,
         }
 
         if (hasUnassigned) {
-            TDF_Label lbl = stExp->AddShape(unassigned, Standard_False);
+            TDF_Label lbl = stExp->AddShape(unassigned, false);
             TDataStd_Name::Set(lbl, TCollection_ExtendedString("LCNC_AXIS_UNASSIGNED"));
         }
     }
 
     STEPCAFControl_Writer writer;
-    writer.SetNameMode(Standard_True);
+    writer.SetNameMode(true);
     if (writer.Transfer(xdeExport) != IFSelect_RetDone)
         return false;
     return writer.Write(filePath.toUtf8().constData()) == IFSelect_RetDone;
@@ -284,9 +281,7 @@ bool exportMachineToFile(LcncDocument* doc,
     try {
         return exportMachineToFileImpl(doc, kin, filePath);
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.machine_io: OCCT export failure: {}",
-                 failure.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "cam.machine_io: OCCT export failure: {}", failure.what());
     } catch (const std::exception& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "cam.machine_io: machine export failure: {}", failure.what());

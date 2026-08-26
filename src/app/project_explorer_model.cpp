@@ -9,14 +9,13 @@
 #include "modules/cad/contracts/i_cad_project_explorer_projection.h"
 #include "modules/cam/contracts/i_cam_project_explorer_projection.h"
 
-#include <QObject>
+#include <NCollection_Sequence.hxx>
+#include <QHash>
 #include <QMap>
+#include <QObject>
 #include <QRegularExpression>
 #include <QSet>
-#include <QHash>
-
-#include <TDF_LabelSequence.hxx>
-
+#include <TDF_Label.hxx>
 #include <utility>
 
 namespace lcnc::app {
@@ -115,7 +114,7 @@ void appendFallbackWorkpieceShapes(ProjectExplorerNode& documentNode, LcncDocume
     if (!doc)
         return;
 
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    NCollection_Sequence<TDF_Label> labels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
     for (int index = 1; index <= labels.Length(); ++index) {
         const TDF_Label label = labels.Value(index);
         const QString entry = XcafUtils::entry(label);

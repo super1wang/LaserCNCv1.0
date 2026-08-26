@@ -1,42 +1,41 @@
 #include "modules/cam/commands/toolpath/toolpath_commands.h"
-#include "app/app_command_context.h"
-#include "view/widget_occ_view.h"
 
-#include "core/project/project_types.h"
-#include "core/document/lcnc_document.h"
-#include "core/kernel/kernel.h"
-#include "core/services/selection_service.h"
-#include "core/algorithms/cam/laser_toolpath.h"
+#include "app/app_command_context.h"
 #include "core/algorithms/cam/face_classifier.h"
-#include "core/kinematics/machine_kinematics.h"
+#include "core/algorithms/cam/laser_toolpath.h"
+#include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
+#include "core/kernel/kernel.h"
+#include "core/kinematics/machine_kinematics.h"
+#include "core/project/project_types.h"
+#include "core/services/selection_service.h"
+#include "modules/cam/cam_module.h"
+#include "view/graphics_scene.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
-#include "view/graphics_scene.h"
-#include "modules/cam/cam_module.h"
+#include "view/widget_occ_view.h"
 
+#include <AIS_InteractiveContext.hxx>
+#include <AIS_Shape.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRep_Builder.hxx>
+#include <BRep_tool.hxx>
+#include <NCollection_Sequence.hxx>
 #include <QAction>
 #include <QIcon>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTimer>
 #include <QToolTip>
-
-#include <AIS_Shape.hxx>
-#include <AIS_InteractiveContext.hxx>
 #include <Quantity_Color.hxx>
-#include <TopoDS.hxx>
-#include <TopoDS_Edge.hxx>
-#include <TopoDS_Compound.hxx>
-#include <BRep_Builder.hxx>
-#include <BRepBuilderAPI_MakeWire.hxx>
-#include <TopExp_Explorer.hxx>
-#include <BRepAdaptor_Curve.hxx>
-#include <BRep_tool.hxx>
-#include <StdSelect_BRepOwner.hxx>
 #include <SelectMgr_EntityOwner.hxx>
-
-#include <TDF_LabelSequence.hxx>
+#include <StdSelect_BRepOwner.hxx>
+#include <TDF_Label.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Edge.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
 // =============================================================================

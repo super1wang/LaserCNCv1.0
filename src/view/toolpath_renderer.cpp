@@ -29,7 +29,7 @@ void applyLocalTransform(const Handle(AIS_InteractiveContext)& ctx,
 
     ais->SetLocalTransformation(transform);
     if (!ctx.IsNull())
-        ctx->RecomputePrsOnly(ais, Standard_False);
+        ctx->RecomputePrsOnly(ais, false);
 }
 
 } // namespace
@@ -218,9 +218,9 @@ void ToolpathRenderer::setVisible(GuiDocument* gd, bool visible)
     auto toggle = [&](const Handle(AIS_Shape)& ais) {
         if (ais.IsNull()) return;
         if (visible)
-            ctx->Display(ais, Standard_False);
+            ctx->Display(ais, false);
         else
-            ctx->Erase(ais, Standard_False);
+            ctx->Erase(ais, false);
     };
 
     for (const ContourAisBundle& bundle : m_bundles) {
@@ -262,7 +262,7 @@ void ToolpathRenderer::eraseAis(GuiDocument* gd, Handle(AIS_Shape)& ais)
     if (gd) {
         const Handle(AIS_InteractiveContext)& ctx = gd->context();
         if (!ctx.IsNull())
-            ctx->Erase(ais, Standard_False);
+            ctx->Erase(ais, false);
     }
     ais.Nullify();
 }
@@ -305,9 +305,9 @@ void ToolpathRenderer::rebuildLeadInAis(GuiDocument* gd,
 
     const Quantity_Color red(0.9, 0.15, 0.15, Quantity_TOC_RGB);
     Handle(AIS_Shape) ais = new AIS_Shape(leadEdge);
-    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
-    ctx->SetColor(ais, red, Standard_False);
-    ctx->SetWidth(ais, 2.0, Standard_False);
+    ctx->Display(ais, AIS_WireFrame, 0, false);
+    ctx->SetColor(ais, red, false);
+    ctx->SetWidth(ais, 2.0, false);
     ctx->Deactivate(ais);
     bundle.leadIn = ais;
 }
@@ -361,9 +361,9 @@ void ToolpathRenderer::rebuildNormalAis(GuiDocument* gd,
 
     const Quantity_Color amber(0.95, 0.55, 0.10, Quantity_TOC_RGB);
     Handle(AIS_Shape) ais = new AIS_Shape(compound);
-    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
-    ctx->SetColor(ais, amber, Standard_False);
-    ctx->SetWidth(ais, 1.8, Standard_False);
+    ctx->Display(ais, AIS_WireFrame, 0, false);
+    ctx->SetColor(ais, amber, false);
+    ctx->SetWidth(ais, 1.8, false);
     ctx->Deactivate(ais);
     bundle.normal = ais;
 }
@@ -396,9 +396,9 @@ void ToolpathRenderer::rebuildPreviewAis(GuiDocument* gd,
 
     const Quantity_Color yellow(0.95, 0.8, 0.1, Quantity_TOC_RGB);
     Handle(AIS_Shape) ais = new AIS_Shape(previewEdge);
-    ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
-    ctx->SetColor(ais, yellow, Standard_False);
-    ctx->SetWidth(ais, 2.5, Standard_False);
+    ctx->Display(ais, AIS_WireFrame, 0, false);
+    ctx->SetColor(ais, yellow, false);
+    ctx->SetWidth(ais, 2.5, false);
     ctx->Deactivate(ais);
     m_previewLeadInAis = ais;
     m_previewContourIndex = preview.contourIndex;

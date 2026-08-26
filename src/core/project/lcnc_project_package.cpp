@@ -18,15 +18,15 @@
 #include <windows.h>
 #endif
 
-#include <JlCompress.h>
-
 #include <BinXCAFDrivers.hxx>
+#include <JlCompress.h>
+#include <NCollection_Sequence.hxx>
 #include <PCDM_ReaderStatus.hxx>
 #include <PCDM_StoreStatus.hxx>
+#include <TCollection_ExtendedString.hxx>
+#include <TDF_Label.hxx>
 #include <TDataStd_Integer.hxx>
 #include <TDocStd_Document.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <TCollection_ExtendedString.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
@@ -235,7 +235,7 @@ void exportEntityKind(const LcncDocument& source,
                       LcncDocument::EntityKind kind,
                       const Handle(XCAFDoc_ShapeTool)& targetShapeTool)
 {
-    const TDF_LabelSequence labels = source.entityLabels(kind);
+    const NCollection_Sequence<TDF_Label> labels = source.entityLabels(kind);
     const Handle(XCAFDoc_ShapeTool) sourceShapeTool = source.shapeTool();
 
     for (int i = 1; i <= labels.Length(); ++i) {
@@ -248,7 +248,7 @@ void exportEntityKind(const LcncDocument& source,
         targetShapeTool->SetShape(targetLabel, shape);
         XcafUtils::setName(targetLabel,
                            labelNameOrFallback(sourceLabel, QStringLiteral("Shape_%1").arg(i)));
-        TDataStd_Integer::Set(targetLabel, static_cast<Standard_Integer>(kind));
+        TDataStd_Integer::Set(targetLabel, static_cast<int>(kind));
     }
 }
 
@@ -312,7 +312,7 @@ bool loadXcafSnapshot(LcncDocument& workpieceDocument,
     }
 
     const Handle(XCAFDoc_ShapeTool) shapeTool = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
-    TDF_LabelSequence labels;
+    NCollection_Sequence<TDF_Label> labels;
     shapeTool->GetFreeShapes(labels);
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label label = labels.Value(i);

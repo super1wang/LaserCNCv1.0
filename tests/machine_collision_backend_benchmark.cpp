@@ -1,21 +1,22 @@
-#include "core/algorithms/cam/machine_safety_index.h"
-#include "core/algorithms/cam/machine_motion_certificate.h"
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/machine_motion_certificate.h"
+#include "core/algorithms/cam/machine_safety_index.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 
-#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <NCollection_Sequence.hxx>
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPControl_Reader.hxx>
-#include <Bnd_Box.hxx>
 #include <TCollection_ExtendedString.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <TDataStd_Name.hxx>
 #include <TDocStd_Document.hxx>
 #include <TopAbs_Orientation.hxx>
@@ -219,7 +220,7 @@ bool loadMachineBodies(const QString& path, std::vector<Body>* bodies,
         new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
     XCAFDoc_DocumentTool::Set(document->Main());
     STEPCAFControl_Reader reader;
-    reader.SetNameMode(Standard_True);
+    reader.SetNameMode(true);
     if (reader.ReadFile(path.toUtf8().constData()) != IFSelect_RetDone
         || !reader.Transfer(document)) {
         *error = QStringLiteral("无法读取或转换 STEP 机台文件");
@@ -227,11 +228,11 @@ bool loadMachineBodies(const QString& path, std::vector<Body>* bodies,
     }
     const Handle(XCAFDoc_ShapeTool) shapes =
         XCAFDoc_DocumentTool::ShapeTool(document->Main());
-    TDF_LabelSequence roots;
+    NCollection_Sequence<TDF_Label> roots;
     shapes->GetFreeShapes(roots);
     for (int rootIndex = 1; rootIndex <= roots.Length(); ++rootIndex) {
         const TDF_Label root = roots.Value(rootIndex);
-        TDF_LabelSequence components;
+        NCollection_Sequence<TDF_Label> components;
         shapes->GetComponents(root, components);
         if (components.IsEmpty()) {
             appendBody(QStringLiteral("Part_%1").arg(rootIndex), root, shapes,
@@ -256,9 +257,7 @@ bool triangulate(const TopoDS_Shape& source, PlainMesh* mesh, QString* error)
 {
     try {
         TopoDS_Shape shape = BRepBuilderAPI_Copy(source).Shape();
-        BRepMesh_IncrementalMesh mesher(shape, kMeshDeflectionMm,
-                                        Standard_False, 0.35,
-                                        Standard_True);
+        BRepMesh_IncrementalMesh mesher(shape, kMeshDeflectionMm, false, 0.35, true);
         mesher.Perform();
         for (TopExp_Explorer explorer(shape, TopAbs_FACE);
              explorer.More(); explorer.Next()) {
@@ -275,7 +274,7 @@ bool triangulate(const TopoDS_Shape& source, PlainMesh* mesh, QString* error)
                 mesh->vertices.emplace_back(point.X(), point.Y(), point.Z());
             }
             for (int index = 1; index <= triangulation->NbTriangles(); ++index) {
-                Standard_Integer first = 0, second = 0, third = 0;
+                int first = 0, second = 0, third = 0;
                 triangulation->Triangle(index).Get(first, second, third);
                 if (face.Orientation() == TopAbs_REVERSED)
                     std::swap(second, third);
@@ -286,8 +285,7 @@ bool triangulate(const TopoDS_Shape& source, PlainMesh* mesh, QString* error)
             }
         }
     } catch (const Standard_Failure& failure) {
-        *error = QStringLiteral("OCCT 网格化失败: %1")
-                     .arg(QString::fromUtf8(failure.GetMessageString()));
+        *error = QStringLiteral("OCCT 网格化失败: %1").arg(QString::fromUtf8(failure.what()));
         return false;
     }
     if (mesh->triangles.empty()) {
@@ -720,8 +718,8 @@ Bnd_Box transformedBounds(const Bnd_Box& local, const gp_Trsf& transform)
     Bnd_Box result;
     if (local.IsVoid())
         return result;
-    Standard_Real minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
-    Standard_Real maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
+    double minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
+    double maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
     local.Get(minimumX, minimumY, minimumZ,
               maximumX, maximumY, maximumZ);
     for (double x : {minimumX, maximumX}) {
@@ -742,8 +740,8 @@ double maximumRadiusFromAxis(const Bnd_Box& box,
 {
     if (box.IsVoid())
         return 0.0;
-    Standard_Real minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
-    Standard_Real maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
+    double minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
+    double maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
     box.Get(minimumX, minimumY, minimumZ,
             maximumX, maximumY, maximumZ);
     const gp_Vec axis(direction);

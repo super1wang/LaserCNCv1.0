@@ -173,7 +173,7 @@ void GuiApplication::setCurrentDisplayMode(int displayMode, bool faceBoundary)
             continue;
 
         ctx->DefaultDrawer()->SetFaceBoundaryDraw(faceBoundary);
-        ctx->SetDisplayMode(displayMode, Standard_False);
+        ctx->SetDisplayMode(displayMode, false);
         // context 默认显示模式 + DefaultDrawer 面边线，供后续新建对象（含未显式
         // 指定模式的 XCAF 工件/机台对象）继承。工件/机台 AIS_Shape 的逐对象模式
         // 切换已由 applyDisplayModeToDocument -> RenderingManager::

@@ -10,30 +10,30 @@
 
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_TypeOfLine.hxx>
+#include <Graphic3d_AspectFillArea3d.hxx>
+#include <Graphic3d_CLight.hxx>
 #include <Graphic3d_MaterialAspect.hxx>
 #include <Graphic3d_NameOfMaterial.hxx>
 #include <Graphic3d_RenderingMode.hxx>
 #include <Graphic3d_RenderingParams.hxx>
 #include <Graphic3d_TypeOfBackfacingModel.hxx>
-#include <Graphic3d_AspectFillArea3d.hxx>
 #include <NCollection_List.hxx>
+#include <NCollection_Sequence.hxx>
 #include <Prs3d_Drawer.hxx>
 #include <Prs3d_LineAspect.hxx>
 #include <Prs3d_ShadingAspect.hxx>
+#include <QList>
+#include <QSet>
+#include <QTimer>
+#include <QtGlobal>
 #include <Quantity_Color.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <V3d_AmbientLight.hxx>
 #include <V3d_DirectionalLight.hxx>
 #include <V3d_Light.hxx>
-#include <V3d_ListOfLight.hxx>
-#include <V3d_Viewer.hxx>
 #include <V3d_View.hxx>
+#include <V3d_Viewer.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
-
-#include <QTimer>
-#include <QList>
-#include <QSet>
-#include <QtGlobal>
 
 namespace lcnc::view {
 
@@ -219,14 +219,14 @@ void RenderingManager::setRuntimeDisplayMode(int displayMode, bool faceBoundary)
         if (shape.IsNull())
             continue;
         if (shape->DisplayMode() != displayMode)
-            ctx->SetDisplayMode(shape, displayMode, Standard_False);
+            ctx->SetDisplayMode(shape, displayMode, false);
         if (!shape->Attributes().IsNull()
             && shape->Attributes()->FaceBoundaryDraw() != faceBoundary) {
             shape->Attributes()->SetFaceBoundaryDraw(faceBoundary);
             // Mayo invalidates every cached display mode here.  Redisplaying
             // only the current presentation leaves complex XCAF objects with
             // a stale wireframe/shaded cache after a mode switch.
-            shape->Redisplay(Standard_True);
+            shape->Redisplay(true);
         }
     }
     ctx->UpdateCurrentViewer();
@@ -242,12 +242,14 @@ void RenderingManager::applyDocumentStyles(const QMap<QString, Handle(AIS_Shape)
         return;
 
     QSet<QString> machineEntries;
-    const TDF_LabelSequence machineLabels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    const NCollection_Sequence<TDF_Label> machineLabels =
+        doc->entityLabels(LcncDocument::EntityKind::Machine);
     for (int i = 1; i <= machineLabels.Length(); ++i)
         machineEntries.insert(XcafUtils::entry(machineLabels.Value(i)));
 
     QSet<QString> workpieceEntries;
-    const TDF_LabelSequence workpieceLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    const NCollection_Sequence<TDF_Label> workpieceLabels =
+        doc->entityLabels(LcncDocument::EntityKind::Workpiece);
     for (int i = 1; i <= workpieceLabels.Length(); ++i)
         workpieceEntries.insert(XcafUtils::entry(workpieceLabels.Value(i)));
 
@@ -290,11 +292,12 @@ void RenderingManager::applyViewRenderingParams()
         ? Graphic3d_RM_RAYTRACING
         : Graphic3d_RM_RASTERIZATION;
     params.NbMsaaSamples = p.antiAliasing ? qBound(0, p.msaaSamples, 8) : 0;
-    params.RenderResolutionScale = p.antiAliasing ? 1.0f : static_cast<Standard_ShortReal>(qBound(0.25, p.renderResolutionScale, 2.0));
-    params.IsShadowEnabled = p.shadows ? Standard_True : Standard_False;
-    params.IsReflectionEnabled = p.reflections ? Standard_True : Standard_False;
-    params.IsAntialiasingEnabled = p.adaptiveSampling ? Standard_True : Standard_False;
-    params.AdaptiveScreenSampling = p.adaptiveSampling ? Standard_True : Standard_False;
+    params.RenderResolutionScale =
+        p.antiAliasing ? 1.0f : static_cast<float>(qBound(0.25, p.renderResolutionScale, 2.0));
+    params.IsShadowEnabled = p.shadows ? true : false;
+    params.IsReflectionEnabled = p.reflections ? true : false;
+    params.IsAntialiasingEnabled = p.adaptiveSampling ? true : false;
+    params.AdaptiveScreenSampling = p.adaptiveSampling ? true : false;
     params.RaytracingDepth = qBound(1, p.raytracingDepth, 8);
     params.RayTracingTileSize = qBound(8, p.rayTracingTileSize, 128);
     params.NbRayTracingTiles = p.adaptiveSampling ? qBound(1, p.rayTracingTileCount, 1024) : -1;
@@ -318,8 +321,8 @@ void RenderingManager::applyBackground()
 
     const QColor top = m_colors.backgroundColor;
     const QColor bottom = darkerGradientColor(top);
-    m_document->view()->SetBgGradientColors(
-        toQuantity(top), toQuantity(bottom), Aspect_GFM_VER, Standard_False);
+    m_document->view()->SetBgGradientColors(toQuantity(top), toQuantity(bottom), Aspect_GFM_VER,
+                                            false);
     m_document->view()->Redraw();
 }
 
@@ -353,8 +356,8 @@ void RenderingManager::applyHighlight()
                 shape->UnsetHilightMode();
         }
     }
-    ctx->UnhilightSelected(Standard_False);
-    ctx->HilightSelected(Standard_False);
+    ctx->UnhilightSelected(false);
+    ctx->HilightSelected(false);
     ctx->UpdateCurrentViewer();
 }
 
@@ -369,18 +372,18 @@ void RenderingManager::applyLighting()
         return;
 
     QList<Handle(V3d_Light)> existingLights;
-    for (V3d_ListOfLightIterator it(viewer->DefinedLights()); it.More(); it.Next())
+    for (NCollection_List<occ::handle<Graphic3d_CLight>>::Iterator it(viewer->DefinedLights());
+         it.More(); it.Next())
         existingLights.append(it.Value());
     for (const Handle(V3d_Light)& light : existingLights)
         viewer->DelLight(light);
 
-    const Standard_Real ambientLevel = qBound(0.45, p.ambientLight, 0.85);
+    const double ambientLevel = qBound(0.45, p.ambientLight, 0.85);
     const Quantity_Color keyColor(0.72, 0.72, 0.72, Quantity_TOC_RGB);
     const Quantity_Color fillColor(0.38, 0.38, 0.38, Quantity_TOC_RGB);
     const auto addDirectionalLight = [&viewer](V3d_TypeOfOrientation orientation,
                                                const Quantity_Color& color) {
-        Handle(V3d_DirectionalLight) light = new V3d_DirectionalLight(
-            orientation, color, Standard_True);
+        Handle(V3d_DirectionalLight) light = new V3d_DirectionalLight(orientation, color, true);
         viewer->AddLight(light);
     };
 
@@ -441,15 +444,15 @@ void RenderingManager::applyShapeStyle(const QString& entry,
     }
 
     Graphic3d_MaterialAspect material(materialName(p.material));
-    ctx->SetMaterial(ais, material, Standard_False);
-    ctx->SetColor(ais, toQuantity(color), Standard_False);
+    ctx->SetMaterial(ais, material, false);
+    ctx->SetColor(ais, toQuantity(color), false);
     double transparency = 0.0;
     if (isMachineShape)
         transparency = m_colors.machineTransparency;
     else if (isWorkpieceShape)
         transparency = m_colors.workpieceTransparency;
-    ctx->SetTransparency(ais, qBound(0.0, transparency, 1.0), Standard_False);
-    ctx->Redisplay(ais, Standard_False);
+    ctx->SetTransparency(ais, qBound(0.0, transparency, 1.0), false);
+    ctx->Redisplay(ais, false);
 }
 
 void RenderingManager::flushPendingApply()

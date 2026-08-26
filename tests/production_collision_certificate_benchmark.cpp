@@ -1,5 +1,5 @@
-#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/collision_scan_policy.h"
+#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/machine_safety_index.h"
 #include "core/algorithms/cam/travel_path_planner.h"
 #include "core/kinematics/machine_configuration_service.h"
@@ -10,20 +10,7 @@
 #include "modules/cam/contracts/toolpath_export_dto.h"
 
 #include <IFSelect_ReturnStatus.hxx>
-#include <STEPCAFControl_Reader.hxx>
-#include <STEPControl_Reader.hxx>
-#include <TCollection_ExtendedString.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <TDataStd_Name.hxx>
-#include <TDocStd_Document.hxx>
-#include <TopLoc_Location.hxx>
-#include <TopoDS_Shape.hxx>
-#include <XCAFDoc_DocumentTool.hxx>
-#include <XCAFDoc_Location.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <gp_Dir.hxx>
-#include <gp_Trsf.hxx>
-
+#include <NCollection_Sequence.hxx>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QElapsedTimer>
@@ -32,10 +19,22 @@
 #include <QSet>
 #include <QTemporaryDir>
 #include <QTextStream>
-
+#include <STEPCAFControl_Reader.hxx>
+#include <STEPControl_Reader.hxx>
+#include <TCollection_ExtendedString.hxx>
+#include <TDF_Label.hxx>
+#include <TDataStd_Name.hxx>
+#include <TDocStd_Document.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopoDS_Shape.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_Location.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <gp_Dir.hxx>
+#include <gp_Trsf.hxx>
 #include <memory>
 #include <vector>
 
@@ -132,7 +131,7 @@ bool loadMachineBodies(const QString& path,
         new TDocStd_Document(TCollection_ExtendedString("BinXCAF"));
     XCAFDoc_DocumentTool::Set(document->Main());
     STEPCAFControl_Reader reader;
-    reader.SetNameMode(Standard_True);
+    reader.SetNameMode(true);
     if (reader.ReadFile(path.toUtf8().constData()) != IFSelect_RetDone
         || !reader.Transfer(document)) {
         *error = QStringLiteral("Cannot read the AC-table STEP model");
@@ -140,11 +139,11 @@ bool loadMachineBodies(const QString& path,
     }
     const Handle(XCAFDoc_ShapeTool) shapes =
         XCAFDoc_DocumentTool::ShapeTool(document->Main());
-    TDF_LabelSequence roots;
+    NCollection_Sequence<TDF_Label> roots;
     shapes->GetFreeShapes(roots);
     for (int rootIndex = 1; rootIndex <= roots.Length(); ++rootIndex) {
         const TDF_Label root = roots.Value(rootIndex);
-        TDF_LabelSequence components;
+        NCollection_Sequence<TDF_Label> components;
         shapes->GetComponents(root, components);
         if (components.IsEmpty()) {
             appendMachineBody(QStringLiteral("Part_%1").arg(rootIndex),

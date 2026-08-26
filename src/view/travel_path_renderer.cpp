@@ -1,28 +1,27 @@
 #include "view/travel_path_renderer.h"
 
-#include "view/gui_document.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/logging/logger.h"
+#include "view/gui_document.h"
 
 #include <AIS_InteractiveContext.hxx>
 #include <Aspect_TypeOfLine.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRep_Builder.hxx>
-#include <Graphic3d_ZLayerId.hxx>
 #include <GeomAPI_Interpolate.hxx>
+#include <Graphic3d_ZLayerId.hxx>
+#include <NCollection_HArray1.hxx>
 #include <Prs3d_Drawer.hxx>
 #include <Prs3d_LineAspect.hxx>
 #include <Quantity_Color.hxx>
+#include <Standard_Failure.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
-#include <TColgp_HArray1OfPnt.hxx>
-#include <Standard_Failure.hxx>
+#include <algorithm>
+#include <cmath>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
-
-#include <algorithm>
-#include <cmath>
 
 namespace lcnc::view {
 namespace {
@@ -72,7 +71,7 @@ void TravelPathRenderer::erase(GuiDocument* gd)
         if (!ctx.IsNull()) {
             for (auto& ais : m_aisByState) {
                 if (!ais.IsNull())
-                    ctx->Erase(ais, Standard_False);
+                    ctx->Erase(ais, false);
             }
         }
     }
@@ -102,7 +101,7 @@ void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segmen
     // 先擦旧
     for (auto& ais : m_aisByState) {
         if (!ais.IsNull()) {
-            ctx->Erase(ais, Standard_False);
+            ctx->Erase(ais, false);
             ais.Nullify();
         }
     }
@@ -131,13 +130,13 @@ void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segmen
         if (waypoints.size() < 3)
             return false;
         try {
-            Handle(TColgp_HArray1OfPnt) poles =
-                new TColgp_HArray1OfPnt(1, waypoints.size());
+            occ::handle<NCollection_HArray1<gp_Pnt>> poles =
+                new NCollection_HArray1<gp_Pnt>(1, waypoints.size());
             for (int index = 0; index < waypoints.size(); ++index) {
                 const auto& waypoint = waypoints.at(index);
                 poles->SetValue(index + 1, gp_Pnt(waypoint.x, waypoint.y, waypoint.z));
             }
-            GeomAPI_Interpolate interpolation(poles, Standard_False, 1e-5);
+            GeomAPI_Interpolate interpolation(poles, false, 1e-5);
             interpolation.Perform();
             if (!interpolation.IsDone())
                 return false;
@@ -149,9 +148,8 @@ void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segmen
             ++addedEdges[bucket];
             return true;
         } catch (const Standard_Failure& failure) {
-            LCNC_ERR(lcnc::LogCode::Generic,
-                     "cam.travel: failed to interpolate preview edge: {}",
-                     failure.GetMessageString() ? failure.GetMessageString() : "OpenCASCADE failure");
+            LCNC_ERR(lcnc::LogCode::Generic, "cam.travel: failed to interpolate preview edge: {}",
+                     failure.what() ? failure.what() : "OpenCASCADE failure");
             return false;
         } catch (...) {
             LCNC_ERR(lcnc::LogCode::Generic,
@@ -282,9 +280,9 @@ void TravelPathRenderer::refresh(GuiDocument* gd, const QVector<Segment>& segmen
         drawer->SetFreeBoundaryAspect(dash);
         drawer->SetSeenLineAspect(dash);
         ais->SetDisplayMode(AIS_WireFrame);
-        ctx->Display(ais, AIS_WireFrame, 0, Standard_False);
-        ctx->SetColor(ais, color, Standard_False);
-        ctx->SetWidth(ais, 2.5, Standard_False);
+        ctx->Display(ais, AIS_WireFrame, 0, false);
+        ctx->SetColor(ais, color, false);
+        ctx->SetWidth(ais, 2.5, false);
         ctx->SetZLayer(ais, Graphic3d_ZLayerId_Topmost);
         ctx->Deactivate(ais);
         m_aisByState[bucket] = ais;
@@ -307,7 +305,7 @@ void TravelPathRenderer::updateTransforms(GuiDocument* gd, MachineKinematics* ki
             continue;
         ais->SetLocalTransformation(transform);
         if (!ctx.IsNull())
-            ctx->RecomputePrsOnly(ais, Standard_False);
+            ctx->RecomputePrsOnly(ais, false);
     }
 }
 

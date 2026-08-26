@@ -1,11 +1,14 @@
 #include "modules/cam/ui/machine/widget_machine_panel.h"
-#include "core/kernel/kernel.h"
 
-#include "modules/cam/cam_module.h"
 #include "core/document/lcnc_document.h"
-#include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
+#include "core/kernel/kernel.h"
+#include "core/kinematics/machine_kinematics.h"
+#include "modules/cam/cam_module.h"
 
+#include <NCollection_Sequence.hxx>
+#include <QAbstractSpinBox>
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFormLayout>
@@ -14,14 +17,10 @@
 #include <QLabel>
 #include <QLayoutItem>
 #include <QPushButton>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
-#include <QAbstractSpinBox>
-#include <QCheckBox>
-
-#include <QSet>
-
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 
 namespace {
 
@@ -359,7 +358,7 @@ void WidgetMachinePanel::rebuildAssignmentSection()
         return;
     }
 
-    TDF_LabelSequence labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
     QMap<QString, QString> entryNames;
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label label = labels.Value(i);
@@ -484,7 +483,7 @@ void WidgetMachinePanel::setSelectedEntries(const QStringList& entries)
         return;
     }
 
-    TDF_LabelSequence labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
     QSet<QString> machineEntries;
     for (int i = 1; i <= labels.Length(); ++i)
         machineEntries.insert(XcafUtils::entry(labels.Value(i)));

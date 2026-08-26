@@ -12,7 +12,8 @@ void TaskProgress::setValue(int value)
     int range = m_max - m_min;
     if (range <= 0) return;
     int pct = qBound(0, (value - m_min) * 100 / range, 100);
-    m_percent.store(pct);
+    if (m_percent.exchange(pct) == pct)
+        return;
 
     ProgressCallback callback;
     QString step;

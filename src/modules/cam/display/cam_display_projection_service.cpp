@@ -36,7 +36,7 @@ public:
             for (auto it = projection.machiningFaceAis.cbegin();
                  it != projection.machiningFaceAis.cend(); ++it) {
                 if (!it.value().ais.IsNull())
-                    projection.context->Remove(it.value().ais, Standard_False);
+                    projection.context->Remove(it.value().ais, false);
             }
             projection.context->UpdateCurrentViewer();
         }
@@ -127,7 +127,7 @@ void CamDisplayProjectionService::refreshMachiningFaces(
         if (kinematics && !entry.workpieceEntry.isEmpty())
             wpcTransform = kinematics->computeWpcTransform(entry.workpieceEntry);
         ais->SetLocalTransformation(wpcTransform);
-        context->Display(ais, AIS_Shaded, 0, Standard_False);
+        context->Display(ais, AIS_Shaded, 0, false);
         context->SetZLayer(ais, Graphic3d_ZLayerId_Top);
         context->Deactivate(ais);
         projection.machiningFaceAis.insert(entry.faceId, {ais, entry.workpieceEntry});
@@ -156,7 +156,7 @@ void CamDisplayProjectionService::updateMachiningFaceTransforms(
         if (!faceIt.value().workpieceEntry.isEmpty())
             transform = kinematics->computeWpcTransform(faceIt.value().workpieceEntry);
         ais->SetLocalTransformation(transform);
-        projection.context->RecomputePrsOnly(ais, Standard_False);
+        projection.context->RecomputePrsOnly(ais, false);
     }
 }
 

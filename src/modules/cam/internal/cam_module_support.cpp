@@ -37,7 +37,7 @@ QStringList entityEntries(LcncDocument* document, LcncDocument::EntityKind kind)
     QStringList result;
     if (!document)
         return result;
-    const TDF_LabelSequence labels = document->entityLabels(kind);
+    const NCollection_Sequence<TDF_Label> labels = document->entityLabels(kind);
     for (int index = 1; index <= labels.Length(); ++index)
         result << XcafUtils::entry(labels.Value(index));
     return result;
@@ -60,7 +60,7 @@ TopoDS_Shape translatedShapeCopy(const TopoDS_Shape& shape, const gp_Vec& transl
         return shape;
     gp_Trsf transform;
     transform.SetTranslation(translation);
-    BRepBuilderAPI_Transform moved(shape, transform, Standard_True);
+    BRepBuilderAPI_Transform moved(shape, transform, true);
     return moved.IsDone() ? moved.Shape() : shape;
 }
 
@@ -68,8 +68,8 @@ gp_Pnt bboxCenter(const Bnd_Box& box)
 {
     if (box.IsVoid())
         return gp_Pnt(0.0, 0.0, 0.0);
-    Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-    Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+    double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+    double xmax = 0.0, ymax = 0.0, zmax = 0.0;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     return gp_Pnt(0.5 * (xmin + xmax),
                   0.5 * (ymin + ymax),

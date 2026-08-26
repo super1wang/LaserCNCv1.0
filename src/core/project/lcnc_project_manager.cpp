@@ -386,7 +386,7 @@ bool LcncProjectManager::exportDomainAsStep(ProjectDomain domain, const QString&
     }
 
     STEPControl_Writer writer;
-    TDF_LabelSequence labels;
+    NCollection_Sequence<TDF_Label> labels;
     target->shapeTool()->GetFreeShapes(labels);
     Handle(XCAFDoc_ShapeTool) shapeTool = target->shapeTool();
     for (int index = 1; index <= labels.Length(); ++index) {

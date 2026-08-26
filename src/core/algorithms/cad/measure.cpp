@@ -44,7 +44,7 @@ gp_Vec firstFaceNormal(const TopoDS_Shape& shape)
     BRepAdaptor_Surface surface(face);
     const double u = 0.5 * (surface.FirstUParameter() + surface.LastUParameter());
     const double v = 0.5 * (surface.FirstVParameter() + surface.LastVParameter());
-    GeomLProp_SLProps properties(surface.Surface().Surface(), u, v, 1, 1e-6);
+    GeomLProp_SLProps properties(surface.GeomSurfaceTransformed(), u, v, 1, 1e-6);
     if (!properties.IsNormalDefined())
         return {};
     return gp_Vec(properties.Normal());

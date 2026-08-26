@@ -31,7 +31,7 @@ void configureOpenGlDriver(const Handle(OpenGl_GraphicDriver)& driver)
     options.keepArrayData = false;
     options.swapInterval = 1;
 
-    driver->EnableVBO(Standard_True);
+    driver->EnableVBO(true);
     driver->SetVerticalSync(true);
 
     LCNC_INFO(lcnc::LogCode::Generic,
@@ -113,8 +113,8 @@ void GraphicsScene::setDefaultLighting()
 {
     // Add lights first, then enable them — SetLightOn() only activates
     // lights already in the viewer's defined-light list.
-    Handle(V3d_DirectionalLight) dirLight = new V3d_DirectionalLight(
-        V3d_XposYnegZpos, Quantity_NOC_WHITE, Standard_True);
+    Handle(V3d_DirectionalLight) dirLight =
+        new V3d_DirectionalLight(V3d_XposYnegZpos, Quantity_NOC_WHITE, true);
     Handle(V3d_AmbientLight) ambLight = new V3d_AmbientLight(
         Quantity_Color(0.3, 0.3, 0.3, Quantity_TOC_RGB));
     m_viewer->AddLight(dirLight);

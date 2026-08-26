@@ -14,21 +14,20 @@
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <Bnd_Box.hxx>
 #include <IFSelect_ReturnStatus.hxx>
-#include <STEPControl_Reader.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <TopExp_Explorer.hxx>
-#include <TopoDS.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <gp_Trsf.hxx>
-#include <gp_Vec.hxx>
-
+#include <NCollection_Sequence.hxx>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QTextStream>
-
+#include <STEPControl_Reader.hxx>
+#include <TDF_Label.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <algorithm>
 #include <cmath>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 #include <vector>
 
 namespace {
@@ -59,7 +58,7 @@ TopoDS_Shape placedAt(const TopoDS_Shape& local, double x, double y, double z)
 {
     gp_Trsf transform;
     transform.SetTranslation(gp_Vec(x, y, z));
-    BRepBuilderAPI_Transform placed(local, transform, Standard_True);
+    BRepBuilderAPI_Transform placed(local, transform, true);
     return placed.IsDone() ? placed.Shape() : TopoDS_Shape{};
 }
 
@@ -67,7 +66,7 @@ double distanceToWorkpiece(const TopoDS_Shape& cutter, const TopoDS_Shape& workp
 {
     BRepExtrema_DistShapeShape distance(cutter, workpiece);
     distance.SetDeflection(0.025);
-    distance.SetMultiThread(Standard_False);
+    distance.SetMultiThread(false);
     distance.Perform();
     return distance.IsDone() ? distance.Value() : -1.0;
 }
@@ -85,7 +84,7 @@ int importApplicationWorkpiece(lcnc::LcncProjectManager* manager,
     LcncDocument* document = manager->importWorkpieceModel(fixture, &error);
     if (!document)
         return fail(QStringLiteral("Application workpiece import failed: %1").arg(error));
-    const TDF_LabelSequence labels =
+    const NCollection_Sequence<TDF_Label> labels =
         document->entityLabels(LcncDocument::EntityKind::Workpiece);
     if (labels.IsEmpty())
         return fail(QStringLiteral("Imported workpiece document has no workpiece entity"));
@@ -216,8 +215,8 @@ int verifyCollisionFlow(bool fullEnvironment)
     BRepBndLib::Add(workpiece, bounds);
     if (bounds.IsVoid())
         return fail(QStringLiteral("Half-sphere STEP fixture has invalid bounds"));
-    Standard_Real xMin = 0.0, yMin = 0.0, zMin = 0.0;
-    Standard_Real xMax = 0.0, yMax = 0.0, zMax = 0.0;
+    double xMin = 0.0, yMin = 0.0, zMin = 0.0;
+    double xMax = 0.0, yMax = 0.0, zMax = 0.0;
     bounds.Get(xMin, yMin, zMin, xMax, yMax, zMax);
     const double centerX = (xMin + xMax) * 0.5;
     const double centerY = (yMin + yMax) * 0.5;

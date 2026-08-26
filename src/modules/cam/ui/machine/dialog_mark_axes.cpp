@@ -1,22 +1,23 @@
 #include "modules/cam/ui/machine/dialog_mark_axes.h"
-#include "core/kernel/kernel.h"
-#include "modules/cam/cam_module.h"
-#include "core/document/lcnc_document.h"
-#include "core/kinematics/machine_kinematics.h"
-#include "core/document/xcaf_utils.h"
 
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QGridLayout>
-#include <QScrollArea>
+#include "core/document/lcnc_document.h"
+#include "core/document/xcaf_utils.h"
+#include "core/kernel/kernel.h"
+#include "core/kinematics/machine_kinematics.h"
+#include "modules/cam/cam_module.h"
+
+#include <NCollection_Sequence.hxx>
 #include <QComboBox>
+#include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
-#include <QDialogButtonBox>
-#include <QFrame>
-
-#include <TDF_LabelSequence.hxx>
+#include <QScrollArea>
+#include <QVBoxLayout>
+#include <TDF_Label.hxx>
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
@@ -143,7 +144,7 @@ void DialogMarkAxes::populateRows()
     }
 
     // Enumerate all Machine entities
-    TDF_LabelSequence labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = m_doc->entityLabels(LcncDocument::EntityKind::Machine);
     int row = 1;  // row 0 is header
     for (int i = 1; i <= labels.Length(); ++i) {
         TDF_Label lbl  = labels.Value(i);

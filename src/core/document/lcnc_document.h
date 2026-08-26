@@ -7,15 +7,15 @@
 #include "core/kinematics/machine_kinematics.h"
 
 // OCC
+#include <NCollection_Sequence.hxx>
 #include <Standard_Handle.hxx>
 #include <Standard_Type.hxx>
-#include <TDocStd_Document.hxx>
 #include <TDF_Label.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDocStd_Document.hxx>
 #include <TopoDS_Shape.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
 #include <XCAFDoc_Colortool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 
 namespace lcnc { class LcncProjectManager; }
 
@@ -72,7 +72,7 @@ public:
     void removeShapeEntity(const QString& entry);
 
     /// Enumerate all top-level entities (for tree building)
-    TDF_LabelSequence entityLabels(EntityKind kind) const;
+    NCollection_Sequence<TDF_Label> entityLabels(EntityKind kind) const;
 
     // ── Undo/Redo ─────────────────────────────────────────────────────────────
     bool canUndo() const;

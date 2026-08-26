@@ -1,10 +1,6 @@
-#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/algorithms/cam/face_classifier.h"
+#include "core/algorithms/cam/laser_toolpath.h"
 #include "core/document/lcnc_document.h"
-
-#include <QCoreApplication>
-#include <QFileInfo>
-#include <QTextStream>
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -13,21 +9,24 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <NCollection_Sequence.hxx>
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <QTextStream>
 #include <STEPCAFControl_Reader.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <TDocStd_Document.hxx>
 #include <TopAbs_ShapeEnum.hxx>
-#include <TopoDS_Shape.hxx>
 #include <TopoDS_Iterator.hxx>
+#include <TopoDS_Shape.hxx>
 #include <XCAFDoc_Documenttool.hxx>
 #include <XCAFDoc_Shapetool.hxx>
+#include <cmath>
 #include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Elips.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
-
-#include <cmath>
 
 namespace {
 
@@ -189,7 +188,7 @@ int verifyStepFile(const QString& path)
     XCAFDoc_DocumentTool::Set(xdeDocument->Main());
 
     STEPCAFControl_Reader reader;
-    reader.SetNameMode(Standard_True);
+    reader.SetNameMode(true);
     if (reader.ReadFile(path.toUtf8().constData()) != IFSelect_RetDone)
         return fail(QStringLiteral("cannot read STEP file: %1").arg(path));
     if (!reader.Transfer(xdeDocument))
@@ -199,7 +198,7 @@ int verifyStepFile(const QString& path)
         999, QStringLiteral("lead-in-regression"));
     document->importFromXcaf(
         xdeDocument, LcncDocument::EntityKind::Workpiece);
-    const TDF_LabelSequence labels =
+    const NCollection_Sequence<TDF_Label> labels =
         document->entityLabels(LcncDocument::EntityKind::Workpiece);
     const Handle(XCAFDoc_ShapeTool) shapeTool = document->shapeTool();
 
@@ -211,8 +210,7 @@ int verifyStepFile(const QString& path)
 
         if (shape.ShapeType() == TopAbs_COMPOUND
             || shape.ShapeType() == TopAbs_COMPSOLID) {
-            for (TopoDS_Iterator it(shape, Standard_True, Standard_True);
-                 it.More(); it.Next()) {
+            for (TopoDS_Iterator it(shape, true, true); it.More(); it.Next()) {
                 const int rc = verifyImportedShape(
                     it.Value(),
                     QFileInfo(path).fileName()

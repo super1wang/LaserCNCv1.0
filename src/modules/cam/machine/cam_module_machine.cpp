@@ -1,61 +1,88 @@
 
-#include "modules/cam/cam_module.h"
-#include "modules/cam/internal/cam_module_support.h"
-#include "view/toolpath_renderer.h"
-#include "view/travel_path_renderer.h"
-#include "view/contour_order_label_renderer.h"
-#include "view/machine_guide_renderer.h"
+#include "core/algorithms/cam/collision_safety_domain.h"
+#include "core/algorithms/cam/collision_scan_policy.h"
+#include "core/algorithms/cam/face_classifier.h"
+#include "core/algorithms/cam/initial_approach_axis_planner.h"
+#include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/machine_safety_index.h"
+#include "core/algorithms/cam/surface_collision_prefilter.h"
+#include "core/algorithms/cam/travel_path_planner.h"
+#include "core/algorithms/occt_exact_operation_lock.h"
+#include "core/document/lcnc_document.h"
+#include "core/document/xcaf_utils.h"
+#include "core/kernel/i_kernel.h"
+#include "core/kernel/kernel.h"
+#include "core/kernel/service_registry.h"
+#include "core/kinematics/machine_configuration_service.h"
+#include "core/kinematics/machine_kinematics.h"
+#include "core/kinematics/machine_pose.h"
+#include "core/logging/logger.h"
+#include "core/machine/machine_safety_package.h"
+#include "core/machine/machine_workspace.h"
 #include "core/project/cam/cam_data_manager.h"
 #include "core/project/cam/layer_container.h"
 #include "core/project/cam/layer_manager.h"
-#include "modules/cam/machine/machine_axis_detector.h"
-#include "modules/cam/display/cam_display_projection_service.h"
-#include "modules/cam/toolpath/toolpath_generation_service.h"
-#include "modules/cam/machine/machine_io.h"
-#include "modules/cam/interaction/reference_pick.h"
-#include "modules/cam/integration/cam_service_adapters.h"
+#include "core/project/lcnc_project_manager.h"
+#include "core/services/selection_service.h"
+#include "core/settings/app_settings.h"
+#include "core/task/task_manager.h"
+#include "modules/cad/services/shape_service.h"
+#include "modules/cam/cam_module.h"
 #include "modules/cam/collision/collision_geometry_cache.h"
 #include "modules/cam/collision/cutter_collision_geometry.h"
+#include "modules/cam/contracts/cam_events.h"
+#include "modules/cam/display/cam_display_projection_service.h"
+#include "modules/cam/integration/cam_service_adapters.h"
+#include "modules/cam/interaction/reference_pick.h"
+#include "modules/cam/internal/cam_module_support.h"
+#include "modules/cam/machine/machine_axis_detector.h"
+#include "modules/cam/machine/machine_io.h"
+#include "modules/cam/settings/cam_config.h"
+#include "modules/cam/toolpath/toolpath_generation_service.h"
 #include "modules/cam/toolpath/toolpath_sequence_service.h"
 #include "modules/cam/toolpath/toolpath_solve_service.h"
-#include "core/machine/machine_workspace.h"
-#include "core/machine/machine_safety_package.h"
-#include "core/algorithms/cam/machine_safety_index.h"
-#include "modules/cam/contracts/cam_events.h"
-#include "core/kinematics/machine_configuration_service.h"
-#include "core/kernel/kernel.h"
-#include "core/settings/app_settings.h"
-#include "modules/cad/services/shape_service.h"
-
-#include "modules/cam/settings/cam_config.h"
-#include "core/algorithms/cam/face_classifier.h"
-#include "core/algorithms/cam/travel_path_planner.h"
-#include "core/document/lcnc_document.h"
-#include "core/algorithms/cam/laser_toolpath.h"
-#include "core/algorithms/cam/collision_scan_policy.h"
-#include "core/algorithms/cam/collision_safety_domain.h"
-#include "core/algorithms/cam/initial_approach_axis_planner.h"
-#include "core/algorithms/cam/surface_collision_prefilter.h"
-#include "core/algorithms/occt_exact_operation_lock.h"
-#include "core/kinematics/machine_kinematics.h"
-#include "core/kinematics/machine_pose.h"
-#include "core/kernel/i_kernel.h"
-#include "core/kernel/service_registry.h"
-#include "core/services/selection_service.h"
-#include "core/logging/logger.h"
-#include "core/project/lcnc_project_manager.h"
-#include "core/task/task_manager.h"
-#include "core/document/xcaf_utils.h"
+#include "view/contour_order_label_renderer.h"
+#include "view/graphics_scene.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
+#include "view/machine_guide_renderer.h"
+#include "view/toolpath_renderer.h"
+#include "view/travel_path_renderer.h"
 #include "view/widget_occ_view.h"
-#include "view/graphics_scene.h"
 
-#include <QElapsedTimer>
+#include <AIS_DisplayMode.hxx>
+#include <Aspect_PolygonOffsetMode.hxx>
+#include <Aspect_TypeOfLine.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <Bnd_Box.hxx>
+#include <Bnd_OBB.hxx>
+#include <GeomAbs_SurfaceType.hxx>
+#include <Graphic3d_ZLayerId.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <NCollection_Map.hxx>
+#include <NCollection_Sequence.hxx>
+#include <OSD_Parallel.hxx>
+#include <OSD_ThreadPool.hxx>
+#include <Precision.hxx>
+#include <Prs3d_Drawer.hxx>
+#include <Prs3d_LineAspect.hxx>
+#include <QByteArray>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
@@ -65,68 +92,40 @@
 #include <QProcess>
 #include <QScopeGuard>
 #include <QSignalBlocker>
-#include <QByteArray>
+#include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
-#include <QTemporaryDir>
+#include <Quantity_Color.hxx>
+#include <Quantity_NameOfColor.hxx>
+#include <STEPControl_Reader.hxx>
+#include <SelectMgr_EntityOwner.hxx>
+#include <SelectMgr_SelectableObject.hxx>
+#include <StdSelect_BRepOwner.hxx>
+#include <StlAPI_Reader.hxx>
+#include <TDF_Label.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <gp_Ax2.hxx>
+#include <gp_Ax3.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
-#include <BRepAlgoAPI_Fuse.hxx>
-#include <BRepAdaptor_Surface.hxx>
-#include <BRep_Builder.hxx>
-#include <BRepBuilderAPI_MakeEdge.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
-#include <BRepBuilderAPI_Sewing.hxx>
-#include <BRepBuilderAPI_Transform.hxx>
-#include <BRepTools.hxx>
-#include <STEPControl_Reader.hxx>
-#include <StlAPI_Reader.hxx>
-#include <IFSelect_ReturnStatus.hxx>
-#include <TopLoc_Location.hxx>
-#include <gp_Trsf.hxx>
-#include <BRepClass3d_SolidClassifier.hxx>
-#include <BRepPrimAPI_MakeCone.hxx>
-#include <BRepPrimAPI_MakeCylinder.hxx>
-#include <AIS_DisplayMode.hxx>
-#include <Aspect_PolygonOffsetMode.hxx>
-#include <Aspect_TypeOfLine.hxx>
-#include <Graphic3d_ZLayerId.hxx>
-#include <Prs3d_Drawer.hxx>
-#include <Prs3d_LineAspect.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <TopoDS.hxx>
-#include <TopoDS_Compound.hxx>
-#include <TopoDS_Iterator.hxx>
-#include <TopoDS_Shell.hxx>
-#include <TopoDS_Solid.hxx>
-#include <TopAbs_ShapeEnum.hxx>
-#include <TopExp_Explorer.hxx>
-#include <Quantity_Color.hxx>
-#include <Quantity_NameOfColor.hxx>
-#include <BRepBndLib.hxx>
-#include <Bnd_Box.hxx>
-#include <Bnd_OBB.hxx>
-#include <GeomAbs_SurfaceType.hxx>
-#include <Precision.hxx>
-#include <SelectMgr_EntityOwner.hxx>
-#include <SelectMgr_SelectableObject.hxx>
-#include <StdSelect_BRepOwner.hxx>
-#include <gp_Vec.hxx>
-#include <gp_Ax2.hxx>
-#include <gp_Ax3.hxx>
-#include <OSD_Parallel.hxx>
-#include <OSD_ThreadPool.hxx>
-#include <TopTools_MapOfShape.hxx>
-
 
 namespace {
 using CamTravelCollisionBody = lcnc::cam::TravelCollisionBody;
@@ -601,7 +600,7 @@ void CamModule::unloadMachine()
     if (!doc) return;
 
     // Remove machine entities
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
     QStringList entries;
     for (int i = 1; i <= labels.Length(); ++i)
         entries << XcafUtils::entry(labels.Value(i));
@@ -912,7 +911,7 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
                   inputs.cutterHeadFaceCenter.Y(), inputs.cutterHeadFaceCenter.Z());
     } catch (const Standard_Failure& f) {
         // 中文翻译：OCC 异常：%1
-        return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.GetMessageString())));
+        return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.what())));
     } catch (const std::exception& e) {
         // 中文翻译：异常：%1
         return fail(tr("Exception: %1").arg(QString::fromUtf8(e.what())));
@@ -977,7 +976,7 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
 
         const gp_Pnt absoluteTcp = cutterHeadWorldPosition();
         const gp_Pnt cutterHeadSnapshot = m_cutterHeadModelPosition;
-        const TDF_LabelSequence machineLabels =
+        const NCollection_Sequence<TDF_Label> machineLabels =
             doc->entityLabels(LcncDocument::EntityKind::Machine);
         struct GeometryMove {
             TDF_Label label;
@@ -1131,7 +1130,7 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
         geometryCommitted = true;
     } catch (const Standard_Failure& f) {
         // 中文翻译：OCC 异常：%1
-        return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.GetMessageString())));
+        return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.what())));
     } catch (const std::exception& e) {
         // 中文翻译：异常：%1
         return fail(tr("Exception: %1").arg(QString::fromUtf8(e.what())));
@@ -1351,7 +1350,8 @@ void CamModule::mountWorkpiece(DocumentId sourceDocId, const QString& axisName, 
         ? defaultWorkpieceMountAxis()
         : axisName.trimmed();
 
-    TDF_LabelSequence sourceLabels = srcDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    NCollection_Sequence<TDF_Label> sourceLabels =
+        srcDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
     if (sourceLabels.Length() == 0)
         return;
 
@@ -1422,7 +1422,8 @@ bool CamModule::clearMountedWorkpieceDisplay(bool refreshView)
         for (const QString& entry : m_mountedWorkpieceEntryBySourceEntry.keys())
             kin->unmountWorkpiece(entry);
         if (LcncDocument* srcDoc = workpieceDocument()) {
-            const TDF_LabelSequence sourceLabels = srcDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
+            const NCollection_Sequence<TDF_Label> sourceLabels =
+                srcDoc->entityLabels(LcncDocument::EntityKind::Workpiece);
             for (int i = 1; i <= sourceLabels.Length(); ++i)
                 kin->unmountWorkpiece(XcafUtils::entry(sourceLabels.Value(i)));
         }
@@ -1445,7 +1446,7 @@ bool CamModule::moveShape(const QString& entry, const gp_Vec& translation)
     LcncDocument* doc = machineDocument();
     if (!doc || entry.isEmpty()) return false;
 
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
     for (int i = 1; i <= labels.Length(); ++i) {
         if (XcafUtils::entry(labels.Value(i)) == entry) {
             bool ok = ShapeService::moveShape(doc, labels.Value(i), translation);
@@ -1458,7 +1459,8 @@ bool CamModule::moveShape(const QString& entry, const gp_Vec& translation)
         }
     }
 
-    TDF_LabelSequence wpcLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    NCollection_Sequence<TDF_Label> wpcLabels =
+        doc->entityLabels(LcncDocument::EntityKind::Workpiece);
     for (int i = 1; i <= wpcLabels.Length(); ++i) {
         if (XcafUtils::entry(wpcLabels.Value(i)) == entry) {
             bool ok = ShapeService::moveShape(doc, wpcLabels.Value(i), translation);
@@ -1477,7 +1479,7 @@ bool CamModule::rotateShape(const QString& entry, const gp_Ax1& axis, double ang
     LcncDocument* doc = machineDocument();
     if (!doc || entry.isEmpty()) return false;
 
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
     for (int i = 1; i <= labels.Length(); ++i) {
         if (XcafUtils::entry(labels.Value(i)) == entry) {
             bool ok = ShapeService::rotateShape(doc, labels.Value(i), axis, angleDeg);
@@ -1490,7 +1492,8 @@ bool CamModule::rotateShape(const QString& entry, const gp_Ax1& axis, double ang
         }
     }
 
-    TDF_LabelSequence wpcLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
+    NCollection_Sequence<TDF_Label> wpcLabels =
+        doc->entityLabels(LcncDocument::EntityKind::Workpiece);
     for (int i = 1; i <= wpcLabels.Length(); ++i) {
         if (XcafUtils::entry(wpcLabels.Value(i)) == entry) {
             bool ok = ShapeService::rotateShape(doc, wpcLabels.Value(i), axis, angleDeg);
@@ -1510,7 +1513,7 @@ void CamModule::deleteShape(const QString& entry)
     if (!doc || entry.isEmpty()) return;
 
     bool deletingMachineShape = false;
-    const TDF_LabelSequence machineLabels =
+    const NCollection_Sequence<TDF_Label> machineLabels =
         doc->entityLabels(LcncDocument::EntityKind::Machine);
     for (int index = 1; index <= machineLabels.Length(); ++index) {
         if (XcafUtils::entry(machineLabels.Value(index)) == entry) {

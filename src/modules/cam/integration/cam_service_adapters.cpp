@@ -21,12 +21,13 @@
 #include "view/gui_document.h"
 
 #include <Graphic3d_Camera.hxx>
+#include <NCollection_Sequence.hxx>
 #include <QCoreApplication>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPointer>
 #include <QThread>
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <atomic>
 #include <memory>
@@ -222,7 +223,7 @@ class CamOfflineSimulationProviderAdapter final : public QObject,
                                               bool workpiece) {
             if (!document || !document->shapeTool())
                 return;
-            const TDF_LabelSequence labels = document->entityLabels(kind);
+            const NCollection_Sequence<TDF_Label> labels = document->entityLabels(kind);
             for (int index = 1; index <= labels.Length(); ++index) {
                 const TDF_Label& label = labels.Value(index);
                 const TopoDS_Shape shape = document->shapeTool()->GetShape(label);

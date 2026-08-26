@@ -1,18 +1,18 @@
 #include "modules/cad/services/shape_service.h"
-#include "core/math/numeric_constants.h"
 
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "core/math/numeric_constants.h"
 
 #include <BRepBuilderAPI_Transform.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <NCollection_Sequence.hxx>
+#include <TDF_Label.hxx>
 #include <TopoDS_Iterator.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
-#include <gp_Ax1.hxx>
-
 
 namespace ShapeService {
 
@@ -26,7 +26,7 @@ bool moveShape(LcncDocument* doc, const TDF_Label& label, const gp_Vec& translat
 
     gp_Trsf trsf;
     trsf.SetTranslation(translation);
-    BRepBuilderAPI_Transform xform(shape, trsf, Standard_True);
+    BRepBuilderAPI_Transform xform(shape, trsf, true);
     if (!xform.IsDone()) return false;
 
     st->SetShape(label, xform.Shape());
@@ -44,7 +44,7 @@ bool rotateShape(LcncDocument* doc, const TDF_Label& label,
 
     gp_Trsf trsf;
     trsf.SetRotation(axis, lcnc::math::degreesToRadians(angleDeg));
-    BRepBuilderAPI_Transform xform(shape, trsf, Standard_True);
+    BRepBuilderAPI_Transform xform(shape, trsf, true);
     if (!xform.IsDone()) return false;
 
     st->SetShape(label, xform.Shape());

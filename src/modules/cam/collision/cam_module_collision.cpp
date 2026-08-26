@@ -1,132 +1,131 @@
 
-#include "modules/cam/cam_module.h"
-#include "modules/cam/internal/cam_module_support.h"
-#include "view/toolpath_renderer.h"
-#include "view/travel_path_renderer.h"
-#include "view/contour_order_label_renderer.h"
-#include "view/machine_guide_renderer.h"
+#include "core/algorithms/cam/collision_safety_domain.h"
+#include "core/algorithms/cam/collision_scan_policy.h"
+#include "core/algorithms/cam/face_classifier.h"
+#include "core/algorithms/cam/initial_approach_axis_planner.h"
+#include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/machine_motion_certificate.h"
+#include "core/algorithms/cam/surface_collision_prefilter.h"
+#include "core/algorithms/cam/travel_path_planner.h"
+#include "core/algorithms/occt_exact_operation_lock.h"
+#include "core/document/lcnc_document.h"
+#include "core/document/xcaf_utils.h"
+#include "core/kernel/i_kernel.h"
+#include "core/kernel/kernel.h"
+#include "core/kernel/service_registry.h"
+#include "core/kinematics/machine_configuration_service.h"
+#include "core/kinematics/machine_kinematics.h"
+#include "core/kinematics/machine_pose.h"
+#include "core/logging/logger.h"
+#include "core/machine/machine_workspace.h"
 #include "core/project/cam/cam_data_manager.h"
 #include "core/project/cam/layer_container.h"
 #include "core/project/cam/layer_manager.h"
-#include "modules/cam/machine/machine_axis_detector.h"
-#include "modules/cam/display/cam_display_projection_service.h"
-#include "modules/cam/toolpath/toolpath_generation_service.h"
-#include "modules/cam/machine/machine_io.h"
-#include "modules/cam/interaction/reference_pick.h"
-#include "modules/cam/integration/cam_service_adapters.h"
-#include "modules/cam/collision/collision_geometry_cache.h"
+#include "core/project/lcnc_project_manager.h"
+#include "core/services/selection_service.h"
+#include "core/settings/app_settings.h"
+#include "core/task/task_manager.h"
+#include "modules/cad/services/shape_service.h"
+#include "modules/cam/cam_module.h"
 #include "modules/cam/collision/coal_collision_backend.h"
+#include "modules/cam/collision/collision_geometry_cache.h"
 #include "modules/cam/collision/continuous_motion_certificate_builder.h"
 #include "modules/cam/collision/cutter_collision_geometry.h"
+#include "modules/cam/contracts/cam_events.h"
+#include "modules/cam/display/cam_display_projection_service.h"
+#include "modules/cam/integration/cam_service_adapters.h"
+#include "modules/cam/interaction/reference_pick.h"
+#include "modules/cam/internal/cam_module_support.h"
+#include "modules/cam/machine/machine_axis_detector.h"
+#include "modules/cam/machine/machine_io.h"
+#include "modules/cam/settings/cam_config.h"
+#include "modules/cam/toolpath/toolpath_generation_service.h"
 #include "modules/cam/toolpath/toolpath_sequence_service.h"
 #include "modules/cam/toolpath/toolpath_solve_service.h"
-#include "core/machine/machine_workspace.h"
-#include "modules/cam/contracts/cam_events.h"
-#include "core/kinematics/machine_configuration_service.h"
-#include "core/kernel/kernel.h"
-#include "core/settings/app_settings.h"
-#include "modules/cad/services/shape_service.h"
-
-#include "modules/cam/settings/cam_config.h"
-#include "core/algorithms/cam/face_classifier.h"
-#include "core/algorithms/cam/travel_path_planner.h"
-#include "core/document/lcnc_document.h"
-#include "core/algorithms/cam/laser_toolpath.h"
-#include "core/algorithms/cam/collision_scan_policy.h"
-#include "core/algorithms/cam/collision_safety_domain.h"
-#include "core/algorithms/cam/machine_motion_certificate.h"
-#include "core/algorithms/cam/initial_approach_axis_planner.h"
-#include "core/algorithms/cam/surface_collision_prefilter.h"
-#include "core/algorithms/occt_exact_operation_lock.h"
-#include "core/kinematics/machine_kinematics.h"
-#include "core/kinematics/machine_pose.h"
-#include "core/kernel/i_kernel.h"
-#include "core/kernel/service_registry.h"
-#include "core/services/selection_service.h"
-#include "core/logging/logger.h"
-#include "core/project/lcnc_project_manager.h"
-#include "core/task/task_manager.h"
-#include "core/document/xcaf_utils.h"
+#include "view/contour_order_label_renderer.h"
+#include "view/graphics_scene.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
+#include "view/machine_guide_renderer.h"
+#include "view/toolpath_renderer.h"
+#include "view/travel_path_renderer.h"
 #include "view/widget_occ_view.h"
-#include "view/graphics_scene.h"
 
-#include <QElapsedTimer>
+#include <AIS_DisplayMode.hxx>
+#include <Aspect_PolygonOffsetMode.hxx>
+#include <Aspect_TypeOfLine.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <Bnd_Box.hxx>
+#include <Bnd_OBB.hxx>
+#include <GeomAbs_SurfaceType.hxx>
+#include <Graphic3d_ZLayerId.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <NCollection_Map.hxx>
+#include <NCollection_Sequence.hxx>
+#include <OSD_Parallel.hxx>
+#include <OSD_ThreadPool.hxx>
+#include <Precision.hxx>
+#include <Prs3d_Drawer.hxx>
+#include <Prs3d_LineAspect.hxx>
+#include <QByteArray>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPoint>
 #include <QPointer>
-#include <QScopeGuard>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QSignalBlocker>
-#include <QByteArray>
 #include <QThread>
 #include <QTimer>
+#include <Quantity_Color.hxx>
+#include <Quantity_NameOfColor.hxx>
+#include <STEPControl_Reader.hxx>
+#include <SelectMgr_EntityOwner.hxx>
+#include <SelectMgr_SelectableObject.hxx>
+#include <StdSelect_BRepOwner.hxx>
+#include <StlAPI_Reader.hxx>
+#include <TDF_Label.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <gp_Ax2.hxx>
+#include <gp_Ax3.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
-#include <BRepAlgoAPI_Fuse.hxx>
-#include <BRepAdaptor_Surface.hxx>
-#include <BRep_Builder.hxx>
-#include <BRepBuilderAPI_MakeEdge.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
-#include <BRepBuilderAPI_Sewing.hxx>
-#include <BRepBuilderAPI_Transform.hxx>
-#include <BRepExtrema_DistShapeShape.hxx>
-#include <BRepTools.hxx>
-#include <STEPControl_Reader.hxx>
-#include <StlAPI_Reader.hxx>
-#include <IFSelect_ReturnStatus.hxx>
-#include <TopLoc_Location.hxx>
-#include <gp_Trsf.hxx>
-#include <BRepClass3d_SolidClassifier.hxx>
-#include <BRepPrimAPI_MakeCone.hxx>
-#include <BRepPrimAPI_MakeCylinder.hxx>
-#include <AIS_DisplayMode.hxx>
-#include <Aspect_PolygonOffsetMode.hxx>
-#include <Aspect_TypeOfLine.hxx>
-#include <Graphic3d_ZLayerId.hxx>
-#include <Prs3d_Drawer.hxx>
-#include <Prs3d_LineAspect.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <TopoDS.hxx>
-#include <TopoDS_Compound.hxx>
-#include <TopoDS_Iterator.hxx>
-#include <TopoDS_Shell.hxx>
-#include <TopoDS_Solid.hxx>
-#include <TopAbs_ShapeEnum.hxx>
-#include <TopExp_Explorer.hxx>
-#include <Quantity_Color.hxx>
-#include <Quantity_NameOfColor.hxx>
-#include <BRepBndLib.hxx>
-#include <Bnd_Box.hxx>
-#include <Bnd_OBB.hxx>
-#include <GeomAbs_SurfaceType.hxx>
-#include <Precision.hxx>
-#include <SelectMgr_EntityOwner.hxx>
-#include <SelectMgr_SelectableObject.hxx>
-#include <StdSelect_BRepOwner.hxx>
-#include <gp_Vec.hxx>
-#include <gp_Ax2.hxx>
-#include <gp_Ax3.hxx>
-#include <OSD_Parallel.hxx>
-#include <OSD_ThreadPool.hxx>
-#include <TopTools_MapOfShape.hxx>
-
 
 namespace {
 using CamTravelCollisionBody = lcnc::cam::TravelCollisionBody;
@@ -636,7 +635,7 @@ lcnc::cam::CollisionValidationSnapshot CamModule::validateCollisionPath(
                                         lcnc::OcctExactOperationLock exactOperationLock;
                                         BRepExtrema_DistShapeShape distance(first, second);
                                         distance.SetDeflection(0.025);
-                                        distance.SetMultiThread(Standard_False);
+                                        distance.SetMultiThread(false);
                                         distance.Perform();
                                         if (!distance.IsDone()) {
                                             result.state = lcnc::cam::CollisionValidationState::Indeterminate;
@@ -695,9 +694,8 @@ lcnc::cam::CollisionValidationSnapshot CamModule::validateCollisionPath(
             }
         }
     } catch (const Standard_Failure& failure) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "CAM collision safety-domain OCCT failure: {}",
-                 failure.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "CAM collision safety-domain OCCT failure: {}",
+                 failure.what());
         result.state = lcnc::cam::CollisionValidationState::Indeterminate;
         // 中文翻译：碰撞安全域几何运算失败
         result.failureReason = tr("Collision safety-domain geometry operation failed");
@@ -1045,8 +1043,8 @@ void CamModule::scheduleCollisionSafetyDomainPreparation(
     QVector<CamTravelCollisionBody> bodies;
     if (LcncDocument* machine = machineDocument();
         machine && machine->shapeTool()) {
-        const TDF_LabelSequence labels = machine->entityLabels(
-            LcncDocument::EntityKind::Machine);
+        const NCollection_Sequence<TDF_Label> labels =
+            machine->entityLabels(LcncDocument::EntityKind::Machine);
         for (int index = 1; index <= labels.Length(); ++index) {
             const TDF_Label& label = labels.Value(index);
             const QString entry = XcafUtils::entry(label);
@@ -1255,7 +1253,8 @@ void CamModule::scheduleFullEnvironmentVerification(
         machineCollisionAxisSources(*machineSafetyPackage.index);
     QVector<CamTravelCollisionBody> bodies;
     if (machine && machine->shapeTool()) {
-        const TDF_LabelSequence labels = machine->entityLabels(LcncDocument::EntityKind::Machine);
+        const NCollection_Sequence<TDF_Label> labels =
+            machine->entityLabels(LcncDocument::EntityKind::Machine);
         for (int index = 1; index <= labels.Length(); ++index) {
             const TDF_Label& label = labels.Value(index);
             const QString entry = XcafUtils::entry(label);
@@ -2002,7 +2001,7 @@ void CamModule::scheduleFullEnvironmentVerification(
                                     passive.timing->exactQueries.fetch_add(1, std::memory_order_relaxed);
                                 BRepExtrema_DistShapeShape distance(first, second);
                                 distance.SetDeflection(0.025);
-                                distance.SetMultiThread(Standard_False);
+                                distance.SetMultiThread(false);
                                 distance.Perform();
                                 if (!distance.IsDone()) {
                                     fail(QObject::tr("Full-machine collision verification failed between %1 and %2")

@@ -5,13 +5,13 @@
 #include "core/kinematics/machine_kinematics.h"
 #include "core/machine/machine_workspace.h"
 
+#include <NCollection_Sequence.hxx>
 #include <QHeaderView>
 #include <QMap>
 #include <QSet>
 #include <QStringList>
 #include <QTreeWidgetItem>
-
-#include <TDF_LabelSequence.hxx>
+#include <TDF_Label.hxx>
 
 namespace {
 constexpr int kRoleEntry = Qt::UserRole;      // shape 节点存 XCAF entry 串
@@ -113,7 +113,8 @@ void WidgetMachineTree::rebuild()
     // 收集所有机台实体
     QMap<QString, QString> nameByEntry;  // entry → displayName
     {
-        const TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+        const NCollection_Sequence<TDF_Label> labels =
+            doc->entityLabels(LcncDocument::EntityKind::Machine);
         for (int i = 1; i <= labels.Length(); ++i) {
             const TDF_Label lbl = labels.Value(i);
             const QString entry = XcafUtils::entry(lbl);

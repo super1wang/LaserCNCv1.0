@@ -6445,6 +6445,30 @@ You need to complete the three pickups above first.</source>
 <context>
     <name>QObject</name>
     <message>
+        <source>Read CAD file...</source>
+        <translation>读取 CAD 文件...</translation>
+    </message>
+    <message>
+        <source>Parse STEP records...</source>
+        <translation>解析 STEP 记录...</translation>
+    </message>
+    <message>
+        <source>Transfer STEP geometry...</source>
+        <translation>传输 STEP 几何...</translation>
+    </message>
+    <message>
+        <source>Analyze display mesh...</source>
+        <translation>分析显示网格...</translation>
+    </message>
+    <message>
+        <source>Generate low-cost display mesh (%1 faces)...</source>
+        <translation>生成低成本显示网格（%1 个面）...</translation>
+    </message>
+    <message>
+        <source>Generate display mesh (%1 faces)...</source>
+        <translation>生成显示网格（%1 个面）...</translation>
+    </message>
+    <message>
         <source>Cutting has been interrupted</source>
         <translation>切割已被中断</translation>
     </message>

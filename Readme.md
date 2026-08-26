@@ -2,7 +2,7 @@
 
 LaserCNC 是面向五轴激光加工的 Windows 桌面软件，将 CAD、CAM、离线仿真与 Process 加工执行放在统一工程工作区中。项目使用 C++17、Qt 6、OpenCASCADE/XCAF、SARibbon、QuaZip、toml11 与 spdlog。
 
-当前版本为 `1.6.2`。本轮在 v1.6.1 基线上将 OpenCASCADE 升级到 8.0.1，完成视图 API 适配、Debug/Release 运行库闭包更新，并修复 Visual Studio 生成树继续使用旧 OCCT 缓存的问题。Ninja 与 VS/MSBuild 的 Debug/Release 构建及自动化冒烟已验证；大型目标 STEP 已不再复现旧栈溢出，但导入耗时、峰值内存和取消及时性仍未达到验收条件，GUI、长稳及物理设备验证也未完成，因此不能据此标记为实体机生产发布。
+当前版本为 `1.6.3`。本轮完成 OpenCASCADE 8.0.1 深层适配：迁移弃用接口，统一文件打开与导入的事务式后台链路，并按精确 B-Rep 面数选择并行显示网格策略。42.7 MB 目标 STEP 的最终 Release 完整导入实测约 20.2 秒，65.9 MB 对照模型约 9.6 秒；Ninja、VS/MSBuild 的 Debug/Release 构建、Debug 41/41 CTest 和关键 ASan 回归均已通过。自动化证据不替代 GUI 显示质量、长稳和物理设备验收，因此本版本不据此标记为实体机生产发布。
 
 ## 系统组成
 

@@ -4,22 +4,21 @@
 
 
 // OCC
-#include <XCAFApp_Application.hxx>
-#include <XCAFDoc_DocumentTool.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
-#include <XCAFDoc_Colortool.hxx>
-#include <TDataStd_Name.hxx>
-#include <TDataStd_Integer.hxx>
-#include <TDF_tool.hxx>
-#include <TDF_LabelSequence.hxx>
-#include <TDF_ChildIterator.hxx>
+#include <NCollection_Sequence.hxx>
+#include <QSignalBlocker>
 #include <TCollection_AsciiString.hxx>
-#include <XCAFDoc_Location.hxx>
+#include <TDF_ChildIterator.hxx>
+#include <TDF_Label.hxx>
+#include <TDF_tool.hxx>
+#include <TDataStd_Integer.hxx>
+#include <TDataStd_Name.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Iterator.hxx>
-
-#include <QSignalBlocker>
-
+#include <XCAFApp_Application.hxx>
+#include <XCAFDoc_Colortool.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_Location.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <memory>
 
 // IMPLEMENT_STANDARD_RTTIEXT(LcncDocument, TDocStd_Document)
@@ -95,7 +94,7 @@ Handle(XCAFDoc_ColorTool) LcncDocument::colorTool() const
 // ── Entity management ─────────────────────────────────────────────────────────
 void LcncDocument::clearEntityKind(EntityKind kind)
 {
-    TDF_LabelSequence labels = entityLabels(kind);
+    NCollection_Sequence<TDF_Label> labels = entityLabels(kind);
 
     MachineKinematics* kin = m_kinematics;
     std::unique_ptr<QSignalBlocker> kinBlocker;
@@ -111,7 +110,7 @@ void LcncDocument::clearEntityKind(EntityKind kind)
             else if (kind == EntityKind::Workpiece)
                 kin->unmountWorkpiece(entry);
         }
-        label.ForgetAllAttributes(Standard_True);
+        label.ForgetAllAttributes(true);
     }
 
     if (kind == EntityKind::Machine)
@@ -150,19 +149,18 @@ TDF_Label LcncDocument::addShapeEntity(const TopoDS_Shape& shape,
     TDF_Label shapeLabel = st->NewShape();
     st->SetShape(shapeLabel, shape);
     XcafUtils::setName(shapeLabel, name);
-    TDataStd_Integer::Set(shapeLabel, static_cast<Standard_Integer>(kind));
+    TDataStd_Integer::Set(shapeLabel, static_cast<int>(kind));
     return shapeLabel;
 }
 
-TDF_LabelSequence LcncDocument::entityLabels(EntityKind kind) const
-{
+NCollection_Sequence<TDF_Label> LcncDocument::entityLabels(EntityKind kind) const {
     // Shapes are stored as top-level XDE free shapes tagged with their
     // EntityKind via a TDataStd_Integer attribute.  Enumerate and filter.
     Handle(XCAFDoc_ShapeTool) st = shapeTool();
-    TDF_LabelSequence freeShapes;
+    NCollection_Sequence<TDF_Label> freeShapes;
     st->GetFreeShapes(freeShapes);
 
-    TDF_LabelSequence result;
+    NCollection_Sequence<TDF_Label> result;
     for (int i = 1; i <= freeShapes.Length(); ++i) {
         TDF_Label lbl = freeShapes.Value(i);
         Handle(TDataStd_Integer) attr;
@@ -177,7 +175,7 @@ TDF_LabelSequence LcncDocument::entityLabels(EntityKind kind) const
 void LcncDocument::removeShapeEntity(const QString& entry)
 {
     Handle(XCAFDoc_ShapeTool) st = shapeTool();
-    TDF_LabelSequence freeShapes;
+    NCollection_Sequence<TDF_Label> freeShapes;
     st->GetFreeShapes(freeShapes);
 
     for (int i = 1; i <= freeShapes.Length(); ++i) {
@@ -187,7 +185,7 @@ void LcncDocument::removeShapeEntity(const QString& entry)
         // Forget all attributes: removes TNaming_NamedShape (so IsShape() returns
         // false and GetFreeShapes() will no longer return this label), the kind
         // tag (TDataStd_Integer), name and any colors.
-        lbl.ForgetAllAttributes(Standard_True);
+        lbl.ForgetAllAttributes(true);
 
         // Remove from in-memory hierarchy trees so the "准备" tab rebuild is clean.
         // Empty virtual parent nodes are pruned automatically (request 2).
@@ -222,7 +220,7 @@ static QString xcafLabelName(const TDF_Label& lbl)
         const TCollection_ExtendedString& ext = attr->Get();
         std::wstring ws;
         ws.reserve(static_cast<size_t>(ext.Length()));
-        for (Standard_Integer i = 1; i <= ext.Length(); ++i)
+        for (int i = 1; i <= ext.Length(); ++i)
             ws.push_back(static_cast<wchar_t>(ext.Value(i)));
         return QString::fromStdWString(ws);
     }
@@ -251,7 +249,7 @@ static LcncDocument::ShapeTreeNode importBuildTreeR(
     // Try XDE GetComponents first; if it fails, fall back to scanning child
     // labels for any reference label (handles STEP files where IsAssembly
     // may not be set but NAUO component-references still exist as children).
-    TDF_LabelSequence comps;
+    NCollection_Sequence<TDF_Label> comps;
     st->GetComponents(designLbl, comps);
     if (comps.IsEmpty()) {
         TDF_ChildIterator childIt(designLbl);
@@ -316,7 +314,7 @@ void LcncDocument::importFromXcaf(const Handle(TDocStd_Document)& xdeDoc,
                                    EntityKind kind)
 {
     Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
-    TDF_LabelSequence freeShapes;
+    NCollection_Sequence<TDF_Label> freeShapes;
     st->GetFreeShapes(freeShapes);
 
     LCNC_DEBUG(lcnc::LogCode::Generic,
@@ -352,7 +350,7 @@ void LcncDocument::importFromXcafFlat(const Handle(TDocStd_Document)& xdeDoc,
                                        EntityKind kind)
 {
     Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
-    TDF_LabelSequence freeShapes;
+    NCollection_Sequence<TDF_Label> freeShapes;
     st->GetFreeShapes(freeShapes);
 
     auto& tree = (kind == EntityKind::Machine)
@@ -364,7 +362,7 @@ void LcncDocument::importFromXcafFlat(const Handle(TDocStd_Document)& xdeDoc,
         const QString    rootName = xcafLabelName(root);
 
         // Get direct components of this free shape (assembly top level)
-        TDF_LabelSequence comps;
+        NCollection_Sequence<TDF_Label> comps;
         st->GetComponents(root, comps);
 
         if (comps.IsEmpty()) {
@@ -428,7 +426,7 @@ void LcncDocument::importFromXcafRoots(const Handle(TDocStd_Document)& xdeDoc,
                                         EntityKind kind)
 {
     Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(xdeDoc->Main());
-    TDF_LabelSequence freeShapes;
+    NCollection_Sequence<TDF_Label> freeShapes;
     st->GetFreeShapes(freeShapes);
 
     auto& tree = (kind == EntityKind::Machine)

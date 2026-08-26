@@ -1,17 +1,19 @@
 #include "view/gui_document.h"
-#include "core/kernel/kernel.h"
-#include "core/logging/logger.h"
-#include "core/settings/app_settings.h"
+
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
+#include "core/kernel/kernel.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
+#include "core/settings/app_settings.h"
 #include "view/rendering_manager.h"
 #include "view/shape_object_driver.h"
 
-#include <TDF_LabelSequence.hxx>
-#include <XCAFDoc_ShapeTool.hxx>
+#include <NCollection_Sequence.hxx>
+#include <TDF_Label.hxx>
 #include <TDataStd_Integer.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 
 // View and gizmo includes
 #include <AIS_ViewCube.hxx>
@@ -138,7 +140,7 @@ void GuiDocument::attachView(const Handle(Aspect_NeutralWindow)& win, int w, int
     m_animTimer->setInterval(16); // ~60 fps
     connect(m_animTimer, &QTimer::timeout, this, [this]() {
         if (!m_viewCube.IsNull() && m_viewCube->HasAnimation()) {
-            Standard_Boolean stillGoing = m_viewCube->UpdateAnimation(Standard_False);
+            bool stillGoing = m_viewCube->UpdateAnimation(false);
             if (!m_view.IsNull())
                 m_view->Redraw();
             if (!stillGoing || !m_viewCube->HasAnimation())
@@ -200,7 +202,7 @@ void GuiDocument::setMachineCoordinateFrame(const QList<MachineAxisDef>& axes)
     m_trihedron->SetComponent(coordSys);
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
     if (!ctx.IsNull())
-        ctx->RecomputePrsOnly(m_trihedron, Standard_False);
+        ctx->RecomputePrsOnly(m_trihedron, false);
     if (!m_view.IsNull())
         m_view->Redraw();
 }
@@ -235,7 +237,7 @@ bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int h
         const bool wasDisplayed = ctx->IsDisplayed(object);
         states.append({object, wasDisplayed});
         if (wasDisplayed)
-            ctx->Erase(object, Standard_False);
+            ctx->Erase(object, false);
     };
 
     for (auto it = m_displayObjects.cbegin(); it != m_displayObjects.cend(); ++it) {
@@ -266,9 +268,9 @@ bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int h
         Handle(AIS_Shape) preview = new AIS_Shape(shape);
         preview->SetDisplayMode(AIS_Shaded);
         preview->SetMaterial(Graphic3d_NOM_PLASTER);
-        preview->Attributes()->SetFaceBoundaryDraw(Standard_False);
-        preview->Attributes()->SetAutoTriangulation(Standard_False);
-        ctx->Display(preview, AIS_Shaded, 0, Standard_False);
+        preview->Attributes()->SetFaceBoundaryDraw(false);
+        preview->Attributes()->SetAutoTriangulation(false);
+        ctx->Display(preview, AIS_Shaded, 0, false);
         previewObjects.append(preview);
     }
 
@@ -281,18 +283,18 @@ bool GuiDocument::dumpWorkpiecePreview(const QString& filePath, int width, int h
     m_view->Redraw();
 
     Image_AlienPixMap image;
-    const bool rendered = m_view->ToPixMap(image, width, height, Graphic3d_BT_RGB, Standard_True);
+    const bool rendered = m_view->ToPixMap(image, width, height, Graphic3d_BT_RGB, true);
     const bool saved = rendered
         && image.Save(TCollection_AsciiString(filePath.toUtf8().constData()));
 
     m_view->SetCamera(previousCamera);
     for (const Handle(AIS_Shape)& preview : previewObjects) {
         if (!preview.IsNull())
-            ctx->Erase(preview, Standard_False);
+            ctx->Erase(preview, false);
     }
     for (const DisplayState& state : states) {
         if (state.wasDisplayed && !state.object.IsNull() && !ctx->IsDisplayed(state.object))
-            ctx->Display(state.object, Standard_False);
+            ctx->Display(state.object, false);
     }
     m_view->Redraw();
 
@@ -533,7 +535,7 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
     }
 
     for (LcncDocument::EntityKind kind : kinds) {
-        const TDF_LabelSequence labels = document->entityLabels(kind);
+        const NCollection_Sequence<TDF_Label> labels = document->entityLabels(kind);
         for (int i = 1; i <= labels.Length(); ++i) {
             TDF_Label lbl   = labels.Value(i);
             TopoDS_Shape sh = XcafUtils::shape(lbl);
@@ -544,9 +546,9 @@ void GuiDocument::rebuildDomain(lcnc::ProjectDomain domain, LcncDocument* docume
                 // mesh directly to avoid an edge-only XCAFPrs presentation.
                 Handle(AIS_Shape) ais = m_scene->displayShape(sh, false, true, false);
                 ais->SetMaterial(Graphic3d_NOM_PLASTER);
-                ais->Attributes()->SetAutoTriangulation(Standard_False);
-                ais->Attributes()->SetIsoOnTriangulation(Standard_False);
-                ais->Attributes()->SetFaceBoundaryDraw(Standard_False);
+                ais->Attributes()->SetAutoTriangulation(false);
+                ais->Attributes()->SetIsoOnTriangulation(false);
+                ais->Attributes()->SetFaceBoundaryDraw(false);
                 registerDisplayObject(domain,
                                       document,
                                       static_cast<int>(kind),
@@ -688,19 +690,12 @@ void activateCamContourSelection(const Handle(AIS_InteractiveContext)& ctx,
     const int globalMode = AIS_Shape::SelectionMode(TopAbs_SHAPE);
     const int wireMode = AIS_Shape::SelectionMode(TopAbs_WIRE);
 
-    ctx->SetDisplayMode(ais, AIS_WireFrame, Standard_False);
-    ctx->SetWidth(ais, 2.0, Standard_False);
+    ctx->SetDisplayMode(ais, AIS_WireFrame, false);
+    ctx->SetWidth(ais, 2.0, false);
     ctx->Deactivate(ais);
-    ctx->SetSelectionModeActive(ais,
-                                globalMode,
-                                Standard_True,
-                                AIS_SelectionModesConcurrency_Multiple,
-                                Standard_False);
-    ctx->SetSelectionModeActive(ais,
-                                wireMode,
-                                Standard_True,
-                                AIS_SelectionModesConcurrency_Multiple,
-                                Standard_False);
+    ctx->SetSelectionModeActive(ais, globalMode, true, AIS_SelectionModesConcurrency_Multiple,
+                                false);
+    ctx->SetSelectionModeActive(ais, wireMode, true, AIS_SelectionModesConcurrency_Multiple, false);
     ctx->SetSelectionSensitivity(ais, globalMode, 8);
     ctx->SetSelectionSensitivity(ais, wireMode, 8);
     ctx->SetPixelTolerance(qMax(ctx->PixelTolerance(), 6));
@@ -854,7 +849,7 @@ void GuiDocument::setEntitySelectionMode(int selectionMode)
             && isCamContourEntry(it.value().entry)) {
             activateCamContourSelection(ctx, ais);
         } else {
-            ctx->Activate(ais, selectionMode, Standard_False);
+            ctx->Activate(ais, selectionMode, false);
         }
     }
 }
@@ -919,7 +914,7 @@ void GuiDocument::updateAxisTransforms(LcncDocument* document)
             continue;  // not assigned — leave transform unchanged
 
         ais->SetLocalTransformation(t);
-        ctx->RecomputePrsOnly(ais, Standard_False);
+        ctx->RecomputePrsOnly(ais, false);
     }
 }
 
@@ -970,7 +965,7 @@ void GuiDocument::updateMachineWorkspaceTransforms(LcncDocument* machineDocument
         if (ais.IsNull())
             continue;
         ais->SetLocalTransformation(t);
-        ctx->RecomputePrsOnly(ais, Standard_False);
+        ctx->RecomputePrsOnly(ais, false);
     }
 }
 
@@ -1115,7 +1110,7 @@ bool GuiDocument::fitDisplayObjects(int priority, bool update)
                "GuiDocument::fitAll using priority={} bounds count={}",
                priority,
                fitCount);
-    m_view->FitAll(fitBox, 0.01, update ? Standard_True : Standard_False);
+    m_view->FitAll(fitBox, 0.01, update ? true : false);
     m_view->ZFitAll();
     return true;
 }

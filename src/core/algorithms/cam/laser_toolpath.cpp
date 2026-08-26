@@ -1,68 +1,66 @@
 #include "core/algorithms/cam/laser_toolpath.h"
-#include "core/math/numeric_constants.h"
+
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/kinematics/ik_solver.h"
 #include "core/kinematics/toolpath_kinematics_solver.h"
 #include "core/logging/logger.h"
+#include "core/math/numeric_constants.h"
 
-#include <TopExp_Explorer.hxx>
-#include <TopoDS.hxx>
-#include <TopoDS_Wire.hxx>
-#include <TopoDS_Edge.hxx>
-#include <TopoDS_Face.hxx>
-#include <BRep_tool.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepGProp.hxx>
+#include <BRepGProp_Face.hxx>
+#include <BRepLProp_CLProps.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepOffset_Analyse.hxx>
+#include <BRepOffset_Interval.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
+#include <BRep_Builder.hxx>
+#include <BRep_tool.hxx>
+#include <Bnd_Box.hxx>
 #include <GCPnts_UniformDeflection.hxx>
-#include <BRepLProp_CLProps.hxx>
-#include <BRepGProp_Face.hxx>
-#include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAbs_SurfaceType.hxx>
-#include <BRepClass_FaceClassifier.hxx>
-#include <BRepClass3d_SolidClassifier.hxx>
-#include <BRepExtrema_DistShapeShape.hxx>
-#include <BRep_Builder.hxx>
-#include <BRepBndLib.hxx>
-#include <BRepOffset_Analyse.hxx>
-#include <BRepOffset_ListOfInterval.hxx>
-#include <TopoDS_Vertex.hxx>
-#include <TopExp.hxx>
-#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
-#include <TopTools_IndexedMapOfShape.hxx>
-#include <TopTools_ListOfShape.hxx>
-#include <ShapeAnalysis_Surface.hxx>
-#include <Geom_Surface.hxx>
-#include <Geom_BSplineCurve.hxx>
 #include <GeomLProp_SLProps.hxx>
-#include <TColgp_Array1OfPnt.hxx>
-#include <TColStd_Array1OfInteger.hxx>
-#include <TColStd_Array1OfReal.hxx>
-#include <Bnd_Box.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_Surface.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
-#include <Poly_Triangulation.hxx>
+#include <NCollection_Array1.hxx>
+#include <NCollection_IndexedDataMap.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <NCollection_List.hxx>
 #include <Poly_Triangle.hxx>
+#include <Poly_Triangulation.hxx>
+#include <ShapeAnalysis_Surface.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
-
-#include <gp_Vec.hxx>
-#include <gp_Trsf.hxx>
-#include <gp_Pnt2d.hxx>
-
+#include <TopTools_ShapeMapHasher.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Vertex.hxx>
+#include <TopoDS_Wire.hxx>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <gp_Pnt.hxx>
+#include <gp_Pnt2d.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 #include <limits>
 #include <utility>
-
 
 // =============================================================================
 // LaserToolpath
@@ -115,9 +113,9 @@ TopoDS_Shape LaserToolpathBuilder::buildOffsetDisplayShape(const LaserContour& c
     // 圆化尖角并产生过冲；一次 B 样条严格等同于采样折线，既不拟合也不增加大量拓扑边。
     try {
         const int poleCount = static_cast<int>(samples.size());
-        TColgp_Array1OfPnt poles(1, poleCount);
-        TColStd_Array1OfReal knots(1, poleCount);
-        TColStd_Array1OfInteger multiplicities(1, poleCount);
+        NCollection_Array1<gp_Pnt> poles(1, poleCount);
+        NCollection_Array1<double> knots(1, poleCount);
+        NCollection_Array1<int> multiplicities(1, poleCount);
         double accumulatedLength = 0.0;
         for (int index = 0; index < poleCount; ++index) {
             if (index > 0)
@@ -128,15 +126,14 @@ TopoDS_Shape LaserToolpathBuilder::buildOffsetDisplayShape(const LaserContour& c
             multiplicities.SetValue(index + 1,
                                     index == 0 || index + 1 == poleCount ? 2 : 1);
         }
-        Handle(Geom_BSplineCurve) polyline = new Geom_BSplineCurve(
-            poles, knots, multiplicities, 1, Standard_False);
+        Handle(Geom_BSplineCurve) polyline =
+            new Geom_BSplineCurve(poles, knots, multiplicities, 1, false);
         BRepBuilderAPI_MakeEdge edge(polyline);
         if (edge.IsDone())
             return edge.Edge();
     } catch (const Standard_Failure& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.toolpath: offset display polyline construction failed: {}",
-                 failure.GetMessageString());
+                 "cam.toolpath: offset display polyline construction failed: {}", failure.what());
     } catch (const std::exception& exception) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "cam.toolpath: offset display polyline construction failed: {}",
@@ -470,12 +467,12 @@ gp_Pnt bboxCenter(const Bnd_Box& box)
     if (box.IsVoid())
         return gp_Pnt(0, 0, 0);
 
-    Standard_Real xmin = 0.0;
-    Standard_Real ymin = 0.0;
-    Standard_Real zmin = 0.0;
-    Standard_Real xmax = 0.0;
-    Standard_Real ymax = 0.0;
-    Standard_Real zmax = 0.0;
+    double xmin = 0.0;
+    double ymin = 0.0;
+    double zmin = 0.0;
+    double xmax = 0.0;
+    double ymax = 0.0;
+    double zmax = 0.0;
     box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
     return gp_Pnt(0.5 * (xmin + xmax),
                   0.5 * (ymin + ymax),
@@ -694,19 +691,17 @@ bool appendFaceIfContainsEdge(std::vector<TopoDS_Face>& result,
 }
 
 void bindOwnedWireSurfaceContext(
-    LaserContour& contour,
-    const TopoDS_Face& owner,
-    const TopTools_IndexedDataMapOfShapeListOfShape& edgeToFaces)
-{
+    LaserContour& contour, const TopoDS_Face& owner,
+    const NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                                     TopTools_ShapeMapHasher>& edgeToFaces) {
     contour.leadInSurfaceContext.clear();
     for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next()) {
         LeadInEdgeSurfaceContext context;
         context.outerFaces.push_back(owner);
         const TopoDS_Edge edge = exp.Current();
         if (edgeToFaces.Contains(edge)) {
-            const TopTools_ListOfShape& adjacentFaces = edgeToFaces.FindFromKey(edge);
-            for (TopTools_ListIteratorOfListOfShape it(adjacentFaces);
-                 it.More(); it.Next()) {
+            const NCollection_List<TopoDS_Shape>& adjacentFaces = edgeToFaces.FindFromKey(edge);
+            for (NCollection_List<TopoDS_Shape>::Iterator it(adjacentFaces); it.More(); it.Next()) {
                 const TopoDS_Face face = TopoDS::Face(it.Value());
                 if (face.IsSame(owner))
                     continue;
@@ -821,9 +816,9 @@ bool mayTraverseExteriorShell(const BRepOffset_Analyse& concavity,
                               const TopoDS_Edge& edge)
 {
     try {
-        const BRepOffset_ListOfInterval& intervals = concavity.Type(edge);
+        const NCollection_List<BRepOffset_Interval>& intervals = concavity.Type(edge);
         bool hasExteriorTransition = false;
-        for (BRepOffset_ListIteratorOfListOfInterval it(intervals); it.More(); it.Next()) {
+        for (NCollection_List<BRepOffset_Interval>::Iterator it(intervals); it.More(); it.Next()) {
             switch (it.Value().Type()) {
             case ChFiDS_Concave:
             case ChFiDS_Mixed:
@@ -849,17 +844,17 @@ bool mayTraverseExteriorShell(const BRepOffset_Analyse& concavity,
 
 bool isAttachedToExteriorShell(
     const TopoDS_Face& face,
-    const TopTools_IndexedDataMapOfShapeListOfShape& edgeToFaces,
-    const BRepOffset_Analyse& concavity)
-{
+    const NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                                     TopTools_ShapeMapHasher>& edgeToFaces,
+    const BRepOffset_Analyse& concavity) {
     bool hasAdjacentFace = false;
     for (TopExp_Explorer edgeExp(face, TopAbs_EDGE); edgeExp.More(); edgeExp.Next()) {
         const TopoDS_Edge edge = TopoDS::Edge(edgeExp.Current());
         if (!edgeToFaces.Contains(edge))
             continue;
-        const TopTools_ListOfShape& adjacent = edgeToFaces.FindFromKey(edge);
+        const NCollection_List<TopoDS_Shape>& adjacent = edgeToFaces.FindFromKey(edge);
         bool hasOtherFace = false;
-        for (TopTools_ListIteratorOfListOfShape it(adjacent); it.More(); it.Next()) {
+        for (NCollection_List<TopoDS_Shape>::Iterator it(adjacent); it.More(); it.Next()) {
             if (!TopoDS::Face(it.Value()).IsSame(face)) {
                 hasOtherFace = true;
                 hasAdjacentFace = true;
@@ -881,7 +876,7 @@ TopoDS_Face makeTopOpenSectionFace(const TopoDS_Shape& workpiece)
     BRepBndLib::Add(workpiece, workpieceBounds);
     if (workpieceBounds.IsVoid())
         return {};
-    Standard_Real xMin, yMin, zMin, xMax, yMax, zMax;
+    double xMin, yMin, zMin, xMax, yMax, zMax;
     workpieceBounds.Get(xMin, yMin, zMin, xMax, yMax, zMax);
     const double extent = std::max({xMax - xMin, yMax - yMin, zMax - zMin, 1.0});
     const double tolerance = std::max(1e-4, extent * 1e-4);
@@ -901,7 +896,7 @@ TopoDS_Face makeTopOpenSectionFace(const TopoDS_Shape& workpiece)
         BRepBndLib::Add(wire, bounds);
         if (bounds.IsVoid())
             continue;
-        Standard_Real wxMin, wyMin, wzMin, wxMax, wyMax, wzMax;
+        double wxMin, wyMin, wzMin, wxMax, wyMax, wzMax;
         bounds.Get(wxMin, wyMin, wzMin, wxMax, wyMax, wzMax);
         if (wzMax < zMax - tolerance || wzMax - wzMin > tolerance)
             continue;
@@ -929,7 +924,7 @@ std::uint64_t LaserToolpathBuilder::computeFaceSignature(const TopoDS_Face& face
     std::uint64_t h = 1469598103934665603ull; // FNV-1a 64-bit offset basis
 
     // Surface type — GeomAbs_SurfaceType is a stable enum.
-    BRepAdaptor_Surface adaptor(face, /*restriction=*/Standard_True);
+    BRepAdaptor_Surface adaptor(face, /*restriction=*/true);
     mixHash(h, static_cast<std::uint64_t>(adaptor.GetType()));
 
     // Area (mm², rounded to 3 decimal places).
@@ -993,7 +988,9 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContours(const TopoDS_Sha
             outerWires.push_back({outer, face});
     }
 
-    TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                               TopTools_ShapeMapHasher>
+        edgeToFaces;
     TopExp::MapShapesAndAncestors(
         workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
     int wireIdx = 0;
@@ -1173,7 +1170,7 @@ bool LaserToolpathBuilder::isPlanarFace(const TopoDS_Face& face)
 {
     if (face.IsNull())
         return false;
-    BRepAdaptor_Surface surf(face, Standard_True);
+    BRepAdaptor_Surface surf(face, true);
     return surf.GetType() == GeomAbs_Plane;
 }
 
@@ -1201,8 +1198,8 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
     BRepBndLib::Add(workpiece, workpieceBounds);
     if (workpieceBounds.IsVoid())
         return result;
-    Standard_Real workpieceXMin, workpieceYMin, workpieceZMin;
-    Standard_Real workpieceXMax, workpieceYMax, workpieceZMax;
+    double workpieceXMin, workpieceYMin, workpieceZMin;
+    double workpieceXMax, workpieceYMax, workpieceZMax;
     workpieceBounds.Get(workpieceXMin, workpieceYMin, workpieceZMin,
                         workpieceXMax, workpieceYMax, workpieceZMax);
     GProp_GProps volumeProperties;
@@ -1232,14 +1229,14 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
     std::vector<FaceCandidate> candidates;
     for (TopExp_Explorer faceExp(workpiece, TopAbs_FACE); faceExp.More(); faceExp.Next()) {
         const TopoDS_Face face = TopoDS::Face(faceExp.Current());
-        Standard_Real uMin, uMax, vMin, vMax;
+        double uMin, uMax, vMin, vMax;
         BRepTools::UVBounds(face, uMin, uMax, vMin, vMax);
         if (!std::isfinite(uMin) || !std::isfinite(uMax)
             || !std::isfinite(vMin) || !std::isfinite(vMax)) {
             continue;
         }
 
-        BRepAdaptor_Surface surface(face, Standard_True);
+        BRepAdaptor_Surface surface(face, true);
         const bool isPlanar = surface.GetType() == GeomAbs_Plane;
         // A bore wall can have a small locally upward-facing strip, even
         // though the face as a whole points toward the material centre.  Test
@@ -1254,8 +1251,7 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
                 const double u = uMin + (uMax - uMin) * uFraction;
                 for (double vFraction : kUvFractions) {
                     const double v = vMin + (vMax - vMin) * vFraction;
-                    BRepClass_FaceClassifier classifier(
-                        face, gp_Pnt2d(u, v), 1e-7, Standard_True);
+                    BRepClass_FaceClassifier classifier(face, gp_Pnt2d(u, v), 1e-7, true);
                     if (classifier.State() != TopAbs_IN && classifier.State() != TopAbs_ON)
                         continue;
                     gp_Pnt point;
@@ -1320,8 +1316,7 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
             // Test the trimmed face only after the cheap normal test.
             // Vertical side and hole walls therefore avoid the more
             // expensive 2-D face classifier altogether.
-            BRepClass_FaceClassifier classifier(
-                face, gp_Pnt2d(u, v), 1e-7, Standard_True);
+            BRepClass_FaceClassifier classifier(face, gp_Pnt2d(u, v), 1e-7, true);
             if (classifier.State() != TopAbs_IN && classifier.State() != TopAbs_ON)
                 return;
             samples.push_back({point, point.Z()});
@@ -1345,21 +1340,19 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
             // this coarse, classification-only mesh.  Keep the fallback's
             // temporary triangulation entirely private to the algorithm.
             BRepBuilderAPI_Copy copy;
-            copy.Perform(face, Standard_True, Standard_False);
+            copy.Perform(face, true, false);
             const TopoDS_Face sampleFace = copy.IsDone()
                 ? TopoDS::Face(copy.Shape())
                 : TopoDS_Face{};
             if (!sampleFace.IsNull()) {
-                BRepMesh_IncrementalMesh mesh(
-                    sampleFace, 0.1, Standard_False, 0.5, Standard_True);
+                BRepMesh_IncrementalMesh mesh(sampleFace, 0.1, false, 0.5, true);
                 TopLoc_Location location;
                 const Handle(Poly_Triangulation) triangulation =
                     BRep_Tool::Triangulation(sampleFace, location);
                 if (!triangulation.IsNull() && triangulation->HasUVNodes()) {
-                    for (Standard_Integer index = 1;
-                         index <= triangulation->NbTriangles() && samples.size() < 8;
+                    for (int index = 1; index <= triangulation->NbTriangles() && samples.size() < 8;
                          ++index) {
-                        Standard_Integer first, second, third;
+                        int first, second, third;
                         triangulation->Triangle(index).Get(first, second, third);
                         const gp_Pnt2d firstUv = triangulation->UVNode(first);
                         const gp_Pnt2d secondUv = triangulation->UVNode(second);
@@ -1404,7 +1397,9 @@ std::vector<TopoDS_Face> LaserToolpathBuilder::selectTopVisibleFacesFromPositive
     // boundary topology before any ray work: a true exterior face connects to
     // a neighbour across a convex/tangent edge, whereas a hole floor or wall
     // is bounded entirely by concave cavity edges.
-    TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                               TopTools_ShapeMapHasher>
+        edgeToFaces;
     TopExp::MapShapesAndAncestors(workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
     BRepOffset_Analyse concavity(workpiece, lcnc::math::kRadiansPerDegree);
     if (concavity.IsDone()) {
@@ -1473,7 +1468,7 @@ TopoDS_Face LaserToolpathBuilder::selectMachiningFace(
         const TopoDS_Face face = TopoDS::Face(fExp.Current());
         if (face.IsNull())
             continue;
-        BRepAdaptor_Surface surf(face, Standard_True);
+        BRepAdaptor_Surface surf(face, true);
         if (surf.GetType() != GeomAbs_Plane)
             continue;  // only planar faces qualify as the machining face
 
@@ -1514,7 +1509,9 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
     if (workpiece.IsNull() || faces.empty())
         return result;
 
-    TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                               TopTools_ShapeMapHasher>
+        edgeToFaces;
     TopExp::MapShapesAndAncestors(
         workpiece, TopAbs_EDGE, TopAbs_FACE, edgeToFaces);
 
@@ -1523,7 +1520,7 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
         BRepBndLib::Add(w, bbox);
         if (bbox.IsVoid())
             return 0.0;
-        Standard_Real x0, y0, z0, x1, y1, z1;
+        double x0, y0, z0, x1, y1, z1;
         bbox.Get(x0, y0, z0, x1, y1, z1);
         const double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
         return std::sqrt(dx * dx + dy * dy + dz * dz);
@@ -1534,14 +1531,14 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
     // independently turns the group's internal seams into false contours.
     // Build the boundary of the entire selected group instead: retain an edge
     // only when it has a non-selected adjacent face (or is a free edge).
-    TopTools_IndexedMapOfShape selectedFaceMap;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> selectedFaceMap;
     for (const TopoDS_Face& face : faces)
         if (!face.IsNull())
             selectedFaceMap.Add(face);
 
     struct BoundaryEdge { TopoDS_Edge edge; TopoDS_Face owner; };
     std::vector<BoundaryEdge> boundaryEdges;
-    TopTools_IndexedMapOfShape collectedEdges;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> collectedEdges;
     for (const TopoDS_Face& face : faces) {
         if (face.IsNull())
             continue;
@@ -1553,8 +1550,9 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
             int adjacentCount = 0;
             int selectedAdjacentCount = 0;
             if (edgeToFaces.Contains(edge)) {
-                const TopTools_ListOfShape& adjacentFaces = edgeToFaces.FindFromKey(edge);
-                for (TopTools_ListIteratorOfListOfShape it(adjacentFaces); it.More(); it.Next()) {
+                const NCollection_List<TopoDS_Shape>& adjacentFaces = edgeToFaces.FindFromKey(edge);
+                for (NCollection_List<TopoDS_Shape>::Iterator it(adjacentFaces); it.More();
+                     it.Next()) {
                     ++adjacentCount;
                     if (selectedFaceMap.Contains(it.Value()))
                         ++selectedAdjacentCount;

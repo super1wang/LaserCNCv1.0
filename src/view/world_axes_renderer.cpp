@@ -199,8 +199,7 @@ void WorldAxesRenderer::detach(GraphicsScene* scene)
         }
         scene->viewer()->Redraw();
     } catch (const Standard_Failure& f) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "WorldAxesRenderer::detach OCC failure: {}", f.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "WorldAxesRenderer::detach OCC failure: {}", f.what());
     } catch (const std::exception& e) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "WorldAxesRenderer::detach std::exception: {}", e.what());
@@ -231,9 +230,8 @@ void WorldAxesRenderer::rebuildShapes()
         m_shapes.sphere = BRepPrimAPI_MakeSphere(o, r).Shape();
         m_shapesBuilt = true;
     } catch (const Standard_Failure& f) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "WorldAxesRenderer::rebuildShapes OCC failure: {}",
-                 f.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "WorldAxesRenderer::rebuildShapes OCC failure: {}",
+                 f.what());
     } catch (const std::exception& e) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "WorldAxesRenderer::rebuildShapes std::exception: {}", e.what());
@@ -260,9 +258,8 @@ void WorldAxesRenderer::ensureSceneObjects(GraphicsScene* scene)
         sp->SetColor(Quantity_Color(1.0, 1.0, 0.2, Quantity_TOC_RGB));
         it->second.objects = {ax, ay, az, sp};
     } catch (const Standard_Failure& f) {
-        LCNC_ERR(lcnc::LogCode::Generic,
-                 "WorldAxesRenderer::ensureSceneObjects OCC failure: {}",
-                 f.GetMessageString());
+        LCNC_ERR(lcnc::LogCode::Generic, "WorldAxesRenderer::ensureSceneObjects OCC failure: {}",
+                 f.what());
     } catch (const std::exception& e) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "WorldAxesRenderer::ensureSceneObjects std::exception: {}",
@@ -300,8 +297,7 @@ void WorldAxesRenderer::applyVisibilityForScene(GraphicsScene* scene, bool visib
         scene->viewer()->Redraw();
     } catch (const Standard_Failure& f) {
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "WorldAxesRenderer::applyVisibilityForScene OCC failure: {}",
-                 f.GetMessageString());
+                 "WorldAxesRenderer::applyVisibilityForScene OCC failure: {}", f.what());
     } catch (const std::exception& e) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "WorldAxesRenderer::applyVisibilityForScene std::exception: {}",

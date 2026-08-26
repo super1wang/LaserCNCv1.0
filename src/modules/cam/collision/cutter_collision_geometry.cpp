@@ -99,10 +99,9 @@ TopoDS_Shape loadNozzleDisplayShape(const QString& filePath, QString* error)
         return shape;
     } catch (const Standard_Failure& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
-                 "cam.cutter_display_proxy: failed to load nozzle geometry: {}",
-                 failure.GetMessageString());
+                 "cam.cutter_display_proxy: failed to load nozzle geometry: {}", failure.what());
         if (error)
-            *error = QString::fromUtf8(failure.GetMessageString());
+            *error = QString::fromUtf8(failure.what());
         return {};
     }
 }
@@ -125,9 +124,9 @@ TopoDS_Shape buildCutterDisplayProxy(const CamConfig& config, QString* errorMess
     } catch (const Standard_Failure& failure) {
         LCNC_ERR(lcnc::LogCode::Generic,
                  "cam.cutter_display_proxy: failed to build analytic nozzle geometry: {}",
-                 failure.GetMessageString());
+                 failure.what());
         if (errorMessage)
-            *errorMessage = QString::fromUtf8(failure.GetMessageString());
+            *errorMessage = QString::fromUtf8(failure.what());
         return {};
     }
 }

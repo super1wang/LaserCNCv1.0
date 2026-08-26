@@ -90,8 +90,8 @@ int main(int argc, char* argv[])
 
     Bnd_Box bounds;
     BRepBndLib::Add(workpiece, bounds);
-    Standard_Real xMin = 0.0, yMin = 0.0, zMin = 0.0;
-    Standard_Real xMax = 0.0, yMax = 0.0, zMax = 0.0;
+    double xMin = 0.0, yMin = 0.0, zMin = 0.0;
+    double xMax = 0.0, yMax = 0.0, zMax = 0.0;
     bounds.Get(xMin, yMin, zMin, xMax, yMax, zMax);
     const double centerX = (xMin + xMax) * 0.5;
     const double centerY = (yMin + yMax) * 0.5;

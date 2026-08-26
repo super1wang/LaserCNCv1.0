@@ -7,8 +7,8 @@
 
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
+#include <NCollection_Sequence.hxx>
 #include <TDF_Label.hxx>
-#include <TDF_LabelSequence.hxx>
 #include <TopoDS_Shape.hxx>
 
 namespace lcnc::cam::machine_axis_detector {
@@ -18,7 +18,7 @@ void autoDetectAxisNames(LcncDocument* doc, MachineKinematics* kin)
     if (!doc || !kin)
         return;
 
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
     QMap<QString, QString> entryToName;
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label lbl = labels.Value(i);
@@ -32,7 +32,7 @@ void autoDetectAxisOrigins(LcncDocument* doc, MachineKinematics* kin)
     if (!doc || !kin)
         return;
 
-    TDF_LabelSequence labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
+    NCollection_Sequence<TDF_Label> labels = doc->entityLabels(LcncDocument::EntityKind::Machine);
     QMap<QString, TDF_Label> labelByEntry;
     for (int i = 1; i <= labels.Length(); ++i) {
         const TDF_Label lbl = labels.Value(i);
@@ -61,8 +61,8 @@ void autoDetectAxisOrigins(LcncDocument* doc, MachineKinematics* kin)
         if (!hasShape || bbox.IsVoid())
             continue;
 
-        Standard_Real xmin = 0.0, ymin = 0.0, zmin = 0.0;
-        Standard_Real xmax = 0.0, ymax = 0.0, zmax = 0.0;
+        double xmin = 0.0, ymin = 0.0, zmin = 0.0;
+        double xmax = 0.0, ymax = 0.0, zmax = 0.0;
         bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
         kin->setAxisOrigin(axis.name,
                            gp_Pnt(0.5 * (xmin + xmax),

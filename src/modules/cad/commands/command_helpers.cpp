@@ -42,7 +42,7 @@ QList<EntityInfo> collectEntities(LcncDocument* doc, LcncDocument::EntityKind ki
     if (!doc)
         return out;
 
-    TDF_LabelSequence labels = doc->entityLabels(kind);
+    NCollection_Sequence<TDF_Label> labels = doc->entityLabels(kind);
     Handle(XCAFDoc_ShapeTool) shapeTool = doc->shapeTool();
     for (int index = 1; index <= labels.Length(); ++index) {
         TDF_Label label = labels.Value(index);

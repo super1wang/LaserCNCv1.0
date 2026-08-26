@@ -1,37 +1,36 @@
 #include "modules/cam/commands/machine/machine_commands.h"
-#include "modules/cam/ui/machine/dialog_mark_axes.h"
-#include "app/app_command_context.h"
 
-#include "core/project/project_types.h"
+#include "app/app_command_context.h"
 #include "core/document/lcnc_document.h"
-#include "core/kinematics/machine_kinematics.h"
 #include "core/document/xcaf_utils.h"
+#include "core/kinematics/machine_kinematics.h"
+#include "core/project/project_types.h"
+#include "modules/cam/cam_module.h"
+#include "modules/cam/ui/machine/dialog_mark_axes.h"
 #include "view/gui_application.h"
 #include "view/gui_document.h"
-#include "modules/cam/cam_module.h"
 
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <NCollection_Sequence.hxx>
 #include <QAction>
-#include <QIcon>
+#include <QDialog>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QIcon>
 #include <QMessageBox>
-#include <QDialog>
-
 #include <QSet>
-
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPCAFControl_Writer.hxx>
-#include <TCollection_ExtendedString.hxx>
-#include <BRep_Builder.hxx>
-#include <BRepTools.hxx>
 #include <StlAPI_Reader.hxx>
-#include <IFSelect_ReturnStatus.hxx>
-#include <TDF_LabelSequence.hxx>
+#include <TCollection_ExtendedString.hxx>
+#include <TDF_Label.hxx>
+#include <TDataStd_Name.hxx>
 #include <TDocStd_Document.hxx>
+#include <TopoDS_Compound.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
-#include <TDataStd_Name.hxx>
-#include <TopoDS_Compound.hxx>
 
 // Bounding box / shape transform (for workpiece auto-snap on mount)
 #include <BRepBndLib.hxx>

@@ -29,7 +29,7 @@ auto invokeCadAlgorithm(Function&& function, QString* errorMessage) noexcept
             *errorMessage = QObject::tr("Invalid CAD operation parameters: %1")
                                 .arg(QString::fromUtf8(exception.what()));
     } catch (const Standard_Failure& exception) {
-        const char* const message = exception.GetMessageString();
+        const char* const message = exception.what();
         LCNC_ERR(lcnc::LogCode::Generic,
                  "CAD OCC operation failed: {}",
                  message ? message : "unknown OCC failure");

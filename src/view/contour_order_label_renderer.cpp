@@ -43,7 +43,7 @@ void ContourOrderLabelRenderer::erase(GuiDocument* gd)
         if (!ctx.IsNull()) {
             for (Entry& e : m_entries) {
                 if (!e.ais.IsNull())
-                    ctx->Erase(e.ais, Standard_False);
+                    ctx->Erase(e.ais, false);
             }
         }
     }
@@ -79,13 +79,13 @@ void ContourOrderLabelRenderer::refresh(GuiDocument* gd, MachineKinematics* kin,
         text->SetDisplayType(Aspect_TODT_DEKALE);
         text->SetColorSubTitle(Quantity_Color(0.0, 0.0, 0.0, Quantity_TOC_RGB));
         // 固定屏幕像素高度，缩放视图时序号不随模型尺度变化。
-        text->SetZoomable(Standard_False);
+        text->SetZoomable(false);
         text->SetHeight(16.0);
-        text->SetOwnAnchorPoint(Standard_True);
+        text->SetOwnAnchorPoint(true);
         text->SetHJustification(Graphic3d_HTA_CENTER);
         text->SetVJustification(Graphic3d_VTA_CENTER);
 
-        ctx->Display(text, Standard_False);
+        ctx->Display(text, false);
         ctx->Deactivate(text); // 禁拾取，避免干扰轮廓多选
 
         m_entries.append({text, label.workpieceEntry, localPoint});
@@ -103,7 +103,7 @@ void ContourOrderLabelRenderer::updateTransforms(GuiDocument* gd, MachineKinemat
     for (Entry& e : m_entries) {
         if (e.ais.IsNull()) continue;
         e.ais->SetPosition(worldPosition(kin, e.workpieceEntry, e.localPoint));
-        ctx->RecomputePrsOnly(e.ais, Standard_False);
+        ctx->RecomputePrsOnly(e.ais, false);
     }
 }
 

@@ -142,8 +142,8 @@ double localBoundingRadius(const Bnd_Box& box)
 {
     if (box.IsVoid())
         return 0.0;
-    Standard_Real minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
-    Standard_Real maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
+    double minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
+    double maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
     box.Get(minimumX, minimumY, minimumZ,
             maximumX, maximumY, maximumZ);
     double radius = 0.0;
@@ -196,8 +196,8 @@ double bodyRadiusAboutAxis(const TravelCollisionBody& body,
 {
     if (body.localAabb.IsVoid())
         return 0.0;
-    Standard_Real minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
-    Standard_Real maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
+    double minimumX = 0.0, minimumY = 0.0, minimumZ = 0.0;
+    double maximumX = 0.0, maximumY = 0.0, maximumZ = 0.0;
     body.localAabb.Get(minimumX, minimumY, minimumZ,
                        maximumX, maximumY, maximumZ);
     const gp_Vec axisDirection(axis.direction);
@@ -437,7 +437,7 @@ ExactPairProof exactLeafPairProof(
                 BRepExtrema_DistShapeShape distance(
                     firstLeaf.shape, secondLeaf.shape);
                 distance.SetDeflection(0.025);
-                distance.SetMultiThread(Standard_False);
+                distance.SetMultiThread(false);
                 distance.Perform();
                 completed = distance.IsDone();
                 if (completed)
