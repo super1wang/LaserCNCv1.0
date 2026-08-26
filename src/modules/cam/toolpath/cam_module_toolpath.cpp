@@ -124,7 +124,6 @@
 
 
 namespace {
-using lcnc::cam::detail::translatedShapeCopy;
 using lcnc::cam::detail::watchTask;
 } // namespace
 
@@ -179,34 +178,6 @@ bool CamModule::ensureAcCenterCalibrationAvailable(QString* errorMessage) const
     }
 
     return true;
-}
-
-void CamModule::translateToolpathWorldData(const gp_Vec& translation)
-{
-    if (translation.SquareMagnitude() < 1e-12)
-        return;
-
-    for (LaserContour& contour : toolpathRef().contours()) {
-        const TopoDS_Shape movedWire = translatedShapeCopy(contour.wire, translation);
-        if (!movedWire.IsNull() && movedWire.ShapeType() == TopAbs_WIRE)
-            contour.wire = TopoDS::Wire(movedWire);
-        contour.sourceShape = translatedShapeCopy(contour.sourceShape, translation);
-
-        for (ToolpathPoint& point : contour.points)
-            point.position.Translate(translation);
-
-        if (contour.leadIn.valid)
-            contour.leadIn.entryPoint.Translate(translation);
-        if (contour.leadInSolution.valid)
-            contour.leadInSolution.point.position.Translate(translation);
-    }
-
-    m_workpieceShape = translatedShapeCopy(m_workpieceShape, translation);
-    m_jobSafetyOverlayManager.invalidate(
-        tr("Workpiece setup translation changed"));
-
-    if (m_previewLeadInValid)
-        m_previewLeadInPoint.Translate(translation);
 }
 
 void CamModule::updateToolpathMachineCoordinates()
@@ -294,8 +265,8 @@ bool CamModule::applyAutoContourSort(lcnc::cam::AutoSortAxis axis, QString* erro
     if (auto* manager = m_camData->layerManager()) {
         manager->setManualContourOrder(ordered);
         manager->setSortStrategy(lcnc::cam::CuttingPlanSortStrategy::Manual);
-        manager->setLastAutoSortAxis(axis);
     }
+    setLastAutoContourSortAxis(axis);
     return rebuildTravelPlanForCurrentOrder(errorMessage);
 }
 
@@ -311,19 +282,18 @@ QVector<lcnc::cam::ContourId> CamModule::planAutoContourOrder(
         toolpathRef(), m_camData->layerContainer(), kinematics(), axis, errorMessage);
 }
 
-bool CamModule::preparePersistedAutoSort(QString* errorMessage)
+bool CamModule::prepareConfiguredAutoSort(QString* errorMessage)
 {
     if (!m_camData || !m_camData->layerManager()) {
         if (errorMessage) *errorMessage = tr("CAM contour sequence service is unavailable");
         return false;
     }
-    const auto axis = m_camData->layerContainer().lastAutoSortAxis();
+    const auto axis = m_config.autoSortAxis();
     const auto order = planAutoContourOrder(axis, errorMessage);
     if (order.isEmpty())
         return false;
     m_camData->layerManager()->setManualContourOrder(order);
     m_camData->layerManager()->setSortStrategy(lcnc::cam::CuttingPlanSortStrategy::Manual);
-    m_camData->layerManager()->setLastAutoSortAxis(axis);
     return true;
 }
 
@@ -335,21 +305,15 @@ QVector<lcnc::cam::ContourId> CamModule::manualContourOrder() const
 
 lcnc::cam::AutoSortAxis CamModule::lastAutoContourSortAxis() const
 {
-    return m_camData ? m_camData->layerContainer().lastAutoSortAxis()
-                     : lcnc::cam::AutoSortAxis::XPos;
+    return m_config.autoSortAxis();
 }
 
 void CamModule::setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis axis)
 {
-    if (!m_camData || !m_camData->layerManager()
-        || m_camData->layerContainer().lastAutoSortAxis() == axis) {
+    if (m_config.autoSortAxis() == axis)
         return;
-    }
-
-    m_camData->layerManager()->setLastAutoSortAxis(axis);
-    m_camData->markDirty(true);
-    if (auto* projectManager = lcnc::Kernel::current().projectManager())
-        projectManager->notifyDomainChanged(lcnc::ProjectDomain::Cam);
+    m_config.setAutoSortAxis(axis);
+    emit autoSortAxisChanged(axis);
 }
 
 bool CamModule::setManualContourOrder(

@@ -252,6 +252,8 @@ class CamLayerProviderAdapter final : public QObject, public ICamLayerProvider {
         QObject::connect(&m_module, &CamModule::toolpathCleared, this, [this] { refreshCache(); });
         QObject::connect(&m_module, &CamModule::toolpathLayersChanged, this,
                          [this] { refreshCache(); });
+        QObject::connect(&m_module, &CamModule::autoSortAxisChanged, this,
+                         [this](AutoSortAxis) { refreshCache(); });
         refreshCache();
     }
 
@@ -308,8 +310,6 @@ class CamLayerProviderAdapter final : public QObject, public ICamLayerProvider {
         QObject::connect(m_layerManager, &LayerManager::manualContourOrderChanged, this, refresh);
         QObject::connect(m_layerManager, &LayerManager::sortStrategyChanged, this,
                          [this](CuttingPlanSortStrategy) { refreshCache(); });
-        QObject::connect(m_layerManager, &LayerManager::lastAutoSortAxisChanged, this,
-                         [this](AutoSortAxis) { refreshCache(); });
     }
 
     void refreshCache() {
@@ -340,7 +340,7 @@ class CamLayerProviderAdapter final : public QObject, public ICamLayerProvider {
         m_manualContourOrder = container ? container->manualContourOrder() : QVector<ContourId>{};
         m_sortStrategy =
             container ? container->sortStrategy() : CuttingPlanSortStrategy::LayerThenContour;
-        m_lastAutoSortAxis = container ? container->lastAutoSortAxis() : AutoSortAxis::XPos;
+        m_lastAutoSortAxis = m_module.lastAutoContourSortAxis();
         ++m_revision;
     }
 

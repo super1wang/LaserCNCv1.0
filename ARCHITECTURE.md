@@ -1,6 +1,6 @@
 # LaserCNC 架构说明
 
-本文描述截至 2026-08-24、本次审计整改工作区的实际架构。源码和 `CMakeLists.txt` 是实现事实；本文是架构事实源；尚未收口的偏差记录在 [AUDIT.md](AUDIT.md) 与 [todo.md](todo.md)。历史版本文档不得覆盖当前事实。
+本文描述截至 2026-08-26、本次审计整改工作区的实际架构。源码和 `CMakeLists.txt` 是实现事实；本文是架构事实源；尚未收口的偏差记录在 [AUDIT.md](AUDIT.md) 与 [todo.md](todo.md)。历史版本文档不得覆盖当前事实。
 
 ## 1. 系统边界
 
@@ -112,6 +112,8 @@ CAM 的权威契约：
 
 刀路生成遵循“GUI 快照 → 后台 OCC/IK → revision 校验 → 原子提交”。有序求解在副本上完成，全量成功后才替换已提交坐标。切割偏置、空程偏置和工具高度只在 CAM 应用一次；Process 与 Simulation 不得重排、重求或再次叠加。
 
+自动排序方向属于软件级 `CamConfig`，持久化到 `config/cam.toml`，不写入 `.lcnc`、不制造项目 dirty；所有生成入口在求解和碰撞前读取同一配置。机台标定以配置 AC 中心和控制器 XYZ 所表示的模拟 TCP 为绝对世界目标：先平移整机对齐 AC，再按轴运动子树校正切割头承载部件（Y 带动 Y/X/Z，X 带动 X/Z，Z 仅带动 Z），不得修改实时轴坐标、工件或刀路。
+
 碰撞生产链为“离线固定 `.lmsp/.lmsi` 机台域（完整切割头属于 Z 轴实体） AND 工件局部 Job Overlay → Surface-BVH/Coal 极窄残差 → 连续运动边证书”。模拟锥头/喷嘴代理只用于显示，工件是唯一运行时几何变量；有效包与工件同时存在后即后台准备 Overlay。Rapid、LeadIn、Cutting 和 Traverse 每条边都必须有与包键、环境代际和端点绑定的证书；Process 不做 OCC 或在线几何，只校验证书和固定/连续点动许可证。生产连续证书的 OCCT exact 预算为 0，exact 仅由 CAM 保留作离线 CertifiedSafe 反向审计。Pending、Indeterminate、BoundaryUnknown、环境过期、证书缺失或 `complete=false` 必须阻断真实加工。碰撞后自动绕障/重规划仍见专项计划。
 
 `MachiningFacePipelineService` 独占 entry 写入，只向调用方发布 const 视图和 revision；`CamModule` 不再长期持有可变容器引用。`CamDisplayProjectionService` 记录 AIS owning context；双工作区反复投影仍是后续回归项。
@@ -120,7 +122,7 @@ CAM 的权威契约：
 
 `SimulationModule` 创建独立 `GuiDocument`/OCC 沙箱，冻结 CAM 刀路、轮廓顺序、机台运动学、显示和碰撞输入后回放。它不连接控制器、激光器或串口，不写项目/CAM，也不改变实时机台姿态。
 
-Simulation 只通过 `ICamOfflineSimulationProvider` 在会话开始时捕获不可变 `OfflineSimulationSnapshot`。快照包含已提交执行/激光刀路、轴与机台配置、装配、机台/工件形状、碰撞和显示参数；CAM 通过 revision 与 `OfflineSimulationSourceChanged` 事件通知失效。Simulation 不再 include、查询或持有具体 `CamModule`。
+Simulation 只通过 `ICamOfflineSimulationProvider` 在会话开始时捕获不可变 `OfflineSimulationSnapshot`。快照包含已提交执行/激光刀路、轴与机台配置、装配、机台/工件形状、碰撞和显示参数；模拟 TCP 由快照内控制器 X/Y/Z 直接还原到世界坐标，不依赖机台 STEP 的初始放置。CAM 通过 revision 与 `OfflineSimulationSourceChanged` 事件通知失效。Simulation 不再 include、查询或持有具体 `CamModule`。
 
 ## 8. Process
 
@@ -144,6 +146,8 @@ Process 的安全边界：
 - 机台指纹不匹配、CAM 快照不完整、碰撞 Pending/Collision/Indeterminate 都必须阻止真实加工。
 - 固定运动必须持有未过期的端点许可证；连续点动按 100 ms 续签 300 ms 视界，续签失败立即排队停止。
 
+Process 设置对话框采用显式草稿事务：Apply 保存但保持当前页面，OK 仅在应用成功后关闭，Cancel、Esc 和标题栏关闭均恢复最后一次已提交状态；变更判断使用 TOML 结构相等而不是格式化文本相等。
+
 ## 9. 工程包和迁移
 
 桌面应用只读取 format v4，并要求：
@@ -164,7 +168,7 @@ v1/v2/v3 不由桌面应用或普通库路径兼容。`src/tools/lcnc_project_up
 
 唯一构建约定见 [BUILD.md](BUILD.md)。`build-cmake/` 与 `build-vs/` 不能共享生成树或并发构建；运行输出按生成器/变体隔离。
 
-版本由 CMake `project(... VERSION 1.6.0)` 单点定义并生成 `LCNC_VERSION_STRING`；`QApplication`、模块信息和工程包 fallback 使用同一值。版本交付文档必须与该值一致。
+版本由 CMake `project(... VERSION 1.6.1)` 单点定义并生成 `LCNC_VERSION_STRING`；`QApplication`、模块信息和工程包 fallback 使用同一值。版本交付文档必须与该值一致。
 
 `scripts/check_architecture.ps1` 拒绝 core/view 反向依赖、pure algorithm 污染、Process OCC include、淘汰 API、settings singleton、runtime 外原始设备访问、Process/Simulation 具体跨模块头、旧 CAD 活动文档导入入口、重复 settings 目录、设备公共头命名空间污染、`M_PI` 和孤儿 `.cpp`。运行时 deadline、catch 日志、格式风格和新 `tr()` catalog 仍需测试或后续门禁补充。
 

@@ -65,30 +65,6 @@ CuttingPlanSortStrategy sortStrategyFromString(const QString& s, CuttingPlanSort
     return def;
 }
 
-const char* autoSortAxisToString(AutoSortAxis a)
-{
-    switch (a) {
-    case AutoSortAxis::XPos: return "X+";
-    case AutoSortAxis::XNeg: return "X-";
-    case AutoSortAxis::YPos: return "Y+";
-    case AutoSortAxis::YNeg: return "Y-";
-    case AutoSortAxis::ZPos: return "Z+";
-    case AutoSortAxis::ZNeg: return "Z-";
-    }
-    return "X+";
-}
-
-AutoSortAxis autoSortAxisFromString(const QString& s, AutoSortAxis def)
-{
-    if (s == "X+") return AutoSortAxis::XPos;
-    if (s == "X-") return AutoSortAxis::XNeg;
-    if (s == "Y+") return AutoSortAxis::YPos;
-    if (s == "Y-") return AutoSortAxis::YNeg;
-    if (s == "Z+") return AutoSortAxis::ZPos;
-    if (s == "Z-") return AutoSortAxis::ZNeg;
-    return def;
-}
-
 // ---- 二进制点集 IO ----------------------------------------------------------
 
 SolvedMachinePose canonicalPose(const MachineCoord& coord, const MachineAxisLayout& layout)
@@ -432,7 +408,6 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
         manualArr.push_back(static_cast<std::int64_t>(cid));
     root["manualContourOrder"] = manualArr;
     root["sortStrategy"]     = std::string(sortStrategyToString(container.sortStrategy()));
-    root["lastAutoSortAxis"] = std::string(autoSortAxisToString(container.lastAutoSortAxis()));
 
     // 工程级刀路生成参数（随工程持久化，保证重开可复现）。
     const CamDataManager::GenerationParams& gp = cam.generationParams();
@@ -721,7 +696,7 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
         ? QString::fromStdString(root.at("machineConfigurationFingerprint").as_string())
         : QString());
 
-    // 恢复容器级 manual order / sortStrategy / lastAutoSortAxis。
+    // 恢复容器级 manual order / sortStrategy。自动排序方向属于软件配置。
     LayerContainer& container = cam.layerContainer();
     if (root.contains("manualContourOrder") && root.at("manualContourOrder").is_array()) {
         QVector<ContourId> manual;
@@ -737,11 +712,6 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             QString::fromStdString(root.at("sortStrategy").as_string()),
             CuttingPlanSortStrategy::LayerThenContour));
     }
-    if (root.contains("lastAutoSortAxis") && root.at("lastAutoSortAxis").is_string()) {
-        container.setLastAutoSortAxis(autoSortAxisFromString(
-            QString::fromStdString(root.at("lastAutoSortAxis").as_string()), AutoSortAxis::XPos));
-    }
-
     // 工程级刀路生成参数。
     if (root.contains("generation") && root.at("generation").is_table()) {
         const toml::value& gen = root.at("generation");

@@ -18,7 +18,8 @@ namespace lcnc::cam {
  *
  * 用途：Process 模块的切割链表服务不允许包含 OCC 类型，但需要访问 CAM 的
  * 图层级状态（toolName / enabled / 人工顺序 / 排序策略 / 包含轮廓子集）。
- * 自 Phase B 起，这些状态由 LayerContainer 统一持有；ICamLayerProvider 在
+ * 项目级图层与顺序状态由 LayerContainer 统一持有；自动排序方向
+ * 是 CamConfig 中的软件级偏好。ICamLayerProvider 在
  * CamModule::init() 中以 IService 形式注册，Process 端通过 ServiceRegistry
  * 取到后只做只读消费。
  *

@@ -5,6 +5,8 @@
 #include <gp_Ax1.hxx>
 #include <gp_Pnt.hxx>
 
+#include <QSet>
+
 #include <cmath>
 #include <utility>
 
@@ -293,6 +295,40 @@ void MachineKinematics::setWorkpieceSetupTransform(const gp_Trsf& transform)
 gp_Trsf MachineKinematics::computeAxisTransform(const QString& axisName) const
 {
     return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName);
+}
+
+bool MachineKinematics::isAxisDescendantOf(const QString& axisName,
+                                           const QString& ancestorAxis) const
+{
+    const QString target = ancestorAxis.trimmed().toUpper();
+    QString current = axisName.trimmed().toUpper();
+    QSet<QString> visited;
+    bool matched = false;
+    while (!current.isEmpty()) {
+        if (visited.contains(current))
+            return false;
+        visited.insert(current);
+        matched = matched || current == target;
+        const MachineAxisDef* axis = findAxis(current);
+        if (!axis)
+            return false;
+        current = axis->parentAxis.trimmed().toUpper();
+    }
+    return matched;
+}
+
+gp_Pnt MachineKinematics::currentLinearPosition() const
+{
+    gp_Vec position(0.0, 0.0, 0.0);
+    for (const QString& axisName : {QStringLiteral("X"),
+                                    QStringLiteral("Y"),
+                                    QStringLiteral("Z")}) {
+        const MachineAxisDef* axis = findAxis(axisName);
+        if (!axis || axis->motionType != MachineAxisDef::Linear)
+            continue;
+        position += gp_Vec(axis->direction) * axis->currentPos;
+    }
+    return gp_Pnt(position.X(), position.Y(), position.Z());
 }
 
 gp_Dir MachineKinematics::nominalBeamDirectionMachine() const

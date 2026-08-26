@@ -49,7 +49,6 @@ public:
     bool clearManualOrder();
 
     bool setSortStrategy(CuttingPlanSortStrategy s);
-    void setLastAutoSortAxis(AutoSortAxis a);
 
     // ── 给 CamDataManager 内部用 —— 复杂操作（重排/同步图层）发完信号 ───
     /// 图层列表整体重建（新建/清空 toolpath 等），通知订阅方做整树刷新。
@@ -74,7 +73,6 @@ signals:
     void contourMembershipChanged();
     void manualContourOrderChanged();
     void sortStrategyChanged(lcnc::cam::CuttingPlanSortStrategy strategy);
-    void lastAutoSortAxisChanged(lcnc::cam::AutoSortAxis axis);
 
 private:
     LayerContainer* m_container{nullptr};

@@ -164,13 +164,24 @@ int main(int argc, char* argv[])
     persistedContour.points.push_back(persistedPoint);
     sourceCam.toolpath().contours().push_back(persistedContour);
     sourceCam.ensureToolpathLayers();
-    sourceCam.layerManager()->setLastAutoSortAxis(lcnc::cam::AutoSortAxis::YNeg);
     const QString packagePath = QDir(temporary.path()).filePath(QStringLiteral("roundtrip.lcnc"));
     QString error;
     lcnc::LcncProjectManifest manifest;
     if (!lcnc::LcncProjectPackage::save(*source, nullptr, nullptr, packagePath, manifest,
                                         lcnc::ProjectSaveOptions{}, nullptr, &error, &sourceCam))
         return fail(QStringLiteral("v5 save failed: %1").arg(error));
+
+    QTemporaryDir savedPackageContents;
+    if (!savedPackageContents.isValid()
+        || JlCompress::extractDir(packagePath, savedPackageContents.path()).isEmpty()) {
+        return fail(QStringLiteral("Cannot inspect the saved project package"));
+    }
+    QFile savedCamToolpath(QDir(savedPackageContents.path()).filePath(
+        QStringLiteral("cam_toolpath.toml")));
+    if (!savedCamToolpath.open(QIODevice::ReadOnly | QIODevice::Text))
+        return fail(QStringLiteral("Cannot inspect the saved CAM toolpath metadata"));
+    if (savedCamToolpath.readAll().contains("lastAutoSortAxis"))
+        return fail(QStringLiteral("Project package still persisted the software-level auto-sort axis"));
 
     auto target = LcncDocument::createStandalone(2, QStringLiteral("Target"));
     lcnc::cam::CamDataManager restoredCam;
@@ -182,7 +193,6 @@ int main(int argc, char* argv[])
         || restoredSnapshot != expectedSnapshot
         || restoredCam.machiningMode() != lcnc::MachiningMode::RotaryTube4Axis
         || restoredCam.machineAxisLayout() != sourceLayout
-        || restoredCam.layerContainer().lastAutoSortAxis() != lcnc::cam::AutoSortAxis::YNeg
         || restoredCam.toolpath().layers().empty()
         || restoredCam.toolpath().layers().front().toolName != QStringLiteral("default")
         || restoredCam.solvedMachineConfigurationFingerprint() != QStringLiteral("test-fingerprint"))

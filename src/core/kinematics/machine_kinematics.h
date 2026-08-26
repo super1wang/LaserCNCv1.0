@@ -87,6 +87,12 @@ public:
     const gp_Trsf& workpieceSetupTransform() const { return m_workpieceSetupTransform; }
     /// World transform for an axis node at current axis positions.
     gp_Trsf computeAxisTransform(const QString& axisName) const;
+    /// Returns true when axisName is ancestorAxis itself or is carried by its
+    /// descendant chain. Cyclic or incomplete parent chains fail closed.
+    bool isAxisDescendantOf(const QString& axisName, const QString& ancestorAxis) const;
+    /// Current controller X/Y/Z coordinates reconstructed in the machine-world
+    /// frame. The result is independent of the imported machine CAD placement.
+    gp_Pnt currentLinearPosition() const;
 
     /// Nominal laser beam direction in machine space at the home posture.
     /// All current presets carry the laser head on the machine Z axis, so at

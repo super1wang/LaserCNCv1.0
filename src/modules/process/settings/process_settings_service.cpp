@@ -38,7 +38,7 @@ bool isDigital(ProcessIoBucket bucket) {
 }
 
 bool sameToml(const toml::value& lhs, const toml::value& rhs) {
-    return toml::format(lhs) == toml::format(rhs);
+    return lhs == rhs;
 }
 
 table& ensureTable(toml::value& node) {
@@ -863,8 +863,11 @@ ProcessSettingsChangeSet ProcessSettingsService::changesSinceCommitted() const {
         const auto& nowRoot = m_draft.at("Setting").as_table();
         const auto oldIt = oldRoot.find(section.toStdString());
         const auto nowIt = nowRoot.find(section.toStdString());
-        return oldIt == oldRoot.end() || nowIt == nowRoot.end() ||
-               !sameToml(oldIt->second, nowIt->second);
+        const bool oldMissing = oldIt == oldRoot.end();
+        const bool nowMissing = nowIt == nowRoot.end();
+        if (oldMissing || nowMissing)
+            return oldMissing != nowMissing;
+        return !sameToml(oldIt->second, nowIt->second);
     };
     if (changed("MotionControl") || changed("Laser") || changed("Internet") || changed("Camera")) {
         result.domains.append(QStringLiteral("devices"));

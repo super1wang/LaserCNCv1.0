@@ -92,8 +92,8 @@ ProcessSettingsDialog::ProcessSettingsDialog(ProcessSettingsService* settings,
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Apply | QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, [this] { apply(); });
-    connect(buttons, &QDialogButtonBox::accepted, this, [this] { apply(); if (!m_settings->hasChanges()) accept(); });
-    connect(buttons, &QDialogButtonBox::rejected, this, [this] { m_settings->cancelEdit(); reject(); });
+    connect(buttons, &QDialogButtonBox::accepted, this, &ProcessSettingsDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &ProcessSettingsDialog::reject);
     layout->addWidget(buttons);
 
     connect(m_objects, &QTreeWidget::currentItemChanged, this, [this] { showCurrentObject(); });
@@ -102,11 +102,12 @@ ProcessSettingsDialog::ProcessSettingsDialog(ProcessSettingsService* settings,
     rebuildObjectTree();
 }
 
-void ProcessSettingsDialog::rebuildObjectTree()
+void ProcessSettingsDialog::rebuildObjectTree(const QString& selectedObjectId)
 {
     m_objectDescriptors = m_settings->objects();
     m_objects->clear();
     QMap<QString, QTreeWidgetItem*> categories;
+    QTreeWidgetItem* restoredSelection = nullptr;
     for (int i = 0; i < m_objectDescriptors.size(); ++i) {
         const auto& object = m_objectDescriptors.at(i);
         auto* category = categories.value(object.category);
@@ -117,9 +118,13 @@ void ProcessSettingsDialog::rebuildObjectTree()
         }
         auto* item = new QTreeWidgetItem(category, {object.title});
         item->setData(0, Qt::UserRole, i);
+        if (!selectedObjectId.isEmpty() && object.id == selectedObjectId)
+            restoredSelection = item;
     }
     m_objects->expandAll();
-    if (m_objects->topLevelItemCount() && m_objects->topLevelItem(0)->childCount())
+    if (restoredSelection)
+        m_objects->setCurrentItem(restoredSelection);
+    else if (m_objects->topLevelItemCount() && m_objects->topLevelItem(0)->childCount())
         m_objects->setCurrentItem(m_objects->topLevelItem(0)->child(0));
 }
 
@@ -150,12 +155,17 @@ void ProcessSettingsDialog::showCurrentObject()
 
 QString ProcessSettingsDialog::selectedToolName() const
 {
+    const QString id = selectedObjectId();
+    return id.startsWith("tool:") ? id.section(':', 1) : QString();
+}
+
+QString ProcessSettingsDialog::selectedObjectId() const
+{
     const auto* item = m_objects->currentItem();
     if (!item || !item->parent()) return {};
     const int index = item->data(0, Qt::UserRole).toInt();
-    if (index < 0 || index >= m_objectDescriptors.size()) return {};
-    const QString id = m_objectDescriptors.at(index).id;
-    return id.startsWith("tool:") ? id.section(':', 1) : QString();
+    return index >= 0 && index < m_objectDescriptors.size()
+        ? m_objectDescriptors.at(index).id : QString();
 }
 
 void ProcessSettingsDialog::createTool()
@@ -213,14 +223,32 @@ void ProcessSettingsDialog::deleteTool()
     else rebuildObjectTree();
 }
 
-void ProcessSettingsDialog::apply()
+bool ProcessSettingsDialog::apply()
 {
+    const QString currentObjectId = selectedObjectId();
     const auto result = m_settings->commit();
     // 中文翻译：应用参数
-    if (!result.success) { QMessageBox::critical(this, tr("Application parameters"), result.error); return; }
+    if (!result.success) {
+        QMessageBox::critical(this, tr("Application parameters"), result.error);
+        return false;
+    }
     if (m_settingsApplied)
         m_settingsApplied(result.changes);
-    rebuildObjectTree();
+    rebuildObjectTree(currentObjectId);
+    return true;
+}
+
+void ProcessSettingsDialog::accept()
+{
+    if (apply())
+        QDialog::accept();
+}
+
+void ProcessSettingsDialog::reject()
+{
+    if (m_settings)
+        m_settings->cancelEdit();
+    QDialog::reject();
 }
 
 } // namespace lcnc::process

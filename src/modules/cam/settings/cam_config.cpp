@@ -46,6 +46,30 @@ lcnc::RenderQualityPreset renderQualityFromString(const QString& v)
     return lcnc::RenderQualityPreset::Medium;
 }
 
+QString autoSortAxisToString(lcnc::cam::AutoSortAxis axis)
+{
+    switch (axis) {
+    case lcnc::cam::AutoSortAxis::XPos: return QStringLiteral("X+");
+    case lcnc::cam::AutoSortAxis::XNeg: return QStringLiteral("X-");
+    case lcnc::cam::AutoSortAxis::YPos: return QStringLiteral("Y+");
+    case lcnc::cam::AutoSortAxis::YNeg: return QStringLiteral("Y-");
+    case lcnc::cam::AutoSortAxis::ZPos: return QStringLiteral("Z+");
+    case lcnc::cam::AutoSortAxis::ZNeg: return QStringLiteral("Z-");
+    }
+    return QStringLiteral("X+");
+}
+
+lcnc::cam::AutoSortAxis autoSortAxisFromString(const QString& value)
+{
+    const QString axis = value.trimmed().toUpper();
+    if (axis == QStringLiteral("X-")) return lcnc::cam::AutoSortAxis::XNeg;
+    if (axis == QStringLiteral("Y+")) return lcnc::cam::AutoSortAxis::YPos;
+    if (axis == QStringLiteral("Y-")) return lcnc::cam::AutoSortAxis::YNeg;
+    if (axis == QStringLiteral("Z+")) return lcnc::cam::AutoSortAxis::ZPos;
+    if (axis == QStringLiteral("Z-")) return lcnc::cam::AutoSortAxis::ZNeg;
+    return lcnc::cam::AutoSortAxis::XPos;
+}
+
 // ── TOML <-> gp_Pnt ─────────────────────────────────────────────────────────
 toml::value pointToToml(const gp_Pnt& p)
 {
@@ -149,6 +173,8 @@ void CamConfig::readFrom(const toml::value& root)
             get_int(tp, "extractionStrategy", m_extractionStrategy)));
         m_showNormals           = get_bool  (tp, "showNormals",           m_showNormals);
         m_normalSampleStep      = get_double(tp, "normalSampleStep",      m_normalSampleStep);
+        m_autoSortAxis = autoSortAxisFromString(
+            get_qstring(tp, "autoSortAxis", autoSortAxisToString(m_autoSortAxis)));
     }
 
     m_machineProfiles.clear();
@@ -235,6 +261,7 @@ void CamConfig::writeTo(toml::value& root) const
     tp["extractionStrategy"] = m_extractionStrategy;
     tp["showNormals"]           = m_showNormals;
     tp["normalSampleStep"]      = m_normalSampleStep;
+    tp["autoSortAxis"]          = qs(autoSortAxisToString(m_autoSortAxis));
     root["toolpath"] = tp;
 
     toml::array profiles;
@@ -448,6 +475,13 @@ void CamConfig::setCuttingOffsetMm(double mm)
     m_cuttingOffsetMm = mm;
     if (m_rapidOffsetMm <= m_cuttingOffsetMm)
         m_rapidOffsetMm = m_cuttingOffsetMm + 0.001;
+    saveDefault();
+}
+
+void CamConfig::setAutoSortAxis(lcnc::cam::AutoSortAxis axis)
+{
+    if (m_autoSortAxis == axis) return;
+    m_autoSortAxis = axis;
     saveDefault();
 }
 

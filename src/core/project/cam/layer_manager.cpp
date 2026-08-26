@@ -101,14 +101,6 @@ bool LayerManager::setSortStrategy(CuttingPlanSortStrategy s)
     return true;
 }
 
-void LayerManager::setLastAutoSortAxis(AutoSortAxis a)
-{
-    if (!m_container)
-        return;
-    m_container->setLastAutoSortAxis(a);
-    emit lastAutoSortAxisChanged(a);
-}
-
 void LayerManager::emitLayersReset()             { emit layersReset(); }
 void LayerManager::emitLayersReordered()         { emit layersReordered(); }
 void LayerManager::emitLayerPropertyChanged(std::uint64_t layerId, LayerProperty p)

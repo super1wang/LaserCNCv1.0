@@ -9,7 +9,7 @@ if(_lcnc_binary_dir STREQUAL _lcnc_legacy_build_dir)
         "or vs-acs-gtn (build-vs/).")
 endif()
 
-project(LaserCNC VERSION 1.6.0 LANGUAGES CXX)
+project(LaserCNC VERSION 1.6.1 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)

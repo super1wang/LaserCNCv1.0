@@ -81,8 +81,8 @@ void DialogAxisCalibrationWizard::buildUi()
     m_lblHint = new QLabel(
         // 中文翻译：依次拾取 A 轴、C 轴参考面，再拾取切割头下端面。\n
         tr("Select the A-axis and C-axis reference surfaces in sequence, and then select the lower end surface of the cutting head."
-           // 中文翻译：提交时只平移机台模型几何，使拾取到的模型交点对齐到构型配置页填写的旋转中心。
-           "When submitting, only translate the machine model geometry so that the picked model intersection is aligned to the rotation center filled in the configuration configuration page."),
+        // 中文翻译：提交时先牵引整机，使 A 面 Y/Z 与 C 面 X 合成的模型 AC 中心对齐绝对 AC 中心；再按运动子树分别校正：Y 带动 Y/X/Z，X 带动 X/Z，Z 只移动 Z 轴滑台，使所选刀嘴面的 XYZ 对齐当前机台 XYZ 所代表的绝对模拟锥头 TCP。实时轴坐标不会改变。
+           "\nOn submission, the complete machine is first dragged so that the model AC center composed from A-face Y/Z and C-face X reaches the absolute AC center. Then corrections are propagated through the kinematic subtrees: Y moves Y/X/Z, X moves X/Z, and Z moves only the Z slide, so the picked cutter-face XYZ reaches the absolute simulated TCP represented by the current live machine XYZ. Live axis coordinates are never changed."),
         this);
     m_lblHint->setWordWrap(true);
     m_lblHint->setStyleSheet("color: #555; font-size: 11px;");
@@ -120,22 +120,22 @@ void DialogAxisCalibrationWizard::buildUi()
     pickGrid->addWidget(m_lblHeadStatus, 2, 1);
     root->addWidget(groupPick);
 
-    // ── 机台标定位（snap 显示姿态 + 实时显示当前 AC 中心 / 切割嘴） ──
-    // 中文翻译：机台标定位
-    auto* groupPose = new QGroupBox(tr("Machine mark positioning"), this);
+    // ── 绝对标定目标（只读，不改变实时轴位姿） ──
+    // 中文翻译：绝对标定目标
+    auto* groupPose = new QGroupBox(tr("Absolute calibration target"), this);
     auto* poseLayout = new QFormLayout(groupPose);
-    // 中文翻译：进入机台标定位（A=0, C=0, XY 对齐）
-    m_btnEnterStandardPose = new QPushButton(tr("Enter the machine calibration position (A=0, C=0, XY alignment)"), groupPose);
+    // 中文翻译：确认绝对 AC 中心与模拟锥头目标
+    m_btnEnterStandardPose = new QPushButton(tr("Confirm absolute AC-center and simulated-TCP targets"), groupPose);
     m_btnEnterStandardPose->setEnabled(false);
     m_btnEnterStandardPose->setToolTip(
-        // 中文翻译：将模型显示姿态归位：A 轴角=0、C 轴角=0、XY 把切割头与 AC 中心对齐。
-        tr("Return the model display attitude to its original position: A-axis angle=0, C-axis angle=0, XY, and align the cutting head with the AC center."
+        // 中文翻译：只读取并显示绝对世界坐标目标，不修改 A/C/X/Y/Z 实时轴坐标。
+        tr("Read and display the absolute world-coordinate targets only; do not change live A/C/X/Y/Z axis coordinates."
            // 中文翻译：需要先完成上方三段拾取。
-           "You need to complete the three pickups above first."));
-    // 中文翻译：（待进入标定位）
-    m_lblCurrentAcCenter = new QLabel(tr("(To be entered into the target position)"), groupPose);
-    // 中文翻译：（待进入标定位）
-    m_lblCurrentCutterHead = new QLabel(tr("(To be entered into the target position)"), groupPose);
+           "\nYou need to complete the three pickups above first."));
+    // 中文翻译：（待确认绝对目标）
+    m_lblCurrentAcCenter = new QLabel(tr("(Absolute targets not confirmed)"), groupPose);
+    // 中文翻译：（待确认绝对目标）
+    m_lblCurrentCutterHead = new QLabel(tr("(Absolute targets not confirmed)"), groupPose);
     for (QLabel* lbl : {m_lblCurrentAcCenter, m_lblCurrentCutterHead}) {
         lbl->setStyleSheet("color:#888;");
         lbl->setMinimumWidth(280);
@@ -143,8 +143,8 @@ void DialogAxisCalibrationWizard::buildUi()
     poseLayout->addRow(m_btnEnterStandardPose);
     // 中文翻译：当前 AC 中心:
     poseLayout->addRow(tr("Current AC Center:"), m_lblCurrentAcCenter);
-    // 中文翻译：当前切割嘴 (世界):
-    poseLayout->addRow(tr("Current cutting mouth (world):"), m_lblCurrentCutterHead);
+    // 中文翻译：绝对模拟锥头 TCP:
+    poseLayout->addRow(tr("Absolute simulated cutter TCP:"), m_lblCurrentCutterHead);
     root->addWidget(groupPose);
 
     // 中文翻译：第 4 步：确认构型旋转中心（只读）
@@ -315,7 +315,7 @@ void DialogAxisCalibrationWizard::onEnterStandardPoseClicked()
     }
     m_standardPoseEntered = true;
 
-    // 刷新当前 AC 中心 / 切割嘴位置（需求 3）
+    // 显示不可变的绝对 AC 中心与当前实时 XYZ 所代表的绝对 TCP。
     gp_Pnt acCenter;
     if (m_camModule->currentAcRotationCenter(acCenter) && m_lblCurrentAcCenter) {
         m_lblCurrentAcCenter->setText(formatPoint(acCenter));
@@ -327,7 +327,7 @@ void DialogAxisCalibrationWizard::onEnterStandardPoseClicked()
         m_lblCurrentCutterHead->setStyleSheet("color:#1f7a1f;");
     }
     LCNC_INFO(lcnc::LogCode::Generic,
-              "Standard pose displayed: AC=({:.3f},{:.3f},{:.3f}) head=({:.3f},{:.3f},{:.3f})",
+              "Absolute calibration targets displayed: AC=({:.3f},{:.3f},{:.3f}) TCP=({:.3f},{:.3f},{:.3f})",
               acCenter.X(), acCenter.Y(), acCenter.Z(),
               headWorld.X(), headWorld.Y(), headWorld.Z());
 }
@@ -340,13 +340,13 @@ void DialogAxisCalibrationWizard::onResetClicked()
     m_awaitingPick = false;
     m_standardPoseEntered = false;
     if (m_lblCurrentAcCenter) {
-        // 中文翻译：（待进入标定位）
-        m_lblCurrentAcCenter->setText(tr("(To be entered into the target position)"));
+        // 中文翻译：（待确认绝对目标）
+        m_lblCurrentAcCenter->setText(tr("(Absolute targets not confirmed)"));
         m_lblCurrentAcCenter->setStyleSheet("color:#888;");
     }
     if (m_lblCurrentCutterHead) {
-        // 中文翻译：（待进入标定位）
-        m_lblCurrentCutterHead->setText(tr("(To be entered into the target position)"));
+        // 中文翻译：（待确认绝对目标）
+        m_lblCurrentCutterHead->setText(tr("(Absolute targets not confirmed)"));
         m_lblCurrentCutterHead->setStyleSheet("color:#888;");
     }
     refreshSummary();

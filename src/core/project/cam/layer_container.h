@@ -23,7 +23,7 @@ namespace lcnc::cam {
  * 在 Phase A 阶段，LayerContainer 是 LaserToolpath 上层的一层薄包装：
  *   - 图层级字段（name/color/enabled/toolName/compensationIndex/includedContours）
  *     直接操纵 ToolpathLayer 字段。
- *   - 容器级字段（manualContourOrder/sortStrategy/lastAutoSortAxis）存在 LayerContainer。
+ *   - 容器级字段（manualContourOrder/sortStrategy）存在 LayerContainer。
  *
  * 这层包装的存在意义：把所有 mutator 集中到一处，配合 LayerManager 发出细粒度
  * 信号，以便：
@@ -58,7 +58,6 @@ public:
     bool                      isInManualOrder(ContourId id) const { return m_manualOrderSet.contains(id); }
 
     CuttingPlanSortStrategy sortStrategy() const { return m_sortStrategy; }
-    AutoSortAxis            lastAutoSortAxis() const { return m_lastAutoSortAxis; }
 
     // ── 可变（true=有变化，false=无效或无变化；调用方据此决定是否通知）─
     bool setLayerName(std::uint64_t layerId, const QString& name);
@@ -79,14 +78,12 @@ public:
     bool clearManualOrder();
 
     bool setSortStrategy(CuttingPlanSortStrategy s);
-    void setLastAutoSortAxis(AutoSortAxis a) { m_lastAutoSortAxis = a; }
 
 private:
     LaserToolpath*           m_toolpath{nullptr};
     QVector<ContourId>       m_manualContourOrder;
     QSet<ContourId>          m_manualOrderSet;
     CuttingPlanSortStrategy  m_sortStrategy{CuttingPlanSortStrategy::LayerThenContour};
-    AutoSortAxis             m_lastAutoSortAxis{AutoSortAxis::XPos};
 };
 
 } // namespace lcnc::cam

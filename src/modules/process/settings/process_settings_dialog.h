@@ -30,14 +30,19 @@ public:
                           SettingsAppliedHandler settingsApplied,
                           QWidget* parent = nullptr);
 
+public slots:
+    void accept() override;
+    void reject() override;
+
 private:
-    void rebuildObjectTree();
+    void rebuildObjectTree(const QString& selectedObjectId = {});
     void showCurrentObject();
-    void apply();
+    bool apply();
     void createTool();
     void copyTool();
     void renameTool();
     void deleteTool();
+    QString selectedObjectId() const;
     QString selectedToolName() const;
 
     ProcessSettingsService* m_settings{nullptr};

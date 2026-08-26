@@ -876,8 +876,8 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
         LCNC_ERR(lcnc::LogCode::Generic,
                  "CamModule::enterStandardCalibrationPose failed: {}",
                  msg.toStdString());
-        // 中文翻译：机台标定位
-        emit operationFailed(tr("Machine mark positioning"), msg);
+        // 中文翻译：绝对标定目标
+        emit operationFailed(tr("Absolute calibration target"), msg);
         return false;
     };
 
@@ -889,6 +889,13 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
     if (!kin)
         // 中文翻译：找不到机台轴系配置。
         return fail(tr("The machine axis system configuration cannot be found."));
+    for (const QString& rotaryAxis : {QStringLiteral("A"), QStringLiteral("C")}) {
+        const MachineAxisDef* axis = kin->findAxis(rotaryAxis);
+        if (axis && std::abs(axis->currentPos) > 1e-6) {
+            // 中文翻译：绝对几何标定要求实际 A/C 轴先回到 0；向导不会替机台修改实时轴坐标。
+            return fail(tr("Absolute geometry calibration requires the physical A/C axes to be at 0 first. The wizard will not change live axis coordinates."));
+        }
+    }
 
     try {
         gp_Pnt configuredCenter;
@@ -896,27 +903,13 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
             // 中文翻译：请先在应用程序选项的机台构型页填写 A/C 旋转中心。
             return fail(tr("Please fill in the A/C rotation center on the machine configuration page of the application options first."));
 
-        // 切割头模型点（BASE 局部坐标），直接采用拾取面中心。
-        m_cutterHeadModelPosition = inputs.cutterHeadFaceCenter;
-
-        // 中文翻译：机台标定位
-        // 进入"Machine mark positioning"：A=0, C=0；XY 调整为切割头世界 XY 与配置旋转中心 XY 对齐。
-        kin->setAxisPosition(QStringLiteral("A"), 0.0);
-        kin->setAxisPosition(QStringLiteral("C"), 0.0);
-        if (kin->findAxis(QStringLiteral("X")))
-            kin->setAxisPosition(QStringLiteral("X"),
-                                 configuredCenter.X() - m_cutterHeadModelPosition.X());
-        if (kin->findAxis(QStringLiteral("Y")))
-            kin->setAxisPosition(QStringLiteral("Y"),
-                                 configuredCenter.Y() - m_cutterHeadModelPosition.Y());
-
         LCNC_INFO(lcnc::LogCode::Generic,
-                  "Standard pose entered: configuredCenter=({:.3f},{:.3f},{:.3f}) "
-                  "head.model=({:.3f},{:.3f},{:.3f})",
+                  "Calibration absolute targets: configuredCenter=({:.3f},{:.3f},{:.3f}) "
+                  "tcp=({:.3f},{:.3f},{:.3f}) pickedHead=({:.3f},{:.3f},{:.3f})",
                   configuredCenter.X(), configuredCenter.Y(), configuredCenter.Z(),
-                  m_cutterHeadModelPosition.X(),
-                  m_cutterHeadModelPosition.Y(),
-                  m_cutterHeadModelPosition.Z());
+                  cutterHeadWorldPosition().X(), cutterHeadWorldPosition().Y(),
+                  cutterHeadWorldPosition().Z(), inputs.cutterHeadFaceCenter.X(),
+                  inputs.cutterHeadFaceCenter.Y(), inputs.cutterHeadFaceCenter.Z());
     } catch (const Standard_Failure& f) {
         // 中文翻译：OCC 异常：%1
         return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.GetMessageString())));
@@ -928,8 +921,6 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
         return fail(tr("An unknown exception occurred."));
     }
 
-    displayAxisGuides();
-    refreshMachineTransforms();
     return true;
 }
 
@@ -937,11 +928,10 @@ gp_Pnt CamModule::cutterHeadWorldPosition() const
 {
     const MachineKinematics* kin = kinematics();
     if (!kin)
-        return m_cutterHeadModelPosition;
-    // 切割头几何挂在 Z 轴链下（BASE→Y→X→Z），由该链变换 m_cutterHeadModelPosition。
-    gp_Pnt pos = m_cutterHeadModelPosition;
-    pos.Transform(kin->computeAxisTransform(QStringLiteral("Z")));
-    return pos;
+        return gp_Pnt(0.0, 0.0, 0.0);
+    // 模拟锥头表示控制器 TCP，而不是 STEP 模型中的拾取点。机台几何标定会
+    // 平移 m_cutterHeadModelPosition；该平移不得改变 X/Y/Z 实时反馈所表示的位置。
+    return kin->currentLinearPosition();
 }
 
 bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
@@ -960,10 +950,18 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
         return false;
     };
 
-    // ── 1) 进入标定位（写入轴心、切割头模型点、A=C=0、XY 对齐） ────────
+    // Validate only. Absolute targets must never move the live controller pose.
     QString reason;
-    if (!enterStandardCalibrationPose(inputs, &reason))
-        return fail(reason);
+    if (!enterStandardCalibrationPose(inputs, &reason)) {
+        // enterStandardCalibrationPose() has already reported this validation
+        // failure. Avoid emitting a duplicate operationFailed signal here.
+        if (errorMessage)
+            *errorMessage = reason;
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "CamModule::applyAxisCalibration rejected before geometry update: {}",
+                 reason.toStdString());
+        return false;
+    }
 
     try {
         gp_Pnt configuredCenter;
@@ -971,26 +969,157 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
             // 中文翻译：请先在应用程序选项的机台构型页填写 A/C 旋转中心。
             return fail(tr("Please fill in the A/C rotation center on the machine configuration page of the application options first."));
 
-        // A/C 拾取只用于推导“模型当前的 AC 交点”，不写入物理旋转中心。
+        LcncDocument* doc = machineDocument();
+        MachineKinematics* kin = kinematics();
+        if (!doc || !kin)
+            // 中文翻译：找不到机台项目文档。
+            return fail(tr("The machine project document cannot be found."));
+
+        const gp_Pnt absoluteTcp = cutterHeadWorldPosition();
+        const gp_Pnt cutterHeadSnapshot = m_cutterHeadModelPosition;
+        const TDF_LabelSequence machineLabels =
+            doc->entityLabels(LcncDocument::EntityKind::Machine);
+        struct GeometryMove {
+            TDF_Label label;
+            gp_Vec translation;
+        };
+        std::vector<GeometryMove> completedMoves;
+        auto rollback = [&] {
+            for (auto it = completedMoves.rbegin(); it != completedMoves.rend(); ++it) {
+                const gp_Vec reverse(-it->translation.X(), -it->translation.Y(),
+                                     -it->translation.Z());
+                ShapeService::moveShape(doc, it->label, reverse);
+            }
+            completedMoves.clear();
+            m_cutterHeadModelPosition = cutterHeadSnapshot;
+        };
+        bool geometryCommitted = false;
+        auto rollbackGuard = qScopeGuard([&] {
+            if (!geometryCommitted)
+                rollback();
+        });
+        Q_UNUSED(rollbackGuard);
+        auto moveLabel = [&](const TDF_Label& label, const gp_Vec& translation) {
+            if (translation.SquareMagnitude() < 1e-12)
+                return true;
+            if (!ShapeService::moveShape(doc, label, translation))
+                return false;
+            completedMoves.push_back({label, translation});
+            return true;
+        };
+
+        // Stage 1: A supplies Y/Z and C supplies X. Drag the complete machine
+        // model until that picked model AC intersection reaches the immutable
+        // absolute AC center.
         const gp_Pnt pickedModelCenter(inputs.cFaceCenter.X(),
                                        inputs.aFaceCenter.Y(),
                                        inputs.aFaceCenter.Z());
-        const gp_Vec translation(pickedModelCenter, configuredCenter);
-        if (translation.SquareMagnitude() >= 1e-12) {
-            // 中文翻译：机台模型对齐
-            if (!translateMachineGeometryOnly(translation, tr("Machine model alignment")))
-                return false; // translateMachineGeometryOnly 已发 operationFailed
-        } else if (!activeMachineProfilePath().isEmpty()) {
+        const gp_Vec acTranslation(pickedModelCenter, configuredCenter);
+        for (int index = 1; index <= machineLabels.Length(); ++index) {
+            const TDF_Label label = machineLabels.Value(index);
+            if (!label.IsNull() && !moveLabel(label, acTranslation)) {
+                rollback();
+                // 中文翻译：AC 中心对齐失败，机台模型已恢复标定前位置。
+                return fail(tr("AC center alignment failed and the machine model has been restored to its pre-calibration position."));
+            }
+        }
+        gp_Pnt alignedCutterFaceWorld =
+            inputs.cutterHeadFaceCenter.Translated(acTranslation);
+
+        // Stage 2: drag only the cutter-carrier Y->X->Z chain in XYZ so the
+        // picked cutter face reaches the immutable simulated TCP represented
+        // by the current live X/Y/Z machine coordinates.
+        const gp_Vec cutterTranslation(
+            absoluteTcp.X() - alignedCutterFaceWorld.X(),
+            absoluteTcp.Y() - alignedCutterFaceWorld.Y(),
+            absoluteTcp.Z() - alignedCutterFaceWorld.Z());
+
+        // Resolve the world-space correction in the configured linear-axis
+        // basis. Each correction is then propagated only through that axis'
+        // kinematic subtree. For BASE->Y->X->Z this means:
+        //   Y correction -> Y/X/Z, X correction -> X/Z, Z correction -> Z.
+        const MachineAxisDef* xAxis = kin->findAxis(QStringLiteral("X"));
+        const MachineAxisDef* yAxis = kin->findAxis(QStringLiteral("Y"));
+        const MachineAxisDef* zAxis = kin->findAxis(QStringLiteral("Z"));
+        if (!xAxis || !yAxis || !zAxis
+            || xAxis->motionType != MachineAxisDef::Linear
+            || yAxis->motionType != MachineAxisDef::Linear
+            || zAxis->motionType != MachineAxisDef::Linear) {
+            rollback();
+            // 中文翻译：切割头标定需要完整的 X/Y/Z 直线轴构型。
+            return fail(tr("Cutter-head calibration requires a complete X/Y/Z linear-axis configuration."));
+        }
+        const gp_Vec xDirection(xAxis->direction);
+        const gp_Vec yDirection(yAxis->direction);
+        const gp_Vec zDirection(zAxis->direction);
+        const double basisDeterminant = xDirection.Dot(yDirection.Crossed(zDirection));
+        if (std::abs(basisDeterminant) < 1e-9) {
+            rollback();
+            // 中文翻译：X/Y/Z 轴方向不能构成独立的三维标定坐标系。
+            return fail(tr("The X/Y/Z axis directions do not form an independent three-dimensional calibration frame."));
+        }
+
+        QMap<QString, gp_Vec> axisCorrections;
+        axisCorrections.insert(QStringLiteral("X"), xDirection
+            * (cutterTranslation.Dot(yDirection.Crossed(zDirection)) / basisDeterminant));
+        axisCorrections.insert(QStringLiteral("Y"), yDirection
+            * (xDirection.Dot(cutterTranslation.Crossed(zDirection)) / basisDeterminant));
+        axisCorrections.insert(QStringLiteral("Z"), zDirection
+            * (xDirection.Dot(yDirection.Crossed(cutterTranslation)) / basisDeterminant));
+
+        QMap<QString, int> affectedPartCounts;
+        for (int index = 1; index <= machineLabels.Length(); ++index) {
+            const TDF_Label label = machineLabels.Value(index);
+            if (label.IsNull())
+                continue;
+            const QString entry = XcafUtils::entry(label);
+            const QString assignedAxis = kin->axisForShape(entry);
+            gp_Vec partTranslation(0.0, 0.0, 0.0);
+            for (auto correction = axisCorrections.cbegin();
+                 correction != axisCorrections.cend(); ++correction) {
+                if (!kin->isAxisDescendantOf(assignedAxis, correction.key()))
+                    continue;
+                partTranslation += correction.value();
+                if (correction.value().SquareMagnitude() >= 1e-12)
+                    affectedPartCounts[correction.key()] += 1;
+            }
+            if (!moveLabel(label, partTranslation)) {
+                rollback();
+                // 中文翻译：切割头 XYZ 对齐失败，机台模型已恢复标定前位置。
+                return fail(tr("Cutter-head XYZ alignment failed and the machine model has been restored to its pre-calibration position."));
+            }
+        }
+        for (auto correction = axisCorrections.cbegin();
+             correction != axisCorrections.cend(); ++correction) {
+            if (correction.value().SquareMagnitude() < 1e-12
+                || affectedPartCounts.value(correction.key()) > 0) {
+                continue;
+            }
+            rollback();
+            // 中文翻译：标定需要移动 %1 轴，但未找到归属于该轴子树的机台部件。请先完成轴归属标记。
+            return fail(tr("Calibration requires moving the %1-axis, but no machine parts assigned to that axis subtree were found. Please complete the axis assignments first.")
+                            .arg(correction.key()));
+        }
+        alignedCutterFaceWorld.Translate(cutterTranslation);
+        // Persist the cutter reference in its carrier-local frame. Picks are
+        // world-space points with the live local transformation already
+        // applied, so storing the world point directly would double-apply the
+        // current XYZ feedback in collision/simulation consumers.
+        m_cutterHeadModelPosition = alignedCutterFaceWorld.Transformed(
+            kin->computeAxisTransform(QStringLiteral("Z")).Inverted());
+
+        if (!activeMachineProfilePath().isEmpty())
             m_config.setCutterHeadModelPositionForMachine(activeMachineProfilePath(),
                                                           m_cutterHeadModelPosition);
-        }
+
+        invalidateMachineSafetyPackage();
+        invalidateMachineEnvironment();
 
         // 自动 STEP 回写：对齐后的模型作为下次启动的初始模型。
         if (!activeMachineProfilePath().isEmpty()) {
             LCNC_INFO(lcnc::LogCode::Generic,
                       "Saving aligned machine model back to: {}",
                       activeMachineProfilePath().toStdString());
-            LcncDocument* doc = machineDocument();
             if (doc && !lcnc::cam::machine_io::exportMachineToFile(
                             doc, doc->machineKinematics(), activeMachineProfilePath())) {
                 LCNC_WARN(lcnc::LogCode::Generic,
@@ -999,6 +1128,7 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
                 // 仅警告，不中断标定流程
             }
         }
+        geometryCommitted = true;
     } catch (const Standard_Failure& f) {
         // 中文翻译：OCC 异常：%1
         return fail(tr("OCC exception: %1").arg(QString::fromUtf8(f.GetMessageString())));
@@ -1012,75 +1142,9 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
 
     displayAxisGuides();
     refreshMachineDisplay();
-    if (hasToolpath())
-        updateToolpathMachineCoordinates();
 
     LCNC_INFO(lcnc::LogCode::Generic,
-              "CamModule::applyAxisCalibration done (model geometry aligned; rotation center kept from machine config)");
-    emit machineWorkspaceChanged();
-    return true;
-}
-
-bool CamModule::translateMachineGeometryOnly(const gp_Vec& translation, const QString& operationTitle)
-{
-    if (translation.SquareMagnitude() < 1e-12)
-        return true;
-
-    LcncDocument* doc = machineDocument();
-    if (!doc) {
-        // 中文翻译：找不到机台项目文档。
-        emit operationFailed(operationTitle, tr("The machine project document cannot be found."));
-        return false;
-    }
-
-    const TDF_LabelSequence machineLabels = doc->entityLabels(LcncDocument::EntityKind::Machine);
-    const TDF_LabelSequence workpieceLabels = doc->entityLabels(LcncDocument::EntityKind::Workpiece);
-    const gp_Pnt cutterHeadSnapshot = m_cutterHeadModelPosition;
-    QList<TDF_Label> movedLabels;
-
-    auto moveLabels = [&](const TDF_LabelSequence& labels) {
-        for (int i = 1; i <= labels.Length(); ++i) {
-            const TDF_Label label = labels.Value(i);
-            if (label.IsNull())
-                continue;
-
-            if (!ShapeService::moveShape(doc, label, translation))
-                return false;
-
-            movedLabels.append(label);
-        }
-        return true;
-    };
-
-    auto rollback = [&]() {
-        const gp_Vec reverse(-translation.X(), -translation.Y(), -translation.Z());
-        for (int i = movedLabels.size() - 1; i >= 0; --i)
-            ShapeService::moveShape(doc, movedLabels.at(i), reverse);
-        m_cutterHeadModelPosition = cutterHeadSnapshot;
-    };
-
-    if (!moveLabels(machineLabels) || !moveLabels(workpieceLabels)) {
-        rollback();
-        // 中文翻译：机台几何平移失败，当前模型已恢复原始位置。
-        emit operationFailed(operationTitle, tr("The machine geometric translation failed and the current model has been restored to its original position."));
-        return false;
-    }
-
-    m_cutterHeadModelPosition.Translate(translation);
-    if (!activeMachineProfilePath().isEmpty()) {
-        m_config.setCutterHeadModelPositionForMachine(activeMachineProfilePath(), m_cutterHeadModelPosition);
-    }
-
-    translateToolpathWorldData(translation);
-    invalidateMachineSafetyPackage();
-    invalidateMachineEnvironment();
-    if (hasToolpath())
-        updateToolpathMachineCoordinates();
-    refreshMachineDisplay();
-    displayAxisGuides();
-    if (hasToolpath() || m_previewLeadInValid)
-        refreshToolpathDisplay();
-
+              "CamModule::applyAxisCalibration done (absolute AC center and TCP XYZ kept fixed; machine geometry aligned)");
     emit machineWorkspaceChanged();
     return true;
 }

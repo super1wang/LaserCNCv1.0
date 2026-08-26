@@ -249,12 +249,9 @@ TopoDS_Shape transformed(const TopoDS_Shape& shape, const gp_Trsf& trsf)
     return transform.IsDone() ? transform.Shape() : TopoDS_Shape{};
 }
 
-gp_Pnt cutterHeadWorldPosition(const MachineKinematics& kinematics,
-                               const gp_Pnt& modelPosition)
+gp_Pnt cutterHeadWorldPosition(const MachineKinematics& kinematics)
 {
-    gp_Pnt position = modelPosition;
-    position.Transform(kinematics.computeAxisTransform(QStringLiteral("Z")));
-    return position;
+    return kinematics.currentLinearPosition();
 }
 
 } // namespace
@@ -779,10 +776,9 @@ private:
     gp_Pnt cutterHeadWorldPosition() const
     {
         // Keep this exactly aligned with CamModule::cutterHeadWorldPosition:
-        // the frozen model-space tip rides the virtual Z-axis chain.  Unlike
-        // CAM, this method only reads the session's private kinematics copy.
-        return ::cutterHeadWorldPosition(m_kinematics,
-                                         m_sceneSnapshot.cutterHeadModelPosition);
+        // the visual TCP follows controller XYZ and is independent of the
+        // imported machine CAD placement.
+        return ::cutterHeadWorldPosition(m_kinematics);
     }
 
     void projectFrozenCamOverlays()

@@ -224,10 +224,9 @@ public:
     /// 三段式模型对齐：用拾取到的模型参考交点平移机台几何，使其对齐到构型配置页
     /// 中手动填写的旋转中心。此流程不写入/修改 A/C 物理旋转中心。
     bool applyAxisCalibration(const AxisCalibrationInputs& inputs, QString* errorMessage = nullptr);
-    // 中文翻译：机台标定位
-    /// 进入"Machine mark positioning"：记录切割头模型点，并把 A=0/C=0、X/Y 调整为
-    /// 让切割头世界 XY 与当前配置旋转中心 XY 对齐。不修改旋转中心、不持久化、不导出。
-    /// 仅用于向导显示标定姿态下的当前 AC 中心 / 切割嘴位置。
+    // 中文翻译：绝对标定目标
+    /// Validate the picked calibration references and expose the immutable
+    /// absolute AC-center/TCP targets. This preview never changes live axes.
     bool enterStandardCalibrationPose(const AxisCalibrationInputs& inputs,
                                       QString* errorMessage = nullptr);
     /// 切割头当前世界坐标（受当前 X/Y/Z 轴位置影响）。
@@ -299,7 +298,7 @@ public:
     /// Consumers (Process and offline simulation) must use this snapshot and
     /// must not rebuild an independent order.
     lcnc::cam::ContourSequenceSnapshot contourSequenceSnapshot() const;
-    /// Applies CAM's persisted automatic order and resolves the complete
+    /// Applies CAM's software-configured automatic order and resolves the complete
     /// machine-coordinate sequence at the single CAM solve boundary.
     bool applyAutoContourSort(lcnc::cam::AutoSortAxis axis, QString* errorMessage = nullptr);
     /// 无视自动碰撞检测开关，对当前已求解刀路执行一次完整碰撞校验。
@@ -500,6 +499,7 @@ signals:
     void workpieceUnmounted();
     void toolpathGenerated();
     void toolpathCleared();
+    void autoSortAxisChanged(lcnc::cam::AutoSortAxis axis);
     /// Emitted when the machining-face set changes (auto-capture / manual add /
     /// remove / clear) so the project tree and view highlight can refresh.
     void machiningFacesChanged();
@@ -566,8 +566,6 @@ private:
                                      QString* errorMessage) const;
     bool ensureAcCenterCalibrationAvailable(QString* errorMessage = nullptr) const;
     bool currentWorkpieceRotationCenter(gp_Pnt& center) const;
-    bool translateMachineGeometryOnly(const gp_Vec& translation, const QString& operationTitle);
-    void translateToolpathWorldData(const gp_Vec& translation);
     void autoDetectAxisOrigins();
     void applyStoredMachineProfile(const QString& machinePath);
     bool applyConfiguredMachineAxes(bool updateView);
@@ -588,7 +586,7 @@ private:
     bool rebuildTravelPlanForCurrentOrder(QString* errorMessage = nullptr);
     QVector<lcnc::cam::ContourId> planAutoContourOrder(
         lcnc::cam::AutoSortAxis axis, QString* errorMessage = nullptr) const;
-    bool preparePersistedAutoSort(QString* errorMessage = nullptr);
+    bool prepareConfiguredAutoSort(QString* errorMessage = nullptr);
     void clearToolpathSelectionState();
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);

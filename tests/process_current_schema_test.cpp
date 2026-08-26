@@ -37,6 +37,8 @@ int main(int argc, char* argv[])
     lcnc::process::ProcessSettingsService current(directory.path());
     if (!current.initialize())
         return fail(QStringLiteral("Current Process settings did not initialize"));
+    if (current.hasChanges())
+        return fail(QStringLiteral("Fresh Process settings incorrectly reported pending changes"));
 
     const auto initialDefaults = current.initialApproachSettings();
     if (initialDefaults.mode
@@ -71,6 +73,18 @@ int main(int argc, char* argv[])
     if (!initialCommit.success
         || !initialCommit.changes.domains.contains(QStringLiteral("workflow"))) {
         return fail(QStringLiteral("Initial-approach settings were not committed to workflow"));
+    }
+
+    if (!setInitialField(QStringLiteral("safetyZ"), 99.0) || !current.hasChanges())
+        return fail(QStringLiteral("Process settings cancel fixture was not modified"));
+    const bool cancelSucceeded = current.cancelEdit();
+    const bool changesAfterCancel = current.hasChanges();
+    const double safetyZAfterCancel = current.initialApproachSettings().safetyZ;
+    if (!cancelSucceeded || changesAfterCancel || safetyZAfterCancel != 42.5) {
+        return fail(QStringLiteral(
+            "Cancel did not restore the last applied Process settings "
+            "(success=%1, changed=%2, safetyZ=%3)")
+            .arg(cancelSucceeded).arg(changesAfterCancel).arg(safetyZAfterCancel));
     }
 
     const QString devices = directory.filePath(QStringLiteral("devices.toml"));

@@ -2,6 +2,7 @@
 
 #include "core/settings/app_settings.h"
 #include "core/settings/toml_config.h"
+#include "core/project/cam/layer_contracts.h"
 
 #include <QMap>
 #include <QSet>
@@ -21,7 +22,7 @@ enum class CutterCollisionProxyMode : int
  * 字段：
  *   - 全局：machineModelPath / autoLoadMachineModel / machinePreset / machineRenderQualityPreset
  *   - [toolpath]：leadInLength / deflection / smoothAngle /
- *     useFaceClassification / showNormals / normalSampleStep
+ *     useFaceClassification / showNormals / normalSampleStep / autoSortAxis
  *   - machineProfile（按机台 absolute 路径分组，array of tables）：
  *     axisOrigins、cutterHeadModelPosition、cutterHeadPhysicalPosition、
  *     legacy workpieceInstallPosition (read only for one-time migration)
@@ -102,6 +103,9 @@ public:
 
     double normalSampleStep() const { return m_normalSampleStep; }
     void setNormalSampleStep(double mm);
+
+    lcnc::cam::AutoSortAxis autoSortAxis() const { return m_autoSortAxis; }
+    void setAutoSortAxis(lcnc::cam::AutoSortAxis axis);
 
     bool axisOriginForMachine(const QString& machinePath,
                               const QString& axisName,
@@ -188,6 +192,7 @@ private:
     int m_extractionStrategy{0}; ///< ExtractionStrategy (LargestSmoothConnectedSurface)
     bool m_showNormals{false};
     double m_normalSampleStep{2.0};
+    lcnc::cam::AutoSortAxis m_autoSortAxis{lcnc::cam::AutoSortAxis::XPos};
 
     QMap<QString, MachineProfile> m_machineProfiles;
 };

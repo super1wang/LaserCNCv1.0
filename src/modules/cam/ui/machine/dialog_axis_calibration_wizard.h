@@ -21,7 +21,9 @@ namespace lcnc::cam::ui {
  *   ② 拾取 C 轴参考面 → 记录中心
  *   ③ 拾取切割头下端面 → 记录中心
  *   ④ 读取应用程序选项 / 机台构型中手动填写的旋转中心
- *   ⑤ 点击「提交」平移机台模型几何，使模型交点对齐到配置中心
+ *   ⑤ 点击「提交」牵引整机，使模型 AC 交点对齐绝对配置中心
+ *   ⑥ 按运动子树校正：Y 带动 Y/X/Z，X 带动 X/Z，Z 只移动 Z 轴滑台，
+ *      使所选刀嘴面的 XYZ 对齐当前机台 XYZ 所代表的绝对模拟 TCP
  *
  * 物理旋转中心不在本向导中修改，统一由应用程序选项的构型配置页维护。
  *
@@ -101,8 +103,8 @@ private:
     QPushButton* m_btnCancel{nullptr};
     QLabel*      m_lblHint{nullptr};
     QLabel*      m_lblCalibStatus{nullptr};  ///< 顶部“当前旋转中心”状态指示
-    // 中文翻译：机台标定位
-    bool m_standardPoseEntered{false};  ///< 是否已进入"Machine mark positioning"
+    // 中文翻译：已确认绝对标定目标
+    bool m_standardPoseEntered{false};  ///< 是否已确认绝对 AC/TCP 标定目标
 };
 
 } // namespace lcnc::cam::ui

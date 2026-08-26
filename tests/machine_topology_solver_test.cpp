@@ -166,6 +166,31 @@ max = 120.0
     displayedMachine.mountWorkpiece(QStringLiteral("fixture"), QStringLiteral("C"));
     displayedMachine.setAxisPosition(QStringLiteral("A"), 35.0);
     displayedMachine.setAxisPosition(QStringLiteral("C"), -42.0);
+    ok &= require(displayedMachine.isAxisDescendantOf(QStringLiteral("Z"), QStringLiteral("Z"))
+                  && displayedMachine.isAxisDescendantOf(QStringLiteral("Z"), QStringLiteral("X"))
+                  && displayedMachine.isAxisDescendantOf(QStringLiteral("Z"), QStringLiteral("Y"))
+                  && displayedMachine.isAxisDescendantOf(QStringLiteral("X"), QStringLiteral("Y"))
+                  && !displayedMachine.isAxisDescendantOf(QStringLiteral("X"), QStringLiteral("Z"))
+                  && !displayedMachine.isAxisDescendantOf(QStringLiteral("Y"), QStringLiteral("X"))
+                  && !displayedMachine.isAxisDescendantOf(QStringLiteral("C"), QStringLiteral("Z")),
+                  "VERTICAL_AC_TABLE calibration axis-subtree propagation is incorrect");
+    ok &= require(displayedMachine.currentLinearPosition().Distance(gp_Pnt(0.0, 0.0, 0.0)) < 1e-9,
+                  "Zero controller XYZ did not place the simulated TCP at machine origin");
+    displayedMachine.setAxisPosition(QStringLiteral("X"), 12.0);
+    displayedMachine.setAxisPosition(QStringLiteral("Y"), -8.0);
+    displayedMachine.setAxisPosition(QStringLiteral("Z"), 25.0);
+    const gp_Pnt displayedTcp = displayedMachine.currentLinearPosition();
+    gp_Vec expectedDisplayedTcp;
+    expectedDisplayedTcp += gp_Vec(displayedMachine.findAxis(QStringLiteral("X"))->direction) * 12.0;
+    expectedDisplayedTcp += gp_Vec(displayedMachine.findAxis(QStringLiteral("Y"))->direction) * -8.0;
+    expectedDisplayedTcp += gp_Vec(displayedMachine.findAxis(QStringLiteral("Z"))->direction) * 25.0;
+    ok &= require(isNear(displayedTcp.X(), expectedDisplayedTcp.X())
+                  && isNear(displayedTcp.Y(), expectedDisplayedTcp.Y())
+                  && isNear(displayedTcp.Z(), expectedDisplayedTcp.Z()),
+                  "Simulated TCP did not follow configured live linear-axis coordinates");
+    displayedMachine.setAxisPosition(QStringLiteral("X"), 0.0);
+    displayedMachine.setAxisPosition(QStringLiteral("Y"), 0.0);
+    displayedMachine.setAxisPosition(QStringLiteral("Z"), 0.0);
     gp_Trsf fixtureSetup;
     fixtureSetup.SetTranslation(gp_Vec(12.0, -8.0, 25.0));
     displayedMachine.setWorkpieceSetupTransform(fixtureSetup);

@@ -598,8 +598,8 @@
     </message>
     <message>
         <location filename="../src/modules/cam/cam_module.cpp" line="1839"/>
-        <source>Machine mark positioning</source>
-        <translation>机台标定位</translation>
+        <source>Absolute calibration target</source>
+        <translation>绝对标定目标</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/cam_module.cpp" line="1856"/>
@@ -676,6 +676,30 @@
         <location filename="../src/modules/cam/cam_module.cpp" line="2160"/>
         <source>The machine geometric translation failed and the current model has been restored to its original position.</source>
         <translation>机台几何平移失败，当前模型已恢复原始位置。</translation>
+    </message>
+    <message>
+        <source>Absolute geometry calibration requires the physical A/C axes to be at 0 first. The wizard will not change live axis coordinates.</source>
+        <translation>绝对几何标定要求实际 A/C 轴先回到 0 位；向导不会修改实时轴坐标。</translation>
+    </message>
+    <message>
+        <source>AC center alignment failed and the machine model has been restored to its pre-calibration position.</source>
+        <translation>AC 中心对齐失败，机台模型已恢复标定前位置。</translation>
+    </message>
+    <message>
+        <source>Cutter-head XYZ alignment failed and the machine model has been restored to its pre-calibration position.</source>
+        <translation>切割头 XYZ 对齐失败，机台模型已恢复标定前位置。</translation>
+    </message>
+    <message>
+        <source>Cutter-head calibration requires a complete X/Y/Z linear-axis configuration.</source>
+        <translation>切割头标定需要完整的 X/Y/Z 直线轴构型。</translation>
+    </message>
+    <message>
+        <source>The X/Y/Z axis directions do not form an independent three-dimensional calibration frame.</source>
+        <translation>X/Y/Z 轴方向不能构成独立的三维标定坐标系。</translation>
+    </message>
+    <message>
+        <source>Calibration requires moving the %1-axis, but no machine parts assigned to that axis subtree were found. Please complete the axis assignments first.</source>
+        <translation>标定需要移动 %1 轴，但未找到归属于该轴子树的机台部件。请先完成轴归属标记。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/cam_module.cpp" line="2195"/>
@@ -2989,8 +3013,10 @@ continue?</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="83"/>
-        <source>Select the A-axis and C-axis reference surfaces in sequence, and then select the lower end surface of the cutting head.When submitting, only translate the machine model geometry so that the picked model intersection is aligned to the rotation center filled in the configuration configuration page.</source>
-        <translation>依次选择A轴和C轴参考面，然后选择切割头的下端面。提交时，只需平移机器模型几何体，使选取的模型交点与配置配置页中填写的旋转中心对齐。</translation>
+        <source>Select the A-axis and C-axis reference surfaces in sequence, and then select the lower end surface of the cutting head.
+On submission, the complete machine is first dragged so that the model AC center composed from A-face Y/Z and C-face X reaches the absolute AC center. Then corrections are propagated through the kinematic subtrees: Y moves Y/X/Z, X moves X/Z, and Z moves only the Z slide, so the picked cutter-face XYZ reaches the absolute simulated TCP represented by the current live machine XYZ. Live axis coordinates are never changed.</source>
+        <translation>依次拾取 A 轴、C 轴参考面，再拾取切割头下端面。
+提交时先牵引整机，使 A 面 Y/Z 与 C 面 X 合成的模型 AC 中心对齐绝对 AC 中心；再按运动子树分别校正：Y 带动 Y/X/Z，X 带动 X/Z，Z 只移动 Z 轴滑台，使所选切割头面的 XYZ 对齐当前机台 XYZ 所代表的绝对模拟锥头 TCP。实时轴坐标不会改变。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="92"/>
@@ -3022,26 +3048,28 @@ continue?</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="125"/>
-        <source>Machine mark positioning</source>
-        <translation>机台标定位</translation>
+        <source>Absolute calibration target</source>
+        <translation>绝对标定目标</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="128"/>
-        <source>Enter the machine calibration position (A=0, C=0, XY alignment)</source>
-        <translation>进入机台标定位（A=0, C=0, XY 对齐）</translation>
+        <source>Confirm absolute AC-center and simulated-TCP targets</source>
+        <translation>确认绝对 AC 中心与模拟锥头 TCP 目标</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="132"/>
-        <source>Return the model display attitude to its original position: A-axis angle=0, C-axis angle=0, XY, and align the cutting head with the AC center.You need to complete the three pickups above first.</source>
-        <translation>将模型显示姿态恢复到原来的位置：A轴角度=0，C轴角度=0，XY，将切割头对准AC中心。需要先完成以上三个拾取。</translation>
+        <source>Read and display the absolute world-coordinate targets only; do not change live A/C/X/Y/Z axis coordinates.
+You need to complete the three pickups above first.</source>
+        <translation>只读取并显示绝对世界坐标目标，不修改 A/C/X/Y/Z 实时轴坐标。
+需要先完成上方三段拾取。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="136"/>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="138"/>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="344"/>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="349"/>
-        <source>(To be entered into the target position)</source>
-        <translation>（待进入标定位）</translation>
+        <source>(Absolute targets not confirmed)</source>
+        <translation>（待确认绝对目标）</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="145"/>
@@ -3050,8 +3078,8 @@ continue?</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="147"/>
-        <source>Current cutting mouth (world):</source>
-        <translation>当前切割嘴 (世界):</translation>
+        <source>Absolute simulated cutter TCP:</source>
+        <translation>绝对模拟锥头 TCP:</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="151"/>

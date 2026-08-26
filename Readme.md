@@ -2,7 +2,7 @@
 
 LaserCNC 是面向五轴激光加工的 Windows 桌面软件，将 CAD、CAM、离线仿真与 Process 加工执行放在统一工程工作区中。项目使用 C++17、Qt 6、OpenCASCADE/XCAF、SARibbon、QuaZip、toml11 与 spdlog。
 
-当前版本为 `1.6.0`。本轮在既有审计整改基线上完成 `.lmsp/.lmsi → Job Overlay → Surface-BVH/Coal → 连续运动证书 → Process O(1)` 软件碰撞闭环，并统一首刀、刀路、固定运动和连续点动的失败关闭入口。代码适合作为继续开发和自动化回归的稳定基座；正式夹具、扩大 exact 审计、GUI/长稳和物理设备验证仍未完成，因此不能据此标记为实体机生产发布。
+当前版本为 `1.6.1`。本轮在 v1.6.0 软件碰撞闭环基线上，将 CAM 自动排序方向收归软件级配置，完善 Process 设置对话框的应用/确认/取消事务语义，并修正机台绝对坐标标定：AC 中心与模拟锥头保持世界坐标，XYZ 校正只沿对应运动子树传播。代码适合作为继续开发和自动化回归的稳定基座；GUI 标定实机复核、长稳和物理设备验证仍未完成，因此不能据此标记为实体机生产发布。
 
 ## 系统组成
 
@@ -42,7 +42,7 @@ cmd /c "call \"E:\vs2022IDE\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x6
 ctest --test-dir build-cmake --build-config Debug --output-on-failure
 ```
 
-截至本轮整改，日常 ACS+GTN Debug 构建和 41/41 CTest 通过。新增回归覆盖机台安全包、真实 AC 转台索引、Coal、混合实体/开放面包含、连续证书、首刀与 Process 失败关闭，同时保留既有协议、设备等待和真实 STEP 流程回归。该证据仍不替代 GUI 人工验收、长时间资源趋势或 ACS/GTN/激光物理硬件验证。唯一构建约定见 [BUILD.md](BUILD.md)，测试分层见 [tests/README.md](tests/README.md)。
+截至本轮整改，日常 ACS+GTN Debug 构建和完整 CTest 通过。新增回归覆盖机台轴拓扑、绝对 TCP 坐标、工程包不再保存软件级自动排序方向，以及 Process 设置取消恢复；同时保留机台安全包、连续证书、设备等待和真实 STEP 流程回归。该证据仍不替代 GUI 人工验收、长时间资源趋势或 ACS/GTN/激光物理硬件验证。唯一构建约定见 [BUILD.md](BUILD.md)，测试分层见 [tests/README.md](tests/README.md)。
 
 ## 工程包
 

@@ -1021,7 +1021,7 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
         return kInvalidTaskId;
     }
     QString autoSortError;
-    if (!preparePersistedAutoSort(&autoSortError)) {
+    if (!prepareConfiguredAutoSort(&autoSortError)) {
         emit operationFailed(tr("Solve for machine coordinates"), autoSortError);
         return kInvalidTaskId;
     }
@@ -1478,7 +1478,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             // 中文翻译：5/5 正在求解机台坐标
             progress->setStepName(QObject::tr("5/5 Solving machine coordinates"));
             // Machine coordinates deliberately remain unsolved here.  The GUI-thread
-            // adoption path first applies the persisted automatic direction, then
+            // adoption path first applies the software-configured automatic direction, then
             // performs the only authoritative ordered solve and collision planning.
             // 中文翻译：此处仅生成几何刀路；主线程采纳结果后先按已保存方向自动排序，
             // 再执行唯一一次权威的有序机床坐标求解及碰撞规划。
@@ -1612,7 +1612,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             // redundant and was the crash site after the asynchronous move.
             m_camData->ensureToolpathLayers();
             QString autoSortError;
-            if (!preparePersistedAutoSort(&autoSortError)) {
+            if (!prepareConfiguredAutoSort(&autoSortError)) {
                 m_camData->failPipelineStage(
                     lcnc::cam::CamPipelineStage::MachineSolve, autoSortError);
                 emit operationFailed(tr("Generate toolpath globally"), autoSortError);
