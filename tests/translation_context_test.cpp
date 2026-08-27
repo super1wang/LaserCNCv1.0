@@ -42,6 +42,11 @@ int main(int argc, char* argv[])
         {"WidgetLaserControl", "Laser", "激光"},
         {"WidgetLaserControl", "Blow", "吹气"},
         {"lcnc::DialogOptions", "Application Options", "应用程序选项"},
+        {"lcnc::DialogOptions", "Cutter head parameters", "切割头参数"},
+        {"lcnc::DialogOptions", "Cutter head appearance", "切割头外观"},
+        {"lcnc::DialogOptions", "Linear X", "X 直线轴"},
+        {"lcnc::DialogOptions", "Table tilt", "转台倾斜轴"},
+        {"lcnc::DialogOptions", "Primary head tilt", "第一摆头轴"},
         {"lcnc::cam::ui::DialogAxisCalibrationWizard", "Machine coordinate system calibration wizard", "机台坐标系标定向导"},
     };
 

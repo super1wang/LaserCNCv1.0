@@ -118,18 +118,13 @@ public:
     /**
      * @brief 三段式机台坐标系标定输入。
      *
-     * 由 @ref DialogAxisCalibrationWizard 在用户依次拾取 A 轴参考面、
-     * C 轴参考面、切割头下端面并填入物理 AC 中心坐标后整合而成。
-     * 仅在 VERTICAL_AC_TABLE 构型下有效。
+     * 由 @ref DialogAxisCalibrationWizard 按 TableTilt、TableSpin 语义依次
+     * 拾取父旋转轴参考面、子旋转轴参考面和切割头下端面后整合而成。
      */
     struct AxisCalibrationInputs {
-        gp_Pnt aFaceCenter{0.0, 0.0, 0.0};       ///< A 轴参考面中心（模型坐标）
-        gp_Pnt cFaceCenter{0.0, 0.0, 0.0};       ///< C 轴参考面中心（模型坐标）
+        gp_Pnt tiltFaceCenter{0.0, 0.0, 0.0};    ///< TableTilt 父旋转轴参考面中心
+        gp_Pnt spinFaceCenter{0.0, 0.0, 0.0};    ///< TableSpin 子旋转轴参考面中心
         gp_Pnt cutterHeadFaceCenter{0.0, 0.0, 0.0}; ///< 切割头下端面中心（模型坐标）
-        gp_Pnt physicalAcCenter{0.0, 0.0, 0.0};  ///< 兼容字段：新流程中目标中心来自机台构型配置。
-        bool   hasPhysicalCenter{true};          ///< 是否需要执行整机平移对齐
-        double physicalAAngle{0.0};              ///< 标定位对应的物理 A 角度（度）
-        double physicalCAngle{0.0};              ///< 标定位对应的物理 C 角度（度）
     };
 
 
@@ -221,8 +216,9 @@ public:
                                  const QPoint& screenPos,
                                  gp_Pnt& center,
                                  QString* errorMessage = nullptr) const;
-    /// 三段式模型对齐：用拾取到的模型参考交点平移机台几何，使其对齐到构型配置页
-    /// 中手动填写的旋转中心。此流程不写入/修改 A/C 物理旋转中心。
+    /// 三段式模型对齐：从 TableTilt/TableSpin 轴方向与参考面推导旋转中心，
+    /// 先刚体平移整机，再沿实际刀头承载链牵引对应直线轴模型。
+    /// 此流程不写入/修改物理旋转中心或实时轴坐标。
     bool applyAxisCalibration(const AxisCalibrationInputs& inputs, QString* errorMessage = nullptr);
     // 中文翻译：绝对标定目标
     /// Validate the picked calibration references and expose the immutable

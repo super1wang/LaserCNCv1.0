@@ -59,7 +59,7 @@ int machiningModeSolverVersion(MachiningMode mode)
     switch (mode) {
     case MachiningMode::Planar3Axis:             return 3;
     case MachiningMode::RotaryTube4Axis:
-    case MachiningMode::SimultaneousTable5Axis:
+    case MachiningMode::SimultaneousTable5Axis:  return 3;
     case MachiningMode::SimultaneousHead5Axis:  return 2;
     }
     return 0;

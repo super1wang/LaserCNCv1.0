@@ -1,4 +1,5 @@
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/kinematics/machine_calibration.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kinematics/machine_pose.h"
@@ -174,6 +175,73 @@ max = 120.0
                   && !displayedMachine.isAxisDescendantOf(QStringLiteral("Y"), QStringLiteral("X"))
                   && !displayedMachine.isAxisDescendantOf(QStringLiteral("C"), QStringLiteral("Z")),
                   "VERTICAL_AC_TABLE calibration axis-subtree propagation is incorrect");
+    ok &= require(displayedMachine.axisChain(QStringLiteral("Z"))
+                      == QStringList({QStringLiteral("BASE"), QStringLiteral("Y"),
+                                      QStringLiteral("X"), QStringLiteral("Z")}),
+                  "VERTICAL_AC_TABLE did not expose the physical BASE-Y-X-Z carrier chain");
+
+    const gp_Pnt aReferenceCenter(10.0, 20.0, 30.0);
+    const gp_Pnt cReferenceCenter(40.0, 20.0, 60.0);
+    const MachineAxisDef* aAxis = displayedMachine.findAxis(QStringLiteral("A"));
+    const MachineAxisDef* cAxis = displayedMachine.findAxis(QStringLiteral("C"));
+    gp_Pnt composedAcCenter;
+    double acAxisSeparation = -1.0;
+    ok &= require(aAxis && cAxis
+                      && lcnc::kinematics::tableRotationCenterFromReferences(
+                          *aAxis, aReferenceCenter, *cAxis, cReferenceCenter,
+                          composedAcCenter, &acAxisSeparation),
+                  "Could not derive the AC center from configured rotary-axis directions");
+    ok &= require(composedAcCenter.Distance(gp_Pnt(40.0, 20.0, 30.0)) < 1e-9
+                      && isNear(acAxisSeparation, 0.0),
+                  "AC center did not preserve A.Y/Z and obtain X from C");
+
+    lcnc::kinematics::TableCalibrationPlan calibrationPlan;
+    lcnc::kinematics::CalibrationPlanError calibrationError =
+        lcnc::kinematics::CalibrationPlanError::None;
+    ok &= require(lcnc::kinematics::buildTableCalibrationPlan(
+                      displayedMachine, aReferenceCenter, cReferenceCenter,
+                      gp_Pnt(70.0, 80.0, 90.0), gp_Pnt(100.0, 200.0, 300.0),
+                      gp_Pnt(0.0, 0.0, 0.0), calibrationPlan, &calibrationError),
+                  "Could not build a topology-driven AC calibration plan");
+    ok &= require(calibrationPlan.carrierCorrections.size() == 3
+                      && calibrationPlan.carrierCorrections[0].axisName == QStringLiteral("Y")
+                      && calibrationPlan.carrierCorrections[1].axisName == QStringLiteral("X")
+                      && calibrationPlan.carrierCorrections[2].axisName == QStringLiteral("Z"),
+                  "Calibration corrections did not follow the physical Y-X-Z carrier order");
+    const gp_Vec yModelCorrection = lcnc::kinematics::inheritedCarrierCorrection(
+        displayedMachine, QStringLiteral("Y"), calibrationPlan.carrierCorrections);
+    const gp_Vec xModelCorrection = lcnc::kinematics::inheritedCarrierCorrection(
+        displayedMachine, QStringLiteral("X"), calibrationPlan.carrierCorrections);
+    const gp_Vec zModelCorrection = lcnc::kinematics::inheritedCarrierCorrection(
+        displayedMachine, QStringLiteral("Z"), calibrationPlan.carrierCorrections);
+    ok &= require(isNear(yModelCorrection.X(), 0.0)
+                      && isNear(yModelCorrection.Y(), -260.0)
+                      && isNear(yModelCorrection.Z(), 0.0),
+                  "Y-axis model was not pulled by its carrier correction");
+    ok &= require(isNear(xModelCorrection.X(), -130.0)
+                      && isNear(xModelCorrection.Y(), -260.0)
+                      && isNear(xModelCorrection.Z(), 0.0),
+                  "X-axis model did not inherit Y and X carrier corrections");
+    ok &= require(isNear(zModelCorrection.X(), -130.0)
+                      && isNear(zModelCorrection.Y(), -260.0)
+                      && isNear(zModelCorrection.Z(), -360.0),
+                  "Z-axis model did not inherit the complete Y-X-Z carrier correction");
+
+    MachineKinematics bcCalibrationMachine;
+    bcCalibrationMachine.loadPreset(QStringLiteral("VERTICAL_BC_TABLE"));
+    const MachineAxisDef* bAxis = bcCalibrationMachine.findAxis(QStringLiteral("B"));
+    const MachineAxisDef* bcSpinAxis = bcCalibrationMachine.findAxis(QStringLiteral("C"));
+    gp_Pnt composedBcCenter;
+    double bcAxisSeparation = -1.0;
+    ok &= require(bAxis && bcSpinAxis
+                      && lcnc::kinematics::tableRotationCenterFromReferences(
+                          *bAxis, gp_Pnt(10.0, 20.0, 30.0),
+                          *bcSpinAxis, gp_Pnt(10.0, 50.0, 60.0),
+                          composedBcCenter, &bcAxisSeparation),
+                  "Could not derive the BC center from configured rotary-axis directions");
+    ok &= require(composedBcCenter.Distance(gp_Pnt(10.0, 50.0, 30.0)) < 1e-9
+                      && isNear(bcAxisSeparation, 0.0),
+                  "BC center did not preserve B.X/Z and obtain Y from C");
     ok &= require(displayedMachine.currentLinearPosition().Distance(gp_Pnt(0.0, 0.0, 0.0)) < 1e-9,
                   "Zero controller XYZ did not place the simulated TCP at machine origin");
     displayedMachine.setAxisPosition(QStringLiteral("X"), 12.0);
@@ -402,6 +470,107 @@ max = 120.0
     const auto tableSidewallPose = registry.solve(tableRequest);
     ok &= require(tableSidewallPose.size() == 1 && tableSidewallPose.front().valid,
                   "AC-table five-axis solver rejected a reachable tube sidewall normal");
+
+    // Split-table regression: X carries the B/C workpiece branch while Y/Z
+    // carry the tool. The same semantic roles and parent tree must therefore
+    // solve X with the opposite sign, then pass a full-tree forward residual.
+    // 中文翻译：分轴式转台中 X 位于工件支链，Y/Z 位于刀头支链；逆解必须自动处理相对运动符号。
+    lcnc::MachineConfigurationService splitTableConfiguration;
+    splitTableConfiguration.applyPreset(QStringLiteral("VERTICAL_BC_TABLE"));
+    auto splitAxisConfigs = splitTableConfiguration.axisConfigurations();
+    for (lcnc::MachineAxisRuntimeConfig& config : splitAxisConfigs) {
+        switch (config.axis.role) {
+        case lcnc::MachineAxisRole::LinearX:
+        case lcnc::MachineAxisRole::LinearY:
+            config.axis.parentAxis = QStringLiteral("BASE");
+            break;
+        case lcnc::MachineAxisRole::LinearZ:
+            config.axis.parentAxis = QStringLiteral("Y");
+            break;
+        case lcnc::MachineAxisRole::TableTilt:
+            config.axis.parentAxis = QStringLiteral("X");
+            break;
+        case lcnc::MachineAxisRole::TableSpin:
+            config.axis.parentAxis = QStringLiteral("B");
+            break;
+        default:
+            break;
+        }
+    }
+    splitTableConfiguration.setAxisConfigurations(splitAxisConfigs);
+    QString splitValidationError;
+    ok &= require(splitTableConfiguration.validateConfiguration(&splitValidationError),
+                  "Full-rank split BC table configuration was rejected");
+
+    MachineKinematics splitTable;
+    splitTable.setAxes(splitTableConfiguration.axisDefinitions(),
+                       QStringLiteral("SPLIT_BC_TABLE"));
+    lcnc::kinematics::TableCalibrationPlan splitCalibrationPlan;
+    lcnc::kinematics::CalibrationPlanError splitCalibrationError =
+        lcnc::kinematics::CalibrationPlanError::None;
+    ok &= require(lcnc::kinematics::buildTableCalibrationPlan(
+                      splitTable, gp_Pnt(0.0, 0.0, 0.0),
+                      gp_Pnt(0.0, 0.0, 0.0), gp_Pnt(0.0, 10.0, 20.0),
+                      gp_Pnt(0.0, 0.0, 0.0), gp_Pnt(0.0, 0.0, 0.0),
+                      splitCalibrationPlan, &splitCalibrationError),
+                  "Could not build a calibration plan for the split BC table");
+    ok &= require(splitCalibrationPlan.carrierCorrections.size() == 2
+                      && splitCalibrationPlan.carrierCorrections[0].axisName
+                          == QStringLiteral("Y")
+                      && splitCalibrationPlan.carrierCorrections[1].axisName
+                          == QStringLiteral("Z"),
+                  "Split-table calibration incorrectly pulled workpiece-side X");
+    splitTable.setAxisPosition(QStringLiteral("X"), 12.0);
+    splitTable.setAxisPosition(QStringLiteral("Y"), 5.0);
+    splitTable.setAxisPosition(QStringLiteral("Z"), 7.0);
+    ok &= require(splitTable.currentLinearPosition().Distance(
+                      gp_Pnt(0.0, 5.0, 7.0)) < 1e-6,
+                  "Split-table TCP incorrectly included the workpiece-side X axis");
+    splitTable.setAxisPosition(QStringLiteral("X"), 0.0);
+    splitTable.setAxisPosition(QStringLiteral("Y"), 0.0);
+    splitTable.setAxisPosition(QStringLiteral("Z"), 0.0);
+    ToolpathPoint splitPoint;
+    splitPoint.position = gp_Pnt(10.0, 0.0, 0.0);
+    splitPoint.normal = gp_Dir(0.0, 0.0, 1.0);
+    std::vector<ToolpathPoint> splitPoints{splitPoint};
+    lcnc::ToolpathKinematicsRequest splitRequest;
+    splitRequest.machine = &splitTable;
+    splitRequest.mode = lcnc::MachiningMode::SimultaneousTable5Axis;
+    splitRequest.definition = splitTableConfiguration.modeDefinition(splitRequest.mode);
+    splitRequest.points = &splitPoints;
+    const auto splitPoses = registry.solve(splitRequest);
+    const int splitXIndex = splitRequest.definition.interpolatedAxes.indexOfRole(
+        lcnc::MachineAxisRole::LinearX);
+    ok &= require(splitPoses.size() == 1 && splitPoses.front().valid
+                      && splitXIndex >= 0
+                      && isNear(splitPoses.front().value(splitXIndex), -10.0),
+                  "Split-table solver did not compensate workpiece-side X with the relative sign");
+    if (splitPoses.size() == 1 && splitPoses.front().valid) {
+        QMap<QString, double> splitPositions;
+        for (int index = 0; index < splitRequest.definition.interpolatedAxes.count; ++index) {
+            splitPositions.insert(splitRequest.definition.interpolatedAxes.axes[index].name,
+                                  splitPoses.front().value(index));
+        }
+        const gp_Pnt toolWorld = gp_Pnt(0.0, 0.0, 0.0).Transformed(
+            splitTable.computeAxisTransform(QStringLiteral("Z"), splitPositions));
+        const gp_Pnt workpieceWorld = splitPoint.position.Transformed(
+            splitTable.computeAxisTransform(QStringLiteral("C"), splitPositions));
+        ok &= require(toolWorld.Distance(workpieceWorld) < 1e-6,
+                      "Split-table inverse result failed the complete-tree forward residual");
+    }
+
+    // If X is common to both tool and workpiece branches it cancels out of
+    // relative motion. Such a rank-deficient tree must fail configuration.
+    auto singularSplitConfigs = splitAxisConfigs;
+    for (lcnc::MachineAxisRuntimeConfig& config : singularSplitConfigs) {
+        if (config.axis.role == lcnc::MachineAxisRole::LinearY)
+            config.axis.parentAxis = QStringLiteral("X");
+    }
+    lcnc::MachineConfigurationService singularSplitConfiguration;
+    singularSplitConfiguration.applyPreset(QStringLiteral("VERTICAL_BC_TABLE"));
+    singularSplitConfiguration.setAxisConfigurations(singularSplitConfigs);
+    ok &= require(!singularSplitConfiguration.validateConfiguration(&splitValidationError),
+                  "Rank-deficient tool/workpiece relative axis tree was accepted");
 
     // Regression: the controller layout is XYZ/A/C, but table IK internally
     // uses child C then parent A.  A previous pose at +90 degrees must be

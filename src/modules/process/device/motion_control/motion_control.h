@@ -115,6 +115,8 @@ public:
 	// 回零
 	virtual bool Home(lcnc::process::Axis eAxis) = 0;
 	virtual bool Home() = 0;
+	/// Thread-safe, SDK-free cancellation hint for a bounded vendor homing loop.
+	virtual void requestMotionAbort() noexcept {}
 	virtual bool StopHome() = 0;
 	virtual bool IsHomed() = 0;
 	virtual bool IsHomed(lcnc::process::Axis eAxis) = 0;

@@ -13,6 +13,7 @@ class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QEvent;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -75,6 +76,7 @@ private:
     void buildUi();
     void buildRenderPage(const QString& title, bool camView, RenderControls& controls);
     void buildColorPage();
+    void buildCutterHeadPage();
     void buildApplicationPage();
     void buildMachineConfigurationPage();
     void disableSpinWheel(QWidget* root);
@@ -83,6 +85,7 @@ private:
     QList<MachineAxisDef> collectMachineAxisDefinitions() const;
     void setRotationCenterUiFromAxes(const QList<MachineAxisDef>& axes);
     void applyRotationCenterToMachineAxisTable();
+    void updateHeadTcpVisibility();
     bool hasRotaryAxisInTable() const;
     void setProfileToUi(const RenderProfileSettings& profile, const RenderControls& controls);
     RenderProfileSettings collectProfileFromUi(const RenderControls& controls) const;
@@ -133,6 +136,7 @@ private:
     QDoubleSpinBox* m_spRotationCenterX{nullptr};
     QDoubleSpinBox* m_spRotationCenterY{nullptr};
     QDoubleSpinBox* m_spRotationCenterZ{nullptr};
+    QGroupBox* m_headTcpGroup{nullptr};
     std::array<QDoubleSpinBox*, 7> m_headTcpEditors{};
     QTableWidget* m_machineAxesTable{nullptr};
     MachineConfigurationService* m_machineConfig{nullptr};

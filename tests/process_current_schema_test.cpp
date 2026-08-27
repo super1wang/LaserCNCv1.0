@@ -47,6 +47,16 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("Initial-approach settings defaults are invalid"));
     }
     const auto settingsObjects = current.objects();
+    const auto homingObject = std::find_if(
+        settingsObjects.cbegin(), settingsObjects.cend(),
+        [](const lcnc::process::ParameterObjectDescriptor& object) {
+            return object.id == QStringLiteral("homing");
+        });
+    if (homingObject == settingsObjects.cend()
+        || homingObject->parentObjectId != QStringLiteral("controller")) {
+        return fail(QStringLiteral(
+            "Homing settings are not nested below the motion-controller root"));
+    }
     const auto initialObject = std::find_if(
         settingsObjects.cbegin(), settingsObjects.cend(),
         [](const lcnc::process::ParameterObjectDescriptor& object) {
@@ -69,10 +79,44 @@ int main(int argc, char* argv[])
         || !setInitialField(QStringLiteral("safetyZ"), 42.5)) {
         return fail(QStringLiteral("Initial-approach settings could not be edited"));
     }
+
+    const auto setHomingField = [&current](const QString& key,
+                                           lcnc::process::ParameterValueType type,
+                                           const QVariant& value) {
+        lcnc::process::ParameterDescriptor field;
+        field.id = key;
+        field.title = key;
+        field.type = type;
+        field.area = lcnc::process::ProcessConfigArea::Devices;
+        field.tableName = QStringLiteral("Homing");
+        field.key = key;
+        QString error;
+        return current.setFieldValue(field, QStringLiteral("homing"), value, &error);
+    };
+    if (!setHomingField(QStringLiteral("sMethodB"),
+                        lcnc::process::ParameterValueType::Enum,
+                        QStringLiteral("SetCurrentPosition"))
+        || !setHomingField(QStringLiteral("iOrderB"),
+                           lcnc::process::ParameterValueType::Int, 4)
+        || !setHomingField(QStringLiteral("fPositionB"),
+                           lcnc::process::ParameterValueType::Double, 12.5)
+        || !setHomingField(QStringLiteral("sMethodC"),
+                           lcnc::process::ParameterValueType::Enum,
+                           QStringLiteral("SetCurrentPosition"))
+        || !setHomingField(QStringLiteral("iOrderC"),
+                           lcnc::process::ParameterValueType::Int, 5)
+        || !setHomingField(QStringLiteral("fPositionC"),
+                           lcnc::process::ParameterValueType::Double, -30.0)
+        || !setHomingField(QStringLiteral("sMethodY"),
+                           lcnc::process::ParameterValueType::Enum,
+                           QStringLiteral("Disabled"))) {
+        return fail(QStringLiteral("Homing settings could not be edited"));
+    }
     const auto initialCommit = current.commit();
     if (!initialCommit.success
-        || !initialCommit.changes.domains.contains(QStringLiteral("workflow"))) {
-        return fail(QStringLiteral("Initial-approach settings were not committed to workflow"));
+        || !initialCommit.changes.domains.contains(QStringLiteral("workflow"))
+        || !initialCommit.changes.domains.contains(QStringLiteral("devices"))) {
+        return fail(QStringLiteral("Process settings were not committed to their domains"));
     }
 
     if (!setInitialField(QStringLiteral("safetyZ"), 99.0) || !current.hasChanges())
@@ -94,7 +138,8 @@ int main(int argc, char* argv[])
             return QByteArray{};
         return file.readAll();
     }();
-    if (!currentData.contains("schemaVersion = 2"))
+    if (!currentData.contains("schemaVersion = 2")
+        || !currentData.contains("[Setting.MotionControl.Homing]"))
         return fail(QStringLiteral("Process settings writer did not emit schema v2"));
 
     const QDir toolsDirectory(directory.filePath(QStringLiteral("tools")));
@@ -127,6 +172,56 @@ int main(int argc, char* argv[])
     if (reloadedInitial.mode != lcnc::process::ProcessInitialApproachMode::Manual
         || reloadedInitial.safetyZ != 42.5) {
         return fail(QStringLiteral("Initial-approach settings did not round-trip"));
+    }
+    QString homingError;
+    const auto homingCommands = currentReload.homingCommands(
+        {QStringLiteral("Z"), QStringLiteral("Y"), QStringLiteral("X"),
+         QStringLiteral("B"), QStringLiteral("C")}, &homingError);
+    if (!homingError.isEmpty() || homingCommands.size() != 4
+        || homingCommands.at(0).axis != lcnc::process::Axis::Z
+        || homingCommands.at(1).axis != lcnc::process::Axis::X
+        || homingCommands.at(2).axis != lcnc::process::Axis::B
+        || homingCommands.at(2).method
+               != lcnc::process::AxisHomingMethod::SetCurrentPosition
+        || homingCommands.at(2).position != 12.5
+        || homingCommands.at(3).axis != lcnc::process::Axis::C
+        || homingCommands.at(3).method
+               != lcnc::process::AxisHomingMethod::SetCurrentPosition
+        || homingCommands.at(3).position != -30.0) {
+        return fail(QStringLiteral("Homing settings did not round-trip into Ribbon commands: %1")
+                        .arg(homingError));
+    }
+
+    const auto disableAxis = [&currentReload](const QString& axisName) {
+        lcnc::process::ParameterDescriptor field;
+        field.id = QStringLiteral("method.%1").arg(axisName);
+        field.title = field.id;
+        field.type = lcnc::process::ParameterValueType::Enum;
+        field.area = lcnc::process::ProcessConfigArea::Devices;
+        field.tableName = QStringLiteral("Homing");
+        field.key = QStringLiteral("sMethod%1").arg(axisName);
+        QString error;
+        return currentReload.setFieldValue(
+            field, QStringLiteral("homing"), QStringLiteral("Disabled"), &error);
+    };
+    for (const QString& axisName : {QStringLiteral("Z"), QStringLiteral("X"),
+                                    QStringLiteral("B"), QStringLiteral("C")}) {
+        if (!disableAxis(axisName))
+            return fail(QStringLiteral("Could not disable homing for axis %1").arg(axisName));
+    }
+    const auto allDisabledCommit = currentReload.commit();
+    if (!allDisabledCommit.success
+        || !allDisabledCommit.changes.domains.contains(QStringLiteral("devices"))) {
+        return fail(QStringLiteral("All-disabled homing configuration could not be applied"));
+    }
+    homingError = QStringLiteral("stale error");
+    const auto allDisabled = currentReload.homingCommands(
+        {QStringLiteral("Z"), QStringLiteral("Y"), QStringLiteral("X"),
+         QStringLiteral("B"), QStringLiteral("C")}, &homingError);
+    if (!allDisabled.isEmpty() || !homingError.isEmpty()) {
+        return fail(QStringLiteral(
+            "All-disabled homing configuration did not produce a clean no-op: %1")
+                        .arg(homingError));
     }
 
     const QStringList toolNames = currentReload.toolDisplayNames();

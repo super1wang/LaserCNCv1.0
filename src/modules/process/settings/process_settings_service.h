@@ -54,6 +54,10 @@ public:
     QVariant rawValue(ProcessConfigArea area, const QString& tableName, const QString& key, const QVariant& fallback = {}) const;
     toml::table axisRuntimeTable(const QString& axisName) const;
     ProcessInitialApproachSettings initialApproachSettings() const;
+    /// Builds the validated Ribbon homing sequence. The supplied axis list
+    /// defines stable defaults for installations that predate homing settings.
+    QVector<AxisHomingCommand> homingCommands(const QStringList& axisNames,
+                                              QString* error = nullptr) const;
 
 private:
     QString rootDir() const;

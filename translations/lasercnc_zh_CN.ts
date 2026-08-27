@@ -604,8 +604,8 @@
     <message>
         <location filename="../src/modules/cam/cam_module.cpp" line="1856"/>
         <location filename="../src/modules/cam/cam_module.cpp" line="1955"/>
-        <source>Please fill in the A/C rotation center on the machine configuration page of the application options first.</source>
-        <translation>请先在应用程序选项的机台构型页填写 A/C 旋转中心。</translation>
+        <source>Please configure the rotary-table axis origins on the machine configuration page of the application options first.</source>
+        <translation>请先在应用程序选项的机台构型页配置转台旋转轴原点。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/cam_module.cpp" line="1881"/>
@@ -678,28 +678,48 @@
         <translation>机台几何平移失败，当前模型已恢复原始位置。</translation>
     </message>
     <message>
-        <source>Absolute geometry calibration requires the physical A/C axes to be at 0 first. The wizard will not change live axis coordinates.</source>
-        <translation>绝对几何标定要求实际 A/C 轴先回到 0 位；向导不会修改实时轴坐标。</translation>
+        <source>Absolute geometry calibration requires the physical rotary-table axes to be at 0 first. The wizard will not change live axis coordinates.</source>
+        <translation>绝对几何标定要求实际转台旋转轴先回到 0 位；向导不会修改实时轴坐标。</translation>
     </message>
     <message>
-        <source>AC center alignment failed and the machine model has been restored to its pre-calibration position.</source>
-        <translation>AC 中心对齐失败，机台模型已恢复标定前位置。</translation>
+        <source>Rotary-table center alignment failed and the machine model has been restored to its pre-calibration position.</source>
+        <translation>转台中心对齐失败，机台模型已恢复标定前位置。</translation>
     </message>
     <message>
         <source>Cutter-head XYZ alignment failed and the machine model has been restored to its pre-calibration position.</source>
         <translation>切割头 XYZ 对齐失败，机台模型已恢复标定前位置。</translation>
     </message>
     <message>
-        <source>Cutter-head calibration requires a complete X/Y/Z linear-axis configuration.</source>
-        <translation>切割头标定需要完整的 X/Y/Z 直线轴构型。</translation>
+        <source>The TableTilt and TableSpin axes are parallel and do not define a unique rotary-table center.</source>
+        <translation>TableTilt 与 TableSpin 旋转轴平行，无法定义唯一的转台中心。</translation>
     </message>
     <message>
-        <source>The X/Y/Z axis directions do not form an independent three-dimensional calibration frame.</source>
-        <translation>X/Y/Z 轴方向不能构成独立的三维标定坐标系。</translation>
+        <source>The two picked rotary-axis lines do not intersect. Check the reference faces and configured axis directions.</source>
+        <translation>拾取的两条旋转轴线不相交，请检查参考面和轴方向配置。</translation>
+    </message>
+    <message>
+        <source>The required cutter correction contains a direction that the configured tool-carrier chain cannot produce. Check the model assembly and parent-axis chain.</source>
+        <translation>所需切割头校正包含刀头承载链无法产生的方向，请检查模型装配和父轴链路。</translation>
+    </message>
+    <message>
+        <source>The tool-carrier chain is incomplete or its linear-axis motion is degenerate, so calibration cannot continue.</source>
+        <translation>切割头承载链不完整或其直线轴运动退化，无法执行标定。</translation>
     </message>
     <message>
         <source>Calibration requires moving the %1-axis, but no machine parts assigned to that axis subtree were found. Please complete the axis assignments first.</source>
         <translation>标定需要移动 %1 轴，但未找到归属于该轴子树的机台部件。请先完成轴归属标记。</translation>
+    </message>
+    <message>
+        <source>Calibration requires moving the %1-axis on the tool-carrier chain, but no machine model is directly assigned to that axis. Please mark that axis model first.</source>
+        <translation>标定需要移动刀头承载链中的 %1 轴，但没有机台模型直接归属于该轴。请先标记该轴模型。</translation>
+    </message>
+    <message>
+        <source>The machine axis system configuration cannot be found. Please select a rotary-table configuration first.</source>
+        <translation>找不到机台轴系配置，请先选择转台构型。</translation>
+    </message>
+    <message>
+        <source>The rotary-table axis definition is incomplete. TableSpin must be carried by TableTilt. Please complete the axis roles and parent chain first.</source>
+        <translation>转台轴定义不完整；TableSpin 必须由 TableTilt 承载。请先完善轴角色与父轴链路。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/cam_module.cpp" line="2195"/>
@@ -3013,10 +3033,8 @@ continue?</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="83"/>
-        <source>Select the A-axis and C-axis reference surfaces in sequence, and then select the lower end surface of the cutting head.
-On submission, the complete machine is first dragged so that the model AC center composed from A-face Y/Z and C-face X reaches the absolute AC center. Then corrections are propagated through the kinematic subtrees: Y moves Y/X/Z, X moves X/Z, and Z moves only the Z slide, so the picked cutter-face XYZ reaches the absolute simulated TCP represented by the current live machine XYZ. Live axis coordinates are never changed.</source>
-        <translation>依次拾取 A 轴、C 轴参考面，再拾取切割头下端面。
-提交时先牵引整机，使 A 面 Y/Z 与 C 面 X 合成的模型 AC 中心对齐绝对 AC 中心；再按运动子树分别校正：Y 带动 Y/X/Z，X 带动 X/Z，Z 只移动 Z 轴滑台，使所选切割头面的 XYZ 对齐当前机台 XYZ 所代表的绝对模拟锥头 TCP。实时轴坐标不会改变。</translation>
+        <source>Select the parent rotary-axis %1 reference face, the child rotary-axis %2 reference face, and then the lower cutter-head face. On submission, the model rotation center is derived from the two configured axis lines; the whole machine is translated first, then only the physical tool-carrier chain is pulled. Live axis coordinates are never changed.</source>
+        <translation>依次拾取父旋转轴 %1、子旋转轴 %2 的参考面，再拾取切割头下端面。提交时从两条配置轴线自动求取模型旋转中心，先平移整机，再只沿实际刀头承载链牵引轴模型。实时轴坐标不会改变。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="92"/>
@@ -3025,13 +3043,8 @@ On submission, the complete machine is first dragged so that the model AC center
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="99"/>
-        <source>Pick the A-axis reference plane...</source>
-        <translation>拾取 A 轴参考面...</translation>
-    </message>
-    <message>
-        <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="101"/>
-        <source>Pick the C-axis reference plane...</source>
-        <translation>拾取 C 轴参考面...</translation>
+        <source>Pick the %1-axis reference plane...</source>
+        <translation>拾取 %1 轴参考面...</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="103"/>
@@ -3053,14 +3066,14 @@ On submission, the complete machine is first dragged so that the model AC center
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="128"/>
-        <source>Confirm absolute AC-center and simulated-TCP targets</source>
-        <translation>确认绝对 AC 中心与模拟锥头 TCP 目标</translation>
+        <source>Confirm absolute rotary-table center and simulated-TCP targets</source>
+        <translation>确认绝对转台中心与模拟锥头 TCP 目标</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="132"/>
-        <source>Read and display the absolute world-coordinate targets only; do not change live A/C/X/Y/Z axis coordinates.
+        <source>Read and display the absolute world-coordinate targets only; do not change any live axis coordinates.
 You need to complete the three pickups above first.</source>
-        <translation>只读取并显示绝对世界坐标目标，不修改 A/C/X/Y/Z 实时轴坐标。
+        <translation>只读取并显示绝对世界坐标目标，不修改任何实时轴坐标。
 需要先完成上方三段拾取。</translation>
     </message>
     <message>
@@ -3073,8 +3086,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="145"/>
-        <source>Current AC Center:</source>
-        <translation>当前 AC 中心:</translation>
+        <source>Current rotary-table center:</source>
+        <translation>当前转台旋转中心:</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="147"/>
@@ -3123,13 +3136,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="202"/>
-        <source>A-axis reference plane</source>
-        <translation>A 轴参考面</translation>
-    </message>
-    <message>
-        <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="204"/>
-        <source>C-axis reference plane</source>
-        <translation>C 轴参考面</translation>
+        <source>%1-axis reference plane</source>
+        <translation>%1 轴参考面</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="206"/>
@@ -3143,8 +3151,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="271"/>
-        <source>Select the A-axis and C-axis reference surfaces in sequence, then select the lower end surface of the cutting head, and then submit the model for alignment.</source>
-        <translation>依次拾取 A 轴、C 轴参考面，再拾取切割头下端面，然后提交模型对齐。</translation>
+        <source>Select the parent rotary-axis %1 and child rotary-axis %2 reference faces, then select the lower cutter-head face and submit the model alignment.</source>
+        <translation>依次拾取父旋转轴 %1、子旋转轴 %2 的参考面，再拾取切割头下端面并提交模型对齐。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="284"/>
@@ -3307,6 +3315,11 @@ You need to complete the three pickups above first.</source>
         <location filename="../src/app/dialog/dialog_options.cpp" line="398"/>
         <source>Color configuration</source>
         <translation>颜色配置</translation>
+    </message>
+    <message>
+        <location filename="../src/app/dialog/dialog_options.cpp" line="401"/>
+        <source>Cutter head parameters</source>
+        <translation>切割头参数</translation>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="401"/>
@@ -3649,8 +3662,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="712"/>
-        <source>Cutter head</source>
-        <translation>切割头</translation>
+        <source>Cutter head appearance</source>
+        <translation>切割头外观</translation>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="725"/>
@@ -8597,6 +8610,86 @@ You need to complete the three pickups above first.</source>
         <translation>置位轴表包含重复轴</translation>
     </message>
     <message>
+        <source>Homing settings</source>
+        <translation>回零配置</translation>
+    </message>
+    <message>
+        <source>%1 axis</source>
+        <translation>%1 轴</translation>
+    </message>
+    <message>
+        <source>Controller homing (motion)</source>
+        <translation>控制器回零（运动）</translation>
+    </message>
+    <message>
+        <source>Disabled (no action)</source>
+        <translation>关闭（不执行任何动作）</translation>
+    </message>
+    <message>
+        <source>Set current position (no motion)</source>
+        <translation>当前位置置位（不运动）</translation>
+    </message>
+    <message>
+        <source>Homing method</source>
+        <translation>回零方式</translation>
+    </message>
+    <message>
+        <source>Homing order</source>
+        <translation>回零顺序</translation>
+    </message>
+    <message>
+        <source>Set coordinate</source>
+        <translation>置位坐标</translation>
+    </message>
+    <message>
+        <source>Homing axis table is empty</source>
+        <translation>回零轴表为空</translation>
+    </message>
+    <message>
+        <source>The homing method for axis %1 is invalid</source>
+        <translation>轴 %1 的回零方式无效</translation>
+    </message>
+    <message>
+        <source>The homing order must be positive and unique; check axis %1</source>
+        <translation>回零顺序必须为正数且不能重复；请检查 %1 轴</translation>
+    </message>
+    <message>
+        <source>The homing axis table contains duplicate axis %1</source>
+        <translation>回零轴表包含重复轴 %1</translation>
+    </message>
+    <message>
+        <source>The set coordinate for axis %1 must be finite</source>
+        <translation>轴 %1 的置位坐标必须是有限数值</translation>
+    </message>
+    <message>
+        <source>Axis %1 is moving; homing or position setting cannot start</source>
+        <translation>轴 %1 正在运动，不能开始回零或置位</translation>
+    </message>
+    <message>
+        <source>Controller homing failed for axis %1</source>
+        <translation>轴 %1 控制器回零失败</translation>
+    </message>
+    <message>
+        <source>Setting the current position failed for axis %1</source>
+        <translation>轴 %1 当前位置置位失败</translation>
+    </message>
+    <message>
+        <source>Encoder coordinate verification failed after setting axis %1</source>
+        <translation>轴 %1 置位后的编码器坐标校验失败</translation>
+    </message>
+    <message>
+        <source>Invalid homing settings: %1</source>
+        <translation>回零配置无效：%1</translation>
+    </message>
+    <message>
+        <source>Homing is disabled for all axes</source>
+        <translation>所有轴的回零均已关闭</translation>
+    </message>
+    <message>
+        <source>Homing failed: %1</source>
+        <translation>回零失败：%1</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/steps/normal_cutting/normal_cutting_step.cpp" line="25"/>
         <location filename="../src/modules/process/steps/normal_cutting/normal_cutting_step.cpp" line="40"/>
         <source>Ordinary cutting</source>
@@ -10196,8 +10289,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="159"/>
-        <source>Select the A-axis and C-axis reference planes and the lower end face of the cutting head in sequence, and fill in the physical AC center and A/C angle.The machine coordinate system calibration is completed in one go and automatically persisted to cam.toml and machine STEP.</source>
-        <translation>依次选择A轴、C轴参考面和切割头下端面，填写物理AC中心和A/C角。机床坐标系标定一气呵成，自动持久到cam.toml和机床STEP中。</translation>
+        <source>Select the parent rotary-axis, child rotary-axis, and lower cutter-head reference faces in sequence. Calibration is derived automatically from axis roles, directions, and parent links.The machine coordinate system calibration is completed in one go and automatically persisted to cam.toml and machine STEP.</source>
+        <translation>依次选择父旋转轴、子旋转轴和切割头下端参考面；软件根据轴角色、方向和父链自动推导标定关系。机床坐标系标定一次完成，并自动持久化到 cam.toml 和机台 STEP。</translation>
     </message>
     <message>
         <source>Workpiece installation position</source>
@@ -10225,18 +10318,18 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="237"/>
-        <source>Applicable to AC rotary tables: Write Y/Z for the A-axis reference plane and X for the C-axis reference plane. The whole machine is aligned only for translation. The cutting head model points and physical points can be entered and aligned independently.</source>
-        <translation>适用于 AC 转台：A 轴参考面写入 Y/Z，C 轴参考面写入 X。整机对齐只做平移。切割头模型点与物理点可独立录入和对齐。</translation>
+        <source>Applicable to serial rotary tables with TableTilt/TableSpin roles: the rotation center is derived from axis directions and parent links, and cutter alignment follows the physical tool-carrier chain.</source>
+        <translation>适用于配置 TableTilt/TableSpin 角色的串联转台：软件根据轴方向和父链求取旋转中心，并沿实际刀头承载链完成对齐。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="239"/>
-        <source>The current page is used for axis and cutting head position configuration. AC Pivot Quick Fill and AC Center Align are only shown in AC rotary configuration.</source>
-        <translation>当前页用于轴心与切割头位置配置。AC 轴心快填和 AC 中心对齐仅在 AC 转台构型下显示。</translation>
+        <source>The configured axis roles or parent links do not form a supported serial rotary table, so calibration is disabled.</source>
+        <translation>当前轴角色或父链不构成受支持的串联转台，标定入口已禁用。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="264"/>
-        <source>The current configuration does not support AC center alignment.</source>
-        <translation>当前构型暂不支持 AC 中心对齐。</translation>
+        <source>The current configuration does not support rotary-table center alignment.</source>
+        <translation>当前构型暂不支持转台中心对齐。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="306"/>

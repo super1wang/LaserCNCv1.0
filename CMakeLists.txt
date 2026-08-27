@@ -9,7 +9,7 @@ if(_lcnc_binary_dir STREQUAL _lcnc_legacy_build_dir)
         "or vs-acs-gtn (build-vs/).")
 endif()
 
-project(LaserCNC VERSION 1.6.3 LANGUAGES CXX)
+project(LaserCNC VERSION 1.6.4 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -438,7 +438,9 @@ set(SRCS_CORE
     src/core/machine/machine_safety_package.h
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
+    src/core/kinematics/machine_calibration.cpp
     src/core/kinematics/machine_kinematics.cpp
+    src/core/kinematics/machine_relative_kinematics.cpp
     src/core/kinematics/machine_topology.cpp
     src/core/kinematics/toolpath_kinematics_solver.cpp
     src/core/kinematics/machine_configuration_service.cpp

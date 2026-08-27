@@ -2,6 +2,7 @@
 
 #include "core/kinematics/ik_solver.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "core/kinematics/machine_relative_kinematics.h"
 
 #include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
@@ -69,6 +70,56 @@ SolvedMachinePose poseFromLegacy(const MachineCoord& coordinate,
     }
     if (!pose.valid) pose.failureReason = QStringLiteral("Inverse kinematics failed");
     return pose;
+}
+
+bool solveRelativeLinearCoordinates(const ToolpathKinematicsRequest& request,
+                                    const QString& toolCarrierAxis,
+                                    const QString& workpieceCarrierAxis,
+                                    const gp_Pnt& workpiecePoint,
+                                    const QMap<QString, double>& fixedAxisPositions,
+                                    MachineCoord& coordinate,
+                                    QString* failureReason)
+{
+    const MachineAxisDef* linearX = axisForRole(request.machine, MachineAxisRole::LinearX);
+    const MachineAxisDef* linearY = axisForRole(request.machine, MachineAxisRole::LinearY);
+    const MachineAxisDef* linearZ = axisForRole(request.machine, MachineAxisRole::LinearZ);
+    if (!linearX || !linearY || !linearZ) {
+        if (failureReason)
+            *failureReason = QStringLiteral("The configured machine does not define three semantic linear axes");
+        return false;
+    }
+
+    const QStringList linearAxes{linearX->name, linearY->name, linearZ->name};
+    lcnc::kinematics::RelativeLinearSolveResult relative;
+    lcnc::kinematics::RelativeLinearSolveError error =
+        lcnc::kinematics::RelativeLinearSolveError::None;
+    if (!lcnc::kinematics::solveRelativeLinearAxes(
+            *request.machine, toolCarrierAxis, workpieceCarrierAxis,
+            gp_Pnt(0.0, 0.0, 0.0), workpiecePoint, fixedAxisPositions,
+            linearAxes, relative, &error)) {
+        if (failureReason) {
+            switch (error) {
+            case lcnc::kinematics::RelativeLinearSolveError::SingularRelativeMotion:
+                *failureReason = QStringLiteral("The tool/workpiece relative linear motion is singular for the configured axis tree");
+                break;
+            case lcnc::kinematics::RelativeLinearSolveError::AxisLimitExceeded:
+                *failureReason = QStringLiteral("The relative tool/workpiece solution exceeds a configured linear-axis limit");
+                break;
+            case lcnc::kinematics::RelativeLinearSolveError::ForwardResidualExceeded:
+                *failureReason = QStringLiteral("The relative tool/workpiece forward residual exceeds tolerance");
+                break;
+            default:
+                *failureReason = QStringLiteral("The configured tool/workpiece carrier chains are incomplete");
+                break;
+            }
+        }
+        return false;
+    }
+
+    coordinate.x = relative.axisPositions.value(linearX->name);
+    coordinate.y = relative.axisPositions.value(linearY->name);
+    coordinate.z = relative.axisPositions.value(linearZ->name);
+    return true;
 }
 
 MachineCoord tablePreviousFromPose(const SolvedMachinePose& pose,
@@ -157,6 +208,9 @@ public:
             if (tilt) lockedTilt = request.definition.lockedAxisTargets.value(tilt->name, 90.0);
         }
         if (!rotary) return result;
+        const MachineAxisDef* toolCarrier = axisForRole(
+            request.machine, MachineAxisRole::LinearZ);
+        if (!toolCarrier) return result;
 
         gp_Trsf setup = request.workpieceSetup.toTransform();
         gp_Trsf locked;
@@ -170,7 +224,7 @@ public:
         }
 
         for (std::size_t pointIndex = 0; pointIndex < request.points->size(); ++pointIndex) {
-            gp_Pnt position = request.points->at(pointIndex).position.Transformed(setup);
+            const gp_Pnt position = request.points->at(pointIndex).position.Transformed(setup);
             gp_Vec normal(request.points->at(pointIndex).normal);
             normal.Transform(setup);
             gp_Vec target(0, 0, 1);
@@ -207,21 +261,46 @@ public:
                 continue;
             }
             angle = std::clamp(angle, rotary->minVal, rotary->maxVal);
-            gp_Trsf rotaryTransform = rotationOf(*rotary, angle);
-            position.Transform(rotaryTransform);
-            if (tilt) position.Transform(locked);
             bool valid = rotaryIndex >= 0;
             for (int axisIndex = 0; axisIndex < request.definition.interpolatedAxes.count; ++axisIndex) {
                 const MachineAxisSlot& slot = request.definition.interpolatedAxes.axes[axisIndex];
                 if (axisIndex == rotaryIndex) { pose.setValue(axisIndex, angle); continue; }
-                const MachineAxisDef* axis = axisForRole(request.machine, slot.role);
-                if (!axis) { valid = false; break; }
-                const double value = projectedLinear(*axis, position);
-                if (value < axis->minVal - 1e-6 || value > axis->maxVal + 1e-6) { valid = false; break; }
-                pose.setValue(axisIndex, value);
+                if (slot.role == MachineAxisRole::LinearX
+                    || slot.role == MachineAxisRole::LinearY
+                    || slot.role == MachineAxisRole::LinearZ) {
+                    continue;
+                }
+                valid = false;
+                break;
+            }
+            MachineCoord coordinate;
+            coordinate.r1Name = rotary->name;
+            coordinate.r1 = angle;
+            coordinate.valid = valid;
+            QMap<QString, double> fixedPositions{{rotary->name, angle}};
+            if (tilt)
+                fixedPositions.insert(tilt->name, lockedTilt);
+            QString relativeFailure;
+            if (valid && !solveRelativeLinearCoordinates(
+                    request, toolCarrier->name, rotary->name, position,
+                    fixedPositions, coordinate, &relativeFailure)) {
+                valid = false;
+            }
+            if (valid) {
+                const SolvedMachinePose solved = poseFromLegacy(
+                    coordinate, request.definition.interpolatedAxes);
+                for (int axisIndex = 0;
+                     axisIndex < request.definition.interpolatedAxes.count; ++axisIndex) {
+                    if (axisIndex != rotaryIndex)
+                        pose.setValue(axisIndex, solved.value(axisIndex));
+                }
             }
             pose.valid = valid;
-            if (!valid) pose.failureReason = QStringLiteral("Point %1 exceeds a configured axis limit").arg(pointIndex);
+            if (!valid) {
+                pose.failureReason = relativeFailure.isEmpty()
+                    ? QStringLiteral("Point %1 exceeds a configured axis limit").arg(pointIndex)
+                    : QStringLiteral("Point %1: %2").arg(pointIndex).arg(relativeFailure);
+            }
             else { previousAngle = angle; hasPrevious = true; }
             result.push_back(std::move(pose));
         }
@@ -359,7 +438,9 @@ public:
         const gp_Trsf setup = request.workpieceSetup.toTransform();
         const MachineAxisDef* tilt = axisForRole(request.machine, MachineAxisRole::TableTilt);
         const MachineAxisDef* spin = axisForRole(request.machine, MachineAxisRole::TableSpin);
-        if (!tilt || !spin) return result;
+        const MachineAxisDef* toolCarrier = axisForRole(
+            request.machine, MachineAxisRole::LinearZ);
+        if (!tilt || !spin || !toolCarrier) return result;
         MachineCoord previous = request.previousPose
             ? tablePreviousFromPose(*request.previousPose, request.definition.interpolatedAxes,
                                     spin->name, tilt->name)
@@ -375,7 +456,22 @@ public:
             MachineCoord coordinate = IKSolver::solveTableContinuous(
                 request.machine, position, gp_Dir(normal), spin->name, tilt->name,
                 previous.valid ? &previous : nullptr);
-            result.push_back(poseFromLegacy(coordinate, request.definition.interpolatedAxes));
+            QString relativeFailure;
+            if (coordinate.valid) {
+                const QMap<QString, double> fixedPositions{
+                    {spin->name, coordinate.r1},
+                    {tilt->name, coordinate.r2}};
+                if (!solveRelativeLinearCoordinates(
+                        request, toolCarrier->name, spin->name, position,
+                        fixedPositions, coordinate, &relativeFailure)) {
+                    coordinate.valid = false;
+                }
+            }
+            SolvedMachinePose pose = poseFromLegacy(
+                coordinate, request.definition.interpolatedAxes);
+            if (!coordinate.valid && !relativeFailure.isEmpty())
+                pose.failureReason = relativeFailure;
+            result.push_back(std::move(pose));
             if (coordinate.valid) previous = coordinate;
         }
         return result;

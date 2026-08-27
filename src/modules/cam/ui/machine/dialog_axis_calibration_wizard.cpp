@@ -1,6 +1,7 @@
 #include "modules/cam/ui/machine/dialog_axis_calibration_wizard.h"
 
 #include "modules/cam/cam_module.h"
+#include "core/kinematics/machine_kinematics.h"
 #include "core/logging/logger.h"
 
 #include <QDoubleSpinBox>
@@ -47,6 +48,14 @@ DialogAxisCalibrationWizard::DialogAxisCalibrationWizard(CamModule* camModule, Q
     // 非模态：用户在向导打开时仍能与 OCC 视图交互完成拾取。
     setWindowFlags(windowFlags() | Qt::Tool);
     setAttribute(Qt::WA_DeleteOnClose, false);
+    if (m_camModule && m_camModule->kinematics()) {
+        for (const MachineAxisDef& axis : m_camModule->kinematics()->axes()) {
+            if (axis.role == lcnc::MachineAxisRole::TableTilt)
+                m_tiltAxisName = axis.name;
+            else if (axis.role == lcnc::MachineAxisRole::TableSpin)
+                m_spinAxisName = axis.name;
+        }
+    }
     buildUi();
 
     // 旋转中心由“应用程序选项 / 机台构型”统一维护；向导只读取用于对齐提示。
@@ -79,10 +88,9 @@ void DialogAxisCalibrationWizard::buildUi()
     root->addWidget(m_lblCalibStatus);
 
     m_lblHint = new QLabel(
-        // 中文翻译：依次拾取 A 轴、C 轴参考面，再拾取切割头下端面。\n
-        tr("Select the A-axis and C-axis reference surfaces in sequence, and then select the lower end surface of the cutting head."
-        // 中文翻译：提交时先牵引整机，使 A 面 Y/Z 与 C 面 X 合成的模型 AC 中心对齐绝对 AC 中心；再按运动子树分别校正：Y 带动 Y/X/Z，X 带动 X/Z，Z 只移动 Z 轴滑台，使所选刀嘴面的 XYZ 对齐当前机台 XYZ 所代表的绝对模拟锥头 TCP。实时轴坐标不会改变。
-           "\nOn submission, the complete machine is first dragged so that the model AC center composed from A-face Y/Z and C-face X reaches the absolute AC center. Then corrections are propagated through the kinematic subtrees: Y moves Y/X/Z, X moves X/Z, and Z moves only the Z slide, so the picked cutter-face XYZ reaches the absolute simulated TCP represented by the current live machine XYZ. Live axis coordinates are never changed."),
+        // 中文翻译：依次拾取父旋转轴 %1、子旋转轴 %2 的参考面，再拾取切割头下端面。提交时从两条配置轴线自动求取模型旋转中心，先平移整机，再只沿实际刀头承载链牵引轴模型。实时轴坐标不会改变。
+        tr("Select the parent rotary-axis %1 reference face, the child rotary-axis %2 reference face, and then the lower cutter-head face. On submission, the model rotation center is derived from the two configured axis lines; the whole machine is translated first, then only the physical tool-carrier chain is pulled. Live axis coordinates are never changed.")
+            .arg(m_tiltAxisName, m_spinAxisName),
         this);
     m_lblHint->setWordWrap(true);
     m_lblHint->setStyleSheet("color: #555; font-size: 11px;");
@@ -95,10 +103,10 @@ void DialogAxisCalibrationWizard::buildUi()
     pickGrid->setVerticalSpacing(6);
     pickGrid->setColumnStretch(1, 1);
 
-    // 中文翻译：拾取 A 轴参考面...
-    m_btnPickA = new QPushButton(tr("Pick the A-axis reference plane..."), groupPick);
-    // 中文翻译：拾取 C 轴参考面...
-    m_btnPickC = new QPushButton(tr("Pick the C-axis reference plane..."), groupPick);
+    // 中文翻译：拾取 %1 轴参考面...
+    m_btnPickA = new QPushButton(tr("Pick the %1-axis reference plane...").arg(m_tiltAxisName), groupPick);
+    // 中文翻译：拾取 %1 轴参考面...
+    m_btnPickC = new QPushButton(tr("Pick the %1-axis reference plane...").arg(m_spinAxisName), groupPick);
     // 中文翻译：拾取切割头下端面...
     m_btnPickHead = new QPushButton(tr("Pick up the lower end face of the cutting head..."), groupPick);
     // 中文翻译：（未拾取）
@@ -124,12 +132,12 @@ void DialogAxisCalibrationWizard::buildUi()
     // 中文翻译：绝对标定目标
     auto* groupPose = new QGroupBox(tr("Absolute calibration target"), this);
     auto* poseLayout = new QFormLayout(groupPose);
-    // 中文翻译：确认绝对 AC 中心与模拟锥头目标
-    m_btnEnterStandardPose = new QPushButton(tr("Confirm absolute AC-center and simulated-TCP targets"), groupPose);
+    // 中文翻译：确认绝对转台中心与模拟锥头目标
+    m_btnEnterStandardPose = new QPushButton(tr("Confirm absolute rotary-table center and simulated-TCP targets"), groupPose);
     m_btnEnterStandardPose->setEnabled(false);
     m_btnEnterStandardPose->setToolTip(
-        // 中文翻译：只读取并显示绝对世界坐标目标，不修改 A/C/X/Y/Z 实时轴坐标。
-        tr("Read and display the absolute world-coordinate targets only; do not change live A/C/X/Y/Z axis coordinates."
+        // 中文翻译：只读取并显示绝对世界坐标目标，不修改任何实时轴坐标。
+        tr("Read and display the absolute world-coordinate targets only; do not change any live axis coordinates."
            // 中文翻译：需要先完成上方三段拾取。
            "\nYou need to complete the three pickups above first."));
     // 中文翻译：（待确认绝对目标）
@@ -141,8 +149,8 @@ void DialogAxisCalibrationWizard::buildUi()
         lbl->setMinimumWidth(280);
     }
     poseLayout->addRow(m_btnEnterStandardPose);
-    // 中文翻译：当前 AC 中心:
-    poseLayout->addRow(tr("Current AC Center:"), m_lblCurrentAcCenter);
+    // 中文翻译：当前转台旋转中心:
+    poseLayout->addRow(tr("Current rotary-table center:"), m_lblCurrentAcCenter);
     // 中文翻译：绝对模拟锥头 TCP:
     poseLayout->addRow(tr("Absolute simulated cutter TCP:"), m_lblCurrentCutterHead);
     root->addWidget(groupPose);
@@ -198,10 +206,10 @@ void DialogAxisCalibrationWizard::buildUi()
 QString DialogAxisCalibrationWizard::stageDisplayName(Stage stage) const
 {
     switch (stage) {
-    // 中文翻译：A 轴参考面
-    case Stage::AAxis:      return tr("A-axis reference plane");
-    // 中文翻译：C 轴参考面
-    case Stage::CAxis:      return tr("C-axis reference plane");
+    // 中文翻译：%1 轴参考面
+    case Stage::AAxis:      return tr("%1-axis reference plane").arg(m_tiltAxisName);
+    // 中文翻译：%1 轴参考面
+    case Stage::CAxis:      return tr("%1-axis reference plane").arg(m_spinAxisName);
     // 中文翻译：切割头下端面
     case Stage::CutterHead: return tr("Lower end of cutting head");
     }
@@ -267,8 +275,9 @@ void DialogAxisCalibrationWizard::refreshSummary()
                                .arg(stageDisplayName(m_awaitingStage)));
         m_lblHint->setStyleSheet("color: #c98512; font-size: 11px; font-weight: bold;");
     } else {
-        // 中文翻译：依次拾取 A 轴、C 轴参考面，再拾取切割头下端面，然后提交模型对齐。
-        m_lblHint->setText(tr("Select the A-axis and C-axis reference surfaces in sequence, then select the lower end surface of the cutting head, and then submit the model for alignment."));
+        // 中文翻译：依次拾取父旋转轴 %1、子旋转轴 %2 的参考面，再拾取切割头下端面并提交模型对齐。
+        m_lblHint->setText(tr("Select the parent rotary-axis %1 and child rotary-axis %2 reference faces, then select the lower cutter-head face and submit the model alignment.")
+                               .arg(m_tiltAxisName, m_spinAxisName));
         m_lblHint->setStyleSheet("color: #555; font-size: 11px;");
     }
 
@@ -302,10 +311,9 @@ void DialogAxisCalibrationWizard::onEnterStandardPoseClicked()
         return;
 
     CamModule::AxisCalibrationInputs inputs;
-    inputs.aFaceCenter          = m_aCenter;
-    inputs.cFaceCenter          = m_cCenter;
+    inputs.tiltFaceCenter       = m_aCenter;
+    inputs.spinFaceCenter       = m_cCenter;
     inputs.cutterHeadFaceCenter = m_headCenter;
-    inputs.hasPhysicalCenter    = false;
 
     QString errMsg;
     if (!m_camModule->enterStandardCalibrationPose(inputs, &errMsg)) {
@@ -315,7 +323,7 @@ void DialogAxisCalibrationWizard::onEnterStandardPoseClicked()
     }
     m_standardPoseEntered = true;
 
-    // 显示不可变的绝对 AC 中心与当前实时 XYZ 所代表的绝对 TCP。
+    // 显示不可变的绝对转台中心与实际刀头承载链所代表的绝对 TCP。
     gp_Pnt acCenter;
     if (m_camModule->currentAcRotationCenter(acCenter) && m_lblCurrentAcCenter) {
         m_lblCurrentAcCenter->setText(formatPoint(acCenter));
@@ -366,19 +374,13 @@ void DialogAxisCalibrationWizard::onSubmitClicked()
     }
 
     CamModule::AxisCalibrationInputs inputs;
-    inputs.aFaceCenter           = m_aCenter;
-    inputs.cFaceCenter           = m_cCenter;
+    inputs.tiltFaceCenter        = m_aCenter;
+    inputs.spinFaceCenter        = m_cCenter;
     inputs.cutterHeadFaceCenter  = m_headCenter;
-    inputs.physicalAcCenter      = gp_Pnt(m_physX->value(), m_physY->value(), m_physZ->value());
-    inputs.hasPhysicalCenter     = false;
-    inputs.physicalAAngle        = 0.0;
-    inputs.physicalCAngle        = 0.0;
 
     LCNC_INFO(lcnc::LogCode::Generic,
-              "DialogAxisCalibrationWizard submit: configuredCenter=({:.3f},{:.3f},{:.3f})",
-              inputs.physicalAcCenter.X(),
-              inputs.physicalAcCenter.Y(),
-              inputs.physicalAcCenter.Z());
+                  "DialogAxisCalibrationWizard submit: configuredCenter=({:.3f},{:.3f},{:.3f})",
+              m_physX->value(), m_physY->value(), m_physZ->value());
 
     QString errorMessage;
     if (m_camModule->applyAxisCalibration(inputs, &errorMessage)) {

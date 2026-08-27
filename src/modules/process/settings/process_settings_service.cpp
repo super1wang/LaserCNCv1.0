@@ -11,6 +11,8 @@
 #include <QSaveFile>
 #include <QUuid>
 #include <algorithm>
+#include <cmath>
+#include <set>
 
 namespace lcnc::process {
 using toml::table;
@@ -31,6 +33,19 @@ QString ioBucketName(ProcessIoBucket bucket) {
         return QStringLiteral("AnalogOUT");
     }
     return {};
+}
+
+bool axisFromName(const QString& name, Axis* axis)
+{
+    const QString key = name.trimmed().toUpper();
+    if (key == QStringLiteral("X")) *axis = Axis::X;
+    else if (key == QStringLiteral("Y")) *axis = Axis::Y;
+    else if (key == QStringLiteral("Z")) *axis = Axis::Z;
+    else if (key == QStringLiteral("A")) *axis = Axis::A;
+    else if (key == QStringLiteral("B")) *axis = Axis::B;
+    else if (key == QStringLiteral("C")) *axis = Axis::C;
+    else return false;
+    return true;
 }
 
 bool isDigital(ProcessIoBucket bucket) {
@@ -112,7 +127,8 @@ QString ProcessSettingsService::sectionName(ProcessConfigArea area,
                                             const QString& tableName) const {
     switch (area) {
     case ProcessConfigArea::Devices:
-        if (tableName == QStringLiteral("MotionControl"))
+        if (tableName == QStringLiteral("MotionControl")
+            || tableName == QStringLiteral("Homing"))
             return QStringLiteral("MotionControl");
         if (tableName.startsWith(QStringLiteral("Camera")))
             return QStringLiteral("Camera");
@@ -538,6 +554,83 @@ ProcessInitialApproachSettings ProcessSettingsService::initialApproachSettings()
     return settings;
 }
 
+QVector<AxisHomingCommand> ProcessSettingsService::homingCommands(
+    const QStringList& axisNames, QString* error) const
+{
+    if (error)
+        error->clear();
+    struct OrderedCommand { int order; AxisHomingCommand command; };
+    QVector<OrderedCommand> ordered;
+    std::set<int> usedOrders;
+    std::set<Axis> usedAxes;
+    bool hasSupportedAxis = false;
+
+    for (int index = 0; index < axisNames.size(); ++index) {
+        const QString axisName = axisNames.at(index).trimmed().toUpper();
+        Axis axis{};
+        // Extension axes are not exposed by MotionControl::Axis and therefore
+        // cannot be sent to ACS/GTN. They are deliberately left untouched.
+        if (!axisFromName(axisName, &axis))
+            continue;
+        hasSupportedAxis = true;
+
+        const QString suffix = axisName;
+        const QString method = rawValue(
+            ProcessConfigArea::Devices, QStringLiteral("Homing"),
+            QStringLiteral("sMethod%1").arg(suffix), QStringLiteral("ControllerHome"))
+                                   .toString();
+        AxisHomingMethod homingMethod{};
+        if (method == QStringLiteral("Disabled")) {
+            // Disabled means a complete no-op: no Home call and no coordinate
+            // write. Its order and coordinate fields are intentionally ignored.
+            continue;
+        } else if (method == QStringLiteral("ControllerHome")) {
+            homingMethod = AxisHomingMethod::ControllerHome;
+        } else if (method == QStringLiteral("SetCurrentPosition")) {
+            homingMethod = AxisHomingMethod::SetCurrentPosition;
+        } else {
+            if (error)
+                *error = QObject::tr("The homing method for axis %1 is invalid").arg(axisName);
+            return {};
+        }
+        const int order = rawValue(
+            ProcessConfigArea::Devices, QStringLiteral("Homing"),
+            QStringLiteral("iOrder%1").arg(suffix), index + 1).toInt();
+        const double position = rawValue(
+            ProcessConfigArea::Devices, QStringLiteral("Homing"),
+            QStringLiteral("fPosition%1").arg(suffix), 0.0).toDouble();
+        if (order <= 0 || !usedOrders.insert(order).second) {
+            if (error)
+                *error = QObject::tr("The homing order must be positive and unique; check axis %1")
+                             .arg(axisName);
+            return {};
+        }
+        if (!usedAxes.insert(axis).second) {
+            if (error)
+                *error = QObject::tr("The homing axis table contains duplicate axis %1").arg(axisName);
+            return {};
+        }
+        if (!std::isfinite(position)) {
+            if (error)
+                *error = QObject::tr("The set coordinate for axis %1 must be finite").arg(axisName);
+            return {};
+        }
+        ordered.append({order, {axis, homingMethod, position, axisName}});
+    }
+
+    std::sort(ordered.begin(), ordered.end(), [](const OrderedCommand& lhs,
+                                                  const OrderedCommand& rhs) {
+        return lhs.order < rhs.order;
+    });
+    QVector<AxisHomingCommand> result;
+    result.reserve(ordered.size());
+    for (const OrderedCommand& item : ordered)
+        result.append(item.command);
+    if (!hasSupportedAxis && error)
+        *error = QObject::tr("No axis system that can be homed");
+    return result;
+}
+
 QVariant ProcessSettingsService::machineAxisValue(const QString& axisName,
                                                   const QString& key) const {
     for (const auto& axis : m_axisDraft)
@@ -895,6 +988,23 @@ bool ProcessSettingsService::validate(QString* error) const {
         if (error)
             *error = QObject::tr("The default tool must remain the first tool.");
         return false;
+    }
+    if (!m_axisDraft.isEmpty()) {
+        QStringList axisNames;
+        for (const auto& axis : m_axisDraft) {
+            const QString name = axis.axis.name.trimmed().toUpper();
+            if (name == QStringLiteral("Z"))
+                axisNames.prepend(name);
+            else if (!name.isEmpty() && name != QStringLiteral("BASE"))
+                axisNames.append(name);
+        }
+        QString homingError;
+        (void)homingCommands(axisNames, &homingError);
+        if (!homingError.isEmpty()) {
+            if (error)
+                *error = homingError;
+            return false;
+        }
     }
     return true;
 }

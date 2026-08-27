@@ -19,6 +19,7 @@
 #include "modules/process/device/motion_control/gtn_motion_control.h"
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <set>
@@ -30,6 +31,7 @@
 using lcnc::process::AnalogIN;
 using lcnc::process::AnalogOUT;
 using lcnc::process::Axis;
+using lcnc::process::AxisHomingMethod;
 using lcnc::process::DigitalIN;
 using lcnc::process::DigitalOUT;
 using std::string;
@@ -182,6 +184,13 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::stopAllMotion()
     return {ok, ok ? QString() : QObject::tr("Stop motion failed")};
 }
 
+void ProcessDeviceRuntime::requestMotionAbort() noexcept
+{
+    std::lock_guard<std::mutex> lifetimeLock(m_motionControlLifetimeMutex);
+    if (m_motionControl)
+        m_motionControl->requestMotionAbort();
+}
+
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveAxes(
     const QVector<Axis>& axes, const QVector<double>& positions, double velocity, bool relative)
 {
@@ -304,28 +313,92 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::setAnalogOutput(
 }
 
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::homeAxes(
-    const QStringList& axes, bool connected)
+    const QVector<lcnc::process::AxisHomingCommand>& commands)
 {
-    const auto lock = lockDeviceAccess();
-    MotionControl* const motionControl = connected ? m_motionControl.get() : nullptr;
-    for (const QString& axisName : axes) {
-        if (!motionControl)
-            continue;
+    const auto fail = [](const QString& error) {
+        return lcnc::process::DeviceCommandResult{false, error};
+    };
+    if (commands.isEmpty())
+        // 中文翻译：回零轴表为空
+        return fail(QObject::tr("Homing axis table is empty"));
+    const bool hasAction = std::any_of(
+        commands.cbegin(), commands.cend(), [](const lcnc::process::AxisHomingCommand& command) {
+            return command.method != AxisHomingMethod::Disabled;
+        });
+    if (!hasAction)
+        return {};
 
-        const auto axis = magic_enum::enum_cast<Axis>(axisName.toStdString());
-        if (!axis.has_value() || !motionControl->IsMotorCreated(axis.value())) {
-            LCNC_WARN(lcnc::LogCode::Generic,
-                      "ProcessDeviceRuntime::homeAxes: skip hardware home for axis {} "
-                      "(extension or not registered)", axisName.toStdString());
+    const auto lock = lockDeviceAccess();
+    MotionControl* const motionControl = m_motionControl.get();
+    if (!motionControl || !motionControl->IsConnected())
+        // 中文翻译：运动控制器未连接
+        return fail(QObject::tr("Motion controller not connected"));
+
+    // Validate the complete table before the first axis moves or is re-zeroed.
+    std::set<Axis> validatedAxes;
+    for (const auto& command : commands) {
+        if (command.method == AxisHomingMethod::Disabled)
+            continue;
+        const QString axisName = command.axisName.isEmpty()
+            ? QString::fromLatin1(magic_enum::enum_name(command.axis).data())
+            : command.axisName;
+        if (!motionControl->IsMotorCreated(command.axis))
+            // 中文翻译：轴 %1 未在控制器中创建
+            return fail(QObject::tr("Axis %1 was not created in the controller").arg(axisName));
+        if (!validatedAxes.insert(command.axis).second)
+            // 中文翻译：回零轴表包含重复轴 %1
+            return fail(QObject::tr("The homing axis table contains duplicate axis %1").arg(axisName));
+        if (command.method == AxisHomingMethod::SetCurrentPosition
+            && !std::isfinite(command.position))
+            // 中文翻译：轴 %1 的置位坐标必须是有限数值
+            return fail(QObject::tr("The set coordinate for axis %1 must be finite").arg(axisName));
+        if (motionControl->IsAxisMoving(command.axis))
+            // 中文翻译：轴 %1 正在运动，不能开始回零或置位
+            return fail(QObject::tr("Axis %1 is moving; homing or position setting cannot start").arg(axisName));
+    }
+
+    for (const auto& command : commands) {
+        if (command.method == AxisHomingMethod::Disabled)
+            continue;
+        const QString axisName = command.axisName.isEmpty()
+            ? QString::fromLatin1(magic_enum::enum_name(command.axis).data())
+            : command.axisName;
+        if (command.method == AxisHomingMethod::ControllerHome) {
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "ProcessDeviceRuntime::homeAxes: controller home axis {}",
+                      axisName.toStdString());
+            if (!motionControl->Home(command.axis))
+                // 中文翻译：轴 %1 控制器回零失败
+                return fail(QObject::tr("Controller homing failed for axis %1").arg(axisName));
             continue;
         }
-        if (!motionControl->Home(axis.value())) {
-            LCNC_ERR(lcnc::LogCode::Generic,
-                     "ProcessDeviceRuntime::homeAxes: hardware Home failed for axis {}",
-                     axisName.toStdString());
-            // 中文翻译：回零失败，请检查日志
-            return {false, QObject::tr("Return to zero failed, please check the log")};
+
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "ProcessDeviceRuntime::homeAxes: set current position axis {} to {} without motion",
+                  axisName.toStdString(), command.position);
+        if (!motionControl->SetFPosition(command.axis, command.position))
+            // 中文翻译：轴 %1 当前位置置位失败
+            return fail(QObject::tr("Setting the current position failed for axis %1").arg(axisName));
+
+        // Read back the encoder coordinate rather than trusting successful SDK
+        // writes. GTN absolute-scale axes must not proceed with a stale planner
+        // coordinate or an unchanged encoder coordinate.
+        QElapsedTimer timer;
+        timer.start();
+        double feedback = 0.0;
+        bool verified = false;
+        while (timer.elapsed() <= 1000) {
+            if (motionControl->GetFeedbackPos(command.axis, feedback)
+                && std::isfinite(feedback)
+                && std::abs(feedback - command.position) <= 0.01) {
+                verified = true;
+                break;
+            }
+            QThread::msleep(20);
         }
+        if (!verified)
+            // 中文翻译：轴 %1 置位后的编码器坐标校验失败
+            return fail(QObject::tr("Encoder coordinate verification failed after setting axis %1").arg(axisName));
     }
     return {};
 }

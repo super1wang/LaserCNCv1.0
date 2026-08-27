@@ -157,22 +157,23 @@ bool CamModule::ensureAcCenterCalibrationAvailable(QString* errorMessage) const
     const MachineKinematics* kin = kinematics();
     if (!kin) {
         if (errorMessage)
-            // 中文翻译：找不到机台轴系配置。请先选择 AC 转台构型。
-            *errorMessage = tr("The machine axis system configuration cannot be found. Please select the AC turntable configuration first.");
+            // 中文翻译：找不到机台轴系配置。请先选择转台构型。
+            *errorMessage = tr("The machine axis system configuration cannot be found. Please select a rotary-table configuration first.");
         return false;
     }
 
-    if (kin->configType() != QStringLiteral("VERTICAL_AC_TABLE")) {
-        if (errorMessage)
-            // 中文翻译：当前仅 VERTICAL_AC_TABLE 构型支持 A/C 模型对齐。
-            *errorMessage = tr("A/C model alignment is currently supported only for the VERTICAL_AC_TABLE configuration.");
-        return false;
+    const MachineAxisDef* tiltAxis = nullptr;
+    const MachineAxisDef* spinAxis = nullptr;
+    for (const MachineAxisDef& axis : kin->axes()) {
+        if (axis.role == lcnc::MachineAxisRole::TableTilt)
+            tiltAxis = &axis;
+        else if (axis.role == lcnc::MachineAxisRole::TableSpin)
+            spinAxis = &axis;
     }
-
-    if (!kin->findAxis(QStringLiteral("A")) || !kin->findAxis(QStringLiteral("C"))) {
+    if (!tiltAxis || !spinAxis || !kin->isAxisDescendantOf(spinAxis->name, tiltAxis->name)) {
         if (errorMessage)
-            // 中文翻译：当前 AC 转台轴定义不完整，缺少 A 轴或 C 轴。\n请先在应用程序选项的机台构型页完成配置。
-            *errorMessage = tr("The current AC rotary table axis definition is incomplete, either the A or C axis is missing.\nPlease complete the configuration on the Machine Configuration page of the application options first.");
+            // 中文翻译：转台轴定义不完整；TableSpin 必须位于 TableTilt 的子链路中。请先完成轴角色和父链配置。
+            *errorMessage = tr("The rotary-table axis definition is incomplete. TableSpin must be carried by TableTilt. Please complete the axis roles and parent chain first.");
         return false;
     }
 

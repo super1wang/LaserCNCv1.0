@@ -32,6 +32,8 @@ ProcessDeviceRuntime::ProcessDeviceRuntime(lcnc::process::ProcessSettingsService
 ProcessDeviceRuntime::~ProcessDeviceRuntime()
 {
     (void)shutdownDevices();
+    std::lock_guard<std::mutex> lifetimeLock(m_motionControlLifetimeMutex);
+    m_motionControl.reset();
 }
 
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::connectMotionControllerSession(
@@ -180,6 +182,7 @@ bool ProcessDeviceRuntime::shutdownDevices()
 void ProcessDeviceRuntime::setMotionControl(string strName)
 {
     const auto lock = lockDeviceAccess();
+    std::lock_guard<std::mutex> lifetimeLock(m_motionControlLifetimeMutex);
     string strDevice = strName;
     if (strDevice.empty())
         strDevice = configuredMotionControllerName();

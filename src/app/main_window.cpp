@@ -2321,8 +2321,14 @@ void MainWindow::restorePersistedCamState()
     m_toolpathPanel->setNormalSampleStep(cam->normalSampleStep());
 
     const QString machinePath = cam->machineModelPath();
-    if (config.autoLoadMachineModel() && !machinePath.isEmpty() && QFileInfo::exists(machinePath))
+    // The startup smoke test validates application/bootstrap/UI construction,
+    // not a workstation-specific persisted STEP import. Skipping that external
+    // task also guarantees deterministic shutdown of the isolated smoke run.
+    if (!qApp->property("lcnc.smokeTest").toBool()
+        && config.autoLoadMachineModel() && !machinePath.isEmpty()
+        && QFileInfo::exists(machinePath)) {
         cam->loadMachine(machinePath);
+    }
 }
 
 void MainWindow::syncMachineWorkspaceUi()

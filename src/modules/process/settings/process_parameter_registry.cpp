@@ -78,6 +78,61 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
     auto machine = kernel
         ? kernel->services().getService<lcnc::MachineConfigurationService>()
         : nullptr;
+
+    // Ribbon homing is controller setup, not a Process workflow node. Keep it
+    // as a child page below the selectable motion-controller root.
+    // 中文翻译：回零配置；运动与轴系
+    ParameterObjectDescriptor homing{QStringLiteral("homing"), QObject::tr("Homing settings"),
+                                     QObject::tr("Movement and Axis Systems")};
+    homing.parentObjectId = QStringLiteral("controller");
+    if (machine) {
+        QStringList defaultOrder{QStringLiteral("Z")};
+        for (const auto& axis : machine->axisConfigurations()) {
+            const QString axisName = axis.axis.name.trimmed().toUpper();
+            if (!axisName.isEmpty() && axisName != QStringLiteral("BASE")
+                && !defaultOrder.contains(axisName)) {
+                defaultOrder.append(axisName);
+            }
+        }
+        const QStringList supportedAxes{QStringLiteral("X"), QStringLiteral("Y"),
+                                        QStringLiteral("Z"), QStringLiteral("A"),
+                                        QStringLiteral("B"), QStringLiteral("C")};
+        for (const auto& axis : machine->axisConfigurations()) {
+            const QString axisName = axis.axis.name.trimmed().toUpper();
+            if (!supportedAxes.contains(axisName))
+                continue;
+            // 中文翻译：%1 轴
+            const QString group = QObject::tr("%1 axis").arg(axisName);
+            auto method = field(
+                QStringLiteral("method.%1").arg(axisName), QObject::tr("Homing method"), group,
+                ParameterValueType::Enum, ProcessConfigArea::Devices, QStringLiteral("Homing"),
+                QStringLiteral("sMethod%1").arg(axisName), QStringLiteral("ControllerHome"));
+            method.enumValues = {QStringLiteral("Disabled"),
+                                 QStringLiteral("ControllerHome"),
+                                 QStringLiteral("SetCurrentPosition")};
+            // 中文翻译：关闭（不执行）；控制器回零（运动）；当前位置置位（不运动）
+            method.enumLabels = {QObject::tr("Disabled (no action)"),
+                                 QObject::tr("Controller homing (motion)"),
+                                 QObject::tr("Set current position (no motion)")};
+            homing.fields.append(method);
+            // 中文翻译：回零顺序
+            homing.fields.append(field(
+                QStringLiteral("order.%1").arg(axisName), QObject::tr("Homing order"), group,
+                ParameterValueType::Int, ProcessConfigArea::Devices, QStringLiteral("Homing"),
+                QStringLiteral("iOrder%1").arg(axisName), defaultOrder.indexOf(axisName) + 1,
+                {}, 1, 128, 0));
+            // 中文翻译：置位坐标
+            homing.fields.append(field(
+                QStringLiteral("position.%1").arg(axisName), QObject::tr("Set coordinate"), group,
+                ParameterValueType::Double, ProcessConfigArea::Devices, QStringLiteral("Homing"),
+                QStringLiteral("fPosition%1").arg(axisName), 0.0,
+                axis.axis.motionType == MachineAxisDef::Rotary ? QStringLiteral("°")
+                                                                : QStringLiteral("mm"),
+                -1000000.0, 1000000.0, 6));
+        }
+    }
+    objects.append(homing);
+
     if (machine) {
         for (const auto& axis : machine->axisConfigurations()) {
             ParameterObjectDescriptor object;

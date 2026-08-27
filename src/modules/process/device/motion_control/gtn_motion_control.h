@@ -136,6 +136,7 @@ public:
 	virtual bool Reboot();
 	virtual bool Home();
 	virtual bool Home(lcnc::process::Axis eAxis);
+	void requestMotionAbort() noexcept override { m_bStop.store(true); }
 	virtual bool IsHomed();
 	virtual bool IsHomed(lcnc::process::Axis eAxis);
 	

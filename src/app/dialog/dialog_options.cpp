@@ -141,15 +141,15 @@ QString algorithmTextForAxes(const QString& /*preset*/, const QList<MachineAxisD
 QString machineAxisRoleDisplayName(lcnc::MachineAxisRole role)
 {
     switch (role) {
-    case lcnc::MachineAxisRole::LinearX: return QCoreApplication::translate("DialogOptions", "Linear X"); // 中文翻译：X 直线轴
-    case lcnc::MachineAxisRole::LinearY: return QCoreApplication::translate("DialogOptions", "Linear Y"); // 中文翻译：Y 直线轴
-    case lcnc::MachineAxisRole::LinearZ: return QCoreApplication::translate("DialogOptions", "Linear Z"); // 中文翻译：Z 直线轴
-    case lcnc::MachineAxisRole::WorkpieceRotary: return QCoreApplication::translate("DialogOptions", "Workpiece rotary"); // 中文翻译：工件回转轴
-    case lcnc::MachineAxisRole::TableTilt: return QCoreApplication::translate("DialogOptions", "Table tilt"); // 中文翻译：转台倾斜轴
-    case lcnc::MachineAxisRole::TableSpin: return QCoreApplication::translate("DialogOptions", "Table spin"); // 中文翻译：转台回转轴
-    case lcnc::MachineAxisRole::HeadTiltPrimary: return QCoreApplication::translate("DialogOptions", "Primary head tilt"); // 中文翻译：第一摆头轴
-    case lcnc::MachineAxisRole::HeadTiltSecondary: return QCoreApplication::translate("DialogOptions", "Secondary head tilt"); // 中文翻译：第二摆头轴
-    default: return QCoreApplication::translate("DialogOptions", "Unspecified"); // 中文翻译：未指定
+    case lcnc::MachineAxisRole::LinearX: return QCoreApplication::translate("lcnc::DialogOptions", "Linear X"); // 中文翻译：X 直线轴
+    case lcnc::MachineAxisRole::LinearY: return QCoreApplication::translate("lcnc::DialogOptions", "Linear Y"); // 中文翻译：Y 直线轴
+    case lcnc::MachineAxisRole::LinearZ: return QCoreApplication::translate("lcnc::DialogOptions", "Linear Z"); // 中文翻译：Z 直线轴
+    case lcnc::MachineAxisRole::WorkpieceRotary: return QCoreApplication::translate("lcnc::DialogOptions", "Workpiece rotary"); // 中文翻译：工件回转轴
+    case lcnc::MachineAxisRole::TableTilt: return QCoreApplication::translate("lcnc::DialogOptions", "Table tilt"); // 中文翻译：转台倾斜轴
+    case lcnc::MachineAxisRole::TableSpin: return QCoreApplication::translate("lcnc::DialogOptions", "Table spin"); // 中文翻译：转台回转轴
+    case lcnc::MachineAxisRole::HeadTiltPrimary: return QCoreApplication::translate("lcnc::DialogOptions", "Primary head tilt"); // 中文翻译：第一摆头轴
+    case lcnc::MachineAxisRole::HeadTiltSecondary: return QCoreApplication::translate("lcnc::DialogOptions", "Secondary head tilt"); // 中文翻译：第二摆头轴
+    default: return QCoreApplication::translate("lcnc::DialogOptions", "Unspecified"); // 中文翻译：未指定
     }
 }
 
@@ -397,18 +397,23 @@ void DialogOptions::buildUi()
     // 中文翻译：颜色配置
     auto* itemColors = new QTreeWidgetItem(m_nav, QStringList(tr("Color configuration")));
     itemColors->setData(0, Qt::UserRole, 1);
+    // 中文翻译：切割头参数
+    auto* itemCutterHead = new QTreeWidgetItem(m_nav, QStringList(tr("Cutter head parameters")));
+    itemCutterHead->setData(0, Qt::UserRole, 2);
     // 中文翻译：应用程序
     auto* itemApp = new QTreeWidgetItem(m_nav, QStringList(tr("application")));
-    itemApp->setData(0, Qt::UserRole, 2);
+    itemApp->setData(0, Qt::UserRole, 3);
     // 中文翻译：机台构型
     auto* itemMachine = new QTreeWidgetItem(m_nav, QStringList(tr("Machine configuration")));
-    itemMachine->setData(0, Qt::UserRole, 3);
+    itemMachine->setData(0, Qt::UserRole, 4);
 
     // 中文翻译：视图渲染
     buildRenderPage(tr("View rendering"), true, m_renderControls);
     buildColorPage();
+    buildCutterHeadPage();
     buildApplicationPage();
     buildMachineConfigurationPage();
+    Q_UNUSED(itemCutterHead);
     Q_UNUSED(itemApp);
     Q_UNUSED(itemMachine);
 
@@ -708,28 +713,124 @@ void DialogOptions::buildColorPage()
     highlightForm->addRow(tr("Highlight line width:"), m_spHighlightLineWidth);
     root->addWidget(highlightGroup);
 
-    // 中文翻译：刀头
-    auto* cutterHeadGroup = new QGroupBox(tr("Cutter head"), page);
-    auto* cutterHeadForm = new QFormLayout(cutterHeadGroup);
+    root->addStretch(1);
+    m_stack->addWidget(page);
+}
+
+void DialogOptions::buildCutterHeadPage()
+{
+    auto* page = new QWidget(this);
+    auto* pageLayout = new QVBoxLayout(page);
+    auto* scroll = new QScrollArea(page);
+    scroll->setWidgetResizable(true);
+    auto* content = new QWidget(scroll);
+    auto* root = new QVBoxLayout(content);
+
+    // 中文翻译：切割头外观
+    auto* appearanceGroup = new QGroupBox(tr("Cutter head appearance"), content);
+    auto* appearanceForm = new QFormLayout(appearanceGroup);
     m_btnCutterHeadColor = makeColorButton(&m_colorDraft.cutterHeadColor);
-    m_spCutterHeadTransparency = noWheel(new QDoubleSpinBox(cutterHeadGroup));
+    m_spCutterHeadTransparency = noWheel(new QDoubleSpinBox(appearanceGroup));
     m_spCutterHeadTransparency->setRange(0.0, 100.0);
     m_spCutterHeadTransparency->setDecimals(0);
     m_spCutterHeadTransparency->setSingleStep(5.0);
     m_spCutterHeadTransparency->setSuffix(tr(" %"));
-    m_spCutterHeadScale = noWheel(new QDoubleSpinBox(cutterHeadGroup));
+    m_spCutterHeadScale = noWheel(new QDoubleSpinBox(appearanceGroup));
     m_spCutterHeadScale->setRange(0.2, 3.0);
     m_spCutterHeadScale->setDecimals(2);
     m_spCutterHeadScale->setSingleStep(0.1);
-    // 中文翻译：刀头颜色:
-    cutterHeadForm->addRow(tr("Cutter head color:"), m_btnCutterHeadColor);
-    // 中文翻译：刀头透明度:
-    cutterHeadForm->addRow(tr("Cutter head transparency:"), m_spCutterHeadTransparency);
-    // 中文翻译：刀头大小(缩放):
-    cutterHeadForm->addRow(tr("Cutter head size (scale):"), m_spCutterHeadScale);
-    root->addWidget(cutterHeadGroup);
+    // 中文翻译：切割头颜色:
+    appearanceForm->addRow(tr("Cutter head color:"), m_btnCutterHeadColor);
+    // 中文翻译：切割头透明度:
+    appearanceForm->addRow(tr("Cutter head transparency:"), m_spCutterHeadTransparency);
+    // 中文翻译：切割头尺寸（缩放）:
+    appearanceForm->addRow(tr("Cutter head size (scale):"), m_spCutterHeadScale);
+    root->addWidget(appearanceGroup);
+
+    // 中文翻译：切割嘴示意显示
+    auto* nozzleGroup = new QGroupBox(tr("Cutting nozzle display"), content);
+    auto* nozzleForm = new QFormLayout(nozzleGroup);
+    m_cbCutterCollisionProxyMode = new QComboBox(nozzleGroup);
+    // 中文翻译：模拟锥头
+    m_cbCutterCollisionProxyMode->addItem(tr("Simulated cone"), 0);
+    // 中文翻译：刀嘴模型文件
+    m_cbCutterCollisionProxyMode->addItem(tr("Nozzle model file"), 1);
+    // 中文翻译：显示类型
+    nozzleForm->addRow(tr("Display type"), m_cbCutterCollisionProxyMode);
+
+    auto* nozzlePathRow = new QWidget(nozzleGroup);
+    auto* nozzlePathLayout = new QHBoxLayout(nozzlePathRow);
+    nozzlePathLayout->setContentsMargins(0, 0, 0, 0);
+    nozzlePathLayout->setSpacing(4);
+    m_editCutterNozzleModelPath = new QLineEdit(nozzlePathRow);
+    m_editCutterNozzleModelPath->setClearButtonEnabled(true);
+    // 中文翻译：选择轻量化切割嘴模型文件
+    m_editCutterNozzleModelPath->setPlaceholderText(tr("Select a lightweight cutting nozzle model"));
+    // 中文翻译：浏览...
+    m_btnBrowseCutterNozzleModel = new QPushButton(tr("Browse..."), nozzlePathRow);
+    nozzlePathLayout->addWidget(m_editCutterNozzleModelPath, 1);
+    nozzlePathLayout->addWidget(m_btnBrowseCutterNozzleModel);
+    // 中文翻译：刀嘴模型路径
+    nozzleForm->addRow(tr("Nozzle model path"), nozzlePathRow);
+
+    const auto positiveDistanceSpin = [nozzleGroup](double minimum, double maximum) {
+        auto* spin = noWheel(new QDoubleSpinBox(nozzleGroup));
+        spin->setRange(minimum, maximum);
+        spin->setDecimals(3);
+        spin->setSuffix(QStringLiteral(" mm"));
+        return spin;
+    };
+    m_spSimulatedConeLength = positiveDistanceSpin(0.1, 1000.0);
+    m_spSimulatedConeTipRadius = positiveDistanceSpin(0.0, 100.0);
+    m_spSimulatedConeBaseRadius = positiveDistanceSpin(0.0, 500.0);
+    m_spCutterCollisionClearance = positiveDistanceSpin(0.0, 100.0);
+    m_spMaximumRapidSafetyOffset = positiveDistanceSpin(0.1, 10000.0);
+    // 中文翻译：锥头长度；尖端半径；底部半径；最小安全间隙；最大安全抬高量
+    nozzleForm->addRow(tr("Cone length"), m_spSimulatedConeLength);
+    nozzleForm->addRow(tr("Tip radius"), m_spSimulatedConeTipRadius);
+    nozzleForm->addRow(tr("Base radius"), m_spSimulatedConeBaseRadius);
+    nozzleForm->addRow(tr("Minimum clearance"), m_spCutterCollisionClearance);
+    nozzleForm->addRow(tr("Maximum safety offset"), m_spMaximumRapidSafetyOffset);
+    auto* nozzleHint = new QLabel(
+        // 中文翻译：模型会自动将包围盒最低点作为刀嘴尖端，并以局部 +Z 作为远离加工面的方向。碰撞求高在生成刀路时完成。
+        tr("The model bounding-box minimum is treated as the nozzle tip and local +Z points away from the machining surface. Collision height is solved while generating the tool path."),
+        nozzleGroup);
+    nozzleHint->setWordWrap(true);
+    nozzleHint->setStyleSheet("color:#666;");
+    nozzleForm->addRow(nozzleHint);
+    root->addWidget(nozzleGroup);
+
+    const auto updateNozzleMode = [this] {
+        const bool modelMode = m_cbCutterCollisionProxyMode
+            && m_cbCutterCollisionProxyMode->currentData().toInt() == 1;
+        if (m_editCutterNozzleModelPath) m_editCutterNozzleModelPath->setEnabled(modelMode);
+        if (m_btnBrowseCutterNozzleModel) m_btnBrowseCutterNozzleModel->setEnabled(modelMode);
+        if (m_spSimulatedConeLength) m_spSimulatedConeLength->setEnabled(!modelMode);
+        if (m_spSimulatedConeTipRadius) m_spSimulatedConeTipRadius->setEnabled(!modelMode);
+        if (m_spSimulatedConeBaseRadius) m_spSimulatedConeBaseRadius->setEnabled(!modelMode);
+    };
+    connect(m_cbCutterCollisionProxyMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, updateNozzleMode);
+    connect(m_btnBrowseCutterNozzleModel, &QPushButton::clicked, this,
+            [this] {
+                const QString currentPath = m_editCutterNozzleModelPath
+                    ? m_editCutterNozzleModelPath->text().trimmed() : QString();
+                const QString dir = currentPath.isEmpty()
+                    ? QString() : QFileInfo(currentPath).absolutePath();
+                const QString path = QFileDialog::getOpenFileName(
+                    this,
+                    // 中文翻译：选择切割嘴显示模型
+                    tr("Select cutting nozzle display model"), dir,
+                    // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;所有文件 (*)
+                    tr("3D model files (*.stp *.step *.stl *.brep);;All files (*)"));
+                if (!path.isEmpty() && m_editCutterNozzleModelPath)
+                    m_editCutterNozzleModelPath->setText(QFileInfo(path).absoluteFilePath());
+            });
+    updateNozzleMode();
 
     root->addStretch(1);
+    scroll->setWidget(content);
+    pageLayout->addWidget(scroll);
     m_stack->addWidget(page);
 }
 
@@ -830,59 +931,6 @@ void DialogOptions::buildMachineConfigurationPage()
     form->addRow(tr("Tool path algorithm"), m_lblMachineAlgorithm);
     root->addWidget(group);
 
-    // 中文翻译：切割嘴示意显示
-    auto* nozzleGroup = new QGroupBox(tr("Cutting nozzle display"), page);
-    auto* nozzleForm = new QFormLayout(nozzleGroup);
-    m_cbCutterCollisionProxyMode = new QComboBox(nozzleGroup);
-    // 中文翻译：模拟锥头
-    m_cbCutterCollisionProxyMode->addItem(tr("Simulated cone"), 0);
-    // 中文翻译：刀嘴模型文件
-    m_cbCutterCollisionProxyMode->addItem(tr("Nozzle model file"), 1);
-    // 中文翻译：显示类型
-    nozzleForm->addRow(tr("Display type"), m_cbCutterCollisionProxyMode);
-
-    auto* nozzlePathRow = new QWidget(nozzleGroup);
-    auto* nozzlePathLayout = new QHBoxLayout(nozzlePathRow);
-    nozzlePathLayout->setContentsMargins(0, 0, 0, 0);
-    nozzlePathLayout->setSpacing(4);
-    m_editCutterNozzleModelPath = new QLineEdit(nozzlePathRow);
-    m_editCutterNozzleModelPath->setClearButtonEnabled(true);
-    // 中文翻译：选择轻量化切割嘴模型文件
-    m_editCutterNozzleModelPath->setPlaceholderText(tr("Select a lightweight cutting nozzle model"));
-    // 中文翻译：浏览...
-    m_btnBrowseCutterNozzleModel = new QPushButton(tr("Browse..."), nozzlePathRow);
-    nozzlePathLayout->addWidget(m_editCutterNozzleModelPath, 1);
-    nozzlePathLayout->addWidget(m_btnBrowseCutterNozzleModel);
-    // 中文翻译：刀嘴模型路径
-    nozzleForm->addRow(tr("Nozzle model path"), nozzlePathRow);
-
-    const auto positiveDistanceSpin = [nozzleGroup](double minimum, double maximum) {
-        auto* spin = noWheel(new QDoubleSpinBox(nozzleGroup));
-        spin->setRange(minimum, maximum);
-        spin->setDecimals(3);
-        spin->setSuffix(QStringLiteral(" mm"));
-        return spin;
-    };
-    m_spSimulatedConeLength = positiveDistanceSpin(0.1, 1000.0);
-    m_spSimulatedConeTipRadius = positiveDistanceSpin(0.0, 100.0);
-    m_spSimulatedConeBaseRadius = positiveDistanceSpin(0.0, 500.0);
-    m_spCutterCollisionClearance = positiveDistanceSpin(0.0, 100.0);
-    m_spMaximumRapidSafetyOffset = positiveDistanceSpin(0.1, 10000.0);
-    // 中文翻译：锥头长度；尖端半径；底部半径；最小安全间隙；最大安全抬高量
-    nozzleForm->addRow(tr("Cone length"), m_spSimulatedConeLength);
-    nozzleForm->addRow(tr("Tip radius"), m_spSimulatedConeTipRadius);
-    nozzleForm->addRow(tr("Base radius"), m_spSimulatedConeBaseRadius);
-    nozzleForm->addRow(tr("Minimum clearance"), m_spCutterCollisionClearance);
-    nozzleForm->addRow(tr("Maximum safety offset"), m_spMaximumRapidSafetyOffset);
-    auto* nozzleHint = new QLabel(
-        // 中文翻译：模型会自动将包围盒最低点作为刀嘴尖端，并以局部 +Z 作为远离加工面的方向。碰撞求高在生成刀路时完成。
-        tr("The model bounding-box minimum is treated as the nozzle tip and local +Z points away from the machining surface. Collision height is solved while generating the tool path."),
-        nozzleGroup);
-    nozzleHint->setWordWrap(true);
-    nozzleHint->setStyleSheet("color:#666;");
-    nozzleForm->addRow(nozzleHint);
-    root->addWidget(nozzleGroup);
-
     // 中文翻译：旋转中心
     auto* centerGroup = new QGroupBox(tr("center of rotation"), page);
     auto* centerForm = new QFormLayout(centerGroup);
@@ -909,17 +957,17 @@ void DialogOptions::buildMachineConfigurationPage()
     root->addWidget(centerGroup);
 
     // 中文翻译：摆头软件 TCP
-    auto* headTcpGroup = new QGroupBox(tr("Head software TCP"), page);
-    auto* headTcpForm = new QFormLayout(headTcpGroup);
+    m_headTcpGroup = new QGroupBox(tr("Head software TCP"), page);
+    auto* headTcpForm = new QFormLayout(m_headTcpGroup);
     const QStringList tcpLabels = {
         tr("Zero beam X"), tr("Zero beam Y"), tr("Zero beam Z"), tr("Focus length"),
         tr("Installation offset X"), tr("Installation offset Y"), tr("Installation offset Z")};
     for (int index = 0; index < 7; ++index) {
-        m_headTcpEditors[index] = machineCoordinateSpin(headTcpGroup);
+        m_headTcpEditors[index] = machineCoordinateSpin(m_headTcpGroup);
         if (index == 3) m_headTcpEditors[index]->setRange(0.0, 10000.0);
         headTcpForm->addRow(tcpLabels[index], m_headTcpEditors[index]);
     }
-    root->addWidget(headTcpGroup);
+    root->addWidget(m_headTcpGroup);
 
     m_machineAxesTable = new QTableWidget(page);
     m_machineAxesTable->setColumnCount(10);
@@ -981,34 +1029,6 @@ void DialogOptions::buildMachineConfigurationPage()
                 if (!path.isEmpty() && m_editMachineModelPath)
                     m_editMachineModelPath->setText(QFileInfo(path).absoluteFilePath());
             });
-    const auto updateNozzleMode = [this] {
-        const bool modelMode = m_cbCutterCollisionProxyMode
-            && m_cbCutterCollisionProxyMode->currentData().toInt() == 1;
-        if (m_editCutterNozzleModelPath) m_editCutterNozzleModelPath->setEnabled(modelMode);
-        if (m_btnBrowseCutterNozzleModel) m_btnBrowseCutterNozzleModel->setEnabled(modelMode);
-        if (m_spSimulatedConeLength) m_spSimulatedConeLength->setEnabled(!modelMode);
-        if (m_spSimulatedConeTipRadius) m_spSimulatedConeTipRadius->setEnabled(!modelMode);
-        if (m_spSimulatedConeBaseRadius) m_spSimulatedConeBaseRadius->setEnabled(!modelMode);
-    };
-    connect(m_cbCutterCollisionProxyMode, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, updateNozzleMode);
-    connect(m_btnBrowseCutterNozzleModel, &QPushButton::clicked, this,
-            [this] {
-                const QString currentPath = m_editCutterNozzleModelPath
-                    ? m_editCutterNozzleModelPath->text().trimmed() : QString();
-                const QString dir = currentPath.isEmpty()
-                    ? QString() : QFileInfo(currentPath).absolutePath();
-                const QString path = QFileDialog::getOpenFileName(
-                    this,
-                    // 中文翻译：选择切割嘴显示模型
-                    tr("Select cutting nozzle display model"), dir,
-                    // 中文翻译：三维模型文件 (*.stp *.step *.stl *.brep);;所有文件 (*)
-                    tr("3D model files (*.stp *.step *.stl *.brep);;All files (*)"));
-                if (!path.isEmpty() && m_editCutterNozzleModelPath)
-                    m_editCutterNozzleModelPath->setText(QFileInfo(path).absoluteFilePath());
-            });
-    updateNozzleMode();
-
     m_stack->addWidget(page);
 }
 
@@ -1062,6 +1082,14 @@ void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeCon
         }
         const int roleIndex = roleCombo->findData(static_cast<int>(config.axis.role));
         roleCombo->setCurrentIndex(roleIndex >= 0 ? roleIndex : 0);
+        connect(roleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this] {
+                    updateHeadTcpVisibility();
+                    if (m_lblMachineAlgorithm && m_cbMachinePreset)
+                        m_lblMachineAlgorithm->setText(
+                            algorithmTextForAxes(m_cbMachinePreset->currentData().toString(),
+                                                 collectMachineAxisDefinitions()));
+                });
         m_machineAxesTable->setCellWidget(row, 2, roleCombo);
 
         auto* parentCombo = new QComboBox(m_machineAxesTable);
@@ -1093,6 +1121,7 @@ void DialogOptions::populateMachineAxisTable(const QVector<MachineAxisRuntimeCon
     if (m_lblMachineAlgorithm && m_cbMachinePreset)
         m_lblMachineAlgorithm->setText(
             algorithmTextForAxes(m_cbMachinePreset->currentData().toString(), collectMachineAxisDefinitions()));
+    updateHeadTcpVisibility();
 }
 
 QList<MachineAxisDef> DialogOptions::collectMachineAxisDefinitions() const
@@ -1168,6 +1197,26 @@ bool DialogOptions::hasRotaryAxisInTable() const
         }
     }
     return false;
+}
+
+void DialogOptions::updateHeadTcpVisibility()
+{
+    if (!m_headTcpGroup || !m_machineAxesTable)
+        return;
+
+    bool headConfiguration = false;
+    for (int row = 0; row < m_machineAxesTable->rowCount(); ++row) {
+        const auto* combo = qobject_cast<QComboBox*>(m_machineAxesTable->cellWidget(row, 2));
+        if (!combo)
+            continue;
+        const auto role = static_cast<lcnc::MachineAxisRole>(combo->currentData().toInt());
+        if (role == lcnc::MachineAxisRole::HeadTiltPrimary
+            || role == lcnc::MachineAxisRole::HeadTiltSecondary) {
+            headConfiguration = true;
+            break;
+        }
+    }
+    m_headTcpGroup->setVisible(headConfiguration);
 }
 
 void DialogOptions::setRotationCenterUiFromAxes(const QList<MachineAxisDef>& axes)

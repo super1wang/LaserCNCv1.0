@@ -42,10 +42,18 @@ void clearLayout(QLayout* layout)
 
 bool supportsAcCalibration(const MachineKinematics* kin)
 {
-    return kin
-        && kin->configType() == QStringLiteral("VERTICAL_AC_TABLE")
-        && kin->findAxis(QStringLiteral("A"))
-        && kin->findAxis(QStringLiteral("C"));
+    if (!kin)
+        return false;
+    const MachineAxisDef* tiltAxis = nullptr;
+    const MachineAxisDef* spinAxis = nullptr;
+    for (const MachineAxisDef& axis : kin->axes()) {
+        if (axis.role == lcnc::MachineAxisRole::TableTilt)
+            tiltAxis = &axis;
+        else if (axis.role == lcnc::MachineAxisRole::TableSpin)
+            spinAxis = &axis;
+    }
+    return tiltAxis && spinAxis
+        && kin->isAxisDescendantOf(spinAxis->name, tiltAxis->name);
 }
 
 QString formatPointText(const gp_Pnt& point)
@@ -154,8 +162,8 @@ void WidgetMachinePanel::buildConfigPage()
         // 中文翻译：打开标定向导...
         tr("Open the Calibration Wizard..."), calibrationGroup);
     m_btnOpenCalibrationWizard->setToolTip(
-        // 中文翻译：依次拾取 A 轴、C 轴参考面与切割头下端面，填入物理 AC 中心与 A/C 角度，
-        tr("Select the A-axis and C-axis reference planes and the lower end face of the cutting head in sequence, and fill in the physical AC center and A/C angle."
+        // 中文翻译：依次拾取父旋转轴、子旋转轴参考面与切割头下端面；软件根据轴角色、方向和父链自动求取标定关系。
+        tr("Select the parent rotary-axis, child rotary-axis, and lower cutter-head reference faces in sequence. Calibration is derived automatically from axis roles, directions, and parent links."
            // 中文翻译：一次性完成机台坐标系标定，并自动持久化到 cam.toml 与机台 STEP。
            "The machine coordinate system calibration is completed in one go and automatically persisted to cam.toml and machine STEP."));
     calibrationLayout->addWidget(m_btnOpenCalibrationWizard);
@@ -232,24 +240,24 @@ void WidgetMachinePanel::refreshCalibrationSection()
     if (m_lblCalibrationHint) {
         m_lblCalibrationHint->setText(
             supported
-                // 中文翻译：适用于 AC 转台：A 轴参考面写入 Y/Z，C 轴参考面写入 X。整机对齐只做平移。切割头模型点与物理点可独立录入和对齐。
-                ? tr("Applicable to AC rotary tables: Write Y/Z for the A-axis reference plane and X for the C-axis reference plane. The whole machine is aligned only for translation. The cutting head model points and physical points can be entered and aligned independently.")
-                // 中文翻译：当前页用于轴心与切割头位置配置。AC 轴心快填和 AC 中心对齐仅在 AC 转台构型下显示。
-                : tr("The current page is used for axis and cutting head position configuration. AC Pivot Quick Fill and AC Center Align are only shown in AC rotary configuration."));
+                // 中文翻译：适用于配置了 TableTilt/TableSpin 角色的串联转台：软件根据轴方向和父链自动求旋转中心，并沿真实刀头承载链完成对齐。
+                ? tr("Applicable to serial rotary tables with TableTilt/TableSpin roles: the rotation center is derived from axis directions and parent links, and cutter alignment follows the physical tool-carrier chain.")
+                // 中文翻译：当前轴角色或父链不构成受支持的串联转台，标定入口已禁用。
+                : tr("The configured axis roles or parent links do not form a supported serial rotary table, so calibration is disabled."));
     }
 
-    if (m_axisAySpin && kin && kin->findAxis(QStringLiteral("A"))) {
+    if (m_axisAzSpin && kin && kin->findAxis(QStringLiteral("A"))) {
         const gp_Pnt origin = kin->axisOrigin(QStringLiteral("A"));
-        const QSignalBlocker blockY(m_axisAySpin);
         const QSignalBlocker blockZ(m_axisAzSpin);
-        m_axisAySpin->setValue(origin.Y());
         m_axisAzSpin->setValue(origin.Z());
     }
 
-    if (m_axisCxSpin && kin && kin->findAxis(QStringLiteral("C"))) {
+    if (m_axisCxSpin && m_axisCySpin && kin && kin->findAxis(QStringLiteral("C"))) {
         const gp_Pnt origin = kin->axisOrigin(QStringLiteral("C"));
         const QSignalBlocker blockX(m_axisCxSpin);
+        const QSignalBlocker blockY(m_axisCySpin);
         m_axisCxSpin->setValue(origin.X());
+        m_axisCySpin->setValue(origin.Y());
     }
 
     gp_Pnt center;
@@ -259,8 +267,8 @@ void WidgetMachinePanel::refreshCalibrationSection()
             m_lblCurrentAcCenter->setText(formatPointText(center));
             m_lblCurrentAcCenter->setStyleSheet(QString());
         } else {
-            // 中文翻译：当前构型暂不支持 AC 中心对齐。
-            m_lblCurrentAcCenter->setText(tr("The current configuration does not support AC center alignment."));
+            // 中文翻译：当前构型暂不支持转台中心对齐。
+            m_lblCurrentAcCenter->setText(tr("The current configuration does not support rotary-table center alignment."));
             m_lblCurrentAcCenter->setStyleSheet("color: gray; font-size: 11px;");
         }
     }
@@ -274,12 +282,12 @@ void WidgetMachinePanel::refreshCalibrationSection()
         m_btnPickAxisA->setEnabled(supported);
     if (m_btnPickAxisC)
         m_btnPickAxisC->setEnabled(supported);
-    if (m_axisAySpin)
-        m_axisAySpin->setEnabled(supported);
     if (m_axisAzSpin)
         m_axisAzSpin->setEnabled(supported);
     if (m_axisCxSpin)
         m_axisCxSpin->setEnabled(supported);
+    if (m_axisCySpin)
+        m_axisCySpin->setEnabled(supported);
     if (m_btnAlignToPhysical)
         m_btnAlignToPhysical->setEnabled(supported);
     if (m_btnOpenCalibrationWizard)
@@ -516,13 +524,14 @@ void WidgetMachinePanel::onAxisOriginEditorChanged()
 
     const gp_Pnt aOrigin = kin->axisOrigin(QStringLiteral("A"));
     emit axisOriginChanged(QStringLiteral("A"), aOrigin.X(),
-                           m_axisAySpin ? m_axisAySpin->value() : aOrigin.Y(),
+                           aOrigin.Y(),
                            m_axisAzSpin ? m_axisAzSpin->value() : aOrigin.Z());
 
     const gp_Pnt cOrigin = kin->axisOrigin(QStringLiteral("C"));
     emit axisOriginChanged(QStringLiteral("C"),
                            m_axisCxSpin ? m_axisCxSpin->value() : cOrigin.X(),
-                           cOrigin.Y(), cOrigin.Z());
+                           m_axisCySpin ? m_axisCySpin->value() : cOrigin.Y(),
+                           cOrigin.Z());
 }
 
 void WidgetMachinePanel::onCutterHeadModelEditorChanged()

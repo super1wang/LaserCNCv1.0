@@ -78,9 +78,9 @@ private:
     QGroupBox* m_groupAcAxes{nullptr};
     QGroupBox* m_groupAcCenter{nullptr};
     QGroupBox* m_groupHeadAlignment{nullptr};
-    QDoubleSpinBox* m_axisAySpin{nullptr};
     QDoubleSpinBox* m_axisAzSpin{nullptr};
     QDoubleSpinBox* m_axisCxSpin{nullptr};
+    QDoubleSpinBox* m_axisCySpin{nullptr};
     QDoubleSpinBox* m_targetCenterX{nullptr};
     QDoubleSpinBox* m_targetCenterY{nullptr};
     QDoubleSpinBox* m_targetCenterZ{nullptr};

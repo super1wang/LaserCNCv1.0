@@ -238,29 +238,28 @@ QStringList MachineKinematics::workpiecesOnAxis(const QString& axisName) const
 
 gp_Trsf MachineKinematics::axisLocalTrsf(const MachineAxisDef& axis, bool home) const
 {
+    return axisLocalTrsf(axis, home ? 0.0 : axis.currentPos);
+}
+
+gp_Trsf MachineKinematics::axisLocalTrsf(const MachineAxisDef& axis, double position) const
+{
     gp_Trsf t;  // identity
-    if (axis.name == "BASE" || home || axis.currentPos == 0.0) return t;
+    if (axis.name == "BASE" || position == 0.0) return t;
 
     if (axis.motionType == MachineAxisDef::Linear) {
-        t.SetTranslation(gp_Vec(axis.direction) * axis.currentPos);
+        t.SetTranslation(gp_Vec(axis.direction) * position);
     } else {
         t.SetRotation(gp_Ax1(axis.origin, axis.direction),
-                      lcnc::math::degreesToRadians(axis.currentPos));
+                      lcnc::math::degreesToRadians(position));
     }
     return t;
 }
 
 gp_Trsf MachineKinematics::chainTrsf(const QString& axisName, bool home) const
 {
-    // Build chain from ROOT to this axis: [ ..., parent, axisName ]
-    QStringList chain;
-    QString cur = axisName;
-    while (!cur.isEmpty()) {
-        chain.prepend(cur);
-        const MachineAxisDef* def = findAxis(cur);
-        if (!def) break;
-        cur = def->parentAxis;
-    }
+    const QStringList chain = axisChain(axisName);
+    if (chain.isEmpty())
+        return gp_Trsf();
 
     // Compose:  T_root * ... * T_parent * T_axis
     // (A.Multiplied(B)).Transform(P) = A.Transform(B.Transform(P))
@@ -270,6 +269,25 @@ gp_Trsf MachineKinematics::chainTrsf(const QString& axisName, bool home) const
         const MachineAxisDef* def = findAxis(n);
         if (def && def->name != "BASE")
             result = result.Multiplied(axisLocalTrsf(*def, home));
+    }
+    return result;
+}
+
+gp_Trsf MachineKinematics::chainTrsf(
+    const QString& axisName,
+    const QMap<QString, double>& axisPositions) const
+{
+    const QStringList chain = axisChain(axisName);
+    if (chain.isEmpty())
+        return gp_Trsf();
+
+    gp_Trsf result;
+    for (const QString& name : chain) {
+        const MachineAxisDef* axis = findAxis(name);
+        if (axis && axis->name != QStringLiteral("BASE")) {
+            result = result.Multiplied(axisLocalTrsf(
+                *axis, axisPositions.value(axis->name, 0.0)));
+        }
     }
     return result;
 }
@@ -297,28 +315,60 @@ gp_Trsf MachineKinematics::computeAxisTransform(const QString& axisName) const
     return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName);
 }
 
+gp_Trsf MachineKinematics::computeAxisTransform(
+    const QString& axisName,
+    const QMap<QString, double>& axisPositions) const
+{
+    return axisName.isEmpty() ? gp_Trsf() : chainTrsf(axisName, axisPositions);
+}
+
+QStringList MachineKinematics::axisChain(const QString& axisName) const
+{
+    QStringList chain;
+    QString current = axisName.trimmed().toUpper();
+    QSet<QString> visited;
+    while (!current.isEmpty()) {
+        if (visited.contains(current))
+            return {};
+        visited.insert(current);
+
+        const MachineAxisDef* axis = findAxis(current);
+        if (!axis)
+            return {};
+        chain.prepend(axis->name);
+        current = axis->parentAxis.trimmed().toUpper();
+    }
+
+    if (chain.isEmpty() || chain.front() != QStringLiteral("BASE"))
+        return {};
+    return chain;
+}
+
 bool MachineKinematics::isAxisDescendantOf(const QString& axisName,
                                            const QString& ancestorAxis) const
 {
     const QString target = ancestorAxis.trimmed().toUpper();
-    QString current = axisName.trimmed().toUpper();
-    QSet<QString> visited;
-    bool matched = false;
-    while (!current.isEmpty()) {
-        if (visited.contains(current))
-            return false;
-        visited.insert(current);
-        matched = matched || current == target;
-        const MachineAxisDef* axis = findAxis(current);
-        if (!axis)
-            return false;
-        current = axis->parentAxis.trimmed().toUpper();
-    }
-    return matched;
+    if (target.isEmpty())
+        return false;
+    const QStringList chain = axisChain(axisName);
+    return !chain.isEmpty() && chain.contains(target, Qt::CaseInsensitive);
 }
 
 gp_Pnt MachineKinematics::currentLinearPosition() const
 {
+    bool hasTableSpin = false;
+    const MachineAxisDef* toolCarrier = nullptr;
+    for (const MachineAxisDef& axis : m_axes) {
+        hasTableSpin = hasTableSpin
+            || axis.role == lcnc::MachineAxisRole::TableSpin;
+        if (axis.role == lcnc::MachineAxisRole::LinearZ)
+            toolCarrier = &axis;
+    }
+    if (hasTableSpin && toolCarrier) {
+        return gp_Pnt(0.0, 0.0, 0.0).Transformed(
+            computeAxisTransform(toolCarrier->name));
+    }
+
     gp_Vec position(0.0, 0.0, 0.0);
     for (const QString& axisName : {QStringLiteral("X"),
                                     QStringLiteral("Y"),

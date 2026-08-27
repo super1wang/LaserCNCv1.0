@@ -1,5 +1,6 @@
 #include "core/kinematics/machine_configuration_service.h"
 
+#include "core/kinematics/machine_relative_kinematics.h"
 #include "core/logging/logger.h"
 
 #include <QCoreApplication>
@@ -468,6 +469,42 @@ bool MachineConfigurationService::validateConfiguration(QString* errorMessage) c
             }
             visited.insert(current, true);
             current = parentOf.value(current);
+        }
+    }
+
+    if (roleOwners.contains(MachineAxisRole::TableTilt)
+        && roleOwners.contains(MachineAxisRole::TableSpin)) {
+        const QString tiltAxis = roleOwners.value(MachineAxisRole::TableTilt);
+        const QString spinAxis = roleOwners.value(MachineAxisRole::TableSpin);
+        const QString toolCarrier = roleOwners.value(MachineAxisRole::LinearZ);
+        if (toolCarrier.isEmpty()) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Table kinematics requires a LinearZ tool-carrier axis");
+            return false;
+        }
+
+        MachineKinematics topology;
+        topology.setAxes(axisDefinitions(), m_presetName);
+        if (!topology.isAxisDescendantOf(spinAxis, tiltAxis)) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("TableSpin axis %1 must be carried by TableTilt axis %2")
+                    .arg(spinAxis, tiltAxis);
+            }
+            return false;
+        }
+
+        const QStringList linearAxes{
+            roleOwners.value(MachineAxisRole::LinearX),
+            roleOwners.value(MachineAxisRole::LinearY),
+            roleOwners.value(MachineAxisRole::LinearZ)};
+        if (!lcnc::kinematics::hasFullRankRelativeLinearMotion(
+                topology, toolCarrier, spinAxis, linearAxes)) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral(
+                    "The configured X/Y/Z axes do not provide full-rank relative motion between tool carrier %1 and workpiece carrier %2")
+                    .arg(toolCarrier, spinAxis);
+            }
+            return false;
         }
     }
     for (MachiningMode mode : supportedMachiningModes()) {

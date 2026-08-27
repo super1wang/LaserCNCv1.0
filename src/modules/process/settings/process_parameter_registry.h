@@ -41,6 +41,9 @@ struct ParameterObjectDescriptor
     QString id;
     QString title;
     QString category;
+    /// Optional parent object id. The settings tree renders this object below
+    /// that selectable object instead of directly below its category.
+    QString parentObjectId;
     QString iconName;
     QVector<ParameterDescriptor> fields;
     bool toolObject{false};

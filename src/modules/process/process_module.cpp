@@ -1250,17 +1250,23 @@ void ProcessModule::home()
         return;
     }
 
-    // 合并预设轴系（按 Z 优先顺序）+ 用户扩展轴系；扩展轴系无对应 Axis 枚举，
-    // 实控阶段只能跳过硬件回零，但仍参与位姿清零，与仿真保持一致。
+    // Build the Ribbon command from the software-level controller settings.
+    // Extension axes have no MotionControl::Axis mapping and remain untouched.
     QStringList axes = lcnc::process::homeOrderForAxes(m_axisDefinitions);
     for (const QString& ext : m_runtimeConfiguration.extensionAxes()) {
         const QString key = ext.trimmed().toUpper();
         if (!key.isEmpty() && key != QStringLiteral("BASE") && !axes.contains(key))
             axes.append(key);
     }
-    if (axes.isEmpty()) {
-        // 中文翻译：没有可回零的轴系
-        setStatusMessage(tr("No axis system that can be homed"));
+    QString homingError;
+    const QVector<lcnc::process::AxisHomingCommand> commands = m_settingsService
+        ? m_settingsService->homingCommands(axes, &homingError)
+        : QVector<lcnc::process::AxisHomingCommand>{};
+    if (commands.isEmpty()) {
+        // 中文翻译：所有轴的回零均已关闭；回零配置无效：%1
+        setStatusMessage(homingError.isEmpty()
+                             ? tr("Homing is disabled for all axes")
+                             : tr("Invalid homing settings: %1").arg(homingError));
         return;
     }
 
@@ -1273,38 +1279,41 @@ void ProcessModule::home()
     m_homing = true;
     m_deviceOperation = DeviceOperation::Homing;
     // 中文翻译：开始回零（共 %1 个轴）
-    setStatusMessage(tr("Start zero return (total %1 axes)").arg(axes.size()));
+    setStatusMessage(tr("Start zero return (total %1 axes)").arg(commands.size()));
 
-    const bool connected = m_connected;
     const auto service = m_service;
     QPointer<ProcessModule> self(this);
 
     // The complete sequence stays on the device thread so no axis can be
     // interleaved with a settings update or later migrated device command.
-    if (!m_deviceCommandQueue->submit([axes, connected, service, self] {
-            const auto result = service->homeAxes(axes, connected);
+    if (!m_deviceCommandQueue->submit([commands, service, self] {
+            const auto result = service->homeAxes(commands);
             const bool success = result.success;
             if (self) {
-                QMetaObject::invokeMethod(self, [self, axes, success] {
+                QMetaObject::invokeMethod(self, [self, commands, success, error = result.error] {
                     if (!self)
                         return;
 
                     self->m_homing = false;
                     self->m_deviceOperation = DeviceOperation::None;
-                    // The hardware poller may overwrite this with its actual
-                    // position shortly afterwards; clear the UI cache now.
-                    for (const QString& axis : axes)
-                        self->setAxisPosition(axis, 0.0);
-                    self->m_simPhase = 0.0;
-
                     if (success) {
+                        // The hardware poller may overwrite this with its actual
+                        // position shortly afterwards; update only after the
+                        // complete device transaction succeeds.
+                        for (const auto& command : commands) {
+                            const double position =
+                                command.method == lcnc::process::AxisHomingMethod::SetCurrentPosition
+                                    ? command.position : 0.0;
+                            self->setAxisPosition(command.axisName, position);
+                        }
+                        self->m_simPhase = 0.0;
                         // 中文翻译：回零完成 — 共 %1 个轴
-                        self->setStatusMessage(tr("Zero return completed - %1 axes in total").arg(axes.size()));
+                        self->setStatusMessage(tr("Zero return completed - %1 axes in total").arg(commands.size()));
                         LCNC_INFO(lcnc::LogCode::Generic,
-                                  "ProcessModule::home: completed for {} axes", axes.size());
+                                  "ProcessModule::home: completed for {} axes", commands.size());
                     } else {
-                        // 中文翻译：回零失败，请检查日志
-                        self->setState(State::Error, tr("Return to zero failed, please check the log"));
+                        // 中文翻译：回零失败：%1
+                        self->setState(State::Error, tr("Homing failed: %1").arg(error));
                     }
                 }, Qt::QueuedConnection);
             }
@@ -1758,6 +1767,11 @@ void ProcessModule::requestStop(StopOutcome outcome, const QString& statusMessag
 {
     ++m_runRequestGeneration;
     m_activeLockedAxisTargets.clear();
+    // GTN Smart Home is a bounded vendor loop on the device worker. Set its
+    // SDK-free atomic cancellation hint before queueing the Stop transaction,
+    // so the active Home call can yield to the highest-priority Stop lane.
+    if (m_service)
+        m_service->requestMotionAbort();
     // Queue gating exists only while this safe-stop transaction is unfinished.
     // It must not persist merely because the resulting state is Error/Stopped.
     m_stopRecoveryRequired = true;

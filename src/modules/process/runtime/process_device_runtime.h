@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <functional>
+#include <mutex>
 #include <string>
 #include "modules/process/device/motion_control/motion_control.h"
 #include "modules/process/runtime/process_device_coordinator.h"
@@ -84,6 +85,9 @@ public:
     lcnc::process::DeviceCommandResult jog(lcnc::process::Axis axis, bool positive, double velocity);
     lcnc::process::DeviceCommandResult stopAxis(lcnc::process::Axis axis);
     lcnc::process::DeviceCommandResult stopAllMotion();
+    /// Sets only the controller's atomic cancellation hint. This never calls a
+    /// vendor SDK and may therefore run before the queued Stop transaction.
+    void requestMotionAbort() noexcept;
     lcnc::process::DeviceCommandResult moveAxes(
         const QVector<lcnc::process::Axis>& axes, const QVector<double>& positions, double velocity, bool relative);
     /// 将所选轴当前位置寄存器直接置位为指定坐标（ACS setfpos / GTN 对应接口）。
@@ -93,7 +97,11 @@ public:
     lcnc::process::DeviceCommandResult setDigitalOutput(const QString& outputName, bool value);
     lcnc::process::DeviceCommandResult setAnalogOutput(lcnc::process::AnalogOUT output, double value,
                                                        const QString& outputName = {});
-    lcnc::process::DeviceCommandResult homeAxes(const QStringList& axes, bool connected);
+    /// Establishes each axis reference sequentially. Disabled is a complete
+    /// no-op; ControllerHome moves through the vendor routine;
+    /// SetCurrentPosition only rewrites the encoder/planner coordinate.
+    lcnc::process::DeviceCommandResult homeAxes(
+        const QVector<lcnc::process::AxisHomingCommand>& commands);
     lcnc::process::DeviceCommandResult moveToPreset(
         const QMap<QString, double>& targets, double velocity, const QString& positionName);
     lcnc::process::DeviceStatusSnapshot pollStatus(
@@ -134,6 +142,7 @@ private:
     void setLaserDevice(std::string strName = "");
     lcnc::process::ProcessSettingsService& m_settings;
     lcnc::process::ProcessRuntimeConfiguration& m_runtimeConfiguration;
+    mutable std::mutex m_motionControlLifetimeMutex;
     std::unique_ptr<MotionControl> m_motionControl;
     mutable lcnc::process::ProcessDeviceCoordinator m_deviceCoordinator;
 

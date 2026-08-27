@@ -200,6 +200,7 @@ int main(int argc, char* argv[])
 
     QApplication app(argc, argv);
     const bool smokeTest = app.arguments().contains(QStringLiteral("--smoke-test"));
+    app.setProperty("lcnc.smokeTest", smokeTest);
     app.setApplicationName(QStringLiteral("LaserCNC"));
     app.setApplicationVersion(QStringLiteral(LCNC_VERSION_STRING));
     app.setOrganizationName(QStringLiteral("LaserCNC"));

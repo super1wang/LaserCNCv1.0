@@ -21,7 +21,9 @@
  *      on top of the Z linear axis.
  *      IK: decompose the desired tool direction into two rotary angles.
  *
- * In all cases, the linear axes X/Y/Z absorb the residual translation.
+ * Table rotary orientation is solved here. The topology solver then derives
+ * X/Y/Z from the relative motion between the configured tool-carrier and
+ * workpiece-carrier branches. Head machines retain their calibrated TCP path.
  */
 class IKSolver
 {

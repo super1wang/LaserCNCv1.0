@@ -107,17 +107,23 @@ void ProcessSettingsDialog::rebuildObjectTree(const QString& selectedObjectId)
     m_objectDescriptors = m_settings->objects();
     m_objects->clear();
     QMap<QString, QTreeWidgetItem*> categories;
+    QMap<QString, QTreeWidgetItem*> objectItems;
     QTreeWidgetItem* restoredSelection = nullptr;
     for (int i = 0; i < m_objectDescriptors.size(); ++i) {
         const auto& object = m_objectDescriptors.at(i);
-        auto* category = categories.value(object.category);
-        if (!category) {
-            category = new QTreeWidgetItem(m_objects, {object.category});
-            category->setFlags(category->flags() & ~Qt::ItemIsSelectable);
-            categories.insert(object.category, category);
+        QTreeWidgetItem* parent = objectItems.value(object.parentObjectId);
+        if (!parent) {
+            auto* category = categories.value(object.category);
+            if (!category) {
+                category = new QTreeWidgetItem(m_objects, {object.category});
+                category->setFlags(category->flags() & ~Qt::ItemIsSelectable);
+                categories.insert(object.category, category);
+            }
+            parent = category;
         }
-        auto* item = new QTreeWidgetItem(category, {object.title});
+        auto* item = new QTreeWidgetItem(parent, {object.title});
         item->setData(0, Qt::UserRole, i);
+        objectItems.insert(object.id, item);
         if (!selectedObjectId.isEmpty() && object.id == selectedObjectId)
             restoredSelection = item;
     }

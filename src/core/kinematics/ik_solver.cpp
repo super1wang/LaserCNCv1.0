@@ -125,11 +125,6 @@ double linearAxisCoordinate(const MachineKinematics* kin,
     const MachineAxisDef* axis = kin ? kin->findAxis(axisName) : nullptr;
     if (!axis || axis->motionType != MachineAxisDef::Linear)
         return fallback;
-
-    // MachineKinematics applies a linear axis as direction * coordinate. Its
-    // inverse is therefore the scalar projection of the world point onto the
-    // configured positive axis direction. In particular, Z=(0,0,-1) maps a
-    // negative world-space Z cutting point to a positive machine Z value.
     return gp_Vec(gp_Pnt(0.0, 0.0, 0.0), worldPoint).Dot(gp_Vec(axis->direction));
 }
 
@@ -507,18 +502,10 @@ MachineCoord IKSolver::solveTableType(const MachineKinematics* kin,
         return result;
     }
 
-    // Step 3: Compute the actual rotation applied to the workpiece
-    gp_Trsf rot1Final = axisRotation(*ax1, result.r1);
-    gp_Trsf rot2Final = axisRotation(*ax2, result.r2);
-    // 链路顺序与 MachineKinematics::chainTrsf(BASE→parent→child) 一致：
-    // totalRot = T_parent * T_child（child=r1 先施加，parent=r2 后施加）。
-    gp_Trsf totalRot = rot2Final.Multiplied(rot1Final);
-
-    // The tool tip position in world after table rotation:
-    // The workpiece point P rotates with the table → P_world = totalRot * P
-    // The gantry must go to P_world, so XYZ = P_world.
-    gp_Pnt rotatedPos = toolPos.Transformed(totalRot);
-    setLinearMachineCoordinates(result, kin, rotatedPos);
+    // Translation is solved by ToolpathKinematicsSolver from the relative
+    // tool/workpiece carrier trees. It cannot be projected directly from the
+    // rotated point because a linear axis may live on the workpiece branch.
+    Q_UNUSED(toolPos);
     result.valid = true;
 
     return result;

@@ -13,6 +13,7 @@
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
 #include "core/kernel/service_registry.h"
+#include "core/kinematics/machine_calibration.h"
 #include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/kinematics/machine_pose.h"
@@ -805,10 +806,20 @@ bool CamModule::currentAcRotationCenter(gp_Pnt& center) const
     if (!kin)
         return false;
 
-    const gp_Pnt aOrigin = kin->axisOrigin(QStringLiteral("A"));
-    const gp_Pnt cOrigin = kin->axisOrigin(QStringLiteral("C"));
-    center = gp_Pnt(cOrigin.X(), aOrigin.Y(), aOrigin.Z());
-    return true;
+    const MachineAxisDef* tiltAxis = nullptr;
+    const MachineAxisDef* spinAxis = nullptr;
+    for (const MachineAxisDef& axis : kin->axes()) {
+        if (axis.role == lcnc::MachineAxisRole::TableTilt)
+            tiltAxis = &axis;
+        else if (axis.role == lcnc::MachineAxisRole::TableSpin)
+            spinAxis = &axis;
+    }
+    double axisSeparation = 0.0;
+    return tiltAxis && spinAxis
+        && lcnc::kinematics::tableRotationCenterFromReferences(
+            *tiltAxis, tiltAxis->origin, *spinAxis, spinAxis->origin,
+            center, &axisSeparation)
+        && axisSeparation <= 0.1;
 }
 
 bool CamModule::currentWorkpieceRotationCenter(gp_Pnt& center) const
@@ -817,21 +828,16 @@ bool CamModule::currentWorkpieceRotationCenter(gp_Pnt& center) const
     if (!kin)
         return false;
 
-    const QString configType = kin->configType();
-    if (configType == QStringLiteral("VERTICAL_AC_TABLE"))
+    bool hasTableTilt = false;
+    bool hasTableSpin = false;
+    for (const MachineAxisDef& axis : kin->axes()) {
+        hasTableTilt = hasTableTilt || axis.role == lcnc::MachineAxisRole::TableTilt;
+        hasTableSpin = hasTableSpin || axis.role == lcnc::MachineAxisRole::TableSpin;
+    }
+    if (hasTableTilt && hasTableSpin)
         return currentAcRotationCenter(center);
 
-    if (configType == QStringLiteral("VERTICAL_BC_TABLE")) {
-        if (!kin->findAxis(QStringLiteral("B")) || !kin->findAxis(QStringLiteral("C")))
-            return false;
-
-        const gp_Pnt bOrigin = kin->axisOrigin(QStringLiteral("B"));
-        const gp_Pnt cOrigin = kin->axisOrigin(QStringLiteral("C"));
-        center = gp_Pnt(bOrigin.X(), cOrigin.Y(), bOrigin.Z());
-        return true;
-    }
-
-    if (configType == QStringLiteral("XYZA")) {
+    if (kin->configType() == QStringLiteral("XYZA")) {
         if (!kin->findAxis(QStringLiteral("A")))
             return false;
 
@@ -888,19 +894,20 @@ bool CamModule::enterStandardCalibrationPose(const AxisCalibrationInputs& inputs
     if (!kin)
         // 中文翻译：找不到机台轴系配置。
         return fail(tr("The machine axis system configuration cannot be found."));
-    for (const QString& rotaryAxis : {QStringLiteral("A"), QStringLiteral("C")}) {
-        const MachineAxisDef* axis = kin->findAxis(rotaryAxis);
-        if (axis && std::abs(axis->currentPos) > 1e-6) {
-            // 中文翻译：绝对几何标定要求实际 A/C 轴先回到 0；向导不会替机台修改实时轴坐标。
-            return fail(tr("Absolute geometry calibration requires the physical A/C axes to be at 0 first. The wizard will not change live axis coordinates."));
+    for (const MachineAxisDef& axis : kin->axes()) {
+        if ((axis.role == lcnc::MachineAxisRole::TableTilt
+             || axis.role == lcnc::MachineAxisRole::TableSpin)
+            && std::abs(axis.currentPos) > 1e-6) {
+            // 中文翻译：绝对几何标定要求实际转台旋转轴先回到 0；向导不会替机台修改实时轴坐标。
+            return fail(tr("Absolute geometry calibration requires the physical rotary-table axes to be at 0 first. The wizard will not change live axis coordinates."));
         }
     }
 
     try {
         gp_Pnt configuredCenter;
         if (!currentAcRotationCenter(configuredCenter))
-            // 中文翻译：请先在应用程序选项的机台构型页填写 A/C 旋转中心。
-            return fail(tr("Please fill in the A/C rotation center on the machine configuration page of the application options first."));
+            // 中文翻译：请先在应用程序选项的机台构型页配置转台旋转轴原点。
+            return fail(tr("Please configure the rotary-table axis origins on the machine configuration page of the application options first."));
 
         LCNC_INFO(lcnc::LogCode::Generic,
                   "Calibration absolute targets: configuredCenter=({:.3f},{:.3f},{:.3f}) "
@@ -928,8 +935,6 @@ gp_Pnt CamModule::cutterHeadWorldPosition() const
     const MachineKinematics* kin = kinematics();
     if (!kin)
         return gp_Pnt(0.0, 0.0, 0.0);
-    // 模拟锥头表示控制器 TCP，而不是 STEP 模型中的拾取点。机台几何标定会
-    // 平移 m_cutterHeadModelPosition；该平移不得改变 X/Y/Z 实时反馈所表示的位置。
     return kin->currentLinearPosition();
 }
 
@@ -965,8 +970,8 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
     try {
         gp_Pnt configuredCenter;
         if (!currentAcRotationCenter(configuredCenter))
-            // 中文翻译：请先在应用程序选项的机台构型页填写 A/C 旋转中心。
-            return fail(tr("Please fill in the A/C rotation center on the machine configuration page of the application options first."));
+            // 中文翻译：请先在应用程序选项的机台构型页配置转台旋转轴原点。
+            return fail(tr("Please configure the rotary-table axis origins on the machine configuration page of the application options first."));
 
         LcncDocument* doc = machineDocument();
         MachineKinematics* kin = kinematics();
@@ -1007,65 +1012,47 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
             return true;
         };
 
-        // Stage 1: A supplies Y/Z and C supplies X. Drag the complete machine
-        // model until that picked model AC intersection reaches the immutable
-        // absolute AC center.
-        const gp_Pnt pickedModelCenter(inputs.cFaceCenter.X(),
-                                       inputs.aFaceCenter.Y(),
-                                       inputs.aFaceCenter.Z());
-        const gp_Vec acTranslation(pickedModelCenter, configuredCenter);
+        lcnc::kinematics::TableCalibrationPlan calibrationPlan;
+        lcnc::kinematics::CalibrationPlanError planError =
+            lcnc::kinematics::CalibrationPlanError::None;
+        if (!lcnc::kinematics::buildTableCalibrationPlan(
+                *kin, inputs.tiltFaceCenter, inputs.spinFaceCenter,
+                inputs.cutterHeadFaceCenter, configuredCenter, absoluteTcp,
+                calibrationPlan, &planError)) {
+            if (planError == lcnc::kinematics::CalibrationPlanError::ParallelRotaryAxes) {
+                // 中文翻译：TableTilt 与 TableSpin 旋转轴平行，无法定义唯一的转台中心。
+                return fail(tr("The TableTilt and TableSpin axes are parallel and do not define a unique rotary-table center."));
+            }
+            if (planError == lcnc::kinematics::CalibrationPlanError::SkewRotaryReferences) {
+                // 中文翻译：拾取的两条旋转轴线不相交，请检查参考面和轴方向配置。
+                return fail(tr("The two picked rotary-axis lines do not intersect. Check the reference faces and configured axis directions."));
+            }
+            if (planError == lcnc::kinematics::CalibrationPlanError::UnreachableToolCorrection) {
+                // 中文翻译：所需切割头校正包含刀头承载链无法产生的方向，请检查模型装配和父轴链路。
+                return fail(tr("The required cutter correction contains a direction that the configured tool-carrier chain cannot produce. Check the model assembly and parent-axis chain."));
+            }
+            // 中文翻译：切割头承载链不完整或其直线轴运动退化，无法执行标定。
+            return fail(tr("The tool-carrier chain is incomplete or its linear-axis motion is degenerate, so calibration cannot continue."));
+        }
+
+        // Stage 1: derive the model center from the configured rotary-axis
+        // lines, then translate the complete machine to the physical center.
+        const gp_Vec& acTranslation = calibrationPlan.wholeMachineTranslation;
         for (int index = 1; index <= machineLabels.Length(); ++index) {
             const TDF_Label label = machineLabels.Value(index);
             if (!label.IsNull() && !moveLabel(label, acTranslation)) {
                 rollback();
-                // 中文翻译：AC 中心对齐失败，机台模型已恢复标定前位置。
-                return fail(tr("AC center alignment failed and the machine model has been restored to its pre-calibration position."));
+                // 中文翻译：转台中心对齐失败，机台模型已恢复标定前位置。
+                return fail(tr("Rotary-table center alignment failed and the machine model has been restored to its pre-calibration position."));
             }
         }
-        gp_Pnt alignedCutterFaceWorld =
-            inputs.cutterHeadFaceCenter.Translated(acTranslation);
+        gp_Pnt alignedCutterFaceWorld = inputs.cutterHeadFaceCenter.Translated(
+            acTranslation);
 
-        // Stage 2: drag only the cutter-carrier Y->X->Z chain in XYZ so the
-        // picked cutter face reaches the immutable simulated TCP represented
-        // by the current live X/Y/Z machine coordinates.
-        const gp_Vec cutterTranslation(
-            absoluteTcp.X() - alignedCutterFaceWorld.X(),
-            absoluteTcp.Y() - alignedCutterFaceWorld.Y(),
-            absoluteTcp.Z() - alignedCutterFaceWorld.Z());
-
-        // Resolve the world-space correction in the configured linear-axis
-        // basis. Each correction is then propagated only through that axis'
-        // kinematic subtree. For BASE->Y->X->Z this means:
-        //   Y correction -> Y/X/Z, X correction -> X/Z, Z correction -> Z.
-        const MachineAxisDef* xAxis = kin->findAxis(QStringLiteral("X"));
-        const MachineAxisDef* yAxis = kin->findAxis(QStringLiteral("Y"));
-        const MachineAxisDef* zAxis = kin->findAxis(QStringLiteral("Z"));
-        if (!xAxis || !yAxis || !zAxis
-            || xAxis->motionType != MachineAxisDef::Linear
-            || yAxis->motionType != MachineAxisDef::Linear
-            || zAxis->motionType != MachineAxisDef::Linear) {
-            rollback();
-            // 中文翻译：切割头标定需要完整的 X/Y/Z 直线轴构型。
-            return fail(tr("Cutter-head calibration requires a complete X/Y/Z linear-axis configuration."));
-        }
-        const gp_Vec xDirection(xAxis->direction);
-        const gp_Vec yDirection(yAxis->direction);
-        const gp_Vec zDirection(zAxis->direction);
-        const double basisDeterminant = xDirection.Dot(yDirection.Crossed(zDirection));
-        if (std::abs(basisDeterminant) < 1e-9) {
-            rollback();
-            // 中文翻译：X/Y/Z 轴方向不能构成独立的三维标定坐标系。
-            return fail(tr("The X/Y/Z axis directions do not form an independent three-dimensional calibration frame."));
-        }
-
-        QMap<QString, gp_Vec> axisCorrections;
-        axisCorrections.insert(QStringLiteral("X"), xDirection
-            * (cutterTranslation.Dot(yDirection.Crossed(zDirection)) / basisDeterminant));
-        axisCorrections.insert(QStringLiteral("Y"), yDirection
-            * (xDirection.Dot(cutterTranslation.Crossed(zDirection)) / basisDeterminant));
-        axisCorrections.insert(QStringLiteral("Z"), zDirection
-            * (xDirection.Dot(yDirection.Crossed(cutterTranslation)) / basisDeterminant));
-
+        // Stage 2: propagate corrections only through linear axes on the real
+        // tool-carrier chain. A workpiece-side linear axis is never counted as
+        // cutter motion.
+        QMap<QString, int> directPartCounts;
         QMap<QString, int> affectedPartCounts;
         for (int index = 1; index <= machineLabels.Length(); ++index) {
             const TDF_Label label = machineLabels.Value(index);
@@ -1073,39 +1060,52 @@ bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
                 continue;
             const QString entry = XcafUtils::entry(label);
             const QString assignedAxis = kin->axisForShape(entry);
-            gp_Vec partTranslation(0.0, 0.0, 0.0);
-            for (auto correction = axisCorrections.cbegin();
-                 correction != axisCorrections.cend(); ++correction) {
-                if (!kin->isAxisDescendantOf(assignedAxis, correction.key()))
+            directPartCounts[assignedAxis.toUpper()] += 1;
+            for (const auto& correction : calibrationPlan.carrierCorrections) {
+                if (!kin->isAxisDescendantOf(assignedAxis, correction.axisName))
                     continue;
-                partTranslation += correction.value();
-                if (correction.value().SquareMagnitude() >= 1e-12)
-                    affectedPartCounts[correction.key()] += 1;
+                if (correction.translation.SquareMagnitude() >= 1e-12)
+                    affectedPartCounts[correction.axisName] += 1;
             }
+            const gp_Vec partTranslation =
+                lcnc::kinematics::inheritedCarrierCorrection(
+                    *kin, assignedAxis, calibrationPlan.carrierCorrections);
             if (!moveLabel(label, partTranslation)) {
                 rollback();
                 // 中文翻译：切割头 XYZ 对齐失败，机台模型已恢复标定前位置。
                 return fail(tr("Cutter-head XYZ alignment failed and the machine model has been restored to its pre-calibration position."));
             }
         }
-        for (auto correction = axisCorrections.cbegin();
-             correction != axisCorrections.cend(); ++correction) {
-            if (correction.value().SquareMagnitude() < 1e-12
-                || affectedPartCounts.value(correction.key()) > 0) {
+        for (const auto& correction : calibrationPlan.carrierCorrections) {
+            if (correction.translation.SquareMagnitude() < 1e-12)
                 continue;
+            LCNC_INFO(lcnc::LogCode::Generic,
+                      "Calibration tool-carrier axis={} correction=({:.3f},{:.3f},{:.3f}) "
+                      "directParts={} affectedParts={}",
+                      correction.axisName.toStdString(), correction.translation.X(),
+                      correction.translation.Y(), correction.translation.Z(),
+                      directPartCounts.value(correction.axisName),
+                      affectedPartCounts.value(correction.axisName));
+            if (directPartCounts.value(correction.axisName) == 0) {
+                rollback();
+                // 中文翻译：标定需要移动刀头承载链中的 %1 轴，但没有机台模型直接归属于该轴。请先标记该轴模型。
+                return fail(tr("Calibration requires moving the %1-axis on the tool-carrier chain, but no machine model is directly assigned to that axis. Please mark that axis model first.")
+                                .arg(correction.axisName));
             }
-            rollback();
-            // 中文翻译：标定需要移动 %1 轴，但未找到归属于该轴子树的机台部件。请先完成轴归属标记。
-            return fail(tr("Calibration requires moving the %1-axis, but no machine parts assigned to that axis subtree were found. Please complete the axis assignments first.")
-                            .arg(correction.key()));
+            if (affectedPartCounts.value(correction.axisName) == 0) {
+                rollback();
+                // 中文翻译：标定需要移动 %1 轴，但未找到归属于该轴子树的机台部件。请先完成轴归属标记。
+                return fail(tr("Calibration requires moving the %1-axis, but no machine parts assigned to that axis subtree were found. Please complete the axis assignments first.")
+                                .arg(correction.axisName));
+            }
         }
-        alignedCutterFaceWorld.Translate(cutterTranslation);
+        alignedCutterFaceWorld.Translate(calibrationPlan.cutterTranslation);
         // Persist the cutter reference in its carrier-local frame. Picks are
         // world-space points with the live local transformation already
         // applied, so storing the world point directly would double-apply the
         // current XYZ feedback in collision/simulation consumers.
         m_cutterHeadModelPosition = alignedCutterFaceWorld.Transformed(
-            kin->computeAxisTransform(QStringLiteral("Z")).Inverted());
+            kin->computeAxisTransform(calibrationPlan.toolCarrierAxisName).Inverted());
 
         if (!activeMachineProfilePath().isEmpty())
             m_config.setCutterHeadModelPositionForMachine(activeMachineProfilePath(),

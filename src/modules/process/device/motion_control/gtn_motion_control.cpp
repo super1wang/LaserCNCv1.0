@@ -278,9 +278,14 @@ bool GTNMotionControl::Home(Axis eAxis)
 {
 	short sRtn;
 	int AxisIndex = m_mapMotorValue[eAxis].AxisIndex;
+	const bool wasEnabled = IsEnabled(eAxis);
 	if (!Enable(eAxis))
 		return false;
-	Sleep(2000);
+	// The reference GTN implementation documents that the first power-on
+	// enable needs settling time for encoder/direction initialization before
+	// Smart Home. Re-homing an already enabled axis does not need this delay.
+	if (!wasEnabled)
+		Sleep(5000);
 	if (!ClearGSNAlarm(eAxis)) return false;
 
 	sRtn = GTN_LmtsOffEx(m_iCore, AxisIndex, -1, 1);	//控制轴限位失效
@@ -693,11 +698,11 @@ bool GTNMotionControl::GetActualPos(Axis eAxis, double& dAPos)
 	short sRtn;
 	double APos;
 	int iAxis = m_mapMotorValue[eAxis].AxisIndex;
-	sRtn = GTN_GetPrfPos(m_iCore, iAxis, &APos);//规划位置
+	sRtn = GTN_GetEncPos(m_iCore, iAxis, &APos);//编码器实际位置
 	if (sRtn != 0)
 	{
 		dAPos = -1;
-		//LogError("GetActualPos", "GTN_GetPrfPos", magic_enum::enum_name(eAxis).data(), sRtn);
+		//LogError("GetActualPos", "GTN_GetEncPos", magic_enum::enum_name(eAxis).data(), sRtn);
 		return false;
 	}
 	PulseToMillimeter(eAxis, APos, dAPos);
@@ -1844,11 +1849,23 @@ bool GTNMotionControl::InitCrd(const Tool& curTool)
 		}
 	}
 
-	// scale：固高当前前瞻库要求各槽一致；按 X 轴的脉冲当量填充。
+	// scale 与 axisRelation 使用相同槽位语义：每个物理轴必须使用自己的
+	// 脉冲当量。直线轴单位为 pulse/mm，旋转轴单位为 pulse/degree；不能把
+	// X 轴分辨率复制给 B/C，否则非零旋转角会被控制器按错误比例执行。
+	for (int slot = 0; slot < 8; ++slot)
 	{
-		double dRes = m_mapMotorValue[m_cuttingAxes[0]].Resolution;
-		for (int k = 0; k < 8; k++)
-			lookAheadPara.scale[k] = dRes;
+		const int physicalAxisIndex = lookAheadPara.axisRelation[slot];
+		double resolution = 0.0;
+		for (const auto& entry : m_mapMotorValue)
+		{
+			if (entry.second.AxisIndex == physicalAxisIndex)
+			{
+				resolution = static_cast<double>(entry.second.Resolution);
+				break;
+			}
+		}
+		// 未配置的填充槽不会参与运动，但 SDK 仍要求非零 scale。
+		lookAheadPara.scale[slot] = resolution > 0.0 ? resolution : 1.0;
 	}
 
 	for (Axis axis : m_vecMotors)
@@ -2151,19 +2168,24 @@ bool GTNMotionControl::MovePostion(Axis aAxis, double dVel, double dPos)
 
 bool GTNMotionControl::PulseToMillimeter(Axis aAxis, double dValue, double& dNewValue)
 {
-	if (m_mapMotorValue[aAxis].Rotary)
-		dNewValue = dValue / m_mapMotorValue[aAxis].Resolution * (lcnc::process::kPi * m_dDiameter);
-	else
-		dNewValue = dValue / m_mapMotorValue[aAxis].Resolution;
+	const double resolution = static_cast<double>(m_mapMotorValue[aAxis].Resolution);
+	if (!std::isfinite(resolution) || resolution <= 0.0)
+		return LogError("PulseToMillimeter", "invalid axis resolution",
+			magic_enum::enum_name(aAxis).data(), -1), false;
+	// Process coordinates use native machine units: mm for linear axes and
+	// degrees for rotary axes. Tube diameter is CAM geometry and must never
+	// change the controller coordinate unit of a B/C/A axis.
+	dNewValue = dValue / resolution;
 	return true;
 }
 
 bool GTNMotionControl::MillimeterToPulse(Axis aAxis, double dValue, double& dNewValue)
 {
-	if (m_mapMotorValue[aAxis].Rotary)
-		dNewValue = dValue * m_mapMotorValue[aAxis].Resolution / (lcnc::process::kPi * m_dDiameter);
-	else
-		dNewValue = dValue * m_mapMotorValue[aAxis].Resolution;
+	const double resolution = static_cast<double>(m_mapMotorValue[aAxis].Resolution);
+	if (!std::isfinite(resolution) || resolution <= 0.0)
+		return LogError("MillimeterToPulse", "invalid axis resolution",
+			magic_enum::enum_name(aAxis).data(), -1), false;
+	dNewValue = dValue * resolution;
 	return true;
 }
 

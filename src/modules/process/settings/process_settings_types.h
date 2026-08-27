@@ -1,6 +1,9 @@
 #pragma once
 
+#include "modules/process/runtime/process_axis_types.h"
+
 #include <QString>
+#include <QVector>
 
 namespace lcnc::process {
 

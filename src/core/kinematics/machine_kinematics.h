@@ -87,11 +87,20 @@ public:
     const gp_Trsf& workpieceSetupTransform() const { return m_workpieceSetupTransform; }
     /// World transform for an axis node at current axis positions.
     gp_Trsf computeAxisTransform(const QString& axisName) const;
+    /// World transform evaluated from an explicit axis-position snapshot.
+    /// Axes absent from the snapshot are evaluated at zero.
+    gp_Trsf computeAxisTransform(const QString& axisName,
+                                 const QMap<QString, double>& axisPositions) const;
+    /// Root-to-axis carrier chain, including BASE and axisName. Invalid,
+    /// incomplete, or cyclic parent links return an empty list.
+    QStringList axisChain(const QString& axisName) const;
     /// Returns true when axisName is ancestorAxis itself or is carried by its
     /// descendant chain. Cyclic or incomplete parent chains fail closed.
     bool isAxisDescendantOf(const QString& axisName, const QString& ancestorAxis) const;
-    /// Current controller X/Y/Z coordinates reconstructed in the machine-world
-    /// frame. The result is independent of the imported machine CAD placement.
+    /// Current cutter TCP reconstructed in the machine-world frame. Rotary-table
+    /// configurations follow the actual LinearZ carrier chain, so a linear axis
+    /// on the workpiece branch is not incorrectly added to the cutter position.
+    /// Legacy non-table configurations retain their established XYZ sum.
     gp_Pnt currentLinearPosition() const;
 
     /// Nominal laser beam direction in machine space at the home posture.
@@ -120,7 +129,10 @@ signals:
 
 private:
     gp_Trsf axisLocalTrsf(const MachineAxisDef& axis, bool home = false) const;
+    gp_Trsf axisLocalTrsf(const MachineAxisDef& axis, double position) const;
     gp_Trsf chainTrsf     (const QString& axisName, bool home = false) const;
+    gp_Trsf chainTrsf     (const QString& axisName,
+                           const QMap<QString, double>& axisPositions) const;
     void    removeInvalidAssignments();
 
     QString               m_configType;

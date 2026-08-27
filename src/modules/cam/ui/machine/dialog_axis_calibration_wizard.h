@@ -14,16 +14,15 @@ class QGroupBox;
 namespace lcnc::cam::ui {
 
 /**
- * @brief 三段式机台模型对齐向导（VERTICAL_AC_TABLE）。
+ * @brief 由轴角色与父链驱动的三段式转台机型对齐向导。
  *
  * 流程：
- *   ① 拾取 A 轴参考面 → 记录中心
- *   ② 拾取 C 轴参考面 → 记录中心
+ *   ① 拾取 TableTilt 父旋转轴参考面 → 记录中心
+ *   ② 拾取 TableSpin 子旋转轴参考面 → 记录中心
  *   ③ 拾取切割头下端面 → 记录中心
  *   ④ 读取应用程序选项 / 机台构型中手动填写的旋转中心
- *   ⑤ 点击「提交」牵引整机，使模型 AC 交点对齐绝对配置中心
- *   ⑥ 按运动子树校正：Y 带动 Y/X/Z，X 带动 X/Z，Z 只移动 Z 轴滑台，
- *      使所选刀嘴面的 XYZ 对齐当前机台 XYZ 所代表的绝对模拟 TCP
+ *   ⑤ 点击「提交」牵引整机，使两条模型旋转轴线交点对齐配置中心
+ *   ⑥ 仅沿实际刀头承载链牵引轴模型，使刀嘴对齐绝对模拟 TCP
  *
  * 物理旋转中心不在本向导中修改，统一由应用程序选项的构型配置页维护。
  *
@@ -36,8 +35,8 @@ class DialogAxisCalibrationWizard : public QDialog
 public:
     /// 标定阶段标识，用于与外部 facePick 流程对接。
     enum class Stage {
-        AAxis,        ///< 步骤 1：A 轴参考面
-        CAxis,        ///< 步骤 2：C 轴参考面
+        AAxis,        ///< 步骤 1：TableTilt 父旋转轴参考面
+        CAxis,        ///< 步骤 2：TableSpin 子旋转轴参考面
         CutterHead,   ///< 步骤 3：切割头下端面
     };
 
@@ -72,6 +71,8 @@ private:
     QString stageDisplayName(Stage stage) const;
 
     CamModule* m_camModule{nullptr};
+    QString m_tiltAxisName{QStringLiteral("TableTilt")};
+    QString m_spinAxisName{QStringLiteral("TableSpin")};
 
     // 三段中心（模型坐标）
     bool   m_aFilled{false};
