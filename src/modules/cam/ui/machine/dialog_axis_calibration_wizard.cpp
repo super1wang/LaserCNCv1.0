@@ -61,7 +61,7 @@ DialogAxisCalibrationWizard::DialogAxisCalibrationWizard(CamModule* camModule, Q
     // 旋转中心由“应用程序选项 / 机台构型”统一维护；向导只读取用于对齐提示。
     if (m_camModule) {
         gp_Pnt savedCenter;
-        if (m_camModule->currentAcRotationCenter(savedCenter)) {
+        if (m_camModule->currentAcRotationCenterAxisCoordinates(savedCenter)) {
             if (m_physX) m_physX->setValue(savedCenter.X());
             if (m_physY) m_physY->setValue(savedCenter.Y());
             if (m_physZ) m_physZ->setValue(savedCenter.Z());
@@ -132,12 +132,14 @@ void DialogAxisCalibrationWizard::buildUi()
     // 中文翻译：绝对标定目标
     auto* groupPose = new QGroupBox(tr("Absolute calibration target"), this);
     auto* poseLayout = new QFormLayout(groupPose);
-    // 中文翻译：确认绝对转台中心与模拟锥头目标
-    m_btnEnterStandardPose = new QPushButton(tr("Confirm absolute rotary-table center and simulated-TCP targets"), groupPose);
+    // 中文翻译：确认转台中心与模拟锥头 TCP 的绝对轴系坐标
+    m_btnEnterStandardPose = new QPushButton(
+        tr("Confirm absolute controller-axis coordinates of the rotary-table center and simulated TCP"),
+        groupPose);
     m_btnEnterStandardPose->setEnabled(false);
     m_btnEnterStandardPose->setToolTip(
-        // 中文翻译：只读取并显示绝对世界坐标目标，不修改任何实时轴坐标。
-        tr("Read and display the absolute world-coordinate targets only; do not change any live axis coordinates."
+        // 中文翻译：仅读取并显示绝对轴系坐标目标，不修改任何实时轴坐标。
+        tr("Read and display the absolute controller-axis coordinate targets only; do not change any live axis coordinates."
            // 中文翻译：需要先完成上方三段拾取。
            "\nYou need to complete the three pickups above first."));
     // 中文翻译：（待确认绝对目标）
@@ -149,10 +151,12 @@ void DialogAxisCalibrationWizard::buildUi()
         lbl->setMinimumWidth(280);
     }
     poseLayout->addRow(m_btnEnterStandardPose);
-    // 中文翻译：当前转台旋转中心:
-    poseLayout->addRow(tr("Current rotary-table center:"), m_lblCurrentAcCenter);
-    // 中文翻译：绝对模拟锥头 TCP:
-    poseLayout->addRow(tr("Absolute simulated cutter TCP:"), m_lblCurrentCutterHead);
+    // 中文翻译：当前转台中心轴系坐标:
+    poseLayout->addRow(tr("Current rotary-table center axis coordinates:"),
+                       m_lblCurrentAcCenter);
+    // 中文翻译：模拟锥头 TCP 绝对轴系坐标:
+    poseLayout->addRow(tr("Absolute simulated cutter TCP axis coordinates:"),
+                       m_lblCurrentCutterHead);
     root->addWidget(groupPose);
 
     // 中文翻译：第 4 步：确认构型旋转中心（只读）
@@ -289,7 +293,7 @@ void DialogAxisCalibrationWizard::refreshSummary()
     // 顶部已/未标定徽章
     if (m_lblCalibStatus && m_camModule) {
         gp_Pnt c;
-        if (m_camModule->currentAcRotationCenter(c)) {
+        if (m_camModule->currentAcRotationCenterAxisCoordinates(c)) {
             m_lblCalibStatus->setText(tr(
                 // 中文翻译：● 当前构型旋转中心: %1
                 "● Current configuration rotation center: %1").arg(formatPoint(c)));
@@ -325,19 +329,20 @@ void DialogAxisCalibrationWizard::onEnterStandardPoseClicked()
 
     // 显示不可变的绝对转台中心与实际刀头承载链所代表的绝对 TCP。
     gp_Pnt acCenter;
-    if (m_camModule->currentAcRotationCenter(acCenter) && m_lblCurrentAcCenter) {
+    if (m_camModule->currentAcRotationCenterAxisCoordinates(acCenter)
+        && m_lblCurrentAcCenter) {
         m_lblCurrentAcCenter->setText(formatPoint(acCenter));
         m_lblCurrentAcCenter->setStyleSheet("color:#1f7a1f;");
     }
-    const gp_Pnt headWorld = m_camModule->cutterHeadWorldPosition();
+    const gp_Pnt headAxis = m_camModule->cutterHeadAxisPosition();
     if (m_lblCurrentCutterHead) {
-        m_lblCurrentCutterHead->setText(formatPoint(headWorld));
+        m_lblCurrentCutterHead->setText(formatPoint(headAxis));
         m_lblCurrentCutterHead->setStyleSheet("color:#1f7a1f;");
     }
     LCNC_INFO(lcnc::LogCode::Generic,
               "Absolute calibration targets displayed: AC=({:.3f},{:.3f},{:.3f}) TCP=({:.3f},{:.3f},{:.3f})",
               acCenter.X(), acCenter.Y(), acCenter.Z(),
-              headWorld.X(), headWorld.Y(), headWorld.Z());
+               headAxis.X(), headAxis.Y(), headAxis.Z());
 }
 
 void DialogAxisCalibrationWizard::onResetClicked()
@@ -386,11 +391,12 @@ void DialogAxisCalibrationWizard::onSubmitClicked()
     if (m_camModule->applyAxisCalibration(inputs, &errorMessage)) {
         // 需求 4：提交后刷新显示，验证当前坐标已与物理坐标系同步
         gp_Pnt acAfter;
-        if (m_camModule->currentAcRotationCenter(acAfter) && m_lblCurrentAcCenter) {
+        if (m_camModule->currentAcRotationCenterAxisCoordinates(acAfter)
+            && m_lblCurrentAcCenter) {
             m_lblCurrentAcCenter->setText(formatPoint(acAfter));
             m_lblCurrentAcCenter->setStyleSheet("color:#1f7a1f;font-weight:bold;");
         }
-        const gp_Pnt headAfter = m_camModule->cutterHeadWorldPosition();
+        const gp_Pnt headAfter = m_camModule->cutterHeadAxisPosition();
         if (m_lblCurrentCutterHead) {
             m_lblCurrentCutterHead->setText(formatPoint(headAfter));
             m_lblCurrentCutterHead->setStyleSheet("color:#1f7a1f;font-weight:bold;");

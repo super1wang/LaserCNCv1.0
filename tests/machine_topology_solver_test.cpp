@@ -51,12 +51,205 @@ int main(int argc, char** argv)
                   "XYZA reduced capability matrix is incorrect");
     configuration.applyPreset(QStringLiteral("VERTICAL_AC_TABLE"));
     ok &= require(configuration.defaultMachiningMode() == lcnc::MachiningMode::SimultaneousTable5Axis,
-                  "A five-axis table machine did not default to simultaneous five-axis mode");
+                   "A five-axis table machine did not default to simultaneous five-axis mode");
+
+    // User-facing rotation-center and setup XYZ values are controller-axis
+    // coordinates. Geometry/collision receive the converted right-handed world
+    // point, while inverse conversion reproduces the taught feedback exactly.
+    // 中文翻译：旋转中心与安装 XYZ 使用轴系示教坐标；
+    // 几何/碰撞使用转换后的右手世界点，逆变换必须精确恢复反馈值。
+    lcnc::MachineConfigurationService coordinateConfiguration;
+    coordinateConfiguration.applyPreset(QStringLiteral("VERTICAL_AC_TABLE"));
+    auto coordinateAxes = coordinateConfiguration.axisConfigurations();
+    const gp_Pnt taughtCenter(100.0, 50.0, 300.0);
+    for (lcnc::MachineAxisRuntimeConfig& config : coordinateAxes) {
+        if (config.axis.role == lcnc::MachineAxisRole::LinearZ)
+            config.axis.direction = gp_Dir(0.0, 0.0, -1.0);
+        if (config.axis.motionType == MachineAxisDef::Rotary)
+            config.axis.origin = taughtCenter;
+    }
+    coordinateConfiguration.setAxisConfigurations(coordinateAxes);
+    ok &= require(coordinateConfiguration.validateConfiguration(),
+                  "Orthogonal reverse-Z controller-axis basis was rejected");
+    gp_Pnt centerWorld;
+    gp_Pnt centerRoundTrip;
+    ok &= require(coordinateConfiguration.axisCoordinatesToWorld(
+                      taughtCenter, &centerWorld)
+                  && centerWorld.Distance(gp_Pnt(100.0, 50.0, -300.0)) < 1e-9
+                  && coordinateConfiguration.worldToAxisCoordinates(
+                      centerWorld, &centerRoundTrip)
+                  && centerRoundTrip.Distance(taughtCenter) < 1e-9,
+                  "Reverse-Z axis/world coordinate conversion did not round-trip");
+
+    auto skewedAxes = coordinateAxes;
+    for (lcnc::MachineAxisRuntimeConfig& config : skewedAxes) {
+        if (config.axis.role == lcnc::MachineAxisRole::LinearY)
+            config.axis.direction = gp_Dir(0.1, 1.0, 0.0);
+    }
+    lcnc::MachineConfigurationService skewedConfiguration;
+    skewedConfiguration.setAxisConfigurations(skewedAxes);
+    ok &= require(!skewedConfiguration.validateConfiguration(),
+                  "Non-orthogonal controller-axis basis was accepted");
+    const QList<MachineAxisDef> coordinateRuntimeAxes =
+        coordinateConfiguration.axisDefinitions();
+    const auto runtimeOriginForRole = [&coordinateRuntimeAxes](
+                                          lcnc::MachineAxisRole role) {
+        for (const MachineAxisDef& axis : coordinateRuntimeAxes)
+            if (axis.role == role) return axis.origin;
+        return gp_Pnt();
+    };
+    ok &= require(runtimeOriginForRole(lcnc::MachineAxisRole::TableTilt)
+                          .Distance(centerWorld) < 1e-9
+                      && runtimeOriginForRole(lcnc::MachineAxisRole::TableSpin)
+                             .Distance(centerWorld) < 1e-9,
+                  "Taught AC center was not converted before entering kinematics");
+
+    lcnc::WorkpieceSetupTransform taughtSetup;
+    taughtSetup.x = 10.0;
+    taughtSetup.y = 20.0;
+    taughtSetup.z = 40.0;
+    coordinateConfiguration.setWorkpieceSetupAxisCoordinates(taughtSetup);
+    const lcnc::WorkpieceSetupTransform worldSetup =
+        coordinateConfiguration.workpieceSetupTransform();
+    ok &= require(isNear(worldSetup.x, 10.0) && isNear(worldSetup.y, 20.0)
+                      && isNear(worldSetup.z, -40.0),
+                  "Workpiece setup XYZ was not converted from axis to world coordinates");
+
+    MachineKinematics coordinateMachine;
+    coordinateMachine.setAxes(coordinateRuntimeAxes,
+                              QStringLiteral("VERTICAL_AC_TABLE"));
+    QMap<QString, double> rotatedCenterPose;
+    rotatedCenterPose.insert(QStringLiteral("A"), 23.0);
+    rotatedCenterPose.insert(QStringLiteral("C"), -67.0);
+    const gp_Pnt rotatedCenter = centerWorld.Transformed(
+        coordinateMachine.computeAxisTransform(QStringLiteral("C"), rotatedCenterPose));
+    ok &= require(rotatedCenter.Distance(centerWorld) < 1e-6,
+                  "Converted AC intersection did not remain fixed under A/C rotation");
 
     // Old XYZA configurations could retain the +/-120 degree A tilt limits
     // from the AC-table preset.  Loading one must upgrade A to the continuous
     // workpiece-rotary planning envelope.
     QTemporaryDir temporaryConfigDir;
+    const QString axisCoordinateConfigPath =
+        temporaryConfigDir.filePath(QStringLiteral("axis-coordinate-machine.toml"));
+    ok &= require(coordinateConfiguration.save(axisCoordinateConfigPath),
+                  "Could not save the controller-axis coordinate configuration");
+    lcnc::MachineConfigurationService reloadedCoordinateConfiguration;
+    ok &= require(reloadedCoordinateConfiguration.load(axisCoordinateConfigPath),
+                  "Could not reload the controller-axis coordinate configuration");
+    gp_Pnt reloadedWorldCenter;
+    const auto reloadedCoordinateAxes =
+        reloadedCoordinateConfiguration.axisConfigurations();
+    gp_Pnt reloadedTaughtCenter;
+    for (const lcnc::MachineAxisRuntimeConfig& config : reloadedCoordinateAxes) {
+        if (config.axis.role == lcnc::MachineAxisRole::TableTilt)
+            reloadedTaughtCenter = config.axis.origin;
+    }
+    ok &= require(reloadedTaughtCenter.Distance(taughtCenter) < 1e-9
+                      && reloadedCoordinateConfiguration.axisCoordinatesToWorld(
+                          reloadedTaughtCenter, &reloadedWorldCenter)
+                      && reloadedWorldCenter.Distance(centerWorld) < 1e-9
+                      && isNear(reloadedCoordinateConfiguration
+                                    .workpieceSetupAxisCoordinates().z,
+                                40.0)
+                      && isNear(reloadedCoordinateConfiguration
+                                    .workpieceSetupTransform().z,
+                                -40.0),
+                  "Axis-coordinate machine configuration did not survive save/reload");
+
+    // A file written before ControllerAxisV1 stored rotary origins and setup
+    // translations directly in world coordinates. Loading it must migrate the
+    // persisted numbers without moving the effective geometry.
+    // 中文翻译：ControllerAxisV1 之前的配置直接保存世界坐标；
+    // 加载时需转为轴系输入数值，同时保持有效几何位置不变。
+    const QString legacyCoordinatePath =
+        temporaryConfigDir.filePath(QStringLiteral("legacy-world-machine.toml"));
+    QFile legacyCoordinateFile(legacyCoordinatePath);
+    ok &= require(legacyCoordinateFile.open(QIODevice::WriteOnly | QIODevice::Text),
+                  "Could not create the legacy world-coordinate fixture");
+    if (legacyCoordinateFile.isOpen()) {
+        legacyCoordinateFile.write(R"(machinePreset = "VERTICAL_AC_TABLE"
+[workpieceSetup]
+x = 10.0
+y = 20.0
+z = -40.0
+
+[[axes]]
+name = "X"
+motionType = "Linear"
+role = "LinearX"
+parent = "Y"
+directionX = 1.0
+directionY = 0.0
+directionZ = 0.0
+
+[[axes]]
+name = "Y"
+motionType = "Linear"
+role = "LinearY"
+parent = "BASE"
+directionX = 0.0
+directionY = 1.0
+directionZ = 0.0
+
+[[axes]]
+name = "Z"
+motionType = "Linear"
+role = "LinearZ"
+parent = "X"
+directionX = 0.0
+directionY = 0.0
+directionZ = -1.0
+
+[[axes]]
+name = "A"
+motionType = "Rotary"
+role = "TableTilt"
+parent = "BASE"
+directionX = 1.0
+directionY = 0.0
+directionZ = 0.0
+originX = 100.0
+originY = 50.0
+originZ = -300.0
+
+[[axes]]
+name = "C"
+motionType = "Rotary"
+role = "TableSpin"
+parent = "A"
+directionX = 0.0
+directionY = 0.0
+directionZ = 1.0
+originX = 100.0
+originY = 50.0
+originZ = -300.0
+)");
+        legacyCoordinateFile.close();
+        lcnc::MachineConfigurationService migratedCoordinates;
+        ok &= require(migratedCoordinates.load(legacyCoordinatePath),
+                      "Could not load the legacy world-coordinate fixture");
+        gp_Pnt migratedInputCenter;
+        for (const auto& config : migratedCoordinates.axisConfigurations()) {
+            if (config.axis.role == lcnc::MachineAxisRole::TableTilt)
+                migratedInputCenter = config.axis.origin;
+        }
+        gp_Pnt migratedRuntimeCenter;
+        for (const MachineAxisDef& axis : migratedCoordinates.axisDefinitions()) {
+            if (axis.role == lcnc::MachineAxisRole::TableTilt)
+                migratedRuntimeCenter = axis.origin;
+        }
+        ok &= require(migratedInputCenter.Distance(taughtCenter) < 1e-9
+                          && migratedRuntimeCenter.Distance(centerWorld) < 1e-9
+                          && isNear(migratedCoordinates
+                                        .workpieceSetupAxisCoordinates().z,
+                                    40.0)
+                          && isNear(migratedCoordinates
+                                        .workpieceSetupTransform().z,
+                                    -40.0),
+                      "Legacy world-coordinate values moved during axis-coordinate migration");
+    }
+
     const QString legacyXyzaConfigPath = temporaryConfigDir.filePath(QStringLiteral("machine.toml"));
     QFile legacyXyzaConfig(legacyXyzaConfigPath);
     ok &= require(legacyXyzaConfig.open(QIODevice::WriteOnly | QIODevice::Text),

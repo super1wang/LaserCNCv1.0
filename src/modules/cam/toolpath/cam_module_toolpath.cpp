@@ -1824,14 +1824,14 @@ bool CamModule::setMachiningMode(lcnc::MachiningMode mode)
 
 lcnc::WorkpieceSetupTransform CamModule::workpieceSetupTransform() const
 {
-    return m_machineConfig ? m_machineConfig->workpieceSetupTransform()
+    return m_machineConfig ? m_machineConfig->workpieceSetupAxisCoordinates()
                            : lcnc::WorkpieceSetupTransform{};
 }
 
 bool CamModule::setWorkpieceSetupTransform(const lcnc::WorkpieceSetupTransform& setup)
 {
     if (!m_machineConfig) return false;
-    const auto current = m_machineConfig->workpieceSetupTransform();
+    const auto current = m_machineConfig->workpieceSetupAxisCoordinates();
     const auto close = [](double lhs, double rhs) { return std::abs(lhs - rhs) <= 1e-9; };
     if (close(current.x, setup.x) && close(current.y, setup.y) && close(current.z, setup.z)
         && close(current.rotationXDeg, setup.rotationXDeg)
@@ -1841,7 +1841,7 @@ bool CamModule::setWorkpieceSetupTransform(const lcnc::WorkpieceSetupTransform& 
     // change signal refreshes kinematics/view state and invalidates any active
     // project's solved-machine-coordinate stage.
     // 中文翻译：机床配置服务是唯一权威；其同步变更信号负责刷新运动学/视图并使当前工程机床坐标阶段失效。
-    m_machineConfig->setWorkpieceSetupTransform(setup);
+    m_machineConfig->setWorkpieceSetupAxisCoordinates(setup);
     emit workpieceSetupTransformChanged();
     return true;
 }

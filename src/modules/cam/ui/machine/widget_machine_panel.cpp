@@ -3,6 +3,7 @@
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
 #include "core/kernel/kernel.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "modules/cam/cam_module.h"
 
@@ -207,8 +208,8 @@ void WidgetMachinePanel::buildWorkpiecePage()
         installLayout->addRow(setupLabels[index], m_workpieceSetupEditors[index]);
     installLayout->addRow(m_btnAlignRotationCenter);
     auto* installHint = new QLabel(
-        // 中文翻译：这是 CAD 工件坐标到夹具零位的唯一刚体变换。它同时驱动模型显示和机床坐标，修改后需要重新计算刀路。
-        tr("This is the only rigid transform from CAD workpiece coordinates to the fixture zero. It drives both model display and machine coordinates; recalculate the toolpath after a change."),
+        // 中文翻译：安装 XYZ 直接使用轴系示教坐标；旋转仍为右手几何角。该变换同时驱动模型、碰撞与刀路，修改后需重新计算。
+        tr("Setup XYZ uses taught controller-axis coordinates directly; rotations remain right-handed geometric angles. This transform drives model display, collision, and toolpath solving, so recalculate the toolpath after a change."),
         m_installGroup);
     installHint->setWordWrap(true);
     installHint->setStyleSheet("color:#666;");
@@ -246,14 +247,20 @@ void WidgetMachinePanel::refreshCalibrationSection()
                 : tr("The configured axis roles or parent links do not form a supported serial rotary table, so calibration is disabled."));
     }
 
+    auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
+    auto axisCoordinates = [machineConfig](const gp_Pnt& world) {
+        gp_Pnt axis;
+        return machineConfig && machineConfig->worldToAxisCoordinates(world, &axis)
+            ? axis : world;
+    };
     if (m_axisAzSpin && kin && kin->findAxis(QStringLiteral("A"))) {
-        const gp_Pnt origin = kin->axisOrigin(QStringLiteral("A"));
+        const gp_Pnt origin = axisCoordinates(kin->axisOrigin(QStringLiteral("A")));
         const QSignalBlocker blockZ(m_axisAzSpin);
         m_axisAzSpin->setValue(origin.Z());
     }
 
     if (m_axisCxSpin && m_axisCySpin && kin && kin->findAxis(QStringLiteral("C"))) {
-        const gp_Pnt origin = kin->axisOrigin(QStringLiteral("C"));
+        const gp_Pnt origin = axisCoordinates(kin->axisOrigin(QStringLiteral("C")));
         const QSignalBlocker blockX(m_axisCxSpin);
         const QSignalBlocker blockY(m_axisCySpin);
         m_axisCxSpin->setValue(origin.X());
@@ -261,7 +268,9 @@ void WidgetMachinePanel::refreshCalibrationSection()
     }
 
     gp_Pnt center;
-    const bool hasCenter = supported && lcnc::Kernel::current().service<CamModule>()->currentAcRotationCenter(center);
+    const bool hasCenter = supported
+        && lcnc::Kernel::current().service<CamModule>()
+               ->currentAcRotationCenterAxisCoordinates(center);
     if (m_lblCurrentAcCenter) {
         if (hasCenter) {
             m_lblCurrentAcCenter->setText(formatPointText(center));
@@ -522,16 +531,39 @@ void WidgetMachinePanel::onAxisOriginEditorChanged()
     if (!kin)
         return;
 
-    const gp_Pnt aOrigin = kin->axisOrigin(QStringLiteral("A"));
-    emit axisOriginChanged(QStringLiteral("A"), aOrigin.X(),
-                           aOrigin.Y(),
-                           m_axisAzSpin ? m_axisAzSpin->value() : aOrigin.Z());
+    auto* machineConfig = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
+    auto editedWorldOrigin = [machineConfig](const gp_Pnt& currentWorld,
+                                             const gp_Pnt& editedAxis) {
+        gp_Pnt currentAxis;
+        gp_Pnt world;
+        if (!machineConfig
+            || !machineConfig->worldToAxisCoordinates(currentWorld, &currentAxis)
+            || !machineConfig->axisCoordinatesToWorld(editedAxis, &world)) {
+            return editedAxis;
+        }
+        return world;
+    };
 
-    const gp_Pnt cOrigin = kin->axisOrigin(QStringLiteral("C"));
-    emit axisOriginChanged(QStringLiteral("C"),
-                           m_axisCxSpin ? m_axisCxSpin->value() : cOrigin.X(),
-                           m_axisCySpin ? m_axisCySpin->value() : cOrigin.Y(),
-                           cOrigin.Z());
+    const gp_Pnt aCurrentWorld = kin->axisOrigin(QStringLiteral("A"));
+    gp_Pnt aCurrentAxis = aCurrentWorld;
+    if (machineConfig)
+        (void)machineConfig->worldToAxisCoordinates(aCurrentWorld, &aCurrentAxis);
+    const gp_Pnt aWorld = editedWorldOrigin(
+        aCurrentWorld,
+        gp_Pnt(aCurrentAxis.X(), aCurrentAxis.Y(),
+               m_axisAzSpin ? m_axisAzSpin->value() : aCurrentAxis.Z()));
+    emit axisOriginChanged(QStringLiteral("A"), aWorld.X(), aWorld.Y(), aWorld.Z());
+
+    const gp_Pnt cCurrentWorld = kin->axisOrigin(QStringLiteral("C"));
+    gp_Pnt cCurrentAxis = cCurrentWorld;
+    if (machineConfig)
+        (void)machineConfig->worldToAxisCoordinates(cCurrentWorld, &cCurrentAxis);
+    const gp_Pnt cWorld = editedWorldOrigin(
+        cCurrentWorld,
+        gp_Pnt(m_axisCxSpin ? m_axisCxSpin->value() : cCurrentAxis.X(),
+               m_axisCySpin ? m_axisCySpin->value() : cCurrentAxis.Y(),
+               cCurrentAxis.Z()));
+    emit axisOriginChanged(QStringLiteral("C"), cWorld.X(), cWorld.Y(), cWorld.Z());
 }
 
 void WidgetMachinePanel::onCutterHeadModelEditorChanged()

@@ -948,8 +948,8 @@ void DialogOptions::buildMachineConfigurationPage()
     centerLayout->addWidget(new QLabel(QStringLiteral("Z"), centerRow));
     centerLayout->addWidget(m_spRotationCenterZ);
     centerLayout->addStretch(1);
-    // 中文翻译：中心坐标
-    centerForm->addRow(tr("Center coordinates"), centerRow);
+    // 中文翻译：轴系中心坐标
+    centerForm->addRow(tr("Axis-system center coordinates"), centerRow);
     m_lblRotationCenterHint = new QLabel(centerGroup);
     m_lblRotationCenterHint->setWordWrap(true);
     m_lblRotationCenterHint->setStyleSheet("color:#666;");
@@ -985,12 +985,14 @@ void DialogOptions::buildMachineConfigurationPage()
     m_machineAxesTable->setAlternatingRowColors(true);
     root->addWidget(m_machineAxesTable, 1);
     auto* coordinateHint = new QLabel(
-        // 中文翻译：线性 X/Y/Z 轴的方向同时用于机台模型运动和视图坐标提示。
-        tr("The directions of the linear X/Y/Z axes are used for both machine model motion and view coordinate prompts."
+        // 中文翻译：线性 X/Y/Z 方向定义控制器正值的实际运动方向；输入、反馈和状态显示均使用轴系坐标。
+        tr("The linear X/Y/Z directions define the physical motion caused by positive controller values; input, feedback, and status display use controller-axis coordinates."
            // 中文翻译：例如 Z 轴零点在上方且向下为正时，将 Z 方向设为 (0, 0, -1)。
            "For example, when the Z-axis zero point is above and downward is positive, set the Z direction to (0, 0, -1)."
-           // 中文翻译：坐标三轴提示需要 X/Y/Z 构成正交右手系。
-           "The coordinate three-axis prompt requires X/Y/Z to form an orthogonal right-handed system."), page);
+           // 中文翻译：OCC 几何、碰撞和角落三轴始终使用 Z 向上的右手世界系；轴正向箭头独立显示。
+           "OCC geometry, collision, and the corner trihedron always use the right-handed Z-up world frame; controller-positive arrows are displayed separately."
+           // 中文翻译：控制器 X/Y/Z 正方向必须彼此正交，但可构成右手或左手轴系。
+           "The controller X/Y/Z positive directions must be mutually orthogonal, but may form either a right- or left-handed axis system."), page);
     coordinateHint->setWordWrap(true);
     coordinateHint->setStyleSheet("color:#666;");
     root->addWidget(coordinateHint);
@@ -1243,8 +1245,8 @@ void DialogOptions::setRotationCenterUiFromAxes(const QList<MachineAxisDef>& axe
     if (m_lblRotationCenterHint) {
         if (enabled) {
             m_lblRotationCenterHint->setText(
-                // 中文翻译：该坐标会写入旋转轴 %1 的原点；AC 转台请填写 A 轴与 C 轴的物理交点。
-                tr("This coordinate will be written as the origin of the rotation axis %1; for AC turntable, please fill in the physical intersection point of the A-axis and C-axis.")
+                // 中文翻译：请直接填写轴系示教反馈的旋转轴 %1 原点；AC 转台请填写 A/C 物理交点的轴系坐标。
+                tr("Enter the taught controller-axis coordinates of rotary-axis origin %1 directly; for an AC table, enter the axis-system coordinates of the physical A/C intersection.")
                     .arg(rotaryNames.join(QStringLiteral("/"))));
         } else {
             // 中文翻译：当前构型没有旋转轴，不需要填写旋转中心。

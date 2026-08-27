@@ -51,7 +51,7 @@ public:
 };
 
 /**
- * @brief 切换"物理坐标系世界轴"显示。
+ * @brief 切换"控制器轴正向"显示。
  *
  * 当前激活 GuiDocument 的场景上挂载/卸载 lcnc::view::WorldAxesRenderer。
  * 该 QAction 是 checkable，由 ribbon"文件→显示→坐标系"调用。

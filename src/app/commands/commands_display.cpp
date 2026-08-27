@@ -131,8 +131,8 @@ CmdToggleWorldAxes::CmdToggleWorldAxes(IAppContext* ctx) : CommandBase(ctx)
     auto* a = new QAction(QIcon("themeicons:machine.svg"), tr("coordinate system"), this);
     a->setCheckable(true);
     a->setChecked(false);
-    // 中文翻译：以世界 0 点为中心绘制持久 XYZ 坐标轴；同时显示在机台与所有工件视图。
-    a->setStatusTip(tr("Draw persistent XYZ coordinate axes centered on world 0 point; displayed on the machine and all workpiece views simultaneously."));
+    // 中文翻译：以轴系基础零点为中心绘制控制器 X+/Y+/Z+ 运动方向；同时显示在机台与所有工件视图。
+    a->setStatusTip(tr("Draw the controller X+/Y+/Z+ motion directions at the common axis zero; display them in the machine and all workpiece views."));
     setAction(a);
 }
 

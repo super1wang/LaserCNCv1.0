@@ -21,7 +21,7 @@ struct MachineAxisDef
     QString    name;                 ///< "BASE", "X", "Y", "Z", "A", "B", "C"
     MotionType motionType{Linear};
     gp_Dir     direction;            ///< translation direction (Linear) or rotation axis (Rotary)
-    gp_Pnt     origin{0.0, 0.0, 0.0};///< pivot/origin point in machine coordinates
+    gp_Pnt     origin{0.0, 0.0, 0.0};///< runtime pivot/origin in parent zero-pose OCC world basis
     double     minVal{-999.0};       ///< travel limit (mm or °)
     double     maxVal{ 999.0};
     QString    parentAxis;           ///< kinematic parent; empty = world

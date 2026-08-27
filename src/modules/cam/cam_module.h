@@ -207,7 +207,10 @@ public:
     gp_Pnt axisOrigin(const QString& axisName) const;
     void setAxisOrigin(const QString& axisName, const gp_Pnt& origin);
     bool setAxisLimits(const QString& axisName, double minVal, double maxVal);
+    /// Runtime/OCC world point used by geometry, collision and calibration.
     bool currentAcRotationCenter(gp_Pnt& center) const;
+    /// User-facing controller-axis coordinate of the same physical center.
+    bool currentAcRotationCenterAxisCoordinates(gp_Pnt& center) const;
     gp_Pnt cutterHeadModelPosition() const;
     gp_Pnt cutterHeadPhysicalPosition() const;
     /// 拾取一个平面参考面，返回其几何中心（已叠加 LocalTransformation）。
@@ -227,6 +230,8 @@ public:
                                       QString* errorMessage = nullptr);
     /// 切割头当前世界坐标（受当前 X/Y/Z 轴位置影响）。
     gp_Pnt cutterHeadWorldPosition() const;
+    /// 切割头当前轴系坐标（与控制器反馈方向一致）。
+    gp_Pnt cutterHeadAxisPosition() const;
     QList<WorkpieceMountCandidate> mountableWorkpieces() const;
     bool autoInstallWorkpiece() const;
     void setAutoInstallWorkpiece(bool enabled);

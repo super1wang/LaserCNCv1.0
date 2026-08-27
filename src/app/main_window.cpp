@@ -568,28 +568,19 @@ void MainWindow::connectOccViewSignals(WidgetOccView* view)
 
                 const auto* machineConfig =
                     lcnc::Kernel::current().service<lcnc::MachineConfigurationService>();
-                const QList<MachineAxisDef> axes = machineConfig
-                    ? machineConfig->axisDefinitions()
-                    : QList<MachineAxisDef>{};
-                const auto axisCoordinate = [&axes, x, y, z](const QString& name,
-                                                               double fallback) {
-                    for (const MachineAxisDef& axis : axes) {
-                        if (axis.motionType == MachineAxisDef::Linear
-                            && axis.name.compare(name, Qt::CaseInsensitive) == 0) {
-                            // 机台线性轴坐标以其配置的正方向为基准；与刀路
-                            // 坐标求解保持同一投影语义。
-                            return x * axis.direction.X()
-                                + y * axis.direction.Y()
-                                + z * axis.direction.Z();
-                        }
+                gp_Pnt axisPoint(x, y, z);
+                if (machineConfig) {
+                    gp_Pnt converted;
+                    if (machineConfig->worldToAxisCoordinates(
+                            gp_Pnt(x, y, z), &converted)) {
+                        axisPoint = converted;
                     }
-                    return fallback;
-                };
+                }
                 m_sbCoords->setText(
                     tr("X: %1  Y: %2  Z: %3")
-                        .arg(axisCoordinate(QStringLiteral("X"), x), 0, 'f', 3)
-                        .arg(axisCoordinate(QStringLiteral("Y"), y), 0, 'f', 3)
-                        .arg(axisCoordinate(QStringLiteral("Z"), z), 0, 'f', 3));
+                        .arg(axisPoint.X(), 0, 'f', 3)
+                        .arg(axisPoint.Y(), 0, 'f', 3)
+                        .arg(axisPoint.Z(), 0, 'f', 3));
             });
 
     // ── 3D selection → module coordination ────────────────────────────────

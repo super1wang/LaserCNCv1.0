@@ -8,6 +8,8 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include <gp_Vec.hxx>
+
 #include <algorithm>
 #include <cmath>
 
@@ -20,6 +22,109 @@ constexpr double kDefaultAxisJerk = 10000.0;
 // full turns and avoiding the legacy table-tilt +/-120 degree default.
 // 中文翻译：工件回转轴无行程止挡；使用有限规划范围以兼容控制器配置，并避免误用转台倾斜轴的 +/-120 度默认值。
 constexpr double kContinuousRotaryPlanningLimitDeg = 9999.0;
+constexpr double kCoordinateBasisTolerance = 1e-10;
+constexpr double kCoordinateOrthogonalityTolerance = 1e-8;
+constexpr auto kControllerAxisCoordinateConvention = "ControllerAxisV1";
+
+const MachineAxisDef* coordinateAxis(const QList<MachineAxisDef>& axes,
+                                     MachineAxisRole role,
+                                     const QString& fallbackName)
+{
+    for (const MachineAxisDef& axis : axes) {
+        if (axis.motionType == MachineAxisDef::Linear && axis.role == role)
+            return &axis;
+    }
+    for (const MachineAxisDef& axis : axes) {
+        if (axis.motionType == MachineAxisDef::Linear
+            && axis.name.compare(fallbackName, Qt::CaseInsensitive) == 0) {
+            return &axis;
+        }
+    }
+    return nullptr;
+}
+
+QList<MachineAxisDef> rawAxisDefinitions(
+    const QVector<MachineAxisRuntimeConfig>& configs)
+{
+    QList<MachineAxisDef> axes;
+    axes.reserve(configs.size());
+    for (const MachineAxisRuntimeConfig& config : configs)
+        axes.append(config.axis);
+    return axes;
+}
+
+bool coordinateBasis(const QList<MachineAxisDef>& axes,
+                     gp_Vec* x, gp_Vec* y, gp_Vec* z, double* determinant)
+{
+    const MachineAxisDef* axisX = coordinateAxis(
+        axes, MachineAxisRole::LinearX, QStringLiteral("X"));
+    const MachineAxisDef* axisY = coordinateAxis(
+        axes, MachineAxisRole::LinearY, QStringLiteral("Y"));
+    const MachineAxisDef* axisZ = coordinateAxis(
+        axes, MachineAxisRole::LinearZ, QStringLiteral("Z"));
+    if (!axisX || !axisY || !axisZ)
+        return false;
+
+    const gp_Vec basisX(axisX->direction);
+    const gp_Vec basisY(axisY->direction);
+    const gp_Vec basisZ(axisZ->direction);
+    if (std::abs(basisX.Dot(basisY)) > kCoordinateOrthogonalityTolerance
+        || std::abs(basisX.Dot(basisZ)) > kCoordinateOrthogonalityTolerance
+        || std::abs(basisY.Dot(basisZ)) > kCoordinateOrthogonalityTolerance) {
+        return false;
+    }
+    const double det = basisX.Dot(basisY.Crossed(basisZ));
+    if (!std::isfinite(det) || std::abs(det) <= kCoordinateBasisTolerance)
+        return false;
+    if (x) *x = basisX;
+    if (y) *y = basisY;
+    if (z) *z = basisZ;
+    if (determinant) *determinant = det;
+    return true;
+}
+
+bool axisPointToWorld(const QList<MachineAxisDef>& axes,
+                      const gp_Pnt& axisPoint,
+                      gp_Pnt* worldPoint)
+{
+    if (!worldPoint)
+        return false;
+    gp_Vec x, y, z;
+    if (!coordinateBasis(axes, &x, &y, &z, nullptr))
+        return false;
+    const gp_Vec world = x * axisPoint.X()
+        + y * axisPoint.Y() + z * axisPoint.Z();
+    *worldPoint = gp_Pnt(world.X(), world.Y(), world.Z());
+    return true;
+}
+
+bool worldPointToAxis(const QList<MachineAxisDef>& axes,
+                      const gp_Pnt& worldPoint,
+                      gp_Pnt* axisPoint)
+{
+    if (!axisPoint)
+        return false;
+    gp_Vec x, y, z;
+    double det = 0.0;
+    if (!coordinateBasis(axes, &x, &y, &z, &det))
+        return false;
+    const gp_Vec world(gp_Pnt(0.0, 0.0, 0.0), worldPoint);
+    const double axisX = world.Dot(y.Crossed(z)) / det;
+    const double axisY = x.Dot(world.Crossed(z)) / det;
+    const double axisZ = x.Dot(y.Crossed(world)) / det;
+    *axisPoint = gp_Pnt(axisX, axisY, axisZ);
+    return true;
+}
+
+bool sameWorkpieceSetup(const WorkpieceSetupTransform& lhs,
+                        const WorkpieceSetupTransform& rhs)
+{
+    const auto close = [](double a, double b) { return std::abs(a - b) <= 1e-9; };
+    return close(lhs.x, rhs.x) && close(lhs.y, rhs.y) && close(lhs.z, rhs.z)
+        && close(lhs.rotationXDeg, rhs.rotationXDeg)
+        && close(lhs.rotationYDeg, rhs.rotationYDeg)
+        && close(lhs.rotationZDeg, rhs.rotationZDeg);
+}
 
 void sanitizeAxisMotionParameters(MachineAxisRuntimeConfig& config)
 {
@@ -162,6 +267,7 @@ void MachineConfigurationService::setAxisConfigurations(const QVector<MachineAxi
             return;
     }
     m_axisConfigs = sanitized;
+    refreshCoordinateDerivedState();
     notifyChanged();
 }
 
@@ -186,6 +292,7 @@ void MachineConfigurationService::setMachineAxisDefinitions(const QString& prese
         return;
     m_presetName = nextPreset;
     m_axisConfigs = nextConfigs;
+    refreshCoordinateDerivedState();
     notifyChanged();
 }
 
@@ -259,9 +366,26 @@ QList<MachineAxisDef> MachineConfigurationService::axisDefinitions() const
     base.minVal = 0.0;
     base.maxVal = 0.0;
     axes.append(base);
-    for (const MachineAxisRuntimeConfig& config : m_axisConfigs)
-        axes.append(config.axis);
+    for (const MachineAxisRuntimeConfig& config : m_axisConfigs) {
+        MachineAxisDef runtimeAxis = config.axis;
+        gp_Pnt worldOrigin;
+        if (axisCoordinatesToWorld(config.axis.origin, &worldOrigin))
+            runtimeAxis.origin = worldOrigin;
+        axes.append(runtimeAxis);
+    }
     return axes;
+}
+
+bool MachineConfigurationService::axisCoordinatesToWorld(
+    const gp_Pnt& axisPoint, gp_Pnt* worldPoint) const
+{
+    return axisPointToWorld(rawAxisDefinitions(m_axisConfigs), axisPoint, worldPoint);
+}
+
+bool MachineConfigurationService::worldToAxisCoordinates(
+    const gp_Pnt& worldPoint, gp_Pnt* axisPoint) const
+{
+    return worldPointToAxis(rawAxisDefinitions(m_axisConfigs), worldPoint, axisPoint);
 }
 
 MachineToolpathAlgorithm MachineConfigurationService::toolpathAlgorithm() const
@@ -325,17 +449,28 @@ MachiningMode MachineConfigurationService::defaultMachiningMode() const
     return MachiningMode::Planar3Axis;
 }
 
-void MachineConfigurationService::setWorkpieceSetupTransform(const WorkpieceSetupTransform& setup)
+void MachineConfigurationService::setWorkpieceSetupAxisCoordinates(
+    const WorkpieceSetupTransform& setup)
 {
-    const auto close = [](double lhs, double rhs) { return std::abs(lhs - rhs) <= 1e-9; };
-    if (close(m_workpieceSetup.x, setup.x) && close(m_workpieceSetup.y, setup.y)
-        && close(m_workpieceSetup.z, setup.z)
-        && close(m_workpieceSetup.rotationXDeg, setup.rotationXDeg)
-        && close(m_workpieceSetup.rotationYDeg, setup.rotationYDeg)
-        && close(m_workpieceSetup.rotationZDeg, setup.rotationZDeg))
+    if (sameWorkpieceSetup(m_workpieceSetupAxis, setup))
         return;
-    m_workpieceSetup = setup;
+    m_workpieceSetupAxis = setup;
+    refreshCoordinateDerivedState();
     notifyChanged();
+}
+
+void MachineConfigurationService::setWorkpieceSetupTransform(
+    const WorkpieceSetupTransform& worldSetup)
+{
+    WorkpieceSetupTransform axisSetup = worldSetup;
+    gp_Pnt axisTranslation;
+    if (worldToAxisCoordinates(gp_Pnt(worldSetup.x, worldSetup.y, worldSetup.z),
+                               &axisTranslation)) {
+        axisSetup.x = axisTranslation.X();
+        axisSetup.y = axisTranslation.Y();
+        axisSetup.z = axisTranslation.Z();
+    }
+    setWorkpieceSetupAxisCoordinates(axisSetup);
 }
 
 MachineModeDefinition MachineConfigurationService::modeDefinition(MachiningMode mode) const
@@ -450,6 +585,15 @@ bool MachineConfigurationService::validateConfiguration(QString* errorMessage) c
         }
     }
 
+    if (!coordinateBasis(rawAxisDefinitions(m_axisConfigs), nullptr, nullptr,
+                         nullptr, nullptr)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral(
+                "Configured LinearX/LinearY/LinearZ positive directions must form an orthogonal controller-axis coordinate basis (right- or left-handed)");
+        }
+        return false;
+    }
+
     QHash<QString, QString> parentOf;
     for (const MachineAxisRuntimeConfig& config : m_axisConfigs)
         parentOf.insert(config.axis.name, config.axis.parentAxis);
@@ -536,7 +680,8 @@ bool MachineConfigurationService::validateCandidateConfiguration(
         ? QStringLiteral("VERTICAL_AC_TABLE") : presetName.trimmed();
     candidate.m_axisConfigs = mergedAxisConfigurations(axes);
     candidate.m_headToolGeometry = headGeometry;
-    candidate.m_workpieceSetup = m_workpieceSetup;
+    candidate.m_workpieceSetupAxis = m_workpieceSetupAxis;
+    candidate.refreshCoordinateDerivedState();
     candidate.m_lockedTargetOverrides = candidate.m_presetName.compare(
         m_presetName, Qt::CaseInsensitive) == 0 ? m_lockedTargetOverrides
                                                 : QHash<MachiningMode, QMap<QString, double>>{};
@@ -547,17 +692,17 @@ QString MachineConfigurationService::configurationFingerprint() const
 {
     QByteArray payload = m_presetName.toUtf8();
     payload += "|workpieceSetup|";
-    payload += QByteArray::number(m_workpieceSetup.x, 'g', 17);
+    payload += QByteArray::number(m_workpieceSetupAxis.x, 'g', 17);
     payload += '|';
-    payload += QByteArray::number(m_workpieceSetup.y, 'g', 17);
+    payload += QByteArray::number(m_workpieceSetupAxis.y, 'g', 17);
     payload += '|';
-    payload += QByteArray::number(m_workpieceSetup.z, 'g', 17);
+    payload += QByteArray::number(m_workpieceSetupAxis.z, 'g', 17);
     payload += '|';
-    payload += QByteArray::number(m_workpieceSetup.rotationXDeg, 'g', 17);
+    payload += QByteArray::number(m_workpieceSetupAxis.rotationXDeg, 'g', 17);
     payload += '|';
-    payload += QByteArray::number(m_workpieceSetup.rotationYDeg, 'g', 17);
+    payload += QByteArray::number(m_workpieceSetupAxis.rotationYDeg, 'g', 17);
     payload += '|';
-    payload += QByteArray::number(m_workpieceSetup.rotationZDeg, 'g', 17);
+    payload += QByteArray::number(m_workpieceSetupAxis.rotationZDeg, 'g', 17);
     for (const MachineAxisRuntimeConfig& config : m_axisConfigs) {
         const MachineAxisDef& axis = config.axis;
         payload += '|';
@@ -605,7 +750,13 @@ void MachineConfigurationService::syncFromKinematics(const MachineKinematics* ki
     const QString nextPreset = kinematics->configType().trimmed().isEmpty()
         ? m_presetName
         : kinematics->configType().trimmed();
-    setMachineAxisDefinitions(nextPreset, kinematics->axes());
+    QList<MachineAxisDef> configuredAxes = kinematics->axes();
+    for (MachineAxisDef& axis : configuredAxes) {
+        gp_Pnt configuredOrigin;
+        if (worldPointToAxis(kinematics->axes(), axis.origin, &configuredOrigin))
+            axis.origin = configuredOrigin;
+    }
+    setMachineAxisDefinitions(nextPreset, configuredAxes);
 }
 
 QVector<MachineAxisRuntimeConfig> MachineConfigurationService::defaultAxisConfigsForPreset(const QString& presetName)
@@ -729,6 +880,21 @@ void MachineConfigurationService::setPresetDefaults(const QString& presetName)
         m_configuredDefaultMode = MachiningMode::SimultaneousTable5Axis;
     else
         m_configuredDefaultMode = MachiningMode::Planar3Axis;
+    refreshCoordinateDerivedState();
+}
+
+void MachineConfigurationService::refreshCoordinateDerivedState()
+{
+    m_workpieceSetupWorld = m_workpieceSetupAxis;
+    gp_Pnt worldTranslation;
+    if (axisCoordinatesToWorld(
+            gp_Pnt(m_workpieceSetupAxis.x, m_workpieceSetupAxis.y,
+                   m_workpieceSetupAxis.z),
+            &worldTranslation)) {
+        m_workpieceSetupWorld.x = worldTranslation.X();
+        m_workpieceSetupWorld.y = worldTranslation.Y();
+        m_workpieceSetupWorld.z = worldTranslation.Z();
+    }
 }
 
 void MachineConfigurationService::notifyChanged()
@@ -747,6 +913,11 @@ void MachineConfigurationService::readFrom(const toml::value& root)
     using namespace lcnc::toml_io;
     m_presetName = get_qstring(root, "machinePreset", QStringLiteral("VERTICAL_AC_TABLE"));
     setPresetDefaults(m_presetName);
+    const bool controllerAxisInputs = root.is_table()
+        && get_qstring(root, "coordinateConvention", QString()).compare(
+               QString::fromLatin1(kControllerAxisCoordinateConvention),
+               Qt::CaseInsensitive) == 0;
+    WorkpieceSetupTransform loadedWorkpieceSetup;
 
     if (root.is_table() && root.contains("headTcp") && root.at("headTcp").is_table()) {
         const toml::value& tcp = root.at("headTcp");
@@ -760,12 +931,12 @@ void MachineConfigurationService::readFrom(const toml::value& root)
     }
     if (root.is_table() && root.contains("workpieceSetup") && root.at("workpieceSetup").is_table()) {
         const toml::value& setup = root.at("workpieceSetup");
-        m_workpieceSetup.x = get_double(setup, "x", 0.0);
-        m_workpieceSetup.y = get_double(setup, "y", 0.0);
-        m_workpieceSetup.z = get_double(setup, "z", 0.0);
-        m_workpieceSetup.rotationXDeg = get_double(setup, "rotationXDeg", 0.0);
-        m_workpieceSetup.rotationYDeg = get_double(setup, "rotationYDeg", 0.0);
-        m_workpieceSetup.rotationZDeg = get_double(setup, "rotationZDeg", 0.0);
+        loadedWorkpieceSetup.x = get_double(setup, "x", 0.0);
+        loadedWorkpieceSetup.y = get_double(setup, "y", 0.0);
+        loadedWorkpieceSetup.z = get_double(setup, "z", 0.0);
+        loadedWorkpieceSetup.rotationXDeg = get_double(setup, "rotationXDeg", 0.0);
+        loadedWorkpieceSetup.rotationYDeg = get_double(setup, "rotationYDeg", 0.0);
+        loadedWorkpieceSetup.rotationZDeg = get_double(setup, "rotationZDeg", 0.0);
     }
     if (root.is_table()) {
         m_configuredDefaultMode = machiningModeFromName(
@@ -788,11 +959,12 @@ void MachineConfigurationService::readFrom(const toml::value& root)
         }
     }
 
-    if (!root.is_table() || !root.contains("axes") || !root.at("axes").is_array())
-        return;
-
     QVector<MachineAxisRuntimeConfig> loaded;
-    for (const toml::value& item : root.at("axes").as_array()) {
+    const toml::array emptyAxes;
+    const toml::array& persistedAxes = root.is_table() && root.contains("axes")
+            && root.at("axes").is_array()
+        ? root.at("axes").as_array() : emptyAxes;
+    for (const toml::value& item : persistedAxes) {
         if (!item.is_table())
             continue;
         const QString name = get_qstring(item, "name", QString()).trimmed().toUpper();
@@ -839,21 +1011,43 @@ void MachineConfigurationService::readFrom(const toml::value& root)
         }
     if (!loaded.isEmpty())
         m_axisConfigs = loaded;
+
+    m_workpieceSetupAxis = loadedWorkpieceSetup;
+    if (!controllerAxisInputs) {
+        const QList<MachineAxisDef> legacyAxes = rawAxisDefinitions(m_axisConfigs);
+        for (MachineAxisRuntimeConfig& config : m_axisConfigs) {
+            gp_Pnt axisOrigin;
+            if (worldPointToAxis(legacyAxes, config.axis.origin, &axisOrigin))
+                config.axis.origin = axisOrigin;
+        }
+        gp_Pnt axisSetup;
+        if (worldPointToAxis(
+                legacyAxes,
+                gp_Pnt(loadedWorkpieceSetup.x, loadedWorkpieceSetup.y,
+                       loadedWorkpieceSetup.z),
+                &axisSetup)) {
+            m_workpieceSetupAxis.x = axisSetup.X();
+            m_workpieceSetupAxis.y = axisSetup.Y();
+            m_workpieceSetupAxis.z = axisSetup.Z();
+        }
+    }
+    refreshCoordinateDerivedState();
 }
 
 void MachineConfigurationService::writeTo(toml::value& root) const
 {
     using namespace lcnc::toml_io;
     root["machinePreset"] = qs(m_presetName);
+    root["coordinateConvention"] = kControllerAxisCoordinateConvention;
     root["toolpathAlgorithm"] = qs(toolpathAlgorithmText());
     root["defaultMachiningMode"] = qs(machiningModeName(defaultMachiningMode()));
     toml::value workpieceSetup(toml::table{});
-    workpieceSetup["x"] = m_workpieceSetup.x;
-    workpieceSetup["y"] = m_workpieceSetup.y;
-    workpieceSetup["z"] = m_workpieceSetup.z;
-    workpieceSetup["rotationXDeg"] = m_workpieceSetup.rotationXDeg;
-    workpieceSetup["rotationYDeg"] = m_workpieceSetup.rotationYDeg;
-    workpieceSetup["rotationZDeg"] = m_workpieceSetup.rotationZDeg;
+    workpieceSetup["x"] = m_workpieceSetupAxis.x;
+    workpieceSetup["y"] = m_workpieceSetupAxis.y;
+    workpieceSetup["z"] = m_workpieceSetupAxis.z;
+    workpieceSetup["rotationXDeg"] = m_workpieceSetupAxis.rotationXDeg;
+    workpieceSetup["rotationYDeg"] = m_workpieceSetupAxis.rotationYDeg;
+    workpieceSetup["rotationZDeg"] = m_workpieceSetupAxis.rotationZDeg;
     root["workpieceSetup"] = workpieceSetup;
 
     toml::array axes;

@@ -774,8 +774,12 @@ void CamModule::setAxisOrigin(const QString& axisName, const gp_Pnt& origin)
     if (!kin->setAxisOrigin(axisName, origin))
         return;
 
-    if (!activeMachineProfilePath().isEmpty())
-        m_config.setAxisOriginForMachine(activeMachineProfilePath(), axisName, origin);
+    // Runtime calibration works in OCC world coordinates. Persist the result
+    // through the single machine configuration authority, which converts it
+    // back to controller-axis coordinates (for example, world Z=-300 becomes
+    // taught Z=+300 when the configured controller Z direction is downward).
+    if (m_machineConfig)
+        m_machineConfig->syncFromKinematics(kin);
 
     displayAxisGuides();
     refreshMachineTransforms();
@@ -820,6 +824,14 @@ bool CamModule::currentAcRotationCenter(gp_Pnt& center) const
             *tiltAxis, tiltAxis->origin, *spinAxis, spinAxis->origin,
             center, &axisSeparation)
         && axisSeparation <= 0.1;
+}
+
+bool CamModule::currentAcRotationCenterAxisCoordinates(gp_Pnt& center) const
+{
+    gp_Pnt worldCenter;
+    if (!currentAcRotationCenter(worldCenter) || !m_machineConfig)
+        return false;
+    return m_machineConfig->worldToAxisCoordinates(worldCenter, &center);
 }
 
 bool CamModule::currentWorkpieceRotationCenter(gp_Pnt& center) const
@@ -936,6 +948,15 @@ gp_Pnt CamModule::cutterHeadWorldPosition() const
     if (!kin)
         return gp_Pnt(0.0, 0.0, 0.0);
     return kin->currentLinearPosition();
+}
+
+gp_Pnt CamModule::cutterHeadAxisPosition() const
+{
+    const gp_Pnt world = cutterHeadWorldPosition();
+    gp_Pnt axis;
+    return m_machineConfig
+            && m_machineConfig->worldToAxisCoordinates(world, &axis)
+        ? axis : world;
 }
 
 bool CamModule::applyAxisCalibration(const AxisCalibrationInputs& inputs,
@@ -1217,15 +1238,26 @@ bool CamModule::alignWorkpieceSetupToRotationCenter()
     }
 
     lcnc::WorkpieceSetupTransform setup = workpieceSetupTransform();
-    setup.x = center.X();
-    setup.y = center.Y();
-    setup.z = center.Z();
+    gp_Pnt axisCenter;
+    if (!m_machineConfig
+        || !m_machineConfig->worldToAxisCoordinates(center, &axisCenter)) {
+        // 中文翻译：工件安装姿态；无法将转台中心转换为轴系坐标。
+        emit operationFailed(tr("Workpiece setup"),
+                             tr("The rotary-table center cannot be converted to controller-axis coordinates."));
+        return false;
+    }
+    setup.x = axisCenter.X();
+    setup.y = axisCenter.Y();
+    setup.z = axisCenter.Z();
     return setWorkpieceSetupTransform(setup);
 }
 
 void CamModule::autoDetectAxisOrigins()
 {
-    lcnc::cam::machine_axis_detector::autoDetectAxisOrigins(machineDocument(), kinematics());
+    MachineKinematics* kin = kinematics();
+    lcnc::cam::machine_axis_detector::autoDetectAxisOrigins(machineDocument(), kin);
+    if (kin && m_machineConfig)
+        m_machineConfig->syncFromKinematics(kin);
 }
 
 void CamModule::applyStoredMachineProfile(const QString& machinePath)
@@ -1252,7 +1284,8 @@ void CamModule::applyStoredMachineProfile(const QString& machinePath)
             LCNC_WARN(lcnc::LogCode::Generic,
                       "cam.machine: failed to persist migrated legacy workpiece installation setup");
         }
-        kin->setWorkpieceSetupTransform(migrated.toTransform());
+        kin->setWorkpieceSetupTransform(
+            m_machineConfig->workpieceSetupTransform().toTransform());
         LCNC_INFO(lcnc::LogCode::Generic,
                   "cam.machine: migrated legacy workpiece installation XYZ into unified workpiece setup");
     }

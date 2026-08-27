@@ -24,6 +24,12 @@ QString machineToolpathAlgorithmName(MachineToolpathAlgorithm algorithm);
 
 struct MachineAxisRuntimeConfig
 {
+    // axis.direction is the controller-positive motion direction in the
+    // parent zero-pose/world basis. axis.origin is persisted and edited in
+    // controller-axis coordinates; axisDefinitions() converts it to the
+    // right-handed OCC world point consumed by kinematics and collision code.
+    // 中文翻译：direction 表示控制器正向；origin 以轴系坐标编辑/持久化，
+    // 进入运动学与碰撞之前由 axisDefinitions() 转为 OCC 右手世界坐标。
     MachineAxisDef axis;
     int controllerIndex{-1};
     int homeIndex{-1};
@@ -57,7 +63,17 @@ public:
     void setAxisConfigurations(const QVector<MachineAxisRuntimeConfig>& configs);
     void setMachineAxisDefinitions(const QString& presetName, const QList<MachineAxisDef>& axes);
     void setAxisHardwareConfigurations(const QVector<MachineAxisRuntimeConfig>& configs);
+    /// Effective runtime definitions. Rotary/linear origins are converted from
+    /// controller-axis input coordinates to right-handed OCC world points.
     QList<MachineAxisDef> axisDefinitions() const;
+
+    /// Convert points between controller-axis coordinates (the values shown by
+    /// teaching feedback/UI) and the internal right-handed OCC world frame.
+    /// The common axis base zero is the origin in both representations; the
+    /// configured orthogonal LinearX/Y/Z positive directions form the
+    /// conversion basis; either handedness is supported.
+    bool axisCoordinatesToWorld(const gp_Pnt& axisPoint, gp_Pnt* worldPoint) const;
+    bool worldToAxisCoordinates(const gp_Pnt& worldPoint, gp_Pnt* axisPoint) const;
 
     MachineToolpathAlgorithm toolpathAlgorithm() const;
     QString toolpathAlgorithmText() const { return machineToolpathAlgorithmName(toolpathAlgorithm()); }
@@ -65,10 +81,17 @@ public:
     MachiningMode defaultMachiningMode() const;
     MachineModeDefinition modeDefinition(MachiningMode mode) const;
     bool supportsMachiningMode(MachiningMode mode) const;
-    /// Runtime machine-model mounting posture.  It belongs to the machine
-    /// configuration, never to an individual CAM project.
-    const WorkpieceSetupTransform& workpieceSetupTransform() const { return m_workpieceSetup; }
-    void setWorkpieceSetupTransform(const WorkpieceSetupTransform& setup);
+    /// Runtime world-space mounting posture consumed by CAM, collision and
+    /// rendering. Its XYZ translation is derived from the axis-coordinate
+    /// input below; Euler rotations remain right-handed geometric rotations.
+    const WorkpieceSetupTransform& workpieceSetupTransform() const { return m_workpieceSetupWorld; }
+    /// User-facing/persisted workpiece setup. XYZ is in controller-axis
+    /// coordinates so taught values can be entered directly.
+    const WorkpieceSetupTransform& workpieceSetupAxisCoordinates() const { return m_workpieceSetupAxis; }
+    void setWorkpieceSetupAxisCoordinates(const WorkpieceSetupTransform& setup);
+    /// Legacy/world-space import boundary. Converts XYZ to axis coordinates
+    /// before storing it; new UI code should call setWorkpieceSetupAxisCoordinates().
+    void setWorkpieceSetupTransform(const WorkpieceSetupTransform& worldSetup);
     bool validateConfiguration(QString* errorMessage = nullptr) const;
     bool validateCandidateConfiguration(const QString& presetName,
                                         const QList<MachineAxisDef>& axes,
@@ -101,13 +124,15 @@ private:
     static MachineAxisRole defaultRoleForAxis(const QString& presetName,
                                               const QString& axisName,
                                               MachineAxisDef::MotionType motionType);
+    void refreshCoordinateDerivedState();
     void setPresetDefaults(const QString& presetName);
     void notifyChanged();
 
     QString m_presetName{QStringLiteral("VERTICAL_AC_TABLE")};
     QVector<MachineAxisRuntimeConfig> m_axisConfigs;
     HeadToolGeometry m_headToolGeometry;
-    WorkpieceSetupTransform m_workpieceSetup;
+    WorkpieceSetupTransform m_workpieceSetupAxis;
+    WorkpieceSetupTransform m_workpieceSetupWorld;
     MachiningMode m_configuredDefaultMode{MachiningMode::Planar3Axis};
     QHash<MachiningMode, QMap<QString, double>> m_lockedTargetOverrides;
 };

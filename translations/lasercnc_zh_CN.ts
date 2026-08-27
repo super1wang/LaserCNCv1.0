@@ -745,6 +745,11 @@
         <translation>当前构型没有可用于对齐的工件旋转中心。</translation>
     </message>
     <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="1225"/>
+        <source>The rotary-table center cannot be converted to controller-axis coordinates.</source>
+        <translation>无法将转台中心转换为控制器轴系坐标。</translation>
+    </message>
+    <message>
         <source>Workpiece installation</source>
         <translation type="vanished">工件安装</translation>
     </message>
@@ -2975,8 +2980,8 @@ continue?</source>
     </message>
     <message>
         <location filename="../src/app/commands/commands_display.cpp" line="135"/>
-        <source>Draw persistent XYZ coordinate axes centered on world 0 point; displayed on the machine and all workpiece views simultaneously.</source>
-        <translation>以世界 0 点为中心绘制持久 XYZ 坐标轴；同时显示在机台与所有工件视图。</translation>
+        <source>Draw the controller X+/Y+/Z+ motion directions at the common axis zero; display them in the machine and all workpiece views.</source>
+        <translation>以轴系基础零点为中心绘制控制器 X+/Y+/Z+ 运动方向；同时显示在机台与所有工件视图。</translation>
     </message>
 </context>
 <context>
@@ -3066,14 +3071,14 @@ continue?</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="128"/>
-        <source>Confirm absolute rotary-table center and simulated-TCP targets</source>
-        <translation>确认绝对转台中心与模拟锥头 TCP 目标</translation>
+        <source>Confirm absolute controller-axis coordinates of the rotary-table center and simulated TCP</source>
+        <translation>确认转台中心与模拟锥头 TCP 的绝对轴系坐标</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="132"/>
-        <source>Read and display the absolute world-coordinate targets only; do not change any live axis coordinates.
+        <source>Read and display the absolute controller-axis coordinate targets only; do not change any live axis coordinates.
 You need to complete the three pickups above first.</source>
-        <translation>只读取并显示绝对世界坐标目标，不修改任何实时轴坐标。
+        <translation>只读取并显示绝对轴系坐标目标，不修改任何实时轴坐标。
 需要先完成上方三段拾取。</translation>
     </message>
     <message>
@@ -3086,13 +3091,13 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="145"/>
-        <source>Current rotary-table center:</source>
-        <translation>当前转台旋转中心:</translation>
+        <source>Current rotary-table center axis coordinates:</source>
+        <translation>当前转台中心轴系坐标:</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="147"/>
-        <source>Absolute simulated cutter TCP:</source>
-        <translation>绝对模拟锥头 TCP:</translation>
+        <source>Absolute simulated cutter TCP axis coordinates:</source>
+        <translation>模拟锥头 TCP 绝对轴系坐标:</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/dialog_axis_calibration_wizard.cpp" line="151"/>
@@ -3853,8 +3858,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="904"/>
-        <source>Center coordinates</source>
-        <translation>中心坐标</translation>
+        <source>Axis-system center coordinates</source>
+        <translation>轴系中心坐标</translation>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="912"/>
@@ -3948,8 +3953,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="941"/>
-        <source>The directions of the linear X/Y/Z axes are used for both machine model motion and view coordinate prompts.For example, when the Z-axis zero point is above and downward is positive, set the Z direction to (0, 0, -1).The coordinate three-axis prompt requires X/Y/Z to form an orthogonal right-handed system.</source>
-        <translation>直线X/Y/Z轴的方向既用于机器模型运动，也用于视图坐标提示。例如，当Z轴零点向上、向下为正时，设置Z方向为(0,0,-1)。坐标三轴提示要求X/Y/Z构成正交右手系。</translation>
+        <source>The linear X/Y/Z directions define the physical motion caused by positive controller values; input, feedback, and status display use controller-axis coordinates.For example, when the Z-axis zero point is above and downward is positive, set the Z direction to (0, 0, -1).OCC geometry, collision, and the corner trihedron always use the right-handed Z-up world frame; controller-positive arrows are displayed separately.The controller X/Y/Z positive directions must be mutually orthogonal, but may form either a right- or left-handed axis system.</source>
+        <translation>线性 X/Y/Z 方向定义控制器正值导致的实际运动方向；输入、反馈和状态显示均使用轴系坐标。例如 Z 轴零点在上方且向下为正时，将 Z 方向设为 (0, 0, -1)。OCC 几何、碰撞和角落三轴始终使用 Z 向上的右手世界系；控制器轴正向箭头独立显示。控制器 X/Y/Z 正方向必须彼此正交，但可构成右手或左手轴系。</translation>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="977"/>
@@ -3983,8 +3988,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="1198"/>
-        <source>This coordinate will be written as the origin of the rotation axis %1; for AC turntable, please fill in the physical intersection point of the A-axis and C-axis.</source>
-        <translation>该坐标会写入旋转轴 %1 的原点；AC 转台请填写 A 轴与 C 轴的物理交点。</translation>
+        <source>Enter the taught controller-axis coordinates of rotary-axis origin %1 directly; for an AC table, enter the axis-system coordinates of the physical A/C intersection.</source>
+        <translation>请直接填写轴系示教反馈的旋转轴 %1 原点；AC 转台请填写 A/C 物理交点的轴系坐标。</translation>
     </message>
     <message>
         <location filename="../src/app/dialog/dialog_options.cpp" line="1202"/>
@@ -10495,8 +10500,8 @@ You need to complete the three pickups above first.</source>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="204"/>
-        <source>This is the only rigid transform from CAD workpiece coordinates to the fixture zero. It drives both model display and machine coordinates; recalculate the toolpath after a change.</source>
-        <translation>这是 CAD 工件坐标到夹具零位的唯一刚体变换。它同时驱动模型显示和机床坐标，修改后需要重新计算刀路。</translation>
+        <source>Setup XYZ uses taught controller-axis coordinates directly; rotations remain right-handed geometric angles. This transform drives model display, collision, and toolpath solving, so recalculate the toolpath after a change.</source>
+        <translation>安装 XYZ 直接使用轴系示教坐标；旋转仍为右手几何角。该变换同时驱动模型显示、碰撞与刀路求解，修改后需重新计算刀路。</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="465"/>

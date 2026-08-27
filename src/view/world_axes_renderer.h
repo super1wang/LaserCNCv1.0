@@ -53,9 +53,9 @@ public:
     /// 三轴长度（毫米）。变更后会重建所有 AIS。默认 200。
     void setAxisLength(double mm);
 
-    /// Use the configured linear machine axes for the displayed world axes.
-    /// This is display-only; machine motion continues to use the same source
-    /// definitions in MachineKinematics.
+    /// Display the controller-positive linear-axis directions at the common
+    /// axis zero. These arrows may form a left-handed basis and are deliberately
+    /// separate from GuiDocument's right-handed OCC corner trihedron.
     void setMachineAxisDirections(const QList<MachineAxisDef>& axes);
 
 private:

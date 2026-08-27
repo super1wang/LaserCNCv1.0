@@ -161,44 +161,23 @@ void GuiDocument::resizeView(int w, int h)
 
 void GuiDocument::setMachineCoordinateFrame(const QList<MachineAxisDef>& axes)
 {
-    auto linearAxis = [&axes](const QString& name, gp_Dir* result) {
-        for (const MachineAxisDef& axis : axes) {
-            if (axis.motionType == MachineAxisDef::Linear
-                && axis.name.compare(name, Qt::CaseInsensitive) == 0) {
-                *result = axis.direction;
-                return true;
-            }
-        }
-        return false;
-    };
-
-    gp_Dir x = m_machineViewX;
-    gp_Dir y = m_machineViewY;
-    gp_Dir z = m_machineViewZ;
-    if (!linearAxis(QStringLiteral("X"), &x)
-        || !linearAxis(QStringLiteral("Y"), &y)
-        || !linearAxis(QStringLiteral("Z"), &z)) {
-        LCNC_WARN(lcnc::LogCode::Generic,
-                  "GuiDocument: machine view frame requires linear X, Y and Z axes");
-        return;
-    }
-
-    m_machineViewX = x;
-    m_machineViewY = y;
-    m_machineViewZ = z;
+    Q_UNUSED(axes);
+    // OCC geometry, collision and the corner trihedron always live in the
+    // fixed right-handed world frame. Controller-positive axis directions may
+    // form a left-handed basis (for example X right, Y forward, Z down) and are
+    // rendered separately by WorldAxesRenderer.
+    // 中文翻译：OCC 几何、碰撞与角落三轴固定使用右手世界系；
+    // 控制器轴正向可为左手基，由 WorldAxesRenderer 作为独立运动方向显示。
+    m_machineViewX = gp_Dir(1.0, 0.0, 0.0);
+    m_machineViewY = gp_Dir(0.0, 1.0, 0.0);
+    m_machineViewZ = gp_Dir(0.0, 0.0, 1.0);
     m_hasMachineCoordinateFrame = true;
 
     if (m_trihedron.IsNull())
         return;
 
-    if (!isOrthogonalRightHandedFrame(x, y, z)) {
-        LCNC_WARN(lcnc::LogCode::Generic,
-                  "GuiDocument: corner trihedron needs an orthogonal right-handed XYZ frame; "
-                  "configured world axes remain available");
-        return;
-    }
-
-    Handle(Geom_Axis2Placement) coordSys = new Geom_Axis2Placement(gp_Ax2(gp::Origin(), z, x));
+    Handle(Geom_Axis2Placement) coordSys = new Geom_Axis2Placement(
+        gp_Ax2(gp::Origin(), m_machineViewZ, m_machineViewX));
     m_trihedron->SetComponent(coordSys);
     const Handle(AIS_InteractiveContext)& ctx = m_scene->context();
     if (!ctx.IsNull())
