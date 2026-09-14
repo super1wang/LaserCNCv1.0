@@ -1,0 +1,79 @@
+#pragma once
+
+#include "core/kernel/i_service.h"
+#include "core/project/project_types.h"
+#include "core/task/task_manager.h"
+
+#include <QObject>
+#include <QString>
+#include <memory>
+
+class LcncDocument;
+
+namespace lcnc {
+class LcncProjectManager;
+}
+
+namespace lcnc::cad {
+
+struct CadImportPayload;
+
+/**
+ * @brief Transaction boundary for project document lifecycle operations.
+ *
+ * The service owns project-level new/save/close decisions.  Import/export
+ * workers are added here incrementally so CadModule remains an event bridge
+ * instead of becoming another file-format implementation.
+ */
+class CadDocumentIoService final : public QObject, public lcnc::IService {
+    Q_OBJECT
+  public:
+    explicit CadDocumentIoService(lcnc::LcncProjectManager& projectManager,
+                                  TaskManager& taskManager, QObject* parent = nullptr);
+
+    struct ExportTask {
+        TaskId id{kInvalidTaskId};
+        std::shared_ptr<QString> error;
+    };
+    struct ImportTask {
+        TaskId id{kInvalidTaskId};
+        std::shared_ptr<QString> error;
+        std::shared_ptr<CadImportPayload> payload;
+    };
+
+    DocumentId createDocument(const QString& name = QString()) const;
+    bool saveDocument(LcncDocument* document, const QString& path,
+                      QString* errorMessage = nullptr) const;
+    bool closeDocument(DocumentId documentId) const;
+    ExportTask exportStepAsync(LcncDocument* document, const QString& filePath) const;
+    /// Read and mesh an import into detached OCC storage. Never mutates a project document.
+    ImportTask readImportAsync(const QString& filePath) const;
+    /// Commit a completed detached import to a document on its owning thread.
+    static bool commitImport(LcncDocument* document,
+                             const std::shared_ptr<CadImportPayload>& payload,
+                             QString* errorMessage = nullptr);
+
+    // Legacy direct helpers remain for internal compatibility. New UI paths use
+    // readImportAsync() + commitImport() to keep parsing and meshing transactional.
+    static bool importStlIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                              TaskProgress* progress, QString* errorMessage);
+    static bool importBrepIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                               TaskProgress* progress, QString* errorMessage);
+    static bool importStepIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                               QString* errorMessage);
+    static bool importIgesIntoDetachedDocument(LcncDocument* document, const QString& filePath,
+                                               QString* errorMessage);
+    static bool prepareDisplayMesh(LcncDocument* document, TaskProgress* progress,
+                                   QString* errorMessage);
+
+  private:
+    static bool readImport(const QString& filePath, TaskProgress* progress,
+                           const std::shared_ptr<CadImportPayload>& payload, QString* errorMessage);
+    static bool prepareImportMesh(const std::shared_ptr<CadImportPayload>& payload,
+                                  TaskProgress* progress, QString* errorMessage);
+
+    lcnc::LcncProjectManager& m_projectManager;
+    TaskManager& m_taskManager;
+};
+
+} // namespace lcnc::cad

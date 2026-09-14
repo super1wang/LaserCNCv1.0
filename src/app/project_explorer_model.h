@@ -1,0 +1,72 @@
+#pragma once
+
+#include "core/project/project_types.h"
+#include "core/project/cam/cam_data_contracts.h"
+
+#include <QList>
+#include <QColor>
+#include <QString>
+#include <QStringList>
+
+#include <cstdint>
+
+namespace lcnc::cad { class ICadProjectExplorerProjection; }
+namespace lcnc::cam { class ICamProjectExplorerProjection; }
+
+namespace lcnc::app {
+
+enum class ProjectExplorerNodeKind {
+    WorkpieceRoot = 0,
+    CadDocument,
+    CadGroup,
+    CadShape,
+    CadSketch,
+    CadSketchElement,
+    CadTemporarySketch,
+    ToolpathRoot,
+    ToolpathLayer,
+    ToolpathContour,
+    MachiningFaceRoot,
+    MachiningFace
+};
+
+struct ProjectExplorerNode {
+    ProjectExplorerNodeKind kind{ProjectExplorerNodeKind::WorkpieceRoot};
+    DocumentId documentId{kInvalidDocumentId};
+    QString nodeKey;
+    QString displayName;
+    QString infoText;
+    QString entry;
+    QStringList leafEntries;
+    std::uint64_t layerId{0};
+    QColor layerColor;
+    QString toolName;
+    int contourIndex{-1};
+    lcnc::cam::ContourId contourId{0};
+    std::uint64_t machiningFaceId{0};  ///< MachiningFace node -> face id (for delete)
+    bool checkable{true};
+    bool checked{true};
+    bool selectable{true};
+    bool draggable{false};
+    bool droppable{false};
+    bool muted{false};
+    QString toolTip;
+    QList<ProjectExplorerNode> children;
+};
+
+struct ProjectExplorerSnapshot {
+    QList<ProjectExplorerNode> roots;
+};
+
+class ProjectExplorerModel
+{
+public:
+    static ProjectExplorerSnapshot build(const lcnc::cad::ICadProjectExplorerProjection* cad,
+                                         const lcnc::cam::ICamProjectExplorerProjection* cam);
+};
+
+bool isCadProjectNode(ProjectExplorerNodeKind kind);
+bool isToolpathProjectNode(ProjectExplorerNodeKind kind);
+bool isMachiningFaceProjectNode(ProjectExplorerNodeKind kind);
+
+} // namespace lcnc::app

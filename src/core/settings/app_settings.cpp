@@ -1,0 +1,458 @@
+#include "core/settings/app_settings.h"
+
+#include "core/logging/logger.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QtGlobal>
+
+namespace lcnc {
+
+namespace {
+QString defaultPath()
+{
+    const QString exeDir = QCoreApplication::applicationDirPath();
+    return QDir(exeDir).absoluteFilePath(QStringLiteral("config/mainwindow.toml"));
+}
+
+AppSettings* g_instance = nullptr;
+
+QString colorToHex(const QColor& c)
+{
+    return c.name(QColor::HexRgb);
+}
+
+QColor colorFromHex(const QString& s, const QColor& def)
+{
+    const QColor c(s);
+    return c.isValid() ? c : def;
+}
+
+QString presetToString(RenderQualityPreset preset)
+{
+    switch (preset) {
+    case RenderQualityPreset::Low: return QStringLiteral("low");
+    case RenderQualityPreset::High: return QStringLiteral("high");
+    case RenderQualityPreset::Custom: return QStringLiteral("custom");
+    case RenderQualityPreset::Medium: return QStringLiteral("medium");
+    }
+    return QStringLiteral("medium");
+}
+
+RenderQualityPreset presetFromString(const QString& text)
+{
+    const QString s = text.toLower();
+    if (s == QStringLiteral("low")) return RenderQualityPreset::Low;
+    if (s == QStringLiteral("high")) return RenderQualityPreset::High;
+    if (s == QStringLiteral("custom")) return RenderQualityPreset::Custom;
+    return RenderQualityPreset::Medium;
+}
+
+QString methodToString(RenderMethod method)
+{
+    return method == RenderMethod::RayTracing
+        ? QStringLiteral("raytracing")
+        : QStringLiteral("rasterization");
+}
+
+RenderMethod methodFromString(const QString& text)
+{
+    return text.compare(QStringLiteral("raytracing"), Qt::CaseInsensitive) == 0
+        ? RenderMethod::RayTracing
+        : RenderMethod::Rasterization;
+}
+
+QString documentOpenModeToString(DocumentOpenMode mode)
+{
+    switch (mode) {
+    case DocumentOpenMode::MultiDocument:
+        return QStringLiteral("multi");
+    case DocumentOpenMode::SingleDocument:
+        return QStringLiteral("single");
+    }
+    return QStringLiteral("single");
+}
+
+DocumentOpenMode documentOpenModeFromString(const QString& text)
+{
+    return text.compare(QStringLiteral("multi"), Qt::CaseInsensitive) == 0
+        ? DocumentOpenMode::MultiDocument
+        : DocumentOpenMode::SingleDocument;
+}
+
+QString displayModeToString(StartupDisplayMode mode)
+{
+    switch (mode) {
+    case StartupDisplayMode::Wireframe:
+        return QStringLiteral("wireframe");
+    case StartupDisplayMode::ShadedWithEdges:
+        return QStringLiteral("shaded_with_edges");
+    case StartupDisplayMode::Shaded:
+        return QStringLiteral("shaded");
+    }
+    return QStringLiteral("shaded");
+}
+
+StartupDisplayMode displayModeFromString(const QString& text)
+{
+    if (text.compare(QStringLiteral("wireframe"), Qt::CaseInsensitive) == 0)
+        return StartupDisplayMode::Wireframe;
+    if (text.compare(QStringLiteral("shaded_with_edges"), Qt::CaseInsensitive) == 0)
+        return StartupDisplayMode::ShadedWithEdges;
+    return StartupDisplayMode::Shaded;
+}
+
+void applyPresetDefaults(RenderProfileSettings& profile, bool cam)
+{
+    switch (profile.qualityPreset) {
+    case RenderQualityPreset::Low:
+        profile.renderMethod = RenderMethod::Rasterization;
+        profile.antiAliasing = false;
+        profile.msaaSamples = 0;
+        profile.shadows = false;
+        profile.reflections = false;
+        profile.adaptiveSampling = false;
+        profile.frustumCulling = true;
+        profile.backFaceCulling = cam;
+        profile.deviationCoefficient = cam ? 0.14 : 0.10;
+        profile.deviationAngle = cam ? 0.75 : 0.65;
+        profile.edgeWidth = 0.6;
+        profile.targetFps = 60;
+        break;
+    case RenderQualityPreset::High:
+        profile.antiAliasing = true;
+        profile.msaaSamples = cam ? 4 : 8;
+        profile.shadows = !cam;
+        profile.reflections = !cam;
+        profile.frustumCulling = true;
+        profile.backFaceCulling = false;
+        profile.deviationCoefficient = cam ? 0.025 : 0.01;
+        profile.deviationAngle = cam ? 0.20 : 0.12;
+        profile.edgeWidth = 1.1;
+        profile.targetFps = cam ? 45 : 30;
+        break;
+    case RenderQualityPreset::Medium:
+        profile.renderMethod = RenderMethod::Rasterization;
+        profile.antiAliasing = true;
+        profile.msaaSamples = 2;
+        profile.shadows = false;
+        profile.reflections = false;
+        profile.adaptiveSampling = false;
+        profile.frustumCulling = true;
+        profile.backFaceCulling = cam;
+        profile.deviationCoefficient = cam ? 0.06 : 0.05;
+        profile.deviationAngle = cam ? 0.40 : 0.35;
+        profile.edgeWidth = 0.8;
+        profile.targetFps = 60;
+        break;
+    case RenderQualityPreset::Custom:
+        break;
+    }
+}
+
+void readProfile(const toml::value& table, RenderProfileSettings& profile)
+{
+    using namespace toml_io;
+    profile.defaultDisplayMode = displayModeFromString(
+        get_qstring(table, "default_display_mode", displayModeToString(profile.defaultDisplayMode)));
+    profile.qualityPreset = presetFromString(
+        get_qstring(table, "quality", presetToString(profile.qualityPreset)));
+    profile.renderMethod = methodFromString(
+        get_qstring(table, "render_method", methodToString(profile.renderMethod)));
+    profile.material = get_qstring(table, "material", profile.material);
+    profile.antiAliasing = get_bool(table, "anti_aliasing", profile.antiAliasing);
+    profile.msaaSamples = get_int(table, "msaa_samples", profile.msaaSamples);
+    profile.shadows = get_bool(table, "shadows", profile.shadows);
+    profile.reflections = get_bool(table, "reflections", profile.reflections);
+    profile.adaptiveSampling = get_bool(table, "adaptive_sampling", profile.adaptiveSampling);
+    profile.frustumCulling = get_bool(table, "frustum_culling", profile.frustumCulling);
+    profile.backFaceCulling = get_bool(table, "back_face_culling", profile.backFaceCulling);
+    profile.geometryMerge = get_bool(table, "geometry_merge", profile.geometryMerge);
+    profile.proxyGeometry = get_bool(table, "proxy_geometry", profile.proxyGeometry);
+    profile.lowLodWhileMoving = get_bool(table, "low_lod_while_moving", profile.lowLodWhileMoving);
+    profile.disableHeavyEffectsDuringSimulation = get_bool(
+        table, "disable_heavy_effects_during_simulation", profile.disableHeavyEffectsDuringSimulation);
+    profile.ambientLight = get_double(table, "ambient_light", profile.ambientLight);
+    profile.deviationCoefficient = get_double(table, "deviation_coefficient", profile.deviationCoefficient);
+    profile.deviationAngle = get_double(table, "deviation_angle", profile.deviationAngle);
+    profile.edgeWidth = get_double(table, "edge_width", profile.edgeWidth);
+    profile.renderResolutionScale = get_double(table, "render_resolution_scale", profile.renderResolutionScale);
+    profile.raytracingDepth = get_int(table, "raytracing_depth", profile.raytracingDepth);
+    profile.rayTracingTileSize = get_int(table, "raytracing_tile_size", profile.rayTracingTileSize);
+    profile.rayTracingTileCount = get_int(table, "raytracing_tile_count", profile.rayTracingTileCount);
+    profile.targetFps = get_int(table, "target_fps", profile.targetFps);
+}
+
+void writeProfile(toml::value& table, const RenderProfileSettings& profile)
+{
+    using namespace toml_io;
+    table["default_display_mode"] = qs(displayModeToString(profile.defaultDisplayMode));
+    table["quality"] = qs(presetToString(profile.qualityPreset));
+    table["render_method"] = qs(methodToString(profile.renderMethod));
+    table["material"] = qs(profile.material);
+    table["anti_aliasing"] = profile.antiAliasing;
+    table["msaa_samples"] = profile.msaaSamples;
+    table["shadows"] = profile.shadows;
+    table["reflections"] = profile.reflections;
+    table["adaptive_sampling"] = profile.adaptiveSampling;
+    table["frustum_culling"] = profile.frustumCulling;
+    table["back_face_culling"] = profile.backFaceCulling;
+    table["geometry_merge"] = profile.geometryMerge;
+    table["proxy_geometry"] = profile.proxyGeometry;
+    table["low_lod_while_moving"] = profile.lowLodWhileMoving;
+    table["disable_heavy_effects_during_simulation"] = profile.disableHeavyEffectsDuringSimulation;
+    table["ambient_light"] = profile.ambientLight;
+    table["deviation_coefficient"] = profile.deviationCoefficient;
+    table["deviation_angle"] = profile.deviationAngle;
+    table["edge_width"] = profile.edgeWidth;
+    table["render_resolution_scale"] = profile.renderResolutionScale;
+    table["raytracing_depth"] = profile.raytracingDepth;
+    table["raytracing_tile_size"] = profile.rayTracingTileSize;
+    table["raytracing_tile_count"] = profile.rayTracingTileCount;
+    table["target_fps"] = profile.targetFps;
+}
+} // namespace
+
+QHash<QString, QColor> defaultMachineAxisColors()
+{
+    return {
+        {QStringLiteral("BASE"), QColor::fromRgbF(0.62f, 0.64f, 0.68f)},
+        {QStringLiteral("X"),    QColor::fromRgbF(0.90f, 0.27f, 0.18f)},
+        {QStringLiteral("Y"),    QColor::fromRgbF(0.14f, 0.66f, 0.28f)},
+        {QStringLiteral("Z"),    QColor::fromRgbF(0.18f, 0.48f, 0.94f)},
+        {QStringLiteral("A"),    QColor::fromRgbF(0.93f, 0.60f, 0.08f)},
+        {QStringLiteral("B"),    QColor::fromRgbF(0.10f, 0.70f, 0.70f)},
+        {QStringLiteral("C"),    QColor::fromRgbF(0.76f, 0.23f, 0.79f)},
+    };
+}
+
+AppSettings::AppSettings()
+{
+    Q_ASSERT_X(!g_instance, "AppSettings",
+               "second AppSettings instance — must be Kernel-owned only");
+    g_instance = this;
+    colors.machineAxisColors = defaultMachineAxisColors();
+    cadViewRendering.qualityPreset = RenderQualityPreset::Medium;
+    camViewRendering.qualityPreset = RenderQualityPreset::Medium;
+    camViewRendering.backFaceCulling = true;
+    camViewRendering.lowLodWhileMoving = true;
+    camViewRendering.disableHeavyEffectsDuringSimulation = true;
+    applyPresetDefaults(cadViewRendering, false);
+    applyPresetDefaults(camViewRendering, true);
+}
+
+AppSettings::~AppSettings()
+{
+    if (g_instance == this) g_instance = nullptr;
+}
+
+bool AppSettings::loadDefault()
+{
+    const QString path = defaultPath();
+    if (path.trimmed().isEmpty()) {
+        LCNC_ERR(LogCode::SettingsLoaded,
+                 "AppSettings: empty config path; keeping built-in defaults");
+        return false;
+    }
+    if (!QFileInfo::exists(path)) {
+        // 首次启动 / 无有效配置：用内置默认值生成一份配置，避免"无配置"状态，
+        // 并便于用户后续编辑、排查路径问题。生成失败也不阻塞启动（继续用默认值）。
+        LCNC_INFO(LogCode::SettingsLoaded,
+                  "AppSettings: no config at '{}'; generating default",
+                  path.toStdString());
+        if (!saveDefault())
+            LCNC_WARN(LogCode::SettingsSaveFailed,
+                      "AppSettings: failed to write default config '{}'",
+                      path.toStdString());
+        return true;
+    }
+    return load(path);
+}
+bool AppSettings::saveDefault() const { return save(defaultPath()); }
+
+bool AppSettings::isModuleDisabled(const QString& moduleId) const
+{
+    return disabledModules.contains(moduleId);
+}
+
+void AppSettings::readFrom(const toml::value& root)
+{
+    using namespace toml_io;
+
+    if (root.contains("general") && root.at("general").is_table()) {
+        const auto& g = root.at("general");
+        // Older builds persisted "light" by default but never applied the
+        // setting (the application was always dark). Treat those files as the
+        // current dark default; once saved by this build, the version marker
+        // preserves an explicit light selection.
+        theme = get_int(g, "theme_version", 0) >= 1
+            ? get_qstring(g, "theme", theme)
+            : QStringLiteral("dark");
+        language    = get_qstring(g, "language", language);
+        unitSystem  = get_qstring(g, "units",    unitSystem);
+        documentOpenMode = documentOpenModeFromString(
+            get_qstring(g, "document_open_mode", documentOpenModeToString(documentOpenMode)));
+        recentLimit = get_int(g,    "recent_limit", recentLimit);
+    }
+
+    if (root.contains("window") && root.at("window").is_table()) {
+        const auto& w = root.at("window");
+        windowX         = get_int(w,  "x",         windowX);
+        windowY         = get_int(w,  "y",         windowY);
+        windowWidth     = get_int(w,  "width",     windowWidth);
+        windowHeight    = get_int(w,  "height",    windowHeight);
+        windowMaximized = get_bool(w, "maximized", windowMaximized);
+    }
+
+    recentFiles.clear();
+    if (root.contains("recent") && root.at("recent").is_table()) {
+        const auto& r = root.at("recent");
+        if (r.contains("files") && r.at("files").is_array()) {
+            for (const auto& v : r.at("files").as_array()) {
+                if (v.is_string())
+                    recentFiles << QString::fromStdString(v.as_string());
+            }
+        }
+    }
+
+    disabledModules.clear();
+    if (root.contains("modules") && root.at("modules").is_table()) {
+        const auto& m = root.at("modules");
+        if (m.contains("disabled") && m.at("disabled").is_array()) {
+            for (const auto& v : m.at("disabled").as_array()) {
+                if (v.is_string())
+                    disabledModules << QString::fromStdString(v.as_string());
+            }
+        }
+    }
+
+    if (root.contains("rendering_cad") && root.at("rendering_cad").is_table())
+        readProfile(root.at("rendering_cad"), cadViewRendering);
+    if (root.contains("rendering_cam") && root.at("rendering_cam").is_table())
+        readProfile(root.at("rendering_cam"), camViewRendering);
+
+    if (root.contains("colors") && root.at("colors").is_table()) {
+        const auto& c = root.at("colors");
+        colors.workpieceColor = colorFromHex(get_qstring(c, "workpiece", colorToHex(colors.workpieceColor)), colors.workpieceColor);
+        colors.workpieceTransparency = qBound(0.0,
+            get_double(c, "workpiece_transparency", colors.workpieceTransparency), 1.0);
+        colors.machineTransparency = qBound(0.0,
+            get_double(c, "machine_transparency", colors.machineTransparency), 1.0);
+        if (c.contains("background") && c.at("background").is_string())
+            colors.backgroundColor = colorFromHex(QString::fromStdString(c.at("background").as_string()), colors.backgroundColor);
+        colors.selectionColor = colorFromHex(get_qstring(c, "selection", colorToHex(colors.selectionColor)), colors.selectionColor);
+        colors.hoverColor = colorFromHex(get_qstring(c, "hover", colorToHex(colors.hoverColor)), colors.hoverColor);
+        colors.treeSelectionColor = colorFromHex(get_qstring(c, "tree_selection", colorToHex(colors.treeSelectionColor)), colors.treeSelectionColor);
+        colors.highlightDisplayMode = get_int(c, "highlight_display_mode", colors.highlightDisplayMode);
+        colors.highlightLineWidth = get_double(c, "highlight_line_width", colors.highlightLineWidth);
+        colors.cutterHeadColor = colorFromHex(get_qstring(c, "cutter_head", colorToHex(colors.cutterHeadColor)), colors.cutterHeadColor);
+        colors.cutterHeadTransparency = qBound(0.0,
+            get_double(c, "cutter_head_transparency", colors.cutterHeadTransparency), 1.0);
+        colors.cutterHeadScale = qBound(0.1,
+            get_double(c, "cutter_head_scale", colors.cutterHeadScale), 5.0);
+        if (c.contains("axis_colors") && c.at("axis_colors").is_table()) {
+            const auto& ac = c.at("axis_colors");
+            for (const auto& kv : ac.as_table()) {
+                if (kv.second.is_string()) {
+                    colors.machineAxisColors.insert(QString::fromStdString(kv.first),
+                        colorFromHex(QString::fromStdString(kv.second.as_string()), QColor()));
+                }
+            }
+        }
+    }
+
+    // 兼容上一版 [highlight] 字段。
+    if (root.contains("highlight") && root.at("highlight").is_table()) {
+        const auto& h = root.at("highlight");
+        colors.selectionColor = colorFromHex(get_qstring(h, "selection_color", colorToHex(colors.selectionColor)), colors.selectionColor);
+        colors.hoverColor = colorFromHex(get_qstring(h, "hover_color", colorToHex(colors.hoverColor)), colors.hoverColor);
+        colors.treeSelectionColor = colorFromHex(get_qstring(h, "tree_color", colorToHex(colors.treeSelectionColor)), colors.treeSelectionColor);
+        colors.highlightDisplayMode = get_int(h, "display_mode", colors.highlightDisplayMode);
+        colors.highlightLineWidth = get_double(h, "line_width", colors.highlightLineWidth);
+    }
+
+    if (root.contains("view_state") && root.at("view_state").is_table()) {
+        const auto& v = root.at("view_state");
+        viewState.displayMode = get_int(v, "display_mode", viewState.displayMode);
+        viewState.faceBoundary = get_bool(v, "face_boundary", viewState.faceBoundary);
+        viewState.worldAxesVisible = get_bool(v, "world_axes_visible", viewState.worldAxesVisible);
+        viewState.rotaryAxisGuidesVisible = get_bool(v, "rotary_axis_guides_visible", viewState.rotaryAxisGuidesVisible);
+        viewState.cutterHeadGuideVisible = get_bool(v, "cutter_head_guide_visible", viewState.cutterHeadGuideVisible);
+        viewState.machineModelVisible = get_bool(v, "machine_model_visible", viewState.machineModelVisible);
+    }
+}
+
+void AppSettings::writeTo(toml::value& root) const
+{
+    using namespace toml_io;
+
+    toml::value general(toml::table{});
+    general["theme"] = qs(theme);
+    general["theme_version"] = 1;
+    general["language"] = qs(language);
+    general["units"] = qs(unitSystem);
+    general["document_open_mode"] = qs(documentOpenModeToString(documentOpenMode));
+    general["recent_limit"] = recentLimit;
+    root["general"] = general;
+
+    toml::value window(toml::table{});
+    window["x"] = windowX;
+    window["y"] = windowY;
+    window["width"] = windowWidth;
+    window["height"] = windowHeight;
+    window["maximized"] = windowMaximized;
+    root["window"] = window;
+
+    toml::array files;
+    for (const auto& f : recentFiles)
+        files.emplace_back(qs(f));
+    toml::value recent(toml::table{});
+    recent["files"] = files;
+    root["recent"] = recent;
+
+    toml::array disabled;
+    for (const auto& m : disabledModules)
+        disabled.emplace_back(qs(m));
+    toml::value modules(toml::table{});
+    modules["disabled"] = disabled;
+    root["modules"] = modules;
+
+    toml::value cad(toml::table{});
+    writeProfile(cad, cadViewRendering);
+    root["rendering_cad"] = cad;
+
+    toml::value cam(toml::table{});
+    writeProfile(cam, camViewRendering);
+    root["rendering_cam"] = cam;
+
+    toml::value colorTable(toml::table{});
+    colorTable["workpiece"] = qs(colorToHex(colors.workpieceColor));
+    colorTable["workpiece_transparency"] = qBound(0.0, colors.workpieceTransparency, 1.0);
+    colorTable["machine_transparency"] = qBound(0.0, colors.machineTransparency, 1.0);
+    colorTable["background"] = qs(colorToHex(colors.backgroundColor));
+    colorTable["selection"] = qs(colorToHex(colors.selectionColor));
+    colorTable["hover"] = qs(colorToHex(colors.hoverColor));
+    colorTable["tree_selection"] = qs(colorToHex(colors.treeSelectionColor));
+    colorTable["highlight_display_mode"] = colors.highlightDisplayMode;
+    colorTable["highlight_line_width"] = colors.highlightLineWidth;
+    colorTable["cutter_head"] = qs(colorToHex(colors.cutterHeadColor));
+    colorTable["cutter_head_transparency"] = qBound(0.0, colors.cutterHeadTransparency, 1.0);
+    colorTable["cutter_head_scale"] = colors.cutterHeadScale;
+    toml::value axisColors(toml::table{});
+    for (auto it = colors.machineAxisColors.cbegin(); it != colors.machineAxisColors.cend(); ++it)
+        axisColors[qs(it.key())] = qs(colorToHex(it.value()));
+    colorTable["axis_colors"] = axisColors;
+    root["colors"] = colorTable;
+
+    toml::value viewStateTable(toml::table{});
+    viewStateTable["display_mode"] = viewState.displayMode;
+    viewStateTable["face_boundary"] = viewState.faceBoundary;
+    viewStateTable["world_axes_visible"] = viewState.worldAxesVisible;
+    viewStateTable["rotary_axis_guides_visible"] = viewState.rotaryAxisGuidesVisible;
+    viewStateTable["cutter_head_guide_visible"] = viewState.cutterHeadGuideVisible;
+    viewStateTable["machine_model_visible"] = viewState.machineModelVisible;
+    root["view_state"] = viewStateTable;
+}
+
+} // namespace lcnc

@@ -1,0 +1,145 @@
+#pragma once
+
+#include "core/command/commands_api.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Process commands —— 加工运行 / 控制器连接 / 参数设置
+//
+// 每个命令仅负责"对话/触发 → 转发到 IProcessFacade"，不直接持有
+// 加工业务状态。需要参数交互的（如 jog、setFeedOverride）由执行面板
+// 发出信号后交给应用层编排。
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace lcnc::process {
+
+/// 新建流程树。
+class CmdNewProcess : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.newProcess";
+    explicit CmdNewProcess(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 从 TOML 文件加载流程树。
+class CmdLoadProcess : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.loadProcess";
+    explicit CmdLoadProcess(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 保存当前流程树为 TOML 文件。
+class CmdSaveProcess : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.saveProcess";
+    explicit CmdSaveProcess(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 打开动态属性表参数对话框。
+class CmdOpenProcessSettings : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.settings";
+    explicit CmdOpenProcessSettings(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 启动加工运行（仿真或实控）。
+class CmdRunStart : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.runStart";
+    explicit CmdRunStart(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 暂停加工运行。
+class CmdRunPause : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.runPause";
+    explicit CmdRunPause(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 停止加工运行（不释放资源）。
+class CmdRunStop : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.runStop";
+    explicit CmdRunStop(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 停止后的设备检查与状态复位。
+class CmdResetStop : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.resetStop";
+    explicit CmdResetStop(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 各轴回零。
+class CmdHome : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.home";
+    explicit CmdHome(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 移动至设置中定义的上料位。
+class CmdMoveToLoadingPosition : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.moveToLoadingPosition";
+    explicit CmdMoveToLoadingPosition(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 移动至设置中定义的下料位。
+class CmdMoveToBlankingPosition : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.moveToBlankingPosition";
+    explicit CmdMoveToBlankingPosition(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 异步连接当前已启用的全部外设（运动控制器、激光器等）。
+class CmdConnectDevices : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.connectDevices";
+    explicit CmdConnectDevices(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+/// 异步断开当前已连接的全部外设。
+class CmdDisconnectDevices : public CommandBase {
+    Q_OBJECT
+public:
+    inline static const QString Name = "process.disconnectDevices";
+    explicit CmdDisconnectDevices(IAppContext* ctx);
+    void execute() override;
+    bool isEnabled() const override;
+};
+
+} // namespace lcnc::process

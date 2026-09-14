@@ -1,0 +1,162 @@
+#pragma once
+
+#include "core/kinematics/machine_topology.h"
+
+#include "modules/process/device/laser/ld_factory.h"
+#include "modules/process/tool/tool_factory.h"
+#include "modules/process/runtime/device_command_queue.h"
+#include "modules/process/runtime/process_preflight_types.h"
+
+#include <QTimer>
+#include <QElapsedTimer>
+#include <QStringList>
+#include <QString>
+#include <QMap>
+#include <QPair>
+#include <QVector>
+
+#include <memory>
+#include <functional>
+#include <mutex>
+#include <string>
+#include "modules/process/device/motion_control/motion_control.h"
+#include "modules/process/runtime/process_device_coordinator.h"
+
+namespace lcnc::process {
+class IMotionCommandSink;
+struct MotionSinkCallbacks;
+class ProcessSettingsService;
+class ProcessRuntimeConfiguration;
+class PureSimulationToolpathTicker;
+}
+
+namespace lcnc::process {
+struct DeviceAxisStatusSample { QString name; double pos{0.0}; bool enabled{false}; bool valid{false}; };
+struct DeviceDigitalOutputSample { QString channel; QString displayName; bool value{false}; bool valid{false}; };
+struct DeviceStatusSnapshot { bool connected{false}; QVector<DeviceAxisStatusSample> axes; QVector<DeviceDigitalOutputSample> digitalOutputs; };
+struct DevicePeripheralSnapshot { QString deviceName; bool connected{false}; bool initialized{false}; QString diagnostic; bool valid{false}; };
+}
+
+struct ButtonState
+{
+    QTimer*         pressTimer{nullptr};
+    QElapsedTimer   elapsedTimer;
+    bool            bLongPress{false};
+    bool            bPressed{false};
+};
+
+class ProcessDeviceRuntime
+{
+public:
+    ProcessDeviceRuntime(lcnc::process::ProcessSettingsService& settings,
+            lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration);
+    ~ProcessDeviceRuntime();
+
+    std::string activeMotionControllerName() const;
+    /// Reads only the adapter's cached session flag while holding the device lease.
+    bool motionConnectionOpen() const;
+    std::string configuredMotionControllerName() const;
+    bool configuredControllerRequiresDevice() const;
+    /// Stop motion buffers and force process outputs to their safe state.
+    bool stopMotionAndSafeOutputs();
+    /// Stops outputs and disconnects owned devices in the only safe ownership order.
+    bool shutdownDevices();
+
+    /// Creates, connects and configures the selected controller and laser on
+    /// the device worker. Progress callbacks must marshal to the GUI thread.
+    lcnc::process::DeviceCommandResult connectDevices(
+        bool pureSimulation,
+        const std::function<void(int, const QString&)>& reportProgress);
+    /// Opens only the configured motion-controller session.  Used by the SDK
+    /// integration gate before application-level axis/laser configuration.
+    lcnc::process::DeviceCommandResult connectMotionControllerSession(bool pureSimulation);
+    lcnc::process::DeviceCommandResult disconnectMotionControllerSession();
+    /// Safe device-worker disconnect: stop outputs first, then laser, then motion.
+    lcnc::process::DeviceCommandResult disconnectDevices();
+
+    /// Typed motion and IO operations. These methods are called only from the
+    /// device queue worker; they keep vendor pointers and the defensive lease
+    /// inside the runtime boundary.
+    lcnc::process::DeviceCommandResult moveRelative(lcnc::process::Axis axis, double distance, double velocity);
+    lcnc::process::DeviceCommandResult moveAbsolute(lcnc::process::Axis axis, double position, double velocity);
+    /// One short position/status read for workflow-thread absolute-motion waits.
+    lcnc::process::DeviceCommandResult pollAbsoluteMotion(
+        lcnc::process::Axis axis, double target, double tolerance, bool* moving);
+    /// Issues a controller absolute-axis command and verifies that the axis
+    /// has stopped at the requested coordinate before the next safe-zone phase.
+    lcnc::process::DeviceCommandResult moveAbsoluteAndWait(
+        lcnc::process::Axis axis, double position, double velocity,
+        int timeoutMs = 30000, double positionTolerance = 0.05);
+    lcnc::process::DeviceCommandResult jog(lcnc::process::Axis axis, bool positive, double velocity);
+    lcnc::process::DeviceCommandResult stopAxis(lcnc::process::Axis axis);
+    lcnc::process::DeviceCommandResult stopAllMotion();
+    /// Sets only the controller's atomic cancellation hint. This never calls a
+    /// vendor SDK and may therefore run before the queued Stop transaction.
+    void requestMotionAbort() noexcept;
+    lcnc::process::DeviceCommandResult moveAxes(
+        const QVector<lcnc::process::Axis>& axes, const QVector<double>& positions, double velocity, bool relative);
+    /// 将所选轴当前位置寄存器直接置位为指定坐标（ACS setfpos / GTN 对应接口）。
+    lcnc::process::DeviceCommandResult setAxisPositions(const QVector<QPair<lcnc::process::Axis, double>>& targets);
+    lcnc::process::DeviceCommandResult setAxisEnabled(lcnc::process::Axis axis, bool enabled);
+    lcnc::process::DeviceCommandResult setDigitalOutput(lcnc::process::DigitalOUT output, bool value);
+    lcnc::process::DeviceCommandResult setDigitalOutput(const QString& outputName, bool value);
+    lcnc::process::DeviceCommandResult setAnalogOutput(lcnc::process::AnalogOUT output, double value,
+                                                       const QString& outputName = {});
+    /// Establishes each axis reference sequentially. Disabled is a complete
+    /// no-op; ControllerHome moves through the vendor routine;
+    /// SetCurrentPosition only rewrites the encoder/planner coordinate.
+    lcnc::process::DeviceCommandResult homeAxes(
+        const QVector<lcnc::process::AxisHomingCommand>& commands);
+    lcnc::process::DeviceCommandResult moveToPreset(
+        const QMap<QString, double>& targets, double velocity, const QString& positionName);
+    lcnc::process::DeviceStatusSnapshot pollStatus(
+        const QStringList& axisNames, const QVector<QPair<QString, QString>>& digitalOutputs);
+    /// Reads a coherent APOS snapshot on the device queue.  The workflow uses
+    /// this immediately before CAM plans a temporary first-contour approach.
+    lcnc::process::DeviceCommandResult readAxisPositions(
+        const QStringList& axisNames, QMap<QString, double>* positions);
+    lcnc::process::DevicePeripheralSnapshot pollPeripheralStatus();
+
+    /// Typed IO access used by monitoring jobs after they have entered the
+    /// device executor.  Callers never need to inspect vendor channel maps.
+    bool readDigitalChannel(const QString& channel, bool* value, QString* errorMessage);
+    bool readAnalogChannel(const QString& channel, double* value, QString* errorMessage);
+    lcnc::process::DeviceCommandResult runPreflight(
+        const lcnc::process::ProcessPreflightRequest& request,
+        lcnc::process::ProcessPreflightReport* report);
+    lcnc::process::DeviceCommandResult validateContourBoundary();
+    lcnc::process::DeviceCommandResult recoverControllerAfterStop();
+    std::unique_ptr<lcnc::process::IMotionCommandSink> createMotionSink(
+        bool simulationMode,
+        lcnc::process::PureSimulationToolpathTicker* simTicker,
+        const lcnc::process::MotionSinkCallbacks& callbacks,
+        const lcnc::MachineAxisLayout& layout);
+
+    void setToolTable();
+    void clearToolData();
+
+    bool setMotionControlTable(const toml::table& table_MotionControl = {});
+    void setDigitalTable(const toml::table& table_Digital = {});
+    void setAnalogTable(const toml::table& table_Analog = {});
+    void setLaserTable(const toml::table& table_Laser = {});
+    void setGasTable(const toml::table& table_Gas = {});
+
+private:
+    using DeviceLock = lcnc::process::ProcessDeviceCoordinator::Lease;
+    DeviceLock lockDeviceAccess() { return m_deviceCoordinator.acquire(); }
+    bool setMotionControl(std::string strName = "");
+    void setLaserDevice(std::string strName = "");
+    lcnc::process::ProcessSettingsService& m_settings;
+    lcnc::process::ProcessRuntimeConfiguration& m_runtimeConfiguration;
+    mutable std::mutex m_motionControlLifetimeMutex;
+    std::unique_ptr<MotionControl> m_motionControl;
+    mutable lcnc::process::ProcessDeviceCoordinator m_deviceCoordinator;
+
+    LDFactory       m_LDFactory;
+    LaserDevice*    m_pLaserDevice{nullptr};
+
+    ToolFactory     m_ToolFactory;
+
+    std::string  m_strMotionControl;
+    std::string  m_strLaserDevice;
+};

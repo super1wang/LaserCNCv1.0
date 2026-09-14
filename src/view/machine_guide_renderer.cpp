@@ -1,0 +1,315 @@
+#include "view/machine_guide_renderer.h"
+#include "core/math/numeric_constants.h"
+
+#include "view/gui_document.h"
+#include "view/graphics_scene.h"
+#include "core/logging/logger.h"
+#include "core/kinematics/machine_kinematics.h"
+
+#include <AIS_InteractiveContext.hxx>
+#include <AIS_DisplayMode.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRep_Builder.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <Graphic3d_MaterialAspect.hxx>
+#include <Graphic3d_NameOfMaterial.hxx>
+#include <Graphic3d_ZLayerId.hxx>
+#include <Quantity_Color.hxx>
+#include <TopoDS_Compound.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
+
+#include <cmath>
+
+namespace lcnc::view {
+
+MachineGuideRenderer::MachineGuideRenderer() = default;
+MachineGuideRenderer::~MachineGuideRenderer() = default;
+
+void MachineGuideRenderer::setCutterHeadAppearance(const CutterHeadAppearance& appearance)
+{
+    m_cutterHeadAppearance = appearance;
+}
+
+void MachineGuideRenderer::setCutterDisplayProxy(const TopoDS_Shape& shape)
+{
+    m_cutterDisplayProxy = shape;
+}
+
+QMap<QString, Handle(AIS_Shape)>& MachineGuideRenderer::guideMap(GuiDocument* gd)
+{
+    return m_axisGuideAisByDocument[gd];
+}
+
+const QMap<QString, Handle(AIS_Shape)>* MachineGuideRenderer::guideMap(GuiDocument* gd) const
+{
+    const auto it = m_axisGuideAisByDocument.constFind(gd);
+    return it == m_axisGuideAisByDocument.cend() ? nullptr : &it.value();
+}
+
+void MachineGuideRenderer::erase(GuiDocument* gd)
+{
+    if (!gd) { m_axisGuideAisByDocument.clear(); return; }
+    GraphicsScene* scene = gd->scene();
+    auto it = m_axisGuideAisByDocument.find(gd);
+    if (it == m_axisGuideAisByDocument.end())
+        return;
+    if (!scene) {
+        m_axisGuideAisByDocument.erase(it);
+        return;
+    }
+    for (auto& ais : it.value()) {
+        if (!ais.IsNull()) scene->eraseObject(ais, false);
+    }
+    m_axisGuideAisByDocument.erase(it);
+}
+
+void MachineGuideRenderer::refresh(GuiDocument* gd,
+                                   MachineKinematics* kin,
+                                   const gp_Pnt& cutterHeadWorldTip)
+{
+    erase(gd);
+    if (!gd || !kin) return;
+    GraphicsScene* scene = gd->scene();
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (!scene || ctx.IsNull()) return;
+    auto& axisGuideAis = guideMap(gd);
+
+    LCNC_DEBUG(lcnc::LogCode::Generic,
+               "MachineGuideRenderer::refresh cfg='{}' axes={} headTip=({:.3f},{:.3f},{:.3f}) rotaryVisible={} headVisible={}",
+               kin->configType().toStdString(),
+               kin->axes().size(),
+               cutterHeadWorldTip.X(),
+               cutterHeadWorldTip.Y(),
+               cutterHeadWorldTip.Z(),
+               m_rotaryAxisVisible,
+               m_cutterHeadVisible);
+
+    auto axisColor = [](const QString& axisName) {
+        if (axisName == QStringLiteral("A"))
+            return Quantity_Color(0.95, 0.55, 0.10, Quantity_TOC_RGB);
+        if (axisName == QStringLiteral("B"))
+            return Quantity_Color(0.10, 0.70, 0.95, Quantity_TOC_RGB);
+        if (axisName == QStringLiteral("C"))
+            return Quantity_Color(0.90, 0.20, 0.90, Quantity_TOC_RGB);
+        return Quantity_Color(0.20, 0.45, 0.95, Quantity_TOC_RGB);
+    };
+
+    bool hasRotaryAxis = false;
+    for (const MachineAxisDef& axis : kin->axes()) {
+        if (axis.motionType != MachineAxisDef::Rotary)
+            continue;
+        hasRotaryAxis = true;
+        const QString axisName = axis.name.trimmed().toUpper();
+        const gp_Vec axisVector(axis.direction);
+        constexpr double kRotaryGuideHalfLength = 50.0;
+        const gp_Pnt p0 = axis.origin.Translated(axisVector * -kRotaryGuideHalfLength);
+        const gp_Pnt p1 = axis.origin.Translated(axisVector *  kRotaryGuideHalfLength);
+        BRepBuilderAPI_MakeEdge edgeMaker(p0, p1);
+        if (!edgeMaker.IsDone()) continue;
+        Handle(AIS_Shape) ais = scene->displayShape(edgeMaker.Edge(), false, false, false);
+        scene->setShapeColor(ais, axisColor(axisName), false);
+        ais->SetWidth(3.0);
+        ctx->SetZLayer(ais, Graphic3d_ZLayerId_Topmost);
+        ctx->Deactivate(ais);
+        axisGuideAis.insert(QStringLiteral("axis:%1").arg(axisName), ais);
+    }
+
+    if (hasRotaryAxis) {
+        constexpr double kCenterSphereRadius = 3.5;
+        const gp_Pnt center = rotationCenter(kin);
+        BRepPrimAPI_MakeSphere sphereMaker(center, kCenterSphereRadius);
+        sphereMaker.Build();  // 同 cone：OCCT 7.9 需显式 Build()，否则 IsDone() 恒 false
+        if (sphereMaker.IsDone()) {
+            Handle(AIS_Shape) sphereAis = scene->displayShape(sphereMaker.Shape(), false, false, false);
+            scene->setShapeColor(sphereAis, Quantity_Color(0.95, 0.95, 0.15, Quantity_TOC_RGB), false);
+            ctx->SetZLayer(sphereAis, Graphic3d_ZLayerId_Topmost);
+            ctx->Deactivate(sphereAis);
+            axisGuideAis.insert(QStringLiteral("center:sphere"), sphereAis);
+        }
+    }
+
+    constexpr double kHeadConeHeight  = 30.0;
+    constexpr double kHeadConeRadius  = 8.0;
+    constexpr double kHeadConeTipRadius = 0.35;
+    // 外观（颜色/透明度/缩放）由 CamModule 从 AppSettings 注入。scale 仅放大
+    // 几何，锥尖仍在原点，由 updateTransforms 平移到刀尖世界点。
+    const double scale = m_cutterHeadAppearance.scale;
+    const double coneHeight    = kHeadConeHeight    * scale;
+    const double coneRadius    = kHeadConeRadius    * scale;
+    const double coneTipRadius = kHeadConeTipRadius * scale;
+    const QColor& headColor = m_cutterHeadAppearance.color;
+    const Quantity_Color headQty(headColor.redF(), headColor.greenF(),
+                                 headColor.blueF(), Quantity_TOC_RGB);
+    const gp_Pnt coneTip(0.0, 0.0, 0.0);
+    const gp_Pnt coneBaseCenter(0.0, 0.0, coneHeight);
+    // 用默认 +Z 轴构造：R1=尖半径(z=0)、R2=底半径(z=H)。
+    BRepPrimAPI_MakeCone coneMaker(coneTipRadius, coneRadius, coneHeight);
+    // OCCT 7.9: BRepPrimAPI_MakeOneAxis 的构造函数不调用 Done()，IsDone() 在
+    // Build() 之前恒为 false（Shape() 虽能惰性返回有效实体，但不会置位 IsDone）。
+    // 若直接判断 IsDone() 会永远走线框回退分支--这正是刀头锥一直显示为红色线框
+    // （8 条母线 + 底圆，比完整线框更少线条）的根因。必须显式 Build()。
+    coneMaker.Build();
+    TopoDS_Shape coneShape = m_cutterDisplayProxy;
+    if (coneShape.IsNull() && coneMaker.IsDone())
+        coneShape = coneMaker.Shape();
+    if (!coneShape.IsNull()) {
+        BRepMesh_IncrementalMesh(coneShape, 0.5);
+        // 直接以 AIS_Shaded 显式 Display，不经过 displayShape(-1)：后者沿用 context
+        // 默认显示模式，用户切到“线框”时锥体会以线框创建且难以纠正。
+        Handle(AIS_Shape) coneAis = new AIS_Shape(coneShape);
+        coneAis->SetDisplayMode(AIS_Shaded);
+        ctx->Display(coneAis, AIS_Shaded, 0, false);
+        ctx->SetColor(coneAis, headQty, false);
+        ctx->SetMaterial(coneAis,
+                         Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial_ShinyPlastified), false);
+        ctx->SetTransparency(coneAis, qBound(0.0, m_cutterHeadAppearance.transparency, 1.0), false);
+        coneAis->Attributes()->SetFaceBoundaryDraw(false);
+        ctx->SetZLayer(coneAis, Graphic3d_ZLayerId_Topmost);
+        ctx->Deactivate(coneAis);
+        ctx->Redisplay(coneAis, false);
+        axisGuideAis.insert(QStringLiteral("head:cone"), coneAis);
+    } else {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "MachineGuideRenderer::refresh failed to create shaded cutter head cone; "
+                  "using wireframe fallback");
+
+        // 只有实体构建失败时才退化为线框，不能再用置顶线框覆盖正常的着色实体。
+        TopoDS_Compound coneWire;
+        BRep_Builder builder;
+        builder.MakeCompound(coneWire);
+        BRepBuilderAPI_MakeEdge baseMaker(
+            gp_Circ(gp_Ax2(coneBaseCenter, gp_Dir(0.0, 0.0, 1.0)), coneRadius));
+        if (baseMaker.IsDone())
+            builder.Add(coneWire, baseMaker.Edge());
+        for (int i = 0; i < 8; ++i) {
+            const double angle = (2.0 * lcnc::math::kPi * i) / 8.0;
+            const gp_Pnt basePoint(coneRadius * std::cos(angle),
+                                   coneRadius * std::sin(angle),
+                                   coneHeight);
+            BRepBuilderAPI_MakeEdge sideMaker(coneTip, basePoint);
+            if (sideMaker.IsDone())
+                builder.Add(coneWire, sideMaker.Edge());
+        }
+        Handle(AIS_Shape) wireAis =
+            scene->displayShape(coneWire, false, false, false);
+        scene->setShapeColor(wireAis, headQty, false);
+        wireAis->SetWidth(3.0);
+        ctx->SetZLayer(wireAis, Graphic3d_ZLayerId_Topmost);
+        ctx->Deactivate(wireAis);
+        axisGuideAis.insert(QStringLiteral("head:wire"), wireAis);
+    }
+
+    applyVisibility(gd);
+    updateTransforms(gd, kin, cutterHeadWorldTip);
+}
+
+void MachineGuideRenderer::setRotaryAxisVisible(GuiDocument* gd, bool visible)
+{
+    m_rotaryAxisVisible = visible;
+    applyVisibility(gd);
+}
+
+void MachineGuideRenderer::setCutterHeadVisible(GuiDocument* gd, bool visible)
+{
+    m_cutterHeadVisible = visible;
+    applyVisibility(gd);
+}
+
+void MachineGuideRenderer::applyVisibility(GuiDocument* gd)
+{
+    if (!gd)
+        return;
+    GraphicsScene* scene = gd->scene();
+    if (!scene)
+        return;
+    const auto guideIt = m_axisGuideAisByDocument.constFind(gd);
+    if (guideIt == m_axisGuideAisByDocument.cend())
+        return;
+
+    const auto& axisGuideAis = guideIt.value();
+    for (auto it = axisGuideAis.cbegin(); it != axisGuideAis.cend(); ++it) {
+        const bool isRotaryAxis = it.key().startsWith(QStringLiteral("axis:"));
+        const bool isCenter = it.key().startsWith(QStringLiteral("center:"));
+        const bool isHead = it.key().startsWith(QStringLiteral("head:"));
+        const bool visible = ((isRotaryAxis || isCenter) && m_rotaryAxisVisible)
+            || (isHead && m_cutterHeadVisible);
+        if (visible)
+            scene->displayObject(it.value(), false);
+        else
+            scene->eraseObject(it.value(), false);
+    }
+    if (gd->hasView())
+        gd->view()->Redraw();
+}
+
+void MachineGuideRenderer::updateTransforms(GuiDocument* gd,
+                                            MachineKinematics* kin,
+                                            const gp_Pnt& cutterHeadWorldTip)
+{
+    if (!gd || !kin) return;
+    const Handle(AIS_InteractiveContext)& ctx = gd->context();
+    if (ctx.IsNull()) return;
+    const auto guideIt = m_axisGuideAisByDocument.constFind(gd);
+    if (guideIt == m_axisGuideAisByDocument.cend())
+        return;
+    const auto& axisGuideAis = guideIt.value();
+
+    auto applyTransform = [&](const QString& key, const gp_Trsf& trsf) {
+        const auto it = axisGuideAis.constFind(key);
+        if (it == axisGuideAis.cend() || it.value().IsNull()) return;
+        it.value()->SetLocalTransformation(trsf);
+        ctx->RecomputePrsOnly(it.value(), false);
+    };
+
+    for (const MachineAxisDef& axis : kin->axes()) {
+        if (axis.motionType != MachineAxisDef::Rotary)
+            continue;
+        const QString axisName = axis.name.trimmed().toUpper();
+        applyTransform(QStringLiteral("axis:%1").arg(axisName), kin->computeAxisTransform(axisName));
+    }
+
+    gp_Trsf headTransform;
+    headTransform.SetTranslation(gp_Vec(gp_Pnt(0.0, 0.0, 0.0), cutterHeadWorldTip));
+    applyTransform(QStringLiteral("head:cone"), headTransform);
+    applyTransform(QStringLiteral("head:wire"), headTransform);
+}
+
+gp_Pnt MachineGuideRenderer::rotationCenter(MachineKinematics* kin) const
+{
+    if (!kin)
+        return gp_Pnt(0.0, 0.0, 0.0);
+
+    auto originOf = [kin](const QString& axisName, gp_Pnt* out) {
+        const MachineAxisDef* axis = kin->findAxis(axisName);
+        if (!axis || axis->motionType != MachineAxisDef::Rotary)
+            return false;
+        if (out)
+            *out = axis->origin;
+        return true;
+    };
+
+    gp_Pnt a, b, c;
+    if (kin->configType() == QStringLiteral("VERTICAL_AC_TABLE")
+        && originOf(QStringLiteral("A"), &a)
+        && originOf(QStringLiteral("C"), &c)) {
+        return gp_Pnt(c.X(), a.Y(), a.Z());
+    }
+    if (kin->configType() == QStringLiteral("VERTICAL_BC_TABLE")
+        && originOf(QStringLiteral("B"), &b)
+        && originOf(QStringLiteral("C"), &c)) {
+        return gp_Pnt(b.X(), c.Y(), b.Z());
+    }
+
+    for (const MachineAxisDef& axis : kin->axes()) {
+        if (axis.motionType == MachineAxisDef::Rotary)
+            return axis.origin;
+    }
+    return gp_Pnt(0.0, 0.0, 0.0);
+}
+
+} // namespace lcnc::view
