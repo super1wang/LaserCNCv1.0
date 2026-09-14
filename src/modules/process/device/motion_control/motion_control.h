@@ -164,6 +164,10 @@ public:
 	virtual bool SetAxisAcc(lcnc::process::Axis eAxis, double dAcc) = 0;
 	virtual bool SetAxisDec(lcnc::process::Axis eAxis, double dDec) = 0;
 	virtual bool SetAxisJerk(lcnc::process::Axis eAxis, double dJerk) = 0;
+	// GTN Jog uses a dimensionless smoothing coefficient [0, 1), which is
+	// distinct from both ACS jerk and GTN Trap smooth time. Other controllers
+	// intentionally ignore this controller-specific setting.
+	virtual bool SetAxisJogSmooth(lcnc::process::Axis, double) { return true; }
 	virtual bool SetAxisNegLimit(lcnc::process::Axis eAxis, double dNegLimit) = 0;
 	virtual bool SetAxisPosLimit(lcnc::process::Axis eAxis, double dPosLimit) = 0;
 	virtual bool SetAxisVelAccDecJerk(lcnc::process::Axis eAxis, double dVel, double dAcc, double dDec, double dJerk) = 0;

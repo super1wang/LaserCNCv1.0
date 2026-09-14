@@ -1,5 +1,12 @@
+#include "core/kernel/kernel.h"
+#include "core/kinematics/machine_configuration_service.h"
 #include "modules/process/settings/process_settings_service.h"
 #include "modules/process/workflow/process_flow_store.h"
+
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+#include "modules/process/device/motion_control/gtn_motion_control.h"
+#include "modules/process/runtime/process_runtime_configuration.h"
+#endif
 
 #include <QCoreApplication>
 #include <QDir>
@@ -9,6 +16,7 @@
 #include <QTextStream>
 
 #include <algorithm>
+#include <memory>
 
 namespace {
 
@@ -34,9 +42,31 @@ int main(int argc, char* argv[])
     if (!directory.isValid())
         return fail(QStringLiteral("Could not create temporary settings directory"));
 
+    lcnc::Kernel kernel;
+    auto machine = std::make_shared<lcnc::MachineConfigurationService>();
+    machine->applyPreset(QStringLiteral("XYZ"));
+    auto physicalAxes = machine->axisConfigurations();
+    for (auto& axis : physicalAxes) {
+        if (axis.axis.name == QStringLiteral("X")) axis.controllerIndex = 3;
+        if (axis.axis.name == QStringLiteral("Y")) axis.controllerIndex = 4;
+        if (axis.axis.name == QStringLiteral("Z")) axis.controllerIndex = 5;
+    }
+    machine->setAxisConfigurations(physicalAxes);
+    kernel.services().registerService<lcnc::MachineConfigurationService>(machine);
+
     lcnc::process::ProcessSettingsService current(directory.path());
     if (!current.initialize())
         return fail(QStringLiteral("Current Process settings did not initialize"));
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    lcnc::process::ProcessRuntimeConfiguration runtimeConfiguration;
+    GTNMotionControl disconnectedGtn(current, runtimeConfiguration);
+    if (disconnectedGtn.ErrorOccurred())
+        return fail(QStringLiteral("A fresh GTN controller incorrectly reports a latched error"));
+    int disconnectedFault = 0;
+    if (disconnectedGtn.IsMachiningStatusNormal(disconnectedFault)
+        || disconnectedGtn.RecoverAfterStop() || !disconnectedGtn.ErrorOccurred())
+        return fail(QStringLiteral("Disconnected GTN reset or admission was reported successful"));
+#endif
     if (current.hasChanges())
         return fail(QStringLiteral("Fresh Process settings incorrectly reported pending changes"));
 
@@ -56,6 +86,114 @@ int main(int argc, char* argv[])
         || homingObject->parentObjectId != QStringLiteral("controller")) {
         return fail(QStringLiteral(
             "Homing settings are not nested below the motion-controller root"));
+    }
+
+    const auto setControllerType = [&current](const QString& controllerType) {
+        lcnc::process::ParameterDescriptor field;
+        field.id = QStringLiteral("type");
+        field.title = QStringLiteral("Controller type");
+        field.type = lcnc::process::ParameterValueType::Enum;
+        field.area = lcnc::process::ProcessConfigArea::Devices;
+        field.tableName = QStringLiteral("MotionControl");
+        field.key = QStringLiteral("sType");
+        QString error;
+        return current.setFieldValue(field, QStringLiteral("controller"), controllerType, &error);
+    };
+    if (!setControllerType(QStringLiteral("GTN")))
+        return fail(QStringLiteral("Could not switch the settings draft to GTN"));
+
+    const auto gtnObjects = current.objects();
+    const auto groupObject = std::find_if(
+        gtnObjects.cbegin(), gtnObjects.cend(),
+        [](const lcnc::process::ParameterObjectDescriptor& object) {
+            return object.id == QStringLiteral("gtn-five-axis-group");
+        });
+    const auto hasGroupField = [&groupObject, &gtnObjects](const QString& id) {
+        return groupObject != gtnObjects.cend()
+            && std::any_of(groupObject->fields.cbegin(), groupObject->fields.cend(),
+                           [&id](const lcnc::process::ParameterDescriptor& field) {
+                return field.id == id;
+            });
+    };
+    if (groupObject == gtnObjects.cend()
+        || groupObject->parentObjectId != QStringLiteral("controller")
+        || !hasGroupField(QStringLiteral("enabled"))
+        || !hasGroupField(QStringLiteral("rtcp"))
+        || !hasGroupField(QStringLiteral("group"))
+        || !hasGroupField(QStringLiteral("list"))
+        || !hasGroupField(QStringLiteral("rtcpAgreement"))
+        || !hasGroupField(QStringLiteral("rtcpValidationStride"))) {
+        return fail(QStringLiteral(
+            "GTN Group/CommandList and RTCP settings contract is incomplete"));
+    }
+    if (!hasGroupField(QStringLiteral("configurationDerivedTrial"))
+        || hasGroupField(QStringLiteral("trialLinearVelocity"))
+        || hasGroupField(QStringLiteral("trialRotaryVelocity")))
+        return fail(QStringLiteral("Normal RTCP must retain source opt-in without trial speed settings"));
+    const auto xAxisObject = std::find_if(
+        gtnObjects.cbegin(), gtnObjects.cend(),
+        [](const lcnc::process::ParameterObjectDescriptor& object) {
+            return object.id == QStringLiteral("axis:X");
+        });
+    if (xAxisObject == gtnObjects.cend())
+        return fail(QStringLiteral("GTN X-axis settings object is missing"));
+    const auto axisField = [&xAxisObject](const QString& id) {
+        return std::find_if(
+            xAxisObject->fields.cbegin(), xAxisObject->fields.cend(),
+            [&id](const lcnc::process::ParameterDescriptor& descriptor) {
+                return descriptor.id == id;
+            });
+    };
+    const auto negativeLimit = axisField(QStringLiteral("min"));
+    const auto trapSmoothTime = axisField(QStringLiteral("trapSmoothTime"));
+    const auto jogSmooth = axisField(QStringLiteral("jogSmooth"));
+    if (negativeLimit == xAxisObject->fields.cend() || negativeLimit->minimum >= 0.0
+        || trapSmoothTime == xAxisObject->fields.cend()
+        || trapSmoothTime->minimum != 0.0 || trapSmoothTime->maximum != 50.0
+        || jogSmooth == xAxisObject->fields.cend()
+        || jogSmooth->minimum != 0.0 || jogSmooth->maximum >= 1.0
+        || axisField(QStringLiteral("jerk")) != xAxisObject->fields.cend()) {
+        return fail(QStringLiteral(
+            "GTN axis settings did not replace jerk with valid smoothing parameters"));
+    }
+    QString axisError;
+    if (!current.setFieldValue(*negativeLimit, xAxisObject->id, -250.0, &axisError)
+        || !current.setFieldValue(*trapSmoothTime, xAxisObject->id, 25, &axisError)
+        || !current.setFieldValue(*jogSmooth, xAxisObject->id, 0.75, &axisError)) {
+        return fail(QStringLiteral("GTN axis settings rejected valid signed/smooth values: %1")
+                        .arg(axisError));
+    }
+    const toml::table gtnRuntimeX = current.axisRuntimeTable(QStringLiteral("X"));
+    const auto runtimeIndex = gtnRuntimeX.count("iIndex")
+        ? gtnRuntimeX.at("iIndex").as_integer() : -1;
+    if (runtimeIndex != 3
+        || !gtnRuntimeX.count("fTrapSmoothTime") || !gtnRuntimeX.count("fJogSmooth")
+        || gtnRuntimeX.count("fJerk")
+        || gtnRuntimeX.at("fTrapSmoothTime").as_floating() != 25.0
+        || gtnRuntimeX.at("fJogSmooth").as_floating() != 0.75
+        || gtnRuntimeX.at("fLeftLimit").as_floating() != -250.0) {
+        return fail(QStringLiteral(
+            "GTN runtime axis table shifted configured physical axis %1 or lost edited values")
+                        .arg(runtimeIndex));
+    }
+    const auto gtnToolObject = std::find_if(
+        gtnObjects.cbegin(), gtnObjects.cend(),
+        [](const lcnc::process::ParameterObjectDescriptor& object) {
+            return object.id == QStringLiteral("tool:default");
+        });
+    const auto hasToolField = [&gtnToolObject, &gtnObjects](const QString& id) {
+        return gtnToolObject != gtnObjects.cend()
+            && std::any_of(gtnToolObject->fields.cbegin(), gtnToolObject->fields.cend(),
+                           [&id](const lcnc::process::ParameterDescriptor& field) {
+                return field.id == id;
+            });
+    };
+    if (gtnToolObject == gtnObjects.cend()
+        || !hasToolField(QStringLiteral("cutSmoothTime"))
+        || !hasToolField(QStringLiteral("axisSmoothCoefficient"))
+        || hasToolField(QStringLiteral("cutJerk"))
+        || hasToolField(QStringLiteral("jumpJerk"))) {
+        return fail(QStringLiteral("GTN tool settings did not expose smoothing parameters"));
     }
     const auto initialObject = std::find_if(
         settingsObjects.cbegin(), settingsObjects.cend(),

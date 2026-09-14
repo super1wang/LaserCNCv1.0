@@ -436,9 +436,14 @@ set(SRCS_CORE
     src/core/machine/machine_workspace.h
     src/core/machine/machine_safety_package.cpp
     src/core/machine/machine_safety_package.h
+    src/core/machine/model_envelope_asset.cpp
+    src/core/machine/model_envelope_asset.h
     src/core/document/lcnc_document.cpp
     src/core/document/xcaf_utils.cpp
     src/core/kinematics/machine_calibration.cpp
+    src/core/algorithms/kinematics/axis_line_calibration_solver.cpp
+    src/core/kinematics/machine_calibration_service.cpp
+    src/core/kinematics/controller_kinematics_snapshot.cpp
     src/core/kinematics/machine_kinematics.cpp
     src/core/kinematics/machine_relative_kinematics.cpp
     src/core/kinematics/machine_topology.cpp
@@ -500,6 +505,8 @@ set(SRCS_MODULE_CAD
     src/modules/cad/document/cad_document_state.cpp
     src/modules/cad/document/cad_document_registry.cpp
     src/modules/cad/services/cad_modeling_session.cpp
+    src/modules/cad/services/model_envelope_service.cpp
+    src/modules/cad/services/model_envelope_service.h
     src/modules/cad/services/cad_document_io_service.h
     src/modules/cad/services/cad_document_io_service.cpp
     src/modules/cad/services/sketch_manager.cpp
@@ -562,6 +569,8 @@ set(SRCS_MODULE_CAM
     src/modules/cam/ui/toolpath/widget_toolpath_panel.cpp
     src/modules/cam/ui/machine/dialog_mark_axes.cpp
     src/modules/cam/ui/machine/dialog_axis_calibration_wizard.cpp
+    src/modules/cam/ui/machine/dialog_physical_kinematics_calibration_wizard.cpp
+    src/modules/cam/ui/machine/dialog_configuration_derived_rtcp.cpp
     src/modules/cam/ui/ribbon/ribbon_cam_tab.cpp
 )
 
@@ -993,6 +1002,9 @@ function(lcnc_deploy_gtn_runtime target)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${LCNC_GTN_RUNTIME_DLL}"
                 "$<TARGET_FILE_DIR:${target}>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LCNC_GTN_RUNTIME_DLL}"
+                "$<TARGET_FILE_DIR:${target}>/gtn.dll"
             COMMENT "Copying GTN runtime DLL for ${target}")
     endif()
 endfunction()
@@ -1007,6 +1019,12 @@ if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_REL
         list(APPEND _lcnc_current_runtime_dependencies
             "$<TARGET_FILE:coal::coal>"
             ${LCNC_COAL_RUNTIME_DEPENDENCIES})
+    endif()
+    if(LCNC_WITH_GTN)
+        # The generic runtime snapshot may contain an older gts.dll. Always
+        # deploy the DLL that matches LCNC_GTN_LIB/LCNC_GTN_INCLUDE_DIR last.
+        list(APPEND _lcnc_current_runtime_dependencies
+            "${LCNC_GTN_RUNTIME_DLL}")
     endif()
     # All test executables share ${CMAKE_BINARY_DIR}/<config>. A POST_BUILD
     # copy on each target races under a parallel build, so deploy the snapshot
@@ -1041,6 +1059,15 @@ if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_REL
     )
     add_dependencies(LaserCNC lcnc_runtime_deploy_app)
 endif()
+if(LCNC_WITH_GTN)
+    # The supplied five-axis import library names its runtime dependency
+    # gtn.dll even though the SDK package ships the binary as gts.dll.
+    add_custom_target(lcnc_gtn_runtime_deploy_build
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LCNC_GTN_RUNTIME_DLL}"
+            "${CMAKE_BINARY_DIR}/$<CONFIG>/gtn.dll"
+        COMMENT "Copying GTN five-axis runtime alias to build output directory")
+endif()
 file(GENERATE
     OUTPUT "${CMAKE_BINARY_DIR}/lcnc_runtime_dlls_$<CONFIG>.txt"
     CONTENT "$<JOIN:$<TARGET_RUNTIME_DLLS:LaserCNC>,\n>\n")
@@ -1062,6 +1089,9 @@ if(LCNC_WITH_GTN)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${LCNC_GTN_RUNTIME_DLL}"
             "$<TARGET_FILE_DIR:LaserCNC>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LCNC_GTN_RUNTIME_DLL}"
+            "$<TARGET_FILE_DIR:LaserCNC>/gtn.dll"
         COMMENT "Copying GTN runtime DLL to output directory"
     )
 endif()
@@ -1137,6 +1167,15 @@ if(BUILD_TESTING)
         tests/device_wait_test.cpp
     )
     target_link_libraries(lcnc_device_wait_test PRIVATE lcnc_module_process Qt6::Core)
+    foreach(safety_test IN ITEMS command_list_start confirmed_motion_stop process_device_shutdown_sequence
+            controller_recovery_sequence group_motion_filter)
+        add_executable(lcnc_${safety_test}_test tests/${safety_test}_test.cpp)
+        target_include_directories(lcnc_${safety_test}_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_features(lcnc_${safety_test}_test PRIVATE cxx_std_17)
+        if(MSVC)
+            target_compile_options(lcnc_${safety_test}_test PRIVATE /utf-8)
+        endif()
+    endforeach()
     add_executable(lcnc_ultron_protocol_test
         tests/ultron_protocol_test.cpp
     )
@@ -1229,6 +1268,14 @@ if(BUILD_TESTING)
         LCNC_MACHINE_SAFETY_INDEX_TOOL_PATH="$<TARGET_FILE:lcnc_machine_safety_index>"
         LCNC_AC_TABLE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/精简ac转台.stp"
     )
+    add_executable(lcnc_model_envelope_asset_test
+        tests/model_envelope_asset_test.cpp
+    )
+    target_link_libraries(lcnc_model_envelope_asset_test PRIVATE
+        lcnc_core Qt6::Core QuaZip::QuaZip)
+    target_compile_definitions(lcnc_model_envelope_asset_test PRIVATE
+        LCNC_AC_TABLE_MODEL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/model/精简ac转台.stp"
+    )
     if(LCNC_ENABLE_FCL_COLLISION_BENCHMARK)
         if(NOT LCNC_FCL_ROOT)
             message(FATAL_ERROR
@@ -1315,6 +1362,14 @@ if(BUILD_TESTING)
         tests/machine_topology_solver_test.cpp
     )
     target_link_libraries(lcnc_machine_topology_solver_test PRIVATE lcnc_module_process Qt6::Core)
+    add_executable(lcnc_machine_calibration_solver_test
+        tests/machine_calibration_solver_test.cpp
+    )
+    target_link_libraries(lcnc_machine_calibration_solver_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_physical_calibration_wizard_test tests/physical_calibration_wizard_test.cpp)
+    target_link_libraries(lcnc_physical_calibration_wizard_test PRIVATE lcnc_module_cam Qt6::Widgets)
+    add_executable(lcnc_rtcp_reference_transform_test tests/rtcp_reference_transform_test.cpp)
+    target_link_libraries(lcnc_rtcp_reference_transform_test PRIVATE lcnc_core Qt6::Core)
     add_executable(lcnc_toolpath_snapshot_concurrency_test
         tests/toolpath_snapshot_concurrency_test.cpp
     )
@@ -1365,6 +1420,11 @@ if(BUILD_TESTING)
         lcnc_process_runtime_configuration_test
         lcnc_device_command_queue_test
         lcnc_device_wait_test
+        lcnc_command_list_start_test
+        lcnc_confirmed_motion_stop_test
+        lcnc_controller_recovery_sequence_test
+        lcnc_group_motion_filter_test
+        lcnc_process_device_shutdown_sequence_test
         lcnc_ultron_protocol_test
         lcnc_process_preflight_service_test
         lcnc_process_cutting_safety_test
@@ -1378,9 +1438,13 @@ if(BUILD_TESTING)
         lcnc_occt_exact_operation_lock_test
         lcnc_surface_collision_prefilter_test
         lcnc_machine_safety_index_test
+        lcnc_model_envelope_asset_test
         lcnc_cam_data_manager_test
         lcnc_machine_topology_solver_test
+        lcnc_machine_calibration_solver_test
         lcnc_toolpath_snapshot_concurrency_test
+        lcnc_physical_calibration_wizard_test
+        lcnc_rtcp_reference_transform_test
         lcnc_cad_algorithm_contract_test
         lcnc_cad_detached_import_test
         lcnc_project_explorer_controller_test
@@ -1399,6 +1463,9 @@ if(BUILD_TESTING)
         if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
             add_dependencies(${_lcnc_test_target} lcnc_runtime_deploy_build)
         endif()
+        if(LCNC_WITH_GTN)
+            add_dependencies(${_lcnc_test_target} lcnc_gtn_runtime_deploy_build)
+        endif()
         if(LCNC_WITH_COAL_COLLISION OR LCNC_ENABLE_COAL_COLLISION_BENCHMARK)
             target_link_libraries(${_lcnc_test_target} PRIVATE coal::coal)
         endif()
@@ -1411,6 +1478,9 @@ if(BUILD_TESTING)
         lcnc_deploy_gtn_runtime(lcnc_simulator_cmhp_sdk_integration_test)
     endif()
     lcnc_deploy_qt_offscreen_platform(lcnc_project_explorer_controller_test)
+    lcnc_deploy_qt_offscreen_platform(lcnc_physical_calibration_wizard_test)
+    add_test(NAME lcnc_gtn_digital_laser_contract_test
+        COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/gtn_digital_laser_contract.cmake")
     add_test(NAME architecture_checks
         COMMAND "${LCNC_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_architecture.ps1"
@@ -1438,6 +1508,11 @@ if(BUILD_TESTING)
         COMMAND lcnc_device_command_queue_test)
     add_test(NAME lcnc_device_wait_test
         COMMAND lcnc_device_wait_test)
+    add_test(NAME lcnc_command_list_start_test COMMAND lcnc_command_list_start_test)
+    add_test(NAME lcnc_confirmed_motion_stop_test COMMAND lcnc_confirmed_motion_stop_test)
+    add_test(NAME lcnc_controller_recovery_sequence_test COMMAND lcnc_controller_recovery_sequence_test)
+    add_test(NAME lcnc_group_motion_filter_test COMMAND lcnc_group_motion_filter_test)
+    add_test(NAME lcnc_process_device_shutdown_sequence_test COMMAND lcnc_process_device_shutdown_sequence_test)
     add_test(NAME lcnc_ultron_protocol_test
         COMMAND lcnc_ultron_protocol_test)
     add_test(NAME lcnc_process_preflight_service_test
@@ -1480,12 +1555,22 @@ if(BUILD_TESTING)
         COMMAND lcnc_collision_safety_domain_test)
     add_test(NAME lcnc_machine_safety_index_test
         COMMAND lcnc_machine_safety_index_test)
+    add_test(NAME lcnc_model_envelope_asset_test
+        COMMAND lcnc_model_envelope_asset_test)
+    set_tests_properties(lcnc_model_envelope_asset_test PROPERTIES
+        TIMEOUT 180 LABELS "critical;safety;geometry")
     add_test(NAME lcnc_cam_motion_plan_contract_test
         COMMAND lcnc_cam_motion_plan_contract_test)
     add_test(NAME lcnc_cam_data_manager_test
         COMMAND lcnc_cam_data_manager_test)
     add_test(NAME lcnc_machine_topology_solver_test
         COMMAND lcnc_machine_topology_solver_test)
+    add_test(NAME lcnc_machine_calibration_solver_test
+        COMMAND lcnc_machine_calibration_solver_test)
+    add_test(NAME lcnc_physical_calibration_wizard_test COMMAND lcnc_physical_calibration_wizard_test)
+    set_tests_properties(lcnc_physical_calibration_wizard_test PROPERTIES TIMEOUT 30 LABELS "critical;safety")
+    add_test(NAME lcnc_rtcp_reference_transform_test
+        COMMAND lcnc_rtcp_reference_transform_test)
     add_test(NAME lcnc_toolpath_snapshot_concurrency_test
         COMMAND lcnc_toolpath_snapshot_concurrency_test)
     add_test(NAME lcnc_cad_algorithm_contract_test
@@ -1527,7 +1612,9 @@ if(BUILD_TESTING)
         lcnc_machine_safety_index_test
         lcnc_cam_motion_plan_contract_test
         lcnc_machine_topology_solver_test
+        lcnc_machine_calibration_solver_test
         PROPERTIES LABELS "critical;algorithm")
+    set_tests_properties(lcnc_rtcp_reference_transform_test PROPERTIES LABELS "critical;safety;algorithm")
     set_tests_properties(
         lcnc_project_package_test
         lcnc_process_workflow_test
@@ -1541,6 +1628,11 @@ if(BUILD_TESTING)
         lcnc_task_manager_test
         lcnc_device_command_queue_test
         lcnc_process_runtime_configuration_test
+        lcnc_command_list_start_test
+        lcnc_confirmed_motion_stop_test
+        lcnc_controller_recovery_sequence_test
+        lcnc_group_motion_filter_test
+        lcnc_process_device_shutdown_sequence_test
         lcnc_process_preflight_service_test
         lcnc_process_cutting_safety_test
         lcnc_process_status_service_test

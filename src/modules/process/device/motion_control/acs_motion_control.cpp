@@ -198,7 +198,15 @@ bool ACSMotionControl::Disconnect()
 
 bool ACSMotionControl::IsConnected()
 {
-	ACSC_CONNECTION_INFO info;
+	// Disconnect invalidates the handle before callers confirm the final state.
+	// Do not ask the SDK to inspect a released Simulator/communication session.
+	// 中文翻译：断开后句柄已失效；状态确认不能再把已释放句柄传入 SDK。
+	if (m_hHandle == ACSC_INVALID)
+	{
+		m_bConnectFlag = false;
+		return false;
+	}
+	ACSC_CONNECTION_INFO info{};
 	if (!acsc_GetConnectionInfo(m_hHandle, &info))
 	{
 		m_bConnectFlag = false;

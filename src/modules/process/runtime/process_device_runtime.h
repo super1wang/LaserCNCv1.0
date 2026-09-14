@@ -53,6 +53,8 @@ public:
     ~ProcessDeviceRuntime();
 
     std::string activeMotionControllerName() const;
+    /// Reads only the adapter's cached session flag while holding the device lease.
+    bool motionConnectionOpen() const;
     std::string configuredMotionControllerName() const;
     bool configuredControllerRequiresDevice() const;
     /// Stop motion buffers and force process outputs to their safe state.
@@ -77,6 +79,9 @@ public:
     /// inside the runtime boundary.
     lcnc::process::DeviceCommandResult moveRelative(lcnc::process::Axis axis, double distance, double velocity);
     lcnc::process::DeviceCommandResult moveAbsolute(lcnc::process::Axis axis, double position, double velocity);
+    /// One short position/status read for workflow-thread absolute-motion waits.
+    lcnc::process::DeviceCommandResult pollAbsoluteMotion(
+        lcnc::process::Axis axis, double target, double tolerance, bool* moving);
     /// Issues a controller absolute-axis command and verifies that the axis
     /// has stopped at the requested coordinate before the next safe-zone phase.
     lcnc::process::DeviceCommandResult moveAbsoluteAndWait(
@@ -120,6 +125,7 @@ public:
         const lcnc::process::ProcessPreflightRequest& request,
         lcnc::process::ProcessPreflightReport* report);
     lcnc::process::DeviceCommandResult validateContourBoundary();
+    lcnc::process::DeviceCommandResult recoverControllerAfterStop();
     std::unique_ptr<lcnc::process::IMotionCommandSink> createMotionSink(
         bool simulationMode,
         lcnc::process::PureSimulationToolpathTicker* simTicker,
@@ -129,7 +135,7 @@ public:
     void setToolTable();
     void clearToolData();
 
-    void setMotionControlTable(const toml::table& table_MotionControl = {});
+    bool setMotionControlTable(const toml::table& table_MotionControl = {});
     void setDigitalTable(const toml::table& table_Digital = {});
     void setAnalogTable(const toml::table& table_Analog = {});
     void setLaserTable(const toml::table& table_Laser = {});
@@ -138,7 +144,7 @@ public:
 private:
     using DeviceLock = lcnc::process::ProcessDeviceCoordinator::Lease;
     DeviceLock lockDeviceAccess() { return m_deviceCoordinator.acquire(); }
-    void setMotionControl(std::string strName = "");
+    bool setMotionControl(std::string strName = "");
     void setLaserDevice(std::string strName = "");
     lcnc::process::ProcessSettingsService& m_settings;
     lcnc::process::ProcessRuntimeConfiguration& m_runtimeConfiguration;

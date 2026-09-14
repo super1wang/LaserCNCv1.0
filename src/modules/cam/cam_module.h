@@ -182,6 +182,15 @@ public:
     /// Export machine model as STEP with LCNC_AXIS_* naming.
     void exportMachine(const QString& filePath);
 
+    /// Generate a conservative envelope for the currently opened and marked
+    /// machine, then atomically export an AP242 tessellated STEP.
+    bool exportSimplifiedMachine(const QString& filePath,
+                                 QString* errorMessage = nullptr);
+    bool isModelEnvelopeExportPending() const
+    {
+        return m_modelEnvelopeExportTask != kInvalidTaskId;
+    }
+
     /// Auto-detect axis assignments by shape name heuristics.
     void autoDetectAxes();
     void applyAxisAssignments(const QMap<QString, QString>& entryToAxis);
@@ -496,6 +505,8 @@ signals:
     void machineLoaded();
     void machineUnloaded();
     void machineSafetyPackageChanged();
+    void modelEnvelopeExported(const QString& filePath);
+    void modelEnvelopeExportStateChanged();
     void workpieceMounted(const QString& entry);
     void workpieceUnmounted();
     void toolpathGenerated();
@@ -644,6 +655,8 @@ private:
     TopoDS_Shape                m_cutterDisplayProxyShape;
     std::uint64_t               m_collisionConfigurationRevision{1};
     mutable lcnc::cam::TravelPlanSnapshot m_travelPlanCache;
+    /// Companion geometry: continuous IK also rewrites successor contour axes.
+    mutable lcnc::cam::ToolpathExportSnapshot m_travelSolutionCache;
     /// Immutable collision-only meshes/bounds.  It is filled by the background
     /// rapid verifier and reused while the machine/environment key is stable.
     /// 中文翻译：仅碰撞使用的不可变网格/包围盒，由后台任务建立并按环境键复用。
@@ -651,6 +664,7 @@ private:
     TaskId                      m_travelVerificationTask{kInvalidTaskId};
     TaskId                      m_collisionDomainPreparationTask{kInvalidTaskId};
     TaskId                      m_machineSafetyPackageBuildTask{kInvalidTaskId};
+    TaskId                      m_modelEnvelopeExportTask{kInvalidTaskId};
     QMap<QString, QString>      m_mountedWorkpieceEntryBySourceEntry;
     mutable QList<Handle(AIS_Shape)> m_camContourAisCache;
     QString                     m_machineModelPath;

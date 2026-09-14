@@ -14,6 +14,10 @@
 #include <memory>
 #include <functional>
 
+namespace lcnc {
+struct ModelEnvelopeAsset;
+}
+
 namespace lcnc::cam_algo {
 
 constexpr int kMachineSafetyMaximumAxes = 5;
@@ -156,6 +160,9 @@ public:
     bool isValid() const;
     const QByteArray& sourceSha256() const { return m_sourceSha256; }
     const QByteArray& contentSha256() const { return m_contentSha256; }
+    const QByteArray& envelopeManifestSha256() const {
+        return m_envelopeManifestSha256;
+    }
     const QVector<MachineSafetyAxisGrid>& axes() const { return m_axes; }
     const QVector<MachineSafetyBodySummary>& bodies() const { return m_bodies; }
     const QVector<MachineSafetyPairSummary>& pairs() const { return m_pairs; }
@@ -173,6 +180,7 @@ private:
 
     QByteArray m_sourceSha256;
     QByteArray m_contentSha256;
+    QByteArray m_envelopeManifestSha256;
     QVector<MachineSafetyAxisGrid> m_axes;
     QVector<MachineSafetyBodySummary> m_bodies;
     QVector<MachineSafetyPairSummary> m_pairs;
@@ -201,6 +209,11 @@ public:
 
     bool loadMachine(const QString& machineFilePath,
                      QString* errorMessage = nullptr);
+    /// Replaces per-body persisted collision surfaces with a validated,
+    /// conservative external envelope while retaining the original B-Rep for
+    /// exact generation checks and the source-model fingerprint.
+    bool applyModelEnvelope(const lcnc::ModelEnvelopeAsset& asset,
+                            QString* errorMessage = nullptr);
     bool build(const MachineSafetyBuildOptions& options,
                MachineSafetyIndex* index,
                MachineSafetyBuildMetrics* metrics = nullptr,

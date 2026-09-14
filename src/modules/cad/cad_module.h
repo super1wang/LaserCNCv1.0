@@ -151,6 +151,11 @@ class CadModule : public QObject, public lcnc::IModule, public lcnc::ICadFacade 
 
     // ── Project Domain Access ────────────────────────────────────────────
     DocumentId workpieceDocumentId() const override;
+    bool runModelEnvelopeGenerator(
+        const lcnc::CadModelEnvelopeRequest& request,
+        TaskProgress* progress,
+        lcnc::CadModelEnvelopeResult* result,
+        QString* errorMessage = nullptr) override;
     LcncDocument* workpieceDocument() const;
     GuiDocument* activeGuiDocument() const;
     LcncDocument* domainDocumentById(DocumentId id) const;

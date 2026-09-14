@@ -17,6 +17,7 @@
 #include "modules/cad/services/cad_algorithm_boundary.h"
 #include "modules/cad/services/cad_document_io_service.h"
 #include "modules/cad/services/cad_modeling_session.h"
+#include "modules/cad/services/model_envelope_service.h"
 #include "modules/cad/services/shape_service.h"
 #include "modules/cad/task/cad_command_dispatcher.h"
 #include "modules/cad/task/cad_command_request.h"
@@ -40,6 +41,16 @@
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
+
+bool CadModule::runModelEnvelopeGenerator(
+    const lcnc::CadModelEnvelopeRequest& request,
+    TaskProgress* progress,
+    lcnc::CadModelEnvelopeResult* result,
+    QString* errorMessage)
+{
+    return lcnc::cad::ModelEnvelopeService::generate(
+        request, progress, result, errorMessage);
+}
 
 namespace {
 

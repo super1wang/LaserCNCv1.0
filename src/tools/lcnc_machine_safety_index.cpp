@@ -1,5 +1,6 @@
 #include "core/algorithms/cam/machine_safety_index.h"
 #include "core/machine/machine_safety_package.h"
+#include "core/machine/model_envelope_asset.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -396,6 +397,10 @@ int main(int argc, char** argv)
         QStringLiteral("runtime-configuration-sha256"),
         QStringLiteral("Runtime kinematics/policy fingerprint stored in the package"),
         QStringLiteral("hex"));
+    QCommandLineOption envelopeManifestOption(
+        QStringLiteral("envelope-manifest"),
+        QStringLiteral("Validated lcnc.model-envelope/v1 JSON used as the persisted collision mesh source"),
+        QStringLiteral("path"));
     QCommandLineOption indexOption({QStringLiteral("i"), QStringLiteral("index")},
         QStringLiteral("Existing machine safety index"), QStringLiteral("path"));
     QCommandLineOption poseOption(QStringLiteral("apos"),
@@ -454,6 +459,7 @@ int main(int argc, char** argv)
         QStringLiteral("count"), QStringLiteral("0"));
     parser.addOptions({machineOption, outputOption, packageOutputOption,
                        runtimeConfigurationOption,
+                       envelopeManifestOption,
                        indexOption, poseOption,
                        exactBudgetOption, exactModeOption, motionBoundOption,
                        refinementOption, gridProfileOption, surfaceBvhOption,
@@ -503,6 +509,17 @@ int main(int argc, char** argv)
         if (!compiler.loadMachine(resolvedMachinePath, &error)) {
             err << error << '\n';
             return 3;
+        }
+        lcnc::ModelEnvelopeAsset envelopeAsset;
+        if (parser.isSet(envelopeManifestOption)) {
+            emitBuildProgress(8, QStringLiteral("loading_envelope"));
+            if (!lcnc::ModelEnvelopeAsset::loadAndValidate(
+                    parser.value(envelopeManifestOption), resolvedMachinePath,
+                    &envelopeAsset, &error)
+                || !compiler.applyModelEnvelope(envelopeAsset, &error)) {
+                err << error << '\n';
+                return 13;
+            }
         }
         emitBuildProgress(10, QStringLiteral("preparing_index"));
         auto options = lcnc::cam_algo::defaultAcTableSafetyBuildOptions();
@@ -679,9 +696,15 @@ int main(int argc, char** argv)
             const QString packagePath =
                 lcnc::MachineSafetyPackage::normalizedPackagePath(
                     parser.value(packageOutputOption));
-            if (!lcnc::MachineSafetyPackage::create(
+            const bool packageCreated = parser.isSet(envelopeManifestOption)
+                ? lcnc::MachineSafetyPackage::createWithEnvelope(
+                    resolvedMachinePath, indexOutputPath,
+                    parser.value(envelopeManifestOption), packagePath,
+                    runtimeConfigurationSha256, &error)
+                : lcnc::MachineSafetyPackage::create(
                     resolvedMachinePath, indexOutputPath, packagePath,
-                    runtimeConfigurationSha256, &error)) {
+                    runtimeConfigurationSha256, &error);
+            if (!packageCreated) {
                 err << error << '\n';
                 return 11;
             }

@@ -409,8 +409,6 @@ CamModule::CamModule(QObject* parent)
     connect(m_refreshCoalescer, &QTimer::timeout, this, [this]() {
         QStringList dirty(m_pendingDirtyAxes.cbegin(), m_pendingDirtyAxes.cend());
         m_pendingDirtyAxes.clear();
-        LCNC_DEBUG(lcnc::LogCode::Generic,
-                   "CamModule coalescer flush n={}", dirty.size());
         refreshMachineTransforms(dirty);
     });
     connect(m_pose.get(), &lcnc::MachinePose::poseChanged, this,

@@ -53,9 +53,21 @@ int main(int argc, char* argv[])
         lcnc::process::DeviceCommandResult result;
         if (!queue.submit([runtimeHolder] {
                 lcnc::process::DeviceCommandResult disconnected;
-                if (*runtimeHolder)
+                QTextStream(stdout) << "simulator.gate: phase=disconnect_begin" << Qt::endl;
+                if (*runtimeHolder) {
                     disconnected = (*runtimeHolder)->disconnectDevices();
+                    QTextStream(stdout) << "simulator.gate: phase=disconnect_return success="
+                                        << disconnected.success << " error=" << disconnected.error
+                                        << Qt::endl;
+                    if (disconnected.success && (*runtimeHolder)->motionConnectionOpen()) {
+                        disconnected = {false, QStringLiteral("Simulator session remains open after successful disconnect")};
+                    }
+                    QTextStream(stdout) << "simulator.gate: phase=disconnected_state_checked success="
+                                        << disconnected.success << Qt::endl;
+                }
+                QTextStream(stdout) << "simulator.gate: phase=runtime_release_begin" << Qt::endl;
                 runtimeHolder->reset();
+                QTextStream(stdout) << "simulator.gate: phase=runtime_release_done" << Qt::endl;
                 return disconnected;
             }, TaskPriority::Stop,
             [&result, &completed](const lcnc::process::DeviceCommandResult& completion) {
@@ -64,7 +76,13 @@ int main(int argc, char* argv[])
             })) {
             return false;
         }
-        return completed.tryAcquire(1, 30000) && result.success;
+        if (!completed.tryAcquire(1, 30000)) {
+            QTextStream(stderr) << "simulator.gate: phase=runtime_release_wait result=timeout" << Qt::endl;
+            return false;
+        }
+        if (!result.success)
+            QTextStream(stderr) << "simulator.gate: phase=runtime_release_wait error=" << result.error << Qt::endl;
+        return result.success;
     };
     // Opening a real ACS Simulator validates acsc_OpenCommSimulator and the
     // deployed Simulator.prg.  The position-setting command exercises the ACS
@@ -77,7 +95,11 @@ int main(int argc, char* argv[])
         if (!queue.submit([runtimeHolder, iteration] {
             const auto& runtime = *runtimeHolder;
             if (iteration == 0) {
-                return runtime->connectDevices(false, [](int, const QString&) {});
+                QTextStream(stdout) << "simulator.gate: phase=connect_begin" << Qt::endl;
+                const auto connected = runtime->connectDevices(false, [](int, const QString&) {});
+                QTextStream(stdout) << "simulator.gate: phase=connect_return success="
+                                    << connected.success << " error=" << connected.error << Qt::endl;
+                return connected;
             }
             if (iteration == 1) {
                 return runtime->setAxisPositions({{lcnc::process::Axis::X, 12.5}});
@@ -104,6 +126,7 @@ int main(int argc, char* argv[])
         }
     }
 
+    QTextStream(stdout) << "simulator.gate: phase=session_iterations_done count=100" << Qt::endl;
     // Destroy ACS-owned controller objects on their sole executor thread.
     if (!releaseRuntimeOnExecutor() || !queue.shutdown(30000))
         return fail(QStringLiteral("SimulatorCMHP executor shutdown failed"));

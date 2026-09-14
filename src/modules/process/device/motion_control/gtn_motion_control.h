@@ -1,6 +1,7 @@
 #pragma once
 
 #include "motion_control.h"
+#include "modules/process/runtime/motion_feedback_validation.h"
 //#include "ACSC.h"
 #include "gts.h"
 #include <fstream>
@@ -11,6 +12,7 @@
 #include <map>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <string>
 
 //#define     deviceDescription L"PCI-1730,BID#0"
@@ -32,6 +34,7 @@ struct GSNAxisData
 		double dAcc,
 		double dDec,
 		double dSmoothTime,
+		double dJogSmooth,
 		double dNeg,
 		double dPos,
 		//int    dConversion,
@@ -49,13 +52,14 @@ struct GSNAxisData
 		Acceleration(dAcc),
 		Deceleration(dDec),
 		SmoothTime(dSmoothTime),
+		JogSmooth(dJogSmooth),
 		NegLimit(dNeg),
 		PosLimit(dPos),
 		//Conversion(dConversion),
 		Name(strName),
 		pTHomePrm(homeParameters){}
 	GSNAxisData() : AxisIndex(0), Rotary(false), Resolution(1),
-		Velocity(0), Acceleration(0), Deceleration(0), SmoothTime(0),
+		Velocity(0), Acceleration(0), Deceleration(0), SmoothTime(10), JogSmooth(0.5),
 		NegLimit(0), PosLimit(0), pTHomePrm(nullptr) {}
 	int		AxisIndex;
 	bool	Rotary;
@@ -69,6 +73,7 @@ struct GSNAxisData
 	double	Acceleration;
 	double	Deceleration;
 	double	SmoothTime;
+	double	JogSmooth;
 	double	NegLimit;
 	double	PosLimit;
 	//int     Conversion;
@@ -103,6 +108,24 @@ protected:
 	double					m_dPreR2;					//上一个第二旋转轴的位置
 	bool                    m_hasPreviousCuttingPose{false};
 	bool                    m_cuttingCoordinateReady{false};
+	// True after GTN_InitLookAheadEx has initialized the coordinate FIFO and
+	// until a successful GTN_CrdClear. Fresh connections have no coordinate
+	// mapping, so stop/shutdown must not call GTN_CrdClear in that state.
+	bool                    m_coordinateBufferInitialized{false};
+	// New-architecture Group/CommandList state is kept separate from the
+	// legacy coordinate FIFO so stop/reset cannot clear the wrong resource.
+	bool                    m_groupReady{false};
+	bool                    m_groupRtcpActive{false};
+	bool                    m_groupRtcpConfigurationDerived{false};
+	bool                    m_groupListHasData{false};
+	bool                    m_groupListHasMotion{false};
+	bool                    m_groupListStarted{false};
+	bool                    m_groupCommandPositionValid{false};
+	std::array<double, 5>   m_groupCommandPosition{};
+	short                   m_groupIndex{1};
+	short                   m_commandListIndex{1};
+	long                    m_groupSegmentNumber{0};
+	long                    m_groupRtcpValidationCounter{0};
 	// 五维坐标系的维度顺序。由 GtnBufferedCommandSink 按 AxisMap 注入，
 	// 因而可覆盖 AC / BC 转台及摆头，而非硬编码物理轴号。
 	std::array<lcnc::process::Axis, 5>     m_cuttingAxes{lcnc::process::Axis::X, lcnc::process::Axis::Y, lcnc::process::Axis::Z, lcnc::process::Axis::A, lcnc::process::Axis::C};
@@ -120,6 +143,27 @@ protected:
 	int						m_iCore;					//与控制器核号
 
 private:
+	bool m_connectionInitialized{false};
+	bool m_stopFaultLatched{false};
+	bool requireInitializedConnection(const char* operation);
+	long configuredAxisMask() const;
+	bool waitForStoppedMotion(long axisMask, bool includeGroup, const char* operation);
+	bool stopAndReleaseFiveAxisGroup(long axisMask, const char* operation, bool allowRelease = true);
+	bool stopConfiguredOutputs(const char* operation);
+	bool clearCoordinateBufferIfInitialized(const char* operation);
+	bool synchronizeAxisProfilesToEncoders(long axisMask, const char* operation,
+	                                      bool requireConsistentFeedback = false);
+	bool validateStationaryFeedback(long axisMask, const char* operation, bool reportMismatch);
+	void logAxisPositionEvidence(long axisMask, const char* operation);
+	bool m_groupCompletionSettling{false};
+	bool m_groupFeedbackFaultLatched{false};
+	lcnc::process::StationaryFeedbackFault m_feedbackFault;
+	QString m_groupExecutionError;
+	std::chrono::steady_clock::time_point m_groupCompletionDeadline{};
+	void clearGroupRuntimeState();
+	bool appendGroupDigitalOutput(lcnc::process::DigitalOUT output, bool enabled,
+	                              const char* operation);
+	bool appendGroupDelay(double milliseconds, const char* operation);
 	//std::string FindAxisSign(MotionControl::Axis);
 public:
 	GTNMotionControl(lcnc::process::ProcessSettingsService& settings,
@@ -172,6 +216,7 @@ public:
 	virtual bool SetAxisAcc(lcnc::process::Axis eAxis, double dAcc);
 	virtual bool SetAxisDec(lcnc::process::Axis eAxis, double dDec);
 	virtual bool SetAxisJerk(lcnc::process::Axis eAxis, double dSmoothTime);
+	bool SetAxisJogSmooth(lcnc::process::Axis eAxis, double smooth) override;
 	virtual bool SetAxisNegLimit(lcnc::process::Axis eAxis, double dNegLimit);
 	virtual bool SetAxisPosLimit(lcnc::process::Axis eAxis, double dPosLimit);
 	virtual bool SetAxisVelAccDecJerk(lcnc::process::Axis eAxis, double dVel, double dAcc, double dDec, double dJerk);
@@ -215,6 +260,27 @@ public:
 	/// Configure the XYZ/R1/R2-to-controller-axis mapping used by the five-axis
 	/// interpolation coordinate system. Must be called before InitCrd().
 	bool ConfigureCuttingAxes(const std::array<lcnc::process::Axis, 5>& axes, int dimension);
+	/// Whether the persisted GTN option selects Group/CommandList execution.
+	bool UsesGroupArchitecture() const;
+	bool IsGroupRtcpRequested() const;
+	bool IsGroupRtcpActive() const { return m_groupRtcpActive; }
+	bool IsGroupRtcpConfigurationDerived() const {
+		return m_groupRtcpConfigurationDerived;
+	}
+	/// Configure the five-axis Group and clear its linked CommandList.
+	bool InitFiveAxisGroup(const Tool& tool);
+	bool ResetFiveAxisGroupProgram();
+	bool GroupLineTo(const std::array<double, 5>& position,
+	                 const Tool& tool, long userTag = 0);
+	bool ValidateGroupRtcpTarget(const std::array<double, 5>& tcpAndOrientation,
+	                             const std::array<double, 5>& predictedAxes);
+	bool StartFiveAxisGroupProgram();
+	bool IsFiveAxisGroupProgramRunning();
+	QString GroupExecutionError() const {
+		return m_feedbackFault.captured ? m_feedbackFault.message() : m_groupExecutionError;
+	}
+	bool StopFiveAxisGroupProgram();
+	bool GroupLaserControl(bool laserOn, const Tool& tool);
 	/// 点位移动并等待到位，供 GTN 命令汇执行切割前的空程定位。
 	bool MoveToPosition(lcnc::process::Axis axis, double velocity, double position);
 	virtual void EndProgramCommand(const Tool&) {};
@@ -253,6 +319,10 @@ public:
 
 	// 实现在父类的"无调用"/"未用到"槽（保留以满足旧基类语义，但都是 no-op）。
 	bool IsAxisStatusNormal(int& iFault);
+	// Strict, read-only machining check; unlike jog/escape it rejects soft limits.
+	bool IsMachiningStatusNormal(int& fault, bool reportFaults = true);
+	// Explicit Stop Reset only, called under the device coordinator lease.
+	bool RecoverAfterStop();
 	bool HaltMotor(lcnc::process::Axis) { return true; }
 	int  GetPressureState() override { return 0; }
 	bool GetIsPressureState() override { return true; }
@@ -264,5 +334,6 @@ public:
 	bool GetAxisHomeBufferIndex(lcnc::process::Axis, int&) override { return true; }
 	bool StopBuffer(int) override { return true; }
 	bool AfterOpenComm() { return true; }
-	bool ErrorOccurred() const override { return true; }
+	bool ErrorOccurred() const override { return m_bErrorOccurred || m_stopFaultLatched; }
+	bool IsConnectionInitialized() const { return m_bConnectFlag && m_connectionInitialized; }
 };

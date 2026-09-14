@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/machine/model_envelope_asset.h"
+
 #include <QByteArray>
 #include <QString>
 
@@ -7,7 +9,7 @@ namespace lcnc {
 
 struct MachineSafetyPackageManifest
 {
-    static constexpr int kCurrentFormatVersion = 1;
+    static constexpr int kCurrentFormatVersion = 2;
 
     QString schema{QStringLiteral("lcnc.machine-safety-package")};
     int formatVersion{kCurrentFormatVersion};
@@ -15,11 +17,14 @@ struct MachineSafetyPackageManifest
     QString softwareVersion;
     QString modelPath{QStringLiteral("machine/machine.step")};
     QString safetyIndexPath{QStringLiteral("safety/machine.lmsi")};
+    QString envelopeManifestPath;
     QByteArray modelSha256;
     QByteArray safetyIndexSha256;
     QByteArray indexContentSha256;
     QByteArray safetyConfigurationSha256;
     QByteArray runtimeConfigurationSha256;
+    QByteArray envelopeManifestSha256;
+    QByteArray envelopeMeshSetSha256;
     QByteArray packageKeySha256;
 };
 
@@ -29,6 +34,8 @@ struct MachineSafetyPackageLoadResult
     QString packagePath;
     QString modelPath;
     QString safetyIndexPath;
+    QString envelopeManifestPath;
+    ModelEnvelopeAsset envelopeAsset;
 };
 
 /**
@@ -50,6 +57,13 @@ public:
                        const QString& packagePath,
                        const QByteArray& runtimeConfigurationSha256 = {},
                        QString* errorMessage = nullptr);
+
+    static bool createWithEnvelope(const QString& machineModelPath,
+                                   const QString& safetyIndexPath,
+                                   const QString& envelopeManifestPath,
+                                   const QString& packagePath,
+                                   const QByteArray& runtimeConfigurationSha256 = {},
+                                   QString* errorMessage = nullptr);
 
     static bool extractAndValidate(const QString& packagePath,
                                    const QString& targetDirectory,

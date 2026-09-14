@@ -47,6 +47,8 @@ signals:
     void cutterHeadPhysicalPositionChanged(double x, double y, double z);
     void alignToPhysicalCutterHeadRequested();
     void axisCalibrationWizardRequested();
+    void physicalKinematicsCalibrationWizardRequested();
+    void configurationDerivedRtcpRequested();
     void workpieceSetupChanged(double x, double y, double z,
                                double rotationXDeg, double rotationYDeg, double rotationZDeg);
     void alignWorkpieceSetupToRotationCenterRequested();
@@ -96,6 +98,8 @@ private:
     QPushButton* m_btnAlignToPhysical{nullptr};
     QPushButton* m_btnAlignHeadToPhysical{nullptr};
     QPushButton* m_btnOpenCalibrationWizard{nullptr};
+    QPushButton* m_btnOpenPhysicalCalibrationWizard{nullptr};
+    QPushButton* m_btnGenerateConfigurationRtcp{nullptr};
 
     QGroupBox* m_assignGroup{nullptr};
     QLabel*    m_lblAssignSelection{nullptr};

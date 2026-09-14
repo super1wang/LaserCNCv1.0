@@ -16,6 +16,7 @@
 #include "core/document/xcaf_utils.h"
 #include "core/kernel/kernel.h"
 #include "core/kinematics/machine_configuration_service.h"
+#include "core/kinematics/machine_calibration_service.h"
 #include "core/kinematics/machine_kinematics.h"
 #include "core/logging/logger.h"
 #include "core/machine/machine_workspace.h"
@@ -36,6 +37,8 @@
 #include "modules/cam/settings/cam_config.h"
 #include "modules/cam/ui/collision/widget_collision_detection_panel.h"
 #include "modules/cam/ui/machine/dialog_axis_calibration_wizard.h"
+#include "modules/cam/ui/machine/dialog_configuration_derived_rtcp.h"
+#include "modules/cam/ui/machine/dialog_physical_kinematics_calibration_wizard.h"
 #include "modules/cam/ui/machine/widget_machine_panel.h"
 #include "modules/cam/ui/machine/widget_machine_tree.h"
 #include "modules/cam/ui/ribbon/ribbon_cam_tab.h"
@@ -43,6 +46,7 @@
 #include "modules/process/commands/commands_process.h"
 #include "modules/process/cutting/process_cutting_plan_service.h"
 #include "modules/process/process_module.h"
+#include "modules/process/settings/process_settings_service.h"
 #include "modules/process/ui/process_flow_widget.h"
 #include "modules/process/ui/ribbon_process_tab.h"
 #include "modules/process/ui/widget_laser_control.h"
@@ -80,6 +84,7 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QProgressBar>
+#include <QPointer>
 #include <QPushButton>
 #include <QSet>
 #include <QSignalBlocker>
@@ -1205,6 +1210,122 @@ void MainWindow::createRightPanel()
                 m_axisCalibWizard->raise();
                 m_axisCalibWizard->activateWindow();
             });
+        connect(m_machinePanel,
+                &WidgetMachinePanel::physicalKinematicsCalibrationWizardRequested,
+                this, [this]() {
+            auto machine = lcnc::Kernel::current().services()
+                .getService<lcnc::MachineConfigurationService>();
+            auto calibration = lcnc::Kernel::current().services()
+                .getService<lcnc::kinematics::MachineCalibrationService>();
+            auto* wizard = new lcnc::cam::ui::DialogPhysicalKinematicsCalibrationWizard(
+                machine.get(), calibration.get(), this);
+            QPointer<ProcessModule> calibrationProcess(
+                m_appContext ? m_appContext->processModule() : nullptr);
+            wizard->setActivationAdmission([calibrationProcess] {
+                return calibrationProcess && calibrationProcess->canActivateMachineCalibration();
+            });
+            if (calibrationProcess) {
+                connect(calibrationProcess, &ProcessModule::machiningInteractionLockChanged,
+                        wizard, &lcnc::cam::ui::DialogPhysicalKinematicsCalibrationWizard::setMachiningInteractionLocked);
+            }
+            wizard->setMachiningInteractionLocked(!calibrationProcess
+                || calibrationProcess->isMachiningInteractionLocked());
+            connect(wizard,
+                    &lcnc::cam::ui::DialogPhysicalKinematicsCalibrationWizard::currentAxisFeedbackRequested,
+                    wizard, [this, wizard](auto target) {
+                ProcessModule* process = m_appContext ? m_appContext->processModule() : nullptr;
+                if (!process || !process->isConnected()) {
+                    QMessageBox::warning(wizard, tr("Calibration feedback unavailable"),
+                                         tr("Connect the motion controller before capturing actual axis feedback."));
+                    return;
+                }
+                if (process->state() != ProcessModule::State::Idle) {
+                    QMessageBox::warning(wizard, tr("Calibration feedback unavailable"),
+                                         tr("Actual-axis capture is allowed only while Process is idle."));
+                    return;
+                }
+                process->synchronizeAxisFeedback();
+                QPointer<lcnc::cam::ui::DialogPhysicalKinematicsCalibrationWizard> guarded(wizard);
+                QTimer::singleShot(350, wizard, [process, guarded, target] {
+                    if (guarded)
+                        guarded->applyCurrentAxisFeedback(target,
+                                                          process->currentAxisPositions());
+                });
+            });
+            wizard->show();
+            wizard->raise();
+            wizard->activateWindow();
+        });
+        connect(m_machinePanel, &WidgetMachinePanel::configurationDerivedRtcpRequested,
+                this, [this]() {
+            ProcessModule* process = m_appContext ? m_appContext->processModule() : nullptr;
+            if (!process || !process->settingsService()) {
+                // 中文翻译：RTCP 不可用；Process 设置服务不可用。
+                QMessageBox::warning(this, tr("RTCP unavailable"),
+                                     tr("The Process settings service is unavailable."));
+                return;
+            }
+            if (process->isConnected()) {
+                // 中文翻译：请先断开运动控制器。生成 RTCP 参数会修改活动五轴模型和 GTN Group/RTCP 设置。
+                QMessageBox::warning(this, tr("Disconnect the motion controller"),
+                    tr("Disconnect the motion controller first. Generating RTCP parameters changes the active five-axis model and the GTN Group/RTCP settings."));
+                return;
+            }
+            auto* settings = process->settingsService();
+            const QString controllerType = settings->rawValue(
+                lcnc::process::ProcessConfigArea::Devices,
+                QStringLiteral("MotionControl"), QStringLiteral("sType"), QString{}).toString();
+            if (controllerType.compare(QStringLiteral("GTN"), Qt::CaseInsensitive) != 0) {
+                // 中文翻译：请先在 Process 设置中选择 GTN 运动控制器。
+                QMessageBox::warning(this, tr("GTN controller required"),
+                    tr("Select the GTN motion controller in Process settings first."));
+                return;
+            }
+            auto machine = lcnc::Kernel::current().services()
+                .getService<lcnc::MachineConfigurationService>();
+            auto calibration = lcnc::Kernel::current().services()
+                .getService<lcnc::kinematics::MachineCalibrationService>();
+            lcnc::cam::ui::DialogConfigurationDerivedRtcp dialog(
+                machine.get(), calibration.get(), this);
+            if (dialog.exec() != QDialog::Accepted)
+                return;
+
+            settings->beginEdit();
+            QString settingError;
+            bool updated = false;
+            const auto objects = settings->objects();
+            for (const auto& object : objects) {
+                if (object.id != QStringLiteral("gtn-five-axis-group"))
+                    continue;
+                for (const auto& field : object.fields) {
+                    if (field.key == QStringLiteral("bUseGroupArchitecture")
+                        || field.key == QStringLiteral("bEnableRtcp")
+                        || field.key == QStringLiteral("bAllowConfigurationDerivedRtcp")) {
+                        if (!settings->setFieldValue(field, object.id, true, &settingError)) {
+                            settings->cancelEdit();
+                            QMessageBox::warning(this, tr("RTCP settings failed"), settingError);
+                            return;
+                        }
+                        updated = true;
+                    }
+                }
+            }
+            if (!updated) {
+                settings->cancelEdit();
+                QMessageBox::warning(this, tr("RTCP settings failed"),
+                    tr("The GTN five-axis Group settings are unavailable."));
+                return;
+            }
+            const auto commit = settings->commit();
+            if (!commit.success) {
+                QMessageBox::warning(this, tr("RTCP settings failed"), commit.error);
+                return;
+            }
+            // 中文翻译：已启用 RTCP 加工
+            QMessageBox::information(this, tr("RTCP machining enabled"),
+                tr("Configuration-derived calibration %1 is active. GTN Group and RTCP machining are enabled. Reconnect the controller before running. Configured tool and axis limits apply; laser and gas follow the normal machining sequence.")
+                    .arg(dialog.savedCalibrationId()));
+        });
         connect(m_machinePanel, &WidgetMachinePanel::workpieceSetupChanged, this,
             [this](double x, double y, double z, double rx, double ry, double rz) {
                 lcnc::WorkpieceSetupTransform setup;

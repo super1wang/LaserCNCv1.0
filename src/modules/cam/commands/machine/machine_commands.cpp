@@ -41,6 +41,29 @@
 
 #include <cmath>
 
+namespace {
+
+QString suggestedEnvelopePath(CamModule* module)
+{
+    const QFileInfo source(module ? module->machineModelPath() : QString{});
+    const QString baseName = source.completeBaseName().isEmpty()
+        ? QStringLiteral("machine") : source.completeBaseName();
+    return source.absoluteDir().filePath(baseName + QStringLiteral("_envelope.step"));
+}
+
+QString normalizedStepPath(const QString& path)
+{
+    if (path.isEmpty())
+        return {};
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().toLower();
+    if (suffix == QStringLiteral("stp") || suffix == QStringLiteral("step"))
+        return info.absoluteFilePath();
+    return info.absoluteFilePath() + QStringLiteral(".step");
+}
+
+} // namespace
+
 // ── CmdLoadMachine ─────────────────────────────────────────────────────────────
 
 CmdLoadMachine::CmdLoadMachine(IAppContext* ctx)
@@ -150,6 +173,25 @@ void CmdMarkAxes::execute()
     DialogMarkAxes dlg(doc, doc->machineKinematics(), nullptr);
     if (dlg.exec() == QDialog::Accepted) {
         context()->updateCommandStates();
+        if (dlg.generateEnvelopeRequested()) {
+            const QString selected = QFileDialog::getSaveFileName(
+                nullptr,
+                // 中文翻译：导出包络精简机台
+                tr("Export envelope-simplified machine"),
+                suggestedEnvelopePath(context()->camModule()),
+                // 中文翻译：STEP 文件 (*.stp *.step);;所有文件 (*)
+                tr("STEP files (*.stp *.step);;All files (*)"));
+            if (!selected.isEmpty()) {
+                QString error;
+                if (!context()->camModule()->exportSimplifiedMachine(
+                        normalizedStepPath(selected), &error)) {
+                    // 中文翻译：导出包络精简机台
+                    QMessageBox::warning(nullptr,
+                                         tr("Export envelope-simplified machine"),
+                                         error);
+                }
+            }
+        }
     }
 }
 
@@ -246,4 +288,55 @@ void CmdExportMachine::execute()
         tr("STEP files (*.stp *.step);;all files (*)"));
     if (path.isEmpty()) return;
     context()->camModule()->exportMachine(path);
+}
+
+// ── CmdExportSimplifiedMachine ───────────────────────────────────────────────
+
+CmdExportSimplifiedMachine::CmdExportSimplifiedMachine(IAppContext* ctx)
+    : CommandBase(ctx)
+{
+    // 中文翻译：生成包络
+    auto* a = new QAction(QIcon("themeicons:export.svg"), tr("Generate envelope"), this);
+    // 中文翻译：对当前已标轴机台生成保守外部包络，并导出适合碰撞检测的精简 STEP
+    a->setStatusTip(tr("Generate a conservative outer envelope for the currently marked machine and export a simplified STEP for collision detection"));
+    setAction(a);
+    if (context()->camModule()) {
+        connect(context()->camModule(), &CamModule::modelEnvelopeExportStateChanged,
+                this, [this] { context()->updateCommandStates(); });
+        connect(context()->camModule(), &CamModule::modelEnvelopeExported,
+                this, [this](const QString& path) {
+            // 中文翻译：包络导出完成
+            QMessageBox::information(nullptr, tr("Envelope export complete"),
+                // 中文翻译：精简机台 STEP 已导出到：\n%1
+                tr("The simplified machine STEP was exported to:\n%1").arg(path));
+            context()->updateCommandStates();
+        });
+    }
+}
+
+bool CmdExportSimplifiedMachine::isEnabled() const
+{
+    LcncDocument* doc = context()->machineDocument();
+    return doc
+        && doc->entityLabels(LcncDocument::EntityKind::Machine).Length() > 0
+        && !context()->camModule()->isModelEnvelopeExportPending();
+}
+
+void CmdExportSimplifiedMachine::execute()
+{
+    const QString selected = QFileDialog::getSaveFileName(
+        nullptr,
+        // 中文翻译：导出包络精简机台
+        tr("Export envelope-simplified machine"),
+        suggestedEnvelopePath(context()->camModule()),
+        // 中文翻译：STEP 文件 (*.stp *.step);;所有文件 (*)
+        tr("STEP files (*.stp *.step);;All files (*)"));
+    if (selected.isEmpty())
+        return;
+    QString error;
+    if (!context()->camModule()->exportSimplifiedMachine(
+            normalizedStepPath(selected), &error)) {
+        QMessageBox::warning(nullptr, tr("Export envelope-simplified machine"), error);
+    }
+    context()->updateCommandStates();
 }

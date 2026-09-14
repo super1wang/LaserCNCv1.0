@@ -50,6 +50,11 @@ ProcessParameterRegistry::ProcessParameterRegistry(const ProcessSettingsService&
 QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() const
 {
     QVector<ParameterObjectDescriptor> objects;
+    const bool gtnController = m_settings.rawValue(
+        ProcessConfigArea::Devices, QStringLiteral("MotionControl"),
+        QStringLiteral("sType"), QStringLiteral("SimulatorCMHP"))
+                                   .toString()
+                                   .compare(QStringLiteral("GTN"), Qt::CaseInsensitive) == 0;
 
     // 中文翻译：运动控制器；运动与轴系
     ParameterObjectDescriptor controller{QStringLiteral("controller"), QObject::tr("motion controller"), QObject::tr("Movement and Axis Systems")};
@@ -73,6 +78,84 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
 #endif
     controller.fields = {controllerType};
     objects.append(controller);
+
+    if (gtnController) {
+        // 中文翻译：GTN 五轴组；运动与轴系。
+        ParameterObjectDescriptor group{
+            QStringLiteral("gtn-five-axis-group"), QObject::tr("GTN five-axis group"),
+            QObject::tr("Movement and Axis Systems")};
+        group.parentObjectId = QStringLiteral("controller");
+        group.fields = {
+            // 中文翻译：启用新架构 Group/CommandList；模式。
+            field("enabled", QObject::tr("Enable Group/CommandList architecture"),
+                  QObject::tr("Mode"), ParameterValueType::Bool,
+                  ProcessConfigArea::Devices, "GTN", "bUseGroupArchitecture", false),
+            // 中文翻译：启用控制器 RTCP；模式。
+            field("rtcp", QObject::tr("Enable controller RTCP"), QObject::tr("Mode"),
+                  ParameterValueType::Bool, ProcessConfigArea::Devices, "GTN",
+                  "bEnableRtcp", false),
+            // 中文翻译：允许使用构型派生参数进行 RTCP 加工；调试安全。
+            field("configurationDerivedTrial",
+                  QObject::tr("Allow configuration-derived RTCP machining"),
+                  QObject::tr("Commissioning safety"), ParameterValueType::Bool,
+                  ProcessConfigArea::Devices, "GTN",
+                  "bAllowConfigurationDerivedRtcp", false),
+            // 中文翻译：Group 编号；资源。
+            field("group", QObject::tr("Group index"), QObject::tr("Resources"),
+                  ParameterValueType::Int, ProcessConfigArea::Devices, "GTN",
+                  "iFiveAxisGroup", 1, {}, 1, 2, 0),
+            // 中文翻译：CommandList 编号；资源。
+            field("list", QObject::tr("Command list index"), QObject::tr("Resources"),
+                  ParameterValueType::Int, ProcessConfigArea::Devices, "GTN",
+                  "iFiveAxisCommandList", 1, {}, 1, 4, 0),
+            // 中文翻译：Group 平滑时间；轨迹规划。
+            field("smoothTime", QObject::tr("Group smooth time"),
+                  QObject::tr("Trajectory planning"), ParameterValueType::Double,
+                  ProcessConfigArea::Devices, "GTN", "fGroupSmoothTime", 20.0,
+                  "ms", 0.0, 60.0),
+            // 中文翻译：Group 平滑系数；轨迹规划。
+            field("smoothK", QObject::tr("Group smooth coefficient"),
+                  QObject::tr("Trajectory planning"), ParameterValueType::Double,
+                  ProcessConfigArea::Devices, "GTN", "fGroupSmoothK", 15.0,
+                  {}, 0.0, 1000.0, 3),
+            // 中文翻译：前瞻段数；轨迹规划。
+            field("lookAheadNum", QObject::tr("Look-ahead segment count"),
+                  QObject::tr("Trajectory planning"), ParameterValueType::Int,
+                  ProcessConfigArea::Devices, "GTN", "iGroupLookAheadNum", 200,
+                  {}, 1, 10000, 0),
+            // 中文翻译：前瞻时间常数；轨迹规划。
+            field("lookAheadTime", QObject::tr("Look-ahead time constant"),
+                  QObject::tr("Trajectory planning"), ParameterValueType::Double,
+                  ProcessConfigArea::Devices, "GTN", "fGroupLookAheadTime", 0.01,
+                  {}, 0.000001, 1000.0, 6),
+            // 中文翻译：前瞻曲率系数；轨迹规划。
+            field("lookAheadRadius", QObject::tr("Look-ahead radius ratio"),
+                  QObject::tr("Trajectory planning"), ParameterValueType::Double,
+                  ProcessConfigArea::Devices, "GTN", "fGroupLookAheadRadiusRatio", 0.1,
+                  {}, 0.0, 1000.0, 6),
+            // 中文翻译：第一旋转轴速度参考比例；轨迹规划。
+            field("primaryRotaryRatio", QObject::tr("Primary rotary velocity reference ratio"),
+                  QObject::tr("Trajectory planning"), ParameterValueType::Double,
+                  ProcessConfigArea::Devices, "GTN", "fGroupPrimaryRotaryVelRefRatio", 20.0,
+                  {}, 0.000001, 1000000.0, 6),
+            // 中文翻译：第二旋转轴速度参考比例；轨迹规划。
+            field("slaveRotaryRatio", QObject::tr("Slave rotary velocity reference ratio"),
+                  QObject::tr("Trajectory planning"), ParameterValueType::Double,
+                  ProcessConfigArea::Devices, "GTN", "fGroupSlaveRotaryVelRefRatio", 20.0,
+                  {}, 0.000001, 1000000.0, 6),
+            // 中文翻译：RTCP 轴坐标一致性容差；RTCP 验证。
+            field("rtcpAgreement", QObject::tr("RTCP axis agreement tolerance"),
+                  QObject::tr("RTCP verification"), ParameterValueType::Double,
+                  ProcessConfigArea::Devices, "GTN", "fGroupRtcpAxisAgreementTolerance", 0.05,
+                  {}, 0.000001, 1000.0, 6),
+            // 中文翻译：RTCP 转换抽检步长；RTCP 验证。
+            field("rtcpValidationStride", QObject::tr("RTCP transform validation stride"),
+                  QObject::tr("RTCP verification"), ParameterValueType::Int,
+                  ProcessConfigArea::Devices, "GTN", "iGroupRtcpValidationStride", 100,
+                  {}, 1, 1000000, 0)
+        };
+        objects.append(group);
+    }
 
     lcnc::Kernel* kernel = lcnc::Kernel::tryCurrent();
     auto machine = kernel
@@ -150,9 +233,9 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
                 // 中文翻译：运动速度；基本
                 machineField("motionSpeed", QObject::tr("Movement speed"), QObject::tr("Basic"), ParameterValueType::Double, "motionSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
                 // 中文翻译：负限位；限位
-                machineField("min", QObject::tr("Negative limit"), QObject::tr("Limit"), ParameterValueType::Double, "min", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm"),
+                machineField("min", QObject::tr("Negative limit"), QObject::tr("Limit"), ParameterValueType::Double, "min", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm", -1e12, 1e12),
                 // 中文翻译：正限位；限位
-                machineField("max", QObject::tr("Positive limit"), QObject::tr("Limit"), ParameterValueType::Double, "max", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm"),
+                machineField("max", QObject::tr("Positive limit"), QObject::tr("Limit"), ParameterValueType::Double, "max", axis.axis.motionType == MachineAxisDef::Rotary ? "°" : "mm", -1e12, 1e12),
                 // 中文翻译：低速；手动速度
                 machineField("lowSpeed", QObject::tr("low speed"), QObject::tr("manual speed"), ParameterValueType::Double, "lowSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
                 // 中文翻译：中速；手动速度
@@ -160,10 +243,30 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
                 // 中文翻译：高速；手动速度
                 machineField("highSpeed", QObject::tr("high speed"), QObject::tr("manual speed"), ParameterValueType::Double, "highSpeed", axis.axis.motionType == MachineAxisDef::Rotary ? "°/s" : "mm/s", 0.0),
                 // 中文翻译：加速度；运动学
-                machineField("acceleration", QObject::tr("acceleration"), QObject::tr("Kinesiology"), ParameterValueType::Double, "acceleration", {}, 0.0),
-                // 中文翻译：加加速度；运动学
-                machineField("jerk", QObject::tr("Jerk"), QObject::tr("Kinesiology"), ParameterValueType::Double, "jerk", {}, 0.0)
+                machineField("acceleration", QObject::tr("acceleration"), QObject::tr("Kinesiology"), ParameterValueType::Double, "acceleration", {}, 0.0)
             };
+            if (gtnController) {
+                const QString suffix = axis.axis.name.trimmed().toUpper();
+                // 中文翻译：点位平滑时间；运动学
+                object.fields.append(field(
+                    QStringLiteral("trapSmoothTime"), QObject::tr("Point motion smooth time"),
+                    QObject::tr("Kinesiology"), ParameterValueType::Int,
+                    ProcessConfigArea::Devices, QStringLiteral("GTN"),
+                    QStringLiteral("iTrapSmoothTime%1").arg(suffix), 10,
+                    QStringLiteral("ms"), 0.0, 50.0, 0));
+                // 中文翻译：Jog 平滑系数；运动学
+                object.fields.append(field(
+                    QStringLiteral("jogSmooth"), QObject::tr("Jog smooth coefficient"),
+                    QObject::tr("Kinesiology"), ParameterValueType::Double,
+                    ProcessConfigArea::Devices, QStringLiteral("GTN"),
+                    QStringLiteral("fJogSmooth%1").arg(suffix), 0.5,
+                    {}, 0.0, 0.999, 3));
+            } else {
+                // 中文翻译：加加速度；运动学
+                object.fields.append(machineField(
+                    "jerk", QObject::tr("Jerk"), QObject::tr("Kinesiology"),
+                    ParameterValueType::Double, "jerk", {}, 0.0));
+            }
             if (axis.axis.motionType == MachineAxisDef::Rotary)
                 // 中文翻译：管径；旋转轴
                 object.fields.append(machineField("pipeDiameter", QObject::tr("Pipe diameter"), QObject::tr("axis of rotation"), ParameterValueType::Double, "pipeDiameter", "mm", 0.0));
@@ -302,14 +405,10 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
             field("lineVelocity", QObject::tr("cutting speed"), QObject::tr("cutting"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fLineVel", 10.0, "mm/s", 0.0),
             // 中文翻译：切割加速度；切割
             field("cutAcceleration", QObject::tr("Cutting acceleration"), QObject::tr("cutting"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutAcc", 100.0, {}, 0.0),
-            // 中文翻译：切割加加速度；切割
-            field("cutJerk", QObject::tr("Cutting jerk"), QObject::tr("cutting"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fCutJerk", 1000.0, {}, 0.0),
             // 中文翻译：切割高度增量；高度
             // 中文翻译：空程高度增量；高度
             // 中文翻译：空程加速度
             field("jumpAcceleration", QObject::tr("Idle acceleration"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelAcc", 100.0, {}, 0.0),
-            // 中文翻译：空程加加速度
-            field("jumpJerk", QObject::tr("Idle acceleration"), QObject::tr("Jump"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fIdelJerk", 1000.0, {}, 0.0),
             // 中文翻译：能量；激光
             field("energy", QObject::tr("energy"), QObject::tr("laser"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fEnergy", 20.0, "%", 0.0),
             // 中文翻译：频率；激光
@@ -321,6 +420,43 @@ QVector<ParameterObjectDescriptor> ProcessParameterRegistry::buildObjects() cons
             // 中文翻译：关光后延时；激光延时
             field("afterClose", QObject::tr("Delay after light off"), QObject::tr("Laser delay"), ParameterValueType::Double, ProcessConfigArea::Tools, toolName, "fAfterCloseLaser", 0.0, "s", 0.0)
         };
+        if (gtnController) {
+            // 中文翻译：插补平滑时间；切割
+            tool.fields.append(field(
+                "cutSmoothTime", QObject::tr("Interpolation smooth time"),
+                QObject::tr("cutting"), ParameterValueType::Double,
+                ProcessConfigArea::Tools, toolName, "fCutSmoothTime", 0.0,
+                "ms", 0.0, 120.0));
+            // 中文翻译：插补平滑系数；切割
+            tool.fields.append(field(
+                "cutSmoothCoefficient", QObject::tr("Interpolation smooth coefficient"),
+                QObject::tr("cutting"), ParameterValueType::Double,
+                ProcessConfigArea::Tools, toolName, "fCutSmoothK", 0.0,
+                {}, 0.0, 99.999));
+            // 中文翻译：轴平滑时间；切割
+            tool.fields.append(field(
+                "axisSmoothTime", QObject::tr("Axis smooth time"),
+                QObject::tr("cutting"), ParameterValueType::Double,
+                ProcessConfigArea::Tools, toolName, "fAxisSmoothTime", 0.0,
+                "ms", 0.0, 60.0));
+            // 中文翻译：轴平滑系数；切割
+            tool.fields.append(field(
+                "axisSmoothCoefficient", QObject::tr("Axis smooth coefficient"),
+                QObject::tr("cutting"), ParameterValueType::Double,
+                ProcessConfigArea::Tools, toolName, "fAxisSmoothK", 0.0,
+                {}, 0.0, 99.999));
+        } else {
+            // 中文翻译：切割加加速度；切割
+            tool.fields.append(field(
+                "cutJerk", QObject::tr("Cutting jerk"), QObject::tr("cutting"),
+                ParameterValueType::Double, ProcessConfigArea::Tools, toolName,
+                "fCutJerk", 1000.0, {}, 0.0));
+            // 中文翻译：空程加加速度；空程
+            tool.fields.append(field(
+                "jumpJerk", QObject::tr("Idle jerk"), QObject::tr("Jump"),
+                ParameterValueType::Double, ProcessConfigArea::Tools, toolName,
+                "fIdelJerk", 1000.0, {}, 0.0));
+        }
         if (machine) for (const auto& axis : machine->axisConfigurations()) {
             const QString name = axis.axis.name;
             // 中文翻译：%1 空程速度

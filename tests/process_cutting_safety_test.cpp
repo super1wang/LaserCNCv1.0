@@ -1,14 +1,47 @@
 #include "modules/process/runtime/process_cutting_safety.h"
+#include "modules/process/runtime/motion_feedback_validation.h"
 #include "modules/process/runtime/process_run_coordinator.h"
 #include "core/algorithms/cam/collision_policy.h"
 #include "modules/cam/safety/machine_safety_package_manager.h"
 
 #include <cassert>
+#include <limits>
 
 using namespace lcnc::process;
 
 int main()
 {
+    // Physical log regression: commanded +360 degrees, encoder -360.003;
+    // this must never become the next Group's rebased start position.
+    if (stationaryFeedbackMatches(360000.0, -360003.0, 1000.0)
+        || stationaryFeedbackMatches(316334.841, -1036335.0, 1000.0)
+        || stationaryFeedbackMatches(360000.0, 0.0, 1000.0)
+        || stationaryFeedbackMatches(0.0, 0.0, 0.0)
+        || stationaryFeedbackMatches(std::numeric_limits<double>::quiet_NaN(), 0.0, 1000.0)
+        || !stationaryFeedbackMatches(360000.0, 360003.0, 1000.0)
+        || !stationaryFeedbackMatches(-403534.6, -403540.0, 10000.0))
+        return 1;
+    // The failure snapshot must not be replaced by the matching positions
+    // observed after a later stop/reset or by a second axis fault.
+    StationaryFeedbackFault feedbackFault;
+    feedbackFault.capture(QStringLiteral("X"), 3, -41734.43087768555,
+                          -37656.0, 10000.0, false);
+    const QString firstMessage = feedbackFault.message();
+    feedbackFault.capture(QStringLiteral("X"), 3, -37656.0, -37656.0, 10000.0, false);
+    feedbackFault.capture(QStringLiteral("C"), 7, 360000.0, -360003.0, 1000.0, true);
+    if (!feedbackFault.captured || feedbackFault.physicalAxis != 3
+        || feedbackFault.profilePulse != -41734.43087768555
+        || feedbackFault.message() != firstMessage
+        || !firstMessage.contains(QStringLiteral("-4.173443"))
+        || !firstMessage.contains(QStringLiteral("-3.765600"))
+        || !firstMessage.contains(QStringLiteral("0.407843"))
+        || !firstMessage.contains(QStringLiteral("mm")))
+        return 1;
+    feedbackFault = {};
+    if (feedbackFault.captured || !feedbackFault.message().isEmpty()) return 1;
+    feedbackFault.capture(QStringLiteral("C"), 7, 360000.0, -360003.0, 1000.0, true);
+    if (!feedbackFault.message().contains(QStringLiteral("deg"))
+        || !feedbackFault.message().contains(QStringLiteral("-720.003000"))) return 1;
     ProcessRunCoordinator coordinator;
     assert(coordinator.state() == lcnc::ProcessRunState::Idle);
     assert(!coordinator.transitionTo(lcnc::ProcessRunState::Paused));

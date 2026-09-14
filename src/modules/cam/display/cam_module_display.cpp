@@ -513,9 +513,6 @@ const QList<Handle(AIS_Shape)>& CamModule::contourAis() const
 void CamModule::setAxisPosition(const QString& axisName, double value, bool refreshNow)
 {
     const QString normalizedAxis = axisName.trimmed().toUpper();
-    LCNC_DEBUG(lcnc::LogCode::Generic,
-               "CamModule::setAxisPosition {}={} refreshNow={}",
-               normalizedAxis.toStdString(), value, refreshNow);
     if (!m_pose || !kinematics()) {
         LCNC_DEBUG(lcnc::LogCode::Generic,
                    "CamModule::setAxisPosition: no pose/kinematics, skip");
@@ -724,8 +721,6 @@ void CamModule::refreshMachineTransforms()
 
 void CamModule::refreshMachineTransforms(const QStringList& dirtyAxes)
 {
-    LCNC_DEBUG(lcnc::LogCode::Generic,
-               "CamModule::refreshMachineTransforms(dirty) n={}", dirtyAxes.size());
     // 现阶段 GuiDocument::updateAxisTransforms 与 MachineGuideRenderer::updateTransforms
     // 内部已是就地 SetLocalTransformation，dirty 集合主要用于：
     //   1) 跳过 m_pose 与几何已一致的"无变化"刷新（上层早 return）；

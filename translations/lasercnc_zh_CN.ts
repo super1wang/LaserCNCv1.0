@@ -386,6 +386,42 @@
 <context>
     <name>CamModule</name>
     <message>
+        <source>A model-envelope export is already running</source>
+        <translation>模型包络导出任务已在运行</translation>
+    </message>
+    <message>
+        <source>Load a machine model before exporting its envelope</source>
+        <translation>请先加载机台模型，再导出包络</translation>
+    </message>
+    <message>
+        <source>The simplified machine output must be a STEP file</source>
+        <translation>精简机台输出必须为 STEP 文件</translation>
+    </message>
+    <message>
+        <source>Every machine part must be assigned to an axis before envelope export. Unassigned part: %1</source>
+        <translation>导出包络前必须为每个机台零件分配轴。未分配零件：%1</translation>
+    </message>
+    <message>
+        <source>The model-envelope generator does not support axis %1</source>
+        <translation>模型包络生成器不支持 %1 轴</translation>
+    </message>
+    <message>
+        <source>Unable to stage the marked machine model for envelope generation</source>
+        <translation>无法暂存已标轴机台模型以生成包络</translation>
+    </message>
+    <message>
+        <source>Generate model envelope: %1</source>
+        <translation>生成模型包络：%1</translation>
+    </message>
+    <message>
+        <source>Export simplified machine</source>
+        <translation>导出精简机台</translation>
+    </message>
+    <message>
+        <source>Model-envelope export failed</source>
+        <translation>模型包络导出失败</translation>
+    </message>
+    <message>
         <source>Collision safety-domain path request is invalid</source>
         <translation>碰撞安全域路径请求无效</translation>
     </message>
@@ -1503,6 +1539,11 @@ Please complete the configuration on the Machine Configuration page of the appli
         <translation>机台安全包生成工具不可用：%1</translation>
     </message>
     <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="481" />
+        <source>The licensed model-envelope generator is unavailable: %1</source>
+        <translation>已授权的模型包络生成器不可用：%1</translation>
+    </message>
+    <message>
         <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="413" />
         <source>The current machine safety configuration is incomplete</source>
         <translation>当前机台安全配置不完整</translation>
@@ -1522,6 +1563,11 @@ Please complete the configuration on the Machine Configuration page of the appli
         <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="510" />
         <source>Machine safety package generation failed</source>
         <translation>机台安全包生成失败</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cam/machine/cam_module_machine.cpp" line="539" />
+        <source>Unable to create model-envelope staging directory</source>
+        <translation>无法创建模型包络暂存目录</translation>
     </message>
     <message>
         <location filename="../src/modules/cam/collision/cam_module_collision.cpp" line="442" />
@@ -2237,6 +2283,14 @@ continue?</source>
 <context>
     <name>CmdMarkAxes</name>
     <message>
+        <source>Export envelope-simplified machine</source>
+        <translation>导出包络精简机台</translation>
+    </message>
+    <message>
+        <source>STEP files (*.stp *.step);;All files (*)</source>
+        <translation>STEP 文件 (*.stp *.step);;所有文件 (*)</translation>
+    </message>
+    <message>
         <location filename="../src/modules/cam/commands/commands_machine.cpp" line="96"/>
         <location filename="../src/modules/cam/commands/commands_machine.cpp" line="116"/>
         <source>Mark axis system</source>
@@ -2251,6 +2305,35 @@ continue?</source>
         <location filename="../src/modules/cam/commands/commands_machine.cpp" line="118"/>
         <source>Please configure the machine configuration in the axis system configuration page of the preparation page first, and load the machine model.</source>
         <translation>请先在准备页的轴系配置页面中配置机台构型，并加载机台模型。</translation>
+    </message>
+</context>
+<context>
+    <name>CmdExportSimplifiedMachine</name>
+    <message>
+        <source>Generate envelope</source>
+        <translation>生成包络</translation>
+    </message>
+    <message>
+        <source>Generate a conservative outer envelope for the currently marked machine and export a simplified STEP for collision detection</source>
+        <translation>对当前已标轴机台生成保守外部包络，并导出适合碰撞检测的精简 STEP</translation>
+    </message>
+    <message>
+        <source>Envelope export complete</source>
+        <translation>包络导出完成</translation>
+    </message>
+    <message>
+        <source>The simplified machine STEP was exported to:
+%1</source>
+        <translation>精简机台 STEP 已导出到：
+%1</translation>
+    </message>
+    <message>
+        <source>Export envelope-simplified machine</source>
+        <translation>导出包络精简机台</translation>
+    </message>
+    <message>
+        <source>STEP files (*.stp *.step);;All files (*)</source>
+        <translation>STEP 文件 (*.stp *.step);;所有文件 (*)</translation>
     </message>
 </context>
 <context>
@@ -3173,6 +3256,14 @@ You need to complete the three pickups above first.</source>
 <context>
     <name>DialogMarkAxes</name>
     <message>
+        <source>Generate an envelope and export a simplified STEP after applying axis assignments</source>
+        <translation>应用轴标记后生成包络并导出精简 STEP</translation>
+    </message>
+    <message>
+        <source>Write the current axis assignments to a temporary model, then use the independent CGAL tool to remove internal structure and generate a collision envelope.</source>
+        <translation>将当前轴归属写入临时模型，由独立 CGAL 工具删除内部结构并生成碰撞用外部包络。</translation>
+    </message>
+    <message>
         <location filename="../src/modules/cam/ui/dialog_mark_axes.cpp" line="31"/>
         <source>Mark shafting components</source>
         <translation>标记轴系零部件</translation>
@@ -4083,6 +4174,37 @@ You need to complete the three pickups above first.</source>
         <source>GTN buffered line command failed</source>
         <translation>GTN 缓冲直线指令失败</translation>
     </message>
+    <message>
+        <location filename="../src/modules/process/runtime/gtn_buffered_command_sink.cpp" line="70"/>
+        <source>GTN failed to release the five-axis Group after execution</source>
+        <translation>GTN 执行后释放五轴 Group 失败</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/gtn_buffered_command_sink.cpp" line="109"/>
+        <source>A GTN buffered command failed before submission</source>
+        <translation>GTN 缓冲指令在提交前失败</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/gtn_buffered_command_sink.cpp" line="119"/>
+        <location filename="../src/modules/process/runtime/gtn_buffered_command_sink.cpp" line="376"/>
+        <source>GTN five-axis Group is not initialized</source>
+        <translation>GTN 五轴 Group 尚未初始化</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/gtn_buffered_command_sink.cpp" line="127"/>
+        <source>GTN batch program start failed</source>
+        <translation>GTN 批处理程序启动失败</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/gtn_buffered_command_sink.cpp" line="164"/>
+        <source>GTN reported a Group/CommandList execution fault</source>
+        <translation>GTN 报告 Group 或 CommandList 执行故障</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/runtime/gtn_buffered_command_sink.cpp" line="315"/>
+        <source>The previous GTN five-axis Group was not released</source>
+        <translation>上一个 GTN 五轴 Group 尚未释放</translation>
+    </message>
 </context>
 <context>
     <name>HTTPClient</name>
@@ -4128,6 +4250,16 @@ You need to complete the three pickups above first.</source>
 </context>
 <context>
     <name>MainWindow</name>
+    <message><source>RTCP unavailable</source><translation>RTCP 不可用</translation></message>
+    <message><source>The Process settings service is unavailable.</source><translation>Process 设置服务不可用。</translation></message>
+    <message><source>Disconnect the motion controller</source><translation>请断开运动控制器</translation></message>
+    <message><source>Disconnect the motion controller first. Generating RTCP parameters changes the active five-axis model and the GTN Group/RTCP settings.</source><translation>请先断开运动控制器。生成 RTCP 参数会修改活动五轴模型和 GTN Group/RTCP 设置。</translation></message>
+    <message><source>GTN controller required</source><translation>需要 GTN 控制器</translation></message>
+    <message><source>Select the GTN motion controller in Process settings first.</source><translation>请先在 Process 设置中选择 GTN 运动控制器。</translation></message>
+    <message><source>RTCP settings failed</source><translation>RTCP 设置失败</translation></message>
+    <message><source>The GTN five-axis Group settings are unavailable.</source><translation>GTN 五轴 Group 设置不可用。</translation></message>
+    <message><source>RTCP machining enabled</source><translation>已启用 RTCP 加工</translation></message>
+    <message><source>Configuration-derived calibration %1 is active. GTN Group and RTCP machining are enabled. Reconnect the controller before running. Configured tool and axis limits apply; laser and gas follow the normal machining sequence.</source><translation>构型派生标定 %1 已激活。已启用 GTN Group 和 RTCP 加工。运行前请重新连接控制器。使用已配置的刀具和轴限制，激光及气体按正常加工时序控制。</translation></message>
     <message>
         <location filename="../src/app/main_window.cpp" line="188"/>
         <source>LaserCNC — five-axis laser processing CAM software</source>
@@ -6065,6 +6197,10 @@ You need to complete the three pickups above first.</source>
         <source>The collision system did not issue a safe fixed-motion permit</source>
         <translation>碰撞系统未签发安全固定运动许可证</translation>
     </message>
+    <message><source>GTN Group/CommandList execution requires a five-axis CAM snapshot</source><translation>GTN Group/CommandList 执行要求五轴 CAM 快照</translation></message>
+    <message><source>Controller RTCP requires an active MachineVerified physical calibration: %1</source><translation>控制器 RTCP 要求存在已激活且状态为 MachineVerified 的物理标定：%1</translation></message>
+    <message><source>Controller RTCP requires a valid MCS TCP for every lead-in point</source><translation>控制器 RTCP 要求每个引入点都包含有效的 MCS TCP</translation></message>
+    <message><source>Controller RTCP requires a valid MCS TCP for every cutting point</source><translation>控制器 RTCP 要求每个切割点都包含有效的 MCS TCP</translation></message>
 </context>
 <context>
     <name>lcnc::process::ProcessNodeEditDialog</name>
@@ -6462,6 +6598,21 @@ You need to complete the three pickups above first.</source>
 </context>
 <context>
     <name>QObject</name>
+    <message>
+        <location filename="../src/modules/cad/services/model_envelope_service.cpp" line="59" />
+        <source>Generating conservative model envelope...</source>
+        <translation>正在生成保守模型包络...</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cad/services/model_envelope_service.cpp" line="101" />
+        <source>Validating model envelope...</source>
+        <translation>正在验证模型包络...</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/cad/services/model_envelope_service.cpp" line="151" />
+        <source>Model envelope ready</source>
+        <translation>模型包络已就绪</translation>
+    </message>
     <message>
         <source>Read CAD file...</source>
         <translation>读取 CAD 文件...</translation>
@@ -7156,6 +7307,16 @@ You need to complete the three pickups above first.</source>
         <translation>设置轴 %1 加加速度 %2 失败。</translation>
     </message>
     <message>
+        <location filename="../src/modules/process/device/motion_control/motion_control.cpp" line="141"/>
+        <source>Set axis %1 point motion smooth time %2 ms failed.</source>
+        <translation>设置轴 %1 点位平滑时间 %2 毫秒失败。</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/device/motion_control/motion_control.cpp" line="151"/>
+        <source>Set axis %1 Jog smooth coefficient %2 failed.</source>
+        <translation>设置轴 %1 Jog 平滑系数 %2 失败。</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/device/motion_control/motion_control.cpp" line="155"/>
         <source>Set axis %1 limit %2 ~ %3 failed.</source>
         <translation>设置轴 %1 限制 %2 ~ %3 失败。</translation>
@@ -7545,6 +7706,30 @@ You need to complete the three pickups above first.</source>
         <translation>设备断开前安全输出复位失败</translation>
     </message>
     <message>
+        <source>Cannot safely disconnect the previous controller or create the selected controller; connection canceled</source>
+        <translation>无法安全断开旧控制器或创建所选控制器；已取消连接。</translation>
+    </message>
+    <message>
+        <source>Safe stop could not be confirmed; the controller connection is preserved</source>
+        <translation>无法确认安全停止；保留控制器连接。</translation>
+    </message>
+    <message>
+        <source>Laser disconnection failed; the motion controller connection is preserved</source>
+        <translation>激光器断开失败；保留运动控制器连接。</translation>
+    </message>
+    <message>
+        <source>Controller parameter application failed; the current device state is preserved</source>
+        <translation>控制器参数应用失败；保留当前设备状态。</translation>
+    </message>
+    <message>
+        <source>An unknown exception occurred during the device connection operation</source>
+        <translation>设备连接操作发生未知异常。</translation>
+    </message>
+    <message>
+        <source>Cannot confirm the motion controller connection state</source>
+        <translation>无法确认运动控制器连接状态。</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/runtime/process_device_session.cpp" line="85"/>
         <location filename="../src/modules/process/runtime/process_device_session.cpp" line="91"/>
         <source>Laser connection failed; this device connection has been canceled</source>
@@ -7901,6 +8086,16 @@ You need to complete the three pickups above first.</source>
         <translation>加加速度</translation>
     </message>
     <message>
+        <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="174"/>
+        <source>Point motion smooth time</source>
+        <translation>点位平滑时间</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="182"/>
+        <source>Jog smooth coefficient</source>
+        <translation>Jog 平滑系数</translation>
+    </message>
+    <message>
         <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="111"/>
         <source>Pipe diameter</source>
         <translation>管径</translation>
@@ -8175,7 +8370,32 @@ You need to complete the three pickups above first.</source>
         <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="228"/>
         <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="230"/>
         <source>Idle acceleration</source>
+        <translation>空程加速度</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="366"/>
+        <source>Idle jerk</source>
         <translation>空程加加速度</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="334"/>
+        <source>Interpolation smooth time</source>
+        <translation>插补平滑时间</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="341"/>
+        <source>Interpolation smooth coefficient</source>
+        <translation>插补平滑系数</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="348"/>
+        <source>Axis smooth time</source>
+        <translation>轴平滑时间</translation>
+    </message>
+    <message>
+        <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="355"/>
+        <source>Axis smooth coefficient</source>
+        <translation>轴平滑系数</translation>
     </message>
     <message>
         <location filename="../src/modules/process/settings/process_parameter_registry.cpp" line="228"/>
@@ -9456,6 +9676,28 @@ You need to complete the three pickups above first.</source>
         <source>Building the machine safety package</source>
         <translation>正在生成机台安全包</translation>
     </message>
+    <message><source>%1: center=(%2, %3, %4), vector=(%5, %6, %7), radius=%8 mm, coverage=%9°, RMS=%10 mm, max=%11 mm</source><translation>%1：中心=(%2, %3, %4)，方向=(%5, %6, %7)，半径=%8 mm，覆盖=%9°，RMS=%10 mm，最大误差=%11 mm</translation></message>
+    <message><source>; suggested outliers=[%1] (not excluded automatically)</source><translation>；建议复核的异常样本=[%1]（不会自动排除）</translation></message>
+    <message><source>GTN five-axis group</source><translation>GTN 五轴组</translation></message>
+    <message><source>Enable Group/CommandList architecture</source><translation>启用 Group/CommandList 架构</translation></message>
+    <message><source>Enable controller RTCP</source><translation>启用控制器 RTCP</translation></message>
+    <message><source>Allow configuration-derived RTCP machining</source><translation>允许使用构型派生参数进行 RTCP 加工</translation></message>
+    <message><source>Commissioning safety</source><translation>调试安全</translation></message>
+    <message><source>Mode</source><translation>模式</translation></message>
+    <message><source>Group index</source><translation>轴组索引</translation></message>
+    <message><source>Command list index</source><translation>命令列表索引</translation></message>
+    <message><source>Resources</source><translation>资源</translation></message>
+    <message><source>Group smooth time</source><translation>轴组平滑时间</translation></message>
+    <message><source>Group smooth coefficient</source><translation>轴组平滑系数</translation></message>
+    <message><source>Look-ahead segment count</source><translation>前瞻段数</translation></message>
+    <message><source>Look-ahead time constant</source><translation>前瞻时间常数</translation></message>
+    <message><source>Look-ahead radius ratio</source><translation>前瞻半径比例</translation></message>
+    <message><source>Primary rotary velocity reference ratio</source><translation>父旋转轴速度参考比例</translation></message>
+    <message><source>Slave rotary velocity reference ratio</source><translation>子旋转轴速度参考比例</translation></message>
+    <message><source>Trajectory planning</source><translation>轨迹规划</translation></message>
+    <message><source>RTCP axis agreement tolerance</source><translation>RTCP 轴坐标一致性容差</translation></message>
+    <message><source>RTCP transform validation stride</source><translation>RTCP 转换抽检步长</translation></message>
+    <message><source>RTCP verification</source><translation>RTCP 验证</translation></message>
 </context>
 <context>
     <name>lcnc::simulation::SimulationModule</name>
@@ -10453,6 +10695,8 @@ You need to complete the three pickups above first.</source>
         <source>Workpiece setup</source>
         <translation>工件安装姿态</translation>
     </message>
+    <message><source>Generate RTCP parameters from current configuration...</source><translation>从当前构型生成 RTCP 参数...</translation></message>
+    <message><source>Generate an RTCP record from the current rotary centers, directions, axis mapping, and TCP. Machining uses configured tool speeds and laser/gas sequences. This is not a precision calibration.</source><translation>使用当前旋转中心、方向、轴映射和 TCP 生成 RTCP 记录。加工采用已配置的刀具速度和激光/气体时序。这不是精密标定。</translation></message>
     <message>
         <location filename="../src/modules/cam/ui/widget_machine_panel.cpp" line="185"/>
         <source>Automatically mount workpieces</source>
@@ -10518,6 +10762,9 @@ You need to complete the three pickups above first.</source>
         <source>Set the setup origin to the A turntable center.</source>
         <translation>将安装原点设为 A 转台旋转中心。</translation>
     </message>
+    <message><source>Open STEP geometry alignment wizard...</source><translation>打开 STEP 几何对齐向导...</translation></message>
+    <message><source>Open physical five-axis calibration wizard...</source><translation>打开物理五轴标定向导...</translation></message>
+    <message><source>Import or enter measured axis feedback and reference-point coordinates at multiple rotary poses. Both rotary-axis lines are fitted automatically and saved as an immutable calibration record with an explicit verification state.</source><translation>导入或录入多个旋转姿态下的实测轴反馈和参考点坐标。系统自动拟合两条旋转轴线，并保存为带有明确验证状态的不可变标定记录。</translation></message>
 </context>
 <context>
     <name>WidgetMachineTree</name>
@@ -12578,5 +12825,77 @@ No available reference surfaces are currently detected.</source>
         <source>Collision roles are fixed by the machine assembly and workpiece mount chain.</source>
         <translation>碰撞角色由机台装配关系和工件安装链固定确定。</translation>
     </message>
+</context>
+<context>
+    <name>lcnc::cam::ui::DialogConfigurationDerivedRtcp</name>
+    <message><source>MCS is the right-handed, Z-up machine-world frame shared with CAD/CAM, not axis feedback coordinates. Legacy calibration records must be regenerated.</source><translation>MCS 是与 CAD/CAM 一致的 Z 向上右手机床世界系，不是轴反馈坐标。旧版标定记录必须重新生成。</translation></message>
+    <message><source>Generate configuration-derived RTCP parameters</source><translation>生成构型派生 RTCP 参数</translation></message>
+    <message><source>This is not a precision calibration. The two rotary-axis lines, directions, controller indices, and scales are copied directly from the active machine configuration into an RTCP record.</source><translation>这不是精密标定。两条旋转轴线、方向、控制器轴号和当量会从当前机台构型直接复制到 RTCP 记录。</translation></message>
+    <message><source>Primary rotary-axis line:</source><translation>第一旋转轴线：</translation></message>
+    <message><source>Secondary rotary-axis line:</source><translation>第二旋转轴线：</translation></message>
+    <message><source>Enter the XYZ coordinates of the tool tip / laser focus in MCS at the machine zero pose. If the MCS origin was established at that point, enter 0, 0, 0. Do not enter the focal length or a rotary center.</source><translation>输入机床零位时刀尖/激光焦点在 MCS 中的 XYZ 坐标。如果 MCS 原点就建在该点，请填入 0,0,0。不要填入焦距或旋转中心。</translation></message>
+    <message><source>Set to MCS origin</source><translation>设为 MCS 原点</translation></message>
+    <message><source>I confirmed the rotary centers and TCP in MCS. I understand that machining uses configured speeds and may enable the laser and gas according to the tool settings.</source><translation>我已确认旋转中心和 TCP 的 MCS 坐标，并理解加工使用配置速度，且可能按刀具设置开启激光和气体。</translation></message>
+    <message><source>Generate, activate, and enable RTCP machining</source><translation>生成、激活并启用 RTCP 加工</translation></message>
+</context>
+<context>
+    <name>lcnc::cam::ui::DialogPhysicalKinematicsCalibrationWizard</name>
+    <message><source>Stop machining and disconnect the controller before activating calibration; device operations must be finished.</source><translation>激活标定前请停止加工并断开控制器；设备操作必须已结束。</translation></message>
+    <message><source>Enter reference and tool points in right-handed, Z-up machine-world MCS. Keep actual axis feedback in native controller coordinates without sign changes.</source><translation>参考点与刀尖用 Z 向上右手机床世界坐标填写；实际轴反馈保留控制器原值，不得取反。</translation></message>
+    <message><source>Sample</source><translation>样本</translation></message>
+    <message><source>X</source><translation>X</translation></message>
+    <message><source>Y</source><translation>Y</translation></message>
+    <message><source>Z</source><translation>Z</translation></message>
+    <message><source>R1</source><translation>R1</translation></message>
+    <message><source>R2</source><translation>R2</translation></message>
+    <message><source>Reference X</source><translation>参考点 X</translation></message>
+    <message><source>Reference Y</source><translation>参考点 Y</translation></message>
+    <message><source>Reference Z</source><translation>参考点 Z</translation></message>
+    <message><source>Physical five-axis calibration wizard</source><translation>物理五轴标定向导</translation></message>
+    <message><source>This wizard fits both rotary-axis lines from real axis feedback and measured reference points in MCS. STEP face picking configures nominal geometry and does not replace physical calibration.</source><translation>本向导使用真实轴反馈与机床坐标系中的实测参考点拟合两条旋转轴线。STEP 面拾取只配置名义几何，不能替代物理标定。</translation></message>
+    <message><source>Keep the other rotary axis fixed. Move %1 through at least six poses spanning 180° or more. For every pose enter actual X/Y/Z/R1/R2 feedback and the measured MCS coordinates of the same reference point.</source><translation>保持另一旋转轴不动，使 %1 至少经过六个姿态且覆盖 180° 以上。每个姿态都要录入实际 X/Y/Z/R1/R2 反馈及同一参考点的 MCS 实测坐标。</translation></message>
+    <message><source>Generate pose template</source><translation>生成姿态模板</translation></message>
+    <message><source>Import CSV...</source><translation>导入 CSV...</translation></message>
+    <message><source>Fill selected row from current feedback</source><translation>用当前反馈填充选中行</translation></message>
+    <message><source>Axis %1</source><translation>%1 轴</translation></message>
+    <message><source>Primary</source><translation>父旋转轴</translation></message>
+    <message><source>Slave</source><translation>子旋转轴</translation></message>
+    <message><source>Calibration record and verification</source><translation>标定记录与验证</translation></message>
+    <message><source>Fixed-TCP physical verification completed (RMS &lt;= 0.10 mm, max &lt;= 0.20 mm)</source><translation>已完成固定 TCP 实体验证（RMS &lt;= 0.10 mm，最大误差 &lt;= 0.20 mm）</translation></message>
+    <message><source>Operator:</source><translation>操作员：</translation></message>
+    <message><source>Measurement device:</source><translation>测量设备：</translation></message>
+    <message><source>Tool ID:</source><translation>工具 ID：</translation></message>
+    <message><source>Tool location point in MCS:</source><translation>工具定位点（MCS）：</translation></message>
+    <message><source>Fixed-TCP RMS:</source><translation>固定 TCP 均方根误差：</translation></message>
+    <message><source>Fixed-TCP maximum:</source><translation>固定 TCP 最大误差：</translation></message>
+    <message><source>Compute and validate</source><translation>计算并校验</translation></message>
+    <message><source>Save candidate</source><translation>保存候选标定</translation></message>
+    <message><source>Save and activate</source><translation>保存并激活</translation></message>
+    <message><source>The active configuration does not provide one TableTilt and one TableSpin axis.</source><translation>当前配置未提供一根 TableTilt 轴和一根 TableSpin 轴。</translation></message>
+    <message><source>Current controller feedback does not contain axis %1</source><translation>当前控制器反馈不包含 %1 轴</translation></message>
+    <message><source>Filled row %1 with current actual axis feedback. Enter the measured MCS reference point before computing.</source><translation>已使用当前实际轴反馈填充第 %1 行。计算前请录入参考点的 MCS 实测坐标。</translation></message>
+    <message><source>Import calibration samples</source><translation>导入标定样本</translation></message>
+    <message><source>CSV files (*.csv);;All files (*)</source><translation>CSV 文件 (*.csv);;所有文件 (*)</translation></message>
+    <message><source>Import failed</source><translation>导入失败</translation></message>
+    <message><source>Imported %1 sample rows from %2</source><translation>已从 %2 导入 %1 行样本</translation></message>
+    <message><source>Row %1 of axis %2 has invalid actual-axis feedback</source><translation>%2 轴第 %1 行的实际轴反馈无效</translation></message>
+    <message><source>Row %1 of axis %2 has an invalid measured MCS point</source><translation>%2 轴第 %1 行的 MCS 实测点无效</translation></message>
+    <message><source>Operator-attested fixed-TCP verification passed the configured acceptance limits</source><translation>操作员确认固定 TCP 实体验证已通过配置的验收阈值</translation></message>
+    <message><source>Axis-line solution computed; fixed-TCP physical verification remains open</source><translation>旋转轴线已完成求解；固定 TCP 实体验证仍未完成</translation></message>
+    <message><source>Verification state: %1. RTCP remains blocked unless the state is MachineVerified.</source><translation>验证状态：%1。状态不是 MachineVerified 时仍禁止 RTCP。</translation></message>
+    <message><source>Candidate %1 was saved but could not be activated: %2</source><translation>候选标定 %1 已保存，但无法激活：%2</translation></message>
+    <message><source>Calibration saved</source><translation>标定已保存</translation></message>
+    <message><source>Calibration %1 was saved and activated.</source><translation>标定 %1 已保存并激活。</translation></message>
+    <message><source>Calibration candidate %1 was saved.</source><translation>候选标定 %1 已保存。</translation></message>
+</context>
+<context>
+    <name>DeviceCommandQueue</name>
+    <message><source>Motion wait must not occupy the device executor</source><translation>运动等待不能占用设备执行线程</translation></message>
+</context>
+<context>
+    <name>GTNMotionControl</name>
+    <message><source>GTN axis %1 (physical %2) feedback validation failed: profile %3, feedback %4, deviation %5 %6, tolerance %7 %6. Further machining is blocked; Stop/Reset preserves fault evidence. Check direction and feedback scaling.</source><translation>GTN %1 轴（物理轴 %2）位置反馈校验失败：规划 %3，反馈 %4，偏差 %5 %6，容差 %7 %6。已阻止继续加工；停止/复位保留故障证据，请检查方向和反馈比例。</translation></message>
+    <message><source>GTN call failed: operation %1, API %2, axis %3, result %4</source><translation>GTN 调用失败：操作 %1，API %2，轴 %3，返回值 %4</translation></message>
+    <message><source>GTN controller execution fault: Group %1, CommandList %2, list stop %3, Group state %4, Group stop %5, executing segment %6</source><translation>GTN 控制器执行故障：Group %1，CommandList %2，列表停止码 %3，Group 状态 %4，Group 停止码 %5，执行段 %6</translation></message>
 </context>
 </TS>

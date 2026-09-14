@@ -8,6 +8,7 @@
 
 #include <NCollection_Sequence.hxx>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFrame>
@@ -100,6 +101,15 @@ void DialogMarkAxes::buildUi()
     m_originGrid->setSpacing(4);
     mainLayout->addWidget(m_originContainer);
 
+    // 中文翻译：应用轴标记后生成包络并导出精简 STEP
+    m_generateEnvelopeCheck = new QCheckBox(
+        tr("Generate an envelope and export a simplified STEP after applying axis assignments"),
+        this);
+    // 中文翻译：将当前轴归属写入临时模型，由独立 CGAL 工具删除内部结构并生成碰撞用外部包络。
+    m_generateEnvelopeCheck->setToolTip(tr(
+        "Write the current axis assignments to a temporary model, then use the independent CGAL tool to remove internal structure and generate a collision envelope."));
+    mainLayout->addWidget(m_generateEnvelopeCheck);
+
     // ── Bottom button row ─────────────────────────────────────────────────
     // 中文翻译：🔍 自动识别
     auto* autoBtn = new QPushButton(tr("🔍 Automatic recognition"), this);
@@ -115,6 +125,11 @@ void DialogMarkAxes::buildUi()
     connect(autoBtn, &QPushButton::clicked, this, &DialogMarkAxes::onAutoDetect);
     connect(btns, &QDialogButtonBox::accepted, this, &DialogMarkAxes::accept);
     connect(btns, &QDialogButtonBox::rejected, this, &QDialog::reject);
+}
+
+bool DialogMarkAxes::generateEnvelopeRequested() const
+{
+    return m_generateEnvelopeCheck && m_generateEnvelopeCheck->isChecked();
 }
 
 // ── Row population ────────────────────────────────────────────────────────────

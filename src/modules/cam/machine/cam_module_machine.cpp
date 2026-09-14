@@ -27,6 +27,7 @@
 #include "core/services/selection_service.h"
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
+#include "modules/cad/i_cad_facade.h"
 #include "modules/cad/services/shape_service.h"
 #include "modules/cam/cam_module.h"
 #include "modules/cam/collision/collision_geometry_cache.h"
@@ -145,6 +146,30 @@ QByteArray sha256File(const QString& path)
         return {};
     QCryptographicHash hash(QCryptographicHash::Sha256);
     return hash.addData(&file) ? hash.result() : QByteArray{};
+}
+
+QString modelEnvelopeGeneratorPath()
+{
+    const QString configured = qEnvironmentVariable("LCNC_MODEL_ENVELOPE_CGAL").trimmed();
+    if (!configured.isEmpty() && QFileInfo(configured).isFile())
+        return QFileInfo(configured).absoluteFilePath();
+    const QString executable =
+#ifdef Q_OS_WIN
+        QStringLiteral("lcnc_model_envelope_cgal.exe");
+#else
+        QStringLiteral("lcnc_model_envelope_cgal");
+#endif
+    const QString appDirectory = QCoreApplication::applicationDirPath();
+    const QStringList candidates{
+        QDir(appDirectory).filePath(executable),
+        QDir::cleanPath(QDir(appDirectory).filePath(
+            QStringLiteral("../../../x64/envelope-tools/cgal/Release/")
+            + executable))};
+    for (const QString& candidate : candidates) {
+        if (QFileInfo(candidate).isFile())
+            return QFileInfo(candidate).absoluteFilePath();
+    }
+    return candidates.constLast();
 }
 
 QString machineSafetyBuildStageText(const QByteArray& token)
@@ -448,6 +473,16 @@ bool CamModule::buildOrUpdateMachineSafetyPackage(QString* errorMessage)
                                 .arg(program);
         return false;
     }
+    const QString envelopeGenerator = modelEnvelopeGeneratorPath();
+    auto* cadFacade = lcnc::Kernel::current().service<lcnc::ICadFacade>();
+    if (!cadFacade || !QFileInfo(envelopeGenerator).isFile()) {
+        if (errorMessage) {
+            // 中文翻译：已授权的模型包络生成器不可用：%1
+            *errorMessage = tr("The licensed model-envelope generator is unavailable: %1")
+                                .arg(envelopeGenerator);
+        }
+        return false;
+    }
     const QByteArray runtimeConfigurationSha256 =
         machineSafetyConfigurationFingerprint();
     if (runtimeConfigurationSha256.size() != 32) {
@@ -482,8 +517,42 @@ bool CamModule::buildOrUpdateMachineSafetyPackage(QString* errorMessage)
     const auto buildResult = std::make_shared<BuildResult>();
     const TaskId taskId = tasks->run(
         tr("Generate machine safety package: %1").arg(sourceInfo.fileName()),
-        [sourcePath, outputPath, program, runtimeConfigurationSha256,
-         buildResult](TaskProgress* progress) {
+        [sourcePath, outputPath, program, envelopeGenerator, cadFacade,
+         runtimeConfigurationSha256, buildResult](TaskProgress* progress) {
+            QTemporaryDir extractedSource;
+            QString envelopeSourcePath = sourcePath;
+            if (lcnc::MachineSafetyPackage::isPackagePath(sourcePath)) {
+                lcnc::MachineSafetyPackageLoadResult existingPackage;
+                if (!extractedSource.isValid()
+                    || !lcnc::MachineSafetyPackage::extractAndValidate(
+                        sourcePath, extractedSource.path(), &existingPackage,
+                        &buildResult->error)) {
+                    throw std::runtime_error(
+                        "unable to extract the source machine safety package");
+                }
+                envelopeSourcePath = existingPackage.modelPath;
+            }
+            QTemporaryDir envelopeAssets;
+            if (!envelopeAssets.isValid()) {
+                // 中文翻译：无法创建模型包络暂存目录
+                buildResult->error = QObject::tr(
+                    "Unable to create model-envelope staging directory");
+                throw std::runtime_error("unable to create model-envelope staging directory");
+            }
+            lcnc::CadModelEnvelopeRequest envelopeRequest;
+            envelopeRequest.sourceModelPath = envelopeSourcePath;
+            envelopeRequest.generatorPath = envelopeGenerator;
+            envelopeRequest.assetRootDirectory = envelopeAssets.path();
+            envelopeRequest.progressMinimum = 0;
+            envelopeRequest.progressMaximum = 20;
+            lcnc::CadModelEnvelopeResult envelopeResult;
+            if (!cadFacade->runModelEnvelopeGenerator(
+                    envelopeRequest, progress, &envelopeResult,
+                    &buildResult->error)) {
+                throw std::runtime_error(buildResult->error.isEmpty()
+                    ? "model-envelope generation failed"
+                    : buildResult->error.toStdString());
+            }
             QProcess process;
             progress->setRange(0, 100);
             progress->setStepName(
@@ -495,17 +564,18 @@ bool CamModule::buildOrUpdateMachineSafetyPackage(QString* errorMessage)
                 QStringLiteral("--package-output"), outputPath,
                 QStringLiteral("--runtime-configuration-sha256"),
                 QString::fromLatin1(runtimeConfigurationSha256.toHex()),
+                QStringLiteral("--envelope-manifest"),
+                envelopeResult.manifestPath,
                 QStringLiteral("--exact-budget"), QStringLiteral("1"),
                 QStringLiteral("--audit-safe"), QStringLiteral("32"),
-                // The real AC-table STEP fixture spends more than 15 minutes
-                // in OCCT surface triangulation at 0.5 mm. Leaf BVH remains
-                // conservative and completed the same package in about two
-                // minutes; persisted surface meshes stay an opt-in high-detail
-                // profile instead of blocking the one-click production gate.
-                // 中文翻译：真实 AC 转台模型的表面三角化超过 15 分钟；一键生产包默认使用
-                // 保守叶级 BVH，高精持久化表面网格保留为显式离线档。
+                // The production grid uses conservative envelope AABBs. The
+                // persisted envelope Surface-BVH resolves Unknown at runtime;
+                // a full 400k-cell Surface-BVH sweep remains an explicit offline
+                // profile. Original STEP leaves cannot certify the envelope.
+                // 中文翻译：生产网格使用包络 AABB 保守认证，持久包络 Surface-BVH 在运行时
+                // 消解 Unknown；全网格 Surface-BVH 扫描保留为显式离线档。
                 QStringLiteral("--surface-bvh"), QStringLiteral("off"),
-                QStringLiteral("--leaf-bvh"), QStringLiteral("on"),
+                QStringLiteral("--leaf-bvh"), QStringLiteral("off"),
                 QStringLiteral("--dependency-cache"), QStringLiteral("on"),
                 QStringLiteral("--refine-threads"), QStringLiteral("8"),
                 QStringLiteral("--checkpoint"),
@@ -550,7 +620,7 @@ bool CamModule::buildOrUpdateMachineSafetyPackage(QString* errorMessage)
                         continue;
                     progress->setStepName(
                         machineSafetyBuildStageText(fields.at(2)));
-                    progress->setValue(qBound(0, percent, 100));
+                    progress->setValue(20 + qBound(0, percent, 100) * 80 / 100);
                 }
                 const QByteArray standardError = process.readAllStandardError();
                 if (!standardError.isEmpty())
@@ -637,6 +707,135 @@ void CamModule::exportMachine(const QString& filePath)
         // 中文翻译：导出机台；写入机台模型失败。
         emit operationFailed(tr("Export machine"), tr("Failed to write the machine model."));
     }
+}
+
+bool CamModule::exportSimplifiedMachine(const QString& filePath,
+                                        QString* errorMessage)
+{
+    if (m_modelEnvelopeExportTask != kInvalidTaskId) {
+        if (errorMessage)
+            // 中文翻译：模型包络导出任务已在运行
+            *errorMessage = tr("A model-envelope export is already running");
+        return false;
+    }
+    LcncDocument* document = machineDocument();
+    if (!document || filePath.trimmed().isEmpty()) {
+        if (errorMessage)
+            // 中文翻译：请先加载机台模型，再导出包络
+            *errorMessage = tr("Load a machine model before exporting its envelope");
+        return false;
+    }
+    const QFileInfo outputInfo(filePath);
+    const QString suffix = outputInfo.suffix().toLower();
+    if (suffix != QStringLiteral("stp") && suffix != QStringLiteral("step")) {
+        if (errorMessage)
+            // 中文翻译：精简机台输出必须为 STEP 文件
+            *errorMessage = tr("The simplified machine output must be a STEP file");
+        return false;
+    }
+    MachineKinematics* machine = document->machineKinematics();
+    const QSet<QString> supportedAxes{
+        QStringLiteral("BASE"), QStringLiteral("X"), QStringLiteral("Y"),
+        QStringLiteral("Z"), QStringLiteral("A"), QStringLiteral("B"),
+        QStringLiteral("C")};
+    const NCollection_Sequence<TDF_Label> labels =
+        document->entityLabels(LcncDocument::EntityKind::Machine);
+    for (int index = 1; index <= labels.Length(); ++index) {
+        const QString entry = XcafUtils::entry(labels.Value(index));
+        const QString axis = machine->axisForShape(entry).trimmed().toUpper();
+        if (axis.isEmpty()) {
+            if (errorMessage) {
+                // 中文翻译：导出包络前必须为每个机台零件分配轴。未分配零件：%1
+                *errorMessage = tr("Every machine part must be assigned to an axis before envelope export. Unassigned part: %1")
+                                    .arg(XcafUtils::name(labels.Value(index)));
+            }
+            return false;
+        }
+        if (!supportedAxes.contains(axis)) {
+            if (errorMessage)
+                // 中文翻译：模型包络生成器不支持 %1 轴
+                *errorMessage = tr("The model-envelope generator does not support axis %1").arg(axis);
+            return false;
+        }
+    }
+    auto* tasks = lcnc::Kernel::current().taskManager();
+    auto* cadFacade = lcnc::Kernel::current().service<lcnc::ICadFacade>();
+    const QString generator = modelEnvelopeGeneratorPath();
+    if (!tasks || !cadFacade || !QFileInfo(generator).isFile()) {
+        if (errorMessage) {
+            // 中文翻译：已授权的模型包络生成器不可用：%1
+            *errorMessage = tr("The licensed model-envelope generator is unavailable: %1")
+                                .arg(generator);
+        }
+        return false;
+    }
+    const auto staging = std::make_shared<QTemporaryDir>();
+    if (!staging->isValid()) {
+        if (errorMessage)
+            // 中文翻译：无法创建模型包络暂存目录
+            *errorMessage = tr("Unable to create model-envelope staging directory");
+        return false;
+    }
+    const QString normalizedOutput = outputInfo.absoluteFilePath();
+    const QString stagedSource = staging->filePath(QStringLiteral("marked_machine.step"));
+    if (!lcnc::cam::machine_io::exportMachineToFile(document, machine, stagedSource)) {
+        if (errorMessage)
+            // 中文翻译：无法暂存已标轴机台模型以生成包络
+            *errorMessage = tr("Unable to stage the marked machine model for envelope generation");
+        return false;
+    }
+
+    struct ExportResult {
+        QString error;
+        QString outputPath;
+    };
+    const auto result = std::make_shared<ExportResult>();
+    const TaskId taskId = tasks->run(
+        // 中文翻译：生成模型包络：%1
+        tr("Generate model envelope: %1").arg(outputInfo.fileName()),
+        [staging, stagedSource, normalizedOutput, generator, cadFacade,
+         result](TaskProgress* progress) {
+            lcnc::CadModelEnvelopeRequest request;
+            request.sourceModelPath = stagedSource;
+            request.generatorPath = generator;
+            request.assetRootDirectory = staging->filePath(QStringLiteral("asset"));
+            request.simplifiedStepOutputPath = normalizedOutput;
+            // Z and rotary-axis bodies carry the most recognizable machine
+            // silhouette. Preserve smaller exterior features there while the
+            // coarse profile remains available for collision-only packages.
+            request.detailAxes = {QStringLiteral("Z"), QStringLiteral("A"),
+                                  QStringLiteral("B"), QStringLiteral("C")};
+            request.detailAlphaMm = 3.0;
+            request.detailOffsetMm = 0.5;
+            lcnc::CadModelEnvelopeResult generated;
+            if (!cadFacade->runModelEnvelopeGenerator(
+                    request, progress, &generated, &result->error)) {
+                throw std::runtime_error(result->error.isEmpty()
+                    ? "model-envelope export failed"
+                    : result->error.toStdString());
+            }
+            result->outputPath = generated.simplifiedStepOutputPath;
+        });
+    m_modelEnvelopeExportTask = taskId;
+    m_taskScope.track(taskId);
+    emit modelEnvelopeExportStateChanged();
+    watchTask(this, taskId, [this, taskId, normalizedOutput, result](bool ok) {
+        m_taskScope.release(taskId);
+        m_modelEnvelopeExportTask = kInvalidTaskId;
+        emit modelEnvelopeExportStateChanged();
+        if (!ok || result->outputPath.isEmpty()
+            || !QFileInfo(normalizedOutput).isFile()) {
+            emit operationFailed(
+                // 中文翻译：导出精简机台
+                tr("Export simplified machine"),
+                result->error.isEmpty()
+                    // 中文翻译：模型包络导出失败
+                    ? tr("Model-envelope export failed") : result->error);
+            return;
+        }
+        emit modelEnvelopeExported(normalizedOutput);
+    });
+    return true;
 }
 
 void CamModule::autoDetectAxes()

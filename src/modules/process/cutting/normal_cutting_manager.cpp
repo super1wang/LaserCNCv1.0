@@ -12,6 +12,7 @@
 #include "modules/process/device/motion_control/motion_control.h"
 #include "modules/process/runtime/i_motion_command_sink.h"
 #include "modules/process/runtime/device_command_queue.h"
+#include "modules/process/runtime/queued_motion_wait.h"
 #include "modules/process/runtime/machine_pose5.h"
 #include "modules/process/runtime/process_interrupt_context.h"
 #include "modules/process/runtime/rapid_motion_utilities.h"
@@ -60,6 +61,14 @@ MachinePose5 toPose5(const lcnc::cam::ToolpathExportPoint& p,
     pose.z  = p.machineZ;
     pose.r1 = p.machineR1;
     pose.r2 = p.machineR2;
+    pose.tcpMcsX = p.tcpMcsX;
+    pose.tcpMcsY = p.tcpMcsY;
+    pose.tcpMcsZ = p.tcpMcsZ;
+    // Axis compensation is not a translation in the table-reference frame.
+    // CompDevice is currently unwired (offsets are zero); future nonzero
+    // offsets must be resolved by CAM before publishing an RTCP reference.
+    // Non-RTCP physical-axis compensation above is unchanged.
+    pose.tcpMcsValid = p.tcpMcsValid && ox == 0.0 && oy == 0.0;
     pose.r1Name = p.rotaryAxis1Name;
     pose.r2Name = p.rotaryAxis2Name;
     pose.mask = MachinePose5::Bx | MachinePose5::By | MachinePose5::Bz;
@@ -564,6 +573,35 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
             return false;
     }
 
+    // Orchestrate on the workflow thread; only bounded SDK work enters the
+    // device executor. In particular, inter-contour rapids must not call
+    // sink.flush() inside a device command for the entire physical movement.
+    const auto deviceStep = [&](const std::function<bool()>& action, QString* error) {
+        if (pureSimulation)
+            return action();
+        const auto result = m_deviceQueue->executeAndWait([&] {
+            if (interrupt.isStopping())
+                return DeviceCommandResult{false, tr("Normal cutting has been interrupted"),
+                    DeviceCommandCompletion::Cancelled};
+            const bool success = action();
+            return DeviceCommandResult{success, error ? *error : QString{}};
+        }, TaskPriority::Workflow, -1);
+        if (!result.success && error)
+            *error = result.error;
+        return result.success;
+    };
+    const auto waitProgram = [&](QString* error) {
+        const auto result = waitForQueuedMotion(*m_deviceQueue,
+            [sink](bool& running) {
+                QString pollError;
+                running = sink->isProgramRunning(&pollError);
+                return DeviceCommandResult{pollError.isEmpty(), pollError};
+            }, [&interrupt] { return interrupt.isStopping(); });
+        if (!result.success && error)
+            *error = result.error;
+        return result.success;
+    };
+
     auto constructAndStart = [&](IMotionCommandSink& commandSink, QString* startError) {
         // Construct and start one complete contour on the device executor.
         if (!row.tool) {
@@ -577,6 +615,7 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     // 指令构建层会跳过失能轴，若这里不阻断，就会把该轮廓视为完成并继续
     // 下发下一轮廓。每次下发前直接读取硬件状态，将其作为不可恢复的步骤失败。
     if (!pureSimulation) {
+        if (!deviceStep([&] {
         const DeviceCommandResult health = m_service
             ? m_service->validateContourBoundary()
             : DeviceCommandResult{false, tr("The motion controller is not connected during processing")};
@@ -585,6 +624,9 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
                 *startError = health.error;
             return false;
         }
+        return true;
+        }, startError))
+            return false;
     }
 
     const Tool& tool = *row.tool;
@@ -602,9 +644,28 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     const MachinePose5 contourStartPose = toPose5(p0, ox, oy);
 
     // ——— 程序起始（与遗留 buildContourACS / executeContourGTN 等价的语义序列）———
-    commandSink.resetProgram();
-    commandSink.applyToolMotionParams(tool, /*jump=*/true);
+    if (!deviceStep([&] {
+        commandSink.resetProgram();
+        commandSink.applyToolMotionParams(tool, /*jump=*/true);
+        return true;
+    }, startError))
+        return false;
     QString commandError;
+    // Only call while constructing an unstarted program on the device thread
+    // (or the explicit simulation path). Discarding it must never submit the
+    // buffered laser/motion commands or replace an already recorded error.
+    // 中文翻译：仅在设备线程构建未启动程序时检查取消；丢弃缓存不能启动运动或覆盖已有错误。
+    const auto discardIfStopping = [&](QString* error, const char* phase) {
+        if (!interrupt.isStopping())
+            return false;
+        if (error && error->isEmpty())
+            *error = tr("Normal cutting has been interrupted");
+        LCNC_INFO(lcnc::LogCode::Generic,
+                  "stage=process.contour.command_build event=cancelled contour={} phase={} action=discard_unstarted_program",
+                  row.data.contour.contourId, phase);
+        commandSink.resetProgram();
+        return true;
+    };
 
     Tool rapidTool = tool;
     rapidTool.m_dLineVelocity = tool.m_dIdleXVelocity > 0
@@ -617,25 +678,36 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     const auto submitCoordinatedRapid = [&](const QVector<MachinePose5>& poses) {
         if (poses.isEmpty())
             return true;
+        if (!deviceStep([&] {
         if (!commandSink.beginSegment(poses.front(), rapidTool, &commandError))
             return false;
         for (const MachinePose5& pose : poses) {
+            if (discardIfStopping(&commandError, "rapid_append"))
+                return false;
             if (!commandSink.lineTo(pose, rapidTool, &commandError))
                 return false;
         }
         commandSink.endSegment(rapidTool);
-        if (!commandSink.flush(&commandError))
+        if (discardIfStopping(&commandError, "rapid_start"))
             return false;
+        return commandSink.startProgram(&commandError);
+        }, &commandError))
+            return false;
+        if (!waitProgram(&commandError))
+            return false;
+        return deviceStep([&] {
         commandSink.resetProgram();
         commandSink.applyToolMotionParams(tool, /*jump=*/false);
         return true;
+        }, &commandError);
     };
 
     if (row.hasEntryTransition) {
         // The continuously solved CAM curve is the sole authority for
         // inter-contour rapid motion.  Do not rebuild a fixed XY/AC jump here:
         // it would break pose continuity and can reintroduce a rotary sweep.
-        commandSink.stopCuttingHead();
+        if (!deviceStep([&] { commandSink.stopCuttingHead(); return true; }, startError))
+            return false;
         const int rapidCount = row.entryTransition.segments.size();
         QVector<MachinePose5> rapidPoses;
         rapidPoses.reserve(rapidCount);
@@ -667,8 +739,10 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
                 ? tr("Planned rapid execution failed") : commandError;
             return false;
         }
-        if (tool.m_bCuttingHead)
-            commandSink.startCuttingHead(tool);
+        if (tool.m_bCuttingHead && !deviceStep([&] {
+            commandSink.startCuttingHead(tool); return true;
+        }, startError))
+            return false;
     } else {
         // There is no predecessor contour for the first row of every new run,
         // including a range run after Stop. Submit measured APOS to CAM and
@@ -676,8 +750,10 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
         // previous run or rebuild a Z-up/XY/Z-down motion locally.
         // 中文翻译：每次全新加工（含停止后的范围加工）的首轮廓都没有前序轮廓，
         // 必须由 CAM 根据控制器 APOS 重新生成首段，不能复用上次运行的过渡段。
-        if (tool.m_bCuttingHead && tool.m_bCrossBridge)
-            commandSink.stopCuttingHead();
+        if (tool.m_bCuttingHead && tool.m_bCrossBridge && !deviceStep([&] {
+            commandSink.stopCuttingHead(); return true;
+        }, startError))
+            return false;
         const lcnc::cam::InitialApproachSnapshot& approach = initialApproach;
         if (pureSimulation) {
             for (const auto& segment : approach.transition.segments) {
@@ -724,14 +800,21 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
                     const DeviceCommandResult move = m_deviceQueue->executeAndWait(
                         DeviceCommandQueue::ResultCommand(
                             [this, targetZ, velocity] {
-                                return m_service->moveAbsoluteAndWait(
-                                    Axis::Z, targetZ, velocity, 30000, 0.05);
+                                return m_service->moveAbsolute(Axis::Z, targetZ, velocity);
                             }),
                         TaskPriority::Workflow, 35000);
                     if (!move.success) {
                         // 中文翻译：CAM 首段 Z 轴绝对运动失败
                         if (startError) *startError = move.error.isEmpty()
                             ? tr("Initial CAM absolute Z movement failed") : move.error;
+                        return false;
+                    }
+                    const auto reached = waitForQueuedMotion(*m_deviceQueue,
+                        [service = m_service, targetZ](bool& moving) {
+                            return service->pollAbsoluteMotion(Axis::Z, targetZ, 0.05, &moving);
+                        }, [&interrupt] { return interrupt.isStopping(); }, 30000);
+                    if (!reached.success) {
+                        if (startError) *startError = reached.error;
                         return false;
                     }
                 } else {
@@ -757,21 +840,41 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
             // cutting parameters even when SafeXY/SafeAC contained no motion.
             // 中文翻译：Z 轴绝对运动绕过缓存指令汇；即使 SafeXY/SafeAC 无位移，
             // 也必须在切割前重新建立切割参数。
-            commandSink.resetProgram();
-            commandSink.applyToolMotionParams(tool, /*jump=*/false);
+            if (!deviceStep([&] {
+                commandSink.resetProgram();
+                commandSink.applyToolMotionParams(tool, /*jump=*/false);
+                return true;
+            }, startError))
+                return false;
         }
-        if (tool.m_bCuttingHead)
-            commandSink.startCuttingHead(tool);
+        if (tool.m_bCuttingHead && !deviceStep([&] {
+            commandSink.startCuttingHead(tool); return true;
+        }, startError))
+            return false;
         initialApproachSucceeded = true;
     }
 
+    return deviceStep([&] {
     commandSink.setShutterTimings(tool.m_dBeforeOn, tool.m_dAfterOn,
                             tool.m_dBeforeOff, tool.m_dAfterOff, tool.m_dBlowDelay);
+
+    // Group/list IO is valid only after InitFiveAxisGroup has linked and
+    // enabled the CommandList. Build laser commands after beginSegment().
+    // 中文翻译：必须先初始化 Group/CommandList，再向列表写入激光和运动指令。
+    if (!commandSink.beginSegment(leadPose, tool, &commandError)) {
+        if (startError) *startError = commandError.isEmpty()
+            ? tr("Controller command generation failed")
+            : commandError;
+        return false;
+    }
+    if (discardIfStopping(startError, "cutting_laser"))
+        return false;
     commandSink.laserOn(tool);
 
-    // ——— 协调插补段：beginSegment → lineTo*  → endSegment ———
-    if (!commandSink.beginSegment(leadPose, tool, &commandError)
-        || !commandSink.lineTo(contourStartPose, tool, &commandError)) {
+    // ——— 协调插补段：beginSegment → laserOn → lineTo* → endSegment ———
+    if (discardIfStopping(startError, "cutting_append"))
+        return false;
+    if (!commandSink.lineTo(contourStartPose, tool, &commandError)) {
         if (startError) *startError = commandError.isEmpty()
             ? tr("Controller command generation failed")
             : commandError;
@@ -779,6 +882,8 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
     }
 
     for (int j = 1; j < pts.size(); ++j) {
+        if (discardIfStopping(startError, "cutting_append"))
+            return false;
         if ((j % kTokenPollEvery) == 0) {
             QVariantMap env;
             env.insert(QString::fromLatin1(kEnvContourIndex), contourIndex);
@@ -789,6 +894,7 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
             if (!interrupt.noteCheckpoint(nodeId,
                                           makeLabel(QStringLiteral("segment"), contourIndex, total),
                                           env)) {
+                (void)discardIfStopping(startError, "cutting_checkpoint");
                 return false;
             }
         }
@@ -806,6 +912,8 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
 
     // ——— 一次性提交并启动（不在持锁区等待控制器完成）———
     QString flushErr;
+    if (discardIfStopping(startError, "cutting_start"))
+        return false;
     if (!commandSink.startProgram(&flushErr)) {
         if (startError) *startError = flushErr.isEmpty()
             // 中文翻译：控制器执行失败
@@ -814,29 +922,17 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
         return false;
     }
         return true;
+    }, startError);
     };
 
-    if (pureSimulation) {
-        if (!constructAndStart(*sink, errorMessage))
-            return false;
-    } else {
-        const auto result = m_deviceQueue->executeAndWait(
-            DeviceCommandQueue::ResultCommand([&] {
-                QString startError;
-                const bool success = constructAndStart(*sink, &startError);
-                return DeviceCommandResult{success, startError};
-            }),
-            TaskPriority::Workflow,
-            -1);
-        if (!result.success) {
-            if (errorMessage)
-                *errorMessage = result.error;
-            return false;
-        }
-    }
+    if (!constructAndStart(*sink, errorMessage))
+        return false;
 
     if (skippedEmptyContour)
         return true;
+
+    if (!pureSimulation)
+        return waitProgram(errorMessage);
 
     QString pollErrorText;
     while (true) {
@@ -849,25 +945,7 @@ bool NormalCuttingManager::executeContour(const std::shared_ptr<IMotionCommandSi
             return false;
         }
 
-        bool running = false;
-        if (pureSimulation || !m_deviceQueue) {
-            running = sink->isProgramRunning(&pollErrorText);
-        } else {
-            const auto state = std::make_shared<bool>(false);
-            const DeviceCommandResult result = m_deviceQueue->executeAndWait(
-                DeviceCommandQueue::ResultCommand([this, sink, state] {
-                    QString pollError;
-                    *state = sink->isProgramRunning(&pollError);
-                    return DeviceCommandResult{pollError.isEmpty(), pollError};
-                }), TaskPriority::Workflow, 1000);
-            if (!result.success) {
-                if (errorMessage)
-                    // 中文翻译：控制器状态读取失败
-                    *errorMessage = result.error.isEmpty() ? tr("Controller status read failed") : result.error;
-                return false;
-            }
-            running = *state;
-        }
+        const bool running = sink->isProgramRunning(&pollErrorText);
         if (!pollErrorText.isEmpty()) {
             if (errorMessage)
                 *errorMessage = pollErrorText;

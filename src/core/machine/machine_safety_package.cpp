@@ -24,6 +24,7 @@
 #include <toml.hpp>
 
 #include <sstream>
+#include <utility>
 
 namespace {
 
@@ -92,12 +93,18 @@ QByteArray packageKey(const lcnc::MachineSafetyPackageManifest& manifest)
         hash.addData(value);
         hash.addData(QByteArrayView(";", 1));
     };
-    add(QByteArrayLiteral("lcnc.machine-safety-package/v1"));
+    add(manifest.formatVersion >= 2
+            ? QByteArrayLiteral("lcnc.machine-safety-package/v2")
+            : QByteArrayLiteral("lcnc.machine-safety-package/v1"));
     add(manifest.modelSha256);
     add(manifest.safetyIndexSha256);
     add(manifest.indexContentSha256);
     add(manifest.safetyConfigurationSha256);
     add(manifest.runtimeConfigurationSha256);
+    if (manifest.formatVersion >= 2) {
+        add(manifest.envelopeManifestSha256);
+        add(manifest.envelopeMeshSetSha256);
+    }
     return hash.result();
 }
 
@@ -115,6 +122,8 @@ bool writeManifest(const QString& path,
     toml::value resources(toml::table{});
     resources["machineModel"] = manifest.modelPath.toStdString();
     resources["safetyIndex"] = manifest.safetyIndexPath.toStdString();
+    if (manifest.formatVersion >= 2)
+        resources["modelEnvelope"] = manifest.envelopeManifestPath.toStdString();
     root["resources"] = resources;
 
     toml::value fingerprints(toml::table{});
@@ -125,6 +134,12 @@ bool writeManifest(const QString& path,
         manifest.safetyConfigurationSha256.toHex().toStdString();
     fingerprints["runtimeConfigurationSha256"] =
         manifest.runtimeConfigurationSha256.toHex().toStdString();
+    if (manifest.formatVersion >= 2) {
+        fingerprints["envelopeManifestSha256"] =
+            manifest.envelopeManifestSha256.toHex().toStdString();
+        fingerprints["envelopeMeshSetSha256"] =
+            manifest.envelopeMeshSetSha256.toHex().toStdString();
+    }
     root["fingerprints"] = fingerprints;
 
     const std::string formatted = toml::format(root);
@@ -179,6 +194,7 @@ bool readManifest(const QString& path,
             const auto& resources = root.at("resources");
             manifest->modelPath = tomlString(resources, "machineModel");
             manifest->safetyIndexPath = tomlString(resources, "safetyIndex");
+            manifest->envelopeManifestPath = tomlString(resources, "modelEnvelope");
         }
         if (root.contains("fingerprints")) {
             const auto& fingerprints = root.at("fingerprints");
@@ -189,6 +205,10 @@ bool readManifest(const QString& path,
                 tomlSha256(fingerprints, "safetyConfigurationSha256");
             manifest->runtimeConfigurationSha256 =
                 tomlSha256(fingerprints, "runtimeConfigurationSha256");
+            manifest->envelopeManifestSha256 =
+                tomlSha256(fingerprints, "envelopeManifestSha256");
+            manifest->envelopeMeshSetSha256 =
+                tomlSha256(fingerprints, "envelopeMeshSetSha256");
         }
     } catch (const std::exception& exception) {
         LCNC_ERR(lcnc::LogCode::Generic,
@@ -200,8 +220,9 @@ bool readManifest(const QString& path,
         return false;
     }
     if (manifest->schema != QStringLiteral("lcnc.machine-safety-package")
+        || manifest->formatVersion < 1
         || manifest->formatVersion
-            != lcnc::MachineSafetyPackageManifest::kCurrentFormatVersion
+            > lcnc::MachineSafetyPackageManifest::kCurrentFormatVersion
         || !isSafeRelativePath(manifest->modelPath)
         || !isSafeRelativePath(manifest->safetyIndexPath)
         || QFileInfo(manifest->safetyIndexPath).suffix().compare(
@@ -217,7 +238,30 @@ bool readManifest(const QString& path,
             *errorMessage = QStringLiteral("Machine safety package manifest is incomplete or unsupported");
         return false;
     }
+    if (manifest->formatVersion >= 2
+        && (!isSafeRelativePath(manifest->envelopeManifestPath)
+            || manifest->envelopeManifestSha256.size() != 32
+            || manifest->envelopeMeshSetSha256.size() != 32)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Machine safety package envelope binding is incomplete");
+        return false;
+    }
     return true;
+}
+
+QByteArray envelopeMeshSetFingerprint(const lcnc::ModelEnvelopeAsset& asset)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const auto& body : asset.bodies) {
+        hash.addData(body.axisName.toUtf8());
+        hash.addData(QByteArrayView("\0", 1));
+        hash.addData(body.parentAxis.toUtf8());
+        hash.addData(QByteArrayView("\0", 1));
+        hash.addData(body.meshPath.toUtf8());
+        hash.addData(QByteArrayView("\0", 1));
+        hash.addData(body.meshSha256);
+    }
+    return hash.result();
 }
 
 bool archiveEntriesAreSafe(const QString& archivePath, QString* errorMessage)
@@ -358,6 +402,18 @@ bool MachineSafetyPackage::create(const QString& machineModelPath,
                                   const QByteArray& runtimeConfigurationSha256,
                                   QString* errorMessage)
 {
+    return createWithEnvelope(machineModelPath, safetyIndexPath, {}, packagePath,
+                              runtimeConfigurationSha256, errorMessage);
+}
+
+bool MachineSafetyPackage::createWithEnvelope(
+    const QString& machineModelPath,
+    const QString& safetyIndexPath,
+    const QString& envelopeManifestPath,
+    const QString& packagePath,
+    const QByteArray& runtimeConfigurationSha256,
+    QString* errorMessage)
+{
     const QFileInfo modelInfo(machineModelPath);
     const QFileInfo indexInfo(safetyIndexPath);
     if (!modelInfo.isFile() || !indexInfo.isFile()) {
@@ -366,6 +422,7 @@ bool MachineSafetyPackage::create(const QString& machineModelPath,
         return false;
     }
     MachineSafetyPackageManifest manifest;
+    manifest.formatVersion = envelopeManifestPath.isEmpty() ? 1 : 2;
     manifest.createdUtc = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     manifest.softwareVersion = QString::fromLatin1(LCNC_VERSION_STRING);
     const QString modelSuffix = modelInfo.suffix().trimmed().isEmpty()
@@ -396,20 +453,78 @@ bool MachineSafetyPackage::create(const QString& machineModelPath,
     manifest.indexContentSha256 = index.contentSha256();
     manifest.safetyConfigurationSha256 = safetyConfigurationFingerprint(index);
     manifest.runtimeConfigurationSha256 = runtimeConfigurationSha256;
+
+    ModelEnvelopeAsset envelopeAsset;
+    if (manifest.formatVersion >= 2) {
+        if (!ModelEnvelopeAsset::loadAndValidate(
+                envelopeManifestPath, machineModelPath, &envelopeAsset,
+                errorMessage)) {
+            return false;
+        }
+        if (index.envelopeManifestSha256() != envelopeAsset.manifestSha256) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral(
+                    "Safety index was not generated from the supplied model envelope");
+            }
+            return false;
+        }
+        manifest.envelopeManifestPath =
+            QStringLiteral("envelope/model_envelope.json");
+        manifest.envelopeManifestSha256 = envelopeAsset.manifestSha256;
+        manifest.envelopeMeshSetSha256 =
+            envelopeMeshSetFingerprint(envelopeAsset);
+    } else if (!index.envelopeManifestSha256().isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral(
+                "Safety index contains an envelope binding but no envelope manifest was supplied");
+        }
+        return false;
+    }
     manifest.packageKeySha256 = packageKey(manifest);
 
     QTemporaryDir staging;
     if (!staging.isValid()
         || !QDir().mkpath(QDir(staging.path()).filePath(QStringLiteral("machine")))
-        || !QDir().mkpath(QDir(staging.path()).filePath(QStringLiteral("safety")))) {
+        || !QDir().mkpath(QDir(staging.path()).filePath(QStringLiteral("safety")))
+        || (manifest.formatVersion >= 2
+            && !QDir().mkpath(QDir(staging.path()).filePath(
+                QStringLiteral("envelope"))))) {
         if (errorMessage)
             *errorMessage = QStringLiteral("Unable to create machine safety package staging directory");
         return false;
     }
     const QString stagedModel = QDir(staging.path()).filePath(manifest.modelPath);
     const QString stagedIndex = QDir(staging.path()).filePath(manifest.safetyIndexPath);
+    bool stagedEnvelope = true;
+    if (manifest.formatVersion >= 2) {
+        const QString stagedEnvelopeManifest = QDir(staging.path()).filePath(
+            manifest.envelopeManifestPath);
+        stagedEnvelope = QFile::copy(envelopeAsset.manifestPath,
+                                     stagedEnvelopeManifest);
+        const QDir sourceEnvelopeDirectory(
+            QFileInfo(envelopeAsset.manifestPath).absolutePath());
+        const QDir stagedEnvelopeDirectory(
+            QFileInfo(stagedEnvelopeManifest).absolutePath());
+        for (const auto& body : envelopeAsset.bodies) {
+            const QString sourceMesh = sourceEnvelopeDirectory.filePath(body.meshPath);
+            const QString stagedMesh = stagedEnvelopeDirectory.filePath(body.meshPath);
+            stagedEnvelope = stagedEnvelope
+                && QDir().mkpath(QFileInfo(stagedMesh).absolutePath())
+                && QFile::copy(sourceMesh, stagedMesh);
+        }
+        if (!envelopeAsset.simplifiedStepPath.isEmpty()) {
+            const QString sourceStep = sourceEnvelopeDirectory.filePath(
+                envelopeAsset.simplifiedStepPath);
+            const QString stagedStep = stagedEnvelopeDirectory.filePath(
+                envelopeAsset.simplifiedStepPath);
+            stagedEnvelope = stagedEnvelope
+                && QDir().mkpath(QFileInfo(stagedStep).absolutePath())
+                && QFile::copy(sourceStep, stagedStep);
+        }
+    }
     if (!QFile::copy(machineModelPath, stagedModel)
         || !QFile::copy(safetyIndexPath, stagedIndex)
+        || !stagedEnvelope
         || !writeManifest(QDir(staging.path()).filePath(QString::fromLatin1(kManifestName)),
                           manifest, errorMessage)) {
         if (errorMessage && errorMessage->isEmpty())
@@ -457,11 +572,33 @@ bool MachineSafetyPackage::extractAndValidate(
                 "Machine model or safety index fingerprint does not match the package manifest");
         return false;
     }
+    ModelEnvelopeAsset envelopeAsset;
+    QString envelopeManifestPath;
+    if (manifest.formatVersion >= 2) {
+        envelopeManifestPath = QDir(targetDirectory).filePath(
+            manifest.envelopeManifestPath);
+        if (!ModelEnvelopeAsset::loadAndValidate(
+                envelopeManifestPath, modelPath, &envelopeAsset, errorMessage)
+            || envelopeAsset.manifestSha256 != manifest.envelopeManifestSha256
+            || envelopeMeshSetFingerprint(envelopeAsset)
+                != manifest.envelopeMeshSetSha256) {
+            if (errorMessage && errorMessage->isEmpty()) {
+                *errorMessage = QStringLiteral(
+                    "Machine safety package model-envelope binding is invalid");
+            }
+            return false;
+        }
+    }
     lcnc::cam_algo::MachineSafetyIndex index;
     QString indexError;
     if (!index.load(indexPath, &indexError)
         || index.sourceSha256() != actualModelSha
         || index.contentSha256() != manifest.indexContentSha256
+        || (manifest.formatVersion >= 2
+            && index.envelopeManifestSha256()
+                != manifest.envelopeManifestSha256)
+        || (manifest.formatVersion < 2
+            && !index.envelopeManifestSha256().isEmpty())
         || safetyConfigurationFingerprint(index) != manifest.safetyConfigurationSha256
         || packageKey(manifest) != manifest.packageKeySha256) {
         if (errorMessage)
@@ -475,6 +612,8 @@ bool MachineSafetyPackage::extractAndValidate(
         result->packagePath = normalized;
         result->modelPath = modelPath;
         result->safetyIndexPath = indexPath;
+        result->envelopeManifestPath = envelopeManifestPath;
+        result->envelopeAsset = std::move(envelopeAsset);
     }
     return true;
 }

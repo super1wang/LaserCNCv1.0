@@ -272,8 +272,13 @@ DeviceCommandTicket DeviceCommandQueue::enqueue(ResultCommand command,
     QMutexLocker locker(&m_mutex);
     if (!m_accepting || m_shutdownRequested
         || (m_stopOnly && priority != TaskPriority::Stop)
-        || (m_timeoutBarrierId != 0 && priority != TaskPriority::Stop))
+        || (m_timeoutBarrierId != 0 && priority != TaskPriority::Stop)) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "process.device_queue: event=submit_rejected priority={} accepting={} shutdown={} stop_only={} timeout_barrier={} active_command={}",
+                  priorityIndex(priority), m_accepting, m_shutdownRequested,
+                  m_stopOnly, m_timeoutBarrierId, m_activeCommandId);
         return {};
+    }
 
     auto& commands = m_commands[static_cast<std::size_t>(priorityIndex(priority))];
     if (!coalesceKey.isEmpty()) {
@@ -301,18 +306,52 @@ DeviceCommandTicket DeviceCommandQueue::enqueue(ResultCommand command,
 
 void DeviceCommandQueue::markTimedOut(DeviceCommandId id)
 {
-    QMutexLocker locker(&m_mutex);
-    if (m_activeCommandId == id) {
-        m_timeoutBarrierId = id;
-        return;
-    }
-    for (const auto& commands : m_commands) {
-        for (const QueuedCommand& command : commands) {
-            if (command.id == id) {
-                m_timeoutBarrierId = id;
-                return;
+    Completion completion;
+    bool activeTimedOut = false;
+    bool pendingTimedOut = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_activeCommandId == id) {
+            // The vendor call may still be executing after its caller stopped
+            // waiting. Preserve the fail-closed barrier until that exact call
+            // returns; Stop commands remain admissible.
+            m_timeoutBarrierId = id;
+            activeTimedOut = true;
+        } else {
+            // A command that has not started owns no SDK state. Remove it
+            // instead of installing a global barrier. This is particularly
+            // important for low-priority monitor reads queued behind a long
+            // Workflow command: their local timeout must not reject the
+            // workflow's next controller-state query.
+            // 中文翻译：尚未执行的超时命令直接取消，不能阻断后续加工指令。
+            for (auto& commands : m_commands) {
+                for (auto it = commands.begin(); it != commands.end(); ++it) {
+                    if (it->id != id)
+                        continue;
+                    completion = std::move(it->completion);
+                    commands.erase(it);
+                    pendingTimedOut = true;
+                    break;
+                }
+                if (pendingTimedOut)
+                    break;
             }
         }
+    }
+
+    if (activeTimedOut) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "process.device_queue: event=wait_timeout command={} state=active action=install_barrier",
+                  id);
+        return;
+    }
+    if (pendingTimedOut) {
+        LCNC_WARN(lcnc::LogCode::Generic,
+                  "process.device_queue: event=wait_timeout command={} state=pending action=cancel_pending",
+                  id);
+        notifyCompletion(std::move(completion),
+                         completionResult(DeviceCommandCompletion::TimedOut,
+                                          QStringLiteral("Timed out waiting for device command")));
     }
 }
 

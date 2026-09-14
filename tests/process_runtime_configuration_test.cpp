@@ -45,6 +45,13 @@ int main(int argc, char* argv[])
     rapid.target.activeMask = 0x1f;
     rapid.target.rotaryAxis1Name = QStringLiteral("A");
     rapid.target.rotaryAxis2Name = QStringLiteral("C");
+    rapid.target.tcpX = 100.0;
+    rapid.target.tcpY = 200.0;
+    rapid.target.tcpZ = 300.0;
+    rapid.target.tcpMcsX = -10.0;
+    rapid.target.tcpMcsY = -20.0;
+    rapid.target.tcpMcsZ = -30.0;
+    rapid.target.tcpMcsValid = true;
     const auto rapidPose = lcnc::process::solvedRapidPose(rapid);
     if (rapidPose.x != 1.25 || rapidPose.y != -2.5 || rapidPose.z != 3.75
         || rapidPose.r1 != 91.0 || rapidPose.r2 != -182.0
@@ -52,6 +59,12 @@ int main(int argc, char* argv[])
         || rapidPose.r2Name != QStringLiteral("C")) {
         return fail(QStringLiteral("Process modified a CAM-certified rapid pose"));
     }
+    if (!rapidPose.tcpMcsValid || rapidPose.tcpMcsX != -10.0
+        || rapidPose.tcpMcsY != -20.0 || rapidPose.tcpMcsZ != -30.0)
+        return fail(QStringLiteral("Process substituted scene-world TCP for RTCP reference"));
+    rapid.target.tcpMcsValid = false;
+    if (lcnc::process::solvedRapidPose(rapid).tcpMcsValid)
+        return fail(QStringLiteral("Process manufactured a missing RTCP reference"));
 
     lcnc::cam::RapidTransition committedTransition;
     committedTransition.fromContourId = 0;

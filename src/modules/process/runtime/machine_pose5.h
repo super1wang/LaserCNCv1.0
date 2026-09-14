@@ -19,6 +19,13 @@ struct MachinePose5
     double z{0.0};
     double r1{0.0};
     double r2{0.0};
+    /// Optional table-zero reference TCP (GTN MCS), not posed scene-world TCP.
+    /// The regular x/y/z/r1/r2
+    /// fields always remain the final software-IK axis coordinates.
+    double tcpMcsX{0.0};
+    double tcpMcsY{0.0};
+    double tcpMcsZ{0.0};
+    bool tcpMcsValid{false};
     QString r1Name;
     QString r2Name;
 

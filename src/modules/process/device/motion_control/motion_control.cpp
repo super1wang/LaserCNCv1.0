@@ -131,6 +131,24 @@ void MotionControl::SetAxisTable(Axis eAxis, const table& tableAxis)
 		if (!SetAxisJerk(eAxis, fJerk))
 			lcnc::process::logDeviceError(ErrorCode::ERROR_MC_SETTINGFAILED, QObject::tr("Set axis %1 jerk %2 failed.").arg(strAxis.c_str()).arg(fJerk).toUtf8().data());
 	}
+	if (tableAxis.count("fTrapSmoothTime"))
+	{
+		double smoothTime = t_Axis["fTrapSmoothTime"].as_floating();
+		if (!SetAxisJerk(eAxis, smoothTime))
+			lcnc::process::logDeviceError(
+				ErrorCode::ERROR_MC_SETTINGFAILED,
+				QObject::tr("Set axis %1 point motion smooth time %2 ms failed.")
+					.arg(strAxis.c_str()).arg(smoothTime).toUtf8().data());
+	}
+	if (tableAxis.count("fJogSmooth"))
+	{
+		double smooth = t_Axis["fJogSmooth"].as_floating();
+		if (!SetAxisJogSmooth(eAxis, smooth))
+			lcnc::process::logDeviceError(
+				ErrorCode::ERROR_MC_SETTINGFAILED,
+				QObject::tr("Set axis %1 Jog smooth coefficient %2 failed.")
+					.arg(strAxis.c_str()).arg(smooth).toUtf8().data());
+	}
 	
 	bool bLimitChange = false;
 	double fLeftLimit, fRightLimit;

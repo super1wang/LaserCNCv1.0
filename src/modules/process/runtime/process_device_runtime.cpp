@@ -38,6 +38,19 @@ using std::string;
 using std::vector;
 using toml::table;
 
+namespace {
+// Point/jog status may allow retreat from a soft limit. Machining and Reset
+// readback must use a strict live status check instead of that escape policy.
+bool readMachiningStatus(MotionControl* controller, int& fault)
+{
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    if (auto* gtn = dynamic_cast<GTNMotionControl*>(controller))
+        return gtn->IsMachiningStatusNormal(fault);
+#endif
+    return controller->IsAxisStatusNormal(fault);
+}
+} // namespace
+
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveRelative(
     Axis axis, double distance, double velocity)
 {
@@ -56,6 +69,9 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveRelative(
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveAbsolute(
     Axis axis, double position, double velocity)
 {
+    if (!std::isfinite(position) || !std::isfinite(velocity) || velocity <= 0.0)
+        // 中文翻译：绝对运动参数无效
+        return {false, QObject::tr("Absolute motion parameters are invalid")};
     const auto lock = lockDeviceAccess();
     if (!m_motionControl || !m_motionControl->IsConnected())
         // 中文翻译：未连接控制器，请先连接设备
@@ -66,6 +82,34 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveAbsolute(
     const bool ok = m_motionControl->MoveAbsolute(axis, position, velocity);
     // 中文翻译：绝对运动命令失败
     return {ok, ok ? QString() : QObject::tr("Absolute motion command failed")};
+}
+
+lcnc::process::DeviceCommandResult ProcessDeviceRuntime::pollAbsoluteMotion(
+    Axis axis, double target, double tolerance, bool* moving)
+{
+    const auto lock = lockDeviceAccess();
+    if (!moving || !std::isfinite(target) || !std::isfinite(tolerance) || tolerance < 0.0)
+        // 中文翻译：绝对运动参数无效
+        return {false, QObject::tr("Absolute motion parameters are invalid")};
+    if (!m_motionControl || !m_motionControl->IsConnected())
+        // 中文翻译：绝对运动等待期间控制器连接已断开
+        return {false, QObject::tr("The controller disconnected while waiting for absolute motion")};
+    if (!m_motionControl->IsMotorCreated(axis))
+        // 中文翻译：轴未注册
+        return {false, QObject::tr("Axis not registered")};
+    int fault = 0;
+    if (!m_motionControl->IsAxisStatusNormal(fault) || fault != 0)
+        // 中文翻译：绝对运动后控制器状态异常
+        return {false, QObject::tr("Controller status is abnormal after absolute motion")};
+    *moving = m_motionControl->IsAxisMoving(axis);
+    if (*moving)
+        return {};
+    double actual = 0.0;
+    if (!m_motionControl->GetActualPos(axis, actual) || !std::isfinite(actual)
+        || std::abs(actual - target) > tolerance)
+        // 中文翻译：绝对运动未到达目标坐标
+        return {false, QObject::tr("Absolute motion did not reach the target coordinate")};
+    return {};
 }
 
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::moveAbsoluteAndWait(
@@ -587,6 +631,8 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
     lcnc::process::ProcessPreflightReport* report)
 {
     const auto fail = [](const QString& error) {
+		LCNC_ERR(lcnc::LogCode::Generic,
+			"process.preflight: result=failed reason='{}'", error.toStdString());
         return lcnc::process::DeviceCommandResult{false, error};
     };
     if (!report)
@@ -598,17 +644,16 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
     if (!mc || !mc->IsConnected())
         // 中文翻译：运动控制器未连接或连接已断开
         return fail(QObject::tr("Motion controller not connected or disconnected"));
-    if (mc->ErrorOccurred())
-        // 中文翻译：运动控制器存在异常，请清除故障后再加工
-        return fail(QObject::tr("There is an abnormality in the motion controller. Please clear the fault before processing."));
-
     int fault = 0;
-    if (!mc->IsAxisStatusNormal(fault))
+    if (!readMachiningStatus(mc, fault))
         // 中文翻译：运动控制器状态读取失败，请检查控制器连接
         return fail(QObject::tr("Motion controller status reading failed, please check the controller connection"));
     if (fault != 0)
         // 中文翻译：运动控制器故障码: %1，请清除故障后再加工
         return fail(QObject::tr("Motion controller fault code: %1, please clear the fault before processing").arg(fault));
+    if (mc->ErrorOccurred())
+        // 中文翻译：运动控制器存在异常，请清除故障后再加工
+        return fail(QObject::tr("There is an abnormality in the motion controller. Please clear the fault before processing."));
 
     for (auto it = request.lockedAxisTargets.cbegin(); it != request.lockedAxisTargets.cend(); ++it) {
         const auto axis = magic_enum::enum_cast<Axis>(it.key().toStdString());
@@ -639,7 +684,7 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
             QThread::msleep(20);
         }
         int postMoveFault = 0;
-        if (!mc->IsAxisStatusNormal(postMoveFault) || postMoveFault != 0)
+        if (!readMachiningStatus(mc, postMoveFault) || postMoveFault != 0)
             // 中文翻译：锁定轴置位后控制器状态异常
             return fail(QObject::tr("Controller status is abnormal after positioning locked axes"));
         for (auto it = request.lockedAxisTargets.cbegin(); it != request.lockedAxisTargets.cend(); ++it) {
@@ -750,6 +795,9 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::runPreflight(
                                  guard.unit,
                                  QString::number(guard.threshold, 'f', 3)));
     }
+	LCNC_INFO(lcnc::LogCode::Generic,
+		"process.preflight: result=success axes={} digital_guards={} analog_guards={}",
+		request.axisNames.size(), request.digitalGuards.size(), request.analogGuards.size());
     return {};
 }
 
@@ -762,10 +810,13 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::validateContourBoundary
     if (!health.connected)
         return lcnc::process::evaluateContourBoundaryHealth(health);
     int fault = 0;
-    health.statusReadable = mc->IsAxisStatusNormal(fault);
+    health.statusReadable = readMachiningStatus(mc, fault);
     health.faultCode = fault;
     if (!health.statusReadable || health.faultCode != 0)
         return lcnc::process::evaluateContourBoundaryHealth(health);
+    if (mc->ErrorOccurred())
+        // 中文翻译：运动控制器存在异常，请清除故障后再加工
+        return {false, QObject::tr("There is an abnormality in the motion controller. Please clear the fault before processing.")};
     for (Axis axis : mc->m_vecMotors) {
         if (!mc->IsMotorCreated(axis))
             health.missingAxes.append(QString::fromLatin1(magic_enum::enum_name(axis).data()));
@@ -773,6 +824,23 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::validateContourBoundary
             health.disabledAxes.append(QString::fromLatin1(magic_enum::enum_name(axis).data()));
     }
     return lcnc::process::evaluateContourBoundaryHealth(health);
+}
+
+lcnc::process::DeviceCommandResult ProcessDeviceRuntime::recoverControllerAfterStop()
+{
+    const auto lock = lockDeviceAccess();
+    if (!m_motionControl || !m_motionControl->IsConnected())
+        return validateContourBoundary();
+#if defined(LCNC_PROCESS_HAS_GTN) && LCNC_PROCESS_HAS_GTN
+    if (auto* gtn = dynamic_cast<GTNMotionControl*>(m_motionControl.get())) {
+        if (!gtn->RecoverAfterStop())
+            // 中文翻译：运动控制器存在异常，请清除故障后再加工
+            return {false, !gtn->GroupExecutionError().isEmpty()
+                ? gtn->GroupExecutionError()
+                : QObject::tr("There is an abnormality in the motion controller. Please clear the fault before processing.")};
+    }
+#endif
+    return validateContourBoundary();
 }
 
 std::unique_ptr<lcnc::process::IMotionCommandSink> ProcessDeviceRuntime::createMotionSink(

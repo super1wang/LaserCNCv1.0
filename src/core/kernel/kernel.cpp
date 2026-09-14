@@ -2,6 +2,7 @@
 
 #include "core/logging/logger.h"
 #include "core/kinematics/machine_configuration_service.h"
+#include "core/kinematics/machine_calibration_service.h"
 #include "core/machine/machine_workspace.h"
 #include "core/project/lcnc_project_manager.h"
 #include "core/services/selection_service.h"
@@ -76,6 +77,11 @@ void Kernel::registerCoreServices()
     m_machineConfig = std::make_shared<MachineConfigurationService>();
     m_machineConfig->loadDefault();
     m_services.registerService<MachineConfigurationService>(m_machineConfig);
+
+    // Physical kinematic calibration records are immutable and independent
+    // from the STEP geometry-alignment workflow owned by CAM.
+    m_machineCalibration = std::make_shared<kinematics::MachineCalibrationService>();
+    m_services.registerService<kinematics::MachineCalibrationService>(m_machineCalibration);
 
     // 5b) SelectionService — 跨 app/cam/process 的轮廓选择顺序记录器。
     auto selSvc = std::make_shared<core::SelectionService>();

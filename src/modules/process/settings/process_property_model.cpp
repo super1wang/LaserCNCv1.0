@@ -112,6 +112,7 @@ bool ProcessPropertyModel::setData(const QModelIndex& index, const QVariant& val
     }
     QStandardItemModel::setData(index, QVariant(), Qt::ToolTipRole);
     emit dataChanged(index, index, {Qt::DisplayRole, Qt::EditRole, Qt::CheckStateRole, Qt::ToolTipRole});
+    emit fieldEdited(objectId(index), field->id);
     return true;
 }
 

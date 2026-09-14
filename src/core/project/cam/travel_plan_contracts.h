@@ -57,6 +57,13 @@ struct RapidPose
     double surfaceNormalX{0.0};
     double surfaceNormalY{0.0};
     double surfaceNormalZ{1.0};
+    /// CAM-derived table-zero reference TCP for controller RTCP commands.
+    /// tcpX/Y/Z above remain machine-world geometry for collision/rendering.
+    /// Derived at export/initial-approach boundaries, never inferred by Process.
+    double tcpMcsX{0.0};
+    double tcpMcsY{0.0};
+    double tcpMcsZ{0.0};
+    bool tcpMcsValid{false};
 };
 
 struct RapidMoveSegment

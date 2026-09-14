@@ -71,6 +71,13 @@ ProcessSettingsDialog::ProcessSettingsDialog(ProcessSettingsService* settings,
     m_editorStack = new QStackedWidget(right);
     m_properties = new QTreeView(m_editorStack);
     m_model = new ProcessPropertyModel(m_settings, m_properties);
+    connect(m_model, &ProcessPropertyModel::fieldEdited, this,
+            [this](const QString& objectId, const QString& fieldId) {
+        if (objectId == QStringLiteral("controller")
+            && fieldId == QStringLiteral("type")) {
+            rebuildObjectTree(objectId);
+        }
+    });
     m_properties->setModel(m_model);
     m_properties->setItemDelegate(new ProcessPropertyDelegate(m_properties));
     m_properties->setAlternatingRowColors(true);

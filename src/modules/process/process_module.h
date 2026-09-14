@@ -123,6 +123,11 @@ public:
     State state() const;
     /// 加工预检、运行和暂停期间锁定所有可能改变加工输入的交互。
     bool isMachiningInteractionLocked() const { return m_machiningInteractionLocked; }
+    bool canActivateMachineCalibration() const {
+        return !m_connected && m_deviceOperation == DeviceOperation::None
+            && !m_preflightInFlight && !m_stopInFlight && !m_stopRecoveryInFlight
+            && !m_machiningInteractionLocked && m_state == State::Idle;
+    }
     QMap<QString, double> currentAxisPositions() const;
     void setAxisPosition(const QString& axisName, double value);
     void setAxisPositions(const QMap<QString, double>& positions);
@@ -259,9 +264,11 @@ private:
     // Background connect/disconnect/home tasks retain a shared ProcessDeviceRuntime lease so
     // a bounded module shutdown cannot destroy vendor objects while an SDK call
     // is still returning.
-    std::unique_ptr<lcnc::process::ProcessSettingsService> m_settingsService;
+    std::shared_ptr<lcnc::process::ProcessSettingsService> m_settingsService;
     // Must outlive ProcessDeviceRuntime and every controller which borrows these runtime facts.
-    lcnc::process::ProcessRuntimeConfiguration m_runtimeConfiguration;
+    std::shared_ptr<lcnc::process::ProcessRuntimeConfiguration> m_runtimeConfigurationOwner{
+        std::make_shared<lcnc::process::ProcessRuntimeConfiguration>()};
+    lcnc::process::ProcessRuntimeConfiguration& m_runtimeConfiguration{*m_runtimeConfigurationOwner};
     // Declared before ProcessDeviceRuntime so reverse member destruction releases the
     // ProcessDeviceRuntime (which borrows this settings object) first.
     std::shared_ptr<ProcessDeviceRuntime> m_service;

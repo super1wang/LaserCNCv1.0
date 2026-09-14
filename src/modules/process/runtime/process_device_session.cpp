@@ -2,6 +2,7 @@
 
 #include "core/logging/logger.h"
 #include "modules/process/device/process_io_types.h"
+#include "modules/process/runtime/device_shutdown_sequence.h"
 #include "modules/process/settings/process_settings_service.h"
 #include "modules/process/runtime/process_runtime_configuration.h"
 #include "modules/process/device/motion_control/simulate_cmhp_motion_control.h"
@@ -19,6 +20,31 @@
 
 using lcnc::process::DigitalOUT;
 using std::string;
+
+namespace {
+
+template<typename Action>
+bool attemptDeviceAction(const char* operation, Action&& action)
+{
+    try {
+        const bool success = action();
+        if (!success) {
+            LCNC_ERR(lcnc::LogCode::Generic,
+                     "process.device: operation={} result=failed", operation);
+        }
+        return success;
+    } catch (const std::exception& exception) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.device: operation={} result=exception error={}",
+                 operation, exception.what());
+    } catch (...) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.device: operation={} result=unknown_exception", operation);
+    }
+    return false;
+}
+
+} // namespace
 
 ProcessDeviceRuntime::ProcessDeviceRuntime(lcnc::process::ProcessSettingsService& settings,
                                            lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration)
@@ -39,7 +65,11 @@ ProcessDeviceRuntime::~ProcessDeviceRuntime()
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::connectMotionControllerSession(
     bool pureSimulation)
 {
-    setMotionControl(pureSimulation ? "Simulator" : "");
+    const auto lock = lockDeviceAccess();
+    if (!setMotionControl(pureSimulation ? "Simulator" : "")) {
+        // 中文翻译：无法安全断开旧控制器或创建所选控制器；已取消连接。
+        return {false, QObject::tr("Cannot safely disconnect the previous controller or create the selected controller; connection canceled")};
+    }
     if (!m_motionControl)
         // 中文翻译：运动控制器实例化失败；当前构建未启用所选控制器
         return {false, QObject::tr("Motion controller instantiation failed; the selected controller is not enabled for the current build")};
@@ -54,7 +84,13 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::disconnectMotionControl
     const auto lock = lockDeviceAccess();
     if (!m_motionControl || !m_motionControl->IsConnected())
         return {};
-    if (!m_motionControl->Disconnect())
+    if (!stopMotionAndSafeOutputs()) {
+        // 中文翻译：无法确认安全停止；保留控制器连接。
+        return {false, QObject::tr("Safe stop could not be confirmed; the controller connection is preserved")};
+    }
+    if (!attemptDeviceAction("DisconnectMotionSession", [this] {
+            return m_motionControl->Disconnect() && !m_motionControl->IsConnected();
+        }))
         // 中文翻译：运动控制器断开失败
         return {false, QObject::tr("Motion controller disconnection failed")};
     return {};
@@ -74,7 +110,10 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::connectDevices(
         reportProgress(25, QObject::tr("Connecting motion controller"));
         const auto motionConnection = connectMotionControllerSession(pureSimulation);
         if (!motionConnection.success)
-            return fail(motionConnection.error);
+            // A rejected controller switch has already attempted safe shutdown.
+            // Do not retry it here and disconnect after that first failure.
+            // 中文翻译：控制器切换失败时已尝试安全停止；不能在此自动重试并断开。
+            return motionConnection;
         // 中文翻译：正在初始化运动轴
         reportProgress(50, QObject::tr("Initializing motion axes"));
         m_motionControl->rebuildAxes();
@@ -96,7 +135,10 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::connectDevices(
         // 中文翻译：正在加载设备参数
         reportProgress(88, QObject::tr("Loading device parameters"));
         if (!pureSimulation) {
-            setMotionControlTable();
+            if (!setMotionControlTable()) {
+                // 中文翻译：控制器参数应用失败；保留当前设备状态。
+                return {false, QObject::tr("Controller parameter application failed; the current device state is preserved")};
+            }
             setDigitalTable();
             setAnalogTable();
         }
@@ -120,16 +162,36 @@ lcnc::process::DeviceCommandResult ProcessDeviceRuntime::connectDevices(
 
 lcnc::process::DeviceCommandResult ProcessDeviceRuntime::disconnectDevices()
 {
-    if (!stopMotionAndSafeOutputs()) {
-        // 中文翻译：设备断开前安全输出复位失败
-        return {false, QObject::tr("Safety output reset fails before device disconnection")};
-    }
-
     const auto lock = lockDeviceAccess();
-    if (m_pLaserDevice)
-        m_pLaserDevice->Disconnect();
-    if (m_motionControl)
-        m_motionControl->Disconnect();
+    const auto failure = lcnc::process::runDeviceShutdownSequence(
+        [this] { return stopMotionAndSafeOutputs(); },
+        [this] {
+            return attemptDeviceAction("DisconnectLaser", [this] {
+                if (!m_pLaserDevice || !m_pLaserDevice->IsConnected())
+                    return true;
+                m_pLaserDevice->Disconnect();
+                return !m_pLaserDevice->IsConnected();
+            });
+        },
+        [this] {
+            return attemptDeviceAction("DisconnectMotion", [this] {
+                if (!m_motionControl || !m_motionControl->IsConnected())
+                    return true;
+                return m_motionControl->Disconnect() && !m_motionControl->IsConnected();
+            });
+        });
+    if (failure == lcnc::process::DeviceShutdownFailure::SafeStop) {
+        // 中文翻译：无法确认安全停止；保留控制器连接。
+        return {false, QObject::tr("Safe stop could not be confirmed; the controller connection is preserved")};
+    }
+    if (failure == lcnc::process::DeviceShutdownFailure::LaserDisconnect) {
+        // 中文翻译：激光器断开失败；保留运动控制器连接。
+        return {false, QObject::tr("Laser disconnection failed; the motion controller connection is preserved")};
+    }
+    if (failure == lcnc::process::DeviceShutdownFailure::MotionDisconnect) {
+        // 中文翻译：运动控制器断开失败
+        return {false, QObject::tr("Motion controller disconnection failed")};
+    }
     return {};
 }
 
@@ -141,21 +203,33 @@ bool ProcessDeviceRuntime::stopMotionAndSafeOutputs()
     // Stop the laser device first. Controller digital outputs alone are not a
     // sufficient guarantee for lasers with an independent control channel.
     if (m_pLaserDevice && m_pLaserDevice->IsConnected()) {
-        success = m_pLaserDevice->StopLaser() && success;
-        success = m_pLaserDevice->StopAimingBeam() && success;
+        success = lcnc::process::attemptAllSafetyActions(
+            [this] { return attemptDeviceAction("StopLaser", [this] {
+                return m_pLaserDevice->StopLaser();
+            }); },
+            [this] { return attemptDeviceAction("StopAimingBeam", [this] {
+                return m_pLaserDevice->StopAimingBeam();
+            }); });
     }
     if (!m_motionControl || !m_motionControl->IsConnected())
         return success;
 
-    success = m_motionControl->StopMotion() && success;
-    success = m_motionControl->StopAllBuffer() && success;
+    success = lcnc::process::attemptAllSafetyActions(
+        [this] { return attemptDeviceAction("StopMotion", [this] {
+            return m_motionControl->StopMotion();
+        }); },
+        [this] { return attemptDeviceAction("StopAllBuffer", [this] {
+            return m_motionControl->StopAllBuffer();
+        }); }) && success;
     // Only laser-emission and assist-gas outputs are forced off by Stop.  Other
     // process IO (chuck and cooling, for example) keeps its commanded state.
     const std::array<DigitalOUT, 3> outputs = {
         DigitalOUT::Laser, DigitalOUT::Blow, DigitalOUT::Blow2};
     for (const DigitalOUT output : outputs) {
         if (m_motionControl->m_mapDigitalOUT.count(output)
-            && !m_motionControl->DigitalOutputSet(output, 0)) {
+            && !attemptDeviceAction("SafeDigitalOutput", [this, output] {
+                return m_motionControl->DigitalOutputSet(output, 0);
+            })) {
             success = false;
         }
     }
@@ -164,25 +238,12 @@ bool ProcessDeviceRuntime::stopMotionAndSafeOutputs()
 
 bool ProcessDeviceRuntime::shutdownDevices()
 {
-    const auto lock = lockDeviceAccess();
-    bool success = true;
-    if (m_pLaserDevice && m_pLaserDevice->IsConnected()) {
-        success = m_pLaserDevice->StopLaser() && success;
-        success = m_pLaserDevice->StopAimingBeam() && success;
-        m_pLaserDevice->Disconnect();
-    }
-    if (m_motionControl && m_motionControl->IsConnected()) {
-        success = m_motionControl->StopMotion() && success;
-        success = m_motionControl->StopAllBuffer() && success;
-        success = m_motionControl->Disconnect() && success;
-    }
-    return success;
+    return disconnectDevices().success;
 }
 
-void ProcessDeviceRuntime::setMotionControl(string strName)
+bool ProcessDeviceRuntime::setMotionControl(string strName)
 {
     const auto lock = lockDeviceAccess();
-    std::lock_guard<std::mutex> lifetimeLock(m_motionControlLifetimeMutex);
     string strDevice = strName;
     if (strDevice.empty())
         strDevice = configuredMotionControllerName();
@@ -190,9 +251,14 @@ void ProcessDeviceRuntime::setMotionControl(string strName)
     // 控制器必须随 ProcessDeviceRuntime 生命期销毁：禁止函数内 static
     // 让 ACS/GTN SDK 句柄活过 Process 的停机顺序。切换类型时先断开旧实例，再创建新实例。
     if (m_motionControl && m_strMotionControl == strDevice)
-        return;
-    if (m_motionControl && m_motionControl->IsConnected())
-        m_motionControl->Disconnect();
+        return true;
+    if (m_motionControl && !shutdownDevices()) {
+        LCNC_ERR(lcnc::LogCode::Generic,
+                 "process.device: operation=SwitchController previous={} requested={} action=preserve_previous reason=safe_shutdown_failed",
+                 m_strMotionControl, strDevice);
+        return false;
+    }
+    std::lock_guard<std::mutex> lifetimeLock(m_motionControlLifetimeMutex);
     m_motionControl.reset();
 
     if (strDevice == "Simulator") {
@@ -216,9 +282,10 @@ void ProcessDeviceRuntime::setMotionControl(string strName)
                  "Process ProcessDeviceRuntime: controller '{}' is unavailable in this build; fallback is forbidden",
                  strDevice);
         m_strMotionControl.clear();
-        return;
+        return false;
     }
     m_strMotionControl = strDevice;
+    return true;
 }
 
 string ProcessDeviceRuntime::configuredMotionControllerName() const
@@ -239,6 +306,12 @@ string ProcessDeviceRuntime::activeMotionControllerName() const
 {
     const auto lock = m_deviceCoordinator.acquire();
     return m_strMotionControl;
+}
+
+bool ProcessDeviceRuntime::motionConnectionOpen() const
+{
+    const auto lock = m_deviceCoordinator.acquire();
+    return m_motionControl && m_motionControl->IsConnected();
 }
 
 bool ProcessDeviceRuntime::configuredControllerRequiresDevice() const

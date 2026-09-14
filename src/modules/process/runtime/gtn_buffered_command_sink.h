@@ -14,14 +14,15 @@ namespace lcnc::process {
  *
  * GTN 与 ACS 的"批量执行"语义一致，只是缓存机制不同：
  *   - ACS：拼成 ACSPL+ 文本 → acsc_LoadBuffer + acsc_RunBuffer 一次提交。
- *   - GTN：每次 GTN_BufXxx / GTN_LnXYZEx 入控制器的运动 FIFO → GTN_CrdDataEx 提交 →
- *          GTN_CrdStart 启动整段插补一次性执行。
+ *   - GTN legacy：GTN_BufXxx / GTN_LnXYZEx → GTN_CrdDataEx → GTN_CrdStart。
+ *   - GTN Group：GTN_MoveLinearAbsolute / list IO → CommandListDataEnd →
+ *                StartCommandList。RTCP 开关只改变 Group 的坐标描述，CAM
+ *                求解轴坐标始终保留为独立输入。
  *
- * 因此 sink 在 lineTo / laserOn / laserOff 阶段 **只** 调用底层 OffsetLineTo /
- * ProLaserControl（这些方法已经是 buffered，写入 GTN_BufXxx FIFO）；mid-stream **绝不**
- * 调用 SendCommand。所有"提交+启动"动作都集中在 flush()：
- *   1. mc->SendCommand()    → GTN_CrdDataEx + GTN_CrdStart 一次下发整段。
- *   2. mc->PrfTrapAxis()    → 等待全部插补完成（与 ACS 的 acsc_WaitProgramEnd 对应）。
+ * Group 模式由 sink 独占一个完整生命周期：beginSegment() 初始化并取得轴组，
+ * lineTo / laserOn / laserOff 只构建 CommandList，startProgram() 提交并启动，
+ * isProgramRunning() 在完成或故障后立即释放轴组。轴组未释放前禁止退回单轴点位模式。
+ * Legacy 模式仍使用 GTN_BufXxx / GTN_LnXYZEx，并由 SendCommand() 一次提交。
  */
 class GtnBufferedCommandSink final : public IMotionCommandSink
 {
@@ -59,9 +60,13 @@ public:
     void applyToolMotionParams(const Tool& tool, bool jump) override;
 
 private:
+    bool releaseActiveGroup(QString* errorMessage, const char* reason);
+
     GTNMotionControl* m_gtn{nullptr};
     AxisMap           m_axisMap;
     ProcessInterruptContext* m_token{nullptr};
+    bool m_bufferCommandFailed{false};
+    bool m_groupProgramActive{false};
 };
 
 } // namespace lcnc::process

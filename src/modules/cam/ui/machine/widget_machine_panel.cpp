@@ -160,8 +160,8 @@ void WidgetMachinePanel::buildConfigPage()
 
     // 唯一入口：打开三段式标定向导（需求 3：移除旧的轴心/AC 中心/切割头独立控件）
     m_btnOpenCalibrationWizard = new QPushButton(
-        // 中文翻译：打开标定向导...
-        tr("Open the Calibration Wizard..."), calibrationGroup);
+        // 中文翻译：打开 STEP 几何对齐向导...
+        tr("Open STEP geometry alignment wizard..."), calibrationGroup);
     m_btnOpenCalibrationWizard->setToolTip(
         // 中文翻译：依次拾取父旋转轴、子旋转轴参考面与切割头下端面；软件根据轴角色、方向和父链自动求取标定关系。
         tr("Select the parent rotary-axis, child rotary-axis, and lower cutter-head reference faces in sequence. Calibration is derived automatically from axis roles, directions, and parent links."
@@ -170,6 +170,27 @@ void WidgetMachinePanel::buildConfigPage()
     calibrationLayout->addWidget(m_btnOpenCalibrationWizard);
     connect(m_btnOpenCalibrationWizard, &QPushButton::clicked,
             this, &WidgetMachinePanel::axisCalibrationWizardRequested);
+
+    m_btnOpenPhysicalCalibrationWizard = new QPushButton(
+        // 中文翻译：打开物理五轴标定向导...
+        tr("Open physical five-axis calibration wizard..."), calibrationGroup);
+    m_btnOpenPhysicalCalibrationWizard->setToolTip(
+        // 中文翻译：导入或填写多个旋转姿态的实测轴反馈与参考点坐标，自动拟合两条旋转轴线并生成带验证状态的不可变标定记录。
+        tr("Import or enter measured axis feedback and reference-point coordinates at multiple rotary poses. Both rotary-axis lines are fitted automatically and saved as an immutable calibration record with an explicit verification state."));
+    calibrationLayout->addWidget(m_btnOpenPhysicalCalibrationWizard);
+    connect(m_btnOpenPhysicalCalibrationWizard, &QPushButton::clicked, this,
+            &WidgetMachinePanel::physicalKinematicsCalibrationWizardRequested);
+
+    m_btnGenerateConfigurationRtcp = new QPushButton(
+        // 中文翻译：从当前构型生成 RTCP 参数...
+        tr("Generate RTCP parameters from current configuration..."),
+        calibrationGroup);
+    m_btnGenerateConfigurationRtcp->setToolTip(
+        // 中文翻译：使用当前旋转轴中心、方向、轴号和 TCP 生成 RTCP 记录，按正常刀具速度和激光/气体时序加工；这不是精密标定。
+        tr("Generate an RTCP record from the current rotary centers, directions, axis mapping, and TCP. Machining uses configured tool speeds and laser/gas sequences. This is not a precision calibration."));
+    calibrationLayout->addWidget(m_btnGenerateConfigurationRtcp);
+    connect(m_btnGenerateConfigurationRtcp, &QPushButton::clicked, this,
+            &WidgetMachinePanel::configurationDerivedRtcpRequested);
 
     mainLayout->addWidget(calibrationGroup, 1);
 

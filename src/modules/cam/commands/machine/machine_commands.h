@@ -100,4 +100,15 @@ public:
     void execute()   override;
 };
 
+class CmdExportSimplifiedMachine : public CommandBase
+{
+    Q_OBJECT
+public:
+    explicit CmdExportSimplifiedMachine(IAppContext* ctx);
+    static constexpr const char* Name = "machine.export_simplified";
+
+    bool isEnabled() const override;
+    void execute() override;
+};
+
 

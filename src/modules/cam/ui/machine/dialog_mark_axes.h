@@ -8,6 +8,7 @@
 class LcncDocument;
 class MachineKinematics;
 class QComboBox;
+class QCheckBox;
 class QDoubleSpinBox;
 class QGridLayout;
 class QScrollArea;
@@ -38,6 +39,8 @@ public:
     explicit DialogMarkAxes(LcncDocument*     doc,
                             MachineKinematics* kin,
                             QWidget*           parent = nullptr);
+
+    bool generateEnvelopeRequested() const;
 
 private slots:
     void onAutoDetect();
@@ -72,4 +75,5 @@ private:
     QWidget*     m_originContainer{nullptr};
     QGridLayout* m_originGrid{nullptr};
     QMap<QString, OriginEditors> m_originEditors;
+    QCheckBox* m_generateEnvelopeCheck{nullptr};
 };

@@ -128,7 +128,8 @@ QString ProcessSettingsService::sectionName(ProcessConfigArea area,
     switch (area) {
     case ProcessConfigArea::Devices:
         if (tableName == QStringLiteral("MotionControl")
-            || tableName == QStringLiteral("Homing"))
+            || tableName == QStringLiteral("Homing")
+            || tableName == QStringLiteral("GTN"))
             return QStringLiteral("MotionControl");
         if (tableName.startsWith(QStringLiteral("Camera")))
             return QStringLiteral("Camera");
@@ -524,14 +525,33 @@ toml::table ProcessSettingsService::axisRuntimeTable(const QString& axisName) co
     for (const auto& axis : m_axisDraft) {
         if (axis.axis.name.compare(axisName, Qt::CaseInsensitive) != 0)
             continue;
+        const bool gtnController = rawValue(
+            ProcessConfigArea::Devices, QStringLiteral("MotionControl"),
+            QStringLiteral("sType"), QStringLiteral("SimulatorCMHP"))
+                                       .toString()
+                                       .compare(QStringLiteral("GTN"), Qt::CaseInsensitive) == 0;
         table result;
+        // controllerIndex is persisted in the native numbering scheme of the
+        // selected controller.  Existing GTN machine configurations therefore
+        // already contain physical axis numbers (1 through 8).  Applying an
+        // additional offset here shifts every jog/feedback channel by one axis.
         result["iIndex"] = axis.controllerIndex;
         result["iHomeIndex"] = axis.homeIndex;
         result["fResolution"] = axis.resolution;
         result["bRotation"] = axis.axis.motionType == MachineAxisDef::Rotary;
         result["fVel"] = axis.motionSpeed;
         result["fAcc"] = axis.acceleration;
-        result["fJerk"] = axis.jerk;
+        if (gtnController) {
+            const QString suffix = axis.axis.name.trimmed().toUpper();
+            result["fTrapSmoothTime"] = rawValue(
+                ProcessConfigArea::Devices, QStringLiteral("GTN"),
+                QStringLiteral("iTrapSmoothTime%1").arg(suffix), 10).toDouble();
+            result["fJogSmooth"] = rawValue(
+                ProcessConfigArea::Devices, QStringLiteral("GTN"),
+                QStringLiteral("fJogSmooth%1").arg(suffix), 0.5).toDouble();
+        } else {
+            result["fJerk"] = axis.jerk;
+        }
         result["fLeftLimit"] = axis.axis.minVal;
         result["fRightLimit"] = axis.axis.maxVal;
         result["fPipeDiameter"] = axis.pipeDiameter;
@@ -667,6 +687,7 @@ bool ProcessSettingsService::setMachineAxisValue(const QString& axisName, const 
                                                  const QVariant& value, QString* error) {
     for (auto& axis : m_axisDraft)
         if (axis.axis.name.compare(axisName, Qt::CaseInsensitive) == 0) {
+            const MachineAxisRuntimeConfig previous = axis;
             if (key == "controllerIndex")
                 axis.controllerIndex = value.toInt();
             else if (key == "homeIndex")
@@ -699,6 +720,7 @@ bool ProcessSettingsService::setMachineAxisValue(const QString& axisName, const 
             }
             // 中文翻译：轴 %1 的负限位不能大于正限位。
             if (axis.axis.minVal > axis.axis.maxVal) {
+                axis = previous;
                 if (error)
                     *error = QObject::tr("The negative limit of axis %1 cannot be greater than the "
                                          "positive limit.")
@@ -730,8 +752,6 @@ bool ProcessSettingsService::setFieldValue(const ParameterDescriptor& field,
             *error = QObject::tr("This parameter is read-only.");
         return false;
     }
-    if (field.machineAxisField)
-        return setMachineAxisValue(objectId.section(':', 1), field.key, value, error);
     // 中文翻译：%1 超出允许范围。
     if ((field.type == ParameterValueType::Int || field.type == ParameterValueType::Double) &&
         (value.toDouble() < field.minimum || value.toDouble() > field.maximum)) {
@@ -739,6 +759,8 @@ bool ProcessSettingsService::setFieldValue(const ParameterDescriptor& field,
             *error = QObject::tr("%1 is outside the allowed range.").arg(field.title);
         return false;
     }
+    if (field.machineAxisField)
+        return setMachineAxisValue(objectId.section(':', 1), field.key, value, error);
     ensureChildTable(sectionRef(field.area, field.tableName),
                      field.tableName.toStdString())[field.key.toStdString()] =
         tomlFromVariant(value, field.type);

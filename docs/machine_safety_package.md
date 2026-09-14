@@ -1,6 +1,6 @@
 # 机台安全包（`.lmsp`）
 
-更新日期：2026-08-24
+更新日期：2026-08-28
 
 `.lmsp` 是 QuaZip 归档格式，用于把机台模型、唯一的 `.lmsi` 安全索引和强绑定清单作为一个不可变机台资产交付。它不是工程数据，不写入 `.lcnc`，生命周期跟随全局 `MachineWorkspace`。
 
@@ -12,6 +12,10 @@ machine/
   machine.step               # 也可保留 stp/stl/brep 后缀
 safety/
   machine.lmsi               # 整个归档只能存在这一个 .lmsi
+envelope/
+  model_envelope.json        # lcnc.model-envelope/v1
+  meshes/
+    *.ply                    # 每个运动刚体的闭合保守包络
 ```
 
 `machine_safety.toml` 保存：
@@ -21,9 +25,12 @@ safety/
 - 模型文件 SHA-256、索引文件 SHA-256；
 - `.lmsi` 内部内容指纹和安全配置指纹；
 - 运行时机台运动学和机台零件归属指纹；
+- 包络清单 SHA-256 和包络 mesh-set SHA-256；
 - 由上述字段合成的包键。
 
-加载时先枚举 ZIP 条目并拒绝绝对路径、`..` 路径、重复清单或多个 `.lmsi`，随后解压到受控临时目录并逐层验证全部指纹。嵌入模型的哈希还必须与 `.lmsi::sourceSha256` 一致。因此修改归档中的模型、替换索引、修改清单或加入第二个索引都会使包失效。
+加载时先枚举 ZIP 条目并拒绝绝对路径、`..` 路径、重复清单或多个 `.lmsi`，随后解压到受控临时目录并逐层验证全部指纹。嵌入模型的哈希还必须与 `.lmsi::sourceSha256` 一致；v2 包中的包络清单哈希还必须与 `.lmsi::envelopeManifestSha256` 一致，每个 PLY 必须通过清单内哈希验证。因此修改归档中的模型、替换索引、修改清单、修改包络网格或加入第二个索引都会使包失效。
+
+格式 v1 继续只读兼容；包含包络绑定的新包使用格式 v2。v2 不接受缺失包络资源或带有未绑定包络指纹的索引。
 
 ## 失效与执行资格
 
@@ -44,6 +51,7 @@ safety/
 lcnc_machine_safety_index.exe `
   --machine "model/精简ac转台.stp" `
   --package-output "model/精简ac转台.lmsp" `
+  --envelope-manifest "model-envelope/model_envelope.json" `
   --runtime-configuration-sha256 <64位十六进制指纹>
 ```
 
@@ -52,19 +60,21 @@ lcnc_machine_safety_index.exe `
 生产档还会传入：
 
 ```powershell
---leaf-bvh on --surface-bvh off --dependency-cache on `
+--leaf-bvh off --surface-bvh off --dependency-cache on `
 --refine-levels 1 --refine-threads 8 --exact-budget 1 --audit-safe 32 `
 --checkpoint <输出包>.checkpoint.lmsi
 ```
 
-真实 AC 转台模型的 0.5 mm OCCT 表面三角化超过 15 分钟，因此一键档默认使用保守叶级 BVH；
-`--surface-bvh on` 保留给显式高精离线档。它只提高 Unknown 消解率，不改变失败关闭语义。
+绑定包络后，一键档使用包络 AABB 做全网格保守认证，并把已验证 PLY 的 Surface-BVH 持久化，
+供运行时处理 Unknown；`--surface-bvh on` 可用于耗时更长的显式离线全网格档。包络 AABB 和
+Surface-BVH 是唯一可签发安全结论的几何；原 STEP 叶级 BVH 只用于离线精确审计，不能替更大的
+外扩包络证明分离。没有包络的旧式索引仍保留原有叶级 BVH 兼容路径。
 
-`.lmsi` schema 5 支持最多三级递归稀疏细化。二、三级必须通过 `--hot-apos-file`
+`.lmsi` schema 6 支持最多三级递归稀疏细化。二、三级必须通过 `--hot-apos-file`
 限定到 AC 轴附近或真实路径产生的 BoundaryUnknown 热区。基网格及每个完整级别都会原子写入
 检查点；再次执行默认验证模型哈希、轴网格、碰撞对和间隙后续建，`--no-resume` 强制重建。
 
-schema 5 可保存完整碰撞三角面片、网格误差、闭合体标志和混合部件的独立封闭实体包含网格。
+schema 6 在 schema 5 的完整碰撞三角面片、网格误差、闭合体标志和混合部件独立封闭实体包含网格基础上，增加包络清单 SHA-256 绑定。
 加载后重建内部/Coal BVH，避免绑定 Coal 私有节点 ABI，同时避免重复 STEP 三角化。schema 3/4
 若含旧持久网格会被拒绝并要求重建，防止开放面干扰实体包含判定。
 

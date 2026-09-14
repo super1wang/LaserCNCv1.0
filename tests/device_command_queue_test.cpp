@@ -1,4 +1,6 @@
 #include "modules/process/runtime/device_command_queue.h"
+#include "modules/process/runtime/command_list_start.h"
+#include "modules/process/runtime/queued_motion_wait.h"
 
 #include <QCoreApplication>
 #include <QMutex>
@@ -7,6 +9,7 @@
 #include <QThread>
 
 #include <algorithm>
+#include <atomic>
 #include <stdexcept>
 #include <thread>
 
@@ -16,6 +19,82 @@ int fail(const QString& message)
 {
     QTextStream(stderr) << message << '\n';
     return 1;
+}
+
+bool cancelledFinalizeYieldsToStop()
+{
+    using namespace lcnc::process;
+    QSemaphore finalizeEntered;
+    QSemaphore releaseFinalize;
+    QSemaphore workflowCompleted;
+    QSemaphore hardwareStopRan;
+    std::atomic_bool stopRequested{false};
+    std::atomic_bool motionWasStarted{false};
+    std::atomic_bool laserWasEnabled{false};
+    std::atomic_bool callbacksOnDeviceThread{true};
+    std::atomic_int startCalls{0};
+    std::atomic_int completionCalls{0};
+    CommandListStartResult submission;
+    DeviceCommandResult completion;
+    // Destroy the worker before any state captured by its callbacks.
+    DeviceCommandQueue queue;
+    if (!queue.start())
+        return false;
+    if (!queue.submit(
+            [&]() -> DeviceCommandResult {
+                callbacksOnDeviceThread = queue.isWorkerThread();
+                submission = startCancellableCommandList(
+                    [&] { return stopRequested.load(); },
+                    [&]() -> short {
+                        finalizeEntered.release();
+                        // Simulated successful DataEnd returns only after the
+                        // GUI side has requested Stop. No SDK is involved.
+                        return releaseFinalize.tryAcquire(1, 2000) ? 0 : -1;
+                    },
+                    [] {},
+                    [&]() -> short {
+                        ++startCalls;
+                        motionWasStarted = true;
+                        laserWasEnabled = true;
+                        return 0;
+                    },
+                    [] { return true; }, [] {}, 10700);
+                if (submission.state == CommandListStartState::Cancelled)
+                    return {false, QStringLiteral("Batch cancelled before Start"),
+                            DeviceCommandCompletion::Cancelled};
+                return {submission.state == CommandListStartState::Started, QString{}};
+            },
+            TaskPriority::Workflow,
+            [&](const DeviceCommandResult& result) {
+                completion = result;
+                ++completionCalls;
+                workflowCompleted.release();
+            })) {
+        return false;
+    }
+    if (!finalizeEntered.tryAcquire(1, 1000)) {
+        releaseFinalize.release();
+        queue.shutdown(2000);
+        return false;
+    }
+
+    stopRequested = true;
+    queue.beginStopOnly();
+    const bool stopAccepted = queue.submitStop([&] {
+        callbacksOnDeviceThread = callbacksOnDeviceThread.load() && queue.isWorkerThread();
+        hardwareStopRan.release();
+    });
+    releaseFinalize.release();
+    const bool workflowReturned = workflowCompleted.tryAcquire(1, 2000);
+    const bool stopExecuted = hardwareStopRan.tryAcquire(1, 2000);
+    const bool shutdown = queue.shutdown(2000);
+    return stopAccepted && workflowReturned && stopExecuted && shutdown
+        && callbacksOnDeviceThread.load()
+        && submission.state == CommandListStartState::Cancelled
+        && submission.apiResult == 0 && submission.finalizeAttempts == 1
+        && !completion.success && completion.completion == DeviceCommandCompletion::Cancelled
+        && completionCalls.load() == 1 && startCalls.load() == 0
+        && !motionWasStarted.load() && !laserWasEnabled.load();
 }
 
 } // namespace
@@ -154,28 +233,70 @@ int main(int argc, char* argv[])
         || !cancelledTicket.accepted || !completionQueue.cancel(cancelledTicket.id))
         return fail(QStringLiteral("Device queue ticket cancellation/coalescing failed"));
 
-    QSemaphore timeoutDone;
-    lcnc::process::DeviceCommandCompletion timeoutStatus = lcnc::process::DeviceCommandCompletion::Succeeded;
-    std::thread timeoutWaiter([&] {
+    // A timed-out command that is still pending behind another command has
+    // never touched the SDK. It must be cancelled without installing the
+    // global timeout barrier, otherwise a low-priority monitor timeout can
+    // reject the workflow command that immediately follows a long operation.
+    QSemaphore pendingTimeoutDone;
+    lcnc::process::DeviceCommandCompletion pendingTimeoutStatus =
+        lcnc::process::DeviceCommandCompletion::Succeeded;
+    std::thread pendingTimeoutWaiter([&] {
         const auto timeout = completionQueue.executeAndWait(
-            [] { return lcnc::process::DeviceCommandResult{}; }, TaskPriority::Normal, 20);
-        timeoutStatus = timeout.completion;
-        timeoutDone.release();
+            [] { return lcnc::process::DeviceCommandResult{}; }, TaskPriority::Polling, 20);
+        pendingTimeoutStatus = timeout.completion;
+        pendingTimeoutDone.release();
     });
-    if (!timeoutDone.tryAcquire(1, 1000))
-        return fail(QStringLiteral("Timed command wait did not return"));
-    timeoutWaiter.join();
-    if (timeoutStatus != lcnc::process::DeviceCommandCompletion::TimedOut)
-        return fail(QStringLiteral("Timed command wait did not report TimedOut"));
-    if (completionQueue.submit([] {}, TaskPriority::Normal))
-        return fail(QStringLiteral("Queue accepted ordinary work behind a timed-out command"));
-    if (!completionQueue.submitStop([] {}))
-        return fail(QStringLiteral("Queue rejected Stop work behind a timed-out command"));
+    if (!pendingTimeoutDone.tryAcquire(1, 1000))
+        return fail(QStringLiteral("Pending timed command wait did not return"));
+    pendingTimeoutWaiter.join();
+    if (pendingTimeoutStatus != lcnc::process::DeviceCommandCompletion::TimedOut)
+        return fail(QStringLiteral("Pending timed command did not report TimedOut"));
+
+    QSemaphore pendingTimeoutRecoveryRan;
+    if (!completionQueue.submit([&] { pendingTimeoutRecoveryRan.release(); },
+                                TaskPriority::Workflow)) {
+        return fail(QStringLiteral("Pending timeout incorrectly blocked later workflow work"));
+    }
 
     releaseActive.release();
+    if (!pendingTimeoutRecoveryRan.tryAcquire(1, 1000))
+        return fail(QStringLiteral("Workflow work did not run after pending timeout cancellation"));
+
+    // A timeout after the command has started is different: its vendor call
+    // may still own SDK state, so ordinary work remains blocked until it exits.
+    QSemaphore activeTimeoutStarted;
+    QSemaphore releaseActiveTimeout;
+    QSemaphore activeTimeoutDone;
+    lcnc::process::DeviceCommandCompletion activeTimeoutStatus =
+        lcnc::process::DeviceCommandCompletion::Succeeded;
+    std::thread activeTimeoutWaiter([&] {
+        const auto timeout = completionQueue.executeAndWait(
+            [&] {
+                activeTimeoutStarted.release();
+                releaseActiveTimeout.acquire();
+                return lcnc::process::DeviceCommandResult{};
+            }, TaskPriority::Normal, 50);
+        activeTimeoutStatus = timeout.completion;
+        activeTimeoutDone.release();
+    });
+    if (!activeTimeoutStarted.tryAcquire(1, 1000)
+        || !activeTimeoutDone.tryAcquire(1, 1000)) {
+        releaseActiveTimeout.release();
+        activeTimeoutWaiter.join();
+        return fail(QStringLiteral("Active timed command wait did not return"));
+    }
+    activeTimeoutWaiter.join();
+    if (activeTimeoutStatus != lcnc::process::DeviceCommandCompletion::TimedOut)
+        return fail(QStringLiteral("Active timed command did not report TimedOut"));
+    if (completionQueue.submit([] {}, TaskPriority::Normal))
+        return fail(QStringLiteral("Queue accepted ordinary work behind an active timed-out command"));
+    if (!completionQueue.submitStop([] {}))
+        return fail(QStringLiteral("Queue rejected Stop work behind an active timed-out command"));
+
+    releaseActiveTimeout.release();
     QThread::msleep(50);
     if (!completionQueue.submit([] {}, TaskPriority::Normal))
-        return fail(QStringLiteral("Queue did not recover after the timed-out command exited"));
+        return fail(QStringLiteral("Queue did not recover after the active timed-out command exited"));
     if (!completionQueue.shutdown(2000))
         return fail(QStringLiteral("Completion queue did not stop"));
     QMutexLocker completionLocker(&completionMutex);
@@ -320,6 +441,42 @@ int main(int argc, char* argv[])
         || !stopOnlyQueue.shutdown(2000)) {
         return fail(QStringLiteral("Stop-only recovery policy failed"));
     }
+
+    if (!cancelledFinalizeYieldsToStop())
+        return fail(QStringLiteral("Stop during successful DataEnd started motion or lost cancellation"));
+
+    // The real workflow wait helper must yield the device executor to both
+    // Stop and lower-priority status reads while a motion remains running.
+    lcnc::process::DeviceCommandQueue motionWaitQueue;
+    motionWaitQueue.start();
+    std::atomic_bool stopLaneRan{false};
+    std::atomic_bool statusLaneRan{false};
+    int motionPolls = 0;
+    lcnc::process::DeviceCommandResult motionWaitResult;
+    std::thread motionWaiter([&] {
+        motionWaitResult = lcnc::process::waitForQueuedMotion(motionWaitQueue,
+            [&](bool& running) {
+                if (++motionPolls == 1) {
+                    motionWaitQueue.submitStop([&] { stopLaneRan = true; });
+                    motionWaitQueue.submit([&] { statusLaneRan = true; }, TaskPriority::Polling);
+                }
+                running = !stopLaneRan || !statusLaneRan;
+                return lcnc::process::DeviceCommandResult{};
+            }, [] { return false; }, 1000);
+    });
+    motionWaiter.join();
+    if (!motionWaitResult.success || !stopLaneRan || !statusLaneRan || motionPolls < 2)
+        return fail(QStringLiteral("Motion wait starved Stop or status polling"));
+    const int pollsBeforeCancel = motionPolls;
+    std::thread cancelledMotionWaiter([&] {
+        motionWaitResult = lcnc::process::waitForQueuedMotion(motionWaitQueue,
+            [&](bool&) { ++motionPolls; return lcnc::process::DeviceCommandResult{}; },
+            [] { return true; });
+    });
+    cancelledMotionWaiter.join();
+    if (motionWaitResult.completion != lcnc::process::DeviceCommandCompletion::Cancelled
+        || motionPolls != pollsBeforeCancel || !motionWaitQueue.shutdown(2000))
+        return fail(QStringLiteral("Cancelled motion wait submitted more controller reads"));
 
     lcnc::process::DeviceCommandQueue lifecycleQueue;
     if (lifecycleQueue.isWorkerThread())

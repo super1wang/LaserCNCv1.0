@@ -33,6 +33,14 @@ struct ToolpathExportPoint
     double machineZ{0.0};
     double machineR1{0.0};
     double machineR2{0.0};
+    /// Table-zero reference TCP in the right-handed Z-up model (GTN MCS).
+    /// Workpiece carrier motion has been removed, setup is retained. This is
+    /// NOT the posed machine-world TCP used by collision/rendering, and NOT
+    /// the controller-axis coordinate basis. Process consumes it unchanged.
+    double tcpMcsX{0.0};
+    double tcpMcsY{0.0};
+    double tcpMcsZ{0.0};
+    bool tcpMcsValid{false};
     QString rotaryAxis1Name;
     QString rotaryAxis2Name;
     bool machineCoordValid{false};

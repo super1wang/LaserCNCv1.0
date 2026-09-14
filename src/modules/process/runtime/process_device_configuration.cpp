@@ -63,7 +63,7 @@ void ProcessDeviceRuntime::clearToolData()
     m_ToolFactory.ToolClear();
 }
 
-void ProcessDeviceRuntime::setMotionControlTable(const table& table_MotionControl)
+bool ProcessDeviceRuntime::setMotionControlTable(const table& table_MotionControl)
 {
     const auto lock = lockDeviceAccess();
     if (!table_MotionControl.size())
@@ -72,14 +72,16 @@ void ProcessDeviceRuntime::setMotionControlTable(const table& table_MotionContro
         strMotionControl = m_settings.rawValue(lcnc::process::ProcessConfigArea::Devices, "MotionControl", "sType", "SimulatorCMHP").toString().toStdString();
         if (m_strMotionControl != strMotionControl)
         {
-            if (m_motionControl)
-                m_motionControl->Disconnect();
-            setMotionControl(strMotionControl);
+            if (!setMotionControl(strMotionControl)) {
+                LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
+                         "ProcessDeviceRuntime: controller switch rejected because safe shutdown was not confirmed");
+                return false;
+            }
         }
         if (!m_motionControl) {
             LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
                      "Process ProcessDeviceRuntime: cannot apply motion table without a controller");
-            return;
+            return false;
         }
         m_motionControl->setMotionControlTable();
     }
@@ -88,10 +90,11 @@ void ProcessDeviceRuntime::setMotionControlTable(const table& table_MotionContro
         if (!m_motionControl) {
             LCNC_ERR(lcnc::LogCode::InternalUnexpectedState,
                      "Process ProcessDeviceRuntime: cannot apply explicit motion table without a controller");
-            return;
+            return false;
         }
         m_motionControl->setMotionControlTable(table_MotionControl);
     }
+    return true;
 }
 
 void ProcessDeviceRuntime::setDigitalTable(const table& table_Digital)

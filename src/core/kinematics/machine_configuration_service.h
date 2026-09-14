@@ -31,6 +31,9 @@ struct MachineAxisRuntimeConfig
     // 中文翻译：direction 表示控制器正向；origin 以轴系坐标编辑/持久化，
     // 进入运动学与碰撞之前由 axisDefinitions() 转为 OCC 右手世界坐标。
     MachineAxisDef axis;
+    // Controller-native axis number. ACS configurations use ACS indices; GTN
+    // configurations store the GTN physical axis number (1 through 8).
+    // 中文翻译：控制器原生轴号；GTN 构型直接保存 1~8 的物理轴号，适配层不得再次偏移。
     int controllerIndex{-1};
     int homeIndex{-1};
     // Controller-facing conversion and motion values.  Keeping them here makes

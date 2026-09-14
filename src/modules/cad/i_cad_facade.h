@@ -1,13 +1,46 @@
 #pragma once
 
-#include "core/document/lcnc_document.h"   // DocumentId
 #include "core/kernel/i_service.h"
+#include "core/project/project_types.h"
 
+#include <QByteArray>
 #include <QString>
+#include <QStringList>
 
 class QObject;
+class TaskProgress;
 
 namespace lcnc {
+
+struct CadModelEnvelopeRequest
+{
+    QString sourceModelPath;
+    QString generatorPath;
+    QString assetRootDirectory;
+    /// Optional user-facing AP242 tessellated STEP output. The CAD boundary
+    /// publishes it atomically only after validating the complete generation.
+    QString simplifiedStepOutputPath;
+    double deflectionMm{2.0};
+    double angleRad{0.35};
+    double alphaMm{10.0};
+    double offsetMm{2.5};
+    /// Optional per-axis visual-fidelity profile. It still produces a closed,
+    /// conservative wrap, but uses a smaller feature threshold and clearance.
+    QStringList detailAxes;
+    double detailAlphaMm{3.0};
+    double detailOffsetMm{0.5};
+    int maximumValidationSamples{20'000};
+    int progressMinimum{0};
+    int progressMaximum{100};
+};
+
+struct CadModelEnvelopeResult
+{
+    QString manifestPath;
+    QString simplifiedStepOutputPath;
+    QByteArray manifestSha256;
+    int bodyCount{0};
+};
 
 /**
  * @brief CAD 模块对外门面接口（Phase 7）。
@@ -34,6 +67,15 @@ public:
 
     /// 当前项目的工件文档 ID（无项目时返回 @c kInvalidDocumentId）。
     virtual DocumentId workpieceDocumentId() const = 0;
+
+    /// Worker-safe external shrink-wrap boundary. The selected backend remains
+    /// an independent process; CAD validates it and atomically publishes a
+    /// content-addressed generation before returning.
+    virtual bool runModelEnvelopeGenerator(
+        const CadModelEnvelopeRequest& request,
+        TaskProgress* progress,
+        CadModelEnvelopeResult* result,
+        QString* errorMessage = nullptr) = 0;
 };
 
 } // namespace lcnc

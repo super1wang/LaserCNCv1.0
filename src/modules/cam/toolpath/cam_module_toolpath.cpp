@@ -4,8 +4,10 @@
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/algorithms/cam/initial_approach_axis_planner.h"
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/solved_rapid_geometry.h"
 #include "core/algorithms/cam/surface_collision_prefilter.h"
 #include "core/algorithms/cam/travel_path_planner.h"
+#include "core/algorithms/kinematics/rtcp_reference_transform.h"
 #include "core/algorithms/occt_exact_operation_lock.h"
 #include "core/document/lcnc_document.h"
 #include "core/document/xcaf_utils.h"
@@ -40,6 +42,7 @@
 #include "modules/cam/toolpath/toolpath_generation_service.h"
 #include "modules/cam/toolpath/toolpath_sequence_service.h"
 #include "modules/cam/toolpath/toolpath_solve_service.h"
+#include "modules/cam/toolpath/travel_solution_cache.h"
 #include "view/contour_order_label_renderer.h"
 #include "view/graphics_scene.h"
 #include "view/gui_application.h"
@@ -124,6 +127,31 @@
 
 namespace {
 using lcnc::cam::detail::watchTask;
+
+bool rtcpReferenceFor(const MachineKinematics& machine, const QString& workpieceEntry,
+                      const gp_Pnt& worldTcp, gp_Pnt* referenceTcp)
+{
+    const QString carrier = machine.wpcMounts().value(workpieceEntry);
+    if (carrier.isEmpty() || machine.axisChain(carrier).isEmpty())
+        return false;
+    return lcnc::kinematics::tableRtcpReferencePoint(worldTcp,
+        machine.computeWpcTransform(workpieceEntry),
+        machine.computeWpcTransformHome(workpieceEntry), referenceTcp);
+}
+
+void attachRapidRtcpReference(lcnc::cam::RapidPose& pose,
+                               const MachineKinematics& machine,
+                               const QString& workpieceEntry)
+{
+    gp_Pnt reference;
+    pose.tcpMcsValid = rtcpReferenceFor(machine, workpieceEntry,
+        gp_Pnt(pose.tcpX, pose.tcpY, pose.tcpZ), &reference);
+    if (pose.tcpMcsValid) {
+        pose.tcpMcsX = reference.X();
+        pose.tcpMcsY = reference.Y();
+        pose.tcpMcsZ = reference.Z();
+    }
+}
 } // namespace
 
 void CamModule::clearToolpath()
@@ -562,25 +590,39 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         projection = &projectionMachine;
     }
     const lcnc::MachineAxisLayout projectionLayout = snapshot.machineAxisLayout;
+    // Enrich the exported copy, not the cached planner geometry. Each rapid
+    // target keeps its world TCP for collision; RTCP uses a separate reference.
+    for (auto& transition : snapshot.travelPlan.transitions) {
+        const auto contour = std::find_if(snapshot.contours.cbegin(), snapshot.contours.cend(),
+            [&transition](const auto& item) { return item.contourId == transition.toContourId; });
+        for (auto& segment : transition.segments) {
+            segment.target.tcpMcsValid = false;
+            if (!projection || contour == snapshot.contours.cend())
+                continue;
+            lcnc::cam_algo::applyOfflineMotionPose(projection, projectionBaselineAxes,
+                projectionLayout, segment.target.kinematicAxes, segment.target.kinematicAxisMask);
+            attachRapidRtcpReference(segment.target, *projection, contour->workpieceEntry);
+        }
+    }
     const auto appendPoint = [&plan, projection, projectionLayout,
                               projectionBaselineAxes](
-                                 const lcnc::cam::ToolpathExportPoint& point,
+                                 lcnc::cam::ToolpathExportPoint* point,
                                  lcnc::cam::CamMotionPhase phase,
                                  std::uint64_t contourId,
                                  const QString& workpieceEntry) {
-        if (!point.machineCoordValid)
+        if (!point || !point->machineCoordValid)
             return;
         lcnc::cam::CamMotionNode node;
         node.phase = phase;
         node.contourId = contourId;
-        node.axes = point.machineAxes;
-        node.axisMask = point.machineAxisMask;
-        node.tcpX = point.x;
-        node.tcpY = point.y;
-        node.tcpZ = point.z;
-        node.normalX = point.normalX;
-        node.normalY = point.normalY;
-        node.normalZ = point.normalZ;
+        node.axes = point->machineAxes;
+        node.axisMask = point->machineAxisMask;
+        node.tcpX = point->x;
+        node.tcpY = point->y;
+        node.tcpZ = point->z;
+        node.normalX = point->normalX;
+        node.normalY = point->normalY;
+        node.normalZ = point->normalZ;
         // ToolpathExportPoint geometry is workpiece-local, while machine
         // bodies and rapid TCPs are already in machine-world coordinates.
         // Apply the complete axis-chain + installation transform exactly once
@@ -594,16 +636,26 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             // 中文翻译：每个节点独立恢复未参与插补的轴，再按冻结物理布局应用该节点轴值。
             lcnc::cam_algo::applyOfflineMotionPose(
                 projection, projectionBaselineAxes, projectionLayout,
-                point.machineAxes, point.machineAxisMask);
+                point->machineAxes, point->machineAxisMask);
             lcnc::cam_algo::transformMotionNodeGeometry(
                 &node, projection->computeWpcTransform(workpieceEntry));
+            gp_Pnt reference;
+            point->tcpMcsValid = rtcpReferenceFor(*projection, workpieceEntry,
+                gp_Pnt(node.tcpX, node.tcpY, node.tcpZ), &reference);
+            if (point->tcpMcsValid) {
+                point->tcpMcsX = reference.X();
+                point->tcpMcsY = reference.Y();
+                point->tcpMcsZ = reference.Z();
+            }
+        } else {
+            point->tcpMcsValid = false;
         }
         node.estimatedTimeMs = phase == lcnc::cam::CamMotionPhase::Cutting ? 20.0 : 1.0;
         plan.nodes.append(std::move(node));
     };
 
     bool firstEnabledContour = true;
-    for (const auto& contour : snapshot.contours) {
+    for (auto& contour : snapshot.contours) {
         if (!contour.enabled || !contour.layerEnabled)
             continue;
         // A committed CAM/offline plan starts at the first contour's lead-in.
@@ -619,11 +671,14 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             }
         }
         if (contour.hasLeadIn)
-            appendPoint(contour.leadInPoint, lcnc::cam::CamMotionPhase::LeadIn,
+            appendPoint(&contour.leadInPoint, lcnc::cam::CamMotionPhase::LeadIn,
                         contour.contourId, contour.workpieceEntry);
-        for (const auto& point : snapshot.pointsByContourId.value(contour.contourId))
-            appendPoint(point, lcnc::cam::CamMotionPhase::Cutting,
+        auto points = snapshot.pointsByContourId.find(contour.contourId);
+        if (points != snapshot.pointsByContourId.end()) {
+            for (auto& point : points.value())
+                appendPoint(&point, lcnc::cam::CamMotionPhase::Cutting,
                         contour.contourId, contour.workpieceEntry);
+        }
         firstEnabledContour = false;
     }
     if (plan.collision.nodeStates.size() != plan.nodes.size())
@@ -867,10 +922,16 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             offsetContinuity = solvePoints.back().machineCoord.solvedPose;
         }
     }
-    if (!m_travelPlanCache.stale && m_travelPlanCache.key == key) {
+    // Restore all solved contour geometry together with the cached transition.
+    // Latest asynchronous collision proof still comes from m_travelPlanCache.
+    // 中文翻译：复用空程时整体恢复后继轮廓求解结果，并保留最新异步碰撞证明。
+    if (!m_travelPlanCache.stale && m_travelPlanCache.key == key
+        && (snapshot.contours.size() <= 1
+            || lcnc::cam::restoreTravelSolution(m_travelSolutionCache, key, &snapshot))) {
         snapshot.travelPlan = m_travelPlanCache;
         return;
     }
+    m_travelSolutionCache = {};
 
     if (snapshot.contours.size() <= 1) {
         lcnc::cam::TravelPlanSnapshot emptyPlan;
@@ -1077,6 +1138,11 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             std::array<double, lcnc::MachineAxisLayout::kMaxAxes> previousAxes{
                 source.machineX, source.machineY, source.machineZ,
                 source.machineR1, source.machineR2};
+            MachineKinematics solvedProjection;
+            solvedProjection.setAxes(offlineBaselineAxes, kin->configType());
+            solvedProjection.setWorkpieceSetupTransform(kin->workpieceSetupTransform());
+            for (auto it = kin->wpcMounts().cbegin(); it != kin->wpcMounts().cend(); ++it)
+                solvedProjection.mountWorkpiece(it.key(), it.value());
             for (int index = 0; index < transition.segments.size(); ++index) {
                 const MachineCoord& coordinate = continuousPoints[
                     static_cast<std::size_t>(index + 1)].machineCoord;
@@ -1088,6 +1154,16 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
                 pose.rotaryAxis2Name = coordinate.r2Name;
                 pose.kinematicAxes = coordinate.solvedPose.values;
                 pose.kinematicAxisMask = coordinate.solvedPose.activeMask;
+                // The planner's world samples belong to its baseline posture.
+                // IK changes the carrier posture: publish the same local point
+                // in the solved world frame before deriving its RTCP reference.
+                // 中文翻译：连续求解后同步 TCP/法线到已求解姿态，不能将规划姿态的世界点与新轴值混用。
+                lcnc::cam_algo::applyOfflineMotionPose(&solvedProjection, offlineBaselineAxes,
+                    snapshot.machineAxisLayout, pose.kinematicAxes, pose.kinematicAxisMask);
+                const auto& solvedPoint = continuousPoints[static_cast<std::size_t>(index + 1)];
+                const gp_Trsf solvedWpc = solvedProjection.computeWpcTransform(sourceContour->workpieceEntry);
+                lcnc::cam_algo::setSolvedRapidWorldGeometry(
+                    pose, solvedPoint.position, solvedPoint.normal, solvedWpc);
                 std::uint8_t moved = 0;
                 for (int axis = 0; axis < lcnc::MachineAxisLayout::kMaxAxes; ++axis) {
                     if (std::abs(pose.axes[axis] - previousAxes[axis]) > 1e-9)
@@ -1136,6 +1212,7 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
     plan.key = key;
     snapshot.travelPlan = plan;
     m_travelPlanCache = plan;
+    m_travelSolutionCache = snapshot;
 }
 
 lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
@@ -1424,6 +1501,7 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
             normal = gp_Vec(0.0, 0.0, 1.0);
         normal.Normalize();
         pose.tcpX = tcp.X(); pose.tcpY = tcp.Y(); pose.tcpZ = tcp.Z();
+        attachRapidRtcpReference(pose, currentKinematics, contourIt->workpieceEntry);
         pose.surfaceNormalX = normal.X();
         pose.surfaceNormalY = normal.Y();
         pose.surfaceNormalZ = normal.Z();

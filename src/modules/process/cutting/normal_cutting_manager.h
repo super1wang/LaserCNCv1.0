@@ -46,7 +46,7 @@ struct NormalCuttingCallbacks
  *     → ProcessToolpathService::refreshSnapshot()
  *     → buildCuttingList() 按 startNumber/endNumber 切片，绑 Tool*、补偿
  *     → 每条 CuttingRow 喂给 sink：resetProgram → jumpTo* → setShutterTimings →
- *                                  laserOn → beginSegment → lineTo* → endSegment →
+ *                                  beginSegment → laserOn → lineTo* → endSegment →
  *                                  laserOff → endProgram → flush
  *
  * 暂停/停止/急停经 ProcessCancellationToken 协同：

@@ -16,6 +16,7 @@ namespace lcnc {
 class AppSettings;
 class LcncProjectManager;
 class MachineConfigurationService;
+namespace kinematics { class MachineCalibrationService; }
 
 /**
  * @brief 微内核实现。
@@ -145,6 +146,7 @@ private:
     std::unique_ptr<::TaskManager>     m_taskMgr;
     std::unique_ptr<AppSettings>       m_appSettings;
     std::shared_ptr<MachineConfigurationService> m_machineConfig;
+    std::shared_ptr<kinematics::MachineCalibrationService> m_machineCalibration;
     // GuiApplication 仅裸指针；所有权在 main()，避免 core 依赖 view。
     ::GuiApplication*                  m_guiApp{nullptr};
     // CommandContainer 仅裸指针；所有权在 MainWindow。

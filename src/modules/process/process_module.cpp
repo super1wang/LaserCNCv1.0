@@ -3,6 +3,8 @@
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
 #include "core/kinematics/machine_configuration_service.h"
+#include "core/kinematics/machine_calibration_service.h"
+#include "core/kinematics/controller_kinematics_snapshot.h"
 #include "core/project/lcnc_project_package.h"
 #include "core/logging/logger.h"
 #include "core/project/lcnc_project_manager.h"
@@ -63,6 +65,19 @@ using toml::table;
 using toml::value;
 
 namespace {
+
+// On a failed final shutdown, preserve the device objects AND the configuration
+// they borrow. This quarantine deliberately has process lifetime and no static
+// destructor: destroying it would retry shutdown after Stop had already failed.
+// 中文翻译：最终停机失败时连同借用配置保留设备；禁止静态析构再次停机或释放 SDK 对象。
+struct RetainedProcessDeviceSession {
+    std::shared_ptr<lcnc::process::ProcessSettingsService> settings;
+    std::shared_ptr<lcnc::process::ProcessRuntimeConfiguration> configuration;
+    std::shared_ptr<ProcessDeviceRuntime> service;
+    std::shared_ptr<std::shared_ptr<ProcessDeviceRuntime>> releaseHolder;
+    std::unique_ptr<lcnc::process::DeviceCommandQueue> queue;
+    std::unique_ptr<lcnc::process::ProcessConnectionService> connectionService;
+};
 
 /// 一次性监听 TaskManager::taskFinished，匹配到指定 taskId 后自动断开。
 void watchTask(QObject* owner, TaskId taskId, std::function<void(bool)> onFinished)
@@ -698,6 +713,8 @@ void ProcessModule::stop()
         m_camPlanSubscription = lcnc::kInvalidSubscription;
     }
     ++m_runRequestGeneration;
+    if (m_service)
+        m_service->requestMotionAbort();
     if (m_deviceCommandQueue)
         m_deviceCommandQueue->beginStopOnly();
 
@@ -716,7 +733,7 @@ void ProcessModule::stop()
     // Process workers borrow ProcessDeviceRuntime and controller objects.  They must leave
     // before this module tears down monitoring or its device ownership.
     const bool tasksFinished = cancelOwnedTasks(10000);
-    if (!tasksFinished) {
+    if (!tasksFinished || !workflowFinished) {
         if (m_deviceCommandQueue) {
             const auto service = m_service;
             (void)m_deviceCommandQueue->submitStop([service] {
@@ -738,13 +755,13 @@ void ProcessModule::stop()
 
     bool disconnectOk = false;
     bool runtimeReleased = false;
+    std::shared_ptr<std::shared_ptr<ProcessDeviceRuntime>> runtimeHolder;
     if (tasksFinished && workflowFinished && m_service && m_deviceCommandQueue) {
-        const auto service = m_service;
         const auto teardown = m_deviceCommandQueue->executeAndWait(
-            lcnc::process::DeviceCommandQueue::ResultCommand([service] {
-                const bool outputsSafe = stopProcessHardware(service);
-                const bool disconnected = service->shutdownDevices();
-                const bool success = outputsSafe && disconnected;
+            lcnc::process::DeviceCommandQueue::ResultCommand([service = m_service] {
+                // shutdownDevices owns the one safe-stop/disconnect sequence.
+                // 中文翻译：安全停止及断连只执行一次，首次失败后不能自动重试并断开。
+                const bool success = service->shutdownDevices();
                 return lcnc::process::DeviceCommandResult{
                     success,
                     success
@@ -756,10 +773,11 @@ void ProcessModule::stop()
         disconnectOk = teardown.success;
         if (disconnectOk) {
             m_connected = false;
-            auto runtimeHolder =
-                std::make_shared<std::shared_ptr<ProcessDeviceRuntime>>(std::move(m_service));
+            runtimeHolder = std::make_shared<std::shared_ptr<ProcessDeviceRuntime>>(std::move(m_service));
             const auto release = m_deviceCommandQueue->executeAndWait(
-                lcnc::process::DeviceCommandQueue::ResultCommand([runtimeHolder] {
+                lcnc::process::DeviceCommandQueue::ResultCommand([
+                    runtimeHolder, settings = m_settingsService,
+                    configuration = m_runtimeConfigurationOwner] {
                     runtimeHolder->reset();
                     return lcnc::process::DeviceCommandResult{};
                 }),
@@ -792,11 +810,20 @@ void ProcessModule::stop()
 
     // Do not destroy or disconnect under an unfinished SDK call. The shared
     // ProcessDeviceRuntime lease retains those objects after any shutdown timeout.
-    if ((!tasksFinished || !workflowFinished || !disconnectOk
-         || !runtimeReleased || !deviceQueueFinished)
-        && m_service) {
+    if (!tasksFinished || !workflowFinished || !disconnectOk
+        || !runtimeReleased || !deviceQueueFinished) {
         LCNC_WARN(lcnc::LogCode::Generic,
-                  "ProcessModule::stop: retaining device runtime because a worker or device queue is still active");
+                  "ProcessModule::stop: quarantining device runtime, configuration and queue after unconfirmed shutdown; no destructor retry or controller close");
+        // Retain even when every worker exited: a failed hardware stop is not
+        // permission to let the runtime destructor disconnect the controller.
+        // 中文翻译：即使线程已退出，硬件停止失败也不能由析构器再次断开控制器。
+        // An in-flight connection command also borrows its callback owner.
+        // 中文翻译：未返回的连接命令还借用回调服务，必须脱离 QObject 父对象并一起保留。
+        if (m_connectionService)
+            m_connectionService->setParent(nullptr);
+        (void)new RetainedProcessDeviceSession{
+            m_settingsService, m_runtimeConfigurationOwner, m_service,
+            runtimeHolder, std::move(m_deviceCommandQueue), std::move(m_connectionService)};
     }
     m_initialized = false;
     lcnc::process::ProcessStepRegistry::instance().clear();
@@ -881,25 +908,33 @@ void ProcessModule::connectAllDevices()
         pureSimulation,
         reportProgress,
         [self](const lcnc::process::DeviceCommandResult& result) {
-            if (!self)
+            if (!self || !self->m_connectionService)
                 return;
             const bool success = result.success;
             self->m_deviceOperation = DeviceOperation::None;
-            self->m_connected = success;
-            emit self->connectionChanged(success);
+            const auto connectionOpen = self->m_connectionService->lastMotionConnectionOpen();
+            self->m_connected = connectionOpen.value_or(success || self->m_connected);
+            emit self->connectionChanged(self->m_connected);
             if (success) {
+                self->m_stopRecoveryRequired = false;
                 // 中文翻译：设备已连接
                 self->setState(State::Idle, self->tr("Device is connected"));
                 self->startDeviceMonitoring();
             } else {
                 // 中文翻译：设备连接失败；未切换到纯软件仿真
                 self->setState(State::Error,
-                               self->tr("Device connection failed; not switched to software-only emulation"));
+                               result.error.isEmpty()
+                                   ? self->tr("Device connection failed; not switched to software-only emulation")
+                                   : result.error);
+                self->m_stopRecoveryRequired = self->m_connected;
+                if (self->m_connected)
+                    self->startDeviceMonitoring();
             }
             emit self->deviceConnectFinished(success,
                 // 中文翻译：所有设备连接成功；设备连接失败，请检查设置
                 success ? self->tr("All devices connected successfully")
-                        : self->tr("Device connection failed, please check settings"));
+                        : (result.error.isEmpty()
+                            ? self->tr("Device connection failed, please check settings") : result.error));
         });
     if (!ticket.accepted) {
         m_deviceOperation = DeviceOperation::None;
@@ -948,34 +983,50 @@ void ProcessModule::disconnectAllDevices()
     m_deviceOperation = DeviceOperation::Disconnecting;
     const auto ticket = m_connectionService->disconnect(
         [self = QPointer<ProcessModule>(this)](const lcnc::process::DeviceCommandResult& result) {
-            if (!self)
+            if (!self || !self->m_connectionService)
                 return;
             const bool success = result.success;
             self->m_deviceOperation = DeviceOperation::None;
-            self->m_connected = false;
+            const auto connectionOpen = self->m_connectionService->lastMotionConnectionOpen();
+            self->m_connected = connectionOpen.value_or(!success && self->m_connected);
             if (self->m_simTimer)
                 self->m_simTimer->stop();
-            emit self->connectionChanged(false);
+            emit self->connectionChanged(self->m_connected);
             self->setState(success ? State::Idle : State::Error, success
                 // 中文翻译：所有设备已断开
                 ? self->tr("All devices are disconnected")
                 // 中文翻译：设备断开过程中出现异常，请检查日志
-                : self->tr("An exception occurred during device disconnection, please check the log."));
+                : (result.error.isEmpty()
+                    ? self->tr("An exception occurred during device disconnection, please check the log.")
+                    : result.error));
             if (success) {
+                // A confirmed disconnect ends the failed-stop transaction;
+                // allow a fresh connection without permitting motion on the
+                // retained partial session when disconnection failed.
+                // 中文翻译：确认安全断连后允许重新连接；断连失败仍保持停止门禁。
+                self->m_stopRecoveryRequired = false;
+                if (self->m_deviceCommandQueue)
+                    self->m_deviceCommandQueue->endStopOnly();
                 LCNC_INFO(lcnc::LogCode::Generic, "ProcessConnectionService: disconnected");
             } else {
                 LCNC_ERR(lcnc::LogCode::Generic, "ProcessConnectionService: disconnect failed");
+                self->m_stopRecoveryRequired = self->m_connected;
+                if (self->m_connected)
+                    self->startDeviceMonitoring();
             }
             emit self->deviceConnectFinished(success,
                 // 中文翻译：所有设备已断开；设备断开过程中出现异常
                 success ? self->tr("All devices are disconnected")
-                        : self->tr("An exception occurred during device disconnection"));
+                        : (result.error.isEmpty()
+                            ? self->tr("An exception occurred during device disconnection") : result.error));
         });
     if (!ticket.accepted) {
         m_deviceOperation = DeviceOperation::None;
         // 中文翻译：设备命令队列不可用
         setState(State::Error, tr("Device command queue is unavailable"));
         emit deviceConnectFinished(false, tr("Device command queue is unavailable"));
+        if (m_connected)
+            startDeviceMonitoring();
     }
 }
 
@@ -1029,7 +1080,7 @@ void ProcessModule::jog(const QString& axisName, int direction, int speedLevel, 
     }
     QPointer<ProcessModule> self(this);
     m_manualMotionService->moveRelative(normalizedAxis, delta, jogVelocityForLevel(speedLevel),
-        m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired,
+        m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired || m_stopRecoveryInFlight,
         [self](const QString& message) { if (self) self->setStatusMessage(message); });
 }
 
@@ -1049,7 +1100,7 @@ void ProcessModule::moveAxisAbsolute(const QString& axisName, double position, i
     }
     QPointer<ProcessModule> self(this);
     m_manualMotionService->moveAbsolute(normalizedAxis, position, jogVelocityForLevel(speedLevel),
-        m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired,
+        m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired || m_stopRecoveryInFlight,
         [self](const QString& message) { if (self) self->setStatusMessage(message); });
 }
 
@@ -1076,7 +1127,7 @@ void ProcessModule::startContinuousJog(const QString& axisName, int direction, i
     QPointer<ProcessModule> self(this);
     const auto ticket = m_manualMotionService->startContinuous(
         normalizedAxis, direction > 0, velocity,
-        m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired,
+        m_axisEnabled.value(normalizedAxis, true), m_stopRecoveryRequired || m_stopRecoveryInFlight,
         [self](const QString& message) { if (self) self->setStatusMessage(message); });
     if (!ticket.accepted) {
         m_continuousJogPermitTimer->stop();
@@ -1506,6 +1557,55 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
             || snapshot.solverVersion != definition.solverVersion)
             // 中文翻译：刀路求解契约与当前机床模式不匹配，请重新求解机床坐标
             return fail(tr("The toolpath solving contract does not match the current machine mode; please solve the machine coordinates again"));
+
+        const QString controllerType = m_settingsService->rawValue(
+            lcnc::process::ProcessConfigArea::Devices, QStringLiteral("MotionControl"),
+            QStringLiteral("sType"), QString{}).toString();
+        const bool gtnGroup = controllerType.compare(QStringLiteral("GTN"), Qt::CaseInsensitive) == 0
+            && m_settingsService->rawValue(
+                lcnc::process::ProcessConfigArea::Devices, QStringLiteral("GTN"),
+                QStringLiteral("bUseGroupArchitecture"), false).toBool();
+        const bool controllerRtcp = gtnGroup && m_settingsService->rawValue(
+            lcnc::process::ProcessConfigArea::Devices, QStringLiteral("GTN"),
+            QStringLiteral("bEnableRtcp"), false).toBool();
+        const bool allowConfigurationDerivedRtcp = controllerRtcp
+            && m_settingsService->rawValue(
+                lcnc::process::ProcessConfigArea::Devices, QStringLiteral("GTN"),
+                QStringLiteral("bAllowConfigurationDerivedRtcp"), false).toBool();
+        if (gtnGroup && snapshot.machineAxisLayout.count != 5)
+            return fail(tr("GTN Group/CommandList execution requires a five-axis CAM snapshot"));
+        if (controllerRtcp) {
+            auto calibration = lcnc::Kernel::current().services()
+                .getService<lcnc::kinematics::MachineCalibrationService>();
+            QString calibrationError;
+            lcnc::kinematics::ControllerKinematicsSnapshot controllerSnapshot;
+            if (!calibration || !lcnc::kinematics::buildControllerKinematicsSnapshot(
+                    *machineConfig, calibration.get(),
+                    allowConfigurationDerivedRtcp
+                        ? lcnc::kinematics::ControllerCalibrationRequirement::MachineVerifiedOrConfigurationDerived
+                        : lcnc::kinematics::ControllerCalibrationRequirement::MachineVerified,
+                    &controllerSnapshot, &calibrationError)) {
+                return fail(tr("Controller RTCP requires an active MachineVerified physical calibration: %1")
+                                .arg(calibrationError));
+            }
+            if (controllerSnapshot.calibrationConfigurationDerived) {
+                LCNC_WARN(lcnc::LogCode::Generic,
+                          "process.rtcp: mode=normal calibration_source=configuration_derived motion_limits=configured laser=tool_sequence calibration={} result=allowed",
+                          controllerSnapshot.calibrationFingerprint.toStdString());
+            }
+            for (const auto& contour : snapshot.contours) {
+                if (!contour.enabled || !contour.layerEnabled)
+                    continue;
+                if (contour.hasLeadIn && !contour.leadInPoint.tcpMcsValid)
+                    return fail(tr("Controller RTCP requires a valid MCS TCP for every lead-in point"));
+                const auto points = snapshot.pointsByContourId.value(contour.contourId);
+                if (std::any_of(points.cbegin(), points.cend(), [](const auto& point) {
+                        return point.machineCoordValid && !point.tcpMcsValid;
+                    })) {
+                    return fail(tr("Controller RTCP requires a valid MCS TCP for every cutting point"));
+                }
+            }
+        }
         if (!m_simulationMode
             && snapshot.machineConfigurationFingerprint != machineConfig->configurationFingerprint())
             // 中文翻译：刀路机床构型指纹不匹配，请重新求解机床坐标
@@ -1841,16 +1941,11 @@ void ProcessModule::resetStop()
 {
     if (m_stopInFlight || m_stopRecoveryInFlight)
         return;
-    if (m_state == State::Error) {
-        QString configurationError;
-        // 中文翻译：停止复位必须再次检查导致加工无法开始的配置错误。
-        if (!validateProcessingConfiguration(&configurationError, false)) {
-            // 中文翻译：停止复位配置检查失败: %1
-            setState(State::Error,
-                     tr("Stop reset configuration check failed: %1").arg(configurationError));
-            return;
-        }
-    }
+    if (m_state != State::Stopped && m_state != State::Error)
+        return;
+    // Reset repairs device state, not the CAM project. A missing/invalid
+    // toolpath must not prevent clearing controller alarms. runStart() still
+    // performs full, current project/configuration and device admission.
     if (m_simulationMode) {
         m_stopRecoveryRequired = false;
         if (m_deviceCommandQueue)
@@ -1864,6 +1959,8 @@ void ProcessModule::resetStop()
     }
 
     m_stopRecoveryInFlight = true;
+    updateMachiningInteractionLock();
+    const std::uint64_t recoveryGeneration = ++m_runRequestGeneration;
     const auto service = m_service;
     QPointer<ProcessModule> self(this);
     if (!m_deviceCommandQueue->submit(
@@ -1871,14 +1968,19 @@ void ProcessModule::resetStop()
                 if (!stopProcessHardware(service))
                     return lcnc::process::DeviceCommandResult{false,
                         QObject::tr("Safety shutdown failed during stop reset")};
-                return service->validateContourBoundary();
+                return service->recoverControllerAfterStop();
             }),
             TaskPriority::Stop,
-            [self](const lcnc::process::DeviceCommandResult& result) {
-                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result] {
+            [self, recoveryGeneration](const lcnc::process::DeviceCommandResult& result) {
+                QMetaObject::invokeMethod(QCoreApplication::instance(), [self, result, recoveryGeneration] {
                     if (!self)
                         return;
                     self->m_stopRecoveryInFlight = false;
+                    self->updateMachiningInteractionLock();
+                    // A newer Stop owns the state/queue gate. An old Reset
+                    // completion must never switch it back to Idle.
+                    if (recoveryGeneration != self->m_runRequestGeneration)
+                        return;
                     if (!result.success) {
                         self->setState(State::Error, self->tr("Stop reset health check failed: %1")
                                                .arg(result.error));
@@ -1893,6 +1995,7 @@ void ProcessModule::resetStop()
                 }, Qt::QueuedConnection);
             })) {
         m_stopRecoveryInFlight = false;
+        updateMachiningInteractionLock();
         setState(State::Error, tr("Stop reset command failed to queue"));
     }
 }
@@ -2365,16 +2468,17 @@ void ProcessModule::applySettingsChanges(const lcnc::process::ProcessSettingsCha
             bool success = true;
             try {
                 if (changes.domains.contains(QStringLiteral("devices"))) {
-                    service->setMotionControlTable();
-                    service->setLaserTable();
+                    success = service->setMotionControlTable();
+                    if (success)
+                        service->setLaserTable();
                 }
-                if (changes.domains.contains(QStringLiteral("io"))) {
+                if (success && changes.domains.contains(QStringLiteral("io"))) {
                     service->setDigitalTable();
                     service->setAnalogTable();
                 }
-                if (changes.domains.contains(QStringLiteral("tools")))
+                if (success && changes.domains.contains(QStringLiteral("tools")))
                     service->setToolTable();
-                if (changes.domains.contains(QStringLiteral("operations")))
+                if (success && changes.domains.contains(QStringLiteral("operations")))
                     service->setGasTable();
             } catch (const std::exception& exception) {
                 success = false;
@@ -2455,6 +2559,7 @@ void ProcessModule::setState(State state, const QString& statusMessage)
 void ProcessModule::updateMachiningInteractionLock()
 {
     const bool locked = m_preflightInFlight
+        || m_stopRecoveryInFlight
         || m_state == State::Running
         || m_state == State::Paused;
     if (m_machiningInteractionLocked == locked)

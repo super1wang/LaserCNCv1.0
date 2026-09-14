@@ -23,6 +23,9 @@ public:
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
     Qt::ItemFlags flags(const QModelIndex& index) const override;
 
+signals:
+    void fieldEdited(const QString& objectId, const QString& fieldId);
+
 private:
     ProcessSettingsService* m_settings{nullptr};
     QString m_objectId;

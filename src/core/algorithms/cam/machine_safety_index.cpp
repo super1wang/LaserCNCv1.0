@@ -1,5 +1,7 @@
 #include "core/algorithms/cam/machine_safety_index.h"
 
+#include "core/machine/model_envelope_asset.h"
+
 #include "core/algorithms/cam/surface_collision_prefilter.h"
 #include "core/algorithms/occt_exact_operation_lock.h"
 #include "core/logging/logger.h"
@@ -17,6 +19,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QSaveFile>
 #include <QSet>
 #include <STEPCAFControl_Reader.hxx>
@@ -54,7 +57,7 @@ namespace lcnc::cam_algo {
 namespace {
 
 constexpr char kIndexMagic[8] = {'L', 'C', 'N', 'C', 'M', 'S', 'I', '1'};
-constexpr quint32 kIndexSchema = 5;
+constexpr quint32 kIndexSchema = 6;
 constexpr int kChecksumBytes = 32;
 constexpr double kPoseTolerance = 1e-9;
 constexpr double kPi = 3.14159265358979323846;
@@ -950,6 +953,8 @@ struct MachineSafetyIndexCompiler::Impl
     QString sourcePath;
     QByteArray sourceSha256;
     QVector<SourceBody> bodies;
+    QHash<QString, QString> envelopeParentAxes;
+    QByteArray envelopeManifestSha256;
     qint64 importMs{0};
 };
 
@@ -1007,6 +1012,8 @@ bool MachineSafetyIndex::isValid() const
 {
     const std::uint64_t cells = flatCellCount(m_axes);
     return m_sourceSha256.size() == kChecksumBytes && cells > 0
+        && (m_envelopeManifestSha256.isEmpty()
+            || m_envelopeManifestSha256.size() == kChecksumBytes)
         && cells == static_cast<std::uint64_t>(m_states.size())
         && m_states.size() == m_clearanceLowerBounds.size()
         && m_states.size() == m_blockingPairs.size()
@@ -1292,7 +1299,7 @@ bool MachineSafetyIndex::save(const QString& filePath, QString* errorMessage) co
     QDataStream stream(&buffer);
     stream.setVersion(QDataStream::Qt_6_5);
     stream.setByteOrder(QDataStream::LittleEndian);
-    stream << m_sourceSha256 << m_clearanceMm;
+    stream << m_sourceSha256 << m_envelopeManifestSha256 << m_clearanceMm;
     stream << static_cast<quint32>(m_axes.size());
     for (const auto& axis : m_axes)
         writeAxis(stream, axis);
@@ -1428,7 +1435,10 @@ bool MachineSafetyIndex::load(const QString& filePath, QString* errorMessage)
     QDataStream stream(&buffer);
     stream.setVersion(QDataStream::Qt_6_5);
     stream.setByteOrder(QDataStream::LittleEndian);
-    stream >> m_sourceSha256 >> m_clearanceMm;
+    stream >> m_sourceSha256;
+    if (schema >= 6)
+        stream >> m_envelopeManifestSha256;
+    stream >> m_clearanceMm;
     quint32 axisCount = 0;
     stream >> axisCount;
     if (axisCount == 0 || axisCount > kMachineSafetyMaximumAxes) {
@@ -1661,6 +1671,8 @@ bool MachineSafetyIndexCompiler::loadMachine(const QString& machineFilePath,
         m_impl->sourcePath = QFileInfo(machineFilePath).absoluteFilePath();
         m_impl->sourceSha256 = digest;
         m_impl->bodies = std::move(bodies);
+        m_impl->envelopeParentAxes.clear();
+        m_impl->envelopeManifestSha256.clear();
         m_impl->importMs = timer.elapsed();
         return true;
     } catch (const Standard_Failure& failure) {
@@ -1680,6 +1692,87 @@ bool MachineSafetyIndexCompiler::loadMachine(const QString& machineFilePath,
             *errorMessage = QStringLiteral("Unknown machine safety index import failure");
     }
     return false;
+}
+
+bool MachineSafetyIndexCompiler::applyModelEnvelope(
+    const lcnc::ModelEnvelopeAsset& asset, QString* errorMessage)
+{
+    if (m_impl->bodies.isEmpty() || asset.bodies.isEmpty()
+        || asset.sourceModelSha256 != m_impl->sourceSha256
+        || asset.manifestSha256.size() != 32
+        || !asset.collisionConservative) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral(
+                "Model envelope does not match the loaded machine source");
+        return false;
+    }
+    QHash<QString, const lcnc::ModelEnvelopeBodyResource*> byAxis;
+    for (const auto& resource : asset.bodies) {
+        const QString axis = resource.axisName.trimmed().toUpper();
+        if (axis.isEmpty() || byAxis.contains(axis)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Model envelope contains duplicate axes");
+            return false;
+        }
+        byAxis.insert(axis, &resource);
+    }
+    if (byAxis.size() != m_impl->bodies.size()) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral(
+                "Model envelope body count does not match the machine model");
+        return false;
+    }
+    QVector<SurfaceCollisionModel> models;
+    models.reserve(m_impl->bodies.size());
+    QVector<Bnd_Box> envelopeBounds;
+    envelopeBounds.reserve(m_impl->bodies.size());
+    QHash<QString, QString> parentAxes;
+    for (const auto& body : std::as_const(m_impl->bodies)) {
+        const auto* resource = byAxis.value(body.axisName.toUpper(), nullptr);
+        if (!resource) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Model envelope is missing axis %1")
+                                    .arg(body.axisName);
+            return false;
+        }
+        SurfaceTriangleSoup soup;
+        if (!lcnc::ModelEnvelopeAsset::loadBodyMesh(
+                asset, *resource, &soup, errorMessage)) {
+            return false;
+        }
+        std::string surfaceError;
+        SurfaceCollisionModel model = SurfaceCollisionModel::buildFromTriangleSoup(
+            soup, asset.deflectionMm, true, &surfaceError);
+        if (!model.isValid()) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral(
+                    "Unable to build model-envelope collision surface for %1: %2")
+                                    .arg(body.axisName,
+                                         QString::fromStdString(surfaceError));
+            }
+            return false;
+        }
+        Bnd_Box bounds;
+        for (const auto& vertex : soup.vertices)
+            bounds.Add(gp_Pnt(vertex[0], vertex[1], vertex[2]));
+        if (bounds.IsVoid()) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral(
+                    "Model-envelope bounds are empty for %1").arg(body.axisName);
+            }
+            return false;
+        }
+        models.append(std::move(model));
+        envelopeBounds.append(std::move(bounds));
+        parentAxes.insert(body.axisName.toUpper(), resource->parentAxis.toUpper());
+    }
+    for (int index = 0; index < m_impl->bodies.size(); ++index) {
+        m_impl->bodies[index].surfaceModel = std::move(models[index]);
+        m_impl->bodies[index].localAabb = std::move(envelopeBounds[index]);
+    }
+    m_impl->envelopeParentAxes = std::move(parentAxes);
+    m_impl->envelopeManifestSha256 = asset.manifestSha256;
+    return true;
 }
 
 bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
@@ -1727,8 +1820,17 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
     try {
         MachineSafetyIndex result;
         result.m_sourceSha256 = m_impl->sourceSha256;
+        result.m_envelopeManifestSha256 = m_impl->envelopeManifestSha256;
         result.m_axes = options.axes;
         result.m_clearanceMm = options.clearanceMm;
+        const bool envelopeBound = !result.m_envelopeManifestSha256.isEmpty();
+        // A bound envelope is the production collision geometry. Original STEP
+        // leaves remain available only for offline exact auditing; they must not
+        // certify separation for the larger shrink-wrap body.
+        const bool useLeafBvhCertification =
+            options.useLeafBvhCertification && !envelopeBound;
+        const bool useSurfaceBvhCertification =
+            options.useSurfaceBvhCertification;
         if (result.m_axes.isEmpty() || result.m_axes.size() > kMachineSafetyMaximumAxes
             || !std::isfinite(options.clearanceMm) || options.clearanceMm < 0.0) {
             if (errorMessage)
@@ -1765,6 +1867,21 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
             }
             axis.cellCount = static_cast<std::uint32_t>(
                 std::ceil((axis.maximum - axis.minimum) / axis.step));
+            if (m_impl->envelopeParentAxes.contains(axis.name.toUpper())
+                && m_impl->envelopeParentAxes.value(axis.name.toUpper())
+                       != axis.parentAxis.toUpper()) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral(
+                        "Model-envelope parent axis mismatch for %1").arg(axis.name);
+                }
+                return false;
+            }
+        }
+        if (m_impl->envelopeParentAxes.contains(QStringLiteral("BASE"))
+            && !m_impl->envelopeParentAxes.value(QStringLiteral("BASE")).isEmpty()) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Model-envelope BASE parent must be empty");
+            return false;
         }
         const std::uint64_t cells = flatCellCount(result.m_axes);
         if (cells == 0 || cells > options.maximumCells
@@ -1844,6 +1961,8 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
             if (checkpoint.load(options.checkpointPath, &checkpointError)
                 && checkpoint.m_sourceSha256 == result.m_sourceSha256
                 && checkpoint.m_clearanceMm == result.m_clearanceMm
+                && checkpoint.m_envelopeManifestSha256
+                    == result.m_envelopeManifestSha256
                 && axesMatch(checkpoint.m_axes, result.m_axes)
                 && bodiesMatch(checkpoint.m_bodies, result.m_bodies)
                 && pairsMatch(checkpoint.m_pairs, result.m_pairs)) {
@@ -1866,7 +1985,7 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
                           checkpointError.toStdString());
             }
         }
-        if (options.useSurfaceBvhCertification) {
+        if (useSurfaceBvhCertification) {
             QElapsedTimer surfaceCompileTimer;
             surfaceCompileTimer.start();
             int surfaceBodyIndex = 0;
@@ -1969,7 +2088,7 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
                     sweptBoxes.at(pair.firstBody), sweptBoxes.at(pair.secondBody));
                 clearanceLowerBound = std::min(clearanceLowerBound, sweptDistance);
                 if (sweptDistance <= options.clearanceMm) {
-                    if (options.useLeafBvhCertification) {
+                    if (useLeafBvhCertification) {
                         const auto queryStarted = std::chrono::steady_clock::now();
                         const bool separated = certifyPairSeparatedByLeafBvh(
                             m_impl->bodies.at(pair.firstBody),
@@ -1986,7 +2105,7 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
                             continue;
                         }
                     }
-                    if (options.useSurfaceBvhCertification) {
+                    if (useSurfaceBvhCertification) {
                         const auto& firstBody = m_impl->bodies.at(pair.firstBody);
                         const auto& secondBody = m_impl->bodies.at(pair.secondBody);
                         const double motionGuard = scalarMagnitude(
@@ -2257,7 +2376,7 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
                             cachedPair.safe = cachedPair.sweptDistance
                                 > options.clearanceMm;
                             if (!cachedPair.safe
-                                && options.useLeafBvhCertification) {
+                                && useLeafBvhCertification) {
                                 const auto queryStarted =
                                     std::chrono::steady_clock::now();
                                 cachedPair.safe = certifyPairSeparatedByLeafBvh(
@@ -2491,7 +2610,7 @@ bool MachineSafetyIndexCompiler::build(const MachineSafetyBuildOptions& options,
                                     if (sweptDistance > options.clearanceMm)
                                         continue;
                                     bool pairSafe = false;
-                                    if (options.useLeafBvhCertification) {
+                                    if (useLeafBvhCertification) {
                                         deepLeafQueries.fetch_add(
                                             1, std::memory_order_relaxed);
                                         pairSafe = certifyPairSeparatedByLeafBvh(
