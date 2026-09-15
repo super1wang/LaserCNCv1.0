@@ -1071,7 +1071,6 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             emptyPlan.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
             emptyPlan.collision.complete = true;
             emptyPlan.collision.failureReason = tr("Collision detection is enabled but the source configuration is incomplete");
-            emptyPlan.failureReason = emptyPlan.collision.failureReason;
         } else {
             emptyPlan.collision.state = lcnc::cam::CollisionValidationState::Pending;
             emptyPlan.collision.complete = false;
@@ -1318,7 +1317,6 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             plan.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
             plan.collision.complete = true;
             plan.collision.failureReason = tr("Collision detection is enabled but the immutable machine/workpiece safety environment is incomplete");
-            plan.failureReason = plan.collision.failureReason;
         } else {
             // Collision validation belongs to the generated CAM motion plan,
             // not to the optional simulation UI. A valid immutable machine

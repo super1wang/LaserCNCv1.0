@@ -173,5 +173,40 @@ int main()
     snapshot.collisionSafety.verificationMode =
         lcnc::cam::CollisionVerificationMode::Optional;
     assert(camExecutionBlockReason(snapshot, true).isEmpty());
+
+    // Collision diagnostics and path construction have separate ownership.
+    // Optional diagnostics may be incomplete without poisoning a valid rapid
+    // path, while Required remains fail-closed for the same diagnostic state.
+    lcnc::cam::ToolpathExportSnapshot policySnapshot;
+    policySnapshot.contours.resize(2);
+    policySnapshot.travelPlan.stale = false;
+    policySnapshot.travelPlan.collision.state =
+        lcnc::cam::CollisionValidationState::Indeterminate;
+    policySnapshot.travelPlan.collision.complete = true;
+    policySnapshot.travelPlan.collision.failureReason =
+        QStringLiteral("collision environment missing");
+    policySnapshot.motionPlan.collision = policySnapshot.travelPlan.collision;
+    policySnapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Optional;
+    assert(policySnapshot.travelPlan.isPathReady());
+    assert(camExecutionBlockReason(policySnapshot, true).isEmpty());
+
+    policySnapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Required;
+    assert(!camExecutionBlockReason(policySnapshot, true).isEmpty());
+
+    policySnapshot.travelPlan.failureReason = QStringLiteral("real IK failure");
+    policySnapshot.motionPlan.collision.state =
+        lcnc::cam::CollisionValidationState::Disabled;
+    policySnapshot.motionPlan.collision.complete = true;
+    policySnapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Disabled;
+    assert(!policySnapshot.travelPlan.isPathReady());
+    assert(camExecutionBlockReason(policySnapshot, true)
+        == QStringLiteral("real IK failure"));
+    policySnapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Optional;
+    assert(camExecutionBlockReason(policySnapshot, true)
+        == QStringLiteral("real IK failure"));
     return 0;
 }

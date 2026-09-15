@@ -1,3 +1,4 @@
+#include "core/algorithms/cam/collision_policy.h"
 #include "modules/cam/collision/continuous_motion_certificate_builder.h"
 #include "modules/cam/contracts/toolpath_export_dto.h"
 #include "modules/cam/settings/cam_config.h"
@@ -25,6 +26,16 @@ public:
 int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
+
+    if (lcnc::cam_algo::automaticCollisionWorkEnabled(
+            lcnc::cam::CollisionVerificationMode::Disabled)
+        || !lcnc::cam_algo::automaticCollisionWorkEnabled(
+            lcnc::cam::CollisionVerificationMode::Optional)
+        || !lcnc::cam_algo::automaticCollisionWorkEnabled(
+            lcnc::cam::CollisionVerificationMode::Required)) {
+        return fail(QStringLiteral(
+            "Automatic collision-work policy does not isolate Disabled mode"));
+    }
 
     TestCamConfig config;
     toml::value legacy(toml::table{});

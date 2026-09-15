@@ -27,7 +27,7 @@
 
 - 本轮没有执行 VS/Release/ASan 全矩阵、GUI 人工检查、GTN/ACS 实机运动、激光、HIL、长稳或生产碰撞验收。
 - B0 只建立合同与未优化的 exact-knot block；Full5D 优化、重采样、5D merge、DOF reduction、候选选择和原子后台编译属于 B1。
-- B1 已由本次 B0 收口复审放行，但尚未开始实现。
+- 补充审阅在相邻 travel/collision scheduling 入口发现 R06/R07；本提交完成修复与定向 Gate 后，B1 仍等待补充 R0 复审明确放行。
 
 ## R0 `PASS_WITH_PATCH` 收口
 
@@ -41,8 +41,23 @@
 收口验证：`acs-gtn-debug` 下 Debug `LaserCNC` 与直接影响目标构建通过；B0-CLOSE 定向矩阵 12/12 通过，包括 architecture、translation、motion plan、foundation/config、Process cutting/workflow、travel path、no-model CAM flow、workpiece collision 与 machine collision contract。
 
 ```text
-R0 = PASS
-B1_RELEASE = YES
+R0 = PASS_WITH_PATCH
+B1_RELEASE = NO
 ```
 
-本结论只放行 B1 开发，不代表 GUI、GTN/ACS 实机、激光、HIL、长稳或 B4 生产碰撞资格通过。
+后续补充 R0 即使放行，也只允许进入 B1 开发，不代表 GUI、GTN/ACS 实机、激光、HIL、长稳或 B4 生产碰撞资格通过。
+
+## R06/R07 补充收口
+
+- R06：`TravelPlanSnapshot::failureReason` 只保留 endpoint、IK、route construction、axis/coordinate representation 等真实路径错误。配置、package、overlay、Unknown、collision/warning 等诊断结果只写入 `travelPlan.collision`，Optional 不再通过 `isPathReady()` 间接阻断；Required 仍由碰撞状态与证书失败关闭。
+- R07：Overlay preparation、collision safety-domain preparation、非强制 full-environment verification 三个自动入口均在任何 Task/OCC/Coal 构造前检查策略；Disabled 直接返回。切换到 Disabled 会请求取消在途验证/准备任务、使任务 id 失效并阻止迟到发布。显式人工碰撞验证仍可走独立 `force` 路径。
+- 定向 Stage Gate：`acs-gtn-debug` 下 Debug `LaserCNC` 与受影响测试目标构建通过；G1–G8 对应场景全部通过，CTest 7/7，包括 Optional/Required 同源诊断、Disabled/Optional 真实路径失败、Disabled 自动碰撞工作合同、no-model CAM flow、Process cutting safety、travel path、foundation/config、architecture 与 translation。
+- 已知延后：`supportsBlock()` 热路径哈希优化属于 B1 immutable compiler context，不阻断本次 correctness 收口。
+
+```text
+R06 = CLOSED_BY_PATCH
+R07 = CLOSED_BY_PATCH
+SUPPLEMENTAL_STAGE_GATE = PASSED
+SUPPLEMENTAL_R0_REVIEW = PENDING
+B1_RELEASE = NO
+```

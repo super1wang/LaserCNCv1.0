@@ -4,6 +4,10 @@
 
 #include <cstdint>
 
+namespace lcnc::cam {
+enum class CollisionVerificationMode : std::uint8_t;
+}
+
 namespace lcnc::cam_algo {
 
 enum class CollisionQueryPurpose : std::uint8_t
@@ -59,5 +63,11 @@ public:
 bool canActivateCollisionDetection(bool machineLoaded,
                                    bool machinePackageExecutionEligible,
                                    bool machinePackageBuildInProgress);
+
+/// Automatic CAM regeneration may prepare collision geometry only when the
+/// selected policy requests diagnostics or mandatory certification. Explicit
+/// user-triggered validation is handled separately by its force path.
+bool automaticCollisionWorkEnabled(
+    lcnc::cam::CollisionVerificationMode mode);
 
 } // namespace lcnc::cam_algo

@@ -956,9 +956,26 @@ bool CamModule::setCollisionDetectionEnabled(bool enabled,
     m_config.setCollisionDetectionEnabledForMachine(profilePath, enabled);
     ++m_collisionConfigurationRevision;
     m_travelPlanCache.stale = true;
+    auto* tasks = lcnc::Kernel::current().taskManager();
     if (m_travelVerificationTask != kInvalidTaskId) {
-        if (auto* tasks = lcnc::Kernel::current().taskManager())
+        if (tasks)
             tasks->requestAbort(m_travelVerificationTask);
+        m_travelVerificationTask = kInvalidTaskId;
+    }
+    if (m_collisionDomainPreparationTask != kInvalidTaskId) {
+        if (tasks)
+            tasks->requestAbort(m_collisionDomainPreparationTask);
+        m_collisionDomainPreparationTask = kInvalidTaskId;
+    }
+    if (!enabled) {
+        m_travelPlanCache.fullEnvironmentVerificationPending = false;
+        m_travelPlanCache.collision.state =
+            lcnc::cam::CollisionValidationState::Disabled;
+        m_travelPlanCache.collision.complete = true;
+        m_travelPlanCache.collision.failureReason.clear();
+        // 中文翻译：已禁用自动碰撞准备
+        m_jobSafetyOverlayManager.invalidate(
+            tr("Automatic collision preparation was disabled"));
     }
     if (enabled)
         scheduleWorkpieceSafetyOverlayPreparation();
@@ -1010,7 +1027,6 @@ bool CamModule::validateCurrentToolpathCollisions(QString* errorMessage)
 
     lcnc::cam::TravelPlanSnapshot pending = snapshot.travelPlan;
     pending.stale = false;
-    pending.failureReason.clear();
     pending.fullEnvironmentVerificationPending = true;
     pending.collision.state = lcnc::cam::CollisionValidationState::Pending;
     pending.collision.complete = false;
@@ -1039,11 +1055,17 @@ bool CamModule::validateCurrentToolpathCollisions(QString* errorMessage)
 void CamModule::scheduleCollisionSafetyDomainPreparation(
     const lcnc::cam::ToolpathExportSnapshot& snapshot)
 {
+    const auto automaticMode = m_config.collisionVerificationModeForMachine(
+        activeMachineProfilePath());
+    if (!lcnc::cam_algo::automaticCollisionWorkEnabled(
+            automaticMode)) {
+        return;
+    }
+    const auto collision = collisionConfiguration();
     auto* tasks = lcnc::Kernel::current().taskManager();
     MachineKinematics* liveKinematics = kinematics();
     if (!tasks || !liveKinematics || !m_machineConfig)
         return;
-    const auto collision = collisionConfiguration();
     const auto machineSafetyPackage =
         m_machineSafetyPackageManager.runtimeSnapshot();
     if (!collision.valid || !machineSafetyPackage.status.executionEligible()
@@ -1217,6 +1239,12 @@ void CamModule::scheduleCollisionSafetyDomainPreparation(
 
 void CamModule::scheduleWorkpieceSafetyOverlayPreparation()
 {
+    const auto automaticMode = m_config.collisionVerificationModeForMachine(
+        activeMachineProfilePath());
+    if (!lcnc::cam_algo::automaticCollisionWorkEnabled(
+            automaticMode)) {
+        return;
+    }
     if (m_workpieceShape.IsNull()
         || !m_machineSafetyPackageManager.status().executionEligible()
         || !m_machineConfig) {
@@ -1232,6 +1260,12 @@ void CamModule::scheduleWorkpieceSafetyOverlayPreparation()
 void CamModule::scheduleFullEnvironmentVerification(
     const lcnc::cam::ToolpathExportSnapshot& snapshot, bool force)
 {
+    const auto automaticMode = m_config.collisionVerificationModeForMachine(
+        activeMachineProfilePath());
+    if (!force && !lcnc::cam_algo::automaticCollisionWorkEnabled(
+            automaticMode)) {
+        return;
+    }
     if ((!snapshot.travelPlan.fullEnvironmentVerificationPending && !force) || !m_machineConfig)
         return;
     auto* tasks = lcnc::Kernel::current().taskManager();
@@ -1249,7 +1283,6 @@ void CamModule::scheduleFullEnvironmentVerification(
         m_travelPlanCache.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
         m_travelPlanCache.collision.complete = true;
         m_travelPlanCache.collision.failureReason = reason;
-        m_travelPlanCache.failureReason = reason;
         QVector<std::uint64_t> order;
         order.reserve(snapshot.contours.size());
         for (const auto& contour : snapshot.contours)
@@ -2189,7 +2222,6 @@ void CamModule::scheduleFullEnvironmentVerification(
                 m_travelPlanCache.collision.state = lcnc::cam::CollisionValidationState::Indeterminate;
                 m_travelPlanCache.collision.complete = true;
                 m_travelPlanCache.collision.failureReason = tr("Full-path collision validation was cancelled or failed");
-                m_travelPlanCache.failureReason = m_travelPlanCache.collision.failureReason;
                 emit contourOrderTravelPlanRebuilt(verifiedOrder);
                 return;
             }
@@ -2218,12 +2250,6 @@ void CamModule::scheduleFullEnvironmentVerification(
                     states.size() == transition.segments.size()
                     ? states
                     : QVector<lcnc::cam::CamMotionCertificateState>{};
-            }
-            if (finalState == lcnc::cam::CollisionValidationState::Collision
-                || finalState == lcnc::cam::CollisionValidationState::Indeterminate
-                || (finalState == lcnc::cam::CollisionValidationState::Warning
-                    && m_travelPlanCache.collision.blockWarning)) {
-                m_travelPlanCache.failureReason = *result;
             }
             emit contourOrderTravelPlanRebuilt(verifiedOrder);
             refreshTravelPath();

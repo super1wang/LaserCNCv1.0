@@ -1,5 +1,7 @@
 #include "core/algorithms/cam/collision_policy.h"
 
+#include "core/project/cam/collision_validation_contracts.h"
+
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QIODevice>
@@ -70,6 +72,12 @@ bool canActivateCollisionDetection(bool machineLoaded,
 {
     return machineLoaded && machinePackageExecutionEligible
         && !machinePackageBuildInProgress;
+}
+
+bool automaticCollisionWorkEnabled(
+    lcnc::cam::CollisionVerificationMode mode)
+{
+    return mode != lcnc::cam::CollisionVerificationMode::Disabled;
 }
 
 } // namespace lcnc::cam_algo
