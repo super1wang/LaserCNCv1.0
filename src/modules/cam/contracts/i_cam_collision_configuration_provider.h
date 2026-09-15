@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/kernel/i_service.h"
+#include "core/project/cam/collision_validation_contracts.h"
 
 #include <QSet>
 #include <QString>
@@ -30,6 +31,8 @@ struct CollisionSourceDescriptor
 
 struct CollisionConfigurationSnapshot
 {
+    CollisionVerificationMode verificationMode{CollisionVerificationMode::Disabled};
+    /// Compatibility projection for existing preview/UI consumers.
     bool enabled{false};
     bool valid{false};
     bool activationAvailable{false};

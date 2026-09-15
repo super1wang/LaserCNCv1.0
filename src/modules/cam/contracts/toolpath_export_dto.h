@@ -92,6 +92,9 @@ struct ToolpathExportContour
 /// contains no geometry or mutable service pointer.
 struct CollisionSafetyExecutionSnapshot
 {
+    CollisionVerificationMode verificationMode{
+        CollisionVerificationMode::Disabled};
+    /// Compatibility projection. New execution gates use verificationMode.
     bool enabled{false};
     bool machinePackageRequired{false};
     bool machinePackageReady{false};
@@ -105,6 +108,14 @@ struct CollisionSafetyExecutionSnapshot
     QString runtimeConfigurationSha256;
     QString failureReason;
     QString jobOverlayFailureReason;
+
+    CollisionVerificationMode effectiveVerificationMode() const
+    {
+        // Compatibility with snapshots created by older in-process callers:
+        // an explicit legacy enabled=true is interpreted fail-closed.
+        return verificationMode == CollisionVerificationMode::Disabled && enabled
+            ? CollisionVerificationMode::Required : verificationMode;
+    }
 };
 
 /**
@@ -136,12 +147,19 @@ struct ToolpathExportSnapshot
     /// without replacing the already committed solved coordinates and nodes.
     /// The adapter uses this when contour order and geometry revision are
     /// unchanged but Job Overlay readiness and edge certificates have advanced.
-    void mergeCollisionProofFrom(const ToolpathExportSnapshot& verified)
+    bool mergeCollisionProofFrom(const ToolpathExportSnapshot& verified)
     {
+        if (motionPlan.planHash.isEmpty()
+            || verified.motionPlan.planHash != motionPlan.planHash
+            || verified.motionPlan.contextHash != motionPlan.contextHash
+            || verified.motionPlan.revision != motionPlan.revision) {
+            return false;
+        }
         collisionSafety = verified.collisionSafety;
         travelPlan = verified.travelPlan;
         motionPlan.collision = verified.motionPlan.collision;
         motionPlan.edgeCertificates = verified.motionPlan.edgeCertificates;
+        return true;
     }
 };
 

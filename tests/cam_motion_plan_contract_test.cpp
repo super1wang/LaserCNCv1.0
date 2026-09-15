@@ -1,4 +1,5 @@
 #include "core/algorithms/cam/collision_scan_policy.h"
+#include "core/algorithms/cam/continuous_motion_evaluator.h"
 #include "modules/cam/contracts/i_cam_initial_approach_planner.h"
 #include "modules/cam/contracts/toolpath_export_dto.h"
 
@@ -109,17 +110,130 @@ int main(int argc, char* argv[])
     rapid.rapidPhase = lcnc::cam::RapidSegmentPhase::Retract;
     rapid.contourId = 7;
     rapid.axisMask = 0x1f;
-    plan.nodes.append(rapid);
+    plan.context.workspaceGeneration = 2;
+    plan.context.sourceToolpathRevision = 42;
+    plan.context.contourOrderHash = QByteArrayLiteral("order");
+    plan.context.machineKinematicsHash = QByteArrayLiteral("machine");
+    plan.context.setupCalibrationHash = QByteArrayLiteral("setup");
+    plan.context.toolProcessHash = QByteArrayLiteral("tool");
+    plan.context.optimizationPolicyHash = QByteArrayLiteral("policy");
+    plan.context.controllerCapabilityHash = QByteArrayLiteral("capability");
+    plan.context.dynamicsSemanticHash = QByteArrayLiteral("dynamics");
+    plan.context.collisionMode =
+        lcnc::cam::CollisionVerificationMode::Disabled;
+    plan.context.interpolationModelVersion = 1;
+    plan.solverId = QStringLiteral("contract-test");
+    plan.solverVersion = 1;
+    lcnc::cam::CamMotionBlock block;
+    block.blockId = 1;
+    block.phase = rapid.phase;
+    block.contourId = rapid.contourId;
+    block.motionClass = lcnc::cam::MotionClass::Full5D;
+    block.activeAxisMask = rapid.axisMask;
+    block.physicalKnots.append(rapid);
+    plan.blocks.append(block);
+    QString finalizationError;
+    if (!lcnc::cam::finalizeMotionPlan(&plan, &finalizationError))
+        return fail(finalizationError);
     plan.collision = validation;
     if (plan.nodes.size() != 1 || plan.nodes.constFirst().contourId != 7
         || plan.nodes.constFirst().phase != lcnc::cam::CamMotionPhase::Rapid)
         return fail(QStringLiteral("Motion node contract did not preserve final CAM data"));
     if (plan.nodes.constFirst().rapidPhase != lcnc::cam::RapidSegmentPhase::Retract)
         return fail(QStringLiteral("Motion node contract lost the CAM rapid segment phase"));
+    if (!lcnc::cam::finalMotionPlanIdentityIsCurrent(plan)
+        || plan.derivedFromPlanHash != plan.planHash
+        || plan.contextHash.isEmpty() || plan.blocks.constFirst().blockHash.isEmpty()) {
+        return fail(QStringLiteral("FinalMotionPlan identity was not finalized deterministically"));
+    }
+    const QByteArray deterministicHash = plan.planHash;
+    lcnc::cam::CamMotionPlanSnapshot repeated = plan;
+    if (!lcnc::cam::finalizeMotionPlan(&repeated, &finalizationError)
+        || repeated.planHash != deterministicHash) {
+        return fail(QStringLiteral("Repeated FinalMotionPlan finalization changed identity"));
+    }
+    repeated.blocks[0].physicalKnots[0].axes[0] = 1.0;
+    if (lcnc::cam::finalMotionPlanIdentityIsCurrent(repeated))
+        return fail(QStringLiteral("Stale FinalMotionPlan identity accepted mutated motion"));
+    repeated = plan;
+    repeated.nodes[0].axes[0] = 1.0;
+    if (lcnc::cam::finalMotionPlanIdentityIsCurrent(repeated))
+        return fail(QStringLiteral("Legacy nodes became a second writable execution truth"));
+    repeated = plan;
+    repeated.context.controllerMode = lcnc::cam::ControllerMotionMode::RTCP;
+    if (!lcnc::cam::finalizeMotionPlan(&repeated, &finalizationError)
+        || repeated.planHash == deterministicHash
+        || repeated.blocks.constFirst().motionClass
+            != lcnc::cam::MotionClass::Full5D) {
+        return fail(QStringLiteral("MotionClass and ControllerMotionMode are not orthogonal"));
+    }
+
+    lcnc::cam::CamMotionBlock evaluatorBlock;
+    evaluatorBlock.blockId = 9;
+    evaluatorBlock.phase = lcnc::cam::CamMotionPhase::Cutting;
+    evaluatorBlock.contourId = 3;
+    evaluatorBlock.interpolation =
+        lcnc::cam::MotionInterpolationKind::PhysicalAxisLine;
+    lcnc::cam::CamMotionNode evaluatorFirst;
+    evaluatorFirst.contourId = 3;
+    evaluatorFirst.axes[0] = 0.0;
+    evaluatorFirst.axisMask = 0x01;
+    lcnc::cam::CamMotionNode evaluatorLast = evaluatorFirst;
+    evaluatorLast.axes[0] = 2.0;
+    evaluatorBlock.physicalKnots = {evaluatorFirst, evaluatorLast};
+    int collisionBackendCalls = 0;
+    lcnc::cam_algo::MotionEvaluationContext evaluationContext;
+    evaluationContext.interpolationModelVersion = 1;
+    evaluationContext.evaluatePhysicalAxes = [](
+            const auto& axes, std::uint8_t mask,
+            lcnc::cam_algo::EvaluatedMotionState* state) {
+        state->physicalAxes = axes;
+        state->physicalAxisMask = mask;
+        state->worldTcpX = axes[0] * axes[0];
+        state->worldTcpY = 0.0;
+        state->worldTcpZ = 0.0;
+        return true;
+    };
+    evaluationContext.boundPhysicalAxes = [](
+            const lcnc::cam::CamMotionBlock&, double u0, double u1,
+            lcnc::cam_algo::MotionIntervalBound* bound) {
+        bound->minimumPhysicalAxes[0] = 2.0 * u0;
+        bound->maximumPhysicalAxes[0] = 2.0 * u1;
+        bound->minimumWorldTcpX = 4.0 * u0 * u0;
+        bound->maximumWorldTcpX = 4.0 * u1 * u1;
+        bound->maximumPositionErrorMm = 0.0;
+        bound->maximumOrientationErrorDegrees = 0.0;
+        bound->refinable = true;
+        bound->valid = true;
+        return true;
+    };
+    lcnc::cam_algo::ContinuousMotionEvaluator evaluator;
+    lcnc::cam_algo::EvaluatedMotionState midpoint;
+    if (!evaluator.evaluate(evaluatorBlock, 0.5, evaluationContext,
+                            &midpoint, &finalizationError)
+        || std::abs(midpoint.physicalAxes[0] - 1.0) > 1e-12
+        || std::abs(midpoint.worldTcpX - 1.0) > 1e-12
+        || std::abs(midpoint.worldTcpX - 2.0) < 0.5) {
+        return fail(QStringLiteral("Evaluator accepted endpoint-only TCP interpolation"));
+    }
+    lcnc::cam_algo::MotionIntervalBound intervalBound;
+    if (!evaluator.bound(evaluatorBlock, 0.0, 1.0, evaluationContext,
+                         &intervalBound, &finalizationError)
+        || !intervalBound.valid || collisionBackendCalls != 0) {
+        return fail(QStringLiteral("Collision-independent continuous bound failed"));
+    }
+    auto missingBoundContext = evaluationContext;
+    missingBoundContext.boundPhysicalAxes = {};
+    if (evaluator.bound(evaluatorBlock, 0.0, 1.0, missingBoundContext,
+                        &intervalBound, &finalizationError)) {
+        return fail(QStringLiteral("Unknown continuous bound was guessed from endpoints"));
+    }
 
     // Process may execute an initial approach only when CAM supplies exactly
     // one execution-eligible continuous certificate for every rapid segment.
     lcnc::cam::InitialApproachSnapshot initialApproach;
+    initialApproach.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Required;
     initialApproach.transition.pathKind =
         lcnc::cam::RapidPathKind::InitialSafeZone;
     initialApproach.transition.segments.append(lcnc::cam::RapidMoveSegment{});
@@ -213,12 +327,18 @@ int main(int argc, char* argv[])
     cached.collisionSafety.enabled = true;
     cached.collisionSafety.jobOverlayRequired = true;
     cached.collisionSafety.jobOverlayBuildInProgress = true;
-    cached.motionPlan.nodes.append(cutting);
-    cached.motionPlan.nodes.front().tcpX = 123.0;
-    lcnc::cam::ToolpathExportSnapshot verified;
+    cutting.tcpX = 123.0;
+    cached.motionPlan = plan;
+    cached.motionPlan.blocks[0].phase = cutting.phase;
+    cached.motionPlan.blocks[0].contourId = cutting.contourId;
+    cached.motionPlan.blocks[0].physicalKnots = {cutting};
+    if (!lcnc::cam::finalizeMotionPlan(&cached.motionPlan, &finalizationError))
+        return fail(finalizationError);
+    lcnc::cam::ToolpathExportSnapshot verified = cached;
     verified.collisionSafety.enabled = true;
     verified.collisionSafety.jobOverlayRequired = true;
     verified.collisionSafety.jobOverlayReady = true;
+    verified.collisionSafety.jobOverlayBuildInProgress = false;
     verified.travelPlan.collision.state =
         lcnc::cam::CollisionValidationState::Safe;
     verified.travelPlan.collision.complete = true;
@@ -227,8 +347,8 @@ int main(int argc, char* argv[])
         lcnc::cam::CamMotionCertificateState::CertifiedSafe;
     verified.motionPlan.collision = verified.travelPlan.collision;
     verified.motionPlan.edgeCertificates.append(edgeCertificate);
-    cached.mergeCollisionProofFrom(verified);
-    if (!cached.collisionSafety.jobOverlayReady
+    if (!cached.mergeCollisionProofFrom(verified)
+        || !cached.collisionSafety.jobOverlayReady
         || cached.collisionSafety.jobOverlayBuildInProgress
         || !cached.motionPlan.collision.complete
         || cached.motionPlan.edgeCertificates.size() != 1
@@ -239,5 +359,13 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral(
             "Collision proof refresh retained stale Job Overlay state or replaced committed coordinates"));
     }
+    auto staleProof = verified;
+    staleProof.motionPlan.context.controllerMode =
+        lcnc::cam::ControllerMotionMode::RTCP;
+    if (!lcnc::cam::finalizeMotionPlan(&staleProof.motionPlan,
+                                       &finalizationError))
+        return fail(finalizationError);
+    if (cached.mergeCollisionProofFrom(staleProof))
+        return fail(QStringLiteral("Stale collision proof attached to a different plan identity"));
     return 0;
 }

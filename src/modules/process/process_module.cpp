@@ -1615,6 +1615,16 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
             snapshot, !m_simulationMode);
         if (!camBlockReason.isEmpty())
             return fail(tr("Machining cannot start: %1").arg(camBlockReason));
+        const auto collisionMode =
+            snapshot.collisionSafety.effectiveVerificationMode();
+        if (collisionMode == lcnc::cam::CollisionVerificationMode::Disabled) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "process.collision: mode=disabled certified=false result=commissioning_only");
+        } else if (collisionMode
+                   == lcnc::cam::CollisionVerificationMode::Optional) {
+            LCNC_WARN(lcnc::LogCode::Generic,
+                      "process.collision: mode=optional certified=false result=diagnostic_only");
+        }
 
         const auto cuttingList = m_cuttingPlanService->buildCuttingList();
         if (cuttingList.isEmpty())

@@ -114,7 +114,8 @@ void WidgetCollisionDetectionPanel::rebuildSources()
     } else if (snapshot.enabled) {
         m_status->setText(tr("Collision detection is enabled. Machine roles are derived from the immutable package; the workpiece is the only variable."));
     } else {
-        m_status->setText(tr("Collision detection is disabled; rapid path generation remains available without full-machine verification."));
+        // 中文翻译：碰撞验证已禁用；轨迹可用于调试，但未获得碰撞安全认证。
+        m_status->setText(tr("Collision verification is disabled; motion remains available for commissioning but is not collision-certified."));
     }
     if (snapshot.unassignedMachineBodyCount > 0)
         m_status->setText(m_status->text() + QLatin1Char('\n')

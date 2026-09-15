@@ -35,6 +35,8 @@ struct InitialApproachSnapshot
     std::uint64_t targetContourId{0};
     QString machineConfigurationFingerprint;
     RapidTransition transition;
+    CollisionVerificationMode verificationMode{
+        CollisionVerificationMode::Disabled};
     CollisionValidationSnapshot collision;
     /// One immutable continuous certificate per initial-approach segment.
     /// Process must reject the plan if this vector is incomplete or any edge
@@ -44,8 +46,11 @@ struct InitialApproachSnapshot
 
     bool isExecutable(bool blockWarning = true) const
     {
-        if (!failureReason.isEmpty() || !transition.isValid() || !collision.complete
-            || collision.blocksExecution(blockWarning)
+        if (!failureReason.isEmpty() || !transition.isValid())
+            return false;
+        if (verificationMode != CollisionVerificationMode::Required)
+            return true;
+        if (!collision.complete || collision.blocksExecution(blockWarning)
             || edgeCertificates.size() != transition.segments.size()) {
             return false;
         }

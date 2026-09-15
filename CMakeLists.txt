@@ -429,6 +429,7 @@ set(SRCS_CORE
     src/core/project/lcnc_project_manager.cpp
     src/core/project/cam/cam_data_manager.cpp
     src/core/project/cam/cam_toolpath_io.cpp
+    src/core/project/cam/final_motion_plan.cpp
     src/core/project/cam/layer_container.cpp
     src/core/project/cam/layer_manager.cpp
     src/core/project/cam/layer_manager.h
@@ -463,6 +464,7 @@ set(SRCS_CORE
     src/core/algorithms/cam/contour_order_planner.cpp
     src/core/algorithms/cam/travel_path_planner.cpp
     src/core/algorithms/cam/collision_safety_domain.cpp
+    src/core/algorithms/cam/continuous_motion_evaluator.cpp
     src/core/algorithms/cam/collision_policy.h
     src/core/algorithms/cam/collision_policy.cpp
     src/core/algorithms/cam/machine_safety_fingerprint.h
@@ -1354,6 +1356,11 @@ if(BUILD_TESTING)
         tests/cam_motion_plan_contract_test.cpp
     )
     target_link_libraries(lcnc_cam_motion_plan_contract_test PRIVATE lcnc_core Qt6::Core)
+    add_executable(lcnc_cam_motion_foundation_test
+        tests/cam_motion_foundation_test.cpp
+    )
+    target_link_libraries(lcnc_cam_motion_foundation_test PRIVATE
+        lcnc_module_cam Qt6::Core)
     add_executable(lcnc_cam_data_manager_test
         tests/cam_data_manager_test.cpp
     )
@@ -1561,6 +1568,10 @@ if(BUILD_TESTING)
         TIMEOUT 180 LABELS "critical;safety;geometry")
     add_test(NAME lcnc_cam_motion_plan_contract_test
         COMMAND lcnc_cam_motion_plan_contract_test)
+    add_test(NAME lcnc_cam_motion_foundation_test
+        COMMAND lcnc_cam_motion_foundation_test)
+    set_tests_properties(lcnc_cam_motion_foundation_test PROPERTIES
+        LABELS "critical;safety;algorithm")
     add_test(NAME lcnc_cam_data_manager_test
         COMMAND lcnc_cam_data_manager_test)
     add_test(NAME lcnc_machine_topology_solver_test

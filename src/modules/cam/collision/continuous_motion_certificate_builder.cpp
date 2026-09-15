@@ -864,6 +864,25 @@ QVector<CamMotionEdgeCertificate> buildContinuousMotionCertificates(
     QVector<CamMotionEdgeCertificate> result(totalEdges);
     if (totalEdges == 0)
         return result;
+    if (snapshot.collisionSafety.effectiveVerificationMode()
+            == CollisionVerificationMode::Disabled) {
+        for (int edgeIndex = 0; edgeIndex < totalEdges; ++edgeIndex) {
+            auto& certificate = result[edgeIndex];
+            certificate.edgeId = (snapshot.motionPlan.revision << 20)
+                ^ static_cast<std::uint64_t>(edgeIndex);
+            certificate.firstNode = edgeIndex;
+            certificate.lastNode = edgeIndex + 1;
+            certificate.phase = snapshot.motionPlan.nodes.at(edgeIndex + 1).phase;
+            certificate.environmentRevision =
+                snapshot.travelPlan.key.environmentRevision;
+            certificate.state = CamMotionCertificateState::Disabled;
+            certificate.reason = QObject::tr(
+                "Collision verification is disabled; motion is not collision-certified");
+        }
+        if (progress)
+            progress(totalEdges, totalEdges);
+        return result;
+    }
     CamMotionEdgeCertificate* const resultData = result.data();
     QHash<std::uint64_t, QString> workpieceByContour;
     workpieceByContour.reserve(snapshot.contours.size());
@@ -908,11 +927,6 @@ QVector<CamMotionEdgeCertificate> buildContinuousMotionCertificates(
                 progress(completed, totalEdges);
             }
         };
-        if (!snapshot.collisionSafety.enabled) {
-            certificate.state = CamMotionCertificateState::Disabled;
-            finish();
-            return;
-        }
         if (cancelled && cancelled()) {
             certificate.state = CamMotionCertificateState::BoundaryUnknown;
             // 中文翻译：连续运动证书构建已取消

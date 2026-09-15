@@ -133,7 +133,8 @@ class CamToolpathProviderAdapter final : public QObject, public ICamToolpathProv
             // edge certificates after CAM has already published both.
             // 中文翻译：异步校验完成时保留已提交的运动坐标，但必须同步工件缓存就绪状态、
             // 碰撞结果和连续边证书，避免 Process 永久读取构建中的旧快照。
-            m_plannedSnapshot.mergeCollisionProofFrom(snapshot);
+            if (!m_plannedSnapshot.mergeCollisionProofFrom(snapshot))
+                m_plannedSnapshot = std::move(snapshot);
         } else {
             m_plannedSnapshot = std::move(snapshot);
         }

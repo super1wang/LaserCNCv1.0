@@ -89,6 +89,8 @@ int main()
 
     lcnc::cam::ToolpathExportSnapshot snapshot;
     snapshot.contours.resize(1);
+    snapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Required;
     snapshot.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Pending;
     snapshot.motionPlan.collision.complete = false;
     assert(camExecutionBlockReason(snapshot).contains(QStringLiteral("incomplete")));
@@ -103,7 +105,17 @@ int main()
 
     snapshot.motionPlan.collision.state = lcnc::cam::CollisionValidationState::Disabled;
     snapshot.motionPlan.collision.blockWarning = true;
+    snapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Disabled;
     assert(camExecutionBlockReason(snapshot).isEmpty());
+    snapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Optional;
+    snapshot.motionPlan.collision.state =
+        lcnc::cam::CollisionValidationState::Collision;
+    snapshot.motionPlan.collision.complete = true;
+    assert(camExecutionBlockReason(snapshot, true).isEmpty());
+    snapshot.motionPlan.collision.state =
+        lcnc::cam::CollisionValidationState::Safe;
 
     // A missing machine package blocks activation of collision detection, not
     // the explicitly selected non-collision machining workflow.
@@ -117,11 +129,15 @@ int main()
     packageStatus.buildInProgress = true;
     assert(!packageStatus.executionEligible());
     snapshot.collisionSafety.enabled = false;
+    snapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Disabled;
     snapshot.collisionSafety.machinePackageRequired = true;
     snapshot.collisionSafety.machinePackageReady = false;
     assert(camExecutionBlockReason(snapshot, true).isEmpty());
 
     snapshot.collisionSafety.enabled = true;
+    snapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Required;
     snapshot.collisionSafety.machinePackageRequired = true;
     snapshot.collisionSafety.machinePackageReady = false;
     assert(camExecutionBlockReason(snapshot).isEmpty());

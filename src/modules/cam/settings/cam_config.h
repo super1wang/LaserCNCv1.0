@@ -3,6 +3,7 @@
 #include "core/settings/app_settings.h"
 #include "core/settings/toml_config.h"
 #include "core/project/cam/layer_contracts.h"
+#include "core/project/cam/collision_validation_contracts.h"
 
 #include <QMap>
 #include <QSet>
@@ -127,6 +128,11 @@ public:
     /// Collision enablement is persisted per immutable machine-package
     /// profile. Source sets below are legacy storage accessors only; runtime
     /// roles are derived from machine topology and the current workpiece.
+    lcnc::cam::CollisionVerificationMode collisionVerificationModeForMachine(
+        const QString& machinePath) const;
+    void setCollisionVerificationModeForMachine(
+        const QString& machinePath,
+        lcnc::cam::CollisionVerificationMode mode);
     bool collisionDetectionEnabledForMachine(const QString& machinePath) const;
     void setCollisionDetectionEnabledForMachine(const QString& machinePath, bool enabled);
     QSet<QString> activeCollisionSourcesForMachine(const QString& machinePath) const;
@@ -156,7 +162,8 @@ private:
         gp_Pnt cutterHeadModelPosition;
         bool hasCutterHeadPhysical{false};
         gp_Pnt cutterHeadPhysicalPosition;
-        bool collisionDetectionEnabled{false};
+        lcnc::cam::CollisionVerificationMode collisionVerificationMode{
+            lcnc::cam::CollisionVerificationMode::Disabled};
         QSet<QString> activeCollisionSources{QStringLiteral("cutter")};
         QSet<QString> passiveCollisionSources{QStringLiteral("workpiece")};
         bool hasWorkpieceInstallPosition{false}; // legacy input only

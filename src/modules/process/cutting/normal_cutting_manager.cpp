@@ -496,13 +496,11 @@ bool NormalCuttingManager::prepareInitialApproach(
                 != approach->toolpathRevision
             || latestExecution.machineConfigurationFingerprint
                 != approach->machineConfigurationFingerprint;
-        if (!collisionProofDrifted && !approach->edgeCertificates.isEmpty()) {
-            const bool approachCollisionEnabled =
-                approach->edgeCertificates.constFirst().state
-                != lcnc::cam::CamMotionCertificateState::Disabled;
-            collisionProofDrifted = approachCollisionEnabled
-                != latestExecution.collisionSafety.enabled;
-            if (latestExecution.collisionSafety.enabled) {
+        if (!collisionProofDrifted) {
+            collisionProofDrifted = approach->verificationMode
+                != latestExecution.collisionSafety.verificationMode;
+            if (approach->verificationMode
+                    == lcnc::cam::CollisionVerificationMode::Required) {
                 const QByteArray packageKey = QByteArray::fromHex(
                     latestExecution.collisionSafety.packageKeySha256.toLatin1());
                 collisionProofDrifted = collisionProofDrifted

@@ -292,6 +292,8 @@ int verifyCollisionFlow(bool fullEnvironment)
         lcnc::cam::ToolpathExportSnapshot snapshot;
         snapshot.contours.resize(2);
         snapshot.travelPlan = plan;
+        snapshot.collisionSafety.verificationMode =
+            lcnc::cam::CollisionVerificationMode::Required;
         snapshot.motionPlan.collision.state =
             lcnc::cam::CollisionValidationState::Pending;
         snapshot.motionPlan.collision.complete = false;

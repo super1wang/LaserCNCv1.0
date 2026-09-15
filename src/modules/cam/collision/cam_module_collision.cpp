@@ -263,8 +263,10 @@ lcnc::cam::CollisionConfigurationSnapshot CamModule::collisionConfiguration() co
     // see enabled=true plus ready=false and fail closed.  Collapsing those two
     // facts into enabled=false would silently enter the non-collision workflow.
     // 中文翻译：全局碰撞意图与运行时就绪状态分离；构建中必须失败关闭。
-    snapshot.enabled = m_config.collisionDetectionEnabledForMachine(
+    snapshot.verificationMode = m_config.collisionVerificationModeForMachine(
         snapshot.machineProfilePath);
+    snapshot.enabled = snapshot.verificationMode
+        != lcnc::cam::CollisionVerificationMode::Disabled;
     // Collision roles are no longer operator-selected. The machine package
     // owns every fixed Machine/Machine pair, while the Job Overlay checks the
     // current workpiece only against machine bodies outside its rigid mount
@@ -746,10 +748,12 @@ lcnc::cam::CamMotionPermit CamModule::requestMotionPermit(
     const auto collision = collisionConfiguration();
     const auto package = m_machineSafetyPackageManager.runtimeSnapshot();
     const auto overlay = m_jobSafetyOverlayManager.runtimeSnapshot();
-    const bool packageRequired = collision.enabled;
-    const bool overlayRequired = collision.enabled
+    const bool collisionRequired = collision.verificationMode
+        == lcnc::cam::CollisionVerificationMode::Required;
+    const bool packageRequired = collisionRequired;
+    const bool overlayRequired = collisionRequired
         && collision.passiveSources.contains(QStringLiteral("workpiece"));
-    if (collision.enabled && !collision.valid) {
+    if (collisionRequired && !collision.valid) {
         permit.state = lcnc::cam::CamMotionCertificateState::BoundaryUnknown;
         // 中文翻译：碰撞检测配置不完整，运动许可证失败关闭
         permit.reason = tr("Collision detection configuration is incomplete; the motion permit is fail-closed");
@@ -780,6 +784,7 @@ lcnc::cam::CamMotionPermit CamModule::requestMotionPermit(
     snapshot.travelPlan.key.environmentRevision = overlay.status.environmentRevision;
     snapshot.travelPlan.key.motionProfileHash = static_cast<std::uint64_t>(
         qHash(permit.commandedAxis)) ^ static_cast<std::uint64_t>(request.kind);
+    snapshot.collisionSafety.verificationMode = collision.verificationMode;
     snapshot.collisionSafety.enabled = collision.enabled;
     snapshot.collisionSafety.machinePackageRequired = packageRequired;
     snapshot.collisionSafety.machinePackageReady = package.status.executionEligible();
@@ -889,6 +894,14 @@ lcnc::cam::CamMotionPermit CamModule::requestMotionPermit(
     permit.packageKeySha256 = certificate.packageKeySha256;
     permit.environmentRevision = certificate.environmentRevision;
     permit.reason = certificate.reason;
+    if (collision.verificationMode
+        == lcnc::cam::CollisionVerificationMode::Optional) {
+        permit.state = lcnc::cam::CamMotionCertificateState::Disabled;
+        permit.reason = certificate.reason.isEmpty()
+            ? tr("Optional collision verification is diagnostic only; motion is not collision-certified")
+            : tr("Optional collision diagnostic: %1; motion is not collision-certified")
+                  .arg(certificate.reason);
+    }
     QByteArray canonical;
     canonical += QByteArray::number(static_cast<int>(permit.kind));
     canonical += QByteArray::number(permit.issuedUtcMs);

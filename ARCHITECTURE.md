@@ -107,14 +107,17 @@ CAM 的权威契约：
 
 - `ContourSequenceSnapshot`：唯一轮廓加工顺序。
 - `ToolpathExportSnapshot`：控制器无关、OCC-free 的已提交执行快照。
+- `CamMotionPlanSnapshot`（FinalMotionPlan）：块、编译上下文和稳定哈希原子发布，是唯一可写执行运动真相；`nodes` 仅为按 `planHash` 派生的兼容/显示视图。
 - `CollisionValidationSnapshot`：完整性、状态、环境修订和节点验证结果。
 - `Retract/Traverse/Approach`：空程阶段语义及最终物理轴坐标。
 
 刀路生成遵循“GUI 快照 → 后台 OCC/IK → revision 校验 → 原子提交”。有序求解在副本上完成，全量成功后才替换已提交坐标。切割偏置、空程偏置和工具高度只在 CAM 应用一次；Process 与 Simulation 不得重排、重求或再次叠加。
 
+`MotionClass`（物理自由度）、`ControllerMotionMode`（PhysicalAxes/RTCP）和 `CollisionVerificationMode`（Disabled/Optional/Required）是三个正交维度。`ContinuousMotionEvaluator` 按 FinalMotionPlan 声明的插值模型从物理轴或经资格确认的 RTCP 命令语义求值；缺少保守区间模型时拒绝合并/等价判断，不能用端点线性插值猜测中间 TCP。求值器不构造或查询碰撞后端，其模型版本参与计划身份。
+
 自动排序方向属于软件级 `CamConfig`，持久化到 `config/cam.toml`，不写入 `.lcnc`、不制造项目 dirty；所有生成入口在求解和碰撞前读取同一配置。机台标定以配置 AC 中心和控制器 XYZ 所表示的模拟 TCP 为绝对世界目标：先平移整机对齐 AC，再按轴运动子树校正切割头承载部件（Y 带动 Y/X/Z，X 带动 X/Z，Z 仅带动 Z），不得修改实时轴坐标、工件或刀路。
 
-碰撞生产链为“离线固定 `.lmsp/.lmsi` 机台域（完整切割头属于 Z 轴实体） AND 工件局部 Job Overlay → Surface-BVH/Coal 极窄残差 → 连续运动边证书”。模拟锥头/喷嘴代理只用于显示，工件是唯一运行时几何变量；有效包与工件同时存在后即后台准备 Overlay。Rapid、LeadIn、Cutting 和 Traverse 每条边都必须有与包键、环境代际和端点绑定的证书；Process 不做 OCC 或在线几何，只校验证书和固定/连续点动许可证。生产连续证书的 OCCT exact 预算为 0，exact 仅由 CAM 保留作离线 CertifiedSafe 反向审计。Pending、Indeterminate、BoundaryUnknown、环境过期、证书缺失或 `complete=false` 必须阻断真实加工。碰撞后自动绕障/重规划仍见专项计划。
+碰撞生产链为“离线固定 `.lmsp/.lmsi` 机台域（完整切割头属于 Z 轴实体） AND 工件局部 Job Overlay → Surface-BVH/Coal 极窄残差 → 连续运动边证书”。模拟锥头/喷嘴代理只用于显示，工件是唯一运行时几何变量；有效包与工件同时存在后即后台准备 Overlay。`Disabled` 不要求机台 STEP、安全包、Overlay 或证书，且不得构造/查询碰撞后端，界面和日志必须标明“未获碰撞安全认证”；`Optional` 只附加诊断，不阻断执行；`Required` 保持失败关闭，Rapid、LeadIn、Cutting 和 Traverse 每条边都必须有与精确计划身份、包键、环境代际和插值模型绑定的证书。三种策略都不影响控制器连接/故障/使能、运动学、软限位、Stop/E-stop 等非碰撞安全门禁。Process 不做 OCC 或在线几何，只按冻结策略校验证书和固定/连续点动许可证。生产连续证书的 OCCT exact 预算为 0，exact 仅由 CAM 保留作离线 CertifiedSafe 反向审计。在 `Required` 下，Pending、Indeterminate、BoundaryUnknown、环境过期、证书缺失或 `complete=false` 必须阻断真实加工。碰撞后自动绕障/重规划仍见专项计划。
 
 `MachiningFacePipelineService` 独占 entry 写入，只向调用方发布 const 视图和 revision；`CamModule` 不再长期持有可变容器引用。`CamDisplayProjectionService` 记录 AIS owning context；双工作区反复投影仍是后续回归项。
 
@@ -143,7 +146,7 @@ Process 的安全边界：
 - Stop 是唯一软件安全停机入口；失败保持 Error，复位前必须重新检查设备。
 - 设备关闭先关闭激光/红光/吹气等输出，再停止运动并断开。
 - GUI 不得同步等待普通设备命令；供应商对象不得跨 worker 边界泄漏。
-- 机台指纹不匹配、CAM 快照不完整、碰撞 Pending/Collision/Indeterminate 都必须阻止真实加工。
+- 机台指纹不匹配、CAM 快照不完整始终阻止真实加工；`Required` 碰撞策略下 Pending/Collision/Indeterminate/过期或缺失证明必须阻止，不能自动降级策略。
 - 固定运动必须持有未过期的端点许可证；连续点动按 100 ms 续签 300 ms 视界，续签失败立即排队停止。
 
 Process 设置对话框采用显式草稿事务：Apply 保存但保持当前页面，OK 仅在应用成功后关闭，Cancel、Esc 和标题栏关闭均恢复最后一次已提交状态；变更判断使用 TOML 结构相等而不是格式化文本相等。

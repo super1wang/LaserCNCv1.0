@@ -164,8 +164,14 @@ struct TravelPlanSnapshot
     /// motion plan. They are derived and replaced atomically with validation.
     QVector<CamMotionEdgeCertificate> motionCertificates;
 
+    bool isPathReady() const {
+        return !stale && failureReason.isEmpty();
+    }
+    bool isCollisionVerificationReady() const {
+        return !fullEnvironmentVerificationPending;
+    }
     bool isExecutable() const {
-        return !stale && !fullEnvironmentVerificationPending && failureReason.isEmpty();
+        return isPathReady() && isCollisionVerificationReady();
     }
     const RapidTransition* transitionTo(std::uint64_t contourId) const
     {
