@@ -161,6 +161,15 @@ int main(int argc, char* argv[])
     if (lcnc::cam::finalMotionPlanIdentityIsCurrent(repeated))
         return fail(QStringLiteral("Legacy nodes became a second writable execution truth"));
     repeated = plan;
+    repeated.blocks[0].physicalKnots[0].sourceEdgeIndex = 3;
+    repeated.blocks[0].physicalKnots[0].sourceParameter = 0.25;
+    repeated.blocks[0].sourceSpans.append({7, 0, 0, 0.25, 0.25, 3});
+    if (!lcnc::cam::finalizeMotionPlan(&repeated, &finalizationError)
+        || repeated.planHash == deterministicHash
+        || repeated.nodes.constFirst().sourceEdgeIndex != 3
+        || repeated.blocks.constFirst().sourceSpans.constFirst().sourceEdgeIndex != 3)
+        return fail(QStringLiteral("Source edge/parameter provenance was not included in plan identity"));
+    repeated = plan;
     repeated.context.controllerMode = lcnc::cam::ControllerMotionMode::RTCP;
     if (!lcnc::cam::finalizeMotionPlan(&repeated, &finalizationError)
         || repeated.planHash == deterministicHash

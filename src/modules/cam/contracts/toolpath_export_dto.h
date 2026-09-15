@@ -28,6 +28,7 @@ struct ToolpathExportPoint
     double tangentY{0.0};
     double tangentZ{0.0};
     double curveParam{0.0};
+    int sourceEdgeIndex{-1}; ///< OCC wire-edge owner; -1 for non-source motion.
     double machineX{0.0};
     double machineY{0.0};
     double machineZ{0.0};

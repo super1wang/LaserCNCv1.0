@@ -48,7 +48,8 @@ bool validNode(const CamMotionNode& node)
     if (!std::isfinite(node.tcpX) || !std::isfinite(node.tcpY)
         || !std::isfinite(node.tcpZ) || !std::isfinite(node.normalX)
         || !std::isfinite(node.normalY) || !std::isfinite(node.normalZ)
-        || !std::isfinite(node.estimatedTimeMs)) {
+        || !std::isfinite(node.estimatedTimeMs)
+        || !std::isfinite(node.sourceParameter)) {
         return false;
     }
     if (node.referenceTcpValid
@@ -67,7 +68,10 @@ bool validNode(const CamMotionNode& node)
 bool sameNode(const CamMotionNode& lhs, const CamMotionNode& rhs)
 {
     return lhs.phase == rhs.phase && lhs.rapidPhase == rhs.rapidPhase
-        && lhs.contourId == rhs.contourId && lhs.axes == rhs.axes
+        && lhs.contourId == rhs.contourId
+        && lhs.sourceEdgeIndex == rhs.sourceEdgeIndex
+        && lhs.sourceParameter == rhs.sourceParameter
+        && lhs.axes == rhs.axes
         && lhs.axisMask == rhs.axisMask && lhs.tcpX == rhs.tcpX
         && lhs.tcpY == rhs.tcpY && lhs.tcpZ == rhs.tcpZ
         && lhs.referenceTcpX == rhs.referenceTcpX
@@ -84,6 +88,8 @@ void appendNode(QByteArray* canonical, const CamMotionNode& node)
     appendInteger(canonical, node.phase);
     appendInteger(canonical, node.rapidPhase);
     appendInteger(canonical, node.contourId);
+    appendInteger(canonical, node.sourceEdgeIndex);
+    appendDouble(canonical, node.sourceParameter);
     appendInteger(canonical, node.axisMask);
     for (double axis : node.axes)
         appendDouble(canonical, axis);
@@ -122,7 +128,7 @@ QByteArray motionCompilationContextHash(const MotionCompilationContext& context)
 
 QByteArray motionBlockHash(const CamMotionBlock& block)
 {
-    QByteArray canonical("lcnc.motion-block.v2;");
+    QByteArray canonical("lcnc.motion-block.v3;");
     appendInteger(&canonical, block.blockId);
     appendInteger(&canonical, block.phase);
     appendInteger(&canonical, block.contourId);
@@ -143,6 +149,7 @@ QByteArray motionBlockHash(const CamMotionBlock& block)
         appendInteger(&canonical, span.lastKnot);
         appendDouble(&canonical, span.firstSourceParameter);
         appendDouble(&canonical, span.lastSourceParameter);
+        appendInteger(&canonical, span.sourceEdgeIndex);
     }
     appendInteger(&canonical, block.fences.size());
     for (const MotionProcessFence& fence : block.fences) {

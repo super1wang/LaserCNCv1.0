@@ -36,6 +36,41 @@ int fail(const QString& message)
     return 1;
 }
 
+int verifySourceSeamAndAnchor()
+{
+    const gp_Pnt a(0.0, 0.0, 0.0);
+    const gp_Pnt b(10.0, 0.0, 0.0);
+    const gp_Pnt c(10.0, 10.0, 0.0);
+    BRepBuilderAPI_MakeWire wire;
+    wire.Add(BRepBuilderAPI_MakeEdge(a, b));
+    wire.Add(BRepBuilderAPI_MakeEdge(b, c));
+    if (!wire.IsDone())
+        return fail(QStringLiteral("source-seam wire construction failed"));
+    LaserContour contour;
+    contour.wire = wire.Wire();
+    contour.leadIn.valid = true;
+    contour.leadIn.entryEdgeIndex = 0;
+    contour.leadIn.entryParam = 0.0;
+    LaserToolpathBuilder::discretizeContour(contour, contour.wire, 0.1);
+    bool foundSeam = false;
+    bool foundAnchor = false;
+    for (std::size_t i = 0; i < contour.points.size(); ++i) {
+        const ToolpathPoint& point = contour.points[i];
+        if (point.sourceEdgeIndex == 0 && std::abs(point.param) <= 1e-12) {
+            foundAnchor = true;
+            if (!std::isfinite(point.normal.X()) || !std::isfinite(point.tangent.X()))
+                return fail(QStringLiteral("source anchor lost its derived directions"));
+        }
+        if (i > 0 && contour.points[i - 1].sourceEdgeIndex == 0
+            && point.sourceEdgeIndex == 1
+            && contour.points[i - 1].position.SquareDistance(point.position) <= 1e-24)
+            foundSeam = true;
+    }
+    if (!foundAnchor || !foundSeam)
+        return fail(QStringLiteral("OCC edge seam or lead-in source anchor was discarded"));
+    return 0;
+}
+
 int verifyShape(const TopoDS_Shape& shape, const QString& label)
 {
     ContourExtractionParams params;
@@ -235,6 +270,8 @@ int verifyStepFile(const QString& path)
 int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
+    if (const int rc = verifySourceSeamAndAnchor(); rc != 0)
+        return rc;
     if (app.arguments().size() > 1) {
         for (int i = 1; i < app.arguments().size(); ++i) {
             if (const int rc = verifyStepFile(app.arguments().at(i)); rc != 0)

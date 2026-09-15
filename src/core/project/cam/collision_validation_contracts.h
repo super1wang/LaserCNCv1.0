@@ -184,6 +184,8 @@ struct CamMotionNode
     /// retract/traverse/approach split for every read-only consumer.
     RapidSegmentPhase rapidPhase{RapidSegmentPhase::Traverse};
     std::uint64_t contourId{0};
+    int sourceEdgeIndex{-1};
+    double sourceParameter{0.0};
     std::array<double, MachineAxisLayout::kMaxAxes> axes{};
     std::uint8_t axisMask{0};
     double tcpX{0.0};
@@ -208,6 +210,7 @@ struct MotionSourceSpan
     int lastKnot{0};
     double firstSourceParameter{0.0};
     double lastSourceParameter{1.0};
+    int sourceEdgeIndex{-1}; ///< Source wire-edge owner; -1 for rapid/unknown.
 };
 
 struct MotionProcessFence

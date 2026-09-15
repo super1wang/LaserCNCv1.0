@@ -1641,6 +1641,34 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
 // LaserToolpathBuilder — discretization
 // =============================================================================
 
+namespace {
+
+bool appendSourceSample(LaserContour& contour, ToolpathPoint point,
+                        int anchoredEdgeIndex, double anchoredParam)
+{
+    const bool anchored = point.sourceEdgeIndex == anchoredEdgeIndex
+        && std::abs(point.param - anchoredParam) <= 1e-12;
+    if (!contour.points.empty()) {
+        const ToolpathPoint& previous = contour.points.back();
+        // A coincident vertex on a different OCC edge is a seam/corner, not
+        // an anonymous duplicate. Both edge owners must survive compilation.
+        const bool strictDuplicate = previous.sourceEdgeIndex == point.sourceEdgeIndex
+            && std::abs(previous.param - point.param) <= 1e-12
+            && previous.position.SquareDistance(point.position) <= 1e-24
+            && gp_Vec(previous.normal).Dot(gp_Vec(point.normal)) >= 1.0 - 1e-12
+            && gp_Vec(previous.tangent).Dot(gp_Vec(point.tangent)) >= 1.0 - 1e-12;
+        if (strictDuplicate) {
+            if (anchored)
+                contour.points.back() = std::move(point);
+            return false;
+        }
+    }
+    contour.points.push_back(std::move(point));
+    return true;
+}
+
+} // namespace
+
 void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
                                              const TopoDS_Shape& workpiece,
                                              double deflection)
@@ -1697,14 +1725,6 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             tp.sourceEdgeIndex = edgeIndex;
             curve.D0(tp.param, tp.position);
 
-            if (!contour.points.empty()
-                && contour.points.back().position.SquareDistance(tp.position) < 1e-12) {
-                if (edgeIndex == anchoredEdgeIndex
-                    && std::abs(tp.param - anchoredParam) <= 1e-12)
-                    contour.points.back() = tp;
-                continue; // 去除相邻边连接处重复点
-            }
-
             const gp_Dir surfaceNormal = pointOuterFaces
                 ? findMachiningNormal(
                       tp.position,
@@ -1734,7 +1754,7 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             else
                 tp.tangent = gp_Dir(0, 0, 1);
 
-            contour.points.push_back(tp);
+            appendSourceSample(contour, std::move(tp), anchoredEdgeIndex, anchoredParam);
         }
     }
 }
@@ -1802,14 +1822,6 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             tp.sourceEdgeIndex = edgeIndex;
             curve.D0(tp.param, tp.position);
 
-            if (!contour.points.empty()
-                && contour.points.back().position.SquareDistance(tp.position) < 1e-12) {
-                if (edgeIndex == anchoredEdgeIndex
-                    && std::abs(tp.param - anchoredParam) <= 1e-12)
-                    contour.points.back() = tp;
-                continue; // 去除相邻边连接处重复点，避免插补重复点和角度突跳
-            }
-
             // Compute machining normal using face classification
             tp.normal = avoidCrossSectionDirection(
                 tp.position,
@@ -1832,7 +1844,7 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             else
                 tp.tangent = gp_Dir(0, 0, 1);
 
-            contour.points.push_back(tp);
+            appendSourceSample(contour, std::move(tp), anchoredEdgeIndex, anchoredParam);
         }
     }
 }
