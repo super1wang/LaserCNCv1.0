@@ -2,9 +2,9 @@
 
 > Design Authority / Final Freeze
 >
-> Repository: `super1wang/LaserCNCv1.0`  
-> Branch: `main`  
-> Planning baseline HEAD: `4254db59696193963392e2946132cf614c8def26`  
+> Repository: `super1wang/LaserCNCv1.0`
+> Branch: `main`
+> Planning baseline HEAD: `4254db59696193963392e2946132cf614c8def26`
 > Audit date: 2026-09-14
 
 ## 1. Problem / Goal

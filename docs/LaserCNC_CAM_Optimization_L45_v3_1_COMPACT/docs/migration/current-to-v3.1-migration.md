@@ -47,7 +47,7 @@ Add the smallest typed/block or lowered-batch interface needed. Keep GTN SDK/con
 
 ### Collision
 
-B0–B3: Disabled commissioning path is independent.  
+B0–B3: Disabled commissioning path is independent.
 B4: Required proof uses the shared final interpolation evaluator and complete identity.
 
 ## 3. A/B / Rollback

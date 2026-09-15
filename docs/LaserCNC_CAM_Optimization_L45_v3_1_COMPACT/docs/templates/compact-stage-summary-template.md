@@ -7,15 +7,15 @@
 
 ## Implemented
 
-- 
+-
 
 ## Changed Areas
 
-- 
+-
 
 ## Soft Checkpoints
 
-- 
+-
 
 ## Stage Gate
 
@@ -26,7 +26,7 @@
 
 ## Capability / Limitations
 
-- 
+-
 
 ## ESCALATE / Blockers
 

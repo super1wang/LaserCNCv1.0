@@ -4,8 +4,8 @@
   "files": [
     {
       "path": "CAM轨迹规划系统设计方案_v3_1_COMPACT.md",
-      "size": 26725,
-      "sha256": "314a33f92576304d208064a367d3e5db490c536ec6e40059fd551b8f13cfdd7f"
+      "size": 26719,
+      "sha256": "4ff70d0eb5e4b2f5e7ac164c8810aab736d641275ef6187b68dd1aa87fc43c44"
     },
     {
       "path": "CHANGELOG.md",
@@ -29,8 +29,8 @@
     },
     {
       "path": "docs/architecture/cam-trajectory-system-design-v3.1.md",
-      "size": 26707,
-      "sha256": "a9943d74f8a106b378a1e77fc1a0f9eeb1aea963f8bad726c08db5653a70e0e6"
+      "size": 26701,
+      "sha256": "f09ad8e6f9af2187fb333062b597e5f724dab3237fb5129c2a7d7337d9aee6c5"
     },
     {
       "path": "docs/architecture/collision-policy-decoupling.md",
@@ -89,8 +89,8 @@
     },
     {
       "path": "docs/migration/current-to-v3.1-migration.md",
-      "size": 2576,
-      "sha256": "7ff51623f48e80a1c80c0ada98d0d4d1684099a2ee985e250498ed1afdefcca9"
+      "size": 2574,
+      "sha256": "890be086ca7c2856464b0b62016e5d4f6a4a306a2beb2f563f2ee5e370fbf236"
     },
     {
       "path": "docs/plans/cam-motion-v3.1/ASTRA-REVIEW-PROMPTS.md",
@@ -179,8 +179,8 @@
     },
     {
       "path": "docs/templates/compact-stage-summary-template.md",
-      "size": 325,
-      "sha256": "ec6e28fb5f7fcf2f2aa24c8fe0944f75868811cda4202f544f938e9dd6c670d1"
+      "size": 321,
+      "sha256": "f539886171ad763f8b07f151773775fb19d17203896d3263ef5ac12187e11069"
     },
     {
       "path": "docs/validation/collision-disabled-validation.md",
