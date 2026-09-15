@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -121,7 +122,7 @@ QByteArray motionCompilationContextHash(const MotionCompilationContext& context)
 
 QByteArray motionBlockHash(const CamMotionBlock& block)
 {
-    QByteArray canonical("lcnc.motion-block.v1;");
+    QByteArray canonical("lcnc.motion-block.v2;");
     appendInteger(&canonical, block.blockId);
     appendInteger(&canonical, block.phase);
     appendInteger(&canonical, block.contourId);
@@ -129,6 +130,9 @@ QByteArray motionBlockHash(const CamMotionBlock& block)
     appendInteger(&canonical, block.optimizationState);
     appendInteger(&canonical, block.interpolation);
     appendInteger(&canonical, block.activeAxisMask);
+    appendInteger(&canonical, block.hasEntryBoundary);
+    if (block.hasEntryBoundary)
+        appendNode(&canonical, block.entryBoundary);
     appendInteger(&canonical, block.physicalKnots.size());
     for (const CamMotionNode& node : block.physicalKnots)
         appendNode(&canonical, node);
@@ -160,7 +164,7 @@ QByteArray motionBlockHash(const CamMotionBlock& block)
 
 QByteArray finalMotionPlanHash(const CamMotionPlanSnapshot& plan)
 {
-    QByteArray canonical("lcnc.final-motion-plan.v1;");
+    QByteArray canonical("lcnc.final-motion-plan.v2;");
     appendBytes(&canonical, motionCompilationContextHash(plan.context));
     appendString(&canonical, plan.solverId);
     appendInteger(&canonical, plan.solverVersion);
@@ -186,9 +190,33 @@ bool finalizeMotionPlan(CamMotionPlanSnapshot* plan, QString* errorMessage)
 
     QVector<CamMotionBlock> blocks = plan->blocks;
     QVector<CamMotionNode> derivedNodes;
-    for (CamMotionBlock& block : blocks) {
+    for (int blockIndex = 0; blockIndex < blocks.size(); ++blockIndex) {
+        CamMotionBlock& block = blocks[blockIndex];
         if (block.physicalKnots.isEmpty())
             return fail(QStringLiteral("FinalMotionPlan block has no physical knots"));
+        if (blockIndex == 0 && block.hasEntryBoundary)
+            return fail(QStringLiteral("FinalMotionPlan first block has an unexpected entry boundary"));
+        if (blockIndex > 0) {
+            if (!block.hasEntryBoundary)
+                return fail(QStringLiteral("FinalMotionPlan block is missing its canonical entry edge"));
+            if (!validNode(block.entryBoundary)
+                || !sameNode(block.entryBoundary,
+                             blocks.at(blockIndex - 1).physicalKnots.constLast())) {
+                return fail(QStringLiteral("FinalMotionPlan block entry boundary does not match its predecessor"));
+            }
+            const bool sourceCoversEntry = std::any_of(
+                block.sourceSpans.cbegin(), block.sourceSpans.cend(),
+                [](const MotionSourceSpan& span) { return span.firstKnot == -1; });
+            const bool fencePrecedesEntryEdge = std::any_of(
+                block.fences.cbegin(), block.fences.cend(),
+                [](const MotionProcessFence& fence) {
+                    return fence.knotIndex == -1 && fence.blockStart;
+                });
+            if (!sourceCoversEntry || !fencePrecedesEntryEdge) {
+                return fail(QStringLiteral(
+                    "FinalMotionPlan block entry edge is missing source-span or process-fence semantics"));
+            }
+        }
         for (const CamMotionNode& node : block.physicalKnots) {
             if (!validNode(node))
                 return fail(QStringLiteral("FinalMotionPlan contains a non-finite motion value"));

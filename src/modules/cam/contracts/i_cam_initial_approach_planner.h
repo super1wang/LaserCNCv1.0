@@ -56,7 +56,7 @@ struct InitialApproachSnapshot
         }
         for (int edge = 0; edge < edgeCertificates.size(); ++edge) {
             const auto& certificate = edgeCertificates.at(edge);
-            if (!certificate.executionEligible()
+            if (certificate.state != CamMotionCertificateState::CertifiedSafe
                 || certificate.firstNode != edge
                 || certificate.lastNode != edge + 1
                 || certificate.phase != CamMotionPhase::Rapid

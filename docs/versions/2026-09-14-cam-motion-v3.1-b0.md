@@ -27,4 +27,22 @@
 
 - 本轮没有执行 VS/Release/ASan 全矩阵、GUI 人工检查、GTN/ACS 实机运动、激光、HIL、长稳或生产碰撞验收。
 - B0 只建立合同与未优化的 exact-knot block；Full5D 优化、重采样、5D merge、DOF reduction、候选选择和原子后台编译属于 B1。
-- B1 在 Astra R0 给出 `PASS` 或关闭 `PASS_WITH_PATCH` 前不开始。
+- B1 已由本次 B0 收口复审放行，但尚未开始实现。
+
+## R0 `PASS_WITH_PATCH` 收口
+
+- F01：后续语义 Block 通过 `entryBoundary` 唯一拥有跨 Block 的 canonical edge；该边界不进入 legacy `nodes` 投影。`sourceSpans` 与 start fence 使用已定义的 `-1` entry 索引，Block/Plan v2 哈希覆盖边界、来源与 fence 语义。
+- F02：`ContinuousMotionEvaluator` 只接受由 finalized plan 一次性生成的 `BoundMotionEvaluationContext`；绑定校验 plan/context/model identity，求值拒绝非成员或已变更 Block，bound 拒绝非有限、逆序和负误差区间。
+- F03：initial approach 的 Disabled 路径不调用碰撞 certifier，也不再要求无实际用途的 workpiece shape；Optional 保留首个运动学合法候选并仅附加诊断，碰撞/Unknown 不改变候选。
+- F04：Required 的 Process 与 initial-approach 门禁显式只接受 `CertifiedSafe`，`Disabled`、`Invalid`、`BoundaryUnknown`、`Blocked` 均不能取得 Required 执行资格。
+- F05：仅在新字段缺失时执行 legacy bool 迁移；显式非法或空 `collisionVerificationMode` 保留 invalid 状态并按 Required 方向失败关闭，不再静默降级 Disabled。
+- B1 handoff：当前 `workspaceGeneration`、`setupCalibrationHash`、controller capability、tool/process 与 dynamics 字段仍是 B0 transition/baseline identity；B1 Workstream 7 必须从真实 immutable compilation context 捕获，非空 hash 不代表控制器能力已获 qualification。
+
+收口验证：`acs-gtn-debug` 下 Debug `LaserCNC` 与直接影响目标构建通过；B0-CLOSE 定向矩阵 12/12 通过，包括 architecture、translation、motion plan、foundation/config、Process cutting/workflow、travel path、no-model CAM flow、workpiece collision 与 machine collision contract。
+
+```text
+R0 = PASS
+B1_RELEASE = YES
+```
+
+本结论只放行 B1 开发，不代表 GUI、GTN/ACS 实机、激光、HIL、长稳或 B4 生产碰撞资格通过。

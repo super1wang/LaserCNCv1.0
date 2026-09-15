@@ -48,6 +48,18 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("Collision mode did not serialize using the v3 policy field"));
     }
 
+    toml::value legacyDisabled(toml::table{});
+    toml::value legacyDisabledProfile(toml::table{});
+    legacyDisabledProfile["path"] = std::string("C:/machines/legacy-disabled.step");
+    legacyDisabledProfile["collisionDetectionEnabled"] = false;
+    legacyDisabled["machineProfile"] = toml::array{legacyDisabledProfile};
+    config.readFrom(legacyDisabled);
+    if (config.collisionVerificationModeForMachine(
+            QStringLiteral("C:/machines/legacy-disabled.step"))
+        != lcnc::cam::CollisionVerificationMode::Disabled) {
+        return fail(QStringLiteral("Legacy collision enabled=false did not migrate to Disabled"));
+    }
+
     toml::value optionalRoot(toml::table{});
     toml::value optionalProfile(toml::table{});
     optionalProfile["path"] = std::string("C:/machines/optional.step");
@@ -58,6 +70,57 @@ int main(int argc, char* argv[])
             QStringLiteral("C:/machines/optional.step"))
         != lcnc::cam::CollisionVerificationMode::Optional) {
         return fail(QStringLiteral("Optional collision verification mode did not round-trip"));
+    }
+
+    const auto verifyExplicitMode = [&config](const char* path, const char* value,
+                                               lcnc::cam::CollisionVerificationMode expected) {
+        toml::value root(toml::table{});
+        toml::value profile(toml::table{});
+        profile["path"] = std::string(path);
+        profile["collisionVerificationMode"] = std::string(value);
+        root["machineProfile"] = toml::array{profile};
+        config.readFrom(root);
+        const QString machinePath = QString::fromUtf8(path);
+        return config.collisionVerificationModeValidForMachine(machinePath)
+            && config.collisionVerificationModeForMachine(machinePath) == expected;
+    };
+    if (!verifyExplicitMode("C:/machines/disabled.step", "disabled",
+                            lcnc::cam::CollisionVerificationMode::Disabled)
+        || !verifyExplicitMode("C:/machines/required.step", "required",
+                               lcnc::cam::CollisionVerificationMode::Required)) {
+        return fail(QStringLiteral("Explicit collision verification mode parsing failed"));
+    }
+
+    toml::value invalidRoot(toml::table{});
+    toml::value invalidProfile(toml::table{});
+    invalidProfile["path"] = std::string("C:/machines/invalid.step");
+    invalidProfile["collisionVerificationMode"] = std::string("requried");
+    invalidProfile["collisionDetectionEnabled"] = false;
+    invalidRoot["machineProfile"] = toml::array{invalidProfile};
+    config.readFrom(invalidRoot);
+    const QString invalidPath = QStringLiteral("C:/machines/invalid.step");
+    if (config.collisionVerificationModeValidForMachine(invalidPath)
+        || config.collisionVerificationModeForMachine(invalidPath)
+            != lcnc::cam::CollisionVerificationMode::Required) {
+        return fail(QStringLiteral("Invalid explicit collision mode did not fail closed"));
+    }
+    toml::value invalidRoundTrip(toml::table{});
+    config.writeTo(invalidRoundTrip);
+    if (invalidRoundTrip.at("machineProfile").as_array().front()
+            .at("collisionVerificationMode").as_string()
+        != std::string("requried")) {
+        return fail(QStringLiteral("Invalid explicit collision mode was silently healed"));
+    }
+
+    toml::value emptyRoot(toml::table{});
+    toml::value emptyProfile(toml::table{});
+    emptyProfile["path"] = std::string("C:/machines/empty.step");
+    emptyProfile["collisionVerificationMode"] = std::string();
+    emptyRoot["machineProfile"] = toml::array{emptyProfile};
+    config.readFrom(emptyRoot);
+    if (config.collisionVerificationModeValidForMachine(
+            QStringLiteral("C:/machines/empty.step"))) {
+        return fail(QStringLiteral("Explicit empty collision mode was accepted"));
     }
 
     lcnc::cam::ToolpathExportSnapshot snapshot;

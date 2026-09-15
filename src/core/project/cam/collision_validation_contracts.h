@@ -203,6 +203,7 @@ struct CamMotionNode
 struct MotionSourceSpan
 {
     std::uint64_t contourId{0};
+    /// -1 denotes the explicit entry boundary preceding physical knot 0.
     int firstKnot{0};
     int lastKnot{0};
     double firstSourceParameter{0.0};
@@ -211,6 +212,8 @@ struct MotionSourceSpan
 
 struct MotionProcessFence
 {
+    /// -1 applies before the incoming entry-boundary edge; non-negative
+    /// values apply at physicalKnots[knotIndex].
     int knotIndex{0};
     bool blockStart{false};
     bool blockEnd{false};
@@ -262,6 +265,11 @@ struct CamMotionBlock
     MotionOptimizationState optimizationState{MotionOptimizationState::Raw};
     MotionInterpolationKind interpolation{MotionInterpolationKind::PhysicalAxisLine};
     std::uint8_t activeAxisMask{0};
+    /// The predecessor of physicalKnots.front() when this block begins after
+    /// another semantic block. It owns the incoming canonical edge without
+    /// becoming a second execution node or changing this block's phase.
+    bool hasEntryBoundary{false};
+    CamMotionNode entryBoundary;
     QVector<CamMotionNode> physicalKnots;
     QVector<MotionSourceSpan> sourceSpans;
     QVector<MotionProcessFence> fences;

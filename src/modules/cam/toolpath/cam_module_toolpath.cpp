@@ -763,6 +763,13 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
                 node.phase == lcnc::cam::CamMotionPhase::Cutting});
             block.feed.profileHash = plan.context.dynamicsSemanticHash;
             block.toleranceProof.exactKnots = true;
+            if (!plan.blocks.isEmpty()) {
+                block.hasEntryBoundary = true;
+                block.entryBoundary = plan.blocks.constLast().physicalKnots.constLast();
+                block.activeAxisMask |= block.entryBoundary.axisMask;
+                block.sourceSpans[0].firstKnot = -1;
+                block.fences[0].knotIndex = -1;
+            }
             plan.blocks.append(std::move(block));
         }
         auto& block = plan.blocks.last();
@@ -1397,7 +1404,6 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
         gp_Trsf setup;
         QMap<QString, QString> assignments;
         QMap<QString, QString> mounts;
-        TopoDS_Shape workpiece;
         gp_Pnt cutterModelPosition;
         lcnc::MachineModeDefinition definition;
         lcnc::WorkpieceSetupTransform workpieceSetup;
@@ -1419,7 +1425,6 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
             captured.assignments = kin->shapeAssignments();
             captured.mounts = kin->wpcMounts();
         }
-        captured.workpiece = m_workpieceShape;
         captured.cutterModelPosition = m_cutterHeadModelPosition;
         if (m_machineConfig) {
             captured.definition = m_machineConfig->modeDefinition(captured.snapshot.machiningMode);
@@ -1455,8 +1460,9 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
         result.failureReason = tr("The first contour has no solved lead-in machine coordinates");
         return result;
     }
-    if (captured.workpiece.IsNull() || !captured.definition.isValid()) {
-        result.failureReason = tr("Initial approach planning geometry or machine definition is unavailable");
+    if (!captured.definition.isValid()) {
+        // 中文翻译：首刀进入路径的机床定义不可用
+        result.failureReason = tr("Initial approach machine definition is unavailable");
         return result;
     }
     const auto collisionMode = captured.collision.verificationMode;
@@ -1821,7 +1827,8 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
             }
         };
         for (const auto& certificate : std::as_const(certified.certificates)) {
-            if (certificate.executionEligible())
+            if (certificate.state
+                == lcnc::cam::CamMotionCertificateState::CertifiedSafe)
                 continue;
             const auto state = certificate.state
                     == lcnc::cam::CamMotionCertificateState::Blocked
@@ -1929,6 +1936,17 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
             continue;
         }
 
+        if (collisionMode == lcnc::cam::CollisionVerificationMode::Disabled) {
+            result.transition = std::move(transition);
+            result.collision.state = lcnc::cam::CollisionValidationState::Disabled;
+            result.collision.complete = true;
+            result.collision.blockWarning = captured.blockCollisionWarning;
+            result.collision.nodeStates.fill(
+                lcnc::cam::CollisionValidationState::Disabled,
+                result.transition.segments.size() + 1);
+            return result;
+        }
+
         CertifiedInitialTransition certified = certifyTransition(
             transition, initialSource, safetyAxisZ);
         auto& collisionResult = certified.collision;
@@ -1936,8 +1954,16 @@ lcnc::cam::InitialApproachSnapshot CamModule::planInitialApproach(
         transition.collisionStates.reserve(certified.certificates.size());
         for (const auto& certificate : std::as_const(certified.certificates))
             transition.collisionStates.append(certificate.state);
-        if (collisionResult.complete
-            && !collisionResult.blocksExecution(collisionResult.blockWarning)) {
+        const bool strictlyCertified = std::all_of(
+            certified.certificates.cbegin(), certified.certificates.cend(),
+            [](const lcnc::cam::CamMotionEdgeCertificate& certificate) {
+                return certificate.state
+                    == lcnc::cam::CamMotionCertificateState::CertifiedSafe;
+            });
+        if (collisionMode == lcnc::cam::CollisionVerificationMode::Optional
+            || (collisionResult.complete && strictlyCertified
+                && !collisionResult.blocksExecution(
+                    collisionResult.blockWarning))) {
             result.transition = std::move(transition);
             result.collision = std::move(collisionResult);
             result.edgeCertificates = std::move(certified.certificates);

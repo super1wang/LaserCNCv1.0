@@ -167,5 +167,11 @@ int main()
     snapshot.motionPlan.edgeCertificates[0].state =
         lcnc::cam::CamMotionCertificateState::CertifiedSafe;
     assert(camExecutionBlockReason(snapshot, true).isEmpty());
+    snapshot.motionPlan.edgeCertificates[0].state =
+        lcnc::cam::CamMotionCertificateState::Disabled;
+    assert(!camExecutionBlockReason(snapshot, true).isEmpty());
+    snapshot.collisionSafety.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Optional;
+    assert(camExecutionBlockReason(snapshot, true).isEmpty());
     return 0;
 }

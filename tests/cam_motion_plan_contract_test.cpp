@@ -4,6 +4,7 @@
 #include "modules/cam/contracts/toolpath_export_dto.h"
 
 #include <QCoreApplication>
+#include <QSet>
 #include <QTextStream>
 
 #include <gp_Ax1.hxx>
@@ -168,6 +169,116 @@ int main(int argc, char* argv[])
         return fail(QStringLiteral("MotionClass and ControllerMotionMode are not orthogonal"));
     }
 
+    // Every canonical edge is owned exactly once. A semantic block owns its
+    // incoming cross-block edge through entryBoundary, while the legacy node
+    // projection remains duplicate-free.
+    lcnc::cam::CamMotionPlanSnapshot boundaryPlan = plan;
+    boundaryPlan.blocks.clear();
+    const auto boundaryNode = [](double x, lcnc::cam::CamMotionPhase phase,
+                                 lcnc::cam::RapidSegmentPhase rapidPhase) {
+        lcnc::cam::CamMotionNode node;
+        node.axes[0] = x;
+        node.axisMask = 0x01;
+        node.tcpX = x;
+        node.phase = phase;
+        node.rapidPhase = rapidPhase;
+        node.contourId = x < 3.0 ? 1 : 2;
+        return node;
+    };
+    const QVector<lcnc::cam::CamMotionNode> canonicalNodes{
+        boundaryNode(0.0, lcnc::cam::CamMotionPhase::LeadIn,
+                     lcnc::cam::RapidSegmentPhase::Approach),
+        boundaryNode(1.0, lcnc::cam::CamMotionPhase::Cutting,
+                     lcnc::cam::RapidSegmentPhase::Approach),
+        boundaryNode(2.0, lcnc::cam::CamMotionPhase::Cutting,
+                     lcnc::cam::RapidSegmentPhase::Approach),
+        boundaryNode(3.0, lcnc::cam::CamMotionPhase::Rapid,
+                     lcnc::cam::RapidSegmentPhase::Retract),
+        boundaryNode(4.0, lcnc::cam::CamMotionPhase::Rapid,
+                     lcnc::cam::RapidSegmentPhase::Traverse),
+        boundaryNode(5.0, lcnc::cam::CamMotionPhase::Rapid,
+                     lcnc::cam::RapidSegmentPhase::Approach),
+        boundaryNode(6.0, lcnc::cam::CamMotionPhase::Cutting,
+                     lcnc::cam::RapidSegmentPhase::Approach)};
+    for (const auto& node : canonicalNodes) {
+        const bool startsBlock = boundaryPlan.blocks.isEmpty()
+            || boundaryPlan.blocks.constLast().phase != node.phase
+            || boundaryPlan.blocks.constLast().contourId != node.contourId
+            || (node.phase == lcnc::cam::CamMotionPhase::Rapid
+                && boundaryPlan.blocks.constLast().physicalKnots.constLast().rapidPhase
+                    != node.rapidPhase);
+        if (startsBlock) {
+            lcnc::cam::CamMotionBlock next;
+            next.blockId = static_cast<std::uint64_t>(
+                boundaryPlan.blocks.size() + 1);
+            next.phase = node.phase;
+            next.contourId = node.contourId;
+            next.activeAxisMask = node.axisMask;
+            next.fences.append({0, true, false,
+                node.phase == lcnc::cam::CamMotionPhase::Cutting});
+            if (!boundaryPlan.blocks.isEmpty()) {
+                next.hasEntryBoundary = true;
+                next.entryBoundary =
+                    boundaryPlan.blocks.constLast().physicalKnots.constLast();
+                next.fences[0].knotIndex = -1;
+            }
+            boundaryPlan.blocks.append(next);
+        }
+        boundaryPlan.blocks.last().physicalKnots.append(node);
+    }
+    for (auto& boundaryBlock : boundaryPlan.blocks) {
+        const int lastKnot = static_cast<int>(
+            boundaryBlock.physicalKnots.size()) - 1;
+        boundaryBlock.sourceSpans.append({boundaryBlock.contourId,
+                                          boundaryBlock.hasEntryBoundary ? -1 : 0,
+                                          lastKnot, 0.0, 1.0});
+        boundaryBlock.fences.append({lastKnot, false, true, false});
+    }
+    if (!lcnc::cam::finalizeMotionPlan(&boundaryPlan, &finalizationError)
+        || boundaryPlan.nodes.size() != canonicalNodes.size()) {
+        return fail(QStringLiteral("Canonical block boundary projection is invalid"));
+    }
+    for (int nodeIndex = 0; nodeIndex < canonicalNodes.size(); ++nodeIndex) {
+        if (boundaryPlan.nodes.at(nodeIndex).axes[0]
+                != canonicalNodes.at(nodeIndex).axes[0]
+            || boundaryPlan.nodes.at(nodeIndex).phase
+                != canonicalNodes.at(nodeIndex).phase
+            || boundaryPlan.nodes.at(nodeIndex).rapidPhase
+                != canonicalNodes.at(nodeIndex).rapidPhase) {
+            return fail(QStringLiteral("Canonical block boundary projection changed node semantics"));
+        }
+    }
+    int coveredEdges = 0;
+    QSet<QString> edgeKeys;
+    for (const auto& boundaryBlock : boundaryPlan.blocks) {
+        if (boundaryBlock.hasEntryBoundary
+            && (boundaryBlock.sourceSpans.constFirst().firstKnot != -1
+                || boundaryBlock.fences.constFirst().knotIndex != -1
+                || !boundaryBlock.fences.constFirst().blockStart)) {
+            return fail(QStringLiteral(
+                "Cross-block source span or process fence lost entry-edge semantics"));
+        }
+        QVector<lcnc::cam::CamMotionNode> evaluable = boundaryBlock.physicalKnots;
+        if (boundaryBlock.hasEntryBoundary)
+            evaluable.prepend(boundaryBlock.entryBoundary);
+        for (int edge = 1; edge < evaluable.size(); ++edge) {
+            ++coveredEdges;
+            edgeKeys.insert(QStringLiteral("%1>%2")
+                .arg(evaluable.at(edge - 1).axes[0])
+                .arg(evaluable.at(edge).axes[0]));
+        }
+    }
+    if (coveredEdges != canonicalNodes.size() - 1
+        || edgeKeys.size() != coveredEdges) {
+        return fail(QStringLiteral("Canonical motion edges are missing or duplicated at block boundaries"));
+    }
+    auto changedBoundary = boundaryPlan;
+    changedBoundary.blocks[1].entryBoundary.axes[0] += 0.25;
+    if (lcnc::cam::finalMotionPlanIdentityIsCurrent(changedBoundary)
+        || lcnc::cam::finalizeMotionPlan(&changedBoundary, &finalizationError)) {
+        return fail(QStringLiteral("FinalMotionPlan identity ignored entry-boundary semantics"));
+    }
+
     lcnc::cam::CamMotionBlock evaluatorBlock;
     evaluatorBlock.blockId = 9;
     evaluatorBlock.phase = lcnc::cam::CamMotionPhase::Cutting;
@@ -207,26 +318,84 @@ int main(int argc, char* argv[])
         bound->valid = true;
         return true;
     };
+    lcnc::cam::CamMotionPlanSnapshot evaluatorPlan = plan;
+    evaluatorPlan.blocks = {evaluatorBlock};
+    if (!lcnc::cam::finalizeMotionPlan(&evaluatorPlan, &finalizationError))
+        return fail(finalizationError);
+    evaluatorBlock = evaluatorPlan.blocks.constFirst();
+    lcnc::cam_algo::BoundMotionEvaluationContext boundContext;
+    if (!lcnc::cam_algo::bindMotionEvaluationContext(
+            evaluatorPlan, evaluationContext, &boundContext,
+            &finalizationError)) {
+        return fail(finalizationError);
+    }
     lcnc::cam_algo::ContinuousMotionEvaluator evaluator;
     lcnc::cam_algo::EvaluatedMotionState midpoint;
-    if (!evaluator.evaluate(evaluatorBlock, 0.5, evaluationContext,
+    if (!evaluator.evaluate(evaluatorBlock, 0.5, boundContext,
                             &midpoint, &finalizationError)
         || std::abs(midpoint.physicalAxes[0] - 1.0) > 1e-12
         || std::abs(midpoint.worldTcpX - 1.0) > 1e-12
         || std::abs(midpoint.worldTcpX - 2.0) < 0.5) {
         return fail(QStringLiteral("Evaluator accepted endpoint-only TCP interpolation"));
     }
+    if (evaluator.evaluate(evaluatorBlock, -0.01, boundContext,
+                           &midpoint, &finalizationError)) {
+        return fail(QStringLiteral("Evaluator accepted an invalid source parameter"));
+    }
     lcnc::cam_algo::MotionIntervalBound intervalBound;
-    if (!evaluator.bound(evaluatorBlock, 0.0, 1.0, evaluationContext,
+    if (!evaluator.bound(evaluatorBlock, 0.0, 1.0, boundContext,
                          &intervalBound, &finalizationError)
         || !intervalBound.valid || collisionBackendCalls != 0) {
         return fail(QStringLiteral("Collision-independent continuous bound failed"));
     }
     auto missingBoundContext = evaluationContext;
     missingBoundContext.boundPhysicalAxes = {};
-    if (evaluator.bound(evaluatorBlock, 0.0, 1.0, missingBoundContext,
+    lcnc::cam_algo::BoundMotionEvaluationContext missingBound;
+    if (!lcnc::cam_algo::bindMotionEvaluationContext(
+            evaluatorPlan, missingBoundContext, &missingBound,
+            &finalizationError)) {
+        return fail(finalizationError);
+    }
+    if (evaluator.bound(evaluatorBlock, 0.0, 1.0, missingBound,
                         &intervalBound, &finalizationError)) {
         return fail(QStringLiteral("Unknown continuous bound was guessed from endpoints"));
+    }
+    auto mismatchedModel = evaluationContext;
+    ++mismatchedModel.interpolationModelVersion;
+    if (lcnc::cam_algo::bindMotionEvaluationContext(
+            evaluatorPlan, mismatchedModel, &boundContext,
+            &finalizationError)) {
+        return fail(QStringLiteral("Evaluator model-version mismatch was accepted"));
+    }
+    int invalidBoundKind = 0;
+    auto invalidBounds = evaluationContext;
+    invalidBounds.boundPhysicalAxes = [&invalidBoundKind](
+            const lcnc::cam::CamMotionBlock&, double, double,
+            lcnc::cam_algo::MotionIntervalBound* bound) {
+        if (invalidBoundKind == 0)
+            bound->minimumWorldTcpX = std::numeric_limits<double>::quiet_NaN();
+        else if (invalidBoundKind == 1) {
+            bound->minimumPhysicalAxes[0] = 2.0;
+            bound->maximumPhysicalAxes[0] = 1.0;
+        } else {
+            bound->maximumPositionErrorMm = -1.0;
+            bound->maximumOrientationErrorDegrees = -1.0;
+        }
+        bound->valid = true;
+        return true;
+    };
+    lcnc::cam_algo::BoundMotionEvaluationContext invalidBoundContext;
+    if (!lcnc::cam_algo::bindMotionEvaluationContext(
+            evaluatorPlan, invalidBounds, &invalidBoundContext,
+            &finalizationError)) {
+        return fail(finalizationError);
+    }
+    for (invalidBoundKind = 0; invalidBoundKind < 3; ++invalidBoundKind) {
+        if (evaluator.bound(evaluatorBlock, 0.0, 1.0, invalidBoundContext,
+                            &intervalBound, &finalizationError)) {
+            return fail(QStringLiteral(
+                "Structurally invalid conservative bound was accepted"));
+        }
     }
 
     // Process may execute an initial approach only when CAM supplies exactly
@@ -259,6 +428,18 @@ int main(int argc, char* argv[])
     if (initialApproach.isExecutable()) {
         return fail(QStringLiteral(
             "Boundary-unknown initial approach was executable"));
+    }
+    initialApproach.edgeCertificates.front().state =
+        lcnc::cam::CamMotionCertificateState::Disabled;
+    if (initialApproach.isExecutable()) {
+        return fail(QStringLiteral(
+            "Required initial approach accepted a Disabled certificate"));
+    }
+    initialApproach.verificationMode =
+        lcnc::cam::CollisionVerificationMode::Optional;
+    if (!initialApproach.isExecutable()) {
+        return fail(QStringLiteral(
+            "Optional initial-approach diagnostics became an execution gate"));
     }
 
     lcnc::cam::CamMotionNode cutting;

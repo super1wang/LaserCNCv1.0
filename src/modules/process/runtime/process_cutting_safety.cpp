@@ -79,7 +79,8 @@ QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapsho
             return cuttingTr("CAM continuous-motion certificates are missing or incomplete; real-machine motion is fail-closed");
         }
         for (const auto& certificate : snapshot.motionPlan.edgeCertificates) {
-            if (!certificate.executionEligible()) {
+            if (certificate.state
+                != lcnc::cam::CamMotionCertificateState::CertifiedSafe) {
                 if (!certificate.reason.isEmpty())
                     return certificate.reason;
                 // 中文翻译：CAM 连续运动证书未确认整段路径安全

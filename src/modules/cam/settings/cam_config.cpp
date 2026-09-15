@@ -84,18 +84,25 @@ QString collisionVerificationModeToString(
     return QStringLiteral("disabled");
 }
 
-lcnc::cam::CollisionVerificationMode collisionVerificationModeFromString(
-    const QString& value, bool legacyEnabled)
+bool collisionVerificationModeFromString(
+    const QString& value, lcnc::cam::CollisionVerificationMode* mode)
 {
+    if (!mode)
+        return false;
     const QString normalized = value.trimmed().toLower();
-    if (normalized == QStringLiteral("optional"))
-        return lcnc::cam::CollisionVerificationMode::Optional;
-    if (normalized == QStringLiteral("required"))
-        return lcnc::cam::CollisionVerificationMode::Required;
-    if (normalized == QStringLiteral("disabled"))
-        return lcnc::cam::CollisionVerificationMode::Disabled;
-    return legacyEnabled ? lcnc::cam::CollisionVerificationMode::Required
-                         : lcnc::cam::CollisionVerificationMode::Disabled;
+    if (normalized == QStringLiteral("optional")) {
+        *mode = lcnc::cam::CollisionVerificationMode::Optional;
+        return true;
+    }
+    if (normalized == QStringLiteral("required")) {
+        *mode = lcnc::cam::CollisionVerificationMode::Required;
+        return true;
+    }
+    if (normalized == QStringLiteral("disabled")) {
+        *mode = lcnc::cam::CollisionVerificationMode::Disabled;
+        return true;
+    }
+    return false;
 }
 
 // ── TOML <-> gp_Pnt ─────────────────────────────────────────────────────────
@@ -221,9 +228,29 @@ void CamConfig::readFrom(const toml::value& root)
             // Legacy collision source arrays are read only for compatible
             // round-trip. Runtime roles are derived from fixed machine
             // topology plus the current workpiece and ignore these values.
-            profile.collisionVerificationMode = collisionVerificationModeFromString(
-                get_qstring(mp, "collisionVerificationMode", QString()),
-                get_bool(mp, "collisionDetectionEnabled", false));
+            if (mp.contains("collisionVerificationMode")) {
+                profile.invalidCollisionVerificationMode =
+                    get_qstring(mp, "collisionVerificationMode", QString());
+                profile.collisionVerificationModeValid =
+                    mp.at("collisionVerificationMode").is_string()
+                    && collisionVerificationModeFromString(
+                        profile.invalidCollisionVerificationMode,
+                        &profile.collisionVerificationMode);
+                if (!profile.collisionVerificationModeValid) {
+                    // An explicit malformed policy is safety-critical. Keep it
+                    // invalid and fail closed instead of falling back to the
+                    // legacy false/default value.
+                    profile.collisionVerificationMode =
+                        lcnc::cam::CollisionVerificationMode::Required;
+                } else {
+                    profile.invalidCollisionVerificationMode.clear();
+                }
+            } else {
+                profile.collisionVerificationMode =
+                    get_bool(mp, "collisionDetectionEnabled", false)
+                    ? lcnc::cam::CollisionVerificationMode::Required
+                    : lcnc::cam::CollisionVerificationMode::Disabled;
+            }
             const auto readSources = [&mp](const char* name, const QString& fallback) {
                 QSet<QString> result;
                 const bool hasPersistedArray = mp.contains(name) && mp.at(name).is_array();
@@ -300,8 +327,11 @@ void CamConfig::writeTo(toml::value& root) const
         mp["path"] = qs(it.key());
         if (it.value().hasCutterHeadModel)       mp["cutterHeadModelPosition"]    = pointToToml(it.value().cutterHeadModelPosition);
         if (it.value().hasCutterHeadPhysical)    mp["cutterHeadPhysicalPosition"] = pointToToml(it.value().cutterHeadPhysicalPosition);
-        mp["collisionVerificationMode"] = qs(collisionVerificationModeToString(
-            it.value().collisionVerificationMode));
+        mp["collisionVerificationMode"] = qs(
+            it.value().collisionVerificationModeValid
+                ? collisionVerificationModeToString(
+                    it.value().collisionVerificationMode)
+                : it.value().invalidCollisionVerificationMode);
         toml::array activeSources;
         for (const QString& source : it.value().activeCollisionSources)
             activeSources.emplace_back(qs(source));
@@ -609,12 +639,22 @@ CamConfig::collisionVerificationModeForMachine(const QString& machinePath) const
                    : lcnc::cam::CollisionVerificationMode::Disabled;
 }
 
+bool CamConfig::collisionVerificationModeValidForMachine(
+    const QString& machinePath) const
+{
+    const auto* profile = profileForMachine(machinePath);
+    return !profile || profile->collisionVerificationModeValid;
+}
+
 void CamConfig::setCollisionVerificationModeForMachine(
     const QString& machinePath, lcnc::cam::CollisionVerificationMode mode)
 {
     auto* profile = mutableProfileForMachine(machinePath);
-    if (profile->collisionVerificationMode == mode) return;
+    if (profile->collisionVerificationMode == mode
+        && profile->collisionVerificationModeValid) return;
     profile->collisionVerificationMode = mode;
+    profile->collisionVerificationModeValid = true;
+    profile->invalidCollisionVerificationMode.clear();
     saveDefault();
 }
 

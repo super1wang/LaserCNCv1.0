@@ -130,6 +130,8 @@ public:
     /// roles are derived from machine topology and the current workpiece.
     lcnc::cam::CollisionVerificationMode collisionVerificationModeForMachine(
         const QString& machinePath) const;
+    bool collisionVerificationModeValidForMachine(
+        const QString& machinePath) const;
     void setCollisionVerificationModeForMachine(
         const QString& machinePath,
         lcnc::cam::CollisionVerificationMode mode);
@@ -164,6 +166,8 @@ private:
         gp_Pnt cutterHeadPhysicalPosition;
         lcnc::cam::CollisionVerificationMode collisionVerificationMode{
             lcnc::cam::CollisionVerificationMode::Disabled};
+        bool collisionVerificationModeValid{true};
+        QString invalidCollisionVerificationMode;
         QSet<QString> activeCollisionSources{QStringLiteral("cutter")};
         QSet<QString> passiveCollisionSources{QStringLiteral("workpiece")};
         bool hasWorkpieceInstallPosition{false}; // legacy input only

@@ -49,6 +49,8 @@ struct MotionEvaluationContext
     std::function<bool(
         const std::array<double, MachineAxisLayout::kMaxAxes>&,
         std::uint8_t, EvaluatedMotionState*)> evaluatePhysicalAxes;
+    /// Qualified RTCP callbacks must treat entryBoundary, when present, as
+    /// evaluable knot 0 and physicalKnots.front() as knot 1.
     std::function<bool(const lcnc::cam::CamMotionBlock&, double,
                        EvaluatedMotionState*)> evaluateRtcp;
     std::function<bool(const lcnc::cam::CamMotionBlock&, double, double,
@@ -57,16 +59,43 @@ struct MotionEvaluationContext
                        MotionIntervalBound*)> boundRtcp;
 };
 
+/// A callback set bound once to one finalized plan identity. Callers cannot
+/// construct a usable instance without bindMotionEvaluationContext().
+class BoundMotionEvaluationContext final
+{
+public:
+    BoundMotionEvaluationContext() = default;
+
+private:
+    friend bool bindMotionEvaluationContext(
+        const lcnc::cam::CamMotionPlanSnapshot&, MotionEvaluationContext,
+        BoundMotionEvaluationContext*, QString*);
+    friend class ContinuousMotionEvaluator;
+
+    bool supportsBlock(const lcnc::cam::CamMotionBlock& block) const;
+
+    QByteArray m_planHash;
+    QByteArray m_contextHash;
+    QVector<QByteArray> m_blockHashes;
+    MotionEvaluationContext m_callbacks;
+};
+
+bool bindMotionEvaluationContext(
+    const lcnc::cam::CamMotionPlanSnapshot& plan,
+    MotionEvaluationContext callbacks,
+    BoundMotionEvaluationContext* bound,
+    QString* errorMessage = nullptr);
+
 class ContinuousMotionEvaluator final
 {
 public:
     bool evaluate(const lcnc::cam::CamMotionBlock& block, double u,
-                  const MotionEvaluationContext& context,
+                  const BoundMotionEvaluationContext& context,
                   EvaluatedMotionState* state,
                   QString* errorMessage = nullptr) const;
 
     bool bound(const lcnc::cam::CamMotionBlock& block, double u0, double u1,
-               const MotionEvaluationContext& context,
+               const BoundMotionEvaluationContext& context,
                MotionIntervalBound* result,
                QString* errorMessage = nullptr) const;
 };

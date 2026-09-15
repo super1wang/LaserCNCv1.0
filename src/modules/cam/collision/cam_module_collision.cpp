@@ -265,8 +265,17 @@ lcnc::cam::CollisionConfigurationSnapshot CamModule::collisionConfiguration() co
     // 中文翻译：全局碰撞意图与运行时就绪状态分离；构建中必须失败关闭。
     snapshot.verificationMode = m_config.collisionVerificationModeForMachine(
         snapshot.machineProfilePath);
+    const bool verificationModeValid =
+        m_config.collisionVerificationModeValidForMachine(
+            snapshot.machineProfilePath);
     snapshot.enabled = snapshot.verificationMode
         != lcnc::cam::CollisionVerificationMode::Disabled;
+    if (!verificationModeValid) {
+        snapshot.activationAvailable = false;
+        // 中文翻译：碰撞校验模式配置无效；请修正 cam.toml 中的显式策略值。
+        snapshot.activationFailureReason = tr(
+            "The collision verification mode is invalid; correct the explicit policy value in cam.toml.");
+    }
     // Collision roles are no longer operator-selected. The machine package
     // owns every fixed Machine/Machine pair, while the Job Overlay checks the
     // current workpiece only against machine bodies outside its rigid mount
@@ -319,7 +328,8 @@ lcnc::cam::CollisionConfigurationSnapshot CamModule::collisionConfiguration() co
         }
         return false;
     };
-    snapshot.valid = snapshot.unassignedMachineBodyCount == 0
+    snapshot.valid = verificationModeValid
+        && snapshot.unassignedMachineBodyCount == 0
         && selectedAvailable(snapshot.activeSources, true)
         && selectedAvailable(snapshot.passiveSources, false);
     return snapshot;
