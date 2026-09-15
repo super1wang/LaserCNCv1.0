@@ -1,0 +1,9 @@
+{
+  "planning_ready": true,
+  "start_coding": true,
+  "formal_stage_gates": 5,
+  "astra_reviews": 5,
+  "no_collision_commissioning_after": "B3 + Astra R3 PASS",
+  "production_release_after": "B4 + Astra R4 PASS",
+  "architecture_semantics_changed_from_v3_final": false
+}

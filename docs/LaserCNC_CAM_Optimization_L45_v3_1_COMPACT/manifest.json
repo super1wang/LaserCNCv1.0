@@ -1,0 +1,236 @@
+{
+  "package": "LaserCNC_CAM_Optimization_L45_v3_1_COMPACT",
+  "version": "3.1",
+  "files": [
+    {
+      "path": "CAM轨迹规划系统设计方案_v3_1_COMPACT.md",
+      "size": 26725,
+      "sha256": "314a33f92576304d208064a367d3e5db490c536ec6e40059fd551b8f13cfdd7f"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "size": 1230,
+      "sha256": "8deaac67230ec2ed650a4c040c308120b92acb4020bad4a1cdfff2d8a3543c47"
+    },
+    {
+      "path": "PACKAGE-QA.md",
+      "size": 437,
+      "sha256": "125cd2d548e107f46d9dee9589fa995f96fac49abeae1effc6a5a2ea5782f8fc"
+    },
+    {
+      "path": "README.md",
+      "size": 1599,
+      "sha256": "cb7955bfdde9e3d3238b008eac5ea4ee55e7ab9353cd1fe7b68d7eab144e1de1"
+    },
+    {
+      "path": "VERSION.md",
+      "size": 470,
+      "sha256": "9feee1863362b29a2cb33ce3a2148d0163263959575a1aaed448e9c269519b05"
+    },
+    {
+      "path": "docs/architecture/cam-trajectory-system-design-v3.1.md",
+      "size": 26707,
+      "sha256": "a9943d74f8a106b378a1e77fc1a0f9eeb1aea963f8bad726c08db5653a70e0e6"
+    },
+    {
+      "path": "docs/architecture/collision-policy-decoupling.md",
+      "size": 5225,
+      "sha256": "a4170595dfb572b769a05640aa27b266f4f4e75c26c54988155d68179b90e023"
+    },
+    {
+      "path": "docs/architecture/continuous-motion-evaluator.md",
+      "size": 2680,
+      "sha256": "1290057d11a20a16928c2b0079fa7a36bb35b36b6b71aacdf90d3fa62e1a856f"
+    },
+    {
+      "path": "docs/architecture/controller-motion-and-collision-policy.md",
+      "size": 1725,
+      "sha256": "34d4462906a14c783a0b012e4879bd85b4cfce17a303e43da491cfdbb6561e6d"
+    },
+    {
+      "path": "docs/architecture/dof-reduction-and-z-hold.md",
+      "size": 3310,
+      "sha256": "089c64419c947efd031881851cbd86732b06d1f59f8c8b67b13f615fcb151e3b"
+    },
+    {
+      "path": "docs/architecture/final-motion-plan-contract.md",
+      "size": 5824,
+      "sha256": "0b77a393db92c9b68f98e1ba61f743a5d3fd1db6822b47ea6b322bddd6d92a1d"
+    },
+    {
+      "path": "docs/architecture/geometry-space-optimizer.md",
+      "size": 1996,
+      "sha256": "4f5536f26b9c5725b7ee740b14737aba37dcfb673922a6ad049f7a74bb3368d4"
+    },
+    {
+      "path": "docs/architecture/gtn-controller-lowering.md",
+      "size": 6149,
+      "sha256": "c05da26529c8c986fbb40f9d17a94f61b2fe8b66b1b524c40bdddecda8c53135"
+    },
+    {
+      "path": "docs/architecture/motion-parameters-v3.md",
+      "size": 3786,
+      "sha256": "0b8b0e61bfa852cbd4d3e587cb46b8f80de4d89edb42c8798bd77ae9cfa81e11"
+    },
+    {
+      "path": "docs/architecture/motion-plan-state-machine.md",
+      "size": 2702,
+      "sha256": "1fae2b43140f8994bcb4e34d85f2cd72121c5953f05dd0e7034a0ca1aa7ab13e"
+    },
+    {
+      "path": "docs/architecture/pose-space-optimizer.md",
+      "size": 3161,
+      "sha256": "04b88c09e3afd6db76f368329a6af3f76149205600509fa9b9b0b57b0f09fadf"
+    },
+    {
+      "path": "docs/migration/config-migration.md",
+      "size": 2590,
+      "sha256": "9347d0a1ce913e401afaae832912504e77d3808dbfd462594e6a2a1507978a72"
+    },
+    {
+      "path": "docs/migration/current-to-v3.1-migration.md",
+      "size": 2576,
+      "sha256": "7ff51623f48e80a1c80c0ada98d0d4d1684099a2ee985e250498ed1afdefcca9"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/ASTRA-REVIEW-PROMPTS.md",
+      "size": 2213,
+      "sha256": "cf954717e9659d0caf1f2025452d33511c2a271b2078399ac123ced24cf77ce5"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/B0-foundation-contracts-evaluator.md",
+      "size": 4077,
+      "sha256": "44b4966392562712dca1514ed51de23fb61826761fa2d84f3a14e40bfc861f47"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/B1-cam-motion-compiler.md",
+      "size": 6051,
+      "sha256": "272d11735adc2f6ae08aab162a4bd9ab4c9f9ebda96b4266d7b2f9d99d57ab11"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/B2-process-gtn-execution.md",
+      "size": 4079,
+      "sha256": "bc95ed408ea0e58884c7721a996370649fc59aaecbcb74ed4272c054c602ae06"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/B3-no-collision-commissioning.md",
+      "size": 3394,
+      "sha256": "8d6ab717c8e00d662e2388df76598ee720ac4d5f4429db4f72a4c588f7f153a2"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/B4-production-safety-qualification.md",
+      "size": 3522,
+      "sha256": "16382c70a6741e382c7543d5629ad9183899e0edb7a1fd73efce011b0e29bb02"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/BATCH-MAPPING.md",
+      "size": 1091,
+      "sha256": "bf29cfe1914bedf5b7fcffd02bc4ad56faa9bba3d04d83fbd766faab9eda621d"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/CONTEXT-MAP.md",
+      "size": 1617,
+      "sha256": "709df304fb550d2ed640a0390208f587ae8cc78c8ed28f7f231bf830996e6294"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/EXECUTION-CONTRACT.md",
+      "size": 4221,
+      "sha256": "3828ab6d58e3b865888c04cd1ed475075da280c092fc076c802aba342e33496e"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/EXECUTION-PROMPTS.md",
+      "size": 2053,
+      "sha256": "49e67abcb1e4408f31b64021ab064bfd389a4f5d7b6d0ef09f0b5384a469341d"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/README.md",
+      "size": 7212,
+      "sha256": "2ed1f749fbf2ce20327883fb57c6d2ab55784017b88e38a094c181f7a5c7dbfd"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/STATUS-MATRIX.md",
+      "size": 767,
+      "sha256": "7c87d21302cf76113f730dda3bb21b8496c7cae8e5860e4ddbb8218b3e86d8e2"
+    },
+    {
+      "path": "docs/plans/cam-motion-v3.1/VALIDATION-POLICY.md",
+      "size": 2632,
+      "sha256": "5ee8277a2005e57ba77a9908cd670eeb192f87a75261b4c6e04a693671bc61a0"
+    },
+    {
+      "path": "docs/research/final-remote-audit-2026-09-14.md",
+      "size": 12501,
+      "sha256": "e1920c20a68da28c1a9d5133ae27e84268401d794c927baba851aafd4f564849"
+    },
+    {
+      "path": "docs/research/industry-patterns.md",
+      "size": 1469,
+      "sha256": "d0b0d201c6e90182d532adf50a9433b022d99b06cb64cc7d863d85f09b6bd05e"
+    },
+    {
+      "path": "docs/research/previous-plan-delta.md",
+      "size": 1487,
+      "sha256": "b6580723466c4715d8bac374ed9d5fbbdf09fc050f2d6ebb416d7933804c3027"
+    },
+    {
+      "path": "docs/research/repository-facts.md",
+      "size": 6719,
+      "sha256": "ec91a59b1e8e338e25414d8f42067802b20be002c5677dd2e7a740fb281383b3"
+    },
+    {
+      "path": "docs/templates/compact-stage-summary-template.md",
+      "size": 325,
+      "sha256": "ec6e28fb5f7fcf2f2aa24c8fe0944f75868811cda4202f544f938e9dd6c670d1"
+    },
+    {
+      "path": "docs/validation/collision-disabled-validation.md",
+      "size": 1086,
+      "sha256": "806cffff30c4c3b4f866cdab3a4fd9bcfab92417552528d627d9a6975dee43f5"
+    },
+    {
+      "path": "docs/validation/development-release-gate.md",
+      "size": 1839,
+      "sha256": "3ab6dbbc46399c28b7a35591ab9fd316437375326cce2d7cd0ff1dd52d1edbf0"
+    },
+    {
+      "path": "docs/validation/full5d-validation.md",
+      "size": 772,
+      "sha256": "99ce9ddcada4582f7cf378759014c75eb27386f1b3d425264eba43879183cd1e"
+    },
+    {
+      "path": "docs/validation/gtn-qualification.md",
+      "size": 926,
+      "sha256": "602bbd291eab258fc93d218b3df33e25adfea3ec6076c8154530e8a8d4ceb604"
+    },
+    {
+      "path": "docs/validation/readiness-review.md",
+      "size": 1278,
+      "sha256": "75dc9f2161eb31db27e88758d3fa455dd5c18e968b8fbf5c97a89247424e4f5f"
+    },
+    {
+      "path": "docs/validation/reduced-dof-validation.md",
+      "size": 782,
+      "sha256": "5520af73d5551002dc6e48d634b62fea5f3395fd13e0147f55fb8efd39222d6d"
+    },
+    {
+      "path": "docs/validation/validation-matrix.md",
+      "size": 4837,
+      "sha256": "34672e184727ffafcc835301a8fa4085f299fc6153d75517feafa5f3c8032209"
+    },
+    {
+      "path": "evidence/compact-package-qa.json",
+      "size": 262,
+      "sha256": "a8d0b289281850c235e5b92b96472dbd65d2380b0456058d43cedbeb0c8bb472"
+    },
+    {
+      "path": "evidence/release-decision.json",
+      "size": 270,
+      "sha256": "08f0097886961b40210fef90b7f7f356d7000bb5c6b5cb2dab0a4678f7246bba"
+    },
+    {
+      "path": "evidence/remote-baseline.txt",
+      "size": 164,
+      "sha256": "18bdb5792296234d8c9dba9f2df94b311161088af4814fbb497040485a7d50dd"
+    }
+  ]
+}

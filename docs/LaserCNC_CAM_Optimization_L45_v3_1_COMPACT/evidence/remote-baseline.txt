@@ -1,0 +1,5 @@
+Repository: super1wang/LaserCNCv1.0
+Branch: main
+HEAD: 4254db59696193963392e2946132cf614c8def26
+Tree: 781c39c091622c2e97d30ef83b0a792f37c7f9fb
+Reviewed: 2026-09-14

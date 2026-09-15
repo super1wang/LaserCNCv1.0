@@ -1,0 +1,11 @@
+{
+  "markdown_files": 43,
+  "batch_docs": 5,
+  "formal_stage_gates": 5,
+  "internal_links_checked": 2,
+  "broken_internal_links": [],
+  "has_execution_contract": true,
+  "has_context_map": true,
+  "has_astra_prompts": true,
+  "legacy_wp_docs_in_active_plan": 0
+}
