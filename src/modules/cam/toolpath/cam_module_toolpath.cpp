@@ -23,6 +23,7 @@
 #include "core/project/cam/layer_container.h"
 #include "core/project/cam/layer_manager.h"
 #include "core/project/lcnc_project_manager.h"
+#include "core/project/project_workspace.h"
 #include "core/services/selection_service.h"
 #include "core/settings/app_settings.h"
 #include "core/task/task_manager.h"
@@ -623,6 +624,7 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         node.axes = point->machineAxes;
         node.sourceEdgeIndex = point->sourceEdgeIndex;
         node.sourceParameter = point->curveParam;
+        node.semanticHardBarrier = point->semanticHardBarrier;
         node.axisMask = point->machineAxisMask;
         node.tcpX = point->x;
         node.tcpY = point->y;
@@ -697,38 +699,116 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
     if (plan.edgeCertificates.size() != qMax(0, plan.nodes.size() - 1))
         plan.edgeCertificates.clear();
 
-    plan.context.workspaceGeneration = snapshot.revision;
-    plan.context.sourceToolpathRevision = snapshot.revision;
-    QByteArray contourOrder;
-    QByteArray toolProcess;
-    for (const auto& contour : snapshot.contours) {
-        contourOrder += QByteArray::number(contour.contourId) + ';';
-        toolProcess += contour.toolName.toUtf8() + ':'
-            + QByteArray::number(contour.cuttingOffsetMm, 'g', 17) + ':'
-            + QByteArray::number(contour.rapidOffsetMm, 'g', 17) + ';';
-    }
     const auto digest = [](const QByteArray& value) {
         return QCryptographicHash::hash(value, QCryptographicHash::Sha256);
     };
-    plan.context.contourOrderHash = digest(contourOrder);
-    plan.context.machineKinematicsHash = digest(
-        snapshot.machineConfigurationFingerprint.toUtf8());
-    plan.context.setupCalibrationHash = plan.context.machineKinematicsHash;
-    plan.context.toolProcessHash = digest(toolProcess);
-    plan.context.optimizationPolicyHash = digest(
-        QByteArrayLiteral("cam-motion-v3.1-b0-unoptimized-v1"));
-    plan.context.controllerMode = lcnc::cam::ControllerMotionMode::PhysicalAxes;
-    QByteArray capability;
-    for (int axis = 0; axis < snapshot.machineAxisLayout.count; ++axis) {
-        capability += snapshot.machineAxisLayout.axes[axis].name.toUtf8() + ':'
-            + QByteArray::number(static_cast<int>(
-                snapshot.machineAxisLayout.axes[axis].role)) + ';';
-    }
-    plan.context.controllerCapabilityHash = digest(capability);
-    plan.context.dynamicsSemanticHash = digest(QByteArray::number(
-        snapshot.travelPlan.key.motionProfileHash));
-    plan.context.collisionMode = snapshot.collisionSafety.effectiveVerificationMode();
-    plan.context.interpolationModelVersion = 1;
+    const auto captureGeneration = [this]() {
+        lcnc::cam::ToolpathGenerationStamp stamp;
+        stamp.toolpathRevision = toolpathRevision();
+        stamp.machiningFaceRevision = machiningFaceSetRevision();
+        stamp.machineSetupRevision = machineSetupRevision();
+        stamp.leadInLength = toolpathRef().globalLeadInLength();
+        stamp.smoothAngle = m_smoothAngle;
+        stamp.deflection = m_deflection;
+        stamp.cuttingOffsetMm = toolpathRef().globalCuttingOffsetMm();
+        stamp.rapidOffsetMm = toolpathRef().globalRapidOffsetMm();
+        stamp.useFaceClassification = m_useFaceClassification;
+        stamp.extractionStrategy = m_extractionStrategy;
+        const auto& contours = toolpathRef().contours();
+        stamp.contourIds.reserve(contours.size());
+        stamp.sources.reserve(contours.size());
+        for (std::size_t index = 0; index < contours.size(); ++index) {
+            const LaserContour& contour = contours[index];
+            stamp.contourIds.push_back(contour.contourId);
+            stamp.sources.push_back({contour.workpieceEntry,
+                static_cast<int>(index), contour.sourceShape});
+        }
+        return stamp;
+    };
+    const lcnc::cam::ToolpathGenerationStamp generation = captureGeneration();
+    const auto captureContext = [this, &snapshot, &generation, &digest]() {
+        lcnc::cam::MotionCompilationContext context;
+        const lcnc::LcncProjectManager* projects =
+            lcnc::Kernel::current().projectManager();
+        const lcnc::ProjectWorkspace* workspace = projects
+            ? projects->activeWorkspace() : nullptr;
+        if (workspace) {
+            context.workspaceGeneration =
+                (static_cast<std::uint64_t>(workspace->id() + 1) << 32)
+                ^ workspace->generation();
+        }
+        context.sourceToolpathRevision = generation.toolpathRevision;
+        QByteArray contourOrder;
+        QByteArray toolProcess;
+        for (const auto& contour : snapshot.contours) {
+            contourOrder += QByteArray::number(contour.contourId) + ';';
+            toolProcess += contour.toolName.toUtf8() + ':'
+                + QByteArray::number(contour.cuttingOffsetMm, 'g', 17) + ':'
+                + QByteArray::number(contour.rapidOffsetMm, 'g', 17) + ';';
+        }
+        context.contourOrderHash = digest(contourOrder);
+        context.machineKinematicsHash = digest(
+            snapshot.machineConfigurationFingerprint.toUtf8());
+        context.setupCalibrationHash = digest(
+            QByteArray::number(generation.machineSetupRevision) + ':'
+            + snapshot.machineConfigurationFingerprint.toUtf8());
+        context.toolProcessHash = digest(toolProcess);
+        // There is no qualified ACS/GTN mode authority yet. The old default
+        // remains a requested value only; its fingerprint cannot admit a
+        // controller-specific candidate or qualified RTCP evaluator.
+        context.controllerQualification.requestedMode =
+            lcnc::cam::ControllerMotionMode::PhysicalAxes;
+        context.controllerQualification.state =
+            lcnc::cam::ControllerQualificationState::Unavailable;
+        context.controllerQualification.qualificationRevision = 0;
+        context.controllerQualification.sourceId =
+            QStringLiteral("legacy/default-physical-axes-unqualified");
+        context.controllerMode = context.controllerQualification.requestedMode;
+        context.controllerCapabilityHash =
+            lcnc::cam::controllerQualificationSnapshotHash(
+                context.controllerQualification);
+        context.dynamicsSemanticHash = digest(
+            QByteArrayLiteral("legacy-offline-rapid-profile:")
+            + QByteArray::number(snapshot.travelPlan.key.motionProfileHash));
+        context.collisionMode = snapshot.collisionSafety.effectiveVerificationMode();
+        context.interpolationModelVersion = 1; // B0 PhysicalAxisLine evaluator model.
+        return context;
+    };
+    const QVector<lcnc::cam::MotionCompilationInput::Parameter> parameters{
+        {QStringLiteral("optimizationMode"), QStringLiteral("Off"),
+            QStringLiteral("Off"), QStringLiteral("cam-motion/legacy-unoptimized"),
+            QStringLiteral("enum"), 1, true},
+        {QStringLiteral("geometry.deflection"), QString::number(m_deflection, 'g', 17),
+            QString::number(m_deflection, 'g', 17), QStringLiteral("CamConfig.toolpath.deflection"),
+            QStringLiteral("mm"), generation.toolpathRevision, true},
+        {QStringLiteral("geometry.maxTangentStepDeg"), QStringLiteral("5"),
+            QStringLiteral("5"), QStringLiteral("cam-motion/geometry-policy-v1"),
+            QStringLiteral("degree"), 1, true},
+        {QStringLiteral("geometry.maxNormalStepDeg"), QStringLiteral("5"),
+            QStringLiteral("5"), QStringLiteral("cam-motion/geometry-policy-v1"),
+            QStringLiteral("degree"), 1, true},
+        {QStringLiteral("geometry.maxSubdivisionDepth"), QStringLiteral("8"),
+            QStringLiteral("8"), QStringLiteral("cam-motion/geometry-policy-v1"),
+            QStringLiteral("levels"), 1, true},
+        {QStringLiteral("geometry.minSourceParameterSpan"), QStringLiteral("1e-9"),
+            QStringLiteral("1e-9"), QStringLiteral("cam-motion/geometry-policy-v1"),
+            QStringLiteral("source-parameter"), 1, true},
+        {QStringLiteral("geometry.maxSampleMultiplier"), QStringLiteral("64"),
+            QStringLiteral("64"), QStringLiteral("cam-motion/geometry-policy-v1"),
+            QStringLiteral("ratio"), 1, true},
+        {QStringLiteral("geometry.processBarriers"), QStringLiteral("none"),
+            QStringLiteral("none"), QStringLiteral("cam-motion/no-process-barrier-source"),
+            QStringLiteral("source-parameter-list"), 0, false},
+        {QStringLiteral("enableDofReduction"), QStringLiteral("false"),
+            QStringLiteral("false"), QStringLiteral("cam-motion/legacy-unoptimized"),
+            QStringLiteral("boolean"), 1, true},
+        {QStringLiteral("enableLaserZHold"), QStringLiteral("false"),
+            QStringLiteral("false"), QStringLiteral("cam-motion/legacy-unoptimized"),
+            QStringLiteral("boolean"), 1, true}};
+    const lcnc::cam::MotionCompilationInput input =
+        lcnc::cam::ToolpathGenerationService::captureMotionInput(
+            generation, captureContext(), parameters);
+    plan.context = input.context;
     plan.solverId = snapshot.solverId;
     plan.solverVersion = snapshot.solverVersion;
 
@@ -748,6 +828,7 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         const bool newBlock = plan.blocks.isEmpty()
             || plan.blocks.constLast().phase != node.phase
             || plan.blocks.constLast().contourId != node.contourId
+            || node.semanticHardBarrier
             || (node.phase == lcnc::cam::CamMotionPhase::Cutting
                 && node.sourceEdgeIndex >= 0
                 && plan.blocks.constLast().physicalKnots.constLast().sourceEdgeIndex
@@ -804,6 +885,19 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
     if (!plan.blocks.isEmpty())
         plan.optimizerReport.selectedClass = plan.blocks.constLast().motionClass;
     QString finalizationError;
+    lcnc::cam::MotionCompilationContext currentContext = captureContext();
+    currentContext.optimizationPolicyHash = input.context.optimizationPolicyHash;
+    if (!lcnc::cam::ToolpathGenerationService::acceptsMotionResult(
+            input, captureGeneration(), currentContext, true, false)) {
+        plan.failureReason = QStringLiteral(
+            "Motion compilation input changed before owner-thread publication");
+        plan.blocks.clear();
+        plan.nodes.clear();
+        plan.contextHash.clear();
+        plan.planHash.clear();
+        plan.derivedFromPlanHash.clear();
+        return;
+    }
     if (!plan.blocks.isEmpty() && !lcnc::cam::finalizeMotionPlan(
             &plan, &finalizationError)) {
         plan.failureReason = finalizationError;
@@ -2166,9 +2260,13 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
         exportedContour.layerEnabled = layer ? layer->enabled : true;
         const bool machineSolveReady = m_camData && m_camData->hasCompletePipelineChain();
         exportedContour.needsRecalculation = contour.needsRecalculation
+            || !contour.geometrySamplingComplete
             || (m_camData && m_camData->generationParamsDirty())
             || !machineSolveReady;
-        if (contour.needsRecalculation)
+        if (!contour.geometrySamplingComplete)
+            // 中文翻译：几何采样预算不足，轮廓尚未完成可验证的采样
+            exportedContour.recalculationReason = tr("The geometry sampling budget did not qualify this contour");
+        else if (contour.needsRecalculation)
             // 中文翻译：轮廓参数或起点尚未重新计算
             exportedContour.recalculationReason = tr("Contour parameters or starting point have not been recalculated");
         else if (m_camData && m_camData->generationParamsDirty())
@@ -2272,6 +2370,7 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             exportedPoint.tangentZ = point.tangent.Z();
             exportedPoint.curveParam = point.param;
             exportedPoint.sourceEdgeIndex = point.sourceEdgeIndex;
+            exportedPoint.semanticHardBarrier = point.semanticHardBarrier;
             exportedPoint.machineX = point.machineCoord.x;
             exportedPoint.machineY = point.machineCoord.y;
             exportedPoint.machineZ = point.machineCoord.z;

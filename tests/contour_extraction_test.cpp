@@ -290,6 +290,37 @@ int verifyAsynchronousResultContracts()
         return fail(QStringLiteral("Failed or cancelled CAM result was accepted"));
     }
 
+    lcnc::cam::MotionCompilationContext motionContext;
+    motionContext.sourceToolpathRevision = captured.toolpathRevision;
+    motionContext.controllerQualification.sourceId =
+        QStringLiteral("legacy/default-physical-axes-unqualified");
+    motionContext.controllerCapabilityHash =
+        lcnc::cam::controllerQualificationSnapshotHash(
+            motionContext.controllerQualification);
+    QVector<lcnc::cam::MotionCompilationInput::Parameter> policy{
+        {QStringLiteral("optimizationMode"), QStringLiteral("Off"),
+         QStringLiteral("Off"), QStringLiteral("compiler/builtin"),
+         QStringLiteral("enum"), 1, true}};
+    const auto motionInput = ToolpathGenerationService::captureMotionInput(
+        captured, motionContext, policy);
+    policy[0].requested = QStringLiteral("Full");
+    if (motionInput.parameters.constFirst().requested != QStringLiteral("Off")
+        || !ToolpathGenerationService::acceptsMotionResult(
+            motionInput, captured, motionInput.context, true, false)) {
+        return fail(QStringLiteral("Motion compilation input was not frozen at capture"));
+    }
+    auto staleMotionContext = motionInput.context;
+    staleMotionContext.controllerQualification.state =
+        lcnc::cam::ControllerQualificationState::Qualified;
+    if (ToolpathGenerationService::acceptsMotionResult(
+            motionInput, captured, staleMotionContext, true, false)
+        || ToolpathGenerationService::acceptsMotionResult(
+            motionInput, changed, motionInput.context, true, false)
+        || ToolpathGenerationService::acceptsMotionResult(
+            motionInput, captured, motionInput.context, true, true)) {
+        return fail(QStringLiteral("Stale or cancelled motion worker result was accepted"));
+    }
+
     lcnc::cam::MachiningFacePipelineService faces;
     const TopoDS_Shape source = lcnc::cad_algo::makeBox(8.0, 6.0, 2.0);
     TopExp_Explorer explorer(source, TopAbs_FACE);

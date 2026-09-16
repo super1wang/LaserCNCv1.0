@@ -95,6 +95,7 @@ struct ToolpathPoint
     gp_Dir tangent;       ///< Tangent direction along the contour (for 5-axis)
     double param{0.0};    ///< Curve parameter on the source edge
     int sourceEdgeIndex{-1}; ///< Stable wire-edge index owning this sample
+    bool semanticHardBarrier{false}; ///< Required process/laser stop at this source knot.
     MachineCoord machineCoord; ///< Computed machine coordinates (filled by IK)
 };
 
@@ -104,6 +105,22 @@ struct ContourGenerationParams
     double deflection{0.1};
     double cuttingOffsetMm{1.0};
     double rapidOffsetMm{5.0};
+};
+
+/// Sampling resolution, not permission to deviate from the OCC source curve.
+/// A failed budget leaves the geometry unqualified for machine solving.
+struct GeometrySamplingPolicy
+{
+    struct SourceBarrier {
+        int sourceEdgeIndex{-1};
+        double parameter{0.0};
+    };
+    double maxTangentStepDeg{5.0};
+    double maxNormalStepDeg{5.0};
+    int maxSubdivisionDepth{8};
+    double minSourceParameterSpan{1e-9};
+    int maxSampleMultiplier{64};
+    std::vector<SourceBarrier> processBarriers;
 };
 
 enum class ContourDirtyStage : std::uint32_t
@@ -177,6 +194,7 @@ struct LaserContour
     TopoDS_Wire                wire;     ///< The original topological wire
     TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
+    bool geometrySamplingComplete{true}; ///< False means the budget could not prove the policy.
     std::vector<LeadInEdgeSurfaceContext> leadInSurfaceContext; ///< Transient edge-to-face adjacency
     LeadInParams               leadIn;   ///< Lead-in parameters for this contour
     LeadInSolution             leadInSolution; ///< Derived geometry and machine pose
@@ -334,7 +352,14 @@ public:
     /// @param deflection Chordal deflection for sampling density (mm).
     static void discretizeContour(LaserContour& contour,
                                   const TopoDS_Shape& workpiece,
-                                  double deflection = 0.1);
+                                  double deflection = 0.1,
+                                  const GeometrySamplingPolicy& policy = {});
+
+    /// Replace the geometry sequence without carrying any old physical solve.
+    /// Every insertion, deletion, move, or source remap must use this boundary.
+    static void replaceGeometrySamples(LaserContour& contour,
+                                       std::vector<ToolpathPoint> samples,
+                                       bool samplingComplete = false);
 
     /// Compute the lead-in approach edge for one contour.
     /// The lead-in line goes from the approach start to the entry point on the contour.
@@ -389,7 +414,8 @@ public:
         LaserContour& contour,
         const std::vector<TopoDS_Face>& outerFaces,
         const std::vector<TopoDS_Face>& crossFaces,
-        double deflection = 0.1);
+        double deflection = 0.1,
+        const GeometrySamplingPolicy& policy = {});
 
     /// v5 mode-explicit batch solver. No solver selection is inferred from
     /// missing axes or configuration-name substrings.

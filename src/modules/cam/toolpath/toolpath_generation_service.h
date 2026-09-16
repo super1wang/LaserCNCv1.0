@@ -1,6 +1,10 @@
 #pragma once
 
+#include "core/project/cam/collision_validation_contracts.h"
+
+#include <QByteArray>
 #include <QString>
+#include <QVector>
 #include <TopoDS_Shape.hxx>
 
 #include <cstdint>
@@ -31,6 +35,25 @@ struct ToolpathGenerationStamp
     std::vector<ToolpathGenerationSource> sources;
 };
 
+/// Detached motion compilation input. The generation part reuses the CAM
+/// owner-thread stamp; worker code may only read this captured value.
+struct MotionCompilationInput
+{
+    ToolpathGenerationStamp generation;
+    struct Parameter {
+        QString key;
+        QString requested;
+        QString effective;
+        QString sourceId;
+        QString unit;
+        std::uint64_t revision{0};
+        bool available{true};
+    };
+    QVector<Parameter> parameters;
+    MotionCompilationContext context;
+    QByteArray capturedContextHash;
+};
+
 class ToolpathGenerationService
 {
 public:
@@ -39,6 +62,17 @@ public:
         const ToolpathGenerationStamp& current,
         bool taskSucceeded,
         bool cancellationRequested) noexcept;
+
+    [[nodiscard]] static MotionCompilationInput captureMotionInput(
+        const ToolpathGenerationStamp& generation,
+        const MotionCompilationContext& context,
+        const QVector<MotionCompilationInput::Parameter>& parameters);
+    [[nodiscard]] static bool acceptsMotionResult(
+        const MotionCompilationInput& captured,
+        const ToolpathGenerationStamp& currentGeneration,
+        const MotionCompilationContext& currentContext,
+        bool taskSucceeded,
+        bool cancellationRequested);
 };
 
 } // namespace lcnc::cam

@@ -388,6 +388,13 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
         entry["pendingRapidOffsetMm"] = c.pendingParams.rapidOffsetMm;
         entry["dirtyStages"] = static_cast<std::int64_t>(c.dirtyStages);
         entry["needsRecalculation"] = c.needsRecalculation;
+        entry["geometrySamplingComplete"] = c.geometrySamplingComplete;
+        toml::array hardBarrierPointIndices;
+        for (std::size_t index = 0; index < c.points.size(); ++index) {
+            if (c.points[index].semanticHardBarrier)
+                hardBarrierPointIndices.push_back(static_cast<std::int64_t>(index));
+        }
+        entry["hardBarrierPointIndices"] = hardBarrierPointIndices;
         entry["leadInValid"]       = c.leadIn.valid;
         if (c.leadIn.valid) {
             entry["leadInEntryX"]    = c.leadIn.entryPoint.X();
@@ -612,6 +619,10 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
                 : ContourDirtyStage::None;
             c.needsRecalculation = e.contains("needsRecalculation")
                 && e.at("needsRecalculation").as_boolean();
+            // Historical packages predate bounded sampling. Preserve their
+            // points for display, but require a new geometry pass before solve.
+            c.geometrySamplingComplete = e.contains("geometrySamplingComplete")
+                && e.at("geometrySamplingComplete").as_boolean();
             if (schemaVersion == kOldCamToolpathSchemaVersion) {
                 c.dirtyStages = ContourDirtyStage::MotionOffset
                     | ContourDirtyStage::MachineSolve | ContourDirtyStage::AdjacentRapid
@@ -639,6 +650,22 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             auto it = pointsByContourId.find(c.contourId);
             if (it != pointsByContourId.end())
                 c.points = std::move(it.value());
+            if (e.contains("hardBarrierPointIndices")
+                && e.at("hardBarrierPointIndices").is_array()) {
+                for (const toml::value& indexValue :
+                     e.at("hardBarrierPointIndices").as_array()) {
+                    if (!indexValue.is_integer()) {
+                        c.geometrySamplingComplete = false;
+                        continue;
+                    }
+                    const std::int64_t index = indexValue.as_integer();
+                    if (index < 0 || static_cast<std::size_t>(index) >= c.points.size()) {
+                        c.geometrySamplingComplete = false;
+                        continue;
+                    }
+                    c.points[static_cast<std::size_t>(index)].semanticHardBarrier = true;
+                }
+            }
             auto leadIt = leadInsByContourId.find(c.contourId);
             if (leadIt != leadInsByContourId.end()) {
                 c.leadInSolution = std::move(leadIt.value());

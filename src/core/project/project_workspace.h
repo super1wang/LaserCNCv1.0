@@ -2,6 +2,7 @@
 
 #include "core/project/lcnc_project_session.h"
 
+#include <cstdint>
 #include <memory>
 
 class LcncDocument;
@@ -25,6 +26,7 @@ public:
     ~ProjectWorkspace();
 
     ProjectWorkspaceId id() const { return m_id; }
+    std::uint64_t generation() const { return m_generation; }
 
     LcncDocument*       workpieceDocument() { return m_projectDocument.get(); }
     const LcncDocument* workpieceDocument() const { return m_projectDocument.get(); }
@@ -43,6 +45,7 @@ public:
 
 private:
     ProjectWorkspaceId m_id{kInvalidProjectWorkspaceId};
+    std::uint64_t m_generation{0};
     std::unique_ptr<LcncDocument> m_projectDocument;
     std::unique_ptr<lcnc::cam::CamDataManager> m_camData;
     LcncProjectSession m_session;

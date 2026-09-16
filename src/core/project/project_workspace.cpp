@@ -25,6 +25,7 @@ void ProjectWorkspace::bindMachineDocument(LcncDocument* machineDocument)
 
 void ProjectWorkspace::resetProjectState(const QString& projectName)
 {
+    ++m_generation;
     if (m_projectDocument) {
         m_projectDocument->setName(projectName);
         m_projectDocument->setFilePath(QString());

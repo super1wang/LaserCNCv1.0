@@ -55,6 +55,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <gp_Pnt.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
@@ -454,6 +455,8 @@ void normalizeContourTraversal(LaserContour& contour,
 
     if (isClosed)
         contour.points.push_back(contour.points.front());
+    LaserToolpathBuilder::replaceGeometrySamples(
+        contour, std::move(contour.points), contour.geometrySamplingComplete);
     if (contour.leadIn.valid && !contour.points.empty()) {
         contour.leadIn.entryPoint = contour.points.front().position;
         contour.leadIn.entryParam = contour.points.front().param;
@@ -1643,13 +1646,132 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
 
 namespace {
 
-bool appendSourceSample(LaserContour& contour, ToolpathPoint point,
+double directionAngleDeg(const gp_Dir& first, const gp_Dir& second)
+{
+    constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
+    const double dot = std::clamp(gp_Vec(first).Dot(gp_Vec(second)), -1.0, 1.0);
+    return std::acos(dot) * kRadToDeg;
+}
+
+double midpointChordDeviation(const gp_Pnt& first, const gp_Pnt& middle,
+                              const gp_Pnt& last)
+{
+    const gp_Vec chord(first, last);
+    if (chord.SquareMagnitude() <= 1e-24)
+        return first.Distance(middle);
+    const gp_Vec offset(first, middle);
+    const double fraction = std::clamp(offset.Dot(chord) / chord.SquareMagnitude(), 0.0, 1.0);
+    return middle.Distance(first.Translated(chord * fraction));
+}
+
+template <typename SampleAt>
+std::vector<ToolpathPoint> insertSourceBarriers(
+    const std::vector<ToolpathPoint>& seeds,
+    const GeometrySamplingPolicy& policy, SampleAt&& sampleAt)
+{
+    if (policy.processBarriers.empty())
+        return seeds;
+    std::vector<ToolpathPoint> result;
+    result.reserve(seeds.size() + policy.processBarriers.size());
+    for (std::size_t index = 0; index < seeds.size(); ++index) {
+        ToolpathPoint seed = seeds[index];
+        for (const auto& barrier : policy.processBarriers) {
+            if (seed.sourceEdgeIndex == barrier.sourceEdgeIndex
+                && std::abs(seed.param - barrier.parameter) <= 1e-12)
+                seed.semanticHardBarrier = true;
+        }
+        result.push_back(std::move(seed));
+        if (index + 1 == seeds.size()
+            || seeds[index].sourceEdgeIndex != seeds[index + 1].sourceEdgeIndex)
+            continue;
+        const auto& next = seeds[index + 1];
+        std::vector<double> interior;
+        for (const auto& barrier : policy.processBarriers) {
+            if (barrier.sourceEdgeIndex != seeds[index].sourceEdgeIndex)
+                continue;
+            if ((barrier.parameter > std::min(seeds[index].param, next.param))
+                && (barrier.parameter < std::max(seeds[index].param, next.param)))
+                interior.push_back(barrier.parameter);
+        }
+        std::sort(interior.begin(), interior.end());
+        interior.erase(std::unique(interior.begin(), interior.end()), interior.end());
+        if (next.param < seeds[index].param)
+            std::reverse(interior.begin(), interior.end());
+        for (double parameter : interior) {
+            ToolpathPoint barrierPoint = sampleAt(seeds[index].sourceEdgeIndex, parameter);
+            barrierPoint.semanticHardBarrier = true;
+            result.push_back(std::move(barrierPoint));
+        }
+    }
+    return result;
+}
+
+template <typename SampleAt>
+std::vector<ToolpathPoint> refineSourceSamples(
+    const std::vector<ToolpathPoint>& seeds, double chordToleranceMm,
+    const GeometrySamplingPolicy& policy, SampleAt&& sampleAt, bool* complete)
+{
+    std::vector<ToolpathPoint> result;
+    if (complete)
+        *complete = true;
+    if (seeds.empty()) {
+        if (complete)
+            *complete = false;
+        return result;
+    }
+    const std::size_t multiplier = static_cast<std::size_t>(
+        std::max(1, policy.maxSampleMultiplier));
+    const std::size_t maxSamples = seeds.size() > std::numeric_limits<std::size_t>::max() / multiplier
+        ? std::numeric_limits<std::size_t>::max() : seeds.size() * multiplier;
+    result.reserve(std::min(maxSamples, seeds.size() * 2));
+    result.push_back(seeds.front());
+    std::function<void(const ToolpathPoint&, const ToolpathPoint&, int)> refine;
+    refine = [&](const ToolpathPoint& first, const ToolpathPoint& last, int depth) {
+        if (first.sourceEdgeIndex != last.sourceEdgeIndex
+            || first.sourceEdgeIndex < 0) {
+            result.push_back(last); // OCC seam or process feature: never cross it.
+            return;
+        }
+        const double span = std::abs(last.param - first.param);
+        const double middleParameter = first.param + (last.param - first.param) * 0.5;
+        if (middleParameter == first.param || middleParameter == last.param) {
+            result.push_back(last);
+            return;
+        }
+        const ToolpathPoint middle = sampleAt(first.sourceEdgeIndex, middleParameter);
+        const bool needsRefinement = midpointChordDeviation(
+            first.position, middle.position, last.position) > chordToleranceMm
+            || directionAngleDeg(first.tangent, middle.tangent) > policy.maxTangentStepDeg
+            || directionAngleDeg(middle.tangent, last.tangent) > policy.maxTangentStepDeg
+            || directionAngleDeg(first.normal, middle.normal) > policy.maxNormalStepDeg
+            || directionAngleDeg(middle.normal, last.normal) > policy.maxNormalStepDeg;
+        if (!needsRefinement) {
+            result.push_back(last);
+            return;
+        }
+        if (depth >= policy.maxSubdivisionDepth
+            || span <= policy.minSourceParameterSpan
+            || result.size() + 2 >= maxSamples) {
+            if (complete)
+                *complete = false;
+            result.push_back(last); // Keep the OCC seed, never enlarge a tolerance.
+            return;
+        }
+        refine(first, middle, depth + 1);
+        refine(middle, last, depth + 1);
+    };
+    for (std::size_t i = 1; i < seeds.size(); ++i)
+        refine(seeds[i - 1], seeds[i], 0);
+    return result;
+}
+
+bool appendSourceSample(std::vector<ToolpathPoint>& points, ToolpathPoint point,
                         int anchoredEdgeIndex, double anchoredParam)
 {
     const bool anchored = point.sourceEdgeIndex == anchoredEdgeIndex
         && std::abs(point.param - anchoredParam) <= 1e-12;
-    if (!contour.points.empty()) {
-        const ToolpathPoint& previous = contour.points.back();
+    if (!points.empty()) {
+        const ToolpathPoint& previous = points.back();
         // A coincident vertex on a different OCC edge is a seam/corner, not
         // an anonymous duplicate. Both edge owners must survive compilation.
         const bool strictDuplicate = previous.sourceEdgeIndex == point.sourceEdgeIndex
@@ -1657,34 +1779,54 @@ bool appendSourceSample(LaserContour& contour, ToolpathPoint point,
             && previous.position.SquareDistance(point.position) <= 1e-24
             && gp_Vec(previous.normal).Dot(gp_Vec(point.normal)) >= 1.0 - 1e-12
             && gp_Vec(previous.tangent).Dot(gp_Vec(point.tangent)) >= 1.0 - 1e-12;
-        if (strictDuplicate) {
+        if (strictDuplicate && !point.semanticHardBarrier
+            && !previous.semanticHardBarrier) {
             if (anchored)
-                contour.points.back() = std::move(point);
+                points.back() = std::move(point);
             return false;
         }
     }
-    contour.points.push_back(std::move(point));
+    points.push_back(std::move(point));
     return true;
 }
 
 } // namespace
 
+void LaserToolpathBuilder::replaceGeometrySamples(
+    LaserContour& contour, std::vector<ToolpathPoint> samples,
+    bool samplingComplete)
+{
+    // Geometry provenance and physical axes are one solve transaction. Even
+    // a caller that reuses old point objects may not carry their solved poses.
+    for (ToolpathPoint& point : samples)
+        point.machineCoord = {};
+    contour.points = std::move(samples);
+    contour.geometrySamplingComplete = samplingComplete;
+    contour.leadInSolution.point.machineCoord = {};
+}
+
 void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
                                              const TopoDS_Shape& workpiece,
-                                             double deflection)
+                                             double deflection,
+                                             const GeometrySamplingPolicy& policy)
 {
     const int anchoredEdgeIndex = contour.leadIn.valid ? contour.leadIn.entryEdgeIndex : -1;
     const double anchoredParam = contour.leadIn.entryParam;
-    contour.points.clear();
-    if (contour.wire.IsNull())
+    std::vector<ToolpathPoint> samples;
+    if (contour.wire.IsNull()) {
+        contour.geometrySamplingComplete = false;
+        replaceGeometrySamples(contour, {});
         return;
+    }
 
     const gp_Pnt workpieceCenter = shapeCenter(workpiece);
+    std::vector<TopoDS_Edge> sourceEdges;
 
     // 必须按 WireExplorer 的连接顺序遍历边，不能用 TopExp_Explorer（拓扑集合顺序不保证连贯）。
     int edgeIndex = 0;
     for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next(), ++edgeIndex) {
         const TopoDS_Edge edge = exp.Current();
+        sourceEdges.push_back(edge);
         if (BRep_Tool::Degenerated(edge))
             continue;
 
@@ -1754,9 +1896,49 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             else
                 tp.tangent = gp_Dir(0, 0, 1);
 
-            appendSourceSample(contour, std::move(tp), anchoredEdgeIndex, anchoredParam);
+            appendSourceSample(samples, std::move(tp), anchoredEdgeIndex, anchoredParam);
         }
     }
+    const auto sampleAt = [&](int sourceEdgeIndex, double parameter) {
+        const TopoDS_Edge& edge = sourceEdges.at(static_cast<std::size_t>(sourceEdgeIndex));
+        BRepAdaptor_Curve curve(edge);
+        ToolpathPoint point;
+        point.sourceEdgeIndex = sourceEdgeIndex;
+        point.param = parameter;
+        curve.D0(parameter, point.position);
+        const LeadInEdgeSurfaceContext* surfaceContext =
+            sourceEdgeIndex < static_cast<int>(contour.leadInSurfaceContext.size())
+                ? &contour.leadInSurfaceContext[static_cast<std::size_t>(sourceEdgeIndex)]
+                : nullptr;
+        const std::vector<TopoDS_Face>* outer = surfaceContext
+            && !surfaceContext->outerFaces.empty() ? &surfaceContext->outerFaces : nullptr;
+        const std::vector<TopoDS_Face>* cross = surfaceContext
+            && !surfaceContext->crossSectionFaces.empty()
+                ? &surfaceContext->crossSectionFaces : nullptr;
+        const gp_Dir surfaceNormal = outer
+            ? findMachiningNormal(point.position, *outer)
+            : findSurfaceNormal(workpiece, point.position);
+        point.normal = outer ? surfaceNormal
+            : enforceOutwardDirection(point.position, surfaceNormal, workpieceCenter);
+        if (cross) {
+            double distance = 0.0;
+            point.crossSectionNormalValid = findClosestFaceNormal(
+                point.position, *cross, point.crossSectionNormal, distance);
+        }
+        gp_Pnt unused;
+        gp_Vec tangent;
+        curve.D1(parameter, unused, tangent);
+        if (edge.Orientation() == TopAbs_REVERSED)
+            tangent.Reverse();
+        point.tangent = tangent.Magnitude() > 1e-10
+            ? gp_Dir(tangent) : gp_Dir(0, 0, 1);
+        return point;
+    };
+    bool complete = false;
+    auto guarded = insertSourceBarriers(samples, policy, sampleAt);
+    auto refined = refineSourceSamples(guarded, deflection, policy, sampleAt, &complete);
+    contour.geometrySamplingComplete = complete;
+    replaceGeometrySamples(contour, std::move(refined), complete);
 }
 
 // =============================================================================
@@ -1767,21 +1949,27 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
     LaserContour& contour,
     const std::vector<TopoDS_Face>& outerFaces,
     const std::vector<TopoDS_Face>& crossFaces,
-    double deflection)
+    double deflection,
+    const GeometrySamplingPolicy& policy)
 {
     const int anchoredEdgeIndex = contour.leadIn.valid ? contour.leadIn.entryEdgeIndex : -1;
     const double anchoredParam = contour.leadIn.entryParam;
-    contour.points.clear();
-    if (contour.wire.IsNull())
+    std::vector<ToolpathPoint> samples;
+    if (contour.wire.IsNull()) {
+        contour.geometrySamplingComplete = false;
+        replaceGeometrySamples(contour, {});
         return;
+    }
 
     const gp_Pnt outerCenter = faceGroupCenter(outerFaces);
+    std::vector<TopoDS_Edge> sourceEdges;
 
     // 必须按 WireExplorer 的连接顺序遍历边，并尊重每条边的 Orientation。
     // TopExp_Explorer 只是拓扑枚举，会导致矩形孔等多边轮廓边之间顺序错乱。
     int edgeIndex = 0;
     for (BRepTools_WireExplorer exp(contour.wire); exp.More(); exp.Next(), ++edgeIndex) {
         const TopoDS_Edge edge = exp.Current();
+        sourceEdges.push_back(edge);
         if (BRep_Tool::Degenerated(edge))
             continue;
 
@@ -1844,9 +2032,46 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             else
                 tp.tangent = gp_Dir(0, 0, 1);
 
-            appendSourceSample(contour, std::move(tp), anchoredEdgeIndex, anchoredParam);
+            appendSourceSample(samples, std::move(tp), anchoredEdgeIndex, anchoredParam);
         }
     }
+    const auto sampleAt = [&](int sourceEdgeIndex, double parameter) {
+        const TopoDS_Edge& edge = sourceEdges.at(static_cast<std::size_t>(sourceEdgeIndex));
+        BRepAdaptor_Curve curve(edge);
+        ToolpathPoint point;
+        point.sourceEdgeIndex = sourceEdgeIndex;
+        point.param = parameter;
+        curve.D0(parameter, point.position);
+        const LeadInEdgeSurfaceContext* surfaceContext =
+            sourceEdgeIndex < static_cast<int>(contour.leadInSurfaceContext.size())
+                ? &contour.leadInSurfaceContext[static_cast<std::size_t>(sourceEdgeIndex)]
+                : nullptr;
+        const std::vector<TopoDS_Face>& outer = surfaceContext
+            && !surfaceContext->outerFaces.empty()
+                ? surfaceContext->outerFaces : outerFaces;
+        const std::vector<TopoDS_Face>& cross = surfaceContext
+            && !surfaceContext->crossSectionFaces.empty()
+                ? surfaceContext->crossSectionFaces : crossFaces;
+        point.normal = avoidCrossSectionDirection(
+            point.position, findMachiningNormal(point.position, outer),
+            outerCenter, cross);
+        double distance = 0.0;
+        point.crossSectionNormalValid = findClosestFaceNormal(
+            point.position, cross, point.crossSectionNormal, distance);
+        gp_Pnt unused;
+        gp_Vec tangent;
+        curve.D1(parameter, unused, tangent);
+        if (edge.Orientation() == TopAbs_REVERSED)
+            tangent.Reverse();
+        point.tangent = tangent.Magnitude() > 1e-10
+            ? gp_Dir(tangent) : gp_Dir(0, 0, 1);
+        return point;
+    };
+    bool complete = false;
+    auto guarded = insertSourceBarriers(samples, policy, sampleAt);
+    auto refined = refineSourceSamples(guarded, deflection, policy, sampleAt, &complete);
+    contour.geometrySamplingComplete = complete;
+    replaceGeometrySamples(contour, std::move(refined), complete);
 }
 
 void LaserToolpathBuilder::bindLeadInSurfaceContext(
@@ -1992,6 +2217,9 @@ bool LaserToolpathBuilder::setContourStart(LaserContour& contour,
         if (error) *error = QStringLiteral("For open contours, only the endpoint can be selected as the starting point for processing.");
         return false;
     }
+
+    replaceGeometrySamples(contour, std::move(contour.points),
+                           contour.geometrySamplingComplete);
 
     contour.leadIn.entryPoint = contour.points.front().position;
     contour.leadIn.entryParam = contour.points.front().param;
@@ -2218,6 +2446,14 @@ bool LaserToolpathBuilder::solveToolpathForOrder(
     if (!modeDefinition.isValid(&definitionError)) {
         if (errorMessage) *errorMessage = definitionError;
         return false;
+    }
+    for (const LaserContour* contour : orderedContours) {
+        if (!contour || !contour->geometrySamplingComplete) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral(
+                    "Geometry sampling could not satisfy its bounded source criteria");
+            return false;
+        }
     }
 
     lcnc::ToolpathSolverRegistry registry;

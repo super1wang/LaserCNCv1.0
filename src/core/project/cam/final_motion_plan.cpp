@@ -71,6 +71,7 @@ bool sameNode(const CamMotionNode& lhs, const CamMotionNode& rhs)
         && lhs.contourId == rhs.contourId
         && lhs.sourceEdgeIndex == rhs.sourceEdgeIndex
         && lhs.sourceParameter == rhs.sourceParameter
+        && lhs.semanticHardBarrier == rhs.semanticHardBarrier
         && lhs.axes == rhs.axes
         && lhs.axisMask == rhs.axisMask && lhs.tcpX == rhs.tcpX
         && lhs.tcpY == rhs.tcpY && lhs.tcpZ == rhs.tcpZ
@@ -90,6 +91,7 @@ void appendNode(QByteArray* canonical, const CamMotionNode& node)
     appendInteger(canonical, node.contourId);
     appendInteger(canonical, node.sourceEdgeIndex);
     appendDouble(canonical, node.sourceParameter);
+    appendInteger(canonical, node.semanticHardBarrier);
     appendInteger(canonical, node.axisMask);
     for (double axis : node.axes)
         appendDouble(canonical, axis);
@@ -110,7 +112,7 @@ void appendNode(QByteArray* canonical, const CamMotionNode& node)
 
 QByteArray motionCompilationContextHash(const MotionCompilationContext& context)
 {
-    QByteArray canonical("lcnc.motion-context.v1;");
+    QByteArray canonical("lcnc.motion-context.v2;");
     appendInteger(&canonical, context.workspaceGeneration);
     appendInteger(&canonical, context.sourceToolpathRevision);
     appendBytes(&canonical, context.contourOrderHash);
@@ -119,10 +121,24 @@ QByteArray motionCompilationContextHash(const MotionCompilationContext& context)
     appendBytes(&canonical, context.toolProcessHash);
     appendBytes(&canonical, context.optimizationPolicyHash);
     appendInteger(&canonical, context.controllerMode);
+    appendBytes(&canonical,
+        controllerQualificationSnapshotHash(context.controllerQualification));
     appendBytes(&canonical, context.controllerCapabilityHash);
     appendBytes(&canonical, context.dynamicsSemanticHash);
     appendInteger(&canonical, context.collisionMode);
     appendInteger(&canonical, context.interpolationModelVersion);
+    return sha256(canonical);
+}
+
+QByteArray controllerQualificationSnapshotHash(
+    const ControllerQualificationSnapshot& snapshot)
+{
+    QByteArray canonical("lcnc.controller-qualification.v1;");
+    appendInteger(&canonical, snapshot.requestedMode);
+    appendInteger(&canonical, snapshot.state);
+    appendInteger(&canonical, snapshot.qualificationRevision);
+    appendBytes(&canonical, snapshot.capabilityFingerprint);
+    appendString(&canonical, snapshot.sourceId);
     return sha256(canonical);
 }
 
@@ -201,6 +217,17 @@ bool finalizeMotionPlan(CamMotionPlanSnapshot* plan, QString* errorMessage)
         CamMotionBlock& block = blocks[blockIndex];
         if (block.physicalKnots.isEmpty())
             return fail(QStringLiteral("FinalMotionPlan block has no physical knots"));
+        if (block.interpolation == MotionInterpolationKind::RtcpLine
+            && (!controllerQualificationIsQualified(plan->context.controllerQualification)
+                || plan->context.controllerMode != ControllerMotionMode::RTCP
+                || plan->context.controllerQualification.requestedMode
+                    != ControllerMotionMode::RTCP
+                || plan->context.controllerCapabilityHash
+                    != controllerQualificationSnapshotHash(
+                        plan->context.controllerQualification))) {
+            return fail(QStringLiteral(
+                "RTCP motion admission requires the same qualified controller snapshot"));
+        }
         if (blockIndex == 0 && block.hasEntryBoundary)
             return fail(QStringLiteral("FinalMotionPlan first block has an unexpected entry boundary"));
         if (blockIndex > 0) {

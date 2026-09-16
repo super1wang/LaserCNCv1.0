@@ -65,6 +65,7 @@ std::uint64_t ToolpathSequenceService::computeToolpathRevision(
         mix(contour.leadInSolution.valid ? 1ull : 0ull);
         mixString(contour.leadInSolution.error);
         mix(contour.needsRecalculation ? 1ull : 0ull);
+        mix(contour.geometrySamplingComplete ? 1ull : 0ull);
         mixRounded(contour.appliedParams.leadInLength);
         mixRounded(contour.appliedParams.deflection);
         mixRounded(contour.appliedParams.cuttingOffsetMm);
@@ -97,6 +98,9 @@ std::uint64_t ToolpathSequenceService::computeToolpathRevision(
             mixRounded(last.position.Y());
         }
         for (const ToolpathPoint& point : contour.points) {
+            mix(static_cast<std::uint64_t>(point.sourceEdgeIndex + 1));
+            mixRounded(point.param);
+            mix(point.semanticHardBarrier ? 1ull : 0ull);
             mixRounded(point.position.X());
             mixRounded(point.position.Y());
             mixRounded(point.position.Z());

@@ -157,11 +157,13 @@ int main(int argc, char* argv[])
     ToolpathPoint persistedPoint;
     persistedPoint.position = gp_Pnt(1.0, 2.0, 3.0);
     persistedPoint.normal = gp_Dir(0.0, 0.0, 1.0);
+    persistedPoint.semanticHardBarrier = true;
     persistedPoint.machineCoord.valid = true;
     persistedPoint.machineCoord.solvedPose.activeMask = 0x0f;
     persistedPoint.machineCoord.solvedPose.valid = true;
     persistedPoint.machineCoord.solvedPose.values = {1.0, 2.0, 3.0, 45.0, 0.0};
     persistedContour.points.push_back(persistedPoint);
+    persistedContour.geometrySamplingComplete = false;
     sourceCam.toolpath().contours().push_back(persistedContour);
     sourceCam.ensureToolpathLayers();
     const QString packagePath = QDir(temporary.path()).filePath(QStringLiteral("roundtrip.lcnc"));
@@ -197,6 +199,14 @@ int main(int argc, char* argv[])
         || restoredCam.toolpath().layers().front().toolName != QStringLiteral("default")
         || restoredCam.solvedMachineConfigurationFingerprint() != QStringLiteral("test-fingerprint"))
         return fail(QStringLiteral("v5 package did not preserve the required tool snapshot"));
+    if (restoredCam.toolpath().contours().size() != 1)
+        return fail(QStringLiteral("v5 contour count was not restored"));
+    const auto& restoredContour = restoredCam.toolpath().contours().front();
+    if (restoredContour.geometrySamplingComplete)
+        return fail(QStringLiteral("incomplete geometry was silently certified on reload"));
+    if (restoredContour.points.empty()
+        || !restoredContour.points.front().semanticHardBarrier)
+        return fail(QStringLiteral("hard barrier marker was lost on reload"));
 
     // A v5 package must never be produced without its declared project resource.
     QFile originalFile(packagePath);

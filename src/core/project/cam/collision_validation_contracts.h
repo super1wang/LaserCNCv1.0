@@ -49,6 +49,33 @@ enum class ControllerMotionMode : std::uint8_t
     RTCP
 };
 
+enum class ControllerQualificationState : std::uint8_t
+{
+    Unavailable = 0,
+    Unqualified,
+    Qualified
+};
+
+/// Requested mode is not an effective/qualified execution mode. Revision 0
+/// explicitly means that no controller qualification authority is available.
+struct ControllerQualificationSnapshot
+{
+    ControllerMotionMode requestedMode{ControllerMotionMode::PhysicalAxes};
+    ControllerQualificationState state{ControllerQualificationState::Unavailable};
+    std::uint64_t qualificationRevision{0};
+    QByteArray capabilityFingerprint;
+    QString sourceId;
+};
+
+inline bool controllerQualificationIsQualified(
+    const ControllerQualificationSnapshot& snapshot)
+{
+    return snapshot.state == ControllerQualificationState::Qualified
+        && snapshot.qualificationRevision != 0
+        && !snapshot.capabilityFingerprint.isEmpty()
+        && !snapshot.sourceId.isEmpty();
+}
+
 enum class CollisionVerificationMode : std::uint8_t
 {
     Disabled = 0,
@@ -186,6 +213,7 @@ struct CamMotionNode
     std::uint64_t contourId{0};
     int sourceEdgeIndex{-1};
     double sourceParameter{0.0};
+    bool semanticHardBarrier{false};
     std::array<double, MachineAxisLayout::kMaxAxes> axes{};
     std::uint8_t axisMask{0};
     double tcpX{0.0};
@@ -250,6 +278,7 @@ struct MotionCompilationContext
     QByteArray toolProcessHash;
     QByteArray optimizationPolicyHash;
     ControllerMotionMode controllerMode{ControllerMotionMode::PhysicalAxes};
+    ControllerQualificationSnapshot controllerQualification;
     QByteArray controllerCapabilityHash;
     QByteArray dynamicsSemanticHash;
     CollisionVerificationMode collisionMode{CollisionVerificationMode::Disabled};
@@ -318,6 +347,8 @@ struct CamMotionPlanSnapshot
 };
 
 QByteArray motionCompilationContextHash(const MotionCompilationContext& context);
+QByteArray controllerQualificationSnapshotHash(
+    const ControllerQualificationSnapshot& snapshot);
 QByteArray motionBlockHash(const CamMotionBlock& block);
 QByteArray finalMotionPlanHash(const CamMotionPlanSnapshot& plan);
 

@@ -338,6 +338,25 @@ int main(int argc, char* argv[])
             &finalizationError)) {
         return fail(finalizationError);
     }
+    auto unqualifiedRtcp = evaluatorPlan;
+    unqualifiedRtcp.context.controllerMode = lcnc::cam::ControllerMotionMode::RTCP;
+    unqualifiedRtcp.context.controllerQualification.requestedMode =
+        lcnc::cam::ControllerMotionMode::RTCP;
+    unqualifiedRtcp.context.controllerQualification.state =
+        lcnc::cam::ControllerQualificationState::Unavailable;
+    unqualifiedRtcp.context.controllerQualification.qualificationRevision = 0;
+    unqualifiedRtcp.context.controllerQualification.sourceId =
+        QStringLiteral("legacy/default-unqualified");
+    unqualifiedRtcp.context.controllerCapabilityHash =
+        lcnc::cam::controllerQualificationSnapshotHash(
+            unqualifiedRtcp.context.controllerQualification);
+    unqualifiedRtcp.blocks[0].interpolation =
+        lcnc::cam::MotionInterpolationKind::RtcpLine;
+    if (lcnc::cam::finalizeMotionPlan(&unqualifiedRtcp, &finalizationError)
+        || lcnc::cam::controllerQualificationIsQualified(
+            unqualifiedRtcp.context.controllerQualification)) {
+        return fail(QStringLiteral("Unqualified RTCP motion plan was admitted"));
+    }
     lcnc::cam_algo::ContinuousMotionEvaluator evaluator;
     lcnc::cam_algo::EvaluatedMotionState midpoint;
     if (!evaluator.evaluate(evaluatorBlock, 0.5, boundContext,

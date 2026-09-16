@@ -82,6 +82,14 @@ bool bindMotionEvaluationContext(
         return fail(errorMessage, QStringLiteral("Bound motion evaluation context output is null"));
     if (!lcnc::cam::finalMotionPlanIdentityIsCurrent(plan))
         return fail(errorMessage, QStringLiteral("Motion evaluation plan identity is stale"));
+    if (!lcnc::cam::controllerQualificationIsQualified(
+            plan.context.controllerQualification)) {
+        for (const auto& block : plan.blocks) {
+            if (block.interpolation == lcnc::cam::MotionInterpolationKind::RtcpLine)
+                return fail(errorMessage,
+                    QStringLiteral("RTCP evaluation requires a qualified controller snapshot"));
+        }
+    }
     if (callbacks.interpolationModelVersion == 0
         || callbacks.interpolationModelVersion
             != plan.context.interpolationModelVersion) {
