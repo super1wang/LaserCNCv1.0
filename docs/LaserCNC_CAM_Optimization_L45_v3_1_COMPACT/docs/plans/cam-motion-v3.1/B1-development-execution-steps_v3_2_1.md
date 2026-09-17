@@ -545,6 +545,41 @@ discard whole result
 
 ## B1.S3 — Reduction / Publication Soft Checkpoint
 
+### S3 实施记录（2026-09-17，基线 `9ca7222`）
+
+`dof_reduction` 已接入 Optimized Full5D 后的生产导出链。通用 physical-axis analysis
+统计整个 block（含 entry）的 span/travel/local delta/反转/dynamics proxy/freeze residual；
+枚举全部合法物理轴子集，覆盖 C-only、U+C、3D、4D。精确常量轴通过分段 affine
+端点恒等证明整个区间 hold；不对局部小增量设冻结阈值。节点保留完整 physical layout，
+block active mask 表达 inactive-axis hold，FinalMotionPlan finalizer 检查 hold 与资格快照。
+
+数值 Z 使用 compiler-v1 的 `64 * machine epsilon * max(1, abs(anchor))`，只消耗浮点误差预算。
+进入/终止边界保持不变，末点不等于 canonical anchor 时拒绝该数值候选，防止跨 block 偷改路径。
+planar/table 的独立 linear Z 提供解析平移上界，缩放安装、Z 驱动工件/旋转轴和 head 模式不推断该证明。
+所有 changed candidate 经共享 evaluator 重建 TCP/reference/direction；证明不可用回到 Optimized reference。
+重建使用 evaluator 的冻结 physical-knots 批量入口：一次 block identity 校验后求值精确节点，
+保留逐点取消、有限值校验及原子输出；避免 1001 点回归中逐节点重新哈希整个 block 的二次开销。
+
+Controller admission 检查请求模式、qualification hash/revision、active-mask capability 和 frozen feed/dynamics hash。
+生产没有 qualification service，默认 authority 不可用；测试资格仅存在于测试 fixture。
+process Z envelope 类型已定义，但缺少正式工艺来源/whitelist，启用时记录稳定拒绝原因；实际工艺 Z-hold 不开放。
+
+策略来自现有 `CamConfig` 的 `[trajectory]`：`optimizationMode = "Off" | "Conservative" | "Full"`、
+`enableDofReduction`、`enableLaserZHold`，默认 Off/false/false。未知模式/错误类型拒绝编译。
+开关、候选预算、数值误差策略和 cost revision 纳入 parameter provenance/context hash。
+按 stops、duration、soft-limit proximity、rotary reversals、normalized travel、knots、active-axis count、mask、ordinal
+进行确定性字典序比较；active-axis count 只作后置 tie-break，数值 Z 的最后 tie 优先 canonical。
+有限软限位区间用于 travel 归一化，否则使用 `max(1, abs(entry axis))`，规则随 cost revision 冻结。
+首版候选不改变 stop/feed/time/source/fence，消耗的 process error budget 为零。预算耗尽保留原 block，与 collision mode 无关。
+最终记录每 block 选择、拒绝原因、轴 span、数值 Z、候选数和非 identity 的耗时，发布前再次比较 owner authority。
+
+验证：Ninja Debug (`acs-gtn-debug`) 与 ASan (`asan`) 完整构建通过；两套定向 CTest 均 7/7 通过，
+覆盖 `dof_reduction`、`full5d_optimizer`、`cam_algorithm_pipeline`、`cam_motion_foundation`、
+`cam_motion_plan_contract`、`cam_lead_in`、`project_package`。最终耗时 Debug 17.02 秒、ASan 42.04 秒。
+首次 ASan 的 1001 点降维测试因逐点全块哈希超时；改为冻结块批量求值后，该项 Debug 0.48 秒、ASan 1.31 秒通过，
+保留 60 秒超时不变，并新增批量入口 stale identity/取消原子性回归。架构检查与 `git diff --check` 通过。
+本次为 S3 Soft Check，待用户人工 review；未执行 B1 Stage Gate、GUI 或物理机验证，未提交/推送。
+
 一次运行：
 
 ```text

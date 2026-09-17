@@ -45,6 +45,10 @@ public:
     /// 保存到 loadDefault() 使用的同一路径。
     bool saveDefault() const;
 
+    QString trajectoryOptimizationMode() const { return m_trajectoryOptimizationMode; }
+    bool enableDofReduction() const { return m_enableDofReduction; }
+    bool enableLaserZHold() const { return m_enableLaserZHold; }
+
     QString machineModelPath() const { return m_machineModelPath; }
     void setMachineModelPath(const QString& path);
 
@@ -158,6 +162,9 @@ protected:
     const char* configName() const override { return "CamConfig"; }
 
 private:
+    QString m_trajectoryOptimizationMode{QStringLiteral("Off")};
+    bool m_enableDofReduction{false};
+    bool m_enableLaserZHold{false};
     struct MachineProfile {
         QMap<QString, gp_Pnt> axisOrigins;
         bool hasCutterHeadModel{false};

@@ -89,6 +89,12 @@ bool bindMotionEvaluationContext(
 class ContinuousMotionEvaluator final
 {
 public:
+    /// Validate a frozen physical block once, then evaluate exact stored knots.
+    /// Output is transactional; entryBoundary is not included in the output.
+    bool evaluatePhysicalKnots(lcnc::cam::CamMotionBlock block,
+        const BoundMotionEvaluationContext& context, QVector<EvaluatedMotionState>* states,
+        QString* errorMessage = nullptr, const std::function<bool()>& cancelled = {}) const;
+
     bool evaluate(const lcnc::cam::CamMotionBlock& block, double u,
                   const BoundMotionEvaluationContext& context,
                   EvaluatedMotionState* state,

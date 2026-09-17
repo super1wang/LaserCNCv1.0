@@ -222,6 +222,20 @@ bool finalizeMotionPlan(CamMotionPlanSnapshot* plan, QString* errorMessage)
         CamMotionBlock& block = blocks[blockIndex];
         if (block.physicalKnots.isEmpty())
             return fail(QStringLiteral("FinalMotionPlan block has no physical knots"));
+        if (block.optimizationState == MotionOptimizationState::Reduced) {
+            if (!controllerQualificationIsQualified(plan->context.controllerQualification)
+                || plan->context.controllerMode != ControllerMotionMode::PhysicalAxes
+                || plan->context.controllerQualification.requestedMode != plan->context.controllerMode
+                || plan->context.controllerCapabilityHash != controllerQualificationSnapshotHash(plan->context.controllerQualification))
+                return fail(QStringLiteral("Reduced motion requires the frozen qualified controller snapshot"));
+            const auto& first = block.hasEntryBoundary ? block.entryBoundary : block.physicalKnots.first();
+            if (!block.activeAxisMask || (block.activeAxisMask & first.axisMask) != block.activeAxisMask)
+                return fail(QStringLiteral("Reduced active mask is outside the physical layout"));
+            for (const auto& node : block.physicalKnots)
+                for (std::size_t a = 0; a < node.axes.size(); ++a)
+                    if (!(block.activeAxisMask & (1u << a)) && node.axes[a] != first.axes[a])
+                        return fail(QStringLiteral("Reduced inactive axis violates continuous hold"));
+        }
         if (block.interpolation == MotionInterpolationKind::RtcpLine
             && (!controllerQualificationIsQualified(plan->context.controllerQualification)
                 || plan->context.controllerMode != ControllerMotionMode::RTCP

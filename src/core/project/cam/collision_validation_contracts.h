@@ -315,6 +315,17 @@ struct CamMotionBlock
 
 struct MotionOptimizerReport
 {
+    struct ReductionSummary {
+        std::uint64_t blockId{0};
+        std::uint8_t selectedMask{0};
+        std::array<double, MachineAxisLayout::kMaxAxes> axisSpans{};
+        int candidates{0};
+        bool numericalZApplied{false};
+        QStringList rejectedReasons;
+    };
+    QVector<ReductionSummary> reduction;
+    QStringList parameterProvenance;
+    qint64 reductionCompileTimeMs{0};
     int knotsBefore{0};
     int knotsAfter{0};
     int blocksBefore{0};

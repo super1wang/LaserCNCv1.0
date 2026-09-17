@@ -38,6 +38,17 @@ int main(int argc, char* argv[])
     }
 
     TestCamConfig config;
+    for (const auto& mode : {"Off", "Conservative", "Full"}) {
+        toml::value trajectoryRoot(toml::table{});
+        trajectoryRoot["trajectory"] = toml::table{{"optimizationMode", std::string(mode)},
+            {"enableDofReduction", true}, {"enableLaserZHold", false}};
+        config.readFrom(trajectoryRoot);
+        toml::value saved(toml::table{});
+        config.writeTo(saved);
+        if (config.trajectoryOptimizationMode() != QString::fromLatin1(mode) || !config.enableDofReduction()
+            || config.enableLaserZHold() || saved.at("trajectory").at("optimizationMode").as_string() != mode)
+            return fail(QStringLiteral("trajectory policy did not round-trip"));
+    }
     toml::value legacy(toml::table{});
     toml::value legacyProfile(toml::table{});
     legacyProfile["path"] = std::string("C:/machines/legacy.step");

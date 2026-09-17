@@ -108,6 +108,38 @@ bool bindMotionEvaluationContext(
     return true;
 }
 
+bool ContinuousMotionEvaluator::evaluatePhysicalKnots(
+    lcnc::cam::CamMotionBlock block, const BoundMotionEvaluationContext& context,
+    QVector<EvaluatedMotionState>* states, QString* errorMessage,
+    const std::function<bool()>& cancelled) const
+{
+    if (!states || !context.supportsBlock(block) || block.physicalKnots.isEmpty()
+        || block.interpolation != lcnc::cam::MotionInterpolationKind::PhysicalAxisLine)
+        return fail(errorMessage, QStringLiteral("Invalid bound physical block"));
+    const auto callback = context.m_callbacks.evaluatePhysicalAxes;
+    if (!callback) return fail(errorMessage, QStringLiteral("Physical-axis kinematics evaluator is unavailable"));
+    QVector<EvaluatedMotionState> result;
+    result.reserve(block.physicalKnots.size());
+    const int entry = block.hasEntryBoundary ? 1 : 0;
+    const int segments = block.physicalKnots.size() - 1 + entry;
+    for (int i = 0; i < block.physicalKnots.size(); ++i) {
+        if (cancelled && cancelled()) return fail(errorMessage, QStringLiteral("Motion evaluation cancelled"));
+        const auto& knot = block.physicalKnots.at(i);
+        EvaluatedMotionState state;
+        if (!callback(knot.axes, knot.axisMask, &state))
+            return fail(errorMessage, QStringLiteral("Motion interpolation evaluation failed"));
+        state.physicalAxes = knot.axes;
+        state.physicalAxisMask = knot.axisMask;
+        state.sourceParameter = segments ? double(i + entry) / segments : 0;
+        if (!validState(state)) return fail(errorMessage, QStringLiteral("Motion interpolation evaluation failed"));
+        result.append(state);
+    }
+    if (cancelled && cancelled()) return fail(errorMessage, QStringLiteral("Motion evaluation cancelled"));
+    *states = std::move(result);
+    if (errorMessage) errorMessage->clear();
+    return true;
+}
+
 bool ContinuousMotionEvaluator::evaluate(
     const lcnc::cam::CamMotionBlock& block, double u,
     const BoundMotionEvaluationContext& context, EvaluatedMotionState* state,

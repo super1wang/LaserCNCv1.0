@@ -212,6 +212,22 @@ void CamConfig::readFrom(const toml::value& root)
             get_qstring(tp, "autoSortAxis", autoSortAxisToString(m_autoSortAxis)));
     }
 
+    m_trajectoryOptimizationMode = QStringLiteral("Off");
+    m_enableDofReduction = false;
+    m_enableLaserZHold = false;
+    if (root.contains("trajectory")) {
+        const auto& trajectory = root.at("trajectory");
+        if (!trajectory.is_table()) m_trajectoryOptimizationMode = QStringLiteral("Invalid");
+        else {
+            m_trajectoryOptimizationMode = get_qstring(trajectory, "optimizationMode", QStringLiteral("Off"));
+            m_enableDofReduction = get_bool(trajectory, "enableDofReduction", false);
+            m_enableLaserZHold = get_bool(trajectory, "enableLaserZHold", false);
+            if ((trajectory.contains("optimizationMode") && !trajectory.at("optimizationMode").is_string())
+                || (trajectory.contains("enableDofReduction") && !trajectory.at("enableDofReduction").is_boolean())
+                || (trajectory.contains("enableLaserZHold") && !trajectory.at("enableLaserZHold").is_boolean()))
+                m_trajectoryOptimizationMode = QStringLiteral("Invalid");
+        }
+    }
     m_machineProfiles.clear();
     if (root.contains("machineProfile") && root.at("machineProfile").is_array()) {
         for (const auto& mp : root.at("machineProfile").as_array()) {
@@ -320,6 +336,10 @@ void CamConfig::writeTo(toml::value& root) const
     tp["normalSampleStep"]      = m_normalSampleStep;
     tp["autoSortAxis"]          = qs(autoSortAxisToString(m_autoSortAxis));
     root["toolpath"] = tp;
+    root["trajectory"] = toml::table{
+        {"optimizationMode", qs(m_trajectoryOptimizationMode)},
+        {"enableDofReduction", m_enableDofReduction},
+        {"enableLaserZHold", m_enableLaserZHold}};
 
     toml::array profiles;
     for (auto it = m_machineProfiles.cbegin(); it != m_machineProfiles.cend(); ++it) {

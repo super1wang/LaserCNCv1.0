@@ -573,6 +573,14 @@ CamModule::captureMotionCompilationInput(
     }
     MotionCompilationInput values;
     values.geometryPolicy = {};
+    const QString optimizationMode = m_config.trajectoryOptimizationMode();
+    using lcnc::cam_algo::PoseOptimizationMode;
+    values.full5DPolicy.mode = optimizationMode == QStringLiteral("Off") ? PoseOptimizationMode::Off
+        : optimizationMode == QStringLiteral("Conservative") ? PoseOptimizationMode::Conservative
+        : optimizationMode == QStringLiteral("Full") ? PoseOptimizationMode::Full : static_cast<PoseOptimizationMode>(-1);
+    values.reductionPolicy.mode = values.full5DPolicy.mode;
+    values.reductionPolicy.enableDofReduction = m_config.enableDofReduction();
+    values.reductionPolicy.enableLaserZHold = m_config.enableLaserZHold();
     values.autoSortAxis = static_cast<int>(m_config.autoSortAxis());
     values.collisionClearanceMm = m_config.cutterCollisionClearanceMm();
     values.maximumRapidSafetyOffsetMm = m_config.maximumRapidSafetyOffsetMm();
@@ -691,8 +699,8 @@ CamModule::captureMotionCompilationInput(
     parameter(QStringLiteral("sampleMultiplier"), policy.maxSampleMultiplier, QStringLiteral("ratio"), builtin);
     parameter(QStringLiteral("rapidSafetyOffset"), m_config.maximumRapidSafetyOffsetMm(), QStringLiteral("mm"), QStringLiteral("CamConfig"));
     parameter(QStringLiteral("collisionClearance"), m_config.cutterCollisionClearanceMm(), QStringLiteral("mm"), QStringLiteral("CamConfig"));
-    parameters.push_back({QStringLiteral("optimizationMode"), QStringLiteral("Off"), QStringLiteral("Off"),
-        QStringLiteral("S2/compiler"), QStringLiteral("enum"), 1, true});
+    parameters.push_back({QStringLiteral("optimizationMode"), optimizationMode, optimizationMode,
+        QStringLiteral("CamConfig/trajectory"), QStringLiteral("enum"), 1, true});
     const QString poseSource = QStringLiteral("cam-motion/strict-full5d-v1");
     parameter(QStringLiteral("pose.orientationToleranceDeg"), values.full5DPolicy.orientationToleranceDeg,
         QStringLiteral("degree"), poseSource);
@@ -708,9 +716,16 @@ CamModule::captureMotionCompilationInput(
     parameter(QStringLiteral("pose.maxKnotsPerBlock"), values.full5DPolicy.maxKnotsPerBlock, QStringLiteral("count"), poseSource);
     parameters.push_back({QStringLiteral("processBarriers"), QStringLiteral("none"), QStringLiteral("none"),
         QStringLiteral("S1/no-process-barrier-authority"), QStringLiteral("source-parameter-list"), 0, false});
-    for (const auto& key : {QStringLiteral("enableDofReduction"), QStringLiteral("enableLaserZHold")})
-        parameters.push_back({key, QStringLiteral("false"), QStringLiteral("false"),
-            QStringLiteral("S1/compiler"), QStringLiteral("bool"), 1, true});
+    parameter(QStringLiteral("enableDofReduction"), values.reductionPolicy.enableDofReduction,
+        QStringLiteral("bool"), QStringLiteral("CamConfig/trajectory"));
+    parameter(QStringLiteral("enableLaserZHold"), values.reductionPolicy.enableLaserZHold,
+        QStringLiteral("bool"), QStringLiteral("CamConfig/trajectory"));
+    parameter(QStringLiteral("reduction.maximumCandidates"), values.reductionPolicy.maximumCandidates,
+        QStringLiteral("count"), QStringLiteral("S3/compiler-v1"));
+    parameter(QStringLiteral("reduction.numericalUlps"), lcnc::cam_algo::ReductionPolicy::numericalUlps,
+        QStringLiteral("machine-epsilon"), QStringLiteral("S3/compiler-v1"));
+    parameter(QStringLiteral("reduction.costRevision"), lcnc::cam_algo::ReductionPolicy::costRevision,
+        QStringLiteral("version"), QStringLiteral("S3/compiler-v1"));
     const auto identity = lcnc::cam::ToolpathGenerationService::captureMotionInput(generation, context, parameters);
     values.generation = identity.generation;
     values.parameters = identity.parameters;
@@ -985,6 +1000,7 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
     bool finalized = plan.blocks.isEmpty() || lcnc::cam::finalizeMotionPlan(&plan, &finalizationError);
     if (finalized && !plan.blocks.isEmpty()) {
         auto posePolicy = m_motionCompilationInput->full5DPolicy;
+        auto reductionPolicy = m_motionCompilationInput->reductionPolicy;
         for (int index = 0; index < projectionLayout.count; ++index) {
             const auto* axis = projection->findAxis(projectionLayout.axes[index].name);
             if (!axis) {
@@ -995,6 +1011,7 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             posePolicy.minimumAxes[index] = axis->minVal;
             posePolicy.maximumAxes[index] = axis->maxVal;
             if (axis->motionType == MachineAxisDef::Rotary) posePolicy.rotaryMask |= (1u << index);
+            if (axis->role == lcnc::MachineAxisRole::LinearZ) reductionPolicy.zAxis = index;
         }
         if (finalized) {
             lcnc::cam_algo::Full5DMetrics metrics;
@@ -1007,7 +1024,24 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             };
             finalized = lcnc::cam_algo::optimizeFull5D(plan, posePolicy, {}, &plan, &metrics,
                 &finalizationError, {}, modelForBlock);
+            if (finalized) {
+                lcnc::cam_algo::ReductionReport reductionReport;
+                finalized = lcnc::cam_algo::reduceMotionPlan(plan, posePolicy, reductionPolicy,
+                    [&](const auto& block) {
+                        const auto contour = std::find_if(snapshot.contours.cbegin(), snapshot.contours.cend(),
+                            [&](const auto& item) { return item.contourId == block.contourId; });
+                        return contour == snapshot.contours.cend() ? lcnc::cam_algo::ReductionEvaluation{}
+                            : lcnc::cam::ToolpathSolveService::reductionEvaluationContext(
+                                *m_motionCompilationInput, contour->workpieceEntry);
+                    }, &plan, &reductionReport, &finalizationError);
+            }
         }
+    }
+    if (finalized && (snapshot.revision != toolpathRevision()
+        || !lcnc::cam::ToolpathGenerationService::sameMotionAuthority(
+            *m_motionCompilationInput, *captureMotionCompilationInput()))) {
+        finalized = false;
+        finalizationError = QStringLiteral("Motion authority changed before selected-plan publication");
     }
     if (!finalized) {
         plan.failureReason = finalizationError;
@@ -1016,6 +1050,12 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         plan.contextHash.clear();
         plan.planHash.clear();
         plan.derivedFromPlanHash.clear();
+    }
+    if (finalized) {
+        for (const auto& parameter : m_motionCompilationInput->parameters)
+            plan.optimizerReport.parameterProvenance.append(QStringLiteral("%1 requested=%2 effective=%3 source=%4 unit=%5 revision=%6")
+                .arg(parameter.key, parameter.requested, parameter.effective, parameter.sourceId, parameter.unit)
+                .arg(parameter.revision));
     }
 }
 

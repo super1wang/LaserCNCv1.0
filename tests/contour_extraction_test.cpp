@@ -47,6 +47,12 @@
 
 // Exercise the actual owner capture/publication boundaries without starting a
 // controller, showing a window or bypassing the production solve service.
+class TrajectoryTestConfig final : public CamConfig
+{
+public:
+    using CamConfig::readFrom;
+};
+
 struct CamMotionCompilationTestAccess
 {
     static QString verifyClosedSourceTraversal()
@@ -192,6 +198,11 @@ struct CamMotionCompilationTestAccess
             if (poses.size() != 1 || !poses[0].valid) return QStringLiteral("Evaluator IK fixture failed: ") + preset
                 + (poses.empty() ? QStringLiteral(" (empty solve)") : poses[0].failureReason);
             auto model = lcnc::cam::ToolpathSolveService::physicalEvaluationContext(input, QStringLiteral("workpiece"));
+            const auto reduction = lcnc::cam::ToolpathSolveService::reductionEvaluationContext(input, QStringLiteral("workpiece"));
+            if (reduction.admission.exactPhysicalAxisLine)
+                return QStringLiteral("Production FK invented controller qualification");
+            if (!preset.endsWith(QStringLiteral("HEAD")) && !reduction.boundNumericalZ)
+                return QStringLiteral("Planar/table numerical Z translation bound missing");
             lcnc::cam_algo::EvaluatedMotionState state;
             if (!model.evaluatePhysicalAxes || !model.evaluatePhysicalAxes(poses[0].values, poses[0].activeMask, &state))
                 return QStringLiteral("Frozen physical evaluator rejected authoritative solve: ") + preset;
@@ -267,6 +278,33 @@ struct CamMotionCompilationTestAccess
                 departureExported = departureExported || (span.firstKnot == -1
                     && span.firstSourceParameter == 0.25 && span.sourceEdgeIndex == 0);
         if (!departureExported) return QStringLiteral("Production raw construction lost source departure span");
+        const auto originalConfig = cam.m_config;
+        TrajectoryTestConfig configured;
+        toml::value policyRoot(toml::table{});
+        policyRoot["trajectory"] = toml::table{{"optimizationMode", std::string("Full")},
+            {"enableDofReduction", true}, {"enableLaserZHold", true}};
+        configured.readFrom(policyRoot);
+        cam.m_config = configured;
+        const auto fullInput = cam.captureMotionCompilationInput();
+        if (lcnc::cam::ToolpathGenerationService::sameMotionAuthority(*captured, *fullInput)
+            || !fullInput->reductionPolicy.enableDofReduction || !fullInput->reductionPolicy.enableLaserZHold)
+            return QStringLiteral("Trajectory feature gates did not enter frozen identity");
+        auto stalePolicy = snapshot;
+        cam.attachMotionPlan(stalePolicy);
+        if (!stalePolicy.motionPlan.planHash.isEmpty()) return QStringLiteral("Changed policy published stale plan");
+        if (!cam.solveToolpathForOrder({id}, fullInput)) return QStringLiteral("Full-policy authoritative solve failed");
+        auto fullSnapshot = cam.exportToolpathBaseSnapshot();
+        cam.attachMotionPlan(fullSnapshot);
+        if (!lcnc::cam::finalMotionPlanIdentityIsCurrent(fullSnapshot.motionPlan)
+            || fullSnapshot.motionPlan.optimizerReport.reduction.isEmpty()
+            || fullSnapshot.motionPlan.optimizerReport.parameterProvenance.isEmpty()
+            || fullSnapshot.motionPlan.optimizerReport.rejectedCandidateReasons.isEmpty())
+            return QStringLiteral("Production Full policy did not publish honest reduction report: ") + fullSnapshot.motionPlan.failureReason;
+        for (const auto& block : fullSnapshot.motionPlan.blocks)
+            if (block.optimizationState == lcnc::cam::MotionOptimizationState::Reduced)
+                return QStringLiteral("Production unqualified reduction was admitted");
+        cam.m_config = originalConfig;
+        if (!cam.solveToolpathForOrder({id}, captured)) return QStringLiteral("Restored policy solve failed");
         const auto differentOrder = cam.exportToolpathSnapshotForOrder({id, id});
         if (!differentOrder.motionPlan.planHash.isEmpty() || differentOrder.motionPlan.failureReason.isEmpty())
             return QStringLiteral("Owner reused solved coordinates for a different requested contour order");

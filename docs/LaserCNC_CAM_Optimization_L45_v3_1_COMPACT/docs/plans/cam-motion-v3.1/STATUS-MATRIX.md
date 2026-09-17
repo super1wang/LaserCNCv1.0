@@ -3,7 +3,7 @@
 | Batch | State | Commit range | Soft checkpoints | Stage Gate | Astra review | Decision / blockers |
 |---|---|---|---|---|---|---|
 | B0 | Astra PASS | `6b11aeb..54d1eaf` | B0.S1 Passed | Supplemental G1..G8 Passed | R0 PASS（用户确认） | F01..F05 accepted; R06/R07 patched |
-| B1 | In Progress | `1aa3aee..e8428b6` + S2 收口工作区 | B1.S1 PASS；B1.S2 PASS，Debug 累计 6 项通过 / ASan 6/6；见 B1_S2_CLOSEOUT_REPORT.md | B1 Stage Gate 尚未执行；本次仅 S2 Soft Check，不新增门禁 | S2 R0 PASS_WITH_PATCH 的 C2.1/C2.2/C2.3 已修复验证 | S3_RELEASE=YES，S3 未实施；Full 缺失生产 bound 时保留 Conservative 子集并报告拒绝；位置/姿态 bound 为 infrastructure-only、动态指标 audit-only；生产 policy 仍 Off，controller 为 Unavailable/revision 0，RTCP/admission 关闭 |
+| B1 | In Progress | `1aa3aee..9ca7222` + S3 实施工作区 | B1.S1 PASS；B1.S2 用户审阅通过；B1.S3 已实施，验证记录见执行步骤的 S3 实施记录 | B1 Stage Gate 尚未执行；本次仅 S3 Soft Check，不新增门禁 | S3 待用户人工 review | S3_RELEASE=YES；泛化降维、数值 Z、资格 admission、确定性成本及派生数据重建已接入。工艺 Z-hold 按步骤 19 仅保留接口/默认关闭/拒绝原因，未提供白名单实现；生产默认 Off，controller 为 Unavailable/revision 0，RTCP/降维 admission 保持关闭；不代表硬件放行 |
 | B2 | Blocked by B1 | — | — | — | R2 pending | — |
 | B3 | Blocked by B2 | — | — | — | R3 pending | — |
 | B4 | Deferred / Blocked by B3 | — | — | — | R4 pending | — |

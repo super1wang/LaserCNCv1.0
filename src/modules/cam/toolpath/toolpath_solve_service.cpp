@@ -13,6 +13,56 @@
 
 namespace lcnc::cam {
 
+lcnc::cam_algo::ReductionEvaluation ToolpathSolveService::reductionEvaluationContext(
+    const MotionCompilationInput& input, const QString& workpieceEntry)
+{
+    lcnc::cam_algo::ReductionEvaluation result;
+    result.motion = physicalEvaluationContext(input, workpieceEntry);
+    if (!result.motion.evaluatePhysicalAxes) return result;
+    // Exact translation bound for the existing planar/table FK families.
+    // Head kinematics and scaled placements are deliberately not inferred.
+    if (input.modeDefinition.mode != MachiningMode::Planar3Axis
+        && input.modeDefinition.mode != MachiningMode::SimultaneousTable5Axis) return result;
+    if (std::abs(input.kinematicSetup.ScaleFactor()) != 1.0) return result;
+    MachineKinematics machine;
+    configureFrozenMachine(&machine, input);
+    int z = -1;
+    QString zName;
+    for (int i = 0; i < input.modeDefinition.interpolatedAxes.count; ++i)
+        if (input.modeDefinition.interpolatedAxes.axes[i].role == MachineAxisRole::LinearZ) {
+            z = i; zName = input.modeDefinition.interpolatedAxes.axes[i].name;
+        }
+    if (z < 0) return result;
+    const auto* axis = machine.findAxis(zName);
+    if (!axis || axis->motionType != MachineAxisDef::Linear) return result;
+    // Workpiece/reference rotation must not acquire a Z-dependent translation.
+    const QString mount = machine.mountedAxis(workpieceEntry);
+    if (!mount.isEmpty() && machine.axisChain(mount).contains(zName)) return result;
+    for (const auto& item : machine.axes())
+        if (item.motionType == MachineAxisDef::Rotary && machine.axisChain(item.name).contains(zName)) return result;
+    result.boundNumericalZ = [z](const CamMotionBlock& original, const CamMotionBlock& candidate, int changedAxis) {
+        lcnc::cam_algo::NumericalZBound bound;
+        if (changedAxis != z || original.physicalKnots.size() != candidate.physicalKnots.size()
+            || original.hasEntryBoundary != candidate.hasEntryBoundary) return bound;
+        const auto inspect = [&](const CamMotionNode& a, const CamMotionNode& b) {
+            if (a.axisMask != b.axisMask) return false;
+            for (int slot = 0; slot < MachineAxisLayout::kMaxAxes; ++slot)
+                if (slot != z && a.axes[slot] != b.axes[slot]) return false;
+            bound.maximumPositionDeviationMm = std::max(bound.maximumPositionDeviationMm,
+                std::abs(a.axes[z] - b.axes[z]));
+            return true;
+        };
+        if (original.hasEntryBoundary && !inspect(original.entryBoundary, candidate.entryBoundary)) return bound;
+        for (int i = 0; i < original.physicalKnots.size(); ++i)
+            if (!inspect(original.physicalKnots[i], candidate.physicalKnots[i])) return bound;
+        // Affine physical Z delta is bounded by its endpoints; rigid FK rotates
+        // this translation without changing its norm or beam orientation.
+        bound.valid = true;
+        return bound;
+    };
+    return result; // Controller/process admission remains unavailable.
+}
+
 lcnc::cam_algo::MotionEvaluationContext ToolpathSolveService::physicalEvaluationContext(
     const MotionCompilationInput& input, const QString& workpieceEntry)
 {

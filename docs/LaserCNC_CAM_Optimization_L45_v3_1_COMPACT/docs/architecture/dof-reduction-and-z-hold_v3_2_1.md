@@ -274,6 +274,12 @@ compute budget exhausted
 
 ## 11. First Release Scope
 
+S3 实现注记：首版 general reduction 采用精确 physical affine hold proof；非数值级非恒定轴保留。
+数值 Z 只在固定 block 边界和 planar/table 独立 linear Z 的解析平移证明下产生候选。
+改变后的候选仍需 Controller admission；现有生产 qualification 不可用，因此保留 Optimized Full5D。
+完整 process envelope 不存在时按执行步骤 19 交付接口/默认关闭/稳定拒绝原因，不推断 whitelist。
+三种模式和功能开关已接入 `CamConfig.[trajectory]` 与 frozen context。详见执行步骤的 S3 实施记录。
+
 B1 首版要求：
 
 1. physical active-axis analysis；
