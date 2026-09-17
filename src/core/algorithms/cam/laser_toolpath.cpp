@@ -354,8 +354,13 @@ bool pointRotaryAngleDeg(const gp_Pnt& point,
 void reverseToolpathPoints(std::vector<ToolpathPoint>& points)
 {
     std::reverse(points.begin(), points.end());
-    for (ToolpathPoint& point : points)
+    for (ToolpathPoint& point : points) {
         point.tangent = gp_Dir(-point.tangent.X(), -point.tangent.Y(), -point.tangent.Z());
+        if (point.departureSourceEdgeIndex >= 0) {
+            std::swap(point.sourceEdgeIndex, point.departureSourceEdgeIndex);
+            std::swap(point.param, point.departureSourceParameter);
+        }
+    }
 }
 
 bool contourHasClosingPoint(const LaserContour& contour)
@@ -429,6 +434,18 @@ void normalizeContourTraversal(LaserContour& contour,
         angles.push_back(angle);
     }
 
+    // Collapse geometry only: preserve both native sides of the original seam.
+    // The alias travels with the sample through reversal/start rotation.
+    if (hadClosingPoint) {
+        auto& first = contour.points.front();
+        if (first.departureSourceEdgeIndex < 0) {
+            first.departureSourceEdgeIndex = first.sourceEdgeIndex;
+            first.departureSourceParameter = first.param;
+        }
+        first.sourceEdgeIndex = originalClosingPoint.sourceEdgeIndex;
+        first.param = originalClosingPoint.param;
+        first.semanticHardBarrier = first.semanticHardBarrier || originalClosingPoint.semanticHardBarrier;
+    }
     double angularTravel = 0.0;
     for (std::size_t i = 1; i < angles.size(); ++i)
         angularTravel += normalizeSigned180(angles[i] - angles[i - 1]);
@@ -462,8 +479,19 @@ void normalizeContourTraversal(LaserContour& contour,
             reverseToolpathPoints(contour.points);
     }
 
-    if (isClosed)
-        contour.points.push_back(contour.points.front());
+    if (isClosed) {
+        auto closing = contour.points.front();
+        closing.departureSourceEdgeIndex = -1;
+        closing.departureSourceParameter = 0;
+        auto& first = contour.points.front();
+        if (first.departureSourceEdgeIndex >= 0) {
+            first.sourceEdgeIndex = first.departureSourceEdgeIndex;
+            first.param = first.departureSourceParameter;
+            first.departureSourceEdgeIndex = -1;
+            first.departureSourceParameter = 0;
+        }
+        contour.points.push_back(closing);
+    }
     LaserToolpathBuilder::replaceGeometrySamples(
         contour, std::move(contour.points), contour.geometrySamplingComplete);
     if (contour.leadIn.valid && !contour.points.empty()) {

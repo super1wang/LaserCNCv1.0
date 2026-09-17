@@ -145,11 +145,54 @@ int main(int argc, char** argv)
                  && result.blocks[1].sourceSpans[0].firstKnot == -1
                  && result.blocks[1].fences[0].knotIndex == -1,
                  "entry boundary ownership changed")) return 1;
-    source.blocks[1].physicalKnots[0].axes[4] = 400;
+    source.blocks[0].physicalKnots[0].axes[4] = 0;
+    source.blocks[0].physicalKnots[1].axes[4] = 0;
+    source.blocks[1].entryBoundary = source.blocks[0].physicalKnots.last();
+    source.blocks[1].physicalKnots[0].axes[4] = 30;
     finalizeMotionPlan(&source);
-    const auto boundaryHash = result.planHash;
-    if (!require(!optimizeFull5D(source, policy, model(), &result, &metrics, &error)
-                 && result.planHash == boundaryHash, "cross-boundary source ownership invented")) return 1;
+    if (!require(optimizeFull5D(source, policy, model(), &result, &metrics, &error)
+                 && finalMotionPlanIdentityIsCurrent(result)
+                 && metrics.maximumRotaryStepDegrees <= 5
+                 && result.blocks[1].physicalKnots.first().sourceEdgeIndex == 0
+                 && result.blocks[1].entryBoundary.axes[4] == 0
+                 && result.blocks[1].physicalKnots.first().axes[4] > 0
+                 && result.nodes.size() == result.blocks[0].physicalKnots.size()
+                     + result.blocks[1].physicalKnots.size()
+                 && result.blocks[1].physicalKnots.first().sourceParameter > 1
+                 && result.blocks[1].sourceSpans.last().firstKnot == -1
+                 && result.blocks[1].fences.first().knotIndex == -1,
+                 "same-source incoming refinement failed")) return 1;
+    for (int kind = 0; kind < 3; ++kind) {
+        auto crossing = source;
+        auto& block = crossing.blocks[1];
+        block.physicalKnots[0].sourceEdgeIndex = 7;
+        block.sourceSpans.last().sourceEdgeIndex = 7;
+        if (kind > 0) block.phase = block.physicalKnots[0].phase = CamMotionPhase::Rapid;
+        if (kind == 2) block.contourId = block.physicalKnots[0].contourId = 2;
+        block.sourceSpans.last().contourId = block.contourId;
+        block.physicalKnots[0].rapidPhase = RapidSegmentPhase::Approach;
+        const auto expectedPhase = block.phase;
+        const auto expectedContour = block.contourId;
+        finalizeMotionPlan(&crossing);
+        if (!require(optimizeFull5D(crossing, policy, model(), &result, &metrics, &error)
+                     && finalMotionPlanIdentityIsCurrent(result)
+                     && result.blocks[1].physicalKnots.first().sourceEdgeIndex == -1
+                     && result.blocks[1].physicalKnots.first().phase == expectedPhase
+                     && result.blocks[1].physicalKnots.first().contourId == expectedContour
+                     && result.blocks[1].physicalKnots.first().rapidPhase == RapidSegmentPhase::Approach
+                     && result.blocks[1].sourceSpans.last().sourceEdgeIndex == -1
+                     && result.blocks[1].sourceSpans.last().firstKnot == -1
+                     && result.blocks[1].sourceSpans.last().lastSourceParameter == 1
+                     && metrics.maximumRotaryStepDegrees <= 5,
+                     "cross-source incoming edge invented OCC ownership")) return 1;
+    }
+    source.blocks[0].physicalKnots.last().departureSourceEdgeIndex = 0;
+    source.blocks[0].physicalKnots.last().departureSourceParameter = 0;
+    source.blocks[1].entryBoundary = source.blocks[0].physicalKnots.last();
+    finalizeMotionPlan(&source);
+    if (!require(optimizeFull5D(source, policy, model(), &result, &metrics, &error)
+                 && result.blocks[1].sourceSpans.last().firstSourceParameter == 0
+                 && finalMotionPlanIdentityIsCurrent(result), "seam departure parameter ignored")) return 1;
     source = fixture({359, 361});
     policy.maximumAxes[4] = 360;
     if (!require(!optimizeFull5D(source, policy, model(), &result, &metrics, &error), "near-limit candidate accepted")) return 1;
@@ -159,6 +202,16 @@ int main(int argc, char** argv)
     const auto unknownHash = result.planHash;
     if (!require(!optimizeFull5D(source, policy, model(), &result, &metrics, &error)
                  && result.planHash == unknownHash, "unknown chord bound certified")) return 1;
+    policy.mode = PoseOptimizationMode::Full;
+    if (!require(optimizeFull5D(source, policy, model(), &result, &metrics, &error)
+                 && metrics.rejectedReasons.size() == 1 && result.nodes.size() == 2
+                 && metrics.dynamicsAuditOnly,
+                 "Full missing-bound capability was not reported")) return 1;
+    const auto fallbackHash = result.planHash;
+    if (!require(optimizeFull5D(source, policy, model(), &result, &metrics, &error)
+                 && result.planHash == fallbackHash && metrics.rejectedReasons.size() == 1,
+                 "Full subset identity or rejection is nondeterministic")) return 1;
+    policy.mode = PoseOptimizationMode::Conservative;
     auto bounded = model();
     bounded.boundPhysicalAxes = [](const CamMotionBlock&, double lo, double hi, MotionIntervalBound* interval) {
         // For x(u)=u^2, the maximum chord error is (hi-lo)^2/4.

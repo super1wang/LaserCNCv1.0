@@ -167,7 +167,8 @@ changed = false
 
 使用 B0 冻结的 `ContinuousMotionEvaluator`，并绑定本次 frozen compilation context。
 
-误差/细分依据至少包含：
+目标设计的误差/细分依据如下。S2 首版仅 rotary step 是生产硬细分条件；
+TCP/orientation 区间 bound 为基础设施，velocity/acceleration/reversal 为 audit-only，不能据此宣称生产资格：
 
 ```text
 TCP positional deviation
@@ -397,7 +398,9 @@ B1 不要求为了“完成 Z-hold”发明通用 constrained IK 或未知工艺
 #### Full
 
 - 包含 Conservative；
-- 可在显式 process/geometry tolerances 下做 bounded resampling/merge；
+- 目标能力：有显式 process/geometry tolerances 与连续区间证明时可做 bounded resampling/merge；
+- S2 首版：生产 `boundPhysicalAxes` 尚不可用，Full 保留 Conservative 等价子集并记录确定性拒绝原因；位置/姿态容差细分仅基础设施，测试 callback 不是生产资格；
+- S2 非零 smoothing 仍拒绝并保留 strict reference，动态 proxy 仅审计；生产 policy 仍 Off，controller 为 Unavailable/revision 0；
 - `enableDofReduction=true` 时允许 reduction；
 - `enableLaserZHold=true` 且 whitelist/process envelope 完整时才允许 process Z-hold。
 

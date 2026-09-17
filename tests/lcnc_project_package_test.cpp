@@ -158,6 +158,8 @@ int main(int argc, char* argv[])
     persistedPoint.position = gp_Pnt(1.0, 2.0, 3.0);
     persistedPoint.normal = gp_Dir(0.0, 0.0, 1.0);
     persistedPoint.semanticHardBarrier = true;
+    persistedPoint.departureSourceEdgeIndex = 3;
+    persistedPoint.departureSourceParameter = 6.283185307179586;
     persistedPoint.machineCoord.valid = true;
     persistedPoint.machineCoord.solvedPose.activeMask = 0x0f;
     persistedPoint.machineCoord.solvedPose.valid = true;
@@ -213,6 +215,9 @@ int main(int argc, char* argv[])
     if (restoredContour.points.empty()
         || !restoredContour.points.front().semanticHardBarrier)
         return fail(QStringLiteral("hard barrier marker was lost on reload"));
+    if (restoredContour.points.front().departureSourceEdgeIndex != 3
+        || restoredContour.points.front().departureSourceParameter != persistedPoint.departureSourceParameter)
+        return fail(QStringLiteral("source departure alias was lost on reload"));
 
     // A v5 package must never be produced without its declared project resource.
     QFile originalFile(packagePath);

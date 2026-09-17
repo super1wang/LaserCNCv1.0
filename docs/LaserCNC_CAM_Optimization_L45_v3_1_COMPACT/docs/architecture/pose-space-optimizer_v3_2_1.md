@@ -1,5 +1,19 @@
 # Pose-Space Optimizer / Full5D 优化设计 v3.2.1
 
+## S2 首版能力冻结（2026-09-17 收口）
+
+本节限定下文目标设计在 S2 的实际交付范围：Off 仅验证/必要归一化，硬约束超限失败；
+Conservative 支持旋转连续性、硬旋转步长细分、evaluator 派生状态重建、严格等价 midpoint merge、软限位和指标。
+Full 缺少区间 bound 时保留 Conservative 等价子集并记录确定性拒绝原因，不声明弦误差已证明。
+生产 `boundPhysicalAxes` 未资格化且尚未提供；位置/姿态容差驱动细分仅属基础设施，测试 callback 不代表生产能力。
+非零姿态平滑仍拒绝并保留 strict reference。速度、加速度 proxy 和 reversal count 仅审计，不是细分阈值。
+生产 policy 仍 Off；控制器资格保持 Unavailable/revision 0。下文 relaxed 优化与 dynamics refinement 是后续目标，不是 S2 已交付能力。
+
+闭合 source 的到达参数使用 `sourceEdgeIndex/param`，同点离开源不同则使用可选
+`departureSourceEdgeIndex/departureSourceParameter`。反向时交换两侧，旋转起点时随点移动；
+源接缝离开处拆 block，incoming span 使用离开源参数，不能把周期端点重写成起点。
+该别名经导出、计划 identity 和包 metadata 持久化；不新增接缝执行节点。
+
 ## 1. 定位
 
 Pose-Space Optimizer 工作在：
@@ -87,7 +101,7 @@ numerical-equivalent cleanup only
 
 ## 4. Adaptive Pose Resampling
 
-误差指标至少包括：
+目标误差指标如下；S2 生产仅 rotary step 用作硬细分条件，位置/姿态 bound 为基础设施，动态 proxy 仅审计：
 
 ```text
 TCP positional deviation
@@ -205,7 +219,7 @@ strict-equivalent resampling/merge
 
 ### Full
 
-在 explicit tolerance 下可做 bounded smoothing/resampling/merge。
+目标能力是在 explicit tolerance 与连续证明 authority 下做 bounded smoothing/resampling/merge；S2 首版仅按上方能力冻结执行。
 
 DOF reduction 是否启用仍由 `enableDofReduction` 决定。
 

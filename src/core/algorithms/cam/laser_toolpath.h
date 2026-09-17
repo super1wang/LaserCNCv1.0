@@ -95,6 +95,9 @@ struct ToolpathPoint
     gp_Dir tangent;       ///< Tangent direction along the contour (for 5-axis)
     double param{0.0};    ///< Curve parameter on the source edge
     int sourceEdgeIndex{-1}; ///< Stable wire-edge index owning this sample
+    // Optional outgoing native owner at a geometrically coincident source seam.
+    int departureSourceEdgeIndex{-1};
+    double departureSourceParameter{0.0};
     bool semanticHardBarrier{false}; ///< Required process/laser stop at this source knot.
     MachineCoord machineCoord; ///< Computed machine coordinates (filled by IK)
 };

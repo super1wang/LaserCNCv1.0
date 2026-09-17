@@ -317,6 +317,14 @@ repeat determinism
 
 ### S2 实施记录（2026-09-17）
 
+本节原实施记录的能力解释以 S2 收口为准：Off 验证/归一化、硬超限失败；Conservative
+提供旋转连续性、硬步长细分、严格等价 merge、evaluator 重建和软限位。
+Full 无区间 bound 时执行 Conservative 等价子集并报告拒绝原因；非零 smoothing 未启用。
+生产 `boundPhysicalAxes` 尚无资格来源，位置/姿态容差驱动细分是 infrastructure-only；
+速度/加速度 proxy、反转计数是 audit-only。生产 policy 仍 Off，不开放 controller admission/RTCP。
+收口修复和最终定向验证见 `B1_S2_CLOSEOUT_REPORT.md`。O2.1 热路径复用、D1 直接分段数、
+D2 最大等价区间合并延后，不作为新增 S3 门禁。
+
 - 新增 `full5d_optimizer`：既有完整 IK 输出作为 Raw reference；生产导出统一经过显式 Optimized reference。保留原 physical layout，不新增 IK 或 DOF reduction。
 - 保留已解算多圈角度；wrapped observation 必须显式指定，半圈方向歧义与软限位越界拒绝。Conservative 使用 evaluator 重建新增/保留 knot 的 TCP、reference TCP、process direction。
 - 细分采用 rotary hard bound；显式 position/orientation chord 限额要求共享 evaluator 的保守区间界，Unknown/预算耗尽/取消整次拒绝，不扩大 tolerance。严格 affine 中点等价证明允许合并；不跨 source span 端点、fence、semantic barrier 或 entry ownership。

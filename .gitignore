@@ -63,3 +63,19 @@ CMakeUserPresets.json
 .qoder/repowiki/zh/content/项目概述/模块设计/Process模块设计/设备控制/设备工厂条件编译.md
 .qoder/repowiki/zh/content/项目概述/模块设计/Process模块设计/设备控制/设备控制.md
 .qoder/repowiki/zh/meta/repowiki-metadata.json
+
+# Local review attachments and workstation-only CAD evidence
+/.codex/
+/docs/LaserCNC_CAM_Optimization_L45_v3_1_COMPACT.zip
+/docs/LaserCNC_CAM_Optimization_L45_v3_1_COMPACT/docs/plans/cam-motion-v3.1/B1_S1_AUDIT_REPORT.md
+/docs/LaserCNC_CAM_Optimization_L45_v3_1_COMPACT/docs/plans/cam-motion-v3.1/B1_S1_CLOSEOUT_EXECUTION_PLAN.md
+/docs/LaserCNC_CAM_Optimization_L45_v3_1_COMPACT/docs/plans/cam-motion-v3.1/B1_S2_AUDIT_REPORT.md
+/docs/LaserCNC_CAM_Optimization_L45_v3_1_COMPACT/docs/plans/cam-motion-v3.1/B1_S2_CLOSEOUT_EXECUTION_PLAN.md
+/model/*.stp
+/model/*.STEP
+/model/*.step
+/model/*.lmsp
+/model/*.lmsi
+/model/*.prt
+/model/*.err
+/model/*.log

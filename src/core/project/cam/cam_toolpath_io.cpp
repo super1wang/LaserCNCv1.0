@@ -19,6 +19,8 @@
 #include <toml.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <fstream>
 #include <vector>
 
@@ -401,6 +403,18 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
                 hardBarrierPointIndices.push_back(static_cast<std::int64_t>(index));
         }
         entry["hardBarrierPointIndices"] = hardBarrierPointIndices;
+        toml::array sourceDepartures;
+        for (std::size_t index = 0; index < c.points.size(); ++index) {
+            const auto& point = c.points[index];
+            if (point.departureSourceEdgeIndex < 0) continue;
+            sourceDepartures.push_back(toml::table{
+                {"pointIndex", static_cast<std::int64_t>(index)},
+                {"edgeIndex", point.departureSourceEdgeIndex},
+                {"parameter", point.departureSourceParameter}});
+        }
+        entry["sourceDepartures"] = sourceDepartures;
+        // Older readers must not certify a contour while ignoring seam aliases.
+        if (!sourceDepartures.empty()) entry["geometrySamplingProofVersion"] = 3;
         entry["leadInValid"]       = c.leadIn.valid;
         if (c.leadIn.valid) {
             entry["leadInEntryX"]    = c.leadIn.entryPoint.X();
@@ -630,7 +644,8 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             c.geometrySamplingComplete = e.contains("geometrySamplingComplete")
                 && e.at("geometrySamplingComplete").as_boolean()
                 && e.contains("geometrySamplingProofVersion")
-                && e.at("geometrySamplingProofVersion").as_integer() == 2;
+                && (e.at("geometrySamplingProofVersion").as_integer() == 2
+                    || e.at("geometrySamplingProofVersion").as_integer() == 3);
             c.geometrySamplingEvidence.sourceCoverageComplete = e.contains("geometrySourceCoverageComplete")
                 && e.at("geometrySourceCoverageComplete").as_boolean();
             c.geometrySamplingEvidence.requiredFeaturesPreserved = e.contains("geometryRequiredFeaturesPreserved")
@@ -689,6 +704,34 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
                 }
             }
             auto leadIt = leadInsByContourId.find(c.contourId);
+            if (e.contains("sourceDepartures")) {
+                const auto invalidateDeparture = [&] {
+                    c.geometrySamplingComplete = false;
+                    c.geometrySamplingEvidence.requiredFeaturesPreserved = false;
+                    c.geometrySamplingEvidence.failureReason = QStringLiteral("Invalid persisted source departure");
+                };
+                if (!e.at("sourceDepartures").is_array()) invalidateDeparture();
+                else for (const auto& value : e.at("sourceDepartures").as_array()) {
+                    if (!value.is_table() || !value.contains("pointIndex")
+                        || !value.at("pointIndex").is_integer() || !value.contains("edgeIndex")
+                        || !value.at("edgeIndex").is_integer() || !value.contains("parameter")
+                        || !value.at("parameter").is_floating()) {
+                        invalidateDeparture(); continue;
+                    }
+                    const auto index = value.at("pointIndex").as_integer();
+                    const auto edge = value.at("edgeIndex").as_integer();
+                    const double parameter = value.at("parameter").as_floating();
+                    if (index < 0 || static_cast<std::size_t>(index) >= c.points.size()
+                        || edge < 0 || edge > std::numeric_limits<int>::max()
+                        || !std::isfinite(parameter)
+                        || c.points[static_cast<std::size_t>(index)].departureSourceEdgeIndex >= 0) {
+                        invalidateDeparture(); continue;
+                    }
+                    auto& point = c.points[static_cast<std::size_t>(index)];
+                    point.departureSourceEdgeIndex = static_cast<int>(edge);
+                    point.departureSourceParameter = parameter;
+                }
+            }
             if (leadIt != leadInsByContourId.end()) {
                 c.leadInSolution = std::move(leadIt.value());
                 if (!c.points.empty()) {

@@ -101,9 +101,18 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
     for (int blockIndex = 0; blockIndex < raw.blocks.size(); ++blockIndex) {
         if (cancelled && cancelled()) return fail(error, QStringLiteral("Full5D compilation cancelled"));
         const auto& source = raw.blocks[blockIndex];
+        const auto blockModel = modelForBlock ? modelForBlock(source) : evaluation;
+        const bool chordRequested = policy.positionChordToleranceMm > 0
+            || policy.orientationChordToleranceDeg > 0;
+        const bool strictSubset = policy.mode == PoseOptimizationMode::Full
+            && !blockModel.boundPhysicalAxes;
+        if (strictSubset) {
+            const QString reason = QStringLiteral("Full chord adaptation unavailable: no whole-interval bound authority; Conservative exact-path subset retained");
+            if (!audit.rejectedReasons.contains(reason)) audit.rejectedReasons.append(reason);
+        }
         BoundMotionEvaluationContext bound;
         if (policy.mode != PoseOptimizationMode::Off
-            && !bindMotionEvaluationContext(raw, modelForBlock ? modelForBlock(source) : evaluation,
+            && !bindMotionEvaluationContext(raw, blockModel,
                 &bound, error)) return false;
         auto& block = result.blocks[blockIndex];
         if (source.interpolation != MotionInterpolationKind::PhysicalAxisLine)
@@ -128,6 +137,10 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
         const qint64 cap = std::min<qint64>(policy.maxKnotsPerBlock,
             static_cast<qint64>(count) * policy.maxKnotMultiplier);
         const int segmentCount = count - 1 + (source.hasEntryBoundary ? 1 : 0);
+        bool refinedEntry = false;
+        bool sourceEntry = false;
+        double entryParameter = 0;
+        QVector<MotionSourceSpan> motionEdgeSpans;
         for (int i = 0; i < count; ++i) {
             if (cancelled && cancelled()) return fail(error, QStringLiteral("Full5D compilation cancelled"));
             const auto& target = source.physicalKnots[i];
@@ -138,6 +151,13 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
                 : source.hasEntryBoundary ? &source.entryBoundary : nullptr;
             int pieces = 1;
             if (previous) {
+                const int departureEdge = previous->departureSourceEdgeIndex >= 0
+                    ? previous->departureSourceEdgeIndex : previous->sourceEdgeIndex;
+                const double departureParameter = previous->departureSourceEdgeIndex >= 0
+                    ? previous->departureSourceParameter : previous->sourceParameter;
+                const bool sameSource = departureEdge >= 0 && departureEdge == target.sourceEdgeIndex
+                    && previous->contourId == target.contourId && previous->phase == target.phase
+                    && target.phase == CamMotionPhase::Cutting;
                 if (!withinLimits(*previous, policy)) return fail(error, QStringLiteral("Full5D entry soft limit exceeded"));
                 if (policy.mode == PoseOptimizationMode::Off
                     && rotaryStep(*previous, target, policy.rotaryMask) > policy.maxRotaryStepDeg)
@@ -147,7 +167,7 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
                     int depth = 0;
                     for (;;) {
                         bool refine = demand / pieces > policy.maxRotaryStepDeg;
-                        if (policy.positionChordToleranceMm > 0 || policy.orientationChordToleranceDeg > 0) {
+                        if (chordRequested && !strictSubset) {
                             for (int piece = 0; piece < pieces && !refine; ++piece) {
                                 if (cancelled && cancelled()) return fail(error, QStringLiteral("Full5D compilation cancelled"));
                                 const double start = i - 1 + (source.hasEntryBoundary ? 1 : 0);
@@ -173,9 +193,17 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
                 }
                 // Incoming edges may belong to a different source/phase. Do not
                 // invent source ownership for an inserted cross-boundary knot.
-                if (pieces > 1 && (i == 0 || previous->sourceEdgeIndex != target.sourceEdgeIndex
-                    || previous->contourId != target.contourId || previous->phase != target.phase))
+                if (pieces > 1 && i > 0 && !sameSource && target.phase != CamMotionPhase::Rapid)
                     return fail(error, QStringLiteral("Full5D boundary refinement requires explicit source ownership"));
+                if (i == 0 && pieces > 1) {
+                    refinedEntry = true;
+                    sourceEntry = sameSource;
+                    entryParameter = departureParameter;
+                }
+                if (i > 0 && pieces > 1 && !sameSource) {
+                    motionEdgeSpans.append({source.contourId, i - 1, i, 0, 1, -1});
+                    protectedKnot[i - 1] = protectedKnot[i] = true;
+                }
                 if (static_cast<qint64>(knots.size()) + pieces + count - i - 1 > cap)
                     return fail(error, QStringLiteral("Full5D knot budget exhausted; candidate rejected"));
                 for (int piece = 1; piece < pieces; ++piece) {
@@ -192,8 +220,11 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
                     inserted.referenceTcpZ = state.referenceTcpZ; inserted.referenceTcpValid = state.referenceTcpValid;
                     inserted.normalX = state.processDirectionX; inserted.normalY = state.processDirectionY;
                     inserted.normalZ = state.processDirectionZ;
-                    inserted.sourceParameter = previous->sourceParameter
-                        + (target.sourceParameter - previous->sourceParameter) * fraction;
+                    inserted.sourceEdgeIndex = sameSource ? target.sourceEdgeIndex : -1;
+                    inserted.sourceParameter = sameSource ? departureParameter
+                        + (target.sourceParameter - departureParameter) * fraction : fraction;
+                    inserted.departureSourceEdgeIndex = -1;
+                    inserted.departureSourceParameter = 0;
                     inserted.semanticHardBarrier = false;
                     inserted.estimatedTimeMs = target.estimatedTimeMs / pieces;
                     if (!withinLimits(inserted, policy) || !normalizeDirection(&inserted))
@@ -226,12 +257,13 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
         // Only exact midpoint removal: identical axes on both affine halves is
         // a whole-interval FK equivalence proof, including nonlinear TCP motion.
         if (policy.mode != PoseOptimizationMode::Off
-            && policy.positionChordToleranceMm == 0 && policy.orientationChordToleranceDeg == 0) {
+            && (!chordRequested || strictSubset)) {
             for (int i = 1; i + 1 < knots.size();) {
                 if (cancelled && cancelled()) return fail(error, QStringLiteral("Full5D compilation cancelled"));
                 const auto& a = knots[i - 1]; const auto& b = knots[i]; const auto& c = knots[i + 1];
                 const int original = originalIndex[i];
                 bool equivalent = !b.semanticHardBarrier && (original < 0 || !protectedKnot[original])
+                    && a.departureSourceEdgeIndex < 0 && b.departureSourceEdgeIndex < 0
                     && a.axisMask == b.axisMask && b.axisMask == c.axisMask
                     && a.rapidPhase == b.rapidPhase && b.rapidPhase == c.rapidPhase
                     && a.sourceEdgeIndex == b.sourceEdgeIndex && b.sourceEdgeIndex == c.sourceEdgeIndex
@@ -253,6 +285,19 @@ bool optimizeFull5D(const lcnc::cam::CamMotionPlanSnapshot& raw,
         }
         for (auto& fence : block.fences)
             if (fence.knotIndex >= 0) fence.knotIndex = mapped[fence.knotIndex];
+        if (refinedEntry) {
+            // -1 names the predecessor, never an extra physical/execution knot.
+            // Owner -1 explicitly denotes motion-edge u, not an OCC parameter.
+            block.sourceSpans.append({source.contourId, -1, mapped[0],
+                sourceEntry ? entryParameter : 0.0,
+                sourceEntry ? source.physicalKnots[0].sourceParameter : 1.0,
+                sourceEntry ? source.physicalKnots[0].sourceEdgeIndex : -1});
+        }
+        for (auto span : motionEdgeSpans) {
+            span.firstKnot = mapped[span.firstKnot];
+            span.lastKnot = mapped[span.lastKnot];
+            block.sourceSpans.append(span);
+        }
         block.physicalKnots = std::move(knots);
         block.feed.estimatedDurationMs = 0;
         for (const auto& node : block.physicalKnots) block.feed.estimatedDurationMs += node.estimatedTimeMs;

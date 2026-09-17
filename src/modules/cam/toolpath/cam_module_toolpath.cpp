@@ -808,6 +808,8 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         node.axes = point->machineAxes;
         node.sourceEdgeIndex = point->sourceEdgeIndex;
         node.sourceParameter = point->curveParam;
+        node.departureSourceEdgeIndex = point->departureSourceEdgeIndex;
+        node.departureSourceParameter = point->departureSourceParameter;
         node.semanticHardBarrier = point->semanticHardBarrier;
         node.axisMask = point->machineAxisMask;
         node.tcpX = point->x;
@@ -904,6 +906,7 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
             || plan.blocks.constLast().phase != node.phase
             || plan.blocks.constLast().contourId != node.contourId
             || node.semanticHardBarrier
+            || plan.blocks.constLast().physicalKnots.constLast().departureSourceEdgeIndex >= 0
             || (node.phase == lcnc::cam::CamMotionPhase::Cutting
                 && node.sourceEdgeIndex >= 0
                 && plan.blocks.constLast().physicalKnots.constLast().sourceEdgeIndex
@@ -935,6 +938,13 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
                     block.entryBoundary.sourceParameter,
                     block.entryBoundary.sourceEdgeIndex});
                 block.fences[0].knotIndex = -1;
+                if (block.entryBoundary.departureSourceEdgeIndex == node.sourceEdgeIndex
+                    && node.sourceEdgeIndex >= 0 && block.entryBoundary.phase == node.phase
+                    && block.entryBoundary.contourId == node.contourId) {
+                    block.sourceSpans.insert(1, {node.contourId, -1, 0,
+                        block.entryBoundary.departureSourceParameter, node.sourceParameter,
+                        node.sourceEdgeIndex});
+                }
             }
             plan.blocks.append(std::move(block));
         }
@@ -2469,6 +2479,8 @@ lcnc::cam::ToolpathExportSnapshot CamModule::buildToolpathExportSnapshot(
             exportedPoint.tangentZ = point.tangent.Z();
             exportedPoint.curveParam = point.param;
             exportedPoint.sourceEdgeIndex = point.sourceEdgeIndex;
+            exportedPoint.departureSourceEdgeIndex = point.departureSourceEdgeIndex;
+            exportedPoint.departureSourceParameter = point.departureSourceParameter;
             exportedPoint.semanticHardBarrier = point.semanticHardBarrier;
             exportedPoint.machineX = point.machineCoord.x;
             exportedPoint.machineY = point.machineCoord.y;

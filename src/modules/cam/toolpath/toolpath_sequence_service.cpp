@@ -100,6 +100,8 @@ std::uint64_t ToolpathSequenceService::computeToolpathRevision(
         for (const ToolpathPoint& point : contour.points) {
             mix(static_cast<std::uint64_t>(point.sourceEdgeIndex + 1));
             mixRounded(point.param);
+            mix(static_cast<std::uint64_t>(point.departureSourceEdgeIndex + 1));
+            mixRounded(point.departureSourceParameter);
             mix(point.semanticHardBarrier ? 1ull : 0ull);
             mixRounded(point.position.X());
             mixRounded(point.position.Y());

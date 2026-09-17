@@ -213,6 +213,9 @@ struct CamMotionNode
     std::uint64_t contourId{0};
     int sourceEdgeIndex{-1};
     double sourceParameter{0.0};
+    // Arrival uses sourceParameter; a seam may have a different outgoing owner.
+    int departureSourceEdgeIndex{-1};
+    double departureSourceParameter{0.0};
     bool semanticHardBarrier{false};
     std::array<double, MachineAxisLayout::kMaxAxes> axes{};
     std::uint8_t axisMask{0};

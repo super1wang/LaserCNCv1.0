@@ -19,6 +19,9 @@ lcnc::cam_algo::MotionEvaluationContext ToolpathSolveService::physicalEvaluation
     lcnc::cam_algo::MotionEvaluationContext model;
     if (input.capturedContextHash != motionCompilationContextHash(input.context)) return model;
     model.interpolationModelVersion = input.context.interpolationModelVersion;
+    // S2 production capability: exact physical FK only. No qualified continuous
+    // chord bound or process-tolerance authority is provided by this adapter.
+    // Full must report its Conservative subset; test bounds are not qualification.
     // Detached values only. Each call owns its private kinematic model, so the
     // callback is usable in a worker without sharing a mutable QObject/pose.
     model.evaluatePhysicalAxes = [input, workpieceEntry](const auto& positions, std::uint8_t mask,

@@ -6,6 +6,7 @@
 //   - The same default on a cylinder yields its smooth outer-surface boundary.
 
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/full5d_optimizer.h"
 #include "core/algorithms/cad/primitives.h"
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/project/cam/cam_data_manager.h"
@@ -26,6 +27,9 @@
 #include <QTextStream>
 
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <gp_Circ.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -45,6 +49,103 @@
 // controller, showing a window or bypassing the production solve service.
 struct CamMotionCompilationTestAccess
 {
+    static QString verifyClosedSourceTraversal()
+    {
+        lcnc::MachineConfigurationService configuration;
+        configuration.applyPreset(QStringLiteral("VERTICAL_AC_TABLE"));
+        lcnc::cam::MotionCompilationInput input;
+        input.machineAxes = configuration.axisDefinitions();
+        input.machineConfigType = QStringLiteral("VERTICAL_AC_TABLE");
+        input.modeDefinition = configuration.modeDefinition(lcnc::MachiningMode::SimultaneousTable5Axis);
+        input.workpieceMounts.insert(QStringLiteral("workpiece"), QStringLiteral("C"));
+        input.context.interpolationModelVersion = 1;
+        input.capturedContextHash = lcnc::cam::motionCompilationContextHash(input.context);
+        for (int shape = 0; shape < 2; ++shape) for (int variant = 0; variant < 4; ++variant) {
+            BRepBuilderAPI_MakeWire wire;
+            if (shape == 0) wire.Add(BRepBuilderAPI_MakeEdge(
+                gp_Circ(gp_Ax2(gp_Pnt(0, 0, 5), gp_Dir(0, 0, 1)), 10)));
+            else {
+                const gp_Pnt corners[] = {{10, 0, 5}, {0, 10, 5}, {-10, 0, 5}, {0, -10, 5}};
+                for (int i = 0; i < 4; ++i) wire.Add(BRepBuilderAPI_MakeEdge(corners[i], corners[(i + 1) % 4]));
+            }
+            LaserContour contour;
+            contour.contourId = 1;
+            contour.wire = wire.Wire();
+            LaserToolpathBuilder::discretizeContour(contour, contour.wire, 0.1);
+            if (variant == 1) std::reverse(contour.points.begin(), contour.points.end());
+            if (variant >= 2) {
+                contour.leadIn.valid = true;
+                contour.leadIn.entryPoint = contour.points[variant == 2 ? contour.points.size() / 3 : 0].position;
+            }
+            for (auto& point : contour.points) point.normal = gp_Dir(0, 0, 1);
+            const auto original = contour.points;
+            MachineKinematics machine;
+            lcnc::cam::ToolpathSolveService::configureFrozenMachine(&machine, input);
+            QString error;
+            if (!LaserToolpathBuilder::solveToolpathForOrder({&contour}, &machine, {},
+                    input.modeDefinition, input.workpieceSetup, input.headToolGeometry, &error))
+                return QStringLiteral("Closed source authoritative IK: ") + error;
+            if (contour.points.size() != original.size()
+                || contour.points.front().position.Distance(contour.points.back().position) > 1e-9)
+                return QStringLiteral("Traversal changed execution knot count or geometric closure");
+            for (const auto& before : original) {
+                const bool retained = std::any_of(contour.points.begin(), contour.points.end(), [&](const auto& after) {
+                    return (after.sourceEdgeIndex == before.sourceEdgeIndex && after.param == before.param)
+                        || (after.departureSourceEdgeIndex == before.sourceEdgeIndex
+                            && after.departureSourceParameter == before.param);
+                });
+                if (!retained) return QStringLiteral("Traversal lost a native source endpoint");
+            }
+            if (shape == 0) {
+                double travel = 0;
+                for (std::size_t i = 1; i < contour.points.size(); ++i) {
+                    const auto& previous = contour.points[i - 1];
+                    const double departure = previous.departureSourceEdgeIndex >= 0
+                        ? previous.departureSourceParameter : previous.param;
+                    const double delta = contour.points[i].param - departure;
+                    if (delta > 1e-10) return QStringLiteral("Periodic source direction changed at wrap");
+                    travel += delta;
+                }
+                if (std::abs(travel + 6.283185307179586) > 1e-8)
+                    return QStringLiteral("Periodic native traversal no longer covers exactly one turn");
+            }
+            lcnc::cam::CamMotionPlanSnapshot raw;
+            raw.context = input.context;
+            for (const auto& point : contour.points) {
+                lcnc::cam::CamMotionNode node;
+                node.contourId = 1; node.axes = point.machineCoord.solvedPose.values;
+                node.axisMask = point.machineCoord.solvedPose.activeMask;
+                node.sourceEdgeIndex = point.sourceEdgeIndex; node.sourceParameter = point.param;
+                node.departureSourceEdgeIndex = point.departureSourceEdgeIndex;
+                node.departureSourceParameter = point.departureSourceParameter;
+                lcnc::cam::CamMotionBlock block;
+                block.blockId = raw.blocks.size() + 1; block.contourId = 1;
+                block.activeAxisMask = node.axisMask; block.physicalKnots = {node};
+                block.sourceSpans = {{1, 0, 0, point.param, point.param, point.sourceEdgeIndex}};
+                block.fences = {{0, true, true, true}};
+                if (!raw.blocks.isEmpty()) {
+                    block.hasEntryBoundary = true; block.entryBoundary = raw.blocks.last().physicalKnots.last();
+                    block.sourceSpans.prepend({1, -1, -1, block.entryBoundary.sourceParameter,
+                        block.entryBoundary.sourceParameter, block.entryBoundary.sourceEdgeIndex});
+                    block.fences.prepend({-1, true, false, true});
+                }
+                raw.blocks.append(block);
+            }
+            if (!lcnc::cam::finalizeMotionPlan(&raw, &error)) return error;
+            lcnc::cam_algo::Full5DPolicy policy;
+            policy.mode = lcnc::cam_algo::PoseOptimizationMode::Conservative;
+            lcnc::cam_algo::Full5DMetrics metrics;
+            lcnc::cam::CamMotionPlanSnapshot optimized;
+            if (!lcnc::cam_algo::optimizeFull5D(raw, policy,
+                    lcnc::cam::ToolpathSolveService::physicalEvaluationContext(input, QStringLiteral("workpiece")),
+                    &optimized, &metrics, &error) || !lcnc::cam::finalMotionPlanIdentityIsCurrent(optimized)) return error;
+            for (int i = 0; i < raw.nodes.size(); ++i)
+                if (raw.nodes[i].sourceParameter != optimized.nodes[i].sourceParameter
+                    || raw.nodes[i].departureSourceParameter != optimized.nodes[i].departureSourceParameter)
+                    return QStringLiteral("Full5D lost the normalized source seam");
+        }
+        return {};
+    }
     static QString verifyPhysicalEvaluator()
     {
         for (const auto& preset : {QStringLiteral("XYZ"), QStringLiteral("VERTICAL_AC_TABLE"),
@@ -112,6 +213,8 @@ struct CamMotionCompilationTestAccess
     {
         const QString evaluatorError = verifyPhysicalEvaluator();
         if (!evaluatorError.isEmpty()) return evaluatorError;
+        const QString closedError = verifyClosedSourceTraversal();
+        if (!closedError.isEmpty()) return closedError;
         lcnc::Kernel kernel;
         kernel.registerCoreServices();
         kernel.service<lcnc::MachineConfigurationService>()->applyPreset(QStringLiteral("XYZ"));
@@ -134,6 +237,8 @@ struct CamMotionCompilationTestAccess
             point.param = index;
             contour.points.push_back(point);
         }
+        contour.points.front().departureSourceEdgeIndex = 0;
+        contour.points.front().departureSourceParameter = 0.25;
         cam.toolpathRef().contours() = {contour};
         cam.m_camData->ensureToolpathLayers();
         const auto id = cam.toolpathRef().contours().front().contourId;
@@ -156,6 +261,12 @@ struct CamMotionCompilationTestAccess
         for (const auto& block : snapshot.motionPlan.blocks)
             if (block.optimizationState != lcnc::cam::MotionOptimizationState::Optimized)
                 return QStringLiteral("Production export bypassed the explicit Optimized reference");
+        bool departureExported = false;
+        for (const auto& block : snapshot.motionPlan.blocks)
+            for (const auto& span : block.sourceSpans)
+                departureExported = departureExported || (span.firstKnot == -1
+                    && span.firstSourceParameter == 0.25 && span.sourceEdgeIndex == 0);
+        if (!departureExported) return QStringLiteral("Production raw construction lost source departure span");
         const auto differentOrder = cam.exportToolpathSnapshotForOrder({id, id});
         if (!differentOrder.motionPlan.planHash.isEmpty() || differentOrder.motionPlan.failureReason.isEmpty())
             return QStringLiteral("Owner reused solved coordinates for a different requested contour order");

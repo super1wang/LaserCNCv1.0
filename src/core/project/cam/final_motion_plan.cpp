@@ -49,7 +49,8 @@ bool validNode(const CamMotionNode& node)
         || !std::isfinite(node.tcpZ) || !std::isfinite(node.normalX)
         || !std::isfinite(node.normalY) || !std::isfinite(node.normalZ)
         || !std::isfinite(node.estimatedTimeMs)
-        || !std::isfinite(node.sourceParameter)) {
+        || !std::isfinite(node.sourceParameter)
+        || !std::isfinite(node.departureSourceParameter)) {
         return false;
     }
     if (node.referenceTcpValid
@@ -71,6 +72,8 @@ bool sameNode(const CamMotionNode& lhs, const CamMotionNode& rhs)
         && lhs.contourId == rhs.contourId
         && lhs.sourceEdgeIndex == rhs.sourceEdgeIndex
         && lhs.sourceParameter == rhs.sourceParameter
+        && lhs.departureSourceEdgeIndex == rhs.departureSourceEdgeIndex
+        && lhs.departureSourceParameter == rhs.departureSourceParameter
         && lhs.semanticHardBarrier == rhs.semanticHardBarrier
         && lhs.axes == rhs.axes
         && lhs.axisMask == rhs.axisMask && lhs.tcpX == rhs.tcpX
@@ -91,6 +94,8 @@ void appendNode(QByteArray* canonical, const CamMotionNode& node)
     appendInteger(canonical, node.contourId);
     appendInteger(canonical, node.sourceEdgeIndex);
     appendDouble(canonical, node.sourceParameter);
+    appendInteger(canonical, node.departureSourceEdgeIndex);
+    appendDouble(canonical, node.departureSourceParameter);
     appendInteger(canonical, node.semanticHardBarrier);
     appendInteger(canonical, node.axisMask);
     for (double axis : node.axes)

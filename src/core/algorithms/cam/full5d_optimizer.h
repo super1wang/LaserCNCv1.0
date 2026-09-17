@@ -15,6 +15,8 @@ struct Full5DPolicy
     double maxRotaryStepDeg{5.0};
     // Zero means no chord-approximation request, not an invented tolerance.
     // Positive limits require the evaluator's whole-interval bound callback.
+    // Full without this capability reports and retains the Conservative exact
+    // path subset, without claiming that chord tolerances have been proven.
     double positionChordToleranceMm{0.0};
     double orientationChordToleranceDeg{0.0};
     int maxDepth{12};
@@ -30,6 +32,7 @@ struct Full5DPolicy
 
 struct Full5DMetrics
 {
+    static constexpr bool dynamicsAuditOnly = true; // No dynamics threshold authority in S2.
     bool changed{false};
     int insertedKnots{0};
     int removedKnots{0};

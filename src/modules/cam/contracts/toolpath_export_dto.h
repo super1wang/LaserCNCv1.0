@@ -29,6 +29,8 @@ struct ToolpathExportPoint
     double tangentZ{0.0};
     double curveParam{0.0};
     int sourceEdgeIndex{-1}; ///< OCC wire-edge owner; -1 for non-source motion.
+    int departureSourceEdgeIndex{-1};
+    double departureSourceParameter{0.0};
     bool semanticHardBarrier{false}; ///< Required process/laser fence at this source knot.
     double machineX{0.0};
     double machineY{0.0};
