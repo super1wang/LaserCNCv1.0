@@ -388,7 +388,13 @@ bool saveCamToolpath(const CamDataManager& cam, const QString& packageDir, QStri
         entry["pendingRapidOffsetMm"] = c.pendingParams.rapidOffsetMm;
         entry["dirtyStages"] = static_cast<std::int64_t>(c.dirtyStages);
         entry["needsRecalculation"] = c.needsRecalculation;
-        entry["geometrySamplingComplete"] = c.geometrySamplingComplete;
+        entry["geometrySamplingComplete"] = c.geometrySamplingComplete
+            && c.geometrySamplingEvidence.complete();
+        entry["geometrySamplingProofVersion"] = 2;
+        entry["geometrySourceCoverageComplete"] = c.geometrySamplingEvidence.sourceCoverageComplete;
+        entry["geometryRequiredFeaturesPreserved"] = c.geometrySamplingEvidence.requiredFeaturesPreserved;
+        entry["geometryRefinementCriteriaSatisfied"] = c.geometrySamplingEvidence.refinementCriteriaSatisfied;
+        entry["geometrySamplingFailure"] = c.geometrySamplingEvidence.failureReason.toStdString();
         toml::array hardBarrierPointIndices;
         for (std::size_t index = 0; index < c.points.size(); ++index) {
             if (c.points[index].semanticHardBarrier)
@@ -622,7 +628,19 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
             // Historical packages predate bounded sampling. Preserve their
             // points for display, but require a new geometry pass before solve.
             c.geometrySamplingComplete = e.contains("geometrySamplingComplete")
-                && e.at("geometrySamplingComplete").as_boolean();
+                && e.at("geometrySamplingComplete").as_boolean()
+                && e.contains("geometrySamplingProofVersion")
+                && e.at("geometrySamplingProofVersion").as_integer() == 2;
+            c.geometrySamplingEvidence.sourceCoverageComplete = e.contains("geometrySourceCoverageComplete")
+                && e.at("geometrySourceCoverageComplete").as_boolean();
+            c.geometrySamplingEvidence.requiredFeaturesPreserved = e.contains("geometryRequiredFeaturesPreserved")
+                && e.at("geometryRequiredFeaturesPreserved").as_boolean();
+            c.geometrySamplingEvidence.refinementCriteriaSatisfied = e.contains("geometryRefinementCriteriaSatisfied")
+                && e.at("geometryRefinementCriteriaSatisfied").as_boolean();
+            c.geometrySamplingComplete = c.geometrySamplingComplete && c.geometrySamplingEvidence.complete();
+            if (e.contains("geometrySamplingFailure"))
+                c.geometrySamplingEvidence.failureReason = QString::fromStdString(
+                    e.at("geometrySamplingFailure").as_string());
             if (schemaVersion == kOldCamToolpathSchemaVersion) {
                 c.dirtyStages = ContourDirtyStage::MotionOffset
                     | ContourDirtyStage::MachineSolve | ContourDirtyStage::AdjacentRapid
@@ -656,11 +674,15 @@ bool loadCamToolpath(CamDataManager& cam, const QString& packageDir, QString* er
                      e.at("hardBarrierPointIndices").as_array()) {
                     if (!indexValue.is_integer()) {
                         c.geometrySamplingComplete = false;
+                        c.geometrySamplingEvidence.requiredFeaturesPreserved = false;
+                        c.geometrySamplingEvidence.failureReason = QStringLiteral("Invalid persisted source barrier");
                         continue;
                     }
                     const std::int64_t index = indexValue.as_integer();
                     if (index < 0 || static_cast<std::size_t>(index) >= c.points.size()) {
                         c.geometrySamplingComplete = false;
+                        c.geometrySamplingEvidence.requiredFeaturesPreserved = false;
+                        c.geometrySamplingEvidence.failureReason = QStringLiteral("Persisted source barrier is out of range");
                         continue;
                     }
                     c.points[static_cast<std::size_t>(index)].semanticHardBarrier = true;

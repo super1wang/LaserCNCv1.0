@@ -62,6 +62,8 @@ class ContourOrderLabelRenderer;
 namespace lcnc::cam {
 class CamDisplayProjectionService;
 struct TravelCollisionGeometryCache;
+struct MotionCompilationInput;
+struct ToolpathGenerationStamp;
 }
 
 namespace lcnc::cam {
@@ -320,7 +322,8 @@ public:
     QVector<lcnc::cam::ContourId> manualContourOrder() const;
     lcnc::cam::AutoSortAxis lastAutoContourSortAxis() const;
     void setLastAutoContourSortAxis(lcnc::cam::AutoSortAxis axis);
-    bool solveToolpathForOrder(const QVector<std::uint64_t>& orderedContourIds);
+    bool solveToolpathForOrder(const QVector<std::uint64_t>& orderedContourIds,
+        std::shared_ptr<const lcnc::cam::MotionCompilationInput> input = {});
     lcnc::cam::ToolpathExportSnapshot exportToolpathBaseSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
         const QVector<std::uint64_t>& orderedContourIds) const;
@@ -533,6 +536,7 @@ signals:
     void contourOrderTravelPlanRebuilt(const QVector<std::uint64_t>& orderedContourIds);
 
 private:
+    friend struct CamMotionCompilationTestAccess;
     struct WorkpieceShapeSource {
         QString workpieceEntry;
         TopoDS_Shape shape;
@@ -586,6 +590,10 @@ private:
         std::uint64_t revision,
         const QString& description) const;
     void attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
+    std::shared_ptr<const lcnc::cam::MotionCompilationInput> captureMotionCompilationInput(
+        const lcnc::cam::ToolpathGenerationStamp* requested = nullptr) const;
+    void retainMotionCompilationInput(
+        const std::shared_ptr<const lcnc::cam::MotionCompilationInput>& input);
     void applyToolMotionOffsets(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
     void attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
     void scheduleFullEnvironmentVerification(const lcnc::cam::ToolpathExportSnapshot& snapshot,
@@ -598,7 +606,8 @@ private:
     bool rebuildTravelPlanForCurrentOrder(QString* errorMessage = nullptr);
     QVector<lcnc::cam::ContourId> planAutoContourOrder(
         lcnc::cam::AutoSortAxis axis, QString* errorMessage = nullptr) const;
-    bool prepareConfiguredAutoSort(QString* errorMessage = nullptr);
+    bool prepareConfiguredAutoSort(QString* errorMessage = nullptr,
+        std::shared_ptr<const lcnc::cam::MotionCompilationInput> input = {});
     void clearToolpathSelectionState();
     void updateToolpathMachineCoordinates();
     bool autoInstallCurrentWorkpieceInternal(bool alignToInstallPosition);
@@ -648,6 +657,9 @@ private:
     // ── CAM data managers ─────────────────────────────────────────────
     /// 借用自 LcncProjectManager（工程核心数据，core 层拥有）；本模块不负责其生命周期。
     lcnc::cam::CamDataManager*                          m_camData{nullptr};
+    std::shared_ptr<const lcnc::cam::MotionCompilationInput> m_motionCompilationInput;
+    std::uint64_t m_motionCompilationResultRevision{0};
+    QVector<std::uint64_t> m_motionCompilationResultOrder;
     /// 借用自 Kernel（独立机台参考资产，core 拥有）；本模块不负责其生命周期。
     lcnc::cam::MachineWorkspace*                         m_machineWorkspace{nullptr};
 

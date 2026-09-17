@@ -1019,22 +1019,17 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
         emit operationFailed(tr("Solve for machine coordinates"), tr("The geometric tool path has expired, or the machine background service is unavailable."));
         return kInvalidTaskId;
     }
+    const auto compilationInput = captureMotionCompilationInput();
     QString autoSortError;
-    if (!prepareConfiguredAutoSort(&autoSortError)) {
+    if (!prepareConfiguredAutoSort(&autoSortError, compilationInput)) {
         emit operationFailed(tr("Solve for machine coordinates"), autoSortError);
         return kInvalidTaskId;
     }
     const std::vector<LaserContour> input = toolpathRef().contours();
+    const auto capturedRevision = toolpathRevision();
+    const auto* capturedCamData = m_camData;
     const QVector<lcnc::cam::ContourId> order = contourSequenceSnapshot().orderedContourIds;
-    const QString configType = machine->configType();
-    const lcnc::MachiningMode machiningMode = m_camData->machiningMode();
-    const lcnc::MachineModeDefinition modeDefinition = m_machineConfig
-        ? m_machineConfig->modeDefinition(machiningMode) : lcnc::MachineModeDefinition{};
-    const QList<MachineAxisDef> axes =
-        lcnc::cam_algo::offlinePlanningAxisBaseline(machine->axes(), modeDefinition);
-    const lcnc::WorkpieceSetupTransform workpieceSetup = m_machineConfig->workpieceSetupTransform();
-    const lcnc::HeadToolGeometry headToolGeometry = m_machineConfig
-        ? m_machineConfig->headToolGeometry() : lcnc::HeadToolGeometry{};
+    const auto modeDefinition = compilationInput->modeDefinition;
     struct Result { std::vector<LaserContour> contours; QString error; bool ok{false}; };
     const auto result = std::make_shared<Result>();
     TaskSpec spec;
@@ -1044,8 +1039,7 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
     spec.priority = TaskPriority::Normal;
     spec.cancellable = true;
     const TaskId taskId = taskManager->run(spec,
-        [input, order, axes, configType, modeDefinition, workpieceSetup,
-         headToolGeometry, result](TaskProgress* progress) {
+        [input, order, compilationInput, result](TaskProgress* progress) {
             progress->setRange(0, 100);
             result->contours = input;
             QSet<std::uint64_t> seen;
@@ -1070,11 +1064,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
                 result->error = QObject::tr("There is currently no contour sequence to solve.");
                 return;
             }
-            MachineKinematics workerKinematics;
-            workerKinematics.setAxes(axes, configType);
-            if (!LaserToolpathBuilder::solveToolpathForOrder(
-                    ordered, &workerKinematics, gp_Trsf(), modeDefinition,
-                    workpieceSetup, headToolGeometry, &result->error)) {
+            if (!lcnc::cam::ToolpathSolveService::solveFrozen(
+                    &result->contours, order, *compilationInput, &result->error)) {
                 return;
             }
             for (const LaserContour& contour : result->contours) {
@@ -1091,7 +1082,8 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
             progress->setValue(100);
         });
     m_taskScope.track(taskId);
-    watchTask(this, taskId, [this, taskId, result, modeDefinition,
+    watchTask(this, taskId, [this, taskId, result, modeDefinition, compilationInput,
+                            capturedRevision, capturedCamData, order,
                             pathRevision = pathState.revision](bool success) {
         m_taskScope.release(taskId);
         if (!success || !result->ok) {
@@ -1099,6 +1091,15 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
             emit operationFailed(tr("Solve for machine coordinates"), result->error.isEmpty()
                 // 中文翻译：机床坐标求解失败或已取消
                 ? tr("Machine tool coordinate solution failed or canceled") : result->error);
+            return;
+        }
+        if (!m_camData || m_camData != capturedCamData
+            || toolpathRevision() != capturedRevision
+            || contourSequenceSnapshot().orderedContourIds != order
+            || !lcnc::cam::ToolpathGenerationService::sameMotionAuthority(
+                *compilationInput, *captureMotionCompilationInput())) {
+            emit operationFailed(tr("Solve for machine coordinates"),
+                QStringLiteral("Motion authority changed during calculation; result discarded"));
             return;
         }
         const auto currentPath = m_camData->pipelineStageState(
@@ -1113,7 +1114,7 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
         m_camData->setSolverId(modeDefinition.solverId);
         m_camData->setSolverVersion(modeDefinition.solverVersion);
         m_camData->setSolvedMachineConfigurationFingerprint(
-            m_machineConfig ? m_machineConfig->configurationFingerprint() : QString());
+            compilationInput->machineFingerprint);
         for (LaserContour& contour : toolpathRef().contours())
             contour.needsRecalculation = false;
         m_camData->commitPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve,
@@ -1121,6 +1122,7 @@ TaskId CamModule::solveCurrentGeometricToolpathAsync()
         m_camData->setGenerationParamsDirty(false);
         m_camData->markDirty(true);
         m_camData->commitToolpathStates();
+        retainMotionCompilationInput(compilationInput);
         refreshToolpathDisplay();
         refreshCuttingOrderOverlays();
         emit toolpathGenerated();
@@ -1250,6 +1252,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
         generationStamp.sources.push_back(
             {source.workpieceEntry, source.componentIndex, source.shape});
     }
+    const auto compilationInput = captureMotionCompilationInput(&generationStamp);
 
     // Beam direction is workpiece-mount-dependent, so compute it per source on
     // this (main) thread where the kinematics WPC mounts live; the worker only
@@ -1258,6 +1261,17 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     beamDirs.reserve(workpieceSources.size());
     for (const WorkpieceShapeSource& s : workpieceSources)
         beamDirs.append(beamDirectionWpc(s.workpieceEntry));
+
+    struct FrozenGeneration {
+        std::shared_ptr<const lcnc::cam::MotionCompilationInput> motion;
+        QList<WorkpieceShapeSource> workpieceSources;
+        QHash<std::uint64_t, LaserContour> previousBySignature;
+        ContourExtractionParams params;
+        std::vector<MachiningFaceEntry> selectedFaceEntries;
+        QVector<gp_Dir> beamDirs;
+    };
+    const auto frozen = std::make_shared<const FrozenGeneration>(FrozenGeneration{
+        compilationInput, workpieceSources, previousBySignature, params, selectedFaceEntries, beamDirs});
 
     TaskSpec spec;
     // 中文翻译：全局生成刀路
@@ -1271,9 +1285,20 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
               workpieceSources.size(), sourceRevision,
               lcnc::machiningModeName(machiningMode).toStdString());
     const TaskId taskId = taskManager->run(spec,
-        [workpieceSources, previousBySignature, leadInLength,
-         cuttingOffsetMm, rapidOffsetMm, params, selectedFaceEntries,
-         extractionStrategy, beamDirs, effectiveUseFaceClassification, result](TaskProgress* progress) {
+        [frozen, result](TaskProgress* progress) {
+            const auto& input = *frozen->motion;
+            const auto& workpieceSources = frozen->workpieceSources;
+            const auto& previousBySignature = frozen->previousBySignature;
+            auto params = frozen->params;
+            params.deflection = input.generation.deflection;
+            params.smoothAngleThresholdDeg = input.generation.smoothAngle;
+            const auto& selectedFaceEntries = frozen->selectedFaceEntries;
+            const auto& beamDirs = frozen->beamDirs;
+            const double leadInLength = input.generation.leadInLength;
+            const double cuttingOffsetMm = input.generation.cuttingOffsetMm;
+            const double rapidOffsetMm = input.generation.rapidOffsetMm;
+            const int extractionStrategy = input.generation.extractionStrategy;
+            const bool effectiveUseFaceClassification = input.generation.useFaceClassification;
             progress->setRange(0, 100);
             // 中文翻译：1/5 正在分离加工面与横截面
             progress->setStepName(QObject::tr("1/5 Separating the machined surface and cross section"));
@@ -1405,15 +1430,14 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                             // 中文翻译：%1 · 工件源 #%2
                             : QObject::tr("%1 · Workpiece source #%2").arg(contour.sourceInfo).arg(source.componentIndex + 1);
                     }
-                    if (oldContour && oldContour->leadIn.valid) {
-                        if (!outerFaces.empty() && !crossFaces.empty())
-                            LaserToolpathBuilder::discretizeContourWithClassification(
-                                contour, outerFaces, crossFaces, params.deflection);
-                        else
-                            LaserToolpathBuilder::discretizeContour(contour, source.shape, params.deflection);
-                    } else if (contour.points.empty()) {
-                        LaserToolpathBuilder::discretizeContour(contour, source.shape, params.deflection);
-                    }
+                    // The final pre-IK sampling pass consumes the same frozen
+                    // policy whose identity is retained through publication.
+                    if (!outerFaces.empty())
+                        LaserToolpathBuilder::discretizeContourWithClassification(
+                            contour, outerFaces, crossFaces, input.generation.deflection, input.geometryPolicy);
+                    else
+                        LaserToolpathBuilder::discretizeContour(
+                            contour, source.shape, input.generation.deflection, input.geometryPolicy);
                     if (!contour.points.empty()) {
                         int startIndex = 0;
                         const bool hasManualStart = oldContour && oldContour->leadIn.valid;
@@ -1501,7 +1525,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
     watchTask(this, taskId,
         [this, taskId, result, leadInLength,
          effectiveUseFaceClassification, smoothAngle, deflection,
-         generationStamp, reuseCurrentFaces, modeDefinition,
+         generationStamp, compilationInput, reuseCurrentFaces, modeDefinition,
          targetWorkspaceId, targetCamData, stageTimer](bool success) {
             bool adopted = false;
             const auto stageLog = qScopeGuard([&] {
@@ -1530,33 +1554,9 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
                     tr("The active project changed during calculation and the background results were discarded"));
                 return;
             }
-            const QList<WorkpieceShapeSource> currentSources = collectWorkpieceShapes();
-            bool currentEffectiveFaceClassification = m_useFaceClassification;
-            if (m_machineConfig && m_camData)
-                currentEffectiveFaceClassification =
-                    m_camData->machiningMode() != lcnc::MachiningMode::Planar3Axis;
-            lcnc::cam::ToolpathGenerationStamp currentStamp;
-            currentStamp.toolpathRevision = toolpathRevision();
-            currentStamp.machiningFaceRevision = machiningFaceSetRevision();
-            currentStamp.machineSetupRevision = machineSetupRevision();
-            currentStamp.leadInLength = toolpathRef().globalLeadInLength();
-            currentStamp.smoothAngle = m_smoothAngle;
-            currentStamp.deflection = m_deflection;
-            currentStamp.cuttingOffsetMm = toolpathRef().globalCuttingOffsetMm();
-            currentStamp.rapidOffsetMm = toolpathRef().globalRapidOffsetMm();
-            currentStamp.useFaceClassification = currentEffectiveFaceClassification;
-            currentStamp.extractionStrategy = m_extractionStrategy;
-            const auto& currentContours = toolpathRef().contours();
-            currentStamp.contourIds.reserve(currentContours.size());
-            for (const auto& contour : currentContours)
-                currentStamp.contourIds.push_back(contour.contourId);
-            currentStamp.sources.reserve(static_cast<std::size_t>(currentSources.size()));
-            for (const WorkpieceShapeSource& source : currentSources) {
-                currentStamp.sources.push_back(
-                    {source.workpieceEntry, source.componentIndex, source.shape});
-            }
-            if (!lcnc::cam::ToolpathGenerationService::acceptsResult(
-                    generationStamp, currentStamp, true, false)) {
+            const auto currentInput = captureMotionCompilationInput();
+            if (!lcnc::cam::ToolpathGenerationService::acceptsMotionResult(
+                    *compilationInput, currentInput->generation, currentInput->context, true, false)) {
                 // 中文翻译：全局生成刀路；刀路在计算期间已变更，后台结果已丢弃
                 emit operationFailed(tr("Generate toolpath globally"), tr("The tool path has changed during calculation and the background results have been discarded"));
                 return;
@@ -1611,7 +1611,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             // redundant and was the crash site after the asynchronous move.
             m_camData->ensureToolpathLayers();
             QString autoSortError;
-            if (!prepareConfiguredAutoSort(&autoSortError)) {
+            if (!prepareConfiguredAutoSort(&autoSortError, compilationInput)) {
                 m_camData->failPipelineStage(
                     lcnc::cam::CamPipelineStage::MachineSolve, autoSortError);
                 emit operationFailed(tr("Generate toolpath globally"), autoSortError);
@@ -1619,7 +1619,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             }
             const auto committedOrder = contourSequenceSnapshot().orderedContourIds;
             if (!solveToolpathForOrder(
-                    QVector<std::uint64_t>(committedOrder.cbegin(), committedOrder.cend()))) {
+                    QVector<std::uint64_t>(committedOrder.cbegin(), committedOrder.cend()), compilationInput)) {
                 const QString error = tr("CAM cannot solve the generated contour order");
                 m_camData->failPipelineStage(lcnc::cam::CamPipelineStage::MachineSolve, error);
                 emit operationFailed(tr("Generate toolpath globally"), error);
@@ -1631,7 +1631,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             m_camData->setSolverId(modeDefinition.solverId);
             m_camData->setSolverVersion(modeDefinition.solverVersion);
             m_camData->setSolvedMachineConfigurationFingerprint(
-                m_machineConfig ? m_machineConfig->configurationFingerprint() : QString());
+                compilationInput->machineFingerprint);
             pushGenerationParamsToCamData();
             auto applied = m_camData->generationParams();
             applied.useFaceClassification = effectiveUseFaceClassification;
@@ -1639,6 +1639,7 @@ TaskId CamModule::generateToolpathAsync(double smoothAngle, bool useFaceClassifi
             m_camData->setGenerationParamsDirty(false);
             m_camData->markDirty(true);
             m_camData->commitToolpathStates();
+            retainMotionCompilationInput(compilationInput);
             QString rapidPlanWarning;
             rebuildTravelPlanForCurrentOrder(&rapidPlanWarning);
             writeContourGeometryToDocument();

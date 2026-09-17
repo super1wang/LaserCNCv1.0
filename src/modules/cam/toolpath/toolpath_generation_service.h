@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/project/cam/collision_validation_contracts.h"
+#include "core/algorithms/cam/laser_toolpath.h"
+#include "core/kinematics/machine_configuration_service.h"
 
 #include <QByteArray>
 #include <QString>
@@ -52,11 +54,27 @@ struct MotionCompilationInput
     QVector<Parameter> parameters;
     MotionCompilationContext context;
     QByteArray capturedContextHash;
+    // Computation values and identity travel together from the owner thread.
+    GeometrySamplingPolicy geometryPolicy;
+    QList<MachineAxisDef> machineAxes;
+    QString machineConfigType;
+    QString machineFingerprint;
+    MachineModeDefinition modeDefinition;
+    WorkpieceSetupTransform workpieceSetup;
+    HeadToolGeometry headToolGeometry;
+    gp_Trsf kinematicSetup;
+    QMap<QString, QString> workpieceMounts;
+    QMap<QString, QString> shapeAssignments;
+    double collisionClearanceMm{0.0};
+    double maximumRapidSafetyOffsetMm{0.0};
+    int autoSortAxis{0};
 };
 
 class ToolpathGenerationService
 {
 public:
+    [[nodiscard]] static bool sameMotionAuthority(
+        const MotionCompilationInput& captured, const MotionCompilationInput& current);
     [[nodiscard]] static bool acceptsResult(
         const ToolpathGenerationStamp& captured,
         const ToolpathGenerationStamp& current,

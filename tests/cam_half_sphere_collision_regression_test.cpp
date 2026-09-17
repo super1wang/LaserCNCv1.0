@@ -9,6 +9,9 @@
 #include "modules/process/runtime/process_cutting_safety.h"
 
 #include <BRepBndLib.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
@@ -142,6 +145,16 @@ int verifyCamPipeline()
         contour.sourceShape = workpiece;
         contour.points.clear();
         LaserToolpathBuilder::discretizeContour(contour, workpiece, parameters.deflection);
+        if (!contour.geometrySamplingComplete) {
+            QTextStream diagnostics(stderr);
+            diagnostics << "Incomplete source: " << contour.geometrySamplingEvidence.failureReason << '\n';
+            for (BRepTools_WireExplorer edge(contour.wire); edge.More(); edge.Next())
+                diagnostics << " curveType=" << static_cast<int>(BRepAdaptor_Curve(edge.Current()).GetType());
+            for (const auto& context : contour.leadInSurfaceContext)
+                for (const auto& face : context.outerFaces)
+                    diagnostics << " normalSurfaceType=" << static_cast<int>(BRepAdaptor_Surface(face).GetType());
+            diagnostics << '\n';
+        }
         if (contour.points.size() < 2)
             return fail(QStringLiteral("Contour discretization produced fewer than two points"));
     }

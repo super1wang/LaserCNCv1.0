@@ -461,6 +461,7 @@ set(SRCS_CORE
     src/core/algorithms/cad/transform_ops.cpp
     src/core/algorithms/cam/face_classifier.cpp
     src/core/algorithms/cam/laser_toolpath.cpp
+    src/core/algorithms/cam/geometry_source_sampler.cpp
     src/core/algorithms/cam/contour_order_planner.cpp
     src/core/algorithms/cam/travel_path_planner.cpp
     src/core/algorithms/cam/collision_safety_domain.cpp

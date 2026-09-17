@@ -88,4 +88,20 @@ bool ToolpathGenerationService::acceptsMotionResult(
         && captured.capturedContextHash == motionCompilationContextHash(currentContext);
 }
 
+bool ToolpathGenerationService::sameMotionAuthority(
+    const MotionCompilationInput& captured, const MotionCompilationInput& current)
+{
+    if (captured.capturedContextHash != motionCompilationContextHash(captured.context)
+        || current.capturedContextHash != motionCompilationContextHash(current.context))
+        return false;
+    auto left = captured.context;
+    auto right = current.context;
+    // These two are input/output identities, checked separately when adopting
+    // a worker result or publishing its exact committed result revision.
+    left.sourceToolpathRevision = right.sourceToolpathRevision = 0;
+    left.contourOrderHash.clear();
+    right.contourOrderHash.clear();
+    return motionCompilationContextHash(left) == motionCompilationContextHash(right);
+}
+
 } // namespace lcnc::cam

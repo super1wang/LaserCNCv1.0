@@ -1,5 +1,6 @@
 #include "core/algorithms/cam/face_classifier.h"
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/geometry_source_sampler.h"
 #include "core/document/lcnc_document.h"
 
 #include <BRepAlgoAPI_Cut.hxx>
@@ -9,6 +10,8 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <NCollection_Array1.hxx>
 #include <NCollection_Sequence.hxx>
 #include <QCoreApplication>
 #include <QFileInfo>
@@ -114,6 +117,19 @@ int verifyBoundedGeometryRefinement()
     LaserToolpathBuilder::discretizeContour(normal, cylinder, 10.0, normalPolicy);
     if (!normal.geometrySamplingComplete || normal.points.size() <= baseline.points.size())
         return fail(QStringLiteral("surface-normal variation did not refine OCC source interval"));
+    const auto outputAnglesWithin = [](const LaserContour& contour, bool normals) {
+        for (std::size_t index = 1; index < contour.points.size(); ++index) {
+            const auto& first = contour.points[index - 1];
+            const auto& last = contour.points[index];
+            if (first.sourceEdgeIndex != last.sourceEdgeIndex) continue;
+            const double angle = (normals ? first.normal.Angle(last.normal)
+                                         : first.tangent.Angle(last.tangent)) * 180.0 / 3.141592653589793;
+            if (angle > 5.0 + 1e-8) return false;
+        }
+        return true;
+    };
+    if (!outputAnglesWithin(tangent, false) || !outputAnglesWithin(normal, true))
+        return fail(QStringLiteral("retained adjacent samples exceed the configured five-degree step"));
     LaserContour fenced = baseline;
     GeometrySamplingPolicy fencedPolicy = loose;
     fencedPolicy.processBarriers.push_back({0, 0.7853981633974483});
@@ -132,6 +148,70 @@ int verifyBoundedGeometryRefinement()
     if (exhausted.geometrySamplingComplete
         || exhausted.points.size() < baseline.points.size())
         return fail(QStringLiteral("geometry budget exhaustion silently certified a sparse path"));
+    return 0;
+}
+
+int verifySamplingCounterexamples()
+{
+    using namespace lcnc::cam_algo;
+    const auto sample = [](int edge, double parameter) {
+        ToolpathPoint point;
+        point.sourceEdgeIndex = edge;
+        point.param = parameter;
+        point.position = gp_Pnt(parameter, 0, 0);
+        const double angle = parameter * 3.14159265358979323846 / 2.0;
+        point.normal = gp_Dir(std::sin(angle), 0, std::cos(angle));
+        point.tangent = gp_Dir(1, 0, 0);
+        return point;
+    };
+    const auto bound = [](int, double first, double last) {
+        return GeometryIntervalBound{true, 0.0, 0.0, 90.0 * std::abs(last - first)};
+    };
+    GeometrySamplingPolicy policy;
+    // The review's 0/4/8-degree counterexample must retain its midpoint.
+    const auto eightDegrees = refineGeometrySource({sample(0, 0), sample(0, 8.0 / 90.0)},
+        true, 0.1, policy, sample, bound);
+    if (!eightDegrees.evidence.complete() || eightDegrees.points.size() < 3)
+        return fail(QStringLiteral("half-interval checks admitted an eight-degree output interval"));
+    const auto oscillatory = [](int edge, double parameter) {
+        ToolpathPoint point;
+        point.sourceEdgeIndex = edge;
+        point.param = parameter;
+        point.position = gp_Pnt(parameter, 0, 0);
+        const double angle = 0.5 * std::sin(2.0 * 3.14159265358979323846 * parameter);
+        point.normal = gp_Dir(std::sin(angle), 0, std::cos(angle));
+        return point;
+    };
+    const auto unknown = [](int, double, double) { return GeometryIntervalBound{}; };
+    const auto hiddenVariation = refineGeometrySource({oscillatory(0, 0), oscillatory(0, 1)},
+        true, 0.1, policy, oscillatory, unknown);
+    if (hiddenVariation.evidence.complete())
+        return fail(QStringLiteral("unbounded interior normal variation was certified by coincident probes"));
+    const auto missingEdge = refineGeometrySource({sample(0, 0), sample(0, 0.01)},
+        false, 0.1, policy, sample, bound);
+    if (missingEdge.evidence.complete() || missingEdge.evidence.sourceCoverageComplete)
+        return fail(QStringLiteral("partial source coverage was declared complete"));
+    for (const auto& barrier : {GeometrySamplingPolicy::SourceBarrier{7, 0.005},
+                                GeometrySamplingPolicy::SourceBarrier{0, 2.0}}) {
+        auto invalid = policy;
+        invalid.processBarriers.push_back(barrier);
+        const auto result = refineGeometrySource({sample(0, 0), sample(0, 0.01)},
+            true, 0.1, invalid, sample, bound);
+        if (result.evidence.complete() || result.evidence.requiredFeaturesPreserved)
+            return fail(QStringLiteral("unresolved required barrier was silently dropped"));
+    }
+    std::vector<ToolpathPoint> seeds;
+    for (int index = 0; index < 5; ++index) seeds.push_back(sample(0, index));
+    policy.maxSampleMultiplier = 2;
+    const auto limited = refineGeometrySource(seeds, true, 0.1, policy, sample, bound);
+    if (limited.evidence.complete() || limited.maximumPointCount != 10 || limited.points.size() > 10)
+        return fail(QStringLiteral("sampling output exceeded the reserved hard budget"));
+    for (const auto& seed : seeds) {
+        if (std::none_of(limited.points.begin(), limited.points.end(), [&](const ToolpathPoint& point) {
+                return point.param == seed.param;
+            }))
+            return fail(QStringLiteral("budget exhaustion discarded an original source seed"));
+    }
     return 0;
 }
 
@@ -199,6 +279,47 @@ int verifySourceTopologyAndTrimmedGeometry()
         const double sagitta = 10.0 * (1.0 - std::cos(span * 0.5));
         if (sagitta > 0.100001)
             return fail(QStringLiteral("curved source was falsely accepted as a sparse line"));
+    }
+    return 0;
+}
+
+int verifySplineIntervalBounds()
+{
+    NCollection_Array1<gp_Pnt> poles(1, 4);
+    poles(1) = gp_Pnt(0, 0, 0);
+    poles(2) = gp_Pnt(1, 4, 0);
+    poles(3) = gp_Pnt(2, -4, 0);
+    poles(4) = gp_Pnt(3, 0, 0);
+    NCollection_Array1<double> knots(1, 2);
+    knots(1) = 0.0; knots(2) = 1.0;
+    NCollection_Array1<int> multiplicities(1, 2);
+    multiplicities(1) = multiplicities(2) = 4;
+    NCollection_Array1<double> weights(1, 4);
+    weights(1) = weights(4) = 1.0;
+    weights(2) = weights(3) = 2.0;
+    for (const bool rational : {false, true}) {
+        Handle(Geom_BSplineCurve) spline = rational
+            ? new Geom_BSplineCurve(poles, weights, knots, multiplicities, 3)
+            : new Geom_BSplineCurve(poles, knots, multiplicities, 3);
+        LaserContour contour;
+        contour.wire = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(spline)).Wire();
+        LaserToolpathBuilder::discretizeContour(contour, contour.wire, 0.05);
+        if (!contour.geometrySamplingComplete || contour.points.size() < 5)
+            return fail(QStringLiteral("Bezier derivative bounds failed a regular spline: ")
+                + contour.geometrySamplingEvidence.failureReason);
+        for (std::size_t index = 1; index < contour.points.size(); ++index) {
+            const auto& a = contour.points[index - 1];
+            const auto& b = contour.points[index];
+            if (a.tangent.Angle(b.tangent) > 5.0 * 3.141592653589793 / 180.0 + 1e-9)
+                return fail(QStringLiteral("Spline interval bound admitted an oversized tangent step"));
+            for (int probe = 1; probe < 20; ++probe) {
+                const double fraction = probe / 20.0;
+                const gp_Pnt actual = spline->Value(a.param + fraction * (b.param - a.param));
+                const gp_Pnt chord = a.position.Translated(gp_Vec(a.position, b.position) * fraction);
+                if (actual.Distance(chord) > 0.050001)
+                    return fail(QStringLiteral("Spline convex-hull chord bound was violated"));
+            }
+        }
     }
     return 0;
 }
@@ -407,6 +528,10 @@ int main(int argc, char* argv[])
     if (const int rc = verifyBoundedGeometryRefinement(); rc != 0)
         return rc;
     if (const int rc = verifySourceTopologyAndTrimmedGeometry(); rc != 0)
+        return rc;
+    if (const int rc = verifySplineIntervalBounds(); rc != 0)
+        return rc;
+    if (const int rc = verifySamplingCounterexamples(); rc != 0)
         return rc;
     if (app.arguments().size() > 1) {
         for (int i = 1; i < app.arguments().size(); ++i) {

@@ -1,12 +1,53 @@
 #include "modules/cam/toolpath/toolpath_solve_service.h"
 
 #include "core/kinematics/machine_kinematics.h"
+#include "modules/cam/toolpath/toolpath_generation_service.h"
 
 #include <QSet>
 
 #include <algorithm>
 
 namespace lcnc::cam {
+
+bool ToolpathSolveService::geometryHasCurrentSolve(const std::vector<LaserContour>& contours)
+{
+    return !contours.empty() && std::all_of(contours.begin(), contours.end(), [](const LaserContour& contour) {
+        if (!contour.enabled) return true;
+        return contour.geometrySamplingComplete && contour.geometrySamplingEvidence.complete()
+            && !contour.needsRecalculation
+            && !contour.points.empty()
+            && std::all_of(contour.points.begin(), contour.points.end(), [](const ToolpathPoint& point) {
+                return point.machineCoord.valid && point.machineCoord.solvedPose.valid;
+            }) && (!contour.leadInSolution.valid
+                || (contour.leadInSolution.point.machineCoord.valid
+                    && contour.leadInSolution.point.machineCoord.solvedPose.valid));
+    });
+}
+
+bool ToolpathSolveService::solveFrozen(std::vector<LaserContour>* contours,
+    const QVector<std::uint64_t>& orderedContourIds,
+    const MotionCompilationInput& input, QString* errorMessage)
+{
+    if (input.capturedContextHash != motionCompilationContextHash(input.context)) {
+        if (errorMessage) *errorMessage = QStringLiteral("Frozen motion input identity is invalid");
+        return false;
+    }
+    MachineKinematics planning;
+    configureFrozenMachine(&planning, input);
+    return solveTransactionally(contours, orderedContourIds, &planning,
+        input.modeDefinition, input.workpieceSetup, input.headToolGeometry, errorMessage);
+}
+
+void ToolpathSolveService::configureFrozenMachine(MachineKinematics* machine,
+    const MotionCompilationInput& input)
+{
+    machine->setAxes(input.machineAxes, input.machineConfigType);
+    machine->setWorkpieceSetupTransform(input.kinematicSetup);
+    for (auto it = input.workpieceMounts.cbegin(); it != input.workpieceMounts.cend(); ++it)
+        machine->mountWorkpiece(it.key(), it.value());
+    for (auto it = input.shapeAssignments.cbegin(); it != input.shapeAssignments.cend(); ++it)
+        machine->assignShape(it.key(), it.value());
+}
 
 bool ToolpathSolveService::solveTransactionally(
     std::vector<LaserContour>* contours,

@@ -12,12 +12,18 @@ class MachineKinematics;
 class QString;
 
 namespace lcnc::cam {
+struct MotionCompilationInput;
 
 /// Executes the ordered machine-coordinate solve against a private contour
 /// copy and commits traversal/coordinate mutations only after full success.
 class ToolpathSolveService final
 {
 public:
+    static void configureFrozenMachine(MachineKinematics* machine, const MotionCompilationInput& input);
+    static bool geometryHasCurrentSolve(const std::vector<LaserContour>& contours);
+    static bool solveFrozen(std::vector<LaserContour>* contours,
+        const QVector<std::uint64_t>& orderedContourIds,
+        const MotionCompilationInput& input, QString* errorMessage);
     static bool solveTransactionally(
         std::vector<LaserContour>* contours,
         const QVector<std::uint64_t>& orderedContourIds,

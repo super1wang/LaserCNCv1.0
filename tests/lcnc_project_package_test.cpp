@@ -164,6 +164,7 @@ int main(int argc, char* argv[])
     persistedPoint.machineCoord.solvedPose.values = {1.0, 2.0, 3.0, 45.0, 0.0};
     persistedContour.points.push_back(persistedPoint);
     persistedContour.geometrySamplingComplete = false;
+    persistedContour.geometrySamplingEvidence = {false, true, true, QStringLiteral("missing-source-fixture")};
     sourceCam.toolpath().contours().push_back(persistedContour);
     sourceCam.ensureToolpathLayers();
     const QString packagePath = QDir(temporary.path()).filePath(QStringLiteral("roundtrip.lcnc"));
@@ -204,6 +205,11 @@ int main(int argc, char* argv[])
     const auto& restoredContour = restoredCam.toolpath().contours().front();
     if (restoredContour.geometrySamplingComplete)
         return fail(QStringLiteral("incomplete geometry was silently certified on reload"));
+    if (restoredContour.geometrySamplingEvidence.sourceCoverageComplete
+        || !restoredContour.geometrySamplingEvidence.requiredFeaturesPreserved
+        || !restoredContour.geometrySamplingEvidence.refinementCriteriaSatisfied
+        || restoredContour.geometrySamplingEvidence.failureReason != QStringLiteral("missing-source-fixture"))
+        return fail(QStringLiteral("Geometry coverage evidence was not preserved on reload"));
     if (restoredContour.points.empty()
         || !restoredContour.points.front().semanticHardBarrier)
         return fail(QStringLiteral("hard barrier marker was lost on reload"));

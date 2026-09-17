@@ -123,6 +123,18 @@ struct GeometrySamplingPolicy
     std::vector<SourceBarrier> processBarriers;
 };
 
+struct GeometrySamplingEvidence
+{
+    bool sourceCoverageComplete{false};
+    bool requiredFeaturesPreserved{false};
+    bool refinementCriteriaSatisfied{false};
+    QString failureReason;
+    bool complete() const {
+        return sourceCoverageComplete && requiredFeaturesPreserved
+            && refinementCriteriaSatisfied;
+    }
+};
+
 enum class ContourDirtyStage : std::uint32_t
 {
     None             = 0,
@@ -195,6 +207,7 @@ struct LaserContour
     TopoDS_Shape               sourceShape; ///< Top-level source shape used for contour extraction/discretisation
     std::vector<ToolpathPoint> points;   ///< Discretised points along the contour
     bool geometrySamplingComplete{true}; ///< False means the budget could not prove the policy.
+    GeometrySamplingEvidence geometrySamplingEvidence;
     std::vector<LeadInEdgeSurfaceContext> leadInSurfaceContext; ///< Transient edge-to-face adjacency
     LeadInParams               leadIn;   ///< Lead-in parameters for this contour
     LeadInSolution             leadInSolution; ///< Derived geometry and machine pose

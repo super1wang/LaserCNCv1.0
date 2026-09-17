@@ -4,7 +4,9 @@
 
 ## 结论
 
-**B1.S1 = PASS（软件 Soft Check）；S2 的 controller-independent 工作可进入。**
+> 2026-09-17 复审更正：下述为 3722c12 的历史报告，不再作为放行依据。复审判定 PASS_WITH_PATCH：计算前冻结、最终区间角度证明、源覆盖/屏障完整性及硬预算仍需修复。修复与重新验证结果见 `B1_S1_REVIEW_FIX_REPORT.md`。
+
+**本报告历史结论已撤回；最新修补及验证结论以 `B1_S1_REVIEW_FIX_REPORT.md` 为准。**
 
 ACS/GTN 尚无 ControllerMotionMode qualification service 或记录。生产捕获明确使用 `Unavailable`、revision `0`、空 capability fingerprint；历史 `PhysicalAxes` 仅是 requested value。该状态进入确定性 context hash；不将 SDK、轴名/角色、编译或普通测试当作资格。RTCP motion plan finalization 和 evaluator binding 均拒绝未资格快照。qualification-dependent candidate admission 仍关闭。
 

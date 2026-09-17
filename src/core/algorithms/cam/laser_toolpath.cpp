@@ -1,6 +1,7 @@
 #include "core/algorithms/cam/laser_toolpath.h"
 
 #include "core/algorithms/cam/face_classifier.h"
+#include "core/algorithms/cam/geometry_source_sampler.h"
 #include "core/kinematics/ik_solver.h"
 #include "core/kinematics/toolpath_kinematics_solver.h"
 #include "core/logging/logger.h"
@@ -30,8 +31,10 @@
 #include <GCPnts_UniformDeflection.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAbs_SurfaceType.hxx>
+#include <GeomConvert_BSplineCurveToBezierCurve.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_BSplineCurve.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <Geom_Surface.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <NCollection_Array1.hxx>
@@ -57,6 +60,12 @@
 #include <exception>
 #include <functional>
 #include <gp_Pnt.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Sphere.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Lin.hxx>
+#include <gp_Circ.hxx>
+#include <gp_Elips.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
@@ -514,6 +523,36 @@ gp_Dir enforceOutwardDirection(const gp_Pnt& point,
     return result;
 }
 
+// Exact support projection for the analytic fields used by the interval
+// certificate below. Keep evaluation and certification on the same field;
+// the approximate UV fallback is deliberately not certifiable.
+bool analyticFaceNormal(const TopoDS_Face& face, const gp_Pnt& point,
+                        gp_Dir& normal, double& distance)
+{
+    BRepAdaptor_Surface surface(face);
+    gp_Vec vector;
+    if (surface.GetType() == GeomAbs_Plane) {
+        vector = gp_Vec(surface.Plane().Axis().Direction());
+        distance = surface.Plane().Distance(point);
+    } else if (surface.GetType() == GeomAbs_Cylinder) {
+        const auto cylinder = surface.Cylinder();
+        const gp_Vec axis(cylinder.Axis().Direction());
+        vector = gp_Vec(cylinder.Location(), point);
+        vector -= axis * vector.Dot(axis);
+        distance = std::abs(vector.Magnitude() - cylinder.Radius());
+    } else if (surface.GetType() == GeomAbs_Sphere) {
+        const auto sphere = surface.Sphere();
+        vector = gp_Vec(sphere.Location(), point);
+        distance = std::abs(vector.Magnitude() - sphere.Radius());
+    } else {
+        return false;
+    }
+    if (vector.Magnitude() <= 1e-12) return false;
+    normal = gp_Dir(vector);
+    if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+    return true;
+}
+
 bool findClosestFaceNormal(const gp_Pnt& pt,
                            const std::vector<TopoDS_Face>& faces,
                            gp_Dir& normal,
@@ -523,6 +562,16 @@ bool findClosestFaceNormal(const gp_Pnt& pt,
     bestDistance = std::numeric_limits<double>::max();
 
     for (const auto& face : faces) {
+        gp_Dir analyticNormal;
+        double analyticDistance = 0.0;
+        if (analyticFaceNormal(face, pt, analyticNormal, analyticDistance)) {
+            if (analyticDistance < bestDistance) {
+                normal = analyticNormal;
+                bestDistance = analyticDistance;
+                found = true;
+            }
+            continue;
+        }
         Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
         if (surf.IsNull())
             continue;
@@ -1646,123 +1695,239 @@ std::vector<LaserContour> LaserToolpathBuilder::extractContoursFromFaces(
 
 namespace {
 
-double directionAngleDeg(const gp_Dir& first, const gp_Dir& second)
+// Conservative analytic adapters for the actual source curve and possible
+// normal fields. Unsupported surfaces/curves have no certificate. Probe values
+// are never promoted to a bound.
+bool splineDerivativeBounds(const BRepAdaptor_Curve& curve, double first, double last,
+                            double& speed, double& acceleration, double& tangentRate)
 {
-    constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
-    const double dot = std::clamp(gp_Vec(first).Dot(gp_Vec(second)), -1.0, 1.0);
-    return std::acos(dot) * kRadToDeg;
-}
-
-double midpointChordDeviation(const gp_Pnt& first, const gp_Pnt& middle,
-                              const gp_Pnt& last)
-{
-    const gp_Vec chord(first, last);
-    if (chord.SquareMagnitude() <= 1e-24)
-        return first.Distance(middle);
-    const gp_Vec offset(first, middle);
-    const double fraction = std::clamp(offset.Dot(chord) / chord.SquareMagnitude(), 0.0, 1.0);
-    return middle.Distance(first.Translated(chord * fraction));
-}
-
-template <typename SampleAt>
-std::vector<ToolpathPoint> insertSourceBarriers(
-    const std::vector<ToolpathPoint>& seeds,
-    const GeometrySamplingPolicy& policy, SampleAt&& sampleAt)
-{
-    if (policy.processBarriers.empty())
-        return seeds;
-    std::vector<ToolpathPoint> result;
-    result.reserve(seeds.size() + policy.processBarriers.size());
-    for (std::size_t index = 0; index < seeds.size(); ++index) {
-        ToolpathPoint seed = seeds[index];
-        for (const auto& barrier : policy.processBarriers) {
-            if (seed.sourceEdgeIndex == barrier.sourceEdgeIndex
-                && std::abs(seed.param - barrier.parameter) <= 1e-12)
-                seed.semanticHardBarrier = true;
+    auto spline = Handle(Geom_BSplineCurve)::DownCast(curve.BSpline()->Copy());
+    spline->Segment(std::min(first, last), std::max(first, last));
+    // Across a C0 knot the derivative can jump. It needs an explicit source
+    // barrier, not a finite second-derivative certificate.
+    if (!spline->IsCN(1)) return false;
+    GeomConvert_BSplineCurveToBezierCurve conversion(spline);
+    NCollection_Array1<double> knots(1, conversion.NbArcs() + 1);
+    conversion.Knots(knots);
+    speed = acceleration = tangentRate = 0.0;
+    for (int arcIndex = 1; arcIndex <= conversion.NbArcs(); ++arcIndex) {
+        const auto arc = conversion.Arc(arcIndex);
+        const int degree = arc->Degree();
+        const double span = knots(arcIndex + 1) - knots(arcIndex);
+        if (degree < 1 || !(span > 0.0)) return false;
+        const auto origin = arc->Pole(1);
+        double minWeight = std::numeric_limits<double>::max(), maxWeight = 0.0;
+        double positionBound = 0.0, positionProjection = 0.0;
+        gp_Pnt unused;
+        gp_Vec middleTangent;
+        arc->D1(0.5, unused, middleTangent);
+        if (middleTangent.Magnitude() <= 1e-12) return false;
+        const gp_Vec direction{gp_Dir(middleTangent)};
+        std::vector<gp_Vec> homogeneous;
+        std::vector<double> weights;
+        for (int index = 1; index <= arc->NbPoles(); ++index) {
+            const double weight = arc->Weight(index);
+            if (!std::isfinite(weight) || !(weight > 0.0)) return false;
+            minWeight = std::min(minWeight, weight);
+            maxWeight = std::max(maxWeight, weight);
+            const gp_Vec pole(origin, arc->Pole(index));
+            positionBound = std::max(positionBound, pole.Magnitude());
+            positionProjection = std::max(positionProjection, std::abs(pole.Dot(direction)));
+            homogeneous.push_back(pole * weight);
+            weights.push_back(weight);
         }
-        result.push_back(std::move(seed));
-        if (index + 1 == seeds.size()
-            || seeds[index].sourceEdgeIndex != seeds[index + 1].sourceEdgeIndex)
-            continue;
-        const auto& next = seeds[index + 1];
-        std::vector<double> interior;
-        for (const auto& barrier : policy.processBarriers) {
-            if (barrier.sourceEdgeIndex != seeds[index].sourceEdgeIndex)
-                continue;
-            if ((barrier.parameter > std::min(seeds[index].param, next.param))
-                && (barrier.parameter < std::max(seeds[index].param, next.param)))
-                interior.push_back(barrier.parameter);
+        double firstBound = 0.0, secondBound = 0.0, firstWeight = 0.0, secondWeight = 0.0;
+        double firstProjection = std::numeric_limits<double>::max();
+        for (int index = 0; index < degree; ++index) {
+            const auto derivative = (homogeneous[index + 1] - homogeneous[index]) * (degree / span);
+            firstBound = std::max(firstBound, derivative.Magnitude());
+            firstProjection = std::min(firstProjection, derivative.Dot(direction));
+            firstWeight = std::max(firstWeight, std::abs(weights[index + 1] - weights[index]) * degree / span);
+            if (index + 1 < degree) {
+                const double scale = degree * (degree - 1.0) / (span * span);
+                secondBound = std::max(secondBound,
+                    (homogeneous[index + 2] - homogeneous[index + 1] * 2.0 + homogeneous[index]).Magnitude() * scale);
+                secondWeight = std::max(secondWeight,
+                    std::abs(weights[index + 2] - 2.0 * weights[index + 1] + weights[index]) * scale);
+            }
         }
-        std::sort(interior.begin(), interior.end());
-        interior.erase(std::unique(interior.begin(), interior.end()), interior.end());
-        if (next.param < seeds[index].param)
-            std::reverse(interior.begin(), interior.end());
-        for (double parameter : interior) {
-            ToolpathPoint barrierPoint = sampleAt(seeds[index].sourceEdgeIndex, parameter);
-            barrierPoint.semanticHardBarrier = true;
-            result.push_back(std::move(barrierPoint));
-        }
+        // Rational Bezier x=A/w: w*x'=A'-w'*x and
+        // w*x''=A''-w''*x-2*w'*x'. Convex hulls bound each numerator.
+        const double velocity = (firstBound + positionBound * firstWeight) / minWeight;
+        const double second = (secondBound + positionBound * secondWeight + 2.0 * firstWeight * velocity) / minWeight;
+        const double lowerSpeed = (firstProjection - positionProjection * firstWeight) / maxWeight;
+        speed = std::max(speed, velocity);
+        acceleration = std::max(acceleration, second);
+        tangentRate = std::max(tangentRate, lowerSpeed > 0.0
+            ? second / lowerSpeed : 3.14159265358979323846 / std::abs(last - first));
     }
-    return result;
+    return std::isfinite(speed) && std::isfinite(acceleration) && std::isfinite(tangentRate);
 }
 
-template <typename SampleAt>
-std::vector<ToolpathPoint> refineSourceSamples(
-    const std::vector<ToolpathPoint>& seeds, double chordToleranceMm,
-    const GeometrySamplingPolicy& policy, SampleAt&& sampleAt, bool* complete)
+void appendSourceKnotBoundaries(const BRepAdaptor_Curve& curve, std::vector<double>& parameters)
 {
-    std::vector<ToolpathPoint> result;
-    if (complete)
-        *complete = true;
-    if (seeds.empty()) {
-        if (complete)
-            *complete = false;
-        return result;
+    if (curve.GetType() != GeomAbs_BSplineCurve) return;
+    const auto spline = curve.BSpline();
+    // Derivative certificates must never straddle a source polynomial break.
+    // These are original source boundaries, reserved before adaptive inserts.
+    for (int index = 1; index <= spline->NbKnots(); ++index) {
+        const double parameter = spline->Knot(index);
+        if (parameter > curve.FirstParameter() && parameter < curve.LastParameter())
+            parameters.push_back(parameter);
     }
-    const std::size_t multiplier = static_cast<std::size_t>(
-        std::max(1, policy.maxSampleMultiplier));
-    const std::size_t maxSamples = seeds.size() > std::numeric_limits<std::size_t>::max() / multiplier
-        ? std::numeric_limits<std::size_t>::max() : seeds.size() * multiplier;
-    result.reserve(std::min(maxSamples, seeds.size() * 2));
-    result.push_back(seeds.front());
-    std::function<void(const ToolpathPoint&, const ToolpathPoint&, int)> refine;
-    refine = [&](const ToolpathPoint& first, const ToolpathPoint& last, int depth) {
-        if (first.sourceEdgeIndex != last.sourceEdgeIndex
-            || first.sourceEdgeIndex < 0) {
-            result.push_back(last); // OCC seam or process feature: never cross it.
-            return;
+}
+
+bool isSourceKnotBoundary(const BRepAdaptor_Curve& curve, double parameter)
+{
+    if (curve.GetType() != GeomAbs_BSplineCurve) return false;
+    const auto spline = curve.BSpline();
+    for (int index = 2; index < spline->NbKnots(); ++index)
+        if (parameter == spline->Knot(index)) return true;
+    return false;
+}
+
+lcnc::cam_algo::GeometryIntervalBound sourceIntervalBound(
+    const TopoDS_Edge& edge, double first, double last,
+    const std::vector<TopoDS_Face>& normalFaces, const gp_Pnt& outwardCenter,
+    bool orientOutward, const std::vector<TopoDS_Face>& crossFaces)
+{
+    constexpr double kDegrees = 180.0 / 3.14159265358979323846;
+    lcnc::cam_algo::GeometryIntervalBound bound;
+    BRepAdaptor_Curve curve(edge);
+    double speed = 0.0, acceleration = 0.0, tangentRate = 0.0;
+    switch (curve.GetType()) {
+    case GeomAbs_Line: speed = 1.0; break;
+    case GeomAbs_Circle:
+        speed = acceleration = curve.Circle().Radius();
+        tangentRate = 1.0;
+        break;
+    case GeomAbs_Ellipse:
+        speed = acceleration = curve.Ellipse().MajorRadius();
+        if (curve.Ellipse().MinorRadius() <= 1e-12) return bound;
+        tangentRate = speed / curve.Ellipse().MinorRadius();
+        break;
+    case GeomAbs_BSplineCurve:
+        if (!splineDerivativeBounds(curve, first, last, speed, acceleration, tangentRate)) return bound;
+        break;
+    default: return bound;
+    }
+    const double span = std::abs(last - first);
+    const double radius = speed * span * 0.5;
+    const gp_Pnt center = curve.Value(first + (last - first) * 0.5);
+    struct Cone { gp_Dir axis; double halfAngle; double distance; };
+    const auto cones = [&](const std::vector<TopoDS_Face>& faces,
+                           std::vector<Cone>* values) {
+        if (faces.empty()) {
+            values->push_back({gp_Dir(0, 0, 1), 0.0, 0.0});
+            return true;
         }
-        const double span = std::abs(last.param - first.param);
-        const double middleParameter = first.param + (last.param - first.param) * 0.5;
-        if (middleParameter == first.param || middleParameter == last.param) {
-            result.push_back(last);
-            return;
+        for (const auto& face : faces) {
+            BRepAdaptor_Surface surface(face);
+            gp_Vec vector;
+            double distance = 0.0, halfAngle = 0.0;
+            if (surface.GetType() == GeomAbs_Plane) {
+                vector = gp_Vec(surface.Plane().Axis().Direction());
+                distance = surface.Plane().Distance(center);
+            } else if (surface.GetType() == GeomAbs_Cylinder) {
+                const auto cylinder = surface.Cylinder();
+                const gp_Vec axis(cylinder.Axis().Direction());
+                vector = gp_Vec(cylinder.Location(), center);
+                vector -= axis * vector.Dot(axis);
+                const double radial = vector.Magnitude();
+                if (radial <= radius || radial <= 1e-12) return false;
+                halfAngle = std::asin(std::min(1.0, radius / radial));
+                distance = std::abs(radial - cylinder.Radius());
+            } else if (surface.GetType() == GeomAbs_Sphere) {
+                const auto sphere = surface.Sphere();
+                vector = gp_Vec(sphere.Location(), center);
+                const double radial = vector.Magnitude();
+                if (radial <= radius || radial <= 1e-12) return false;
+                halfAngle = std::asin(std::min(1.0, radius / radial));
+                distance = std::abs(radial - sphere.Radius());
+            } else {
+                return false;
+            }
+            gp_Dir normal(vector);
+            if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+            values->push_back({normal, halfAngle, distance});
         }
-        const ToolpathPoint middle = sampleAt(first.sourceEdgeIndex, middleParameter);
-        const bool needsRefinement = midpointChordDeviation(
-            first.position, middle.position, last.position) > chordToleranceMm
-            || directionAngleDeg(first.tangent, middle.tangent) > policy.maxTangentStepDeg
-            || directionAngleDeg(middle.tangent, last.tangent) > policy.maxTangentStepDeg
-            || directionAngleDeg(first.normal, middle.normal) > policy.maxNormalStepDeg
-            || directionAngleDeg(middle.normal, last.normal) > policy.maxNormalStepDeg;
-        if (!needsRefinement) {
-            result.push_back(last);
-            return;
-        }
-        if (depth >= policy.maxSubdivisionDepth
-            || span <= policy.minSourceParameterSpan
-            || result.size() + 2 >= maxSamples) {
-            if (complete)
-                *complete = false;
-            result.push_back(last); // Keep the OCC seed, never enlarge a tolerance.
-            return;
-        }
-        refine(first, middle, depth + 1);
-        refine(middle, last, depth + 1);
+        // Distance to an underlying surface is 1-Lipschitz. Discard a possible
+        // owner only if its lower bound exceeds another owner's upper bound.
+        const double upper = std::min_element(values->begin(), values->end(),
+            [](const Cone& a, const Cone& b) { return a.distance < b.distance; })->distance + radius;
+        values->erase(std::remove_if(values->begin(), values->end(),
+            [upper, radius](const Cone& cone) { return cone.distance - radius > upper + 1e-9; }),
+            values->end());
+        return true;
     };
-    for (std::size_t i = 1; i < seeds.size(); ++i)
-        refine(seeds[i - 1], seeds[i], 0);
-    return result;
+    bound.available = true;
+    bound.chordDeviationMm = acceleration * span * span / 8.0;
+    bound.tangentVariationDeg = tangentRate * span * kDegrees;
+    bound.normalVariationDeg = 180.0;
+    std::vector<Cone> normals;
+    if (!cones(normalFaces, &normals)) {
+        // Unknown analytic domains remain unavailable rather than being
+        // certified by endpoint/midpoint agreement.
+        for (const auto& face : normalFaces) {
+            const auto type = BRepAdaptor_Surface(face).GetType();
+            if (type != GeomAbs_Plane && type != GeomAbs_Cylinder && type != GeomAbs_Sphere)
+                bound.available = false;
+        }
+        return bound;
+    }
+    if (orientOutward) {
+        const gp_Vec outward(outwardCenter, center);
+        for (auto& cone : normals) {
+            const double projection = gp_Vec(cone.axis).Dot(outward);
+            const double uncertainty = radius
+                + 2.0 * std::sin(cone.halfAngle * 0.5) * outward.Magnitude();
+            bool constantProjection = false;
+            if (cone.halfAngle == 0.0) {
+                if (curve.GetType() == GeomAbs_Line)
+                    constantProjection = std::abs(cone.axis.Dot(curve.Line().Direction())) <= 1e-12;
+                else if (curve.GetType() == GeomAbs_Circle)
+                    constantProjection = std::abs(cone.axis.Dot(curve.Circle().Axis().Direction())) >= 1.0 - 1e-12;
+                else if (curve.GetType() == GeomAbs_Ellipse)
+                    constantProjection = std::abs(cone.axis.Dot(curve.Ellipse().Axis().Direction())) >= 1.0 - 1e-12;
+                else if (curve.GetType() == GeomAbs_BSplineCurve) {
+                    const auto spline = curve.BSpline();
+                    constantProjection = true;
+                    for (int index = 2; index <= spline->NbPoles(); ++index)
+                        constantProjection = constantProjection
+                            && gp_Vec(spline->Pole(1), spline->Pole(index)).Dot(gp_Vec(cone.axis)) == 0.0;
+                }
+            }
+            if (!constantProjection && std::abs(projection) <= uncertainty)
+                return bound;
+            if (projection < 0.0) cone.axis.Reverse();
+        }
+    }
+    if (!crossFaces.empty()) {
+        std::vector<Cone> cross;
+        if (!cones(crossFaces, &cross)) {
+            bound.available = false;
+            return bound;
+        }
+        for (const auto& normal : normals) {
+            for (const auto& other : cross) {
+                const double alignmentUpper = std::abs(normal.axis.Dot(other.axis))
+                    + 2.0 * std::sin(std::min(3.14159265358979323846,
+                        normal.halfAngle + other.halfAngle) * 0.5);
+                // The heuristic cross-section correction has no interval
+                // derivative bound. Only certify intervals where it is inactive.
+                if (alignmentUpper > 0.85) return bound;
+            }
+        }
+    }
+    double variation = 0.0;
+    for (const auto& a : normals) {
+        for (const auto& b : normals) {
+            variation = std::max(variation, std::acos(std::clamp(a.axis.Dot(b.axis), -1.0, 1.0))
+                + a.halfAngle + b.halfAngle);
+        }
+    }
+    bound.normalVariationDeg = std::min(180.0, variation * kDegrees);
+    return bound;
 }
 
 bool appendSourceSample(std::vector<ToolpathPoint>& points, ToolpathPoint point,
@@ -1775,7 +1940,7 @@ bool appendSourceSample(std::vector<ToolpathPoint>& points, ToolpathPoint point,
         // A coincident vertex on a different OCC edge is a seam/corner, not
         // an anonymous duplicate. Both edge owners must survive compilation.
         const bool strictDuplicate = previous.sourceEdgeIndex == point.sourceEdgeIndex
-            && std::abs(previous.param - point.param) <= 1e-12
+            && previous.param == point.param
             && previous.position.SquareDistance(point.position) <= 1e-24
             && gp_Vec(previous.normal).Dot(gp_Vec(point.normal)) >= 1.0 - 1e-12
             && gp_Vec(previous.tangent).Dot(gp_Vec(point.tangent)) >= 1.0 - 1e-12;
@@ -1802,6 +1967,8 @@ void LaserToolpathBuilder::replaceGeometrySamples(
         point.machineCoord = {};
     contour.points = std::move(samples);
     contour.geometrySamplingComplete = samplingComplete;
+    if (!samplingComplete)
+        contour.geometrySamplingEvidence.refinementCriteriaSatisfied = false;
     contour.leadInSolution.point.machineCoord = {};
 }
 
@@ -1812,6 +1979,8 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
 {
     const int anchoredEdgeIndex = contour.leadIn.valid ? contour.leadIn.entryEdgeIndex : -1;
     const double anchoredParam = contour.leadIn.entryParam;
+    replaceGeometrySamples(contour, {}, false);
+    contour.geometrySamplingEvidence = {};
     std::vector<ToolpathPoint> samples;
     if (contour.wire.IsNull()) {
         contour.geometrySamplingComplete = false;
@@ -1821,6 +1990,10 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
 
     const gp_Pnt workpieceCenter = shapeCenter(workpiece);
     std::vector<TopoDS_Edge> sourceEdges;
+    std::vector<TopoDS_Face> workpieceFaces;
+    for (TopExp_Explorer face(workpiece, TopAbs_FACE); face.More(); face.Next())
+        workpieceFaces.push_back(TopoDS::Face(face.Current()));
+    bool sourceCoverageComplete = true;
 
     // 必须按 WireExplorer 的连接顺序遍历边，不能用 TopExp_Explorer（拓扑集合顺序不保证连贯）。
     int edgeIndex = 0;
@@ -1832,19 +2005,23 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
 
         BRepAdaptor_Curve curve(edge);
         GCPnts_UniformDeflection sampler(curve, deflection);
-        if (!sampler.IsDone())
+        if (!sampler.IsDone() || sampler.NbPoints() < 2) {
+            sourceCoverageComplete = false;
             continue;
+        }
 
         const bool reversed = edge.Orientation() == TopAbs_REVERSED;
         std::vector<double> parameters;
         parameters.reserve(static_cast<std::size_t>(sampler.NbPoints() + 1));
         for (int i = 1; i <= sampler.NbPoints(); ++i)
             parameters.push_back(sampler.Parameter(i));
-        if (edgeIndex == anchoredEdgeIndex)
-            parameters.push_back(anchoredParam);
+        if (std::abs(parameters.front() - curve.FirstParameter()) > 1e-10
+            || std::abs(parameters.back() - curve.LastParameter()) > 1e-10)
+            sourceCoverageComplete = false;
+        appendSourceKnotBoundaries(curve, parameters);
         std::sort(parameters.begin(), parameters.end());
         parameters.erase(std::unique(parameters.begin(), parameters.end(), [](double a, double b) {
-            return std::abs(a - b) <= 1e-12;
+            return a == b;
         }), parameters.end());
         if (reversed)
             std::reverse(parameters.begin(), parameters.end());
@@ -1865,6 +2042,7 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             ToolpathPoint tp;
             tp.param = parameter;
             tp.sourceEdgeIndex = edgeIndex;
+            tp.semanticHardBarrier = isSourceKnotBoundary(curve, parameter);
             curve.D0(tp.param, tp.position);
 
             const gp_Dir surfaceNormal = pointOuterFaces
@@ -1934,11 +2112,20 @@ void LaserToolpathBuilder::discretizeContour(LaserContour& contour,
             ? gp_Dir(tangent) : gp_Dir(0, 0, 1);
         return point;
     };
-    bool complete = false;
-    auto guarded = insertSourceBarriers(samples, policy, sampleAt);
-    auto refined = refineSourceSamples(guarded, deflection, policy, sampleAt, &complete);
-    contour.geometrySamplingComplete = complete;
-    replaceGeometrySamples(contour, std::move(refined), complete);
+    const auto boundInterval = [&](int edgeIndex, double first, double last) {
+        const auto* context = edgeIndex < static_cast<int>(contour.leadInSurfaceContext.size())
+            ? &contour.leadInSurfaceContext[static_cast<std::size_t>(edgeIndex)] : nullptr;
+        const bool boundOwner = context && !context->outerFaces.empty();
+        return sourceIntervalBound(sourceEdges.at(static_cast<std::size_t>(edgeIndex)), first, last,
+            boundOwner ? context->outerFaces : workpieceFaces, workpieceCenter, !boundOwner, {});
+    };
+    auto requiredPolicy = policy;
+    if (contour.leadIn.valid)
+        requiredPolicy.processBarriers.push_back({anchoredEdgeIndex, anchoredParam});
+    auto refined = lcnc::cam_algo::refineGeometrySource(
+        samples, sourceCoverageComplete, deflection, requiredPolicy, sampleAt, boundInterval);
+    contour.geometrySamplingEvidence = refined.evidence;
+    replaceGeometrySamples(contour, std::move(refined.points), refined.evidence.complete());
 }
 
 // =============================================================================
@@ -1954,6 +2141,8 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
 {
     const int anchoredEdgeIndex = contour.leadIn.valid ? contour.leadIn.entryEdgeIndex : -1;
     const double anchoredParam = contour.leadIn.entryParam;
+    replaceGeometrySamples(contour, {}, false);
+    contour.geometrySamplingEvidence = {};
     std::vector<ToolpathPoint> samples;
     if (contour.wire.IsNull()) {
         contour.geometrySamplingComplete = false;
@@ -1963,6 +2152,7 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
 
     const gp_Pnt outerCenter = faceGroupCenter(outerFaces);
     std::vector<TopoDS_Edge> sourceEdges;
+    bool sourceCoverageComplete = true;
 
     // 必须按 WireExplorer 的连接顺序遍历边，并尊重每条边的 Orientation。
     // TopExp_Explorer 只是拓扑枚举，会导致矩形孔等多边轮廓边之间顺序错乱。
@@ -1975,19 +2165,23 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
 
         BRepAdaptor_Curve curve(edge);
         GCPnts_UniformDeflection sampler(curve, deflection);
-        if (!sampler.IsDone())
+        if (!sampler.IsDone() || sampler.NbPoints() < 2) {
+            sourceCoverageComplete = false;
             continue;
+        }
 
         const bool reversed = edge.Orientation() == TopAbs_REVERSED;
         std::vector<double> parameters;
         parameters.reserve(static_cast<std::size_t>(sampler.NbPoints() + 1));
         for (int i = 1; i <= sampler.NbPoints(); ++i)
             parameters.push_back(sampler.Parameter(i));
-        if (edgeIndex == anchoredEdgeIndex)
-            parameters.push_back(anchoredParam);
+        if (std::abs(parameters.front() - curve.FirstParameter()) > 1e-10
+            || std::abs(parameters.back() - curve.LastParameter()) > 1e-10)
+            sourceCoverageComplete = false;
+        appendSourceKnotBoundaries(curve, parameters);
         std::sort(parameters.begin(), parameters.end());
         parameters.erase(std::unique(parameters.begin(), parameters.end(), [](double a, double b) {
-            return std::abs(a - b) <= 1e-12;
+            return a == b;
         }), parameters.end());
         if (reversed)
             std::reverse(parameters.begin(), parameters.end());
@@ -2008,6 +2202,7 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             ToolpathPoint tp;
             tp.param = parameter;
             tp.sourceEdgeIndex = edgeIndex;
+            tp.semanticHardBarrier = isSourceKnotBoundary(curve, parameter);
             curve.D0(tp.param, tp.position);
 
             // Compute machining normal using face classification
@@ -2067,11 +2262,20 @@ void LaserToolpathBuilder::discretizeContourWithClassification(
             ? gp_Dir(tangent) : gp_Dir(0, 0, 1);
         return point;
     };
-    bool complete = false;
-    auto guarded = insertSourceBarriers(samples, policy, sampleAt);
-    auto refined = refineSourceSamples(guarded, deflection, policy, sampleAt, &complete);
-    contour.geometrySamplingComplete = complete;
-    replaceGeometrySamples(contour, std::move(refined), complete);
+    const auto boundInterval = [&](int edgeIndex, double first, double last) {
+        const auto* context = edgeIndex < static_cast<int>(contour.leadInSurfaceContext.size())
+            ? &contour.leadInSurfaceContext[static_cast<std::size_t>(edgeIndex)] : nullptr;
+        return sourceIntervalBound(sourceEdges.at(static_cast<std::size_t>(edgeIndex)), first, last,
+            context && !context->outerFaces.empty() ? context->outerFaces : outerFaces, outerCenter, true,
+            context && !context->crossSectionFaces.empty() ? context->crossSectionFaces : crossFaces);
+    };
+    auto requiredPolicy = policy;
+    if (contour.leadIn.valid)
+        requiredPolicy.processBarriers.push_back({anchoredEdgeIndex, anchoredParam});
+    auto refined = lcnc::cam_algo::refineGeometrySource(
+        samples, sourceCoverageComplete, deflection, requiredPolicy, sampleAt, boundInterval);
+    contour.geometrySamplingEvidence = refined.evidence;
+    replaceGeometrySamples(contour, std::move(refined.points), refined.evidence.complete());
 }
 
 void LaserToolpathBuilder::bindLeadInSurfaceContext(
@@ -2108,6 +2312,16 @@ gp_Dir LaserToolpathBuilder::findMachiningNormal(
     bool   foundOuter = false;
 
     for (const auto& face : outerFaces) {
+        gp_Dir analyticNormal;
+        double analyticDistance = 0.0;
+        if (analyticFaceNormal(face, pt, analyticNormal, analyticDistance)) {
+            if (analyticDistance < bestOuterDist) {
+                outerNormal = analyticNormal;
+                bestOuterDist = analyticDistance;
+                foundOuter = true;
+            }
+            continue;
+        }
         Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
         if (surf.IsNull()) continue;
 
@@ -2149,6 +2363,15 @@ gp_Dir LaserToolpathBuilder::findSurfaceNormal(const TopoDS_Shape& workpiece,
 
     for (TopExp_Explorer faceExp(workpiece, TopAbs_FACE); faceExp.More(); faceExp.Next()) {
         const TopoDS_Face& face = TopoDS::Face(faceExp.Current());
+        gp_Dir analyticNormal;
+        double analyticDistance = 0.0;
+        if (analyticFaceNormal(face, pt, analyticNormal, analyticDistance)) {
+            if (analyticDistance < bestDist) {
+                bestNormal = analyticNormal;
+                bestDist = analyticDistance;
+            }
+            continue;
+        }
         Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
         if (surf.IsNull())
             continue;
@@ -2451,7 +2674,8 @@ bool LaserToolpathBuilder::solveToolpathForOrder(
         if (!contour || !contour->geometrySamplingComplete) {
             if (errorMessage)
                 *errorMessage = QStringLiteral(
-                    "Geometry sampling could not satisfy its bounded source criteria");
+                    "Geometry sampling could not satisfy its bounded source criteria: %1")
+                    .arg(contour ? contour->geometrySamplingEvidence.failureReason : QStringLiteral("Missing contour"));
             return false;
         }
     }
