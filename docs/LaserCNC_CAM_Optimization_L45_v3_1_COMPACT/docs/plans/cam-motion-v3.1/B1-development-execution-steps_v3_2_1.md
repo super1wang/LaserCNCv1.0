@@ -315,6 +315,16 @@ budget exhaustion
 repeat determinism
 ```
 
+### S2 实施记录（2026-09-17）
+
+- 新增 `full5d_optimizer`：既有完整 IK 输出作为 Raw reference；生产导出统一经过显式 Optimized reference。保留原 physical layout，不新增 IK 或 DOF reduction。
+- 保留已解算多圈角度；wrapped observation 必须显式指定，半圈方向歧义与软限位越界拒绝。Conservative 使用 evaluator 重建新增/保留 knot 的 TCP、reference TCP、process direction。
+- 细分采用 rotary hard bound；显式 position/orientation chord 限额要求共享 evaluator 的保守区间界，Unknown/预算耗尽/取消整次拒绝，不扩大 tolerance。严格 affine 中点等价证明允许合并；不跨 source span 端点、fence、semantic barrier 或 entry ownership。
+- 生产 FK adapter 只读取 frozen machine/layout/setup/head/mounts/locked targets；测试覆盖 XYZ、AC/BC 转台、AB 摆头倾斜解及 AC 摆头零姿态。既有 AC_HEAD 倾斜 fixture 被 authoritative IK 判为奇异，保持拒绝，不由 optimizer 补解。
+- 当前没有独立用户优化策略与非零工艺姿态 tolerance authority：生产默认仍为 Off，所有计算参数进入 capture identity；Off 超过 hard rotary step 直接拒绝，不偷偷细分。非零 smoothing 请求记录 rejection，保留 strict reference。模式配置/admission/reduction 属于 S3。
+- 数值 fixture：`351→711` 在 5° hard bound、multiplier=128 下为 2→129 knots；affine `359,360,361` 为 3→2；非线性 position/orientation 区间界为 2→17。无 collision backend 调用。
+- 验证记录：Ninja Debug / ASan 完整构建成功，S2 定向各 5/5。全量首跑 51/53（BVH 计时、资产 timeout），失败项隔离复跑 2/2；最终排除两项已验证重型测试的回归为 50/51，BVH 并行计时 5032 ms 超过 5000 ms，随后与 Full5D 隔离复跑 2/2。没有修改计时阈值，不宣称单次全量全绿。未进行实机验证，不代表 controller qualification 或 B1 Stage Gate；代码留在工作区，未提交/推送。
+
 通过后自动继续。
 
 ---

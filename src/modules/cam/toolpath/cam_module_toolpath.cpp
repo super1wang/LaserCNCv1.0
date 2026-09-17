@@ -692,7 +692,20 @@ CamModule::captureMotionCompilationInput(
     parameter(QStringLiteral("rapidSafetyOffset"), m_config.maximumRapidSafetyOffsetMm(), QStringLiteral("mm"), QStringLiteral("CamConfig"));
     parameter(QStringLiteral("collisionClearance"), m_config.cutterCollisionClearanceMm(), QStringLiteral("mm"), QStringLiteral("CamConfig"));
     parameters.push_back({QStringLiteral("optimizationMode"), QStringLiteral("Off"), QStringLiteral("Off"),
-        QStringLiteral("S1/compiler"), QStringLiteral("enum"), 1, true});
+        QStringLiteral("S2/compiler"), QStringLiteral("enum"), 1, true});
+    const QString poseSource = QStringLiteral("cam-motion/strict-full5d-v1");
+    parameter(QStringLiteral("pose.orientationToleranceDeg"), values.full5DPolicy.orientationToleranceDeg,
+        QStringLiteral("degree"), poseSource);
+    parameter(QStringLiteral("pose.maxRotaryStepDeg"), values.full5DPolicy.maxRotaryStepDeg,
+        QStringLiteral("degree"), poseSource);
+    parameter(QStringLiteral("pose.positionChordToleranceMm"), values.full5DPolicy.positionChordToleranceMm,
+        QStringLiteral("mm"), poseSource);
+    parameter(QStringLiteral("pose.orientationChordToleranceDeg"), values.full5DPolicy.orientationChordToleranceDeg,
+        QStringLiteral("degree"), poseSource);
+    parameter(QStringLiteral("pose.maxDepth"), values.full5DPolicy.maxDepth, QStringLiteral("count"), poseSource);
+    parameter(QStringLiteral("pose.minParameterSpan"), values.full5DPolicy.minParameterSpan, QStringLiteral("parameter"), poseSource);
+    parameter(QStringLiteral("pose.maxKnotMultiplier"), values.full5DPolicy.maxKnotMultiplier, QStringLiteral("ratio"), poseSource);
+    parameter(QStringLiteral("pose.maxKnotsPerBlock"), values.full5DPolicy.maxKnotsPerBlock, QStringLiteral("count"), poseSource);
     parameters.push_back({QStringLiteral("processBarriers"), QStringLiteral("none"), QStringLiteral("none"),
         QStringLiteral("S1/no-process-barrier-authority"), QStringLiteral("source-parameter-list"), 0, false});
     for (const auto& key : {QStringLiteral("enableDofReduction"), QStringLiteral("enableLaserZHold")})
@@ -959,8 +972,34 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         plan.derivedFromPlanHash.clear();
         return;
     }
-    if (!plan.blocks.isEmpty() && !lcnc::cam::finalizeMotionPlan(
-            &plan, &finalizationError)) {
+    bool finalized = plan.blocks.isEmpty() || lcnc::cam::finalizeMotionPlan(&plan, &finalizationError);
+    if (finalized && !plan.blocks.isEmpty()) {
+        auto posePolicy = m_motionCompilationInput->full5DPolicy;
+        for (int index = 0; index < projectionLayout.count; ++index) {
+            const auto* axis = projection->findAxis(projectionLayout.axes[index].name);
+            if (!axis) {
+                finalized = false;
+                finalizationError = QStringLiteral("Frozen Full5D axis layout is unavailable");
+                break;
+            }
+            posePolicy.minimumAxes[index] = axis->minVal;
+            posePolicy.maximumAxes[index] = axis->maxVal;
+            if (axis->motionType == MachineAxisDef::Rotary) posePolicy.rotaryMask |= (1u << index);
+        }
+        if (finalized) {
+            lcnc::cam_algo::Full5DMetrics metrics;
+            const auto modelForBlock = [&](const lcnc::cam::CamMotionBlock& block) {
+                const auto contour = std::find_if(snapshot.contours.cbegin(), snapshot.contours.cend(),
+                    [&](const auto& item) { return item.contourId == block.contourId; });
+                return contour == snapshot.contours.cend() ? lcnc::cam_algo::MotionEvaluationContext{}
+                    : lcnc::cam::ToolpathSolveService::physicalEvaluationContext(
+                        *m_motionCompilationInput, contour->workpieceEntry);
+            };
+            finalized = lcnc::cam_algo::optimizeFull5D(plan, posePolicy, {}, &plan, &metrics,
+                &finalizationError, {}, modelForBlock);
+        }
+    }
+    if (!finalized) {
         plan.failureReason = finalizationError;
         plan.blocks.clear();
         plan.nodes.clear();

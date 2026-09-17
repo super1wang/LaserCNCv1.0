@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/continuous_motion_evaluator.h"
 #include "core/kinematics/machine_configuration_service.h"
 
 #include <QVector>
@@ -20,6 +21,8 @@ class ToolpathSolveService final
 {
 public:
     static void configureFrozenMachine(MachineKinematics* machine, const MotionCompilationInput& input);
+    static lcnc::cam_algo::MotionEvaluationContext physicalEvaluationContext(
+        const MotionCompilationInput& input, const QString& workpieceEntry);
     static bool geometryHasCurrentSolve(const std::vector<LaserContour>& contours);
     static bool solveFrozen(std::vector<LaserContour>* contours,
         const QVector<std::uint64_t>& orderedContourIds,

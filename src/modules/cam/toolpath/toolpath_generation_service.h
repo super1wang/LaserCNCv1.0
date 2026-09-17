@@ -2,6 +2,7 @@
 
 #include "core/project/cam/collision_validation_contracts.h"
 #include "core/algorithms/cam/laser_toolpath.h"
+#include "core/algorithms/cam/full5d_optimizer.h"
 #include "core/kinematics/machine_configuration_service.h"
 
 #include <QByteArray>
@@ -56,6 +57,7 @@ struct MotionCompilationInput
     QByteArray capturedContextHash;
     // Computation values and identity travel together from the owner thread.
     GeometrySamplingPolicy geometryPolicy;
+    lcnc::cam_algo::Full5DPolicy full5DPolicy;
     QList<MachineAxisDef> machineAxes;
     QString machineConfigType;
     QString machineFingerprint;

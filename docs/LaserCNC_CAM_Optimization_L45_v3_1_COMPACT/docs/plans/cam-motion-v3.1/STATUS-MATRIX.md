@@ -3,7 +3,7 @@
 | Batch | State | Commit range | Soft checkpoints | Stage Gate | Astra review | Decision / blockers |
 |---|---|---|---|---|---|---|
 | B0 | Astra PASS | `6b11aeb..54d1eaf` | B0.S1 Passed | Supplemental G1..G8 Passed | R0 PASS（用户确认） | F01..F05 accepted; R06/R07 patched |
-| B1 | In Progress | `1aa3aee..HEAD` | B1.S1 PASS（复审修补 Soft Check）；controller-independent S2 可进入、未实施 | 最终 CTest 52/52 + ASan 定向 5/5；四组复审反例及真实 owner/worker/export 回归通过 | Review fixes verified | 计算前冻结、顺序身份、保守区间证明、源覆盖/屏障、硬预算和旧解拒绝已修复；ControllerMotionMode 保持 Unavailable/revision 0；见 B1_S1_REVIEW_FIX_REPORT.md |
+| B1 | In Progress | `1aa3aee..HEAD` + S2 工作区 | B1.S1 PASS；controller-independent S2 已实现，Debug/ASan 定向各 5/5 | B1 Stage Gate 尚未执行；全量并行性能门禁有波动、隔离复跑通过，见执行步骤 S2 实施记录 | S2 待用户人工 review | Full5D reference、严格等价 merge/refine、冻结 FK adapter 与硬预算已落地；生产 policy 仍 Off，controller 保持 Unavailable/revision 0；S3 未实施 |
 | B2 | Blocked by B1 | — | — | — | R2 pending | — |
 | B3 | Blocked by B2 | — | — | — | R3 pending | — |
 | B4 | Deferred / Blocked by B3 | — | — | — | R4 pending | — |

@@ -466,6 +466,7 @@ set(SRCS_CORE
     src/core/algorithms/cam/travel_path_planner.cpp
     src/core/algorithms/cam/collision_safety_domain.cpp
     src/core/algorithms/cam/continuous_motion_evaluator.cpp
+    src/core/algorithms/cam/full5d_optimizer.cpp
     src/core/algorithms/cam/collision_policy.h
     src/core/algorithms/cam/collision_policy.cpp
     src/core/algorithms/cam/machine_safety_fingerprint.h
@@ -1362,6 +1363,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(lcnc_cam_motion_foundation_test PRIVATE
         lcnc_module_cam Qt6::Core)
+    add_executable(lcnc_full5d_optimizer_test tests/full5d_optimizer_test.cpp)
+    target_link_libraries(lcnc_full5d_optimizer_test PRIVATE lcnc_core Qt6::Core)
+    add_test(NAME lcnc_full5d_optimizer_test COMMAND lcnc_full5d_optimizer_test)
+    set_tests_properties(lcnc_full5d_optimizer_test PROPERTIES TIMEOUT 60 LABELS "critical;algorithm")
     add_executable(lcnc_cam_data_manager_test
         tests/cam_data_manager_test.cpp
     )
@@ -1467,6 +1472,7 @@ if(BUILD_TESTING)
         list(APPEND LCNC_TEST_EXECUTABLE_TARGETS
             lcnc_coal_collision_backend_test)
     endif()
+    list(APPEND LCNC_TEST_EXECUTABLE_TARGETS lcnc_full5d_optimizer_test)
     foreach(_lcnc_test_target IN LISTS LCNC_TEST_EXECUTABLE_TARGETS)
         if(EXISTS "${LCNC_RUNTIME_BIN_DIR_DEBUG}" AND EXISTS "${LCNC_RUNTIME_BIN_DIR_RELEASE}")
             add_dependencies(${_lcnc_test_target} lcnc_runtime_deploy_build)

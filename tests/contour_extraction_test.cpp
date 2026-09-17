@@ -14,6 +14,7 @@
 #include "modules/cam/toolpath/toolpath_solve_service.h"
 #include "modules/cam/toolpath/toolpath_sequence_service.h"
 #include "core/kinematics/machine_kinematics.h"
+#include "core/kinematics/toolpath_kinematics_solver.h"
 #include "core/kernel/kernel.h"
 #include "core/project/lcnc_project_manager.h"
 #include "modules/cam/cam_module.h"
@@ -44,8 +45,73 @@
 // controller, showing a window or bypassing the production solve service.
 struct CamMotionCompilationTestAccess
 {
+    static QString verifyPhysicalEvaluator()
+    {
+        for (const auto& preset : {QStringLiteral("XYZ"), QStringLiteral("VERTICAL_AC_TABLE"),
+                                  QStringLiteral("VERTICAL_BC_TABLE"), QStringLiteral("AB_HEAD"), QStringLiteral("AC_HEAD")}) {
+            lcnc::MachineConfigurationService configuration;
+            configuration.applyPreset(preset);
+            lcnc::HeadToolGeometry head;
+            head.focusLength = 100;
+            configuration.setHeadToolGeometry(head);
+            lcnc::cam::MotionCompilationInput input;
+            input.machineAxes = configuration.axisDefinitions();
+            input.machineConfigType = preset;
+            input.modeDefinition = configuration.modeDefinition(preset.endsWith(QStringLiteral("HEAD"))
+                ? lcnc::MachiningMode::SimultaneousHead5Axis : preset.endsWith(QStringLiteral("TABLE"))
+                ? lcnc::MachiningMode::SimultaneousTable5Axis : lcnc::MachiningMode::Planar3Axis);
+            input.headToolGeometry = head;
+            input.workpieceSetup.x = 5;
+            input.kinematicSetup = input.workpieceSetup.toTransform();
+            QString mount;
+            for (const auto& axis : input.machineAxes)
+                if (axis.role == lcnc::MachineAxisRole::TableSpin) mount = axis.name;
+            if (!mount.isEmpty()) input.workpieceMounts.insert(QStringLiteral("workpiece"), mount);
+            input.capturedContextHash = lcnc::cam::motionCompilationContextHash(input.context);
+            MachineKinematics machine;
+            lcnc::cam::ToolpathSolveService::configureFrozenMachine(&machine, input);
+            ToolpathPoint point;
+            point.position = gp_Pnt(10, 20, 30);
+            point.normal = gp_Dir(0, preset.endsWith(QStringLiteral("HEAD")) ? -0.5 : 0.5, std::sqrt(0.75));
+            std::vector<ToolpathPoint> points{point};
+            lcnc::ToolpathKinematicsRequest request;
+            request.machine = &machine; request.mode = input.modeDefinition.mode;
+            request.definition = input.modeDefinition; request.workpieceSetup = input.workpieceSetup;
+            request.headToolGeometry = head; request.points = &points;
+            auto poses = lcnc::ToolpathSolverRegistry().solve(request);
+            if (preset == QStringLiteral("AC_HEAD")) {
+                // Existing authoritative head IK treats this tilted AC pose
+                // as singular. Preserve that rejection; do not add optimizer IK.
+                if (poses.size() != 1 || poses[0].valid)
+                    return QStringLiteral("AC head singularity fixture unexpectedly admitted");
+                points[0].normal = gp_Dir(0, 0, 1);
+                point.normal = points[0].normal;
+                poses = lcnc::ToolpathSolverRegistry().solve(request);
+            }
+            if (poses.size() != 1 || !poses[0].valid) return QStringLiteral("Evaluator IK fixture failed: ") + preset
+                + (poses.empty() ? QStringLiteral(" (empty solve)") : poses[0].failureReason);
+            auto model = lcnc::cam::ToolpathSolveService::physicalEvaluationContext(input, QStringLiteral("workpiece"));
+            lcnc::cam_algo::EvaluatedMotionState state;
+            if (!model.evaluatePhysicalAxes || !model.evaluatePhysicalAxes(poses[0].values, poses[0].activeMask, &state))
+                return QStringLiteral("Frozen physical evaluator rejected authoritative solve: ") + preset;
+            for (int axis = 0; axis < input.modeDefinition.interpolatedAxes.count; ++axis)
+                machine.findAxis(input.modeDefinition.interpolatedAxes.axes[axis].name)->currentPos = poses[0].values[axis];
+            const gp_Pnt expected = point.position.Transformed(machine.computeWpcTransform(QStringLiteral("workpiece")));
+            if (expected.Distance(gp_Pnt(state.worldTcpX, state.worldTcpY, state.worldTcpZ)) > 1e-5 || !state.referenceTcpValid)
+                return QStringLiteral("Frozen FK disagrees with authoritative IK/setup: ") + preset;
+            if (input.modeDefinition.mode != lcnc::MachiningMode::Planar3Axis) {
+                const gp_Dir expectedNormal = point.normal.Transformed(machine.computeWpcTransform(QStringLiteral("workpiece")));
+                if (expectedNormal.Angle(gp_Dir(state.processDirectionX, state.processDirectionY, state.processDirectionZ)) > 1e-5)
+                    return QStringLiteral("Frozen orientation disagrees with authoritative IK: ") + preset;
+            }
+        }
+        return {};
+    }
+
     static QString verify()
     {
+        const QString evaluatorError = verifyPhysicalEvaluator();
+        if (!evaluatorError.isEmpty()) return evaluatorError;
         lcnc::Kernel kernel;
         kernel.registerCoreServices();
         kernel.service<lcnc::MachineConfigurationService>()->applyPreset(QStringLiteral("XYZ"));
@@ -87,6 +153,9 @@ struct CamMotionCompilationTestAccess
             || snapshot.motionPlan.planHash.isEmpty())
             return QStringLiteral("Published plan did not retain pre-computation context: ")
                 + snapshot.motionPlan.failureReason;
+        for (const auto& block : snapshot.motionPlan.blocks)
+            if (block.optimizationState != lcnc::cam::MotionOptimizationState::Optimized)
+                return QStringLiteral("Production export bypassed the explicit Optimized reference");
         const auto differentOrder = cam.exportToolpathSnapshotForOrder({id, id});
         if (!differentOrder.motionPlan.planHash.isEmpty() || differentOrder.motionPlan.failureReason.isEmpty())
             return QStringLiteral("Owner reused solved coordinates for a different requested contour order");
