@@ -578,7 +578,8 @@ process Z envelope 类型已定义，但缺少正式工艺来源/whitelist，启
 `cam_motion_plan_contract`、`cam_lead_in`、`project_package`。最终耗时 Debug 17.02 秒、ASan 42.04 秒。
 首次 ASan 的 1001 点降维测试因逐点全块哈希超时；改为冻结块批量求值后，该项 Debug 0.48 秒、ASan 1.31 秒通过，
 保留 60 秒超时不变，并新增批量入口 stale identity/取消原子性回归。架构检查与 `git diff --check` 通过。
-本次为 S3 Soft Check，待用户人工 review；未执行 B1 Stage Gate、GUI 或物理机验证，未提交/推送。
+S3 Soft Check 对应提交 `aa8fd34`；该提交未执行 B1 Stage Gate、GUI 或物理机验证。
+后续 R1 收口及 B1 Gate 见 [B1_R1_CLOSEOUT_REPORT.md](B1_R1_CLOSEOUT_REPORT.md)。
 
 一次运行：
 

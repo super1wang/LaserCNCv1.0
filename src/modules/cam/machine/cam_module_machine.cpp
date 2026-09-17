@@ -303,6 +303,7 @@ void CamModule::loadMachine(const QString& filePath)
     const std::uint64_t loadGeneration = ++m_machineLoadGeneration;
     const auto result = std::make_shared<lcnc::cam::machine_io::MachineImportResult>();
     m_machineLoadPending.store(true);
+    emit machineLoadPendingChanged(true);
     invalidateMachineEnvironment();
 
     // 中文翻译：加载机台: %1
@@ -351,6 +352,7 @@ void CamModule::loadMachine(const QString& filePath)
             return;
         }
         m_machineLoadPending.store(false);
+        emit machineLoadPendingChanged(false);
         if (!ok || !result->isValid()) {
             if (packageInput) {
                 m_machineSafetyPackageManager.markInvalid(
@@ -680,6 +682,7 @@ void CamModule::unloadMachine()
 
     ++m_machineLoadGeneration;
     m_machineLoadPending.store(false);
+    emit machineLoadPendingChanged(false);
     m_machineSafetyPackageManager.clear();
     invalidateMachineEnvironment();
     m_machineModelPath.clear();

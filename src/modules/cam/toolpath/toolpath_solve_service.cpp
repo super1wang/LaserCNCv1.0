@@ -3,15 +3,58 @@
 #include "core/kinematics/machine_kinematics.h"
 #include "core/algorithms/kinematics/rtcp_reference_transform.h"
 #include "modules/cam/toolpath/toolpath_generation_service.h"
+#include "modules/cam/contracts/toolpath_export_dto.h"
 
 #include <QSet>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <gp_Ax1.hxx>
 #include <gp_Vec.hxx>
 
 namespace lcnc::cam {
+namespace { std::atomic_uint64_t optimizationInvocations{0}; }
+
+std::uint64_t ToolpathSolveService::optimizationInvocationCount() { return optimizationInvocations.load(); }
+
+bool ToolpathSolveService::optimizeMotionSnapshot(ToolpathExportSnapshot* snapshot,
+    const MotionCompilationInput& input, QString* error, const std::function<bool()>& cancelled)
+{
+    if (!snapshot) return false;
+    ++optimizationInvocations;
+    auto candidate = *snapshot;
+    auto policy = input.full5DPolicy;
+    auto reduction = input.reductionPolicy;
+    for (int i = 0; i < candidate.machineAxisLayout.count; ++i) {
+        const auto& slot = candidate.machineAxisLayout.axes[i];
+        const auto axis = std::find_if(input.machineAxes.cbegin(), input.machineAxes.cend(),
+            [&](const auto& item) { return item.name == slot.name; });
+        if (axis == input.machineAxes.cend()) {
+            if (error) *error = QStringLiteral("Frozen Full5D axis layout is unavailable");
+            return false;
+        }
+        policy.minimumAxes[i] = axis->minVal; policy.maximumAxes[i] = axis->maxVal;
+        if (axis->motionType == MachineAxisDef::Rotary) policy.rotaryMask |= 1u << i;
+        if (axis->role == MachineAxisRole::LinearZ) reduction.zAxis = i;
+    }
+    const auto entryFor = [&](const CamMotionBlock& block) {
+        const auto contour = std::find_if(candidate.contours.cbegin(), candidate.contours.cend(),
+            [&](const auto& item) { return item.contourId == block.contourId; });
+        return contour == candidate.contours.cend() ? QString() : contour->workpieceEntry;
+    };
+    lcnc::cam_algo::Full5DMetrics metrics;
+    lcnc::cam_algo::ReductionReport report;
+    auto& plan = candidate.motionPlan;
+    if (!lcnc::cam_algo::optimizeFull5D(plan, policy, {}, &plan, &metrics, error, cancelled,
+            [&](const auto& block) { return physicalEvaluationContext(input, entryFor(block)); })
+        || !lcnc::cam_algo::reduceMotionPlan(plan, policy, reduction,
+            [&](const auto& block) { return reductionEvaluationContext(input, entryFor(block)); },
+            &plan, &report, error, cancelled)) return false;
+    if (cancelled && cancelled()) return false;
+    *snapshot = std::move(candidate);
+    return true;
+}
 
 lcnc::cam_algo::ReductionEvaluation ToolpathSolveService::reductionEvaluationContext(
     const MotionCompilationInput& input, const QString& workpieceEntry)

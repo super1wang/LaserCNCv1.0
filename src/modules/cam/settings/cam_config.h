@@ -8,6 +8,8 @@
 #include <QMap>
 #include <QSet>
 #include <QString>
+#include <atomic>
+#include <memory>
 
 #include <gp_Pnt.hxx>
 
@@ -38,6 +40,9 @@ class CamConfig : public lcnc::TomlConfig
 {
 public:
     CamConfig() = default;
+    /// Copies are independent; assignment invalidates the destination's readers.
+    std::shared_ptr<const std::atomic_uint64_t> changeClock() const { return m_changes.value; }
+    std::uint64_t changeRevision() const { return m_changes.value->load(); }
 
     /// 装载 <exeDir>/config/cam.toml。
     bool loadDefault();
@@ -162,6 +167,12 @@ protected:
     const char* configName() const override { return "CamConfig"; }
 
 private:
+    struct ChangeClock {
+        std::shared_ptr<std::atomic_uint64_t> value{std::make_shared<std::atomic_uint64_t>(1)};
+        ChangeClock() = default;
+        ChangeClock(const ChangeClock&) : ChangeClock() {}
+        ChangeClock& operator=(const ChangeClock&) { ++*value; return *this; }
+    } m_changes;
     QString m_trajectoryOptimizationMode{QStringLiteral("Off")};
     bool m_enableDofReduction{false};
     bool m_enableLaserZHold{false};

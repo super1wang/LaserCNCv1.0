@@ -163,6 +163,7 @@ struct TravelPlanSnapshot
     /// Continuous certificates for every adjacent node in the canonical
     /// motion plan. They are derived and replaced atomically with validation.
     QVector<CamMotionEdgeCertificate> motionCertificates;
+    QByteArray verifiedMotionPlanHash;
 
     bool isPathReady() const {
         return !stale && failureReason.isEmpty();

@@ -326,7 +326,10 @@ public:
         std::shared_ptr<const lcnc::cam::MotionCompilationInput> input = {});
     lcnc::cam::ToolpathExportSnapshot exportToolpathBaseSnapshot() const;
     lcnc::cam::ToolpathExportSnapshot exportToolpathSnapshotForOrder(
-        const QVector<std::uint64_t>& orderedContourIds) const;
+        const QVector<std::uint64_t>& orderedContourIds, bool deferOptimization = false) const;
+    QByteArray currentMotionPublicationKey() const;
+    std::shared_ptr<const lcnc::cam::MotionCompilationInput> motionPublicationInput() const { return m_motionCompilationInput; }
+    bool adoptMotionPublication(const lcnc::cam::ToolpathExportSnapshot& snapshot, const QByteArray& key) const;
 
     QList<lcnc::MachiningMode> supportedMachiningModes() const;
     lcnc::MachiningMode machiningMode() const;
@@ -498,6 +501,7 @@ public:
     void refreshCuttingOrderOverlays();
 
 signals:
+    void machineLoadPendingChanged(bool pending);
     void machineViewRequested();
     void machineWorkspaceChanged();
     void operationFailed(const QString& title, const QString& message);
@@ -589,7 +593,7 @@ private:
         const std::vector<LaserContour>& contours,
         std::uint64_t revision,
         const QString& description) const;
-    void attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const;
+    void attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot, bool deferOptimization = false) const;
     std::shared_ptr<const lcnc::cam::MotionCompilationInput> captureMotionCompilationInput(
         const lcnc::cam::ToolpathGenerationStamp* requested = nullptr) const;
     void retainMotionCompilationInput(
@@ -660,6 +664,8 @@ private:
     std::shared_ptr<const lcnc::cam::MotionCompilationInput> m_motionCompilationInput;
     std::uint64_t m_motionCompilationResultRevision{0};
     QVector<std::uint64_t> m_motionCompilationResultOrder;
+    mutable lcnc::cam::ToolpathExportSnapshot m_compiledMotionSnapshot;
+    mutable QByteArray m_compiledMotionKey;
     /// 借用自 Kernel（独立机台参考资产，core 拥有）；本模块不负责其生命周期。
     lcnc::cam::MachineWorkspace*                         m_machineWorkspace{nullptr};
 

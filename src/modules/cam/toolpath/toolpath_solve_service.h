@@ -15,12 +15,17 @@ class QString;
 
 namespace lcnc::cam {
 struct MotionCompilationInput;
+struct ToolpathExportSnapshot;
 
 /// Executes the ordered machine-coordinate solve against a private contour
 /// copy and commits traversal/coordinate mutations only after full success.
 class ToolpathSolveService final
 {
 public:
+    static std::uint64_t optimizationInvocationCount();
+    static bool optimizeMotionSnapshot(ToolpathExportSnapshot* snapshot,
+        const MotionCompilationInput& input, QString* error,
+        const std::function<bool()>& cancelled = {});
     static void configureFrozenMachine(MachineKinematics* machine, const MotionCompilationInput& input);
     static lcnc::cam_algo::MotionEvaluationContext physicalEvaluationContext(
         const MotionCompilationInput& input, const QString& workpieceEntry);

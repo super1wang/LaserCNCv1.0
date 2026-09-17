@@ -41,6 +41,11 @@
 
 ## Execution rule
 
+B1 v3.2.1 的 V-007～V-016 收口证据与 case 映射见
+[R1 收口记录](../plans/cam-motion-v3.1/B1_R1_CLOSEOUT_REPORT.md)。
+V-010～V-012 仅接受已批准 strict subset：非零平滑和生产通用区间 bound 延后，dynamics 为 audit-only；
+V-014 的工艺 Z whitelist 未启用；测试资格不得解释为 ACS/GTN 生产资格。
+
 - During implementation, run only the smallest tests necessary to keep the branch healthy.
 - At a soft checkpoint, run the accumulated targeted suite for that workstream cluster.
 - At `B0..B4 Stage Gate`, run all matrix rows owned by that batch exactly once, plus directly impacted regressions.

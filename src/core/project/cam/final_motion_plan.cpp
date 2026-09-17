@@ -149,7 +149,7 @@ QByteArray controllerQualificationSnapshotHash(
 
 QByteArray motionBlockHash(const CamMotionBlock& block)
 {
-    QByteArray canonical("lcnc.motion-block.v3;");
+    QByteArray canonical("lcnc.motion-block.v4;");
     appendInteger(&canonical, block.blockId);
     appendInteger(&canonical, block.phase);
     appendInteger(&canonical, block.contourId);
@@ -178,6 +178,8 @@ QByteArray motionBlockHash(const CamMotionBlock& block)
         appendInteger(&canonical, fence.blockStart);
         appendInteger(&canonical, fence.blockEnd);
         appendInteger(&canonical, fence.laserEnabledAfterFence);
+        appendInteger(&canonical, fence.changesLaserState);
+        appendInteger(&canonical, fence.requiredStop);
     }
     appendDouble(&canonical, block.feed.nominalFeedPerMinute);
     appendDouble(&canonical, block.feed.estimatedDurationMs);
@@ -192,7 +194,7 @@ QByteArray motionBlockHash(const CamMotionBlock& block)
 
 QByteArray finalMotionPlanHash(const CamMotionPlanSnapshot& plan)
 {
-    QByteArray canonical("lcnc.final-motion-plan.v2;");
+    QByteArray canonical("lcnc.final-motion-plan.v3;");
     appendBytes(&canonical, motionCompilationContextHash(plan.context));
     appendString(&canonical, plan.solverId);
     appendInteger(&canonical, plan.solverVersion);
@@ -218,10 +220,60 @@ bool finalizeMotionPlan(CamMotionPlanSnapshot* plan, QString* errorMessage)
 
     QVector<CamMotionBlock> blocks = plan->blocks;
     QVector<CamMotionNode> derivedNodes;
+    bool laserStateKnown = false, laserEnabled = false;
     for (int blockIndex = 0; blockIndex < blocks.size(); ++blockIndex) {
         CamMotionBlock& block = blocks[blockIndex];
         if (block.physicalKnots.isEmpty())
             return fail(QStringLiteral("FinalMotionPlan block has no physical knots"));
+        const auto& firstPose = block.hasEntryBoundary ? block.entryBoundary : block.physicalKnots.first();
+        const unsigned layout = firstPose.axisMask;
+        if (block.optimizationState != MotionOptimizationState::Raw
+            && block.optimizationState != MotionOptimizationState::Optimized
+            && block.optimizationState != MotionOptimizationState::Reduced)
+            return fail(QStringLiteral("Unknown optimization state"));
+        if (block.interpolation != MotionInterpolationKind::PhysicalAxisLine
+            && block.interpolation != MotionInterpolationKind::RtcpLine)
+            return fail(QStringLiteral("Unknown interpolation semantics"));
+        if (!layout || layout > 31 || !block.activeAxisMask || (block.activeAxisMask & layout) != block.activeAxisMask)
+            return fail(QStringLiteral("Invalid physical layout or active mask"));
+        int activeCount = 0;
+        for (unsigned bits = block.activeAxisMask; bits; bits >>= 1) activeCount += bits & 1u;
+        if (static_cast<int>(block.motionClass) != activeCount - 1)
+            return fail(QStringLiteral("Motion class disagrees with active mask"));
+        if (block.activeAxisMask != layout && block.optimizationState != MotionOptimizationState::Reduced)
+            return fail(QStringLiteral("Inactive layout axes require Reduced semantics"));
+        if (block.activeAxisMask == layout && block.optimizationState == MotionOptimizationState::Reduced)
+            return fail(QStringLiteral("Reduced state has no reduced physical axes"));
+        for (const auto& node : block.physicalKnots) {
+            if (node.axisMask != layout) return fail(QStringLiteral("Physical layout changes within block"));
+            for (std::size_t a = 0; a < node.axes.size(); ++a)
+                if (!(block.activeAxisMask & (1u << a)) && node.axes[a] != firstPose.axes[a])
+                    return fail(QStringLiteral("Inactive physical axis is not held"));
+        }
+        const int minimumKnot = block.hasEntryBoundary ? -1 : 0;
+        for (const auto& span : block.sourceSpans)
+            if (span.firstKnot < minimumKnot || span.lastKnot < span.firstKnot
+                || span.lastKnot >= block.physicalKnots.size()
+                || !std::isfinite(span.firstSourceParameter) || !std::isfinite(span.lastSourceParameter))
+                return fail(QStringLiteral("Invalid source span range"));
+        int previousEventKnot = minimumKnot;
+        for (const auto& fence : block.fences) {
+            if (fence.knotIndex < minimumKnot || fence.knotIndex >= block.physicalKnots.size()
+                || (fence.blockStart && fence.knotIndex != minimumKnot)
+                || (fence.blockEnd && fence.knotIndex != block.physicalKnots.size() - 1))
+                return fail(QStringLiteral("Invalid process fence position"));
+            if (fence.changesLaserState || fence.requiredStop) {
+                if (fence.knotIndex < previousEventKnot)
+                    return fail(QStringLiteral("Process events are not ordered"));
+                previousEventKnot = fence.knotIndex;
+            }
+            if (fence.changesLaserState) {
+                if (laserStateKnown && laserEnabled == fence.laserEnabledAfterFence)
+                    return fail(QStringLiteral("Laser event does not change the preceding state"));
+                laserStateKnown = true;
+                laserEnabled = fence.laserEnabledAfterFence;
+            }
+        }
         if (block.optimizationState == MotionOptimizationState::Reduced) {
             if (!controllerQualificationIsQualified(plan->context.controllerQualification)
                 || plan->context.controllerMode != ControllerMotionMode::PhysicalAxes

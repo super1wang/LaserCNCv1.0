@@ -102,7 +102,7 @@ ReductionCost selectionCost(const CamMotionBlock& block, const Full5DPolicy& lim
 {
     int stops = 0, reversals = 0;
     double duration = 0, limitRisk = 0, normalizedTravel = 0;
-    for (const auto& fence : block.fences) if (!fence.laserEnabledAfterFence) ++stops;
+    for (const auto& fence : block.fences) if (fence.requiredStop) ++stops;
     for (const auto& node : block.physicalKnots) duration += node.estimatedTimeMs;
     const auto axes = analyze(block);
     const auto& first = firstNode(block);

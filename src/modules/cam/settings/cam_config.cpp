@@ -165,6 +165,7 @@ bool CamConfig::saveDefault() const
 // ── TOML serialization ──────────────────────────────────────────────────────
 void CamConfig::readFrom(const toml::value& root)
 {
+    ++*m_changes.value;
     using namespace lcnc::toml_io;
 
     m_machineModelPath     = get_qstring(root, "machineModelPath",     QString());
@@ -382,6 +383,7 @@ void CamConfig::setMachineModelPath(const QString& path)
         : QFileInfo(path).absoluteFilePath();
     if (m_machineModelPath == normalized) return;
     m_machineModelPath = normalized;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -389,6 +391,7 @@ void CamConfig::setAutoLoadMachineModel(bool enabled)
 {
     if (m_autoLoadMachineModel == enabled) return;
     m_autoLoadMachineModel = enabled;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -396,6 +399,7 @@ void CamConfig::setMachinePreset(const QString& preset)
 {
     if (m_machinePreset == preset) return;
     m_machinePreset = preset;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -410,6 +414,7 @@ void CamConfig::setAutoInstallWorkpiece(bool enabled)
 {
     if (m_autoInstallWorkpiece == enabled) return;
     m_autoInstallWorkpiece = enabled;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -417,6 +422,7 @@ void CamConfig::setLeadInLength(double mm)
 {
     if (nearlyEqual(m_leadInLength, mm)) return;
     m_leadInLength = mm;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -424,6 +430,7 @@ void CamConfig::setDeflection(double mm)
 {
     if (nearlyEqual(m_deflection, mm)) return;
     m_deflection = mm;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -431,6 +438,7 @@ void CamConfig::setSmoothAngle(double deg)
 {
     if (nearlyEqual(m_smoothAngle, deg)) return;
     m_smoothAngle = deg;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -438,6 +446,7 @@ void CamConfig::setUseFaceClassification(bool enabled)
 {
     if (m_useFaceClassification == enabled) return;
     m_useFaceClassification = enabled;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -446,6 +455,7 @@ void CamConfig::setExtractionStrategy(int strategy)
     strategy = static_cast<int>(extractionStrategyFromPersistedValue(strategy));
     if (m_extractionStrategy == strategy) return;
     m_extractionStrategy = strategy;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -498,6 +508,7 @@ void CamConfig::setAxisOriginForMachine(const QString& machinePath,
     const auto it = profile->axisOrigins.constFind(axisName);
     if (it != profile->axisOrigins.cend() && samePoint(it.value(), origin)) return;
     profile->axisOrigins.insert(axisName, origin);
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -518,6 +529,7 @@ void CamConfig::setCutterHeadModelPositionForMachine(const QString& machinePath,
     if (profile->hasCutterHeadModel && samePoint(profile->cutterHeadModelPosition, position)) return;
     profile->hasCutterHeadModel       = true;
     profile->cutterHeadModelPosition  = position;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -538,6 +550,7 @@ void CamConfig::setCutterHeadPhysicalPositionForMachine(const QString& machinePa
     if (profile->hasCutterHeadPhysical && samePoint(profile->cutterHeadPhysicalPosition, position)) return;
     profile->hasCutterHeadPhysical       = true;
     profile->cutterHeadPhysicalPosition  = position;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -556,6 +569,7 @@ void CamConfig::setCuttingOffsetMm(double mm)
     m_cuttingOffsetMm = mm;
     if (m_rapidOffsetMm <= m_cuttingOffsetMm)
         m_rapidOffsetMm = m_cuttingOffsetMm + 0.001;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -563,6 +577,7 @@ void CamConfig::setAutoSortAxis(lcnc::cam::AutoSortAxis axis)
 {
     if (m_autoSortAxis == axis) return;
     m_autoSortAxis = axis;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -571,6 +586,7 @@ void CamConfig::setRapidOffsetMm(double mm)
     if (!std::isfinite(mm) || mm < 0.0 || mm <= m_cuttingOffsetMm
         || nearlyEqual(m_rapidOffsetMm, mm)) return;
     m_rapidOffsetMm = mm;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -578,6 +594,7 @@ void CamConfig::setCutterCollisionProxyMode(CutterCollisionProxyMode mode)
 {
     if (m_cutterCollisionProxyMode == mode) return;
     m_cutterCollisionProxyMode = mode;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -587,6 +604,7 @@ void CamConfig::setCutterNozzleModelPath(const QString& path)
         ? QString() : QFileInfo(path).absoluteFilePath();
     if (m_cutterNozzleModelPath == normalized) return;
     m_cutterNozzleModelPath = normalized;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -595,6 +613,7 @@ void CamConfig::setSimulatedConeLengthMm(double value)
     value = std::max(0.1, value);
     if (nearlyEqual(m_simulatedConeLengthMm, value)) return;
     m_simulatedConeLengthMm = value;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -604,6 +623,7 @@ void CamConfig::setSimulatedConeTipRadiusMm(double value)
     if (nearlyEqual(m_simulatedConeTipRadiusMm, value)) return;
     m_simulatedConeTipRadiusMm = value;
     if (m_simulatedConeBaseRadiusMm < value) m_simulatedConeBaseRadiusMm = value;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -612,6 +632,7 @@ void CamConfig::setSimulatedConeBaseRadiusMm(double value)
     value = std::max(m_simulatedConeTipRadiusMm, value);
     if (nearlyEqual(m_simulatedConeBaseRadiusMm, value)) return;
     m_simulatedConeBaseRadiusMm = value;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -620,6 +641,7 @@ void CamConfig::setCutterCollisionClearanceMm(double value)
     value = std::max(0.0, value);
     if (nearlyEqual(m_cutterCollisionClearanceMm, value)) return;
     m_cutterCollisionClearanceMm = value;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -628,6 +650,7 @@ void CamConfig::setMaximumRapidSafetyOffsetMm(double value)
     value = std::max(0.1, value);
     if (nearlyEqual(m_maximumRapidSafetyOffsetMm, value)) return;
     m_maximumRapidSafetyOffsetMm = value;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -635,6 +658,7 @@ void CamConfig::setBlockMachiningOnCollisionWarning(bool enabled)
 {
     if (m_blockMachiningOnCollisionWarning == enabled) return;
     m_blockMachiningOnCollisionWarning = enabled;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -675,6 +699,7 @@ void CamConfig::setCollisionVerificationModeForMachine(
     profile->collisionVerificationMode = mode;
     profile->collisionVerificationModeValid = true;
     profile->invalidCollisionVerificationMode.clear();
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -703,6 +728,7 @@ void CamConfig::setCollisionSourcesForMachine(const QString& machinePath,
         && profile->passiveCollisionSources == normalizedPassive) return;
     profile->activeCollisionSources = normalizedActive;
     profile->passiveCollisionSources = normalizedPassive;
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -717,6 +743,7 @@ void CamConfig::copyMachineProfile(const QString& sourceMachinePath,
     if (source == m_machineProfiles.cend())
         return;
     m_machineProfiles.insert(targetKey, source.value());
+    ++*m_changes.value;
     saveDefault();
 }
 
@@ -729,5 +756,6 @@ void CamConfig::clearLegacyWorkpieceInstallPositionForMachine(const QString& mac
         return;
     profile->hasWorkpieceInstallPosition = false;
     profile->workpieceInstallPosition = gp_Pnt();
+    ++*m_changes.value;
     saveDefault();
 }

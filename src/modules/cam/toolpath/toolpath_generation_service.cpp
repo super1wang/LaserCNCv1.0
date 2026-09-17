@@ -91,6 +91,7 @@ bool ToolpathGenerationService::acceptsMotionResult(
 bool ToolpathGenerationService::sameMotionAuthority(
     const MotionCompilationInput& captured, const MotionCompilationInput& current)
 {
+    if (captured.configurationRevision != current.configurationRevision) return false;
     if (captured.capturedContextHash != motionCompilationContextHash(captured.context)
         || current.capturedContextHash != motionCompilationContextHash(current.context))
         return false;

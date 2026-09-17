@@ -223,6 +223,7 @@ int main(int argc, char* argv[])
             next.phase = node.phase;
             next.contourId = node.contourId;
             next.activeAxisMask = node.axisMask;
+            next.motionClass = lcnc::cam::MotionClass::SingleAxis;
             next.fences.append({0, true, false,
                 node.phase == lcnc::cam::CamMotionPhase::Cutting});
             if (!boundaryPlan.blocks.isEmpty()) {
@@ -292,6 +293,8 @@ int main(int argc, char* argv[])
     evaluatorBlock.blockId = 9;
     evaluatorBlock.phase = lcnc::cam::CamMotionPhase::Cutting;
     evaluatorBlock.contourId = 3;
+    evaluatorBlock.activeAxisMask = 1;
+    evaluatorBlock.motionClass = lcnc::cam::MotionClass::SingleAxis;
     evaluatorBlock.interpolation =
         lcnc::cam::MotionInterpolationKind::PhysicalAxisLine;
     lcnc::cam::CamMotionNode evaluatorFirst;
@@ -537,6 +540,7 @@ int main(int argc, char* argv[])
     cached.collisionSafety.jobOverlayRequired = true;
     cached.collisionSafety.jobOverlayBuildInProgress = true;
     cutting.tcpX = 123.0;
+    cutting.axisMask = rapid.axisMask;
     cached.motionPlan = plan;
     cached.motionPlan.blocks[0].phase = cutting.phase;
     cached.motionPlan.blocks[0].contourId = cutting.contourId;

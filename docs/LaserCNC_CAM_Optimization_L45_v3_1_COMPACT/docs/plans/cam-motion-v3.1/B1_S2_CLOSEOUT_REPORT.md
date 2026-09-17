@@ -1,6 +1,6 @@
 # B1.S2 收口记录
 
-- 基线 HEAD：`e8428b6666be929df3b090b57e0bd1686ef28172`；本次为未提交工作区修复。
+- 基线 HEAD：`e8428b6666be929df3b090b57e0bd1686ef28172`；S2 收口已提交为 `9ca7222`。
 - 目标仓库：`https://github.com/super1wang/LaserCNCv1.0.git`，分支 `codex/cam-motion-v3.2.1-b1`；未推送。
 - 范围：仅 C2.1 / C2.2 / C2.3，不进行 B1 Stage Gate，不实施 S3。
 

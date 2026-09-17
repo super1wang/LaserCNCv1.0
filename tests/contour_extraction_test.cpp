@@ -19,12 +19,19 @@
 #include "core/kernel/kernel.h"
 #include "core/project/lcnc_project_manager.h"
 #include "modules/cam/cam_module.h"
+#include "modules/cam/integration/cam_service_adapters.h"
+#include "modules/cam/contracts/i_cam_toolpath_provider.h"
+#include "core/task/task_manager.h"
 #include "view/gui_application.h"
 
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QTimer>
 #include <QTextStream>
+#include <QElapsedTimer>
+#include <QTemporaryDir>
+#include <QThread>
+#include <QScopeGuard>
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -44,6 +51,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <thread>
 
 // Exercise the actual owner capture/publication boundaries without starting a
 // controller, showing a window or bypassing the production solve service.
@@ -55,6 +63,99 @@ public:
 
 struct CamMotionCompilationTestAccess
 {
+    static QString verifyProvider(CamModule& cam, lcnc::Kernel& kernel, std::uint64_t id)
+    {
+        using namespace lcnc::cam;
+        registerCamServiceAdapters(kernel, cam);
+        auto provider = kernel.service<ICamToolpathProvider>();
+        if (!provider) return QStringLiteral("Registered toolpath provider missing");
+        const auto waitFor = [](const auto& condition) {
+            QElapsedTimer timer; timer.start();
+            while (!condition() && timer.elapsed() < 10000) {
+                QCoreApplication::processEvents(); QThread::msleep(1);
+            }
+            return condition();
+        };
+        const auto ready = [&] { return !provider->exportCommittedExecutionSnapshot().motionPlan.planHash.isEmpty(); };
+        emit cam.contourOrderTravelPlanRebuilt({id});
+        if (!waitFor(ready)) return QStringLiteral("Provider initial publication failed");
+        const auto first = provider->exportCommittedExecutionSnapshot();
+        std::atomic_bool stopReader{false}, mixedRecord{false};
+        std::thread reader([&] {
+            while (!stopReader.load()) {
+                const auto record = provider->exportCommittedExecutionSnapshot();
+                if (!record.motionPlan.planHash.isEmpty() && !finalMotionPlanIdentityIsCurrent(record.motionPlan))
+                    mixedRecord.store(true);
+                std::this_thread::yield();
+            }
+        });
+        const auto joinReader = qScopeGuard([&] { stopReader.store(true); reader.join(); });
+        QTemporaryDir directory;
+        const auto apply = [&](const char* mode, bool dof, bool z) {
+            TrajectoryTestConfig config;
+            config.readFrom(toml::value(toml::table{{"trajectory", toml::table{
+                {"optimizationMode", std::string(mode)}, {"enableDofReduction", dof}, {"enableLaserZHold", z}}}}));
+            const auto path = directory.filePath(QStringLiteral("cam.toml"));
+            return config.save(path) && cam.config().load(path);
+        };
+        for (int variant = 0; variant < 3; ++variant) {
+            if (!apply("Conservative", variant > 0, variant > 1)) return QStringLiteral("Config reload failed");
+            const auto blocked = provider->exportCommittedExecutionSnapshot();
+            if (!blocked.motionPlan.planHash.isEmpty() || blocked.hasEnabledContours()
+                || blocked.motionPlan.failureReason.isEmpty() || cam.toolpathRevision() != first.revision)
+                return QStringLiteral("Public provider returned old policy or catalog as committed");
+            if (!cam.solveToolpathForOrder({id})) return QStringLiteral("New policy solve failed");
+            emit cam.contourOrderTravelPlanRebuilt({id});
+            if (!waitFor(ready)) return QStringLiteral("New policy publication failed");
+        }
+        const auto stable = provider->exportCommittedExecutionSnapshot();
+        const auto count = ToolpathSolveService::optimizationInvocationCount();
+        for (int repeat = 0; repeat < 5; ++repeat) {
+            const auto copy = provider->exportCommittedExecutionSnapshot();
+            if (copy.motionPlan.planHash != stable.motionPlan.planHash
+                || copy.motionPlan.contextHash != stable.motionPlan.contextHash
+                || copy.motionPlan.optimizerReport.parameterProvenance != stable.motionPlan.optimizerReport.parameterProvenance)
+                return QStringLiteral("Provider split plan/context/report record");
+        }
+        cam.m_travelPlanCache = stable.travelPlan;
+        cam.m_travelPlanCache.verifiedMotionPlanHash = stable.motionPlan.planHash;
+        cam.m_travelPlanCache.collision.failureReason = QStringLiteral("test-only/proof-refresh");
+        emit cam.contourOrderTravelPlanRebuilt({id});
+        const auto proof = provider->exportCommittedExecutionSnapshot();
+        if (ToolpathSolveService::optimizationInvocationCount() != count
+            || proof.motionPlan.planHash != stable.motionPlan.planHash
+            || proof.motionPlan.collision.failureReason != QStringLiteral("test-only/proof-refresh"))
+            return QStringLiteral("Proof refresh reselected motion or lost same-hash proof");
+
+        // Queue the actual optimization job, mutate authority before the owner
+        // can receive completion, then verify that the late result is rejected.
+        if (!apply("Full", false, false) || !cam.solveToolpathForOrder({id})) return QStringLiteral("Late fixture solve failed");
+        emit cam.contourOrderTravelPlanRebuilt({id});
+        if (!apply("Off", false, false)) return QStringLiteral("Late fixture reload failed");
+        const auto noCompileTasks = [&] {
+            for (const auto& task : kernel.taskManager()->activeTasks())
+                if (task.scope == QStringLiteral("cam.motion.compile")) return false;
+            return true;
+        };
+        if (!waitFor(noCompileTasks) || ready()) return QStringLiteral("Late optimizer result was published");
+        TaskId cancelledTask = kInvalidTaskId;
+        const auto connection = QObject::connect(kernel.taskManager(), &TaskManager::taskStarted, &cam,
+            [&](TaskId task, const QString& label) {
+                if (label == QStringLiteral("Compile CAM motion")) {
+                    cancelledTask = task; kernel.taskManager()->requestAbort(task);
+                }
+            });
+        if (!cam.solveToolpathForOrder({id})) return QStringLiteral("Cancel fixture solve failed");
+        emit cam.contourOrderTravelPlanRebuilt({id});
+        QObject::disconnect(connection);
+        if (cancelledTask == kInvalidTaskId || !waitFor(noCompileTasks) || ready())
+            return QStringLiteral("Actual TaskManager cancellation published motion");
+        emit cam.contourOrderTravelPlanRebuilt({id});
+        if (!waitFor(ready)) return QStringLiteral("Retry after cancellation did not publish");
+        if (mixedRecord.load()) return QStringLiteral("Concurrent public provider read a partial record");
+        return {};
+    }
+
     static QString verifyClosedSourceTraversal()
     {
         lcnc::MachineConfigurationService configuration;
@@ -133,6 +234,7 @@ struct CamMotionCompilationTestAccess
                     block.hasEntryBoundary = true; block.entryBoundary = raw.blocks.last().physicalKnots.last();
                     block.sourceSpans.prepend({1, -1, -1, block.entryBoundary.sourceParameter,
                         block.entryBoundary.sourceParameter, block.entryBoundary.sourceEdgeIndex});
+                    block.fences[0].blockStart = false;
                     block.fences.prepend({-1, true, false, true});
                 }
                 raw.blocks.append(block);
@@ -216,6 +318,56 @@ struct CamMotionCompilationTestAccess
                 if (expectedNormal.Angle(gp_Dir(state.processDirectionX, state.processDirectionY, state.processDirectionZ)) > 1e-5)
                     return QStringLiteral("Frozen orientation disagrees with authoritative IK: ") + preset;
             }
+            if (reduction.boundNumericalZ) {
+                // Formal FK/bound with isolated test-only admission, never a
+                // capability supplied to CamModule or the production provider.
+                using namespace lcnc::cam;
+                CamMotionPlanSnapshot reference;
+                reference.context = input.context;
+                reference.context.controllerQualification = {ControllerMotionMode::PhysicalAxes,
+                    ControllerQualificationState::Qualified, 1, "test-only", QStringLiteral("R1/test-only")};
+                reference.context.controllerCapabilityHash = controllerQualificationSnapshotHash(reference.context.controllerQualification);
+                reference.context.dynamicsSemanticHash = "test-only-dynamics";
+                CamMotionBlock block;
+                block.blockId = 1; block.contourId = 1;
+                block.activeAxisMask = poses[0].activeMask;
+                block.motionClass = static_cast<MotionClass>(input.modeDefinition.interpolatedAxes.count - 1);
+                block.optimizationState = MotionOptimizationState::Optimized;
+                CamMotionNode node;
+                node.contourId = 1; node.axes = poses[0].values; node.axisMask = poses[0].activeMask;
+                block.physicalKnots = {node, node, node};
+                for (int knot = 0; knot < 3; ++knot) block.physicalKnots[knot].axes[0] += 0.25 * knot;
+                int zAxis = -1;
+                for (int slot = 0; slot < input.modeDefinition.interpolatedAxes.count; ++slot)
+                    if (input.modeDefinition.interpolatedAxes.axes[slot].role == lcnc::MachineAxisRole::LinearZ) zAxis = slot;
+                if (zAxis < 0) return QStringLiteral("Real FK fixture has no Z");
+                block.physicalKnots[1].axes[zAxis] = std::nextafter(node.axes[zAxis], node.axes[zAxis] + 1);
+                reference.blocks = {block};
+                QString reductionError;
+                if (!finalizeMotionPlan(&reference, &reductionError)) return reductionError;
+                auto qualified = reduction;
+                qualified.admission.controllerSnapshotHash = reference.context.controllerCapabilityHash;
+                qualified.admission.dynamicsHash = reference.context.dynamicsSemanticHash;
+                qualified.admission.exactPhysicalAxisLine = true;
+                qualified.admission.feedAndDynamicsRepresentable = true;
+                qualified.admission.supportedActiveMasks.fill(true);
+                lcnc::cam_algo::Full5DPolicy limits;
+                limits.mode = lcnc::cam_algo::PoseOptimizationMode::Conservative;
+                lcnc::cam_algo::ReductionPolicy policy;
+                policy.mode = limits.mode; policy.enableDofReduction = true; policy.zAxis = zAxis;
+                lcnc::cam_algo::ReductionReport report;
+                CamMotionPlanSnapshot reduced;
+                if (!lcnc::cam_algo::reduceMotionPlan(reference, limits, policy,
+                        [&](const auto&) { return qualified; }, &reduced, &report, &reductionError)
+                    || !report.blocks[0].numericalZApplied
+                    || reduced.blocks[0].optimizationState != MotionOptimizationState::Reduced)
+                    return QStringLiteral("Real frozen FK numerical-Z/reduction failed: ") + reductionError;
+                QTextStream(stdout) << "R1 real-FK " << preset << " knots=3->" << reduced.nodes.size()
+                    << " blocks=1->" << reduced.blocks.size() << " mask=" << int(reduced.blocks[0].activeAxisMask)
+                    << " positionBound=" << reduced.optimizerReport.maximumPositionDeviationMm
+                    << " orientationBound=0 events=0 compileMs=" << report.compileTimeMs
+                    << " hash=" << reduced.planHash.toHex() << '\n';
+            }
         }
         return {};
     }
@@ -278,6 +430,37 @@ struct CamMotionCompilationTestAccess
                 departureExported = departureExported || (span.firstKnot == -1
                     && span.firstSourceParameter == 0.25 && span.sourceEdgeIndex == 0);
         if (!departureExported) return QStringLiteral("Production raw construction lost source departure span");
+        // Continuous cutting across a source seam: structural blocks must not
+        // add IO. Use the real Raw builder and both optimizer passes.
+        auto rawEvents = cam.exportToolpathBaseSnapshot();
+        auto& seamPoints = rawEvents.pointsByContourId[id];
+        seamPoints[0].departureSourceEdgeIndex = 1;
+        seamPoints[1].sourceEdgeIndex = 1;
+        cam.attachMotionPlan(rawEvents, true);
+        const auto events = [](const auto& plan) {
+            QStringList projected;
+            for (const auto& block : plan.blocks) for (const auto& fence : block.fences) {
+                if (!fence.changesLaserState && !fence.requiredStop) continue;
+                const auto& node = fence.knotIndex < 0 ? block.entryBoundary : block.physicalKnots[fence.knotIndex];
+                projected.append(QStringLiteral("%1:%2:%3:%4").arg(node.contourId)
+                    .arg(node.sourceParameter, 0, 'g', 17).arg(fence.changesLaserState ? int(fence.laserEnabledAfterFence) : -1)
+                    .arg(fence.requiredStop));
+            }
+            return projected;
+        };
+        if (events(rawEvents.motionPlan).size() != 2 || events(rawEvents.motionPlan) != events(snapshot.motionPlan))
+            return QStringLiteral("Structural source split inserted a laser/stop event");
+        QTextStream(stdout) << "R1 production Off/Unavailable knots=" << rawEvents.motionPlan.nodes.size()
+            << "->" << snapshot.motionPlan.nodes.size() << " blocks=" << rawEvents.motionPlan.blocks.size()
+            << "->" << snapshot.motionPlan.blocks.size() << " laserEvents=2 stops=0 hash="
+            << snapshot.motionPlan.planHash.toHex() << '\n';
+        rawEvents.motionPlan.blocks.last().fences.last().requiredStop = true;
+        if (!lcnc::cam::finalizeMotionPlan(&rawEvents.motionPlan)) return QStringLiteral("Explicit stop fixture invalid");
+        const auto expectedEvents = events(rawEvents.motionPlan);
+        QString eventError;
+        if (!lcnc::cam::ToolpathSolveService::optimizeMotionSnapshot(&rawEvents, *captured, &eventError)
+            || events(rawEvents.motionPlan) != expectedEvents)
+            return QStringLiteral("Full5D/Reduction changed an explicit stop: ") + eventError;
         const auto originalConfig = cam.m_config;
         TrajectoryTestConfig configured;
         toml::value policyRoot(toml::table{});
@@ -304,7 +487,9 @@ struct CamMotionCompilationTestAccess
             if (block.optimizationState == lcnc::cam::MotionOptimizationState::Reduced)
                 return QStringLiteral("Production unqualified reduction was admitted");
         cam.m_config = originalConfig;
-        if (!cam.solveToolpathForOrder({id}, captured)) return QStringLiteral("Restored policy solve failed");
+        if (!cam.solveToolpathForOrder({id}, cam.captureMotionCompilationInput())) return QStringLiteral("Restored policy solve failed");
+        const auto providerError = verifyProvider(cam, kernel, id);
+        if (!providerError.isEmpty()) return providerError;
         const auto differentOrder = cam.exportToolpathSnapshotForOrder({id, id});
         if (!differentOrder.motionPlan.planHash.isEmpty() || differentOrder.motionPlan.failureReason.isEmpty())
             return QStringLiteral("Owner reused solved coordinates for a different requested contour order");

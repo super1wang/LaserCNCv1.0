@@ -572,6 +572,7 @@ CamModule::captureMotionCompilationInput(
             generation.sources.push_back({source.workpieceEntry, source.componentIndex, source.shape});
     }
     MotionCompilationInput values;
+    values.configurationRevision = m_config.changeRevision();
     values.geometryPolicy = {};
     const QString optimizationMode = m_config.trajectoryOptimizationMode();
     using lcnc::cam_algo::PoseOptimizationMode;
@@ -743,7 +744,7 @@ void CamModule::retainMotionCompilationInput(
     m_motionCompilationResultOrder = QVector<std::uint64_t>(order.cbegin(), order.cend());
 }
 
-void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) const
+void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot, bool deferOptimization) const
 {
     auto& plan = snapshot.motionPlan;
     plan = {};
@@ -940,8 +941,10 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
                 lcnc::cam::MotionOptimizationState::Raw;
             block.sourceSpans.append({node.contourId, 0, 0,
                 node.sourceParameter, node.sourceParameter, node.sourceEdgeIndex});
-            block.fences.append({0, true, false,
-                node.phase == lcnc::cam::CamMotionPhase::Cutting});
+            const bool startsCut = node.phase == lcnc::cam::CamMotionPhase::Cutting
+                && (plan.blocks.isEmpty() || plan.blocks.last().phase != node.phase
+                    || plan.blocks.last().contourId != node.contourId);
+            block.fences.append({0, true, false, startsCut, startsCut, false});
             block.feed.profileHash = plan.context.dynamicsSemanticHash;
             block.toleranceProof.exactKnots = true;
             if (!plan.blocks.isEmpty()) {
@@ -970,10 +973,14 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         block.motionClass = motionClassForMask(block.activeAxisMask);
         block.feed.estimatedDurationMs += node.estimatedTimeMs;
     }
-    for (auto& block : plan.blocks) {
+    for (int i = 0; i < plan.blocks.size(); ++i) {
+        auto& block = plan.blocks[i];
         const int lastKnot = block.physicalKnots.size() - 1;
         block.sourceSpans.last().lastKnot = lastKnot;
-        block.fences.append({lastKnot, false, true, false});
+        const bool endsCut = block.phase == lcnc::cam::CamMotionPhase::Cutting
+            && (i + 1 == plan.blocks.size() || plan.blocks[i + 1].phase != block.phase
+                || plan.blocks[i + 1].contourId != block.contourId);
+        block.fences.append({lastKnot, false, true, false, endsCut, false});
     }
     plan.optimizerReport.knotsBefore = sourceNodes.size();
     plan.optimizerReport.knotsAfter = sourceNodes.size();
@@ -998,45 +1005,9 @@ void CamModule::attachMotionPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
         return;
     }
     bool finalized = plan.blocks.isEmpty() || lcnc::cam::finalizeMotionPlan(&plan, &finalizationError);
-    if (finalized && !plan.blocks.isEmpty()) {
-        auto posePolicy = m_motionCompilationInput->full5DPolicy;
-        auto reductionPolicy = m_motionCompilationInput->reductionPolicy;
-        for (int index = 0; index < projectionLayout.count; ++index) {
-            const auto* axis = projection->findAxis(projectionLayout.axes[index].name);
-            if (!axis) {
-                finalized = false;
-                finalizationError = QStringLiteral("Frozen Full5D axis layout is unavailable");
-                break;
-            }
-            posePolicy.minimumAxes[index] = axis->minVal;
-            posePolicy.maximumAxes[index] = axis->maxVal;
-            if (axis->motionType == MachineAxisDef::Rotary) posePolicy.rotaryMask |= (1u << index);
-            if (axis->role == lcnc::MachineAxisRole::LinearZ) reductionPolicy.zAxis = index;
-        }
-        if (finalized) {
-            lcnc::cam_algo::Full5DMetrics metrics;
-            const auto modelForBlock = [&](const lcnc::cam::CamMotionBlock& block) {
-                const auto contour = std::find_if(snapshot.contours.cbegin(), snapshot.contours.cend(),
-                    [&](const auto& item) { return item.contourId == block.contourId; });
-                return contour == snapshot.contours.cend() ? lcnc::cam_algo::MotionEvaluationContext{}
-                    : lcnc::cam::ToolpathSolveService::physicalEvaluationContext(
-                        *m_motionCompilationInput, contour->workpieceEntry);
-            };
-            finalized = lcnc::cam_algo::optimizeFull5D(plan, posePolicy, {}, &plan, &metrics,
-                &finalizationError, {}, modelForBlock);
-            if (finalized) {
-                lcnc::cam_algo::ReductionReport reductionReport;
-                finalized = lcnc::cam_algo::reduceMotionPlan(plan, posePolicy, reductionPolicy,
-                    [&](const auto& block) {
-                        const auto contour = std::find_if(snapshot.contours.cbegin(), snapshot.contours.cend(),
-                            [&](const auto& item) { return item.contourId == block.contourId; });
-                        return contour == snapshot.contours.cend() ? lcnc::cam_algo::ReductionEvaluation{}
-                            : lcnc::cam::ToolpathSolveService::reductionEvaluationContext(
-                                *m_motionCompilationInput, contour->workpieceEntry);
-                    }, &plan, &reductionReport, &finalizationError);
-            }
-        }
-    }
+    if (finalized && !plan.blocks.isEmpty() && !deferOptimization)
+        finalized = lcnc::cam::ToolpathSolveService::optimizeMotionSnapshot(
+            &snapshot, *m_motionCompilationInput, &finalizationError);
     if (finalized && (snapshot.revision != toolpathRevision()
         || !lcnc::cam::ToolpathGenerationService::sameMotionAuthority(
             *m_motionCompilationInput, *captureMotionCompilationInput()))) {
@@ -1576,8 +1547,38 @@ void CamModule::attachTravelPlan(lcnc::cam::ToolpathExportSnapshot& snapshot) co
     m_travelSolutionCache = snapshot;
 }
 
+QByteArray CamModule::currentMotionPublicationKey() const
+{
+    const auto current = captureMotionCompilationInput();
+    if (!m_motionCompilationInput || toolpathRevision() != m_motionCompilationResultRevision
+        || !lcnc::cam::ToolpathGenerationService::sameMotionAuthority(*m_motionCompilationInput, *current)
+        || !lcnc::cam::ToolpathSolveService::geometryHasCurrentSolve(toolpathRef().contours())) return {};
+    const auto& travel = m_travelPlanCache.key;
+    return current->capturedContextHash.toHex() + ':' + QByteArray::number(m_config.changeRevision())
+        + ':' + QByteArray::number(travel.toolpathRevision) + ':' + QByteArray::number(travel.orderHash)
+        + ':' + QByteArray::number(travel.environmentRevision) + ':' + QByteArray::number(travel.motionProfileHash)
+        + ':' + QByteArray::number(travel.compensationOffsetX, 'g', 17)
+        + ':' + QByteArray::number(travel.compensationOffsetY, 'g', 17);
+}
+
+bool CamModule::adoptMotionPublication(const lcnc::cam::ToolpathExportSnapshot& snapshot, const QByteArray& key) const
+{
+    if (key.isEmpty() || key != currentMotionPublicationKey()
+        || snapshot.revision != toolpathRevision() || !lcnc::cam::finalMotionPlanIdentityIsCurrent(snapshot.motionPlan)) return false;
+    if (!m_motionCompilationInput || snapshot.motionPlan.contextHash != m_motionCompilationInput->capturedContextHash
+        || !(snapshot.travelPlan.key == m_travelPlanCache.key)
+        || std::any_of(snapshot.motionPlan.blocks.cbegin(), snapshot.motionPlan.blocks.cend(),
+            [](const auto& block) { return block.optimizationState == lcnc::cam::MotionOptimizationState::Raw; })) return false;
+    QVector<std::uint64_t> order;
+    for (const auto& contour : snapshot.contours) order.append(contour.contourId);
+    if (order != m_motionCompilationResultOrder) return false;
+    m_compiledMotionSnapshot = snapshot;
+    m_compiledMotionKey = key;
+    return true;
+}
+
 lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
-    const QVector<std::uint64_t>& orderedContourIds) const
+    const QVector<std::uint64_t>& orderedContourIds, bool deferOptimization) const
 {
     if (orderedContourIds.isEmpty())
         return exportToolpathBaseSnapshot();
@@ -1610,7 +1611,21 @@ lcnc::cam::ToolpathExportSnapshot CamModule::exportToolpathSnapshotForOrder(
     }
     applyToolMotionOffsets(snapshot);
     attachTravelPlan(snapshot);
-    attachMotionPlan(snapshot);
+    const auto key = currentMotionPublicationKey();
+    if (!key.isEmpty() && key == m_compiledMotionKey
+        && m_compiledMotionSnapshot.travelPlan.key == snapshot.travelPlan.key) {
+        auto cached = m_compiledMotionSnapshot;
+        cached.collisionSafety = snapshot.collisionSafety;
+        // Proof attachment only. The exact motion and optimizer report stay fixed.
+        if (snapshot.travelPlan.verifiedMotionPlanHash == cached.motionPlan.planHash) {
+            cached.travelPlan = snapshot.travelPlan;
+            cached.motionPlan.collision = snapshot.travelPlan.collision;
+            cached.motionPlan.edgeCertificates = snapshot.travelPlan.motionCertificates;
+        }
+        return cached;
+    }
+    attachMotionPlan(snapshot, deferOptimization);
+    if (!deferOptimization) adoptMotionPublication(snapshot, key);
     return snapshot;
 }
 

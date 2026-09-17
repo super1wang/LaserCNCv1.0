@@ -1042,6 +1042,7 @@ bool CamModule::validateCurrentToolpathCollisions(QString* errorMessage)
     for (auto& transition : pending.transitions)
         transition.collisionStates.clear();
     pending.collision.intervals.clear();
+    pending.verifiedMotionPlanHash = snapshot.motionPlan.planHash;
     m_travelPlanCache = pending;
     snapshot.travelPlan = pending;
     snapshot.motionPlan.collision = pending.collision;
@@ -2170,6 +2171,7 @@ void CamModule::scheduleFullEnvironmentVerification(
     m_taskScope.track(taskId);
     QObject::connect(tasks, &TaskManager::taskFinishedDetailed, this,
         [this, tasks, taskId, planKey, geometryKey, verifiedOrder, result, completedGeometry,
+         verifiedMotionPlanHash = snapshot.motionPlan.planHash,
          completedNodeStates, completedIntervals, completedIndeterminate,
          completedMotionCertificates, completedRapidStates,
          completedCollision, completedWarning,
@@ -2243,6 +2245,7 @@ void CamModule::scheduleFullEnvironmentVerification(
             m_travelPlanCache.collision.intervals = *completedIntervals;
             m_travelPlanCache.motionCertificates =
                 *completedMotionCertificates;
+            m_travelPlanCache.verifiedMotionPlanHash = verifiedMotionPlanHash;
             for (auto& transition : m_travelPlanCache.transitions) {
                 const auto states = completedRapidStates->value(
                     transition.toContourId);

@@ -496,6 +496,11 @@ Off/Conservative/Full differential
 
 ## 10. B1 Stage Gate
 
+R1 收口实施：结构 fence 与实际激光变更/required stop 分离；公共 provider 通过冻结输入任务
+完成 Full5D/Reduction，只发布匹配 current authority、配置代际、实际顺序和 travel key 的完整记录。
+同 identity 重读复用编译结果；碰撞附件按 exact planHash 更新。证据与首版范围见
+[B1_R1_CLOSEOUT_REPORT.md](B1_R1_CLOSEOUT_REPORT.md)。R1 人工复核前 B2_RELEASE 保持 NO。
+
 仍只进行一次正式 Stage Gate。
 
 运行：

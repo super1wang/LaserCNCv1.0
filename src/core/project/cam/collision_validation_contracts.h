@@ -252,6 +252,9 @@ struct MotionProcessFence
     bool blockStart{false};
     bool blockEnd{false};
     bool laserEnabledAfterFence{false};
+    /// Structural markers do not issue IO. State is meaningful only when set.
+    bool changesLaserState{false};
+    bool requiredStop{false};
 };
 
 struct MotionFeedSemantics

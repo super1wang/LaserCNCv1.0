@@ -5,6 +5,9 @@
 #include "core/kernel/i_kernel.h"
 #include "core/kernel/kernel.h"
 #include "core/kernel/service_registry.h"
+#include "core/task/task_manager.h"
+#include "modules/cam/toolpath/toolpath_solve_service.h"
+#include "modules/cam/toolpath/toolpath_generation_service.h"
 #include "core/logging/logger.h"
 #include "core/project/cam/layer_container.h"
 #include "core/project/cam/layer_manager.h"
@@ -30,6 +33,7 @@
 #include <TDF_Label.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <atomic>
+#include <algorithm>
 #include <memory>
 
 namespace lcnc::cam {
@@ -37,124 +41,176 @@ namespace {
 
 class CamToolpathProviderAdapter final : public QObject, public ICamToolpathProvider {
   public:
-    explicit CamToolpathProviderAdapter(CamModule& module) : m_module(module) {
-        QObject::connect(&m_module, &CamModule::toolpathGenerated, this,
-                         [this] { refreshCache(); });
-        QObject::connect(&m_module, &CamModule::toolpathCleared, this, [this] { refreshCache(); });
-        QObject::connect(&m_module, &CamModule::toolpathLayersChanged, this,
-                         [this] { refreshCache(); });
-        QObject::connect(&m_module, &CamModule::activeContourParametersChanged, this,
-                         [this] { refreshCache(); });
-        QObject::connect(&m_module, &CamModule::machiningModeChanged, this,
-                         [this](lcnc::MachiningMode) { refreshCache(true); });
-        QObject::connect(&m_module, &CamModule::workpieceSetupTransformChanged, this,
-                         [this] { refreshCache(true); });
-        QObject::connect(&m_module, &CamModule::collisionConfigurationChanged, this,
-                         [this] { refreshCache(true); });
-        QObject::connect(&m_module, &CamModule::machineSafetyPackageChanged, this,
-                         [this] { refreshCache(true); });
-        QObject::connect(&m_module, &CamModule::pipelineStageChanged, this,
-                         [this](CamPipelineStage) { refreshCache(); });
-        QObject::connect(
-            &m_module, &CamModule::contourOrderTravelPlanRebuilt, this,
+    explicit CamToolpathProviderAdapter(CamModule& module)
+        : m_module(module), m_configClock(module.config().changeClock()),
+          m_tasks(lcnc::Kernel::current().taskManager()) {
+        m_machineLoading = module.isMachineLoadPending();
+        QObject::connect(&module, &CamModule::machineLoadPendingChanged, this, [this](bool pending) {
+            QMutexLocker lock(&m_cacheMutex);
+            m_machineLoading = pending;
+            if (pending) m_currentKey.clear();
+        });
+        const auto refresh = [this] { refreshCache(); };
+        if (auto* machine = lcnc::Kernel::current().service<lcnc::MachineConfigurationService>())
+            QObject::connect(machine, &lcnc::MachineConfigurationService::machineConfigurationChanged, this, refresh);
+        QObject::connect(lcnc::Kernel::current().projectManager(),
+            &lcnc::LcncProjectManager::activeWorkspaceChanged, this, refresh);
+        QObject::connect(lcnc::Kernel::current().projectManager(),
+            &lcnc::LcncProjectManager::domainDataChanged, this, refresh);
+        QObject::connect(&module, &CamModule::toolpathGenerated, this, refresh);
+        QObject::connect(&module, &CamModule::toolpathCleared, this, refresh);
+        QObject::connect(&module, &CamModule::toolpathLayersChanged, this, refresh);
+        QObject::connect(&module, &CamModule::activeContourParametersChanged, this, refresh);
+        QObject::connect(&module, &CamModule::machiningModeChanged, this, refresh);
+        QObject::connect(&module, &CamModule::workpieceSetupTransformChanged, this, refresh);
+        QObject::connect(&module, &CamModule::collisionConfigurationChanged, this, refresh);
+        QObject::connect(&module, &CamModule::machineSafetyPackageChanged, this, refresh);
+        QObject::connect(&module, &CamModule::machineWorkspaceChanged, this, refresh);
+        QObject::connect(&module, &CamModule::axisAssignmentsChanged, this, refresh);
+        QObject::connect(&module, &CamModule::workpieceMounted, this, refresh);
+        QObject::connect(&module, &CamModule::workpieceUnmounted, this, refresh);
+        QObject::connect(&module, &CamModule::pipelineStageChanged, this, refresh);
+        QObject::connect(&module, &CamModule::contourOrderTravelPlanRebuilt, this,
             [this](const QVector<std::uint64_t>& order) { refreshPlannedCacheForOrder(order); });
+        if (m_tasks) QObject::connect(m_tasks, &TaskManager::taskFinished, this,
+            [this](TaskId id, bool success) {
+                if (id != m_taskId) return;
+                m_taskId = kInvalidTaskId;
+                auto result = std::move(m_pending);
+                const auto key = m_pendingKey;
+                m_pendingKey.clear();
+                if (!success || !result || !result->ok || result->cancelled->load()
+                    || !m_module.adoptMotionPublication(result->snapshot, key)) return;
+                QVector<std::uint64_t> order;
+                for (const auto& contour : result->snapshot.contours) order.append(contour.contourId);
+                auto published = m_module.exportToolpathSnapshotForOrder(order, true);
+                QMutexLocker lock(&m_cacheMutex);
+                m_plannedSnapshot = std::move(published);
+                m_plannedKey = key;
+                m_plannedConfigRevision = result->configurationRevision;
+            });
+        QObject::connect(&module, &QObject::destroyed, this, [this] {
+            m_ownerAlive = false;
+            if (m_pending) m_pending->cancelled->store(true);
+            if (m_tasks) QObject::disconnect(m_tasks, nullptr, this, nullptr);
+            QMutexLocker lock(&m_cacheMutex);
+            m_currentKey.clear();
+        });
         refreshCache();
+    }
+
+    ~CamToolpathProviderAdapter() override {
+        // Workers only own frozen input/result, never this adapter or the module.
+        if (m_pending) m_pending->cancelled->store(true);
+        if (m_tasks && m_taskId != kInvalidTaskId) m_tasks->requestAbort(m_taskId);
     }
 
     bool hasToolpath() const override {
         QMutexLocker lock(&m_cacheMutex);
         return m_baseSnapshot.hasEnabledContours();
     }
-
     std::uint64_t toolpathRevision() const override {
         QMutexLocker lock(&m_cacheMutex);
         return m_baseSnapshot.revision;
     }
-
     ToolpathExportSnapshot exportToolpathCatalogSnapshot() const override {
         QMutexLocker lock(&m_cacheMutex);
-        if (!m_module.isMachineLoadPending())
-            return m_baseSnapshot;
-        return machineLoadBlockedSnapshot(m_baseSnapshot);
+        return m_baseSnapshot;
     }
-
     ToolpathExportSnapshot exportCommittedExecutionSnapshot() const override {
         QMutexLocker lock(&m_cacheMutex);
-        if (m_module.isMachineLoadPending())
-            return machineLoadBlockedSnapshot(m_baseSnapshot);
-        return m_plannedSnapshot.revision == m_baseSnapshot.revision ? m_plannedSnapshot
-                                                                     : m_baseSnapshot;
+        if (!m_machineLoading && !m_plannedKey.isEmpty()
+            && m_plannedKey == m_currentKey
+            && m_plannedConfigRevision == m_configClock->load()
+            && m_plannedSnapshot.revision == m_baseSnapshot.revision) return m_plannedSnapshot;
+        ToolpathExportSnapshot blocked;
+        blocked.revision = m_baseSnapshot.revision;
+        blocked.description = QStringLiteral("Motion publication is stale or not ready");
+        blocked.motionPlan.failureReason = blocked.description;
+        blocked.travelPlan.failureReason = blocked.description;
+        blocked.travelPlan.stale = true;
+        return blocked; // Catalog points are never an execution fallback.
     }
 
   private:
-    static ToolpathExportSnapshot machineLoadBlockedSnapshot(const ToolpathExportSnapshot& base) {
-        auto blocked = base;
-        blocked.travelPlan = {};
-        blocked.travelPlan.mode = TravelPlanningMode::FullEnvironment;
-        blocked.travelPlan.failureReason = QCoreApplication::translate(
-            "CamModule",
-            "The machine model is loading; a verified rapid travel plan is not available yet");
-        blocked.travelPlan.stale = false;
-        blocked.motionPlan = {};
-        blocked.motionPlan.revision = blocked.revision;
-        blocked.motionPlan.collision.state = CollisionValidationState::Pending;
-        blocked.motionPlan.collision.complete = false;
-        blocked.motionPlan.collision.failureReason = blocked.travelPlan.failureReason;
-        return blocked;
-    }
-
-    void refreshPlannedCacheForOrder(const QVector<std::uint64_t>& orderedContourIds) {
-        if (QThread::currentThread() != m_module.thread())
-            return;
-        auto snapshot = orderedContourIds.isEmpty()
-                            ? m_module.exportToolpathBaseSnapshot()
-                            : m_module.exportToolpathSnapshotForOrder(orderedContourIds);
-        auto baseSnapshot = m_module.exportToolpathBaseSnapshot();
-        QMutexLocker lock(&m_cacheMutex);
-        const auto samePlannedOrder = [this, &snapshot] {
-            if (m_plannedSnapshot.revision != snapshot.revision ||
-                m_plannedSnapshot.contours.size() != snapshot.contours.size() ||
-                !(m_plannedSnapshot.travelPlan.key == snapshot.travelPlan.key)) {
-                return false;
-            }
-            for (int index = 0; index < snapshot.contours.size(); ++index) {
-                if (m_plannedSnapshot.contours.at(index).contourId !=
-                    snapshot.contours.at(index).contourId) {
-                    return false;
-                }
-            }
-            return true;
-        };
-        if (samePlannedOrder()) {
-            // Verification completes asynchronously after the planned
-            // snapshot was first cached. Preserve coordinates solved with the
-            // committed rapid path, but refresh every collision proof field;
-            // otherwise Process keeps seeing Job Overlay=Building and missing
-            // edge certificates after CAM has already published both.
-            // 中文翻译：异步校验完成时保留已提交的运动坐标，但必须同步工件缓存就绪状态、
-            // 碰撞结果和连续边证书，避免 Process 永久读取构建中的旧快照。
-            if (!m_plannedSnapshot.mergeCollisionProofFrom(snapshot))
-                m_plannedSnapshot = std::move(snapshot);
-        } else {
-            m_plannedSnapshot = std::move(snapshot);
+    struct Pending {
+        ToolpathExportSnapshot snapshot;
+        std::shared_ptr<std::atomic_bool> cancelled{std::make_shared<std::atomic_bool>(false)};
+        std::uint64_t configurationRevision{0};
+        bool ok{false};
+    };
+    void refreshPlannedCacheForOrder(const QVector<std::uint64_t>& order) {
+        if (!m_ownerAlive) return;
+        if (QThread::currentThread() != m_module.thread()) return;
+        auto key = m_module.currentMotionPublicationKey();
+        auto base = m_module.exportToolpathBaseSnapshot();
+        {
+            QMutexLocker lock(&m_cacheMutex);
+            m_currentKey = key;
+            m_baseSnapshot = std::move(base);
         }
-        m_baseSnapshot = std::move(baseSnapshot);
+        if (key.isEmpty()) {
+            if (m_pending) m_pending->cancelled->store(true);
+            return;
+        }
+        if (m_pending && m_pendingKey == key && !m_pending->cancelled->load()) return;
+        auto snapshot = m_module.exportToolpathSnapshotForOrder(order, true);
+        if (!finalMotionPlanIdentityIsCurrent(snapshot.motionPlan)) return;
+        key = m_module.currentMotionPublicationKey();
+        if (key.isEmpty()) return;
+        { QMutexLocker lock(&m_cacheMutex); m_currentKey = key; }
+        const bool compiled = std::all_of(snapshot.motionPlan.blocks.cbegin(), snapshot.motionPlan.blocks.cend(),
+            [](const auto& block) { return block.optimizationState != MotionOptimizationState::Raw; });
+        if (compiled) {
+            QMutexLocker lock(&m_cacheMutex);
+            m_plannedSnapshot = std::move(snapshot);
+            m_plannedKey = key;
+            m_plannedConfigRevision = m_configClock->load();
+            return;
+        }
+        const auto input = m_module.motionPublicationInput();
+        if (!input || !m_tasks) return;
+        if (m_pending) m_pending->cancelled->store(true);
+        if (m_taskId != kInvalidTaskId) m_tasks->requestAbort(m_taskId);
+        auto result = std::make_shared<Pending>();
+        result->snapshot = std::move(snapshot);
+        result->configurationRevision = input->configurationRevision;
+        m_pending = result;
+        m_pendingKey = key;
+        const auto configClock = m_configClock;
+        TaskSpec spec;
+        spec.label = QStringLiteral("Compile CAM motion");
+        spec.scope = QStringLiteral("cam.motion.compile");
+        m_taskId = m_tasks->run(spec, [input, result, configClock](TaskProgress* progress) {
+            const auto cancelled = [&] {
+                return progress->isAbortRequested() || result->cancelled->load()
+                    || configClock->load() != result->configurationRevision;
+            };
+            QString error;
+            result->ok = !cancelled() && ToolpathSolveService::optimizeMotionSnapshot(
+                &result->snapshot, *input, &error, cancelled) && !cancelled();
+        });
     }
 
-    void refreshCache(bool invalidatePlannedPlan = false) {
-        if (QThread::currentThread() != m_module.thread())
-            return;
-        auto snapshot = m_module.exportToolpathBaseSnapshot();
-        QMutexLocker lock(&m_cacheMutex);
-        if (invalidatePlannedPlan || m_plannedSnapshot.revision != snapshot.revision)
-            m_plannedSnapshot = {};
-        m_baseSnapshot = std::move(snapshot);
+    void refreshCache() {
+        if (!m_ownerAlive) return;
+        if (QThread::currentThread() != m_module.thread()) return;
+        const auto order = m_module.contourSequenceSnapshot().orderedContourIds;
+        refreshPlannedCacheForOrder(QVector<std::uint64_t>(order.cbegin(), order.cend()));
     }
 
     CamModule& m_module;
+    std::shared_ptr<const std::atomic_uint64_t> m_configClock;
+    QPointer<TaskManager> m_tasks;
+    TaskId m_taskId{kInvalidTaskId};
+    std::shared_ptr<Pending> m_pending;
+    QByteArray m_pendingKey;
     mutable QMutex m_cacheMutex;
-    ToolpathExportSnapshot m_baseSnapshot;
-    ToolpathExportSnapshot m_plannedSnapshot;
+    ToolpathExportSnapshot m_baseSnapshot, m_plannedSnapshot;
+    QByteArray m_currentKey, m_plannedKey;
+    std::uint64_t m_plannedConfigRevision{0};
+    bool m_machineLoading{false};
+    bool m_ownerAlive{true};
 };
 
 class CamOfflineSimulationProviderAdapter final : public QObject,

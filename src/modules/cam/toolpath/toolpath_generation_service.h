@@ -56,6 +56,7 @@ struct MotionCompilationInput
     QVector<Parameter> parameters;
     MotionCompilationContext context;
     QByteArray capturedContextHash;
+    std::uint64_t configurationRevision{0};
     // Computation values and identity travel together from the owner thread.
     GeometrySamplingPolicy geometryPolicy;
     lcnc::cam_algo::Full5DPolicy full5DPolicy;

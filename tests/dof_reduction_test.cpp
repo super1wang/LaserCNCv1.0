@@ -30,7 +30,7 @@ CamMotionPlanSnapshot fixture(int count = 3)
         block.physicalKnots.append(node);
     }
     block.sourceSpans = {{1, 0, count - 1, 0, double(count - 1), 0}};
-    block.fences = {{0, true, false, true}, {count - 1, false, true, false}};
+    block.fences = {{0, true, false, true, true, false}, {count - 1, false, true, false, true, false}};
     plan.blocks = {block};
     finalizeMotionPlan(&plan);
     return plan;
@@ -101,6 +101,15 @@ int main(int argc, char** argv)
                     && output.nodes[1].tcpX == std::sin(source.nodes[1].axes[4])
                     && finalMotionPlanIdentityIsCurrent(output), "derived fields or full physical pose lost")) return 1;
     const auto stableHash = output.planHash;
+    QTextStream(stdout) << "R1 test-only C-only knots=" << source.nodes.size() << "->" << output.nodes.size()
+        << " blocks=" << source.blocks.size() << "->" << output.blocks.size()
+        << " mask=" << int(output.blocks[0].activeAxisMask)
+        << " positionBound=" << output.optimizerReport.maximumPositionDeviationMm
+        << " orientationBound=" << output.optimizerReport.maximumOrientationDeviationDegrees
+        << " laserEvents=2 stops=0 rotaryTravel=" << report.blocks[0].axes[4].travel
+        << " reversals=" << report.blocks[0].axes[4].reversals << " maxRotaryDelta=" << report.blocks[0].axes[4].maximumLocalDelta
+        << " candidates=" << report.blocks[0].candidates << " compileMs=" << report.compileTimeMs
+        << " hash=" << output.planHash.toHex() << '\n';
     if (!require(run() && output.planHash == stableHash, "selection is not deterministic")) return 1;
     source.context.collisionMode = CollisionVerificationMode::Required;
     finalizeMotionPlan(&source);
@@ -114,6 +123,33 @@ int main(int argc, char** argv)
                  && output.planHash == source.planHash, "unproved evaluator candidate replaced reference")) return 1;
     if (!require(run(), "restoring evaluator failed")) return 1;
     auto forged = output;
+    forged.blocks[0].optimizationState = MotionOptimizationState::Optimized;
+    if (!require(!finalizeMotionPlan(&forged), "Optimized label bypassed inactive axis semantics")) return 1;
+    forged = source;
+    forged.blocks[0].motionClass = MotionClass::SingleAxis;
+    if (!require(!finalizeMotionPlan(&forged), "inconsistent class accepted")) return 1;
+    forged = source;
+    forged.blocks[0].sourceSpans[0].lastKnot = 999;
+    if (!require(!finalizeMotionPlan(&forged), "out-of-range source span accepted")) return 1;
+    const auto eventProjection = [](const CamMotionPlanSnapshot& plan) {
+        QStringList events;
+        for (const auto& block : plan.blocks) for (const auto& fence : block.fences) {
+            if (!fence.changesLaserState && !fence.requiredStop) continue;
+            const auto& node = fence.knotIndex < 0 ? block.entryBoundary : block.physicalKnots[fence.knotIndex];
+            events.append(QStringLiteral("%1:%2:%3:%4").arg(node.sourceParameter, 0, 'g', 17)
+                .arg(fence.changesLaserState).arg(fence.laserEnabledAfterFence).arg(fence.requiredStop));
+        }
+        return events;
+    };
+    source.blocks[0].fences[1].requiredStop = true;
+    finalizeMotionPlan(&source);
+    if (!require(run() && eventProjection(source) == eventProjection(output), "reduction changed real laser/stop events")) return 1;
+    const auto stoppedHash = source.planHash;
+    source.blocks[0].fences[1].requiredStop = false;
+    finalizeMotionPlan(&source);
+    if (!require(stoppedHash != source.planHash, "required stop missing from identity")) return 1;
+    if (!require(run(), "event fixture restore failed")) return 1;
+    forged = output;
     forged.blocks[0].physicalKnots[1].axes[0] = 1;
     if (!require(!finalizeMotionPlan(&forged), "finalizer admitted a moving held axis")) return 1;
     for (int i = 0; i < 3; ++i) source.blocks[0].physicalKnots[i].axes[0] = i;

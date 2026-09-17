@@ -21,7 +21,7 @@ struct ReductionPolicy
     int maximumCandidates{32};
     // Numerical rounding budget only, never a process machining tolerance.
     static constexpr int numericalUlps = 64;
-    static constexpr int costRevision = 1;
+    static constexpr int costRevision = 2;
 };
 
 /// Supplied only by a qualification authority, bound to frozen context hashes.
