@@ -4,6 +4,7 @@
 #include <vector>
 #include <QString>
 #include <QStringList>
+#include <QHash>
 #include "tool.h"
 using std::map;
 using std::vector;
@@ -22,7 +23,9 @@ public:
 	static Tool* GetTool(const QString&);
 	static Tool* GetTool(const string&);
 
-	void  SetTool(int,Tool);
+	void  SetTool(int, Tool, bool explicitRecipe = true);
+	/// Atomic value capture; excludes synthesized compatibility tools.
+	static QHash<QString, Tool> executionRecipes();
 
 	void ToolClear();
 

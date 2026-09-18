@@ -84,6 +84,9 @@ signals:
     void logMessage(const QString& message);
 
 private:
+    bool runExactProgram(const QString& nodeId, const QVariantMap& parameters,
+                         ProcessInterruptContext& interrupt, QString* error);
+
     struct CuttingRow
     {
         ProcessJobContour data;

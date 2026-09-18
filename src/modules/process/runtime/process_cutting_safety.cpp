@@ -38,8 +38,15 @@ QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapsho
     };
     const auto& collision = snapshot.motionPlan.collision;
     const auto& safety = snapshot.collisionSafety;
-    const bool collisionRequired = safety.effectiveVerificationMode()
+    const bool hasFinalPlan = !snapshot.motionPlan.blocks.isEmpty();
+    if (hasFinalPlan && !lcnc::cam::finalMotionPlanIdentityIsCurrent(snapshot.motionPlan))
+        return QStringLiteral("FinalMotionPlan identity is stale");
+    const bool collisionRequired = (hasFinalPlan ? snapshot.motionPlan.context.collisionMode
+                                                : safety.effectiveVerificationMode())
         == lcnc::cam::CollisionVerificationMode::Required;
+    if (hasFinalPlan && collisionRequired
+        && snapshot.travelPlan.verifiedMotionPlanHash != snapshot.motionPlan.planHash)
+        return QStringLiteral("Required collision proof does not bind the FinalMotionPlan");
     if (realMachineExecution && collisionRequired && safety.machinePackageRequired
         && (!safety.machinePackageReady || safety.packageBuildInProgress)) {
         if (!safety.failureReason.isEmpty())
@@ -65,7 +72,7 @@ QString camExecutionBlockReason(const lcnc::cam::ToolpathExportSnapshot& snapsho
         // 中文翻译：CAM 全路径碰撞校验未确认路径安全
         return cuttingTr("CAM full-path collision validation did not confirm a safe path");
     }
-    if (snapshot.contours.size() > 1 && !snapshot.travelPlan.isPathReady()) {
+    if (!hasFinalPlan && snapshot.contours.size() > 1 && !snapshot.travelPlan.isPathReady()) {
         // 中文翻译：空程规划丢失或已过期
         return snapshot.travelPlan.failureReason.isEmpty()
             ? cuttingTr("The rapid travel plan is missing or out of date")

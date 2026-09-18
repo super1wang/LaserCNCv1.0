@@ -1,4 +1,5 @@
 #include "modules/process/runtime/process_cutting_safety.h"
+#include "prepared_device_program_test.h"
 #include "modules/process/runtime/motion_feedback_validation.h"
 #include "modules/process/runtime/process_run_coordinator.h"
 #include "core/algorithms/cam/collision_policy.h"
@@ -11,6 +12,7 @@ using namespace lcnc::process;
 
 int main()
 {
+    verifyPreparedDeviceProgram();
     // Physical log regression: commanded +360 degrees, encoder -360.003;
     // this must never become the next Group's rebased start position.
     if (stationaryFeedbackMatches(360000.0, -360003.0, 1000.0)

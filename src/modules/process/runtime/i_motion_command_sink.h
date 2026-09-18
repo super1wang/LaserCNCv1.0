@@ -30,6 +30,7 @@ namespace lcnc::process {
 
 class ProcessInterruptContext;
 class PureSimulationToolpathTicker;
+class PreparedDeviceProgram;
 
 /// Narrow callbacks used by motion sinks to project state back to the UI.
 /// They deliberately avoid exposing ProcessModule through runtime contracts.
@@ -52,6 +53,15 @@ public:
 
     /// 注入中断令牌；sink 内部在长循环里轮询。
     virtual void setCancellation(ProcessInterruptContext* token) = 0;
+
+    // B2 exact-plan cutover. Legacy sinks must opt in through qualified
+    // lowering; never translate this call into the old point-loop methods.
+    // Implementations stage only (no device Start), consuming frozen inputs.
+    virtual bool prepareExactProgram(const PreparedDeviceProgram&, QString* error)
+    {
+        if (error) *error = QStringLiteral("Exact-plan lowering is unavailable for this controller");
+        return false;
+    }
 
     // —— 程序生命周期 ——
     virtual void resetProgram() = 0;

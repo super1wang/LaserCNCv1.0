@@ -18,6 +18,7 @@
 #include "modules/process/runtime/rapid_motion_utilities.h"
 #include "modules/process/settings/process_settings_service.h"
 #include "modules/process/runtime/process_cutting_safety.h"
+#include "modules/process/runtime/prepared_device_program.h"
 
 #include <QString>
 #include <QStringList>
@@ -135,6 +136,13 @@ bool NormalCuttingManager::run(const QString& nodeId,
     ProcessInterruptContext localFallback;
     ProcessInterruptContext& ic = interrupt ? *interrupt : localFallback;
 
+    // The compatibility point loop below is explicit visualization only.
+    // Capture the mode once; no controller failure can switch to simulation.
+    const bool explicitSimulation = m_callbacks.simulationModeProvider
+        && m_callbacks.simulationModeProvider();
+    if (!explicitSimulation)
+        return runExactProgram(nodeId, parameters, ic, errorMessage);
+
     const int startNumber   = parameters.value(QString::fromLatin1(kStartNumber), 1).toInt();
     const int endNumber     = parameters.value(QString::fromLatin1(kEndNumber), 0).toInt();
     const QString compIndex = parameters.value(QString::fromLatin1(kCompensationIndex)).toString();
@@ -203,8 +211,7 @@ bool NormalCuttingManager::run(const QString& nodeId,
     }
 
     // 选 sink —— 硬件 sink 必须在设备执行线程创建、使用和销毁。
-    const bool simMode = m_callbacks.simulationModeProvider
-        && m_callbacks.simulationModeProvider();
+    const bool simMode = true;
     const MotionSinkCallbacks& sinkCallbacks = m_callbacks.motionSink;
     std::shared_ptr<IMotionCommandSink> sink;
     QString backendLabel;
@@ -372,6 +379,109 @@ bool NormalCuttingManager::run(const QString& nodeId,
     ic.clearResumePoint(nodeId);
     // 中文翻译：普通切割完成
     emit logMessage(tr("Ordinary cutting completed"));
+    return true;
+}
+
+bool NormalCuttingManager::runExactProgram(const QString& nodeId,
+    const QVariantMap& parameters, ProcessInterruptContext& interrupt, QString* error)
+{
+    const auto reject = [&](const char* message) {
+        if (error) *error = QString::fromLatin1(message);
+        return false;
+    };
+    if (!m_toolpathProvider || !m_planService || !m_settings || !m_service || !m_deviceQueue)
+        return reject("Exact-plan execution dependencies are unavailable");
+    // A sliced/restarted plan needs a CAM-owned incoming boundary. S1 does
+    // not manufacture an approach or replay a partially started program.
+    if (parameters.value(QStringLiteral("startNumber"), 1).toInt() > 1
+        || parameters.value(QStringLiteral("endNumber"), 0).toInt() != 0
+        || !parameters.value(QStringLiteral("compensationIndex")).toString().isEmpty())
+        return reject("Exact-plan range/compensation changes require a new CAM publication");
+    if (interrupt.hasResumePoint(nodeId))
+        return reject("Exact-plan replay is forbidden; restart requires a fresh run");
+
+    cam::ToolpathExportSnapshot snapshot;
+    DeviceRunRecipe recipe;
+    QString captureError;
+    // Settings and layer bindings are owner-thread objects. Never read them
+    // from a device task or retain ToolFactory pointers in the frozen run.
+    const auto capture = [&] {
+        snapshot = m_toolpathProvider->exportCommittedExecutionSnapshot();
+        recipe.planHash = snapshot.motionPlan.planHash;
+        recipe.contextHash = snapshot.motionPlan.contextHash;
+        recipe.sourceId = QStringLiteral("process/committed-settings-and-project-tools");
+        recipe.processIoProfile = m_settings->committedSnapshot().value;
+        recipe.feedOverride = m_callbacks.motionSink.feedOverrideProvider
+            ? m_callbacks.motionSink.feedOverrideProvider() : 1.0;
+        const auto bindings = m_planService->buildCuttingList();
+        const auto tools = ToolFactory::executionRecipes();
+        for (const auto& binding : bindings) {
+            if (!binding.compensationIndex.isEmpty()) {
+                captureError = QStringLiteral("Unresolved contour compensation is not executable");
+                return;
+            }
+            const auto tool = tools.constFind(binding.toolName);
+            if (binding.toolName.isEmpty() || tool == tools.cend()) {
+                captureError = QStringLiteral("Explicit contour tool recipe is missing");
+                return;
+            }
+            recipe.toolsByContour.insert(binding.contourId, tool.value());
+        }
+        // Capture must still refer to the same authoritative publication.
+        const auto current = m_toolpathProvider->exportCommittedExecutionSnapshot();
+        if (current.motionPlan.planHash != recipe.planHash || current.motionPlan.contextHash != recipe.contextHash)
+            captureError = QStringLiteral("CAM publication changed during recipe capture");
+        recipe.revision = deviceRunRecipeHash(recipe);
+    };
+    if (thread() == QThread::currentThread()) capture();
+    else if (!QMetaObject::invokeMethod(this, capture, Qt::BlockingQueuedConnection))
+        return reject("Unable to capture run recipe on the owner thread");
+    if (!captureError.isEmpty()) { if (error) *error = captureError; return false; }
+    static std::atomic<std::uint64_t> nextEpoch{0};
+    const auto program = PreparedDeviceProgram::prepare(snapshot, recipe, ++nextEpoch, true, error);
+    if (!program) return false;
+    if (!interrupt.checkpoint(nodeId, QStringLiteral("beforeExactProgram"),
+        {{QStringLiteral("planHash"), program->plan().planHash},
+         {QStringLiteral("runEpoch"), qulonglong(program->runEpoch())}}))
+        return reject("Exact-plan run cancelled");
+
+    // All SDK ownership stays on the existing queue. S1 hardware sinks reject
+    // prepareExactProgram; S2 supplies lowering and start-position admission.
+    std::unique_ptr<IMotionCommandSink> sink;
+    const auto cleanup = qScopeGuard([&] {
+        if (!sink) return;
+        const auto result = m_deviceQueue->executeAndWait([&] {
+            m_service->stopMotionAndSafeOutputs();
+            sink.reset();
+            return DeviceCommandResult{};
+        }, TaskPriority::Stop, -1);
+        if (!result.success && sink) {
+            sink.release(); // retain SDK-owned object if queue has shut down
+            LCNC_ERR(lcnc::LogCode::Generic, "Exact-plan sink retained after queue shutdown");
+        }
+    });
+    const auto submitted = m_deviceQueue->executeAndWait([&] {
+        if (interrupt.isStopping()) return DeviceCommandResult{false, QStringLiteral("Run cancelled")};
+        const auto health = m_service->validateContourBoundary();
+        if (!health.success) return health;
+        MotionSinkCallbacks frozenCallbacks = m_callbacks.motionSink;
+        frozenCallbacks.feedOverrideProvider = [value = program->recipe().feedOverride] { return value; };
+        sink = m_service->createMotionSink(false, nullptr, frozenCallbacks, program->layout());
+        if (!sink) return DeviceCommandResult{false, QStringLiteral("Exact-plan controller sink unavailable")};
+        sink->setCancellation(&interrupt);
+        QString reason;
+        if (!sink->prepareExactProgram(*program, &reason)) return DeviceCommandResult{false, reason};
+        if (interrupt.isStopping()) return DeviceCommandResult{false, QStringLiteral("Run cancelled before Start")};
+        return DeviceCommandResult{sink->startProgram(&reason), reason};
+    }, TaskPriority::Workflow, -1);
+    if (!submitted.success) { if (error) *error = submitted.error; return false; }
+    const auto waited = waitForQueuedMotion(*m_deviceQueue, [&](bool& running) {
+        QString reason;
+        running = sink->isProgramRunning(&reason);
+        return DeviceCommandResult{reason.isEmpty(), reason};
+    }, [&] { return interrupt.isStopping(); });
+    if (!waited.success) { if (error) *error = waited.error; return false; }
+    interrupt.clearResumePoint(nodeId);
     return true;
 }
 

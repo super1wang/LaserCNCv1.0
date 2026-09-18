@@ -1533,6 +1533,13 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
                         .arg(machineConfigurationError));
         const lcnc::cam::ToolpathExportSnapshot snapshot =
             toolpathProvider->exportCommittedExecutionSnapshot();
+        if (!m_simulationMode) {
+            if (snapshot.motionPlan.blocks.isEmpty()
+                || !lcnc::cam::finalMotionPlanIdentityIsCurrent(snapshot.motionPlan))
+                return fail(QStringLiteral("Real execution requires a current FinalMotionPlan; legacy fallback is disabled"));
+            if (!lcnc::cam::controllerQualificationIsQualified(snapshot.motionPlan.context.controllerQualification))
+                return fail(QStringLiteral("Controller motion qualification is unavailable; real execution is disabled"));
+        }
         // Process preflight must inspect the same immutable execution snapshot
         // that NormalCutting will consume, including CAM collision state.
         // 中文翻译：Process 预检必须读取加工将执行的同一份 CAM 不可变快照及碰撞状态。
@@ -1615,8 +1622,9 @@ bool ProcessModule::validateProcessingConfiguration(QString* errorMessage, bool 
             snapshot, !m_simulationMode);
         if (!camBlockReason.isEmpty())
             return fail(tr("Machining cannot start: %1").arg(camBlockReason));
-        const auto collisionMode =
-            snapshot.collisionSafety.effectiveVerificationMode();
+        const auto collisionMode = snapshot.motionPlan.blocks.isEmpty()
+            ? snapshot.collisionSafety.effectiveVerificationMode()
+            : snapshot.motionPlan.context.collisionMode;
         if (collisionMode == lcnc::cam::CollisionVerificationMode::Disabled) {
             LCNC_WARN(lcnc::LogCode::Generic,
                       "process.collision: mode=disabled certified=false result=commissioning_only");

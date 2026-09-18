@@ -54,7 +54,7 @@ void ProcessDeviceRuntime::setToolTable()
         fallback.m_dXsegEndVelocity  = 1.0;
         fallback.m_strDirectionX  = "X";
         fallback.m_strDirectionY  = "Y";
-        m_ToolFactory.SetTool(0, fallback);
+        m_ToolFactory.SetTool(0, fallback, false);
     }
 }
 
