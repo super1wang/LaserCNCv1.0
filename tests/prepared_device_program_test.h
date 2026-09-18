@@ -5,6 +5,7 @@
 #include "modules/process/tool/tool_factory.h"
 #include "b2_s1_closeout_test.h"
 #include <cassert>
+#include <limits>
 
 inline void verifyPreparedDeviceProgram()
 {
@@ -13,10 +14,11 @@ inline void verifyPreparedDeviceProgram()
     using namespace lcnc::process;
     Tool source;
     source.m_strName = "explicit";
-    source.m_dLineVelocity = 100;
-    source.m_dLineAcc = 1000;
-    source.m_dLineJerk = 10000;
-    source.m_dCutSmoothTime = 2;
+    source.SetFromTable(toml::table{{"fLineVel", 100.0}, {"fCutAcc", 1000.0},
+                                  {"fCutJerk", 10000.0}, {"fCutSmoothTime", 2.0}});
+    assert(source.m_dLineVelocity == 100);
+    assert(source.m_dLineAcc == 1000 && source.m_dArcAcc == 1000);
+    assert(source.m_dLineJerk == 10000 && source.m_dArcJerk == 10000);
     Tool assigned;
     assigned = source;
     assert(assigned.m_dCutSmoothTime == 2);
@@ -79,8 +81,18 @@ inline void verifyPreparedDeviceProgram()
     DeviceRunRecipe recipe;
     recipe.sourceId = QStringLiteral("test/explicit-recipe");
     recipe.processIoProfile = toml::value(toml::table{{"laserChannel", 5}, {"profile", 42}});
-    const auto frozenTool = freezeToolExecutionRecipe(source, recipe.sourceId, &error);
+    const auto frozenTool = freezeToolExecutionRecipe(
+        capturedTools[QStringLiteral("explicit")], recipe.sourceId, &error);
     assert(frozenTool);
+    assert(frozenTool->lineAcceleration == 1000 && frozenTool->lineJerk == 10000);
+    for (auto field : {&Tool::m_dArcVelocity, &Tool::m_dArcAcc, &Tool::m_dArcJerk}) {
+        for (double value : {1.0, std::numeric_limits<double>::quiet_NaN(),
+                             std::numeric_limits<double>::infinity()}) {
+            Tool independentArc = source;
+            independentArc.*field = value;
+            assert(!freezeToolExecutionRecipe(independentArc, recipe.sourceId, &error));
+        }
+    }
     recipe.toolsByContour.insert(9, *frozenTool);
     const auto bind = [&] {
         recipe.planHash = plan.planHash;

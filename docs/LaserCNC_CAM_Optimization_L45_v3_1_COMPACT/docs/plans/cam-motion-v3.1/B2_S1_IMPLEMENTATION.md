@@ -2,7 +2,8 @@
 
 初版日期：2026-09-17；收口更新：2026-09-18。R1 已由用户确认通过。
 初版已提交为 `0b6b3ae0177b550c657b69e0a02fe2e5c38007c1`。
-本轮收口修改位于工作区，尚无收口 commit；本轮没有提交或推送操作。
+首次收口 F01/F02 已提交为 `27a867413544a4323e366440a16a83af8fb3c3a8`。
+二次审计 F03 的增量修复及验证记录见下文；历史提交与本次交付分开记录。
 
 ## 代码范围
 
@@ -44,16 +45,28 @@
 - 同一 live run 始终使用同一 PreparedDeviceProgram、plan/context/recipe identity 和 runEpoch。只对尚未 Start 的 section 延迟准入；任何 Start 失败均返回，不重试。保留 checkpoint 的新调用拒绝恢复；失败后的 safe-stop/SDK 所有权仍由既有队列及 NormalCutting 清理路径处理。
 - `consumeExactSection` 只遍历对应原始 blocks，entryBoundary 不作为重复指令发出。此合同不包含 S2 编码或 S3 Group 生命周期资格。
 
-## 本轮收口验证
+## 首次收口验证（27a8674）
 
 - Ninja Debug 全量构建通过；11 项直接回归全部通过（8.04 秒），其中 process_cutting_safety 包含 F01 逐字段检查、原 S1 用例与 F02 六种并发运行场景。
 - Ninja ASan 全量构建通过；同组回归 11/11（20.44 秒），无 sanitizer 报告。
 - 架构检查与 `git diff --check` 通过。仅测试头命名空间整理后，补跑 Debug process_cutting_safety；未扩展 B1/B2 Stage Gate。
 - 初版日志已被本轮同路径日志替换；上文初版数字为历史记录。
 
+## F03：生产加载的圆弧兼容镜像
+
+- `Tool::SetFromTable` 将 line acceleration/jerk 镜像至 arc 字段；冻结只接受精确相等的镜像，仍拒绝非零 arcVelocity、独立 arcAcc/arcJerk 及非有限值。
+- 不新增 frozen arc 字段，不改变 DTO、identity schema 或 S2 接口；lineAcceleration/lineJerk 仍是唯一执行权威。
+- 正向回归使用真实 TOML table → SetFromTable → ToolFactory 显式配方快照 → freeze → offline PreparedDeviceProgram。负向覆盖三个 arc 字段的独立值、NaN/Inf；保留 F01 全字段与 F02 六种暂停/无重放场景。
+
+### 二次收口验证（2026-09-18）
+
+- Ninja Debug 与 ASan 的 process_cutting_safety / process_current_schema 目标构建通过；定向 CTest 分别 2/2（3.76 秒）、2/2（7.96 秒），无 sanitizer 报告。
+- 架构检查与 `git diff --check` 通过；本次未重复全量构建或 B2 Stage Gate。
+- 原始日志仍为两棵生成树的 `Testing/Temporary/LastTest.log`，现记录本次定向测试；首次收口 11/11 为历史证据。
+
 ## 收口结论
 
-F01 = CLOSED；F02 = CLOSED；C3 = CLOSED。
+F01 = CLOSED；F02 = CLOSED；F03 = CLOSED；C3 = CLOSED。
 `B2.S1 = PASS`，`B2.S2_RELEASE = YES`（开发准入）。
 本轮止于 S1 收口，S2/S3 尚未实施；真实 controller qualification 仍为 Unavailable/revision 0。
-收口修改由本地 commit 记录；本轮不推送远端。
+本次交付不执行提交或远端推送。

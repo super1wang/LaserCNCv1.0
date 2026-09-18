@@ -73,7 +73,11 @@ std::optional<FrozenToolExecutionRecipe> freezeToolExecutionRecipe(
     REQUIRE_ZERO(m_bFlightCutting); REQUIRE_ZERO(m_dFlightCutting_MotorDelay);
     REQUIRE_ZERO(m_bTroughFlag); REQUIRE_ZERO(m_iTroughBuffer); REQUIRE_ZERO(m_dTroughDelay);
     REQUIRE_ZERO(m_bPunch); REQUIRE_ZERO(m_dWaitFirst); REQUIRE_ZERO(m_dWaitSecond);
-    REQUIRE_ZERO(m_dArcVelocity); REQUIRE_ZERO(m_dArcAcc); REQUIRE_ZERO(m_dArcJerk);
+    REQUIRE_ZERO(m_dArcVelocity);
+    // SetFromTable mirrors line dynamics into these compatibility fields.
+    // They are not an independent native-arc profile or frozen authority.
+    if (tool.m_dArcAcc != tool.m_dLineAcc) return reject("independent arc acceleration");
+    if (tool.m_dArcJerk != tool.m_dLineJerk) return reject("independent arc jerk");
     REQUIRE_ZERO(m_iPDMode); REQUIRE_ZERO(m_dPDScaleFactor); REQUIRE_ZERO(m_dPDWidth);
     REQUIRE_ZERO(m_dPDPosOffset); REQUIRE_ZERO(m_dPDLowVelMax); REQUIRE_ZERO(m_dPDPosLowVelMax);
     REQUIRE_ZERO(m_dPDLowVelMax_1); REQUIRE_ZERO(m_dPDPosLowVelMax_1);
