@@ -2,6 +2,7 @@
 
 #include "modules/cam/contracts/toolpath_export_dto.h"
 #include "modules/process/runtime/frozen_tool_execution_recipe.h"
+#include "modules/process/runtime/gtn_lowering_profile.h"
 #include <toml.hpp>
 
 #include <functional>
@@ -20,6 +21,7 @@ struct DeviceRunRecipe {
     toml::value processIoProfile{toml::table{}};
     QHash<std::uint64_t, FrozenToolExecutionRecipe> toolsByContour;
     double feedOverride{1.0};
+    GtnLoweringProfile gtnLowering;
 };
 
 QByteArray deviceRunRecipeHash(const DeviceRunRecipe& recipe);

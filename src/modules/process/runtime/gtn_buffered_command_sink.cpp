@@ -6,6 +6,7 @@
 #include "modules/process/tool/tool.h"
 #include "modules/process/device/motion_control/gtn_motion_control.h"
 #include "modules/process/runtime/process_interrupt_context.h"
+#include "modules/process/runtime/gtn_exact_plan_lowering.h"
 
 #include "magic_enum.hpp"
 
@@ -35,6 +36,8 @@ GtnBufferedCommandSink::GtnBufferedCommandSink(GTNMotionControl* gtn, AxisMap ax
 
 void GtnBufferedCommandSink::resetProgram()
 {
+    m_exactProgram.reset();
+    m_exactSection = -1;
     m_bufferCommandFailed = false;
     if (!m_gtn)
         return;
@@ -46,6 +49,60 @@ void GtnBufferedCommandSink::resetProgram()
     } else if (!m_gtn->UsesGroupArchitecture()) {
         m_gtn->ResetProgramCommand();
     }
+}
+
+bool GtnBufferedCommandSink::prepareExactSection(
+    const PreparedDeviceProgram& program, int ordinal, QString* error)
+{
+    m_exactSection = -1;
+    const auto fail = [&](const char* reason) {
+        m_exactProgram.reset();
+        if (error) *error = QString::fromLatin1(reason);
+        return false;
+    };
+    if (!program.realMachine() || !m_gtn || ordinal < 0 || ordinal >= program.sections().size())
+        return fail("GTN exact device preparation requires a real prepared program and valid section");
+    if (m_token && m_token->isStopping())
+        return fail("GTN exact preparation cancelled");
+    const auto& profile = program.recipe().gtnLowering;
+    // AxisMap currently stores layout-order slots, despite its legacy semantic
+    // enum names. Compare through explicit physical indices; never reinterpret.
+    if (m_axisMap.activeCount() != 5)
+        return fail("GTN exact device axis mapping is unavailable");
+    for (const auto& axis : profile.axes) {
+        if (axis.physicalIndex < 0 || axis.physicalIndex >= 5)
+            return fail("GTN exact physical axis index is invalid");
+        const auto index = static_cast<AxisMap::SemanticAxis>(axis.physicalIndex);
+        if (m_axisMap.axisName(index) != axis.name || m_axisMap.controllerIndex(index) != axis.controllerAxis)
+            return fail("GTN exact device axis mapping differs from frozen qualification");
+    }
+    if (m_exactProgram) {
+        const auto& first = *m_exactProgram->sections().front();
+        if (first.planHash() != program.plan().planHash || first.contextHash() != program.plan().contextHash
+            || first.recipeRevision() != program.recipe().revision || first.runEpoch() != program.runEpoch())
+            return fail("GTN exact prepared program changed within the sink lifetime");
+    } else {
+        // No legacy GroupLineTo: it filters duplicate targets and reads Tool.
+        // Compile the entire host list atomically before exposing any section.
+        m_exactProgram = GtnEncodedProgram::lower(program,
+            [this](const auto& target, const auto& physical, QString* validationError) {
+                if (m_gtn->IsGroupRtcpActive() && m_gtn->ValidateGroupRtcpTarget(target, physical)) return true;
+                if (validationError) *validationError = QStringLiteral("GTN RTCP Group target validation failed");
+                return false;
+            }, [this] { return m_token && m_token->isStopping(); }, error);
+        if (!m_exactProgram) return false;
+    }
+    m_exactSection = ordinal;
+    return true;
+}
+
+bool GtnBufferedCommandSink::startExactSection(const PreparedDeviceProgram&, int, QString* error)
+{
+    // S2 seals the immutable host encoding. S3 must bind it to qualified
+    // Group/IO/profile admission and finite-list submission on this same queue.
+    // Never adapt this to legacy startProgram(), whose buffer has another truth.
+    if (error) *error = QStringLiteral("GTN exact Group submission lifecycle is unavailable (B2.S3)");
+    return false;
 }
 
 bool GtnBufferedCommandSink::releaseActiveGroup(QString* errorMessage,

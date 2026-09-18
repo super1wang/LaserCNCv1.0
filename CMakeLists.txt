@@ -604,6 +604,9 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/process_cutting_safety.cpp
     src/modules/process/runtime/prepared_device_program.cpp
     src/modules/process/runtime/prepared_device_program.h
+    src/modules/process/runtime/gtn_lowering_profile.h
+    src/modules/process/runtime/gtn_exact_plan_lowering.h
+    src/modules/process/runtime/gtn_exact_plan_lowering.cpp
     src/modules/process/runtime/frozen_tool_execution_recipe.cpp
     src/modules/process/runtime/frozen_tool_execution_recipe.h
     src/modules/process/runtime/exact_section_execution.cpp

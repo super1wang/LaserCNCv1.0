@@ -8,6 +8,7 @@
 class GTNMotionControl;
 
 namespace lcnc::process {
+class GtnEncodedProgram;
 
 /**
  * @brief GTN 控制器的缓存式指令汇。
@@ -33,6 +34,9 @@ public:
     QString id() const override { return QStringLiteral("GTN"); }
     bool supportsBatchProgram() const override { return true; }
     void setCancellation(ProcessInterruptContext* token) override { m_token = token; }
+
+    bool prepareExactSection(const PreparedDeviceProgram&, int ordinal, QString* error) override;
+    bool startExactSection(const PreparedDeviceProgram&, int ordinal, QString* error) override;
 
     void resetProgram() override;
     bool startProgram(QString* errorMessage = nullptr) override;
@@ -67,6 +71,8 @@ private:
     ProcessInterruptContext* m_token{nullptr};
     bool m_bufferCommandFailed{false};
     bool m_groupProgramActive{false};
+    std::shared_ptr<const GtnEncodedProgram> m_exactProgram;
+    int m_exactSection{-1};
 };
 
 } // namespace lcnc::process

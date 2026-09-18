@@ -43,8 +43,8 @@ QByteArray deviceRunRecipeHash(const DeviceRunRecipe& recipe)
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     stream.setVersion(QDataStream::Qt_6_0);
-    stream << QByteArray("device-run-recipe-v2") << recipe.planHash << recipe.contextHash
-           << recipe.sourceId << recipe.feedOverride;
+    stream << QByteArray("device-run-recipe-v3") << recipe.planHash << recipe.contextHash
+           << recipe.sourceId << recipe.feedOverride << gtnLoweringProfileHash(recipe.gtnLowering);
     encode(stream, recipe.processIoProfile);
     auto keys = recipe.toolsByContour.keys();
     std::sort(keys.begin(), keys.end());

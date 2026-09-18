@@ -69,4 +69,4 @@
 F01 = CLOSED；F02 = CLOSED；F03 = CLOSED；C3 = CLOSED。
 `B2.S1 = PASS`，`B2.S2_RELEASE = YES`（开发准入）。
 本轮止于 S1 收口，S2/S3 尚未实施；真实 controller qualification 仍为 Unavailable/revision 0。
-本次交付不执行提交或远端推送。
+二次收口已提交为 `398b4e0cf74d004ae1388b10b4e11ab985b9b9dc`，用户确认审阅通过。后续进展见 B2_S2_IMPLEMENTATION.md。
