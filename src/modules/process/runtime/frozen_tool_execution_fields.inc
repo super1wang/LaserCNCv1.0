@@ -1,0 +1,48 @@
+// Ordered execution schema v1. Re-included for declaration, capture, encoding,
+// and numeric validation. Adding an allowed field necessarily changes identity.
+// Requested values retain the legacy configured units; profileSchema identifies
+// that schema. No mm/deg/controller-unit conversion is authorized here.
+// Registry-defined units: lineVelocity mm/s; laserFrequency kHz;
+// laserPulseWidth us; shutter delays seconds. Unlabelled legacy profile values
+// (acc/jerk, smoothing, per-axis rates and device-specific laser parameters)
+// remain requested raw configuration values; S2 must reject an unqualified
+// unit mapping instead of treating them as a universal controller metric.
+LCNC_EXECUTION_FIELD(double, lineVelocity, m_dLineVelocity)
+LCNC_EXECUTION_FIELD(double, lineAcceleration, m_dLineAcc)
+LCNC_EXECUTION_FIELD(double, lineJerk, m_dLineJerk)
+LCNC_EXECUTION_FIELD(double, junctionVelocity, m_dJunctionVelocity)
+LCNC_EXECUTION_FIELD(double, junctionAngle, m_dJunctionAngle)
+LCNC_EXECUTION_FIELD(double, endVelocity, m_dXsegEndVelocity)
+LCNC_EXECUTION_FIELD(double, cutSmoothTime, m_dCutSmoothTime)
+LCNC_EXECUTION_FIELD(double, cutSmoothK, m_dCutSmoothK)
+LCNC_EXECUTION_FIELD(double, axisSmoothTime, m_dAxisSmoothTime)
+LCNC_EXECUTION_FIELD(double, axisSmoothK, m_dAxisSmoothK)
+LCNC_EXECUTION_FIELD(double, rapidXVelocity, m_dIdleXVelocity)
+LCNC_EXECUTION_FIELD(double, rapidYVelocity, m_dIdleYVelocity)
+LCNC_EXECUTION_FIELD(double, rapidZVelocity, m_dIdleZVelocity)
+LCNC_EXECUTION_FIELD(double, rapidAVelocity, m_dIdleAVelocity)
+LCNC_EXECUTION_FIELD(double, rapidA1Velocity, m_dIdleA1Velocity)
+LCNC_EXECUTION_FIELD(double, rapidCVelocity, m_dIdleCVelocity)
+LCNC_EXECUTION_FIELD(double, rapidX1Velocity, m_dIdleX1Velocity)
+LCNC_EXECUTION_FIELD(double, rapidY1Velocity, m_dIdleY1Velocity)
+LCNC_EXECUTION_FIELD(double, rapidAcceleration, m_dIdleXYAccDec)
+LCNC_EXECUTION_FIELD(double, rapidJerk, m_dIdleXYJerk)
+LCNC_EXECUTION_FIELD(double, beforeOn, m_dBeforeOn)
+LCNC_EXECUTION_FIELD(double, afterOn, m_dAfterOn)
+LCNC_EXECUTION_FIELD(double, beforeOff, m_dBeforeOff)
+LCNC_EXECUTION_FIELD(double, afterOff, m_dAfterOff)
+LCNC_EXECUTION_FIELD(double, blowDelay, m_dBlowDelay)
+LCNC_EXECUTION_FIELD(double, laserEnergy, m_dLaserEnergy)
+LCNC_EXECUTION_FIELD(int, laserFrequency, m_dLaserFrequency)
+LCNC_EXECUTION_FIELD(int, laserPulseWidth, m_dLaserPulseWidth)
+LCNC_EXECUTION_FIELD(double, attenuatorPercentage, m_dLaserAttenuatorPercentage)
+LCNC_EXECUTION_FIELD(double, pulseDivider, m_dLaserPpDivider)
+LCNC_EXECUTION_FIELD(int, laserDelay, m_iLaserDelay)
+LCNC_EXECUTION_FIELD(double, analogValue, m_dAnalogValue)
+LCNC_EXECUTION_FIELD(double, analogLaserValue, m_dAnalogLaserValue)
+LCNC_EXECUTION_FIELD(int, powerSetpoint, m_iPowerSetpoint)
+LCNC_EXECUTION_FIELD(int, repetitionRate, m_iRepetitionRate)
+LCNC_EXECUTION_FIELD(int, pulsePickerDivider, m_iPulsePickerDivider)
+LCNC_EXECUTION_FIELD(bool, stopBlow, m_bStopBlow)
+LCNC_EXECUTION_FIELD(bool, blow2, m_bBlow2)
+LCNC_EXECUTION_FIELD(bool, energySwitch, m_bEnergySwitch)

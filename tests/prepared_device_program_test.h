@@ -3,6 +3,7 @@
 #include "modules/process/runtime/prepared_device_program.h"
 #include "modules/process/runtime/pure_simulation_sink.h"
 #include "modules/process/tool/tool_factory.h"
+#include "b2_s1_closeout_test.h"
 #include <cassert>
 
 inline void verifyPreparedDeviceProgram()
@@ -78,18 +79,21 @@ inline void verifyPreparedDeviceProgram()
     DeviceRunRecipe recipe;
     recipe.sourceId = QStringLiteral("test/explicit-recipe");
     recipe.processIoProfile = toml::value(toml::table{{"laserChannel", 5}, {"profile", 42}});
-    recipe.toolsByContour.insert(9, source);
+    const auto frozenTool = freezeToolExecutionRecipe(source, recipe.sourceId, &error);
+    assert(frozenTool);
+    recipe.toolsByContour.insert(9, *frozenTool);
     const auto bind = [&] {
         recipe.planHash = plan.planHash;
         recipe.contextHash = plan.contextHash;
         recipe.revision = deviceRunRecipeHash(recipe);
     };
     bind();
+    b2_s1_test::verify(snapshot, recipe);
     auto prepared = PreparedDeviceProgram::prepare(snapshot, recipe, 1, false, &error);
     assert(prepared);
     // Existing sinks cannot silently turn exact plans back into legacy lines.
     PureSimulationSink legacySink(nullptr, {}, AxisMap{});
-    assert(!legacySink.prepareExactProgram(*prepared, &error));
+    assert(!legacySink.prepareExactSection(*prepared, 0, &error));
     assert(error.contains("lowering is unavailable"));
     // Same unqualified snapshot is valid for offline consumption, never device admission.
     assert(!PreparedDeviceProgram::prepare(snapshot, recipe, 1, true, &error));
@@ -109,7 +113,7 @@ inline void verifyPreparedDeviceProgram()
     qualifiedRecipe.contextHash = qualified.motionPlan.contextHash;
     qualifiedRecipe.revision = deviceRunRecipeHash(qualifiedRecipe);
     assert(PreparedDeviceProgram::prepare(qualified, qualifiedRecipe, 1, true, &error));
-    qualifiedRecipe.toolsByContour[9].m_dLineAcc = 0;
+    qualifiedRecipe.toolsByContour[9].lineAcceleration = 0;
     qualifiedRecipe.revision = deviceRunRecipeHash(qualifiedRecipe);
     assert(!PreparedDeviceProgram::prepare(qualified, qualifiedRecipe, 1, true, &error));
     assert(!PreparedDeviceProgram::prepare(snapshot, recipe, 0, false, &error));
@@ -121,8 +125,8 @@ inline void verifyPreparedDeviceProgram()
         bool begin(const PreparedDeviceProgram& p, QString*) override {
             feed = p.recipe().feedOverride; events << "begin"; return true;
         }
-        bool block(const CamMotionBlock& b, const Tool& t, QString*) override {
-            assert(t.m_dCutSmoothTime == 2);
+        bool block(const CamMotionBlock& b, const FrozenToolExecutionRecipe& t, QString*) override {
+            assert(t.cutSmoothTime == 2);
             events << QStringLiteral("b%1").arg(b.blockId); return true;
         }
         bool knot(const CamMotionBlock& b, int i, QString*) override {
@@ -138,7 +142,7 @@ inline void verifyPreparedDeviceProgram()
     } trace;
     // UI/settings/source mutations after prepare cannot affect the run.
     recipe.feedOverride = 0.5;
-    recipe.toolsByContour[9].m_dCutSmoothTime = 999;
+    recipe.toolsByContour[9].cutSmoothTime = 999;
     recipe.processIoProfile["laserChannel"] = 99;
     plan.blocks[1].physicalKnots[0].axes[0] = 999;
     assert(consumeExactPlan(*prepared, trace, {}, &error));
@@ -153,7 +157,7 @@ inline void verifyPreparedDeviceProgram()
     plan = prepared->plan();
     recipe = prepared->recipe();
     auto stale = recipe;
-    stale.toolsByContour[9].m_dLineVelocity++;
+    stale.toolsByContour[9].lineVelocity++;
     assert(!PreparedDeviceProgram::prepare(snapshot, stale, 2, false, &error));
     stale = recipe;
     stale.toolsByContour.clear();

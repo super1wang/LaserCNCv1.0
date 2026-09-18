@@ -411,6 +411,10 @@ bool NormalCuttingManager::runExactProgram(const QString& nodeId,
         recipe.contextHash = snapshot.motionPlan.contextHash;
         recipe.sourceId = QStringLiteral("process/committed-settings-and-project-tools");
         recipe.processIoProfile = m_settings->committedSnapshot().value;
+        // Tool semantics enter only through the validated typed recipe below.
+        if (recipe.processIoProfile.is_table() && recipe.processIoProfile.contains("Setting")
+            && recipe.processIoProfile.at("Setting").is_table())
+            recipe.processIoProfile.at("Setting").as_table().erase("Tool");
         recipe.feedOverride = m_callbacks.motionSink.feedOverrideProvider
             ? m_callbacks.motionSink.feedOverrideProvider() : 1.0;
         const auto bindings = m_planService->buildCuttingList();
@@ -425,7 +429,9 @@ bool NormalCuttingManager::runExactProgram(const QString& nodeId,
                 captureError = QStringLiteral("Explicit contour tool recipe is missing");
                 return;
             }
-            recipe.toolsByContour.insert(binding.contourId, tool.value());
+            const auto frozen = freezeToolExecutionRecipe(tool.value(), recipe.sourceId, &captureError);
+            if (!frozen) return;
+            recipe.toolsByContour.insert(binding.contourId, *frozen);
         }
         // Capture must still refer to the same authoritative publication.
         const auto current = m_toolpathProvider->exportCommittedExecutionSnapshot();
@@ -440,13 +446,9 @@ bool NormalCuttingManager::runExactProgram(const QString& nodeId,
     static std::atomic<std::uint64_t> nextEpoch{0};
     const auto program = PreparedDeviceProgram::prepare(snapshot, recipe, ++nextEpoch, true, error);
     if (!program) return false;
-    if (!interrupt.checkpoint(nodeId, QStringLiteral("beforeExactProgram"),
-        {{QStringLiteral("planHash"), program->plan().planHash},
-         {QStringLiteral("runEpoch"), qulonglong(program->runEpoch())}}))
-        return reject("Exact-plan run cancelled");
 
     // All SDK ownership stays on the existing queue. S1 hardware sinks reject
-    // prepareExactProgram; S2 supplies lowering and start-position admission.
+    // prepareExactSection; S2 supplies lowering and start-position admission.
     std::unique_ptr<IMotionCommandSink> sink;
     const auto cleanup = qScopeGuard([&] {
         if (!sink) return;
@@ -469,20 +471,11 @@ bool NormalCuttingManager::runExactProgram(const QString& nodeId,
         sink = m_service->createMotionSink(false, nullptr, frozenCallbacks, program->layout());
         if (!sink) return DeviceCommandResult{false, QStringLiteral("Exact-plan controller sink unavailable")};
         sink->setCancellation(&interrupt);
-        QString reason;
-        if (!sink->prepareExactProgram(*program, &reason)) return DeviceCommandResult{false, reason};
-        if (interrupt.isStopping()) return DeviceCommandResult{false, QStringLiteral("Run cancelled before Start")};
-        return DeviceCommandResult{sink->startProgram(&reason), reason};
+        return DeviceCommandResult{};
     }, TaskPriority::Workflow, -1);
     if (!submitted.success) { if (error) *error = submitted.error; return false; }
-    const auto waited = waitForQueuedMotion(*m_deviceQueue, [&](bool& running) {
-        QString reason;
-        running = sink->isProgramRunning(&reason);
-        return DeviceCommandResult{reason.isEmpty(), reason};
-    }, [&] { return interrupt.isStopping(); });
-    if (!waited.success) { if (error) *error = waited.error; return false; }
-    interrupt.clearResumePoint(nodeId);
-    return true;
+    return executePreparedSections(*program, *sink, *m_deviceQueue, interrupt, nodeId,
+        [this] { return m_service->validateContourBoundary(); }, error);
 }
 
 bool NormalCuttingManager::prepareInitialApproach(

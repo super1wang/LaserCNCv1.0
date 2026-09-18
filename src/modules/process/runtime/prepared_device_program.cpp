@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QIODevice>
+#include <QSet>
 #include <cmath>
 #include <algorithm>
 
@@ -42,7 +43,7 @@ QByteArray deviceRunRecipeHash(const DeviceRunRecipe& recipe)
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     stream.setVersion(QDataStream::Qt_6_0);
-    stream << QByteArray("device-run-recipe-v1") << recipe.planHash << recipe.contextHash
+    stream << QByteArray("device-run-recipe-v2") << recipe.planHash << recipe.contextHash
            << recipe.sourceId << recipe.feedOverride;
     encode(stream, recipe.processIoProfile);
     auto keys = recipe.toolsByContour.keys();
@@ -50,7 +51,7 @@ QByteArray deviceRunRecipeHash(const DeviceRunRecipe& recipe)
     stream << quint64(keys.size());
     for (auto id : keys) {
         stream << quint64(id);
-        encode(stream, toml::value(recipe.toolsByContour.value(id).toTable()));
+        stream << frozenToolExecutionRecipeHash(recipe.toolsByContour.value(id));
     }
     return QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
 }
@@ -80,6 +81,10 @@ std::shared_ptr<const PreparedDeviceProgram> PreparedDeviceProgram::prepare(
         || !recipe.processIoProfile.is_table() || recipe.processIoProfile.as_table().empty()
         || !finiteValues(recipe.processIoProfile))
         return reject("Missing, invalid or stale frozen run recipe");
+    if (recipe.processIoProfile.contains("Setting")
+        && recipe.processIoProfile.at("Setting").is_table()
+        && recipe.processIoProfile.at("Setting").contains("Tool"))
+        return reject("Legacy Tool settings cannot bypass the frozen execution recipe");
     const auto layoutMask = (1u << snapshot.machineAxisLayout.count) - 1u;
     for (const auto& block : plan.blocks) {
         if (block.optimizationState == cam::MotionOptimizationState::Raw)
@@ -87,14 +92,11 @@ std::shared_ptr<const PreparedDeviceProgram> PreparedDeviceProgram::prepare(
         for (const auto& knot : block.physicalKnots)
             if (knot.axisMask != layoutMask) return reject("Physical layout mismatch");
         const auto tool = recipe.toolsByContour.constFind(block.contourId);
-        if (tool == recipe.toolsByContour.cend() || tool->m_strName.empty()
-            || tool->m_strName == "__fallback__" || !finiteValues(toml::value(tool->toTable())))
+        if (tool == recipe.toolsByContour.cend())
             return reject("Missing or invalid contour recipe; default substitution is forbidden");
-        if (realMachine && (tool->m_dLineVelocity <= 0 || tool->m_dLineAcc <= 0
-            || tool->m_dLineJerk <= 0 || tool->m_dBeforeOn < 0 || tool->m_dAfterOn < 0
-            || tool->m_dBeforeOff < 0 || tool->m_dAfterOff < 0 || tool->m_dBlowDelay < 0))
-            return reject("Real-run motion/IO recipe is invalid; profile defaults are forbidden");
     }
+    for (auto tool = recipe.toolsByContour.cbegin(); tool != recipe.toolsByContour.cend(); ++tool)
+        if (!validateToolExecutionRecipe(tool.value(), realMachine, error)) return {};
     // The policy belongs to the hashed compilation context, not mutable UI or
     // a late safety attachment. Required proof must bind this exact plan.
     const auto mode = plan.context.collisionMode;
@@ -128,11 +130,30 @@ std::shared_ptr<const PreparedDeviceProgram> PreparedDeviceProgram::prepare(
     program->m_recipe = recipe;
     program->m_runEpoch = runEpoch;
     program->m_realMachine = realMachine;
+    QSet<std::uint64_t> seenContours;
+    bool laserEnabled = false; // device admission establishes safe outputs
+    for (int i = 0; i < plan.blocks.size(); ++i) {
+        const auto& block = plan.blocks[i];
+        if (program->m_sections.isEmpty() || program->m_sections.back().contourId != block.contourId) {
+            if (laserEnabled || seenContours.contains(block.contourId))
+                return reject("Contour boundary is not pause-safe or contour order is non-contiguous");
+            seenContours.insert(block.contourId);
+            program->m_sections.append({int(program->m_sections.size()), block.contourId,
+                i, i, block.blockId, block.blockId, block.blockHash, block.blockHash, plan.planHash, runEpoch});
+        }
+        auto& section = program->m_sections.back();
+        section.lastBlock = i;
+        section.lastBlockId = block.blockId;
+        section.lastBlockHash = block.blockHash;
+        for (const auto& fence : block.fences)
+            if (fence.changesLaserState) laserEnabled = fence.laserEnabledAfterFence;
+    }
+    if (laserEnabled) return reject("Final execution section leaves laser enabled");
     return program;
 }
 
-bool consumeExactPlan(const PreparedDeviceProgram& program, ExactPlanConsumer& consumer,
-                      const std::function<bool()>& cancelled, QString* error)
+static bool consumeBlocks(const PreparedDeviceProgram& program, int firstBlock, int lastBlock,
+    ExactPlanConsumer& consumer, const std::function<bool()>& cancelled, QString* error)
 {
     bool sealed = false;
     struct Rollback {
@@ -146,7 +167,8 @@ bool consumeExactPlan(const PreparedDeviceProgram& program, ExactPlanConsumer& c
         return true;
     };
     if (stopped() || !consumer.begin(program, error)) return false;
-    for (const auto& block : program.plan().blocks) {
+    for (int blockIndex = firstBlock; blockIndex <= lastBlock; ++blockIndex) {
+        const auto& block = program.plan().blocks[blockIndex];
         if (stopped() || !consumer.block(block, program.recipe().toolsByContour[block.contourId], error)) return false;
         const auto fences = [&](int index) {
             for (const auto& fence : block.fences)
@@ -161,5 +183,23 @@ bool consumeExactPlan(const PreparedDeviceProgram& program, ExactPlanConsumer& c
     if (stopped() || !consumer.seal(error)) return false;
     sealed = true;
     return true;
+}
+
+bool consumeExactPlan(const PreparedDeviceProgram& program, ExactPlanConsumer& consumer,
+                      const std::function<bool()>& cancelled, QString* error)
+{
+    return consumeBlocks(program, 0, int(program.plan().blocks.size()) - 1, consumer, cancelled, error);
+}
+
+bool consumeExactSection(const PreparedDeviceProgram& program, int ordinal,
+    ExactPlanConsumer& consumer, const std::function<bool()>& cancelled, QString* error)
+{
+    if (ordinal < 0 || ordinal >= program.sections().size()) {
+        if (error) *error = QStringLiteral("Invalid exact-section ordinal");
+        consumer.discard();
+        return false;
+    }
+    const auto& section = program.sections()[ordinal];
+    return consumeBlocks(program, section.firstBlock, section.lastBlock, consumer, cancelled, error);
 }
 } // namespace lcnc::process

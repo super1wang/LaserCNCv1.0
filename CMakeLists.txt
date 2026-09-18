@@ -604,6 +604,10 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/process_cutting_safety.cpp
     src/modules/process/runtime/prepared_device_program.cpp
     src/modules/process/runtime/prepared_device_program.h
+    src/modules/process/runtime/frozen_tool_execution_recipe.cpp
+    src/modules/process/runtime/frozen_tool_execution_recipe.h
+    src/modules/process/runtime/exact_section_execution.cpp
+    src/modules/process/runtime/exact_section_execution.h
     src/modules/process/runtime/process_preflight_types.h
     src/modules/process/runtime/process_preflight_service.h
     src/modules/process/runtime/process_preflight_service.cpp
