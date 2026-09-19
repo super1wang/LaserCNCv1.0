@@ -607,6 +607,8 @@ set(SRCS_MODULE_PROCESS
     src/modules/process/runtime/gtn_lowering_profile.h
     src/modules/process/runtime/gtn_exact_plan_lowering.h
     src/modules/process/runtime/gtn_exact_plan_lowering.cpp
+    src/modules/process/runtime/gtn_exact_session.cpp
+    src/modules/process/runtime/gtn_exact_session.h
     src/modules/process/runtime/frozen_tool_execution_recipe.cpp
     src/modules/process/runtime/frozen_tool_execution_recipe.h
     src/modules/process/runtime/exact_section_execution.cpp
@@ -697,6 +699,7 @@ endif()
 if(LCNC_WITH_GTN)
     list(APPEND SRCS_MODULE_PROCESS
         src/modules/process/device/motion_control/gtn_motion_control.cpp
+        src/modules/process/device/motion_control/gtn_exact_backend.cpp
         src/modules/process/runtime/gtn_buffered_command_sink.cpp
     )
     # The GTN adapter implements the complete historical vendor surface.  A

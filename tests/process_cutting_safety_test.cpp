@@ -1,6 +1,7 @@
 #include "modules/process/runtime/process_cutting_safety.h"
 #include "prepared_device_program_test.h"
 #include "gtn_exact_plan_lowering_test.h"
+#include "gtn_exact_session_test.h"
 #include "modules/process/runtime/motion_feedback_validation.h"
 #include "modules/process/runtime/process_run_coordinator.h"
 #include "core/algorithms/cam/collision_policy.h"
@@ -8,13 +9,24 @@
 
 #include <cassert>
 #include <limits>
+#ifdef _MSC_VER
+#include <crtdbg.h>
+#include <cstdlib>
+#endif
 
 using namespace lcnc::process;
 
 int main()
 {
+#ifdef _MSC_VER
+    _set_error_mode(_OUT_TO_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
     verifyPreparedDeviceProgram();
     lcnc::process::gtn_lowering_test::verify();
+    lcnc::process::gtn_session_test::verify();
     // Physical log regression: commanded +360 degrees, encoder -360.003;
     // this must never become the next Group's rebased start position.
     if (stationaryFeedbackMatches(360000.0, -360003.0, 1000.0)

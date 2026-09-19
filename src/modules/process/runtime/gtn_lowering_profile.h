@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/project/cam/collision_validation_contracts.h"
+#include "core/kinematics/controller_kinematics_snapshot.h"
 
 namespace lcnc::process {
 
@@ -25,6 +26,29 @@ struct GtnMotionCell {
     bool feedMappingQualified{false};
 };
 
+struct GtnFrozenOutput {
+    int index{0}; // 0 means absent; Laser and selected assist gas are mandatory
+    bool expanded{false};
+    int onValue{0};
+    int offValue{0};
+};
+
+struct GtnGroupProfile {
+    bool finiteListAndIoQualified{false};
+    int groupIndex{0};
+    int listIndex{0};
+    kinematics::ControllerKinematicsSnapshot kinematics;
+    std::array<double, 5> axisVelocity{}, axisAcceleration{}, axisJerk{}, axisDvMax{};
+    double orientationVelocity{0}, orientationAcceleration{0}, orientationJerk{0};
+    double pathVelocityLimit{0}, pathAccelerationLimit{0}, pathJerkLimit{0};
+    double smoothTimeMs{0}, smoothK{0};
+    int lookAheadSegments{0};
+    double lookAheadTime{0}, lookAheadRadiusRatio{0};
+    double startPositionTolerance{0}, rtcpAxisTolerance{0};
+    int orientationDirection{0}; // explicit SDK policy; qualified for unwrapped rotary input
+    std::array<GtnFrozenOutput, 3> outputs; // Laser, Blow, Blow2
+};
+
 // Supplied only by a controller qualification authority. Defaults deliberately
 // provide no authority. Neither SDK availability nor settings can qualify it.
 struct GtnLoweringProfile {
@@ -42,6 +66,7 @@ struct GtnLoweringProfile {
     std::array<double, 5> referenceRatios{};
     double surfaceRadiusMm{0}; // RotaryDegrees: explicit surface-feed conversion
     double rapidFeedMmPerSecond{0};
+    GtnGroupProfile group;
 };
 
 QByteArray gtnLoweringProfileHash(const GtnLoweringProfile& profile);

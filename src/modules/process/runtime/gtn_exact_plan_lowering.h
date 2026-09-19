@@ -3,6 +3,7 @@
 #include "modules/process/runtime/prepared_device_program.h"
 
 namespace lcnc::process {
+bool validateGtnLoweringProfile(const PreparedDeviceProgram&, QString* error);
 
 struct GtnEncodedDynamics {
     double velocity{0};

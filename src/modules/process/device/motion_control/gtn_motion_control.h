@@ -2,6 +2,7 @@
 
 #include "motion_control.h"
 #include "modules/process/runtime/motion_feedback_validation.h"
+#include "modules/process/runtime/gtn_exact_session.h"
 //#include "ACSC.h"
 #include "gts.h"
 #include <fstream>
@@ -81,7 +82,7 @@ struct GSNAxisData
     THomePrm *pTHomePrm;
 };
 
-class  GTNMotionControl :public MotionControl
+class  GTNMotionControl :public MotionControl, public lcnc::process::IGtnExactBackend
 {
 private:
 	double					m_dLaserOnBWait;
@@ -169,6 +170,23 @@ public:
 	GTNMotionControl(lcnc::process::ProcessSettingsService& settings,
 	                 lcnc::process::ProcessRuntimeConfiguration& runtimeConfiguration);
 	~GTNMotionControl(void);
+    // No authority service is installed yet. Never derive qualification from
+    // SDK presence, settings, or an incoming prepared program.
+    virtual lcnc::cam::ControllerQualificationSnapshot currentExactQualification() const;
+    bool admit(const lcnc::process::PreparedDeviceProgram&, int, QString*) override;
+    bool acquire(const lcnc::process::PreparedDeviceProgram&, QString*) override;
+    bool validateRtcp(const std::array<double, 5>&, const std::array<double, 5>&, QString*) override;
+    bool append(const lcnc::process::GtnEncodedSection&, const lcnc::process::GtnExactCommand&, QString*) override;
+    lcnc::process::GtnSealResult seal(QString*) override;
+    bool start(QString*) override;
+    bool poll(bool&, QString*) override;
+    bool stopRelease(bool latch, QString*) override;
+private:
+    lcnc::process::GtnLoweringProfile m_exactProfile;
+    bool m_exactListSealed{false};
+    bool m_exactStartAttempted{false};
+    bool exactApi(short result, const char* operation, QString* error);
+public:
 
 	//MotionControl基类函数重写
 	virtual const std::string& GetName() const;

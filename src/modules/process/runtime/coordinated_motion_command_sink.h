@@ -15,10 +15,15 @@ class CoordinatedMotionCommandSink final : public IMotionCommandSink
 public:
     CoordinatedMotionCommandSink(std::unique_ptr<IMotionCommandSink> inner,
                                  ProcessDeviceCoordinator& coordinator);
+    ~CoordinatedMotionCommandSink() override;
 
     QString id() const override;
     bool supportsBatchProgram() const override;
     void setCancellation(ProcessInterruptContext* token) override;
+    bool prepareExactSection(const PreparedDeviceProgram&, int, QString*) override;
+    bool continueExactPreparation(const PreparedDeviceProgram&, int, bool&, QString*) override;
+    bool startExactSection(const PreparedDeviceProgram&, int, QString*) override;
+    bool isExactSectionRunning(const PreparedDeviceProgram&, int, QString*) override;
     void resetProgram() override;
     bool startProgram(QString* errorMessage = nullptr) override;
     bool isProgramRunning(QString* errorMessage = nullptr) override;

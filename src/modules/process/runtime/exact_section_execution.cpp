@@ -34,6 +34,16 @@ bool executePreparedSections(const PreparedDeviceProgram& program, IExactSection
             return DeviceCommandResult{ok, reason};
         }, TaskPriority::Workflow, -1);
         if (!prepared.success) return fail(prepared.error);
+        bool sealed = false;
+        while (!sealed) {
+            const auto filled = queue.executeAndWait([&] {
+                if (interrupt.isStopping()) return DeviceCommandResult{false, QStringLiteral("Run stopped during fill")};
+                QString reason;
+                const bool ok = sink.continueExactPreparation(program, section.ordinal, sealed, &reason);
+                return DeviceCommandResult{ok, reason};
+            }, TaskPriority::Workflow, -1);
+            if (!filled.success) return fail(filled.error);
+        }
         // Pause can arrive during encode or while Start is queued. Recheck at
         // the device-side admission point; defer ONLY an unstarted section.
         for (;;) {

@@ -21,6 +21,38 @@ QString CoordinatedMotionCommandSink::id() const
     return m_inner ? m_inner->id() : QStringLiteral("Unavailable");
 }
 
+CoordinatedMotionCommandSink::~CoordinatedMotionCommandSink()
+{
+    const auto lease = m_coordinator.acquire();
+    m_inner.reset();
+}
+
+bool CoordinatedMotionCommandSink::prepareExactSection(const PreparedDeviceProgram& p, int i, QString* e)
+{
+    const auto lease = m_coordinator.acquire();
+    return m_inner && m_inner->prepareExactSection(p, i, e);
+}
+bool CoordinatedMotionCommandSink::continueExactPreparation(const PreparedDeviceProgram& p, int i, bool& done, QString* e)
+{
+    const auto lease = m_coordinator.acquire();
+    done = false;
+    return m_inner && m_inner->continueExactPreparation(p, i, done, e);
+}
+bool CoordinatedMotionCommandSink::startExactSection(const PreparedDeviceProgram& p, int i, QString* e)
+{
+    const auto lease = m_coordinator.acquire();
+    return m_inner && m_inner->startExactSection(p, i, e);
+}
+bool CoordinatedMotionCommandSink::isExactSectionRunning(const PreparedDeviceProgram& p, int i, QString* e)
+{
+    const auto lease = m_coordinator.acquire();
+    if (!m_inner) {
+        if (e) *e = QStringLiteral("Exact motion sink is unavailable");
+        return false;
+    }
+    return m_inner && m_inner->isExactSectionRunning(p, i, e);
+}
+
 bool CoordinatedMotionCommandSink::supportsBatchProgram() const
 {
     return m_inner && m_inner->supportsBatchProgram();

@@ -256,7 +256,7 @@ QByteArray gtnLoweringProfileHash(const GtnLoweringProfile& p)
     QByteArray bytes;
     QDataStream s(&bytes, QIODevice::WriteOnly);
     s.setVersion(QDataStream::Qt_6_0);
-    s << QByteArray("gtn-lowering-profile-v1") << quint8(p.state) << quint64(p.revision)
+    s << QByteArray("gtn-lowering-profile-v2") << quint8(p.state) << quint64(p.revision)
       << p.sourceId << p.groupSemanticsId << quint8(p.mode) << p.absoluteRotaryTurnsQualified;
     for (const auto& axis : p.axes)
         s << qint32(axis.physicalIndex) << axis.name << qint32(axis.role) << qint32(axis.controllerAxis)
@@ -267,7 +267,34 @@ QByteArray gtnLoweringProfileHash(const GtnLoweringProfile& p)
     s << quint8(p.metric);
     for (double ratio : p.referenceRatios) s << ratio;
     s << p.surfaceRadiusMm << p.rapidFeedMmPerSecond;
+    const auto& g = p.group;
+    s << g.finiteListAndIoQualified << qint32(g.groupIndex) << qint32(g.listIndex);
+    const auto& k = g.kinematics;
+    s << qint16(k.modelType) << k.primaryAxisName << k.slaveAxisName << qint16(k.directionMode)
+      << k.machineKinematicsFingerprint << k.calibrationFingerprint << k.toolCalibrationFingerprint
+      << k.calibrationMachineVerified << k.calibrationConfigurationDerived;
+    for (double v : k.primaryAxisPointMcs) s << v;
+    for (double v : k.slaveAxisPointMcs) s << v;
+    for (double v : k.toolLocationPointMcs) s << v;
+    for (int i = 0; i < 5; ++i) {
+        s << qint16(k.directions[i]) << qint16(k.physicalAxisIndices[i]);
+        for (double v : k.axisVectorsMcs[i]) s << v;
+        s << qint16(k.scales[i].count) << k.scales[i].alpha << k.scales[i].beta
+          << g.axisVelocity[i] << g.axisAcceleration[i] << g.axisJerk[i] << g.axisDvMax[i];
+    }
+    s << g.orientationVelocity << g.orientationAcceleration << g.orientationJerk
+      << g.pathVelocityLimit << g.pathAccelerationLimit << g.pathJerkLimit
+      << g.smoothTimeMs << g.smoothK << qint32(g.lookAheadSegments)
+      << g.lookAheadTime << g.lookAheadRadiusRatio << g.startPositionTolerance
+      << g.rtcpAxisTolerance << qint32(g.orientationDirection);
+    for (const auto& output : g.outputs)
+        s << qint32(output.index) << output.expanded << qint32(output.onValue) << qint32(output.offValue);
     return QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
+}
+
+bool validateGtnLoweringProfile(const PreparedDeviceProgram& program, QString* error)
+{
+    return validateProfile(program, error);
 }
 
 std::shared_ptr<const GtnEncodedSection> GtnEncodedSection::lower(

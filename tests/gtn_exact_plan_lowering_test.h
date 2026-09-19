@@ -268,7 +268,7 @@ inline void verify()
     GtnBufferedCommandSink device(nullptr, AxisMap{});
     assert(!device.prepareExactSection(*program, 0, &error)); // offline fixture never device admission
     assert(!device.startExactSection(*program, 0, &error));
-    assert(error.contains("B2.S3")); // no legacy Start fallback before lifecycle integration
+    assert(error.contains("not prepared")); // no legacy Start fallback without a sealed session
 #endif
 }
 } // namespace lcnc::process::gtn_lowering_test

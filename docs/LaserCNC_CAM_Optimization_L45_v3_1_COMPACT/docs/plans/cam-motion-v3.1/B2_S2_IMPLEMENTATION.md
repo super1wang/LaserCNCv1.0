@@ -1,5 +1,7 @@
 # B2.S2 实施记录
 
+历史检查点说明：下文为 S2 提交时状态；当前 S3 已替换 Start 占位并接入生命周期，见 [B2_S3_IMPLEMENTATION.md](B2_S3_IMPLEMENTATION.md)。生产资格仍未开放。
+
 基线：`398b4e0`，B2.S1 二次收口由用户确认审阅通过。本次范围为 S2 编码及软件检查点，S3 Group/LookAhead 生命周期另行实施。
 
 ## 代码

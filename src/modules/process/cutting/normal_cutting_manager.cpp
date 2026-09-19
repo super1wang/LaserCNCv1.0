@@ -447,8 +447,8 @@ bool NormalCuttingManager::runExactProgram(const QString& nodeId,
     const auto program = PreparedDeviceProgram::prepare(snapshot, recipe, ++nextEpoch, true, error);
     if (!program) return false;
 
-    // All SDK ownership stays on the existing queue. S1 hardware sinks reject
-    // prepareExactSection; S2 supplies lowering and start-position admission.
+    // All SDK ownership stays on the existing queue. Exact GTN sections use
+    // bounded fill/ seal / one-shot Start; unavailable qualification rejects admission.
     std::unique_ptr<IMotionCommandSink> sink;
     const auto cleanup = qScopeGuard([&] {
         if (!sink) return;

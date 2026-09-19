@@ -17,6 +17,8 @@ public:
     { return unavailable(error); }
     virtual bool startExactSection(const PreparedDeviceProgram&, int, QString* error)
     { return unavailable(error); }
+    virtual bool continueExactPreparation(const PreparedDeviceProgram&, int, bool& complete, QString*)
+    { complete = true; return true; }
     virtual bool isExactSectionRunning(const PreparedDeviceProgram&, int, QString* error)
     { return unavailable(error); }
 private:

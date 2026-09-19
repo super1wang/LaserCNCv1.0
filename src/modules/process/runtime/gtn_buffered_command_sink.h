@@ -2,6 +2,7 @@
 
 #include "modules/process/runtime/i_motion_command_sink.h"
 #include "modules/process/runtime/axis_map.h"
+#include "modules/process/runtime/gtn_exact_session.h"
 
 #include <QString>
 
@@ -29,7 +30,7 @@ class GtnBufferedCommandSink final : public IMotionCommandSink
 {
 public:
     GtnBufferedCommandSink(GTNMotionControl* gtn, AxisMap axisMap);
-    ~GtnBufferedCommandSink() override = default;
+    ~GtnBufferedCommandSink() override;
 
     QString id() const override { return QStringLiteral("GTN"); }
     bool supportsBatchProgram() const override { return true; }
@@ -37,6 +38,8 @@ public:
 
     bool prepareExactSection(const PreparedDeviceProgram&, int ordinal, QString* error) override;
     bool startExactSection(const PreparedDeviceProgram&, int ordinal, QString* error) override;
+    bool continueExactPreparation(const PreparedDeviceProgram&, int, bool&, QString*) override;
+    bool isExactSectionRunning(const PreparedDeviceProgram&, int, QString*) override;
 
     void resetProgram() override;
     bool startProgram(QString* errorMessage = nullptr) override;
@@ -71,8 +74,7 @@ private:
     ProcessInterruptContext* m_token{nullptr};
     bool m_bufferCommandFailed{false};
     bool m_groupProgramActive{false};
-    std::shared_ptr<const GtnEncodedProgram> m_exactProgram;
-    int m_exactSection{-1};
+    std::unique_ptr<GtnExactSession> m_exactSession;
 };
 
 } // namespace lcnc::process

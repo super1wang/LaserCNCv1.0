@@ -34,10 +34,23 @@ GtnBufferedCommandSink::GtnBufferedCommandSink(GTNMotionControl* gtn, AxisMap ax
 	m_gtn->ConfigureCuttingAxes(configuredAxes, m_axisMap.activeCount());
 }
 
+GtnBufferedCommandSink::~GtnBufferedCommandSink()
+{
+    if (m_exactSession && m_exactSession->ownsGroup()) {
+        QString error;
+        if (!m_exactSession->abort(&error))
+            LCNC_ERR(lcnc::LogCode::Generic, "GTN exact Group ownership retained by controller: {}", error.toStdString());
+    }
+}
+
 void GtnBufferedCommandSink::resetProgram()
 {
-    m_exactProgram.reset();
-    m_exactSection = -1;
+    if (m_exactSession) {
+        QString error;
+        if (!m_exactSession->abort(&error))
+            LCNC_ERR(lcnc::LogCode::Generic, "GTN exact reset failed: {}", error.toStdString());
+        return; // reset never removes the no-replay state
+    }
     m_bufferCommandFailed = false;
     if (!m_gtn)
         return;
@@ -54,9 +67,7 @@ void GtnBufferedCommandSink::resetProgram()
 bool GtnBufferedCommandSink::prepareExactSection(
     const PreparedDeviceProgram& program, int ordinal, QString* error)
 {
-    m_exactSection = -1;
     const auto fail = [&](const char* reason) {
-        m_exactProgram.reset();
         if (error) *error = QString::fromLatin1(reason);
         return false;
     };
@@ -76,33 +87,29 @@ bool GtnBufferedCommandSink::prepareExactSection(
         if (m_axisMap.axisName(index) != axis.name || m_axisMap.controllerIndex(index) != axis.controllerAxis)
             return fail("GTN exact device axis mapping differs from frozen qualification");
     }
-    if (m_exactProgram) {
-        const auto& first = *m_exactProgram->sections().front();
-        if (first.planHash() != program.plan().planHash || first.contextHash() != program.plan().contextHash
-            || first.recipeRevision() != program.recipe().revision || first.runEpoch() != program.runEpoch())
-            return fail("GTN exact prepared program changed within the sink lifetime");
-    } else {
-        // No legacy GroupLineTo: it filters duplicate targets and reads Tool.
-        // Compile the entire host list atomically before exposing any section.
-        m_exactProgram = GtnEncodedProgram::lower(program,
-            [this](const auto& target, const auto& physical, QString* validationError) {
-                if (m_gtn->IsGroupRtcpActive() && m_gtn->ValidateGroupRtcpTarget(target, physical)) return true;
-                if (validationError) *validationError = QStringLiteral("GTN RTCP Group target validation failed");
-                return false;
-            }, [this] { return m_token && m_token->isStopping(); }, error);
-        if (!m_exactProgram) return false;
-    }
-    m_exactSection = ordinal;
-    return true;
+    if (m_groupProgramActive) return fail("Legacy GTN Group still owns the axes");
+    if (!m_exactSession) m_exactSession = std::make_unique<GtnExactSession>(*m_gtn);
+    return m_exactSession->prepare(program, ordinal, [this] { return m_token && m_token->isStopping(); }, error);
 }
 
-bool GtnBufferedCommandSink::startExactSection(const PreparedDeviceProgram&, int, QString* error)
+bool GtnBufferedCommandSink::continueExactPreparation(const PreparedDeviceProgram& p, int i, bool& complete, QString* error)
 {
-    // S2 seals the immutable host encoding. S3 must bind it to qualified
-    // Group/IO/profile admission and finite-list submission on this same queue.
-    // Never adapt this to legacy startProgram(), whose buffer has another truth.
-    if (error) *error = QStringLiteral("GTN exact Group submission lifecycle is unavailable (B2.S3)");
-    return false;
+    complete = false;
+    if (!m_exactSession) { if (error) *error = QStringLiteral("GTN exact session is not prepared"); return false; }
+    return m_exactSession->fill(p, i, complete, [this] { return m_token && m_token->isStopping(); }, error);
+}
+
+bool GtnBufferedCommandSink::startExactSection(const PreparedDeviceProgram& p, int i, QString* error)
+{
+    if (!m_exactSession) { if (error) *error = QStringLiteral("GTN exact session is not prepared"); return false; }
+    return m_exactSession->start(p, i, [this] { return m_token && m_token->isStopping(); }, error);
+}
+
+bool GtnBufferedCommandSink::isExactSectionRunning(const PreparedDeviceProgram& p, int i, QString* error)
+{
+    if (!m_exactSession) { if (error) *error = QStringLiteral("GTN exact session is not prepared"); return false; }
+    bool running = false;
+    return m_exactSession->poll(p, i, running, [this] { return m_token && m_token->isStopping(); }, error) && running;
 }
 
 bool GtnBufferedCommandSink::releaseActiveGroup(QString* errorMessage,
@@ -157,6 +164,10 @@ bool GtnBufferedCommandSink::flush(QString* errorMessage)
 
 bool GtnBufferedCommandSink::startProgram(QString* errorMessage)
 {
+    if (m_exactSession) {
+        if (errorMessage) *errorMessage = QStringLiteral("Exact GTN session cannot start a legacy program");
+        return false;
+    }
     if (!m_gtn) {
         if (errorMessage) *errorMessage = QStringLiteral("GtnBufferedCommandSink: motion control not bound");
         return false;
@@ -231,6 +242,10 @@ bool GtnBufferedCommandSink::executeRapidSegment(const lcnc::cam::RapidMoveSegme
                                                   const Tool& tool,
                                                   QString* errorMessage)
 {
+    if (m_exactSession) {
+        if (errorMessage) *errorMessage = QStringLiteral("Exact GTN session owns the motion path");
+        return false;
+    }
     if (!m_gtn) {
         if (errorMessage) *errorMessage = QStringLiteral("GtnBufferedCommandSink: motion control not bound");
         return false;
@@ -344,11 +359,13 @@ bool GtnBufferedCommandSink::executeRapidSegment(const lcnc::cam::RapidMoveSegme
 
 void GtnBufferedCommandSink::startCuttingHead(const Tool& tool)
 {
+    if (m_exactSession) { m_bufferCommandFailed = true; return; }
     if (m_gtn) m_gtn->StartMovingCuttingHead(tool);
 }
 
 void GtnBufferedCommandSink::stopCuttingHead()
 {
+    if (m_exactSession) { m_bufferCommandFailed = true; return; }
     if (m_gtn) m_gtn->StopMovingCuttingHead();
 }
 
@@ -356,12 +373,14 @@ void GtnBufferedCommandSink::setShutterTimings(double beforeOn, double afterOn,
                                                 double beforeOff, double afterOff,
                                                 double blowDelay)
 {
+    if (m_exactSession) { m_bufferCommandFailed = true; return; }
     if (m_gtn)
         m_gtn->SetShutterOnOffWaitTime(beforeOn, afterOn, beforeOff, afterOff, blowDelay);
 }
 
 void GtnBufferedCommandSink::applyToolMotionParams(const Tool& tool, bool jump)
 {
+    if (m_exactSession) { m_bufferCommandFailed = true; return; }
     if (!m_gtn) return;
     if (jump) m_gtn->SetJumpAccJerk(tool);
     else      m_gtn->SetCuttingAccJerk(tool);
@@ -370,6 +389,10 @@ void GtnBufferedCommandSink::applyToolMotionParams(const Tool& tool, bool jump)
 bool GtnBufferedCommandSink::beginSegment(const MachinePose5& /*startPose*/, const Tool& tool,
                                           QString* errorMessage)
 {
+    if (m_exactSession) {
+        if (errorMessage) *errorMessage = QStringLiteral("Legacy segment forbidden during exact GTN session");
+        return false;
+    }
     // GTN 在 InitCrd 阶段已经建立好坐标系（GTN_SetCrdPrm + GTN_InitLookAheadEx）。
     // 这里只需把当前工具的切割 ACC/JERK 推下去（写到 GTN_BufXxx FIFO，不触发执行）。
     if (!m_gtn) {
@@ -409,6 +432,10 @@ bool GtnBufferedCommandSink::beginSegment(const MachinePose5& /*startPose*/, con
 bool GtnBufferedCommandSink::lineTo(const MachinePose5& target, const Tool& tool,
                                     QString* errorMessage)
 {
+    if (m_exactSession) {
+        if (errorMessage) *errorMessage = QStringLiteral("Legacy motion forbidden during exact GTN session");
+        return false;
+    }
 	// 仅写入 GTN_LnXYZACEx 到 FIFO；CAM 已完成软件 IK，因此 RTCP 保持关闭。
 	// CAM already provides final physical coordinates. Never add a tool Z
 	// correction here or GTN would execute a path different from CAM's scan.
@@ -463,6 +490,7 @@ void GtnBufferedCommandSink::endSegment(const Tool& /*tool*/)
 
 void GtnBufferedCommandSink::laserOn(const Tool& tool)
 {
+    if (m_exactSession) { m_bufferCommandFailed = true; return; }
     if (!m_gtn) return;
     if (m_groupProgramActive) {
         m_bufferCommandFailed = !m_gtn->GroupLaserControl(true, tool) || m_bufferCommandFailed;
@@ -477,6 +505,7 @@ void GtnBufferedCommandSink::laserOn(const Tool& tool)
 
 void GtnBufferedCommandSink::laserOff(const Tool& tool)
 {
+    if (m_exactSession) { m_bufferCommandFailed = true; return; }
     if (!m_gtn) return;
     if (m_groupProgramActive) {
         m_bufferCommandFailed = !m_gtn->GroupLaserControl(false, tool) || m_bufferCommandFailed;
